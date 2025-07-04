@@ -1,0 +1,269 @@
+@page
+@model PcbErpApi.Pages.IndexModel
+@{
+    var level0 = Model.Level0Items;
+    var level1Map = Model.Level1Map;
+    var level2List = Model.GetCurrentLevel2();
+    Layout = "_Layout";
+}
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+
+<div style="display: flex; gap: 20px;">
+    <!-- 左側模組 -->
+    <div style="width: 240px;">
+        <h4>系統模組</h4>
+        <ul style="list-style: none; padding-left: 0;">
+            @foreach (var mod0 in level0)
+            {
+                var level1Id = $"level1-{mod0.ItemId}";
+                var shouldExpand = level1Map.ContainsKey(mod0.ItemId) && level1Map[mod0.ItemId].Any(x => x.ItemId == Model.SelectedLevel1Id);
+
+                <li>
+                    <a href="javascript:void(0)" onclick="toggleChildren('@level1Id')" style="font-weight: bold;">
+                        ▶ @mod0.ItemName
+                    </a>
+
+                    @if (level1Map.ContainsKey(mod0.ItemId))
+                    {
+                        <ul id="@level1Id" style="display: @(shouldExpand ? "block" : "none"); margin-left: 15px;">
+                            @foreach (var mod1 in level1Map[mod0.ItemId])
+                            {
+                                <li class="mb-1">
+                                    <a asp-page="/Index" asp-route-level1Id="@mod1.ItemId">@mod1.ItemName</a>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </li>
+            }
+        </ul>
+    </div>
+
+    <!-- 右側功能列表 -->
+    <div style="width: 700px;">
+        @if (level2List.Any())
+        {
+            <div class="d-flex align-items-center mb-2">
+                <h4 class="mb-0 me-2">功能列表</h4>
+                <button class="btn btn-primary" onclick="openAddModal()">新增功能</button>
+            </div>
+
+            <ul id="level2-list" class="list-group">
+                @foreach (var item in level2List)
+                {
+                    if (item.ItemType == 4)
+                    {
+                        <li class="list-group-item p-0" id="li-@item.ItemId">
+                            <hr class="m-0" />
+                        </li>
+                    }
+                    else
+                    {
+                        <li class="list-group-item" id="li-@item.ItemId"
+                            ondblclick="openEditModal('@item.ItemId', '@item.ItemName', '@item.SuperId', '@item.ItemType')"
+                            style="cursor: pointer;">
+                            @item.ItemId - @item.ItemName
+                        </li>
+
+                    }
+                }
+            </ul>
+        }
+        else
+        {
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h4 class="mb-0">功能列表</h4>
+                <button class="btn btn-primary" onclick="openAddModal()">新增功能</button>
+            </div>
+
+            <p>請從左側展開模組並選擇子模組查看功能</p>
+        }
+    </div>
+</div>
+
+<!-- 新增功能 Modal -->
+<div class="modal fade" id="addItemModal" tabindex="-1" aria-labelledby="addItemModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <form id="addItemForm" class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addItemModalLabel">新增功能項目</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="inputItemId" class="form-label">ITEMID</label>
+                    <input type="text" class="form-control" id="inputItemId" name="itemId" required />
+                </div>
+                <div class="mb-3">
+                    <label for="inputItemName" class="form-label">功能名稱</label>
+                    <input type="text" class="form-control" id="inputItemName" name="itemName" required />
+                </div>
+                <div class="mb-3">
+                    <label for="inputSuperId" class="form-label">SUPERID</label>
+                    <input type="text" class="form-control" id="inputSuperId" name="superId" required readonly />
+                    <div class="form-text">SUPERID 不可修改（上層模組 ID）</div>
+                </div>
+                <div id="modalAlert" class="alert alert-danger d-none" role="alert"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-primary">確認新增</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 編輯功能 Modal -->
+<div class="modal fade" id="editItemModal" tabindex="-1" aria-labelledby="editItemModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <form id="editItemForm" class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editItemModalLabel">編輯功能項目</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editItemId" />
+                <div class="mb-3">
+                    <label for="editItemName" class="form-label">功能名稱</label>
+                    <input type="text" class="form-control" id="editItemName" required />
+                </div>
+                <div class="mb-3">
+                    <label for="editSuperId" class="form-label">SUPERID</label>
+                    <input type="text" class="form-control" id="editSuperId" readonly />
+                </div>
+                <div class="mb-3">
+                    <label for="editItemType" class="form-label">Item Type</label>
+                    <input type="number" class="form-control" id="editItemType" />
+                </div>
+                <div id="editAlert" class="alert alert-danger d-none" role="alert"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-primary">確認修改</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    const selectedLevel1Id = "@Model.SelectedLevel1Id";
+
+    document.addEventListener('DOMContentLoaded', () => {
+        let addItemModal = new bootstrap.Modal(document.getElementById('addItemModal'));
+        let editItemModal = new bootstrap.Modal(document.getElementById('editItemModal'));
+
+        window.toggleChildren = function (id) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+        };
+
+        window.openAddModal = async function () {
+            const superId = selectedLevel1Id;
+            if (!superId) return alert("請先點選左側的子模組");
+
+            const systemId = superId.substring(0, 3);
+            try {
+                const res = await fetch(`/api/ItemHelperApi/next-id?systemId=${systemId}`);
+                const data = await res.json();
+                document.getElementById('inputItemId').value = data.nextItemId || (systemId + "001");
+            } catch {
+                document.getElementById('inputItemId').value = systemId + "001";
+            }
+
+            document.getElementById('inputSuperId').value = superId;
+            document.getElementById('modalAlert').classList.add('d-none');
+            addItemModal.show();
+        };
+
+        document.getElementById('addItemForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const itemId = inputItemId.value.trim();
+            const itemName = inputItemName.value.trim();
+            const superId = inputSuperId.value.trim();
+            const alertBox = document.getElementById('modalAlert');
+
+            if (!itemId || !itemName || !superId) {
+                alertBox.textContent = "請填寫完整的資料";
+                alertBox.classList.remove('d-none');
+                return;
+            }
+
+            try {
+                const res = await fetch("/api/AddItemApi", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ itemId, itemName, superId, itemType: 2 })
+                });
+
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    alertBox.textContent = data?.message || "新增失敗";
+                    alertBox.classList.remove('d-none');
+                    return;
+                }
+
+                const rightPanel = document.getElementById("level2-list");
+                const li = document.createElement("li");
+                li.className = "list-group-item text-success";
+                li.id = "li-" + data.item.itemId;
+                li.textContent = `${data.item.itemId} - ${data.item.itemName}`;
+                rightPanel.appendChild(li);
+                addItemModal.hide();
+                alert("新增成功：" + data.item.itemId);
+            } catch (ex) {
+                alertBox.textContent = "新增過程發生錯誤: " + ex.message;
+                alertBox.classList.remove('d-none');
+            }
+        });
+
+        window.openEditModal = function (itemId, itemName, superId, itemType) {
+            document.getElementById('editItemId').value = itemId;
+            document.getElementById('editItemName').value = itemName;
+            document.getElementById('editSuperId').value = superId;
+            document.getElementById('editItemType').value = itemType;
+            document.getElementById('editAlert').classList.add('d-none');
+            editItemModal.show();
+        };
+
+        document.getElementById('editItemForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const itemId = editItemId.value.trim();
+            const itemName = editItemName.value.trim();
+            const superId = editSuperId.value.trim();
+            const itemType = parseInt(editItemType.value);
+            const alertBox = document.getElementById('editAlert');
+
+            if (!itemId || !itemName) {
+                alertBox.textContent = "請填寫完整資料";
+                alertBox.classList.remove('d-none');
+                return;
+            }
+
+            try {
+                const res = await fetch("/api/EditItemApi", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ itemId, itemName, superId, itemType })
+                });
+
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    alertBox.textContent = data?.message || "更新失敗";
+                    alertBox.classList.remove('d-none');
+                    return;
+                }
+
+                const li = document.getElementById("li-" + itemId);
+                if (li) li.textContent = `${itemId} - ${itemName}`;
+                editItemModal.hide();
+                alert("更新成功！");
+            } catch (ex) {
+                alertBox.textContent = "發生錯誤：" + ex.message;
+                alertBox.classList.remove('d-none');
+            }
+        });
+    });
+</script>

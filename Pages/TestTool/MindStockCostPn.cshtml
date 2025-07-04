@@ -1,0 +1,101 @@
+@page
+@using PcbErpApi.Pages
+@model IndexModel
+@{
+    ViewData["Title"] = "Pivot Table 測試";
+}
+
+<h2>交叉分析表（Pivot Table）</h2>
+
+<div id="pivot-table"></div>
+
+<!-- jQuery -->
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+
+<!-- jQuery UI -->
+<link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+<script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+
+<!-- PivotTable.js -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pivottable@2.23.0/dist/pivot.min.css">
+<script src="https://cdn.jsdelivr.net/npm/pivottable@2.23.0/dist/pivot.min.js"></script>
+
+<script>
+const fieldMapping = {
+    partNum: "料號",
+    souQnty: "期初數量",
+    souCost: "期初金額",
+    inQnty: "本期進貨",
+    inCost: "進貨金額",
+    elseInCost: "其他進金額",
+    elseInQnty: "其他進貨",
+    rejQnty: "退貨",
+    rejCost: "退貨金額",
+    balQnty: "調整數量",
+    balCost: "調整金額",
+    saleQnty: "銷貨",
+    saleCost: "銷貨金額",
+    otherOutQnty: "領用",
+    otherOutCost: "領用金額",
+    backQnty: "結存退庫",
+    backCost: "結存退庫金額",
+    scrapQnty: "報廢",
+    scrapCost: "報廢金額",
+    elseOutQnty: "其他出貨",
+    elseOutCost: "其他出金額",
+    endQnty: "期末數量",
+    endCost: "期末金額",
+    back4NetQnty: "非結存退庫",
+    back4NetCost: "非結存退庫金額",
+    fgInQnty: "生產入庫數量",
+    fgInCost: "生產入庫金額",
+    salesReturnQnty: "客退數量",
+    salesReturnCost: "客退金額",
+    farmInQnty: "加工入庫",
+    farmInCost: "加工入金額",
+    farmOutQnty: "加工出貨",
+    farmOutCost: "加工出金額",
+    unitCost: "平均成本"
+};
+
+function renameFields(data, fieldMap) {
+    return data.map(row => {
+        const newRow = {};
+        for (const key in row) {
+            newRow[fieldMap[key] || key] = row[key];
+        }
+        return newRow;
+    });
+}
+
+function addCategoryField(data) {
+    return data.map(row => {
+        const category = row["料號"]?.substring(0, 3) || "未分類";
+        return { ...row, "分類": category };
+    });
+}
+
+$(function () {
+    $.ajax({
+        url: '/api/MindStockCost/pivot-data',
+        method: 'GET',
+        success: function (data) {
+            const renamed = renameFields(data, fieldMapping);
+            const displayData = addCategoryField(renamed);
+
+            console.log("轉換後資料：", displayData); // ✅ Debug 用
+
+            $("#pivot-table").pivotUI(displayData, {
+                rows: ["料號"],
+                cols: ["分類"],
+                vals: ["期末數量", "期末金額"],
+                aggregatorName: "Sum",
+                rendererName: "Table"
+            });
+        },
+        error: function (xhr) {
+            console.error("載入失敗", xhr);
+        }
+    });
+});
+</script>

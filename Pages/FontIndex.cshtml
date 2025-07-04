@@ -1,0 +1,253 @@
+@page
+@model PcbErpApi.Pages.FontIndexModel
+@{
+    var level0 = Model.Level0Items;
+    var level1Map = Model.Level1Map;
+    var level2List = Model.GetCurrentLevel2();
+    Layout = "_Layout";
+}
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+
+<style>
+body {
+    background: #f4f6fb;
+    font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+}
+.erp-sidebar {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px #0001;
+    padding: 20px 12px 20px 20px;
+    min-height: 600px;
+}
+.erp-sidebar h4 {
+    color: #2766b5;
+    font-weight: bold;
+    margin-bottom: 18px;
+    font-size: 1.15rem;
+    letter-spacing: 2px;
+}
+.erp-nav-group li {
+    margin-bottom: 5px;
+}
+.erp-nav-group a {
+    display: flex;
+    align-items: center;
+    border-radius: 6px;
+    padding: 7px 12px;
+    color: #2766b5;
+    font-weight: 500;
+    font-size: 1rem;
+    background: transparent;
+    transition: background 0.13s, color 0.13s;
+    text-decoration: none;
+}
+.erp-nav-group a:hover, .erp-nav-group a.active {
+    background: #e7f1fd;
+    color: #124684;
+    text-decoration: none;
+}
+.erp-nav-group .icon {
+    font-size: 1.2rem;
+    margin-right: 8px;
+    color: #60a4e0;
+}
+.erp-card {
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 2px 10px #0001;
+    padding: 34px 36px 36px 36px;
+    min-height: 550px;
+}
+.erp-list-title {
+    font-weight: bold;
+    color: #333;
+    letter-spacing: 2px;
+}
+.erp-list-group .list-group-item {
+    border: none;
+    border-bottom: 1px solid #eee;
+    padding: 12px 16px;
+    font-size: 1.05rem;
+    transition: background 0.1s;
+    background: transparent;
+    cursor: pointer;
+}
+.erp-list-group .list-group-item:last-child {
+    border-bottom: none;
+}
+.erp-list-group .list-group-item:hover {
+    background: #f0f8ff;
+}
+</style>
+
+<div class="container py-4">
+    <div class="row gx-4">
+        <!-- 左側模組 -->
+        <div class="col-12 col-md-3 mb-4">
+            <div class="erp-sidebar">
+                <h4>系統模組</h4>
+                <ul class="erp-nav-group" style="list-style: none; padding-left: 0;">
+                    @foreach (var mod0 in level0)
+                    {
+                        var level1Id = $"level1-{mod0.ItemId}";
+                        var shouldExpand = level1Map.ContainsKey(mod0.ItemId) && level1Map[mod0.ItemId].Any(x => x.ItemId == Model.SelectedLevel1Id);
+                        <li>
+                            <a href="javascript:void(0)" onclick="toggleChildren('@level1Id')">
+                                <span class="icon">📁</span>
+                                <span style="white-space:nowrap">@mod0.ItemId = @mod0.ItemName</span>
+                            </a>
+                            @if (level1Map.ContainsKey(mod0.ItemId))
+                            {
+                                <ul id="@level1Id" class="ms-3 mt-1 mb-2" style="display: @(shouldExpand ? "block" : "none"); list-style:none;">
+                                    @foreach (var mod1 in level1Map[mod0.ItemId])
+                                    {
+                                        <li>
+                                            <a asp-page="/FontIndex" asp-route-level1Id="@mod1.ItemId" style="color: #548bc7; font-size:0.97rem; font-weight:400; margin:3px 0 2px 0;">
+                                                <span class="icon">➡️</span>@mod1.ItemName
+                                            </a>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        </li>
+                    }
+                </ul>
+            </div>
+        </div>
+        <!-- 右側功能列表 -->
+        <div class="col-12 col-md-5 mb-4">
+            <div class="erp-card">
+                @if (level2List.Any())
+                {
+                    <div class="d-flex align-items-center mb-3">
+                        <h4 class="erp-list-title mb-0 me-2">功能列表</h4>
+                    </div>
+                    <ul id="level2-list" class="list-group erp-list-group">
+                        @foreach (var item in level2List)
+                        {
+                            if (item.ItemType == 4)
+                            {
+                                <li class="list-group-item p-0" id="li-@item.ItemId">
+                                    <hr class="m-0" />
+                                </li>
+                            }
+                            else
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-center" id="li-@item.ItemId">
+                                    <span>@item.ItemId - @item.ItemName</span>
+                                    <button class="btn btn-outline-warning btn-sm" onclick="addToFavorite('@item.ItemId', '@item.ItemName', '@item.SuperId')">★</button>
+                                </li>
+                            }
+                        }
+                    </ul>
+                }
+                else
+                {
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4 class="erp-list-title mb-0">功能列表</h4>
+                    </div>
+                    <p class="text-secondary mt-4">請從左側展開模組並選擇子模組查看功能</p>
+                }
+            </div>
+        </div>
+         <!-- 我的最愛區塊 -->
+        <div class="col-12 col-md-4 mb-4">
+            <div class="erp-card" style="min-height: 300px;">
+                <h5 class="erp-list-title mb-3">★ 我的最愛</h5>
+                <ul id="favorite-list" class="list-group erp-list-group"></ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+
+<script>
+    
+
+    const selectedLevel1Id = "@Model.SelectedLevel1Id";
+
+    window.toggleChildren = function (id) {
+        const el = document.getElementById(id);
+        if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+        let addItemModal = new bootstrap.Modal(document.getElementById('addItemModal'));
+        let editItemModal = new bootstrap.Modal(document.getElementById('editItemModal'));
+
+        window.openEditModal = function (itemId, itemName, superId, itemType) {
+            document.getElementById('editItemId').value = itemId;
+            document.getElementById('editItemName').value = itemName;
+            document.getElementById('editSuperId').value = superId;
+            document.getElementById('editItemType').value = itemType;
+            document.getElementById('editAlert').classList.add('d-none');
+            editItemModal.show();
+        };
+
+    });
+    function getFavorites() {
+    return JSON.parse(localStorage.getItem('erpFavorites') || '[]');
+        }
+
+        function setFavorites(favs) {
+            localStorage.setItem('erpFavorites', JSON.stringify(favs));
+        }
+
+        function addToFavorite(itemId, itemName, superId) {
+            let favs = getFavorites();
+            if (!favs.find(x => x.itemId === itemId)) {
+                favs.push({ itemId, itemName, superId });
+                setFavorites(favs);
+                renderFavorites();
+            }
+        }
+
+        function removeFavorite(itemId) {
+            let favs = getFavorites().filter(x => x.itemId !== itemId);
+            setFavorites(favs);
+            renderFavorites();
+        }
+
+        function renderFavorites() {
+            const list = document.getElementById('favorite-list');
+            const favs = getFavorites();
+            list.innerHTML = '';
+            favs.forEach(f => {
+                let li = document.createElement('li');
+                li.className = "list-group-item d-flex justify-content-between align-items-center";
+                li.setAttribute('data-itemid', f.itemId);
+                li.innerHTML = `<span style="cursor:pointer" onclick="location.href='?level1Id=${f.superId}'">${f.itemId} - ${f.itemName}</span>
+                                <button class="btn btn-outline-danger btn-sm" onclick="removeFavorite('${f.itemId}')">✕</button>`;
+                list.appendChild(li);
+            });
+            enableFavoriteSortable(); // 這裡加
+        }
+
+        function enableFavoriteSortable() {
+            new Sortable(document.getElementById('favorite-list'), {
+                animation: 150,
+                onEnd: function (evt) {
+                    // 重新取得排序後的所有 itemId
+                    const ids = Array.from(document.querySelectorAll('#favorite-list li')).map(li => li.dataset.itemid);
+                    // 依照新排序存回 localStorage
+                    let favs = getFavorites();
+                    let newFavs = [];
+                    ids.forEach(id => {
+                        let found = favs.find(x => x.itemId === id);
+                        if (found) newFavs.push(found);
+                    });
+                    setFavorites(newFavs);
+                    renderFavorites(); // 重新 render 保證順序同步
+                }
+            });
+        }
+        document.addEventListener('DOMContentLoaded', function() {
+            renderFavorites();
+        });
+
+</script>
