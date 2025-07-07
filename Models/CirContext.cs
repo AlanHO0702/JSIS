@@ -10,6 +10,7 @@ public partial class CirContext : DbContext
     {
     }
     public DbSet<CurdSysItem> CurdSysItems { get; set; }
+    public DbSet<SpodOrderSub> SpodOrderSub { get; set; }
     public DbSet<CurdSystemSelect> CurdSystemSelects { get; set; }
      public DbSet<CURdTableField> CURdTableFields { get; set; }
     public CirContext(DbContextOptions<CirContext> options)
@@ -99,6 +100,9 @@ public partial class CirContext : DbContext
 
         modelBuilder.Entity<CURdTableField>()
         .HasKey(e => new { e.TableName, e.FieldName }); // 這裡改成你真正的複合主鍵欄位
+
+        modelBuilder.Entity<SpodOrderSub>()
+        .HasKey(x => new { x.PaperNum, x.Item });
         
         OnModelCreatingPartial(modelBuilder);
     }

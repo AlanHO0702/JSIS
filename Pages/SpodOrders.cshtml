@@ -1,55 +1,140 @@
-@page 
+@page
 @model SpodOrdersModel
 
 <style>
-    table td, table th {
-        border: 1px solid #dee2e6 !important;
+    body { background: #f7f9fb; }
+    .container { max-width: 1100px; }
+    .title-row { display: flex; justify-content: space-between; align-items: flex-end; }
+    .order-count { font-size: 1rem; color: #666; margin-bottom: 6px; }
+    .table { box-shadow: 0 2px 12px 0 #c3d4e6; border-radius: 16px; overflow: hidden; background: #fff; }
+    .table th, .table td { vertical-align: middle !important; white-space: nowrap; font-size: 1rem; border: none; }
+    .table th {
+        background: linear-gradient(90deg, #e8f2fe 0%, #f3f8ff 100%);
+        color: #2056ac; letter-spacing: 2px; font-weight: 600;
+        border-bottom: 2px solid #bdd2f7; padding: 14px 10px;
     }
-    .title-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-end;
-    }
-    .order-count {
-        font-size: 1rem;
-        color: #666;
-        margin-bottom: 6px;
-    }
+    .table tbody tr { transition: background .15s; }
+    .table tbody tr:hover { background: #f0f8ff !important; }
+    .table td { border-top: 1px solid #f0f3f7 !important; padding: 11px 10px; }
+    .status-done { color: #29963b; background: #e5f7e6; border-radius: 8px; padding: 2px 10px; font-weight: bold; letter-spacing: 1px; font-size: 1.05em;}
+    .status-pending { color: #c88400; background: #fff9e3; border-radius: 8px; padding: 2px 10px; font-weight: bold; letter-spacing: 1px; font-size: 1.05em;}
+    .row-link { cursor: pointer; }
+    .pagination-bar { margin: 20px 0 30px 0; }
+    .pagination .page-link { color: #3a72d9; border-radius: 6px !important; margin: 0 2px; }
+    .pagination .page-item.active .page-link { background: #3a72d9; color: #fff; border: none; }
+    .pagination .page-item.disabled .page-link { color: #aaa; pointer-events: none; background: #f1f4f8; }
 </style>
 
 <div class="container my-5">
     <div class="title-row mb-4 border-bottom pb-2">
-        <h2 class="mb-0 text-primary">銷售訂單列表</h2>
-        <span class="order-count">共 @Model.Orders.Count 筆</span>
+        <h2 class="mb-0 text-primary" style="font-weight:700;letter-spacing:3px;">銷售訂單列表</h2>
+        <span class="order-count">
+            共 <span style="font-weight:bold">@Model.TotalCount</span> 筆，
+            顯示第 @(((Model.PageNumber - 1) * Model.PageSize) + 1)
+            ~ @(Math.Min(Model.PageNumber * Model.PageSize, Model.TotalCount)) 筆
+        </span>
     </div>
 
-    <table class="table table-bordered table-hover align-middle text-center">
-        <thead class="table-primary">
+    <table class="table table-hover align-middle text-center">
+        <thead>
             <tr>
-                <th scope="col">單據號碼</th>
-                <th scope="col">日期</th>
-                <th scope="col">客戶代碼</th>
-                <th scope="col">客戶名稱</th>
-                <th scope="col">客戶訂單號</th>
-                <th scope="col">匯率</th>
-                <th scope="col">訂單狀態</th>
+                <th>單據號碼</th>
+                <th>日期</th>
+                <th>客戶代碼</th>
+                <th>客戶名稱</th>
+                <th>客戶訂單號</th>
+                <th>匯率</th>
+                <th>訂單狀態</th>
             </tr>
         </thead>
         <tbody>
-            @foreach (var order in Model.Orders)
-            {
-                <tr>
-                    <td>@order.PaperNum</td>
-                    <td>@order.PaperDate.ToString("yyyy/MM/dd")</td>
-                    <td>@order.CustomerId</td>
-                    <td>@order.CustomerId</td> 
-                    <td>@order.CustPonum</td>
-                    <td>@order.RateToNt.ToString("F2")</td>
-                    <td class="table-@Model.GetStatusColor(order.Finished)">
-                        @Model.GetStatusName(order.Finished)
-                    </td>
-                </tr>
-            }
+        @foreach(var order in Model.Orders)
+        {
+            <tr class="row-link" data-url="/SpodOrderSubs/@order.PaperNum">
+                <td>@order.PaperNum</td>
+                <td>@order.PaperDate.ToString("yyyy/MM/dd")</td>
+                <td>@order.CustomerId</td>
+                <td>@order.CustomerId</td>
+                <td>@order.CustPonum</td>
+                <td>@order.RateToNt.ToString("F2")</td>
+                <td>
+                    @if (Model.GetStatusName(order.Finished) == "已確認")
+                    {
+                        <span class="status-done">@Model.GetStatusName(order.Finished)</span>
+                    }
+                    else
+                    {
+                        <span class="status-pending">@Model.GetStatusName(order.Finished)</span>
+                    }
+                </td>
+            </tr>
+        }
         </tbody>
     </table>
+
+    <div class="pagination-bar">
+    @if (Model.TotalPages > 1)
+    {
+        <nav>
+            <ul class="pagination justify-content-center">
+                <li class="page-item @(Model.PageNumber == 1 ? "disabled" : "")">
+                    <a class="page-link" href="?page=@(Model.PageNumber - 1)">上一頁</a>
+                </li>
+                @{
+                    int start = Math.Max(1, Model.PageNumber - 2);
+                    int end = Math.Min(Model.TotalPages, Model.PageNumber + 2);
+
+                    if (start > 2)
+                    {
+                        <li class="page-item"><a class="page-link" href="?page=1">1</a></li>
+                        <li class="page-item"><a class="page-link" href="?page=2">2</a></li>
+                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                    }
+                    else
+                    {
+                        for (int i = 1; i < start; i++)
+                        {
+                            <li class="page-item"><a class="page-link" href="?page=@i">@i</a></li>
+                        }
+                    }
+
+                    for (int i = start; i <= end; i++)
+                    {
+                        <li class="page-item @(i == Model.PageNumber ? "active" : "")">
+                            <a class="page-link" href="?page=@i">@i</a>
+                        </li>
+                    }
+
+                    if (end < Model.TotalPages - 2)
+                    {
+                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                        <li class="page-item"><a class="page-link" href="?page=@(Model.TotalPages-1)">@(Model.TotalPages-1)</a></li>
+                        <li class="page-item"><a class="page-link" href="?page=@Model.TotalPages">@Model.TotalPages</a></li>
+                    }
+                    else
+                    {
+                        for (int i = end+1; i <= Model.TotalPages; i++)
+                        {
+                            <li class="page-item"><a class="page-link" href="?page=@i">@i</a></li>
+                        }
+                    }
+                }
+                <li class="page-item @(Model.PageNumber == Model.TotalPages ? "disabled" : "")">
+                    <a class="page-link" href="?page=@(Model.PageNumber + 1)">下一頁</a>
+                </li>
+            </ul>
+        </nav>
+    }
+    </div>
 </div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll(".row-link").forEach(function(row) {
+        row.addEventListener("click", function() {
+            var url = row.getAttribute("data-url");
+            if(url) window.location = url;
+        });
+    });
+});
+</script>

@@ -19,6 +19,22 @@ namespace PcbErpApi.Controllers
             _context = context;
         }
 
+        // 分頁查詢 GET: api/SPOdOrderMains/paged?page=1&pageSize=50
+        [HttpGet("paged")]
+        public async Task<IActionResult> GetPagedSPOdOrderMains(int page = 1, int pageSize = 50)
+        {
+            if (page < 1) page = 1;
+            if (pageSize < 1) pageSize = 50;
+
+            var totalCount = await _context.SpodOrderMain.CountAsync();
+            var data = await _context.SpodOrderMain
+                .OrderByDescending(o => o.PaperDate)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return Ok(new { totalCount, data });
+        }
         /// <summary>
         /// 取得所有銷售訂單資料。
         /// </summary>
