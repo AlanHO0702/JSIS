@@ -1,14 +1,15 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PcbErpApi.Data;
 using PcbErpApi.Models;
 
 [ApiController]
 [Route("api/[controller]")]
 public class CurdUsersController : ControllerBase
 {
-    private readonly CirContext _context;
+    private readonly PcbErpContext _context;
 
-    public CurdUsersController(CirContext context)
+    public CurdUsersController(PcbErpContext context)
     {
         _context = context;
     }

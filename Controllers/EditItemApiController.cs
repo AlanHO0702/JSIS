@@ -1,13 +1,14 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PcbErpApi.Data;
 using PcbErpApi.Models;
 
 [ApiController]
 [Route("api/[controller]")]
 public class EditItemApiController : ControllerBase
 {
-    private readonly CirContext _context;
-    public EditItemApiController(CirContext context) => _context = context;
+    private readonly PcbErpContext _context;
+    public EditItemApiController(PcbErpContext context) => _context = context;
 
     public class EditItemRequest
     {

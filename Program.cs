@@ -37,10 +37,6 @@ builder.Services.AddHttpClient();
 builder.Services.AddDbContext<PcbErpContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// 同樣註冊另一個 EF Core 的 CirContext，使用相同的連線字串
-builder.Services.AddDbContext<CirContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
-
 // 建立應用程式物件，進入中介軟體與路由設定階段
 var app = builder.Build();
 

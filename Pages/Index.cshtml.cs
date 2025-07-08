@@ -1,15 +1,16 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using PcbErpApi.Data;
 using PcbErpApi.Models;
 
 namespace PcbErpApi.Pages
 {
     public class IndexModel : PageModel
     {
-        private readonly CirContext _context;
+        private readonly PcbErpContext _context;
 
-        public IndexModel(CirContext context)
+        public IndexModel(PcbErpContext context)
         {
             _context = context;
         }

@@ -1,12 +1,13 @@
 using Microsoft.AspNetCore.Mvc;
+using PcbErpApi.Data;
 using PcbErpApi.Models;
 
 [Route("api/[controller]")]
 [ApiController]
 public class SpodOrderSubsController : ControllerBase
 {
-    private readonly CirContext _context;
-    public SpodOrderSubsController(CirContext context)
+    private readonly PcbErpContext _context;
+    public SpodOrderSubsController(PcbErpContext context)
     {
         _context = context;
     }

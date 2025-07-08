@@ -2,13 +2,14 @@ using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using PcbErpApi.Data;
 using PcbErpApi.Models;
 
 public class LoginModel : PageModel
 {
-    private readonly CirContext _context;
+    private readonly PcbErpContext _context;
 
-    public LoginModel(CirContext context)
+    public LoginModel(PcbErpContext context)
     {
         _context = context;
     }
