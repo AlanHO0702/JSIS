@@ -76,10 +76,6 @@ namespace PcbErpApi.Pages
             Level1Map = level1List.GroupBy(i => i.SuperId!).ToDictionary(g => g.Key, g => g.ToList());
             Level2Map = level2List.GroupBy(i => i.SuperId!).ToDictionary(g => g.Key, g => g.ToList());
         }
-
-
-
-
         public List<CurdSysItem> GetCurrentLevel2() =>
             Level2Map.TryGetValue(SelectedLevel1Id, out var list) ? list : new List<CurdSysItem>();
     }
