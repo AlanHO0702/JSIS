@@ -21,7 +21,8 @@ public class SpodOrdersModel : PageModel
     public async Task OnGetAsync([FromQuery(Name = "page")] int? page)
     {
         PageNumber = page ?? 1;
-        var apiUrl = $"http://localhost:5290/api/SPOdOrderMains/paged?page={PageNumber}&pageSize={PageSize}";
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        var apiUrl = $"{baseUrl}/api/SPOdOrderMains/paged?page={PageNumber}&pageSize={PageSize}";
         var resp = await _httpClient.GetFromJsonAsync<ApiResult>(apiUrl);
         Orders = resp?.data ?? new List<SpodOrderMain>();
         TotalCount = resp?.totalCount ?? 0;
