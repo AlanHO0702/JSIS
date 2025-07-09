@@ -74,34 +74,54 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             public string FieldName { get; set; }
             public string DisplayLabel { get; set; }
             public int SerialNum { get; set; }
+            public string DataType { get; set; }
             // 你有需要可以再加
         }
 
-        public void OnGet()
+public void OnGet()
+{
+    // 用反射取得欄位名稱與型別
+    var modelFieldTypes = typeof(EmodProdInfo)
+        .GetProperties()
+        .ToDictionary(p => p.Name, p => GetInputType(p.PropertyType));
+
+    // 取得資料庫定義（不管 DataType 有沒有）
+    FieldDictList = _context.CURdTableFields
+        .Where(x => x.TableName == "EMOdProdInfo")
+        .OrderBy(x => x.SerialNum)
+        .ToList();
+
+    // 合併: 若 DataType 沒填就補 model 的型別
+    foreach (var f in FieldDictList)
+    {
+        if (string.IsNullOrWhiteSpace(f.DataType) && modelFieldTypes.TryGetValue(f.FieldName, out var dt))
         {
-            // 只取 visible=1 的欄位，語言對應CN
-            DynamicFields = (
-                from field in _context.CURdTableFields
-                join lang in _context.CurdTableFieldLangs
-                    on new { field.TableName, field.FieldName } equals new { lang.TableName, lang.FieldName }
-                    into gj
-                from lang in gj.Where(l => l.LanguageId == "TW").DefaultIfEmpty()
-                where field.TableName == "EMOdProdInfo" && field.Visible == 1
-                orderby field.SerialNum
-                select new DynamicFieldViewModel
-                {
-                    FieldName = field.FieldName,
-                    DisplayLabel = lang != null && !string.IsNullOrEmpty(lang.DisplayLabel) ? lang.DisplayLabel : field.FieldName,
-                    SerialNum = (int)field.SerialNum
-                }
-            ).ToList();
-
-            FieldDictList = _context.CURdTableFields
-                .Where(x => x.TableName == "EMOdProdInfo")
-                .OrderBy(x => x.SerialNum)
-                .ToList();
+            f.DataType = dt;
         }
+    }
+    // 可見欄位 (動態表單)
+    DynamicFields = FieldDictList
+        .Where(x => x.Visible == 1)
+        .Select(x => new DynamicFieldViewModel
+        {
+            FieldName = x.FieldName,
+            DisplayLabel = x.DisplayLabel,
+            SerialNum = (int)x.SerialNum,
+            DataType = x.DataType
+        }).ToList();
+}
 
+// 型別轉 input type
+private string GetInputType(Type type)
+{
+    if (type == typeof(int) || type == typeof(double) || type == typeof(decimal) || type == typeof(float))
+        return "number";
+    if (type == typeof(DateTime))
+        return "date";
+    if (type == typeof(bool))
+        return "checkbox";
+    return "text";
+}
         public IActionResult OnPost()
         {
             TempData["Success"] = "儲存成功！";
