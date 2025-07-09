@@ -16,6 +16,7 @@ namespace PcbErpApi.Data
         public DbSet<CURdTableField> CURdTableFields { get; set; }
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
         public virtual DbSet<EmodProdInfo> EmodProdInfos { get; set; }
+        public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<CurdUser>(entity =>
@@ -97,10 +98,12 @@ namespace PcbErpApi.Data
             modelBuilder.Entity<CURdTableField>()
             .HasKey(e => new { e.TableName, e.FieldName }); // 這裡改成你真正的複合主鍵欄位
 
+            modelBuilder.Entity<CURdTableField>().ToTable("CURdTableField");
+
             modelBuilder.Entity<SpodOrderSub>()
             .HasKey(x => new { x.PaperNum, x.Item });
 
-             modelBuilder.Entity<EmodProdInfo>(entity =>
+            modelBuilder.Entity<EmodProdInfo>(entity =>
             {
                 entity.HasKey(e => new { e.PartNum, e.Revision });
 
@@ -637,7 +640,47 @@ namespace PcbErpApi.Data
                     .HasMaxLength(10)
                     .HasColumnName("XP120");
             });
-            
+
+            modelBuilder.Entity<CurdTableFieldLang>(entity =>
+            {
+                entity.HasKey(e => new { e.LanguageId, e.TableName, e.FieldName });
+
+                entity.ToTable("CURdTableFieldLang", tb =>
+                    {
+                        tb.HasTrigger("CURdTableFieldLang_tI");
+                        tb.HasTrigger("CURdTableFieldLang_tU");
+                    });
+
+                entity.Property(e => e.LanguageId)
+                    .HasMaxLength(4)
+                    .IsUnicode(false);
+                entity.Property(e => e.TableName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.FieldName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.DisplayLabel).HasMaxLength(50);
+                entity.Property(e => e.EditColor)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.FontColor).HasMaxLength(50);
+                entity.Property(e => e.FontName).HasMaxLength(50);
+                entity.Property(e => e.FontStyle).HasMaxLength(50);
+                entity.Property(e => e.HintComment).HasMaxLength(255);
+                entity.Property(e => e.IFieldHeight).HasColumnName("iFieldHeight");
+                entity.Property(e => e.IFieldLeft).HasColumnName("iFieldLeft");
+                entity.Property(e => e.IFieldTop).HasColumnName("iFieldTop");
+                entity.Property(e => e.IFieldWidth).HasColumnName("iFieldWidth");
+                entity.Property(e => e.ILabHeight).HasColumnName("iLabHeight");
+                entity.Property(e => e.ILabLeft).HasColumnName("iLabLeft");
+                entity.Property(e => e.ILabTop).HasColumnName("iLabTop");
+                entity.Property(e => e.ILabWidth).HasColumnName("iLabWidth");
+                entity.Property(e => e.ILayColumn).HasColumnName("iLayColumn");
+                entity.Property(e => e.ILayRow).HasColumnName("iLayRow");
+                entity.Property(e => e.IShowWhere).HasColumnName("iShowWhere");
+            });
+
             OnModelCreatingPartial(modelBuilder);
         }
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
