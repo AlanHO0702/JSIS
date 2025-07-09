@@ -16,7 +16,8 @@ public class SpodOrderSubsModel : PageModel
     public async Task OnGetAsync(string PaperNum)
     {
         this.PaperNum = PaperNum;
-        var url = $"http://localhost:5290/api/SpodOrderSubs?PaperNum={PaperNum}";
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        var url = $"{baseUrl}/api/SpodOrderSubs?PaperNum={PaperNum}";
         OrderSubs = await _httpClient.GetFromJsonAsync<List<SpodOrderSub>>(url) ?? new();
     }
 }
