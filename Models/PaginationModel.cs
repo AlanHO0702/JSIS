@@ -1,11 +1,9 @@
-using Microsoft.AspNetCore.Mvc.RazorPages;
-
-public class PaginationModel : PageModel
+public class PaginationModel
 {
     public int PageSize { get; set; } = 50;
     public int PageNumber { get; set; } = 1;
     public int TotalCount { get; set; }
-    public int TotalPages { get; set; }// => (int)Math.Ceiling((TotalCount) / (double)PageSize);
+    public int TotalPages { get; set; }
     public string PageParameterName { get; set; } = "page";
     public string? RouteUrl { get; set; } // 例如 "/SpodOrders"
     public string GetPageUrl(int page)
