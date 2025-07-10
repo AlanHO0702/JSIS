@@ -7,7 +7,6 @@ public class SpodOrdersModel : PageModel
 {
     private readonly HttpClient _httpClient;
     private readonly ITableDictionaryService _dictService;
-
     public SpodOrdersModel(IHttpClientFactory httpClientFactory, ITableDictionaryService dictService)
     {
         _httpClient = httpClientFactory.CreateClient();

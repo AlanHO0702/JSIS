@@ -13,28 +13,23 @@ namespace PcbErpApi.Controllers
     public class SPOdOrderMainsController : ControllerBase
     {
         private readonly PcbErpContext _context;
+        private readonly PaginationService _pagedService;
 
-        public SPOdOrderMainsController(PcbErpContext context)
+        public SPOdOrderMainsController(PcbErpContext context, PaginationService pagedService)
         {
             _context = context;
+            _pagedService = pagedService;
         }
 
         // 分頁查詢 GET: api/SPOdOrderMains/paged?page=1&pageSize=50
         [HttpGet("paged")]
-        public async Task<IActionResult> GetPagedSPOdOrderMains(int page = 1, int pageSize = 50)
+        public async Task<IActionResult> GetPaged(int page = 1, int pageSize = 50)
         {
-            if (page < 1) page = 1;
-            if (pageSize < 1) pageSize = 50;
-
-            var totalCount = await _context.SpodOrderMain.CountAsync();
-            var data = await _context.SpodOrderMain
-                .OrderByDescending(o => o.PaperDate)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync();
-
-            return Ok(new { totalCount, data });
+            var query = _context.SpodOrderMain.OrderByDescending(o => o.PaperDate);
+            var result = await _pagedService.GetPagedAsync(query, page, pageSize);
+            return Ok(new { totalCount = result.TotalCount, data = result.Data });
         }
+
         /// <summary>
         /// 取得所有銷售訂單資料。
         /// </summary>
@@ -53,8 +48,7 @@ namespace PcbErpApi.Controllers
         [HttpGet("{paperNum}")]
         public async Task<ActionResult<SpodOrderMain>> GetSPOdOrderMain(string paperNum)
         {
-            var order = await _context.SpodOrderMain
-                .FirstOrDefaultAsync(s => s.PaperNum == paperNum);
+            var order = await _context.SpodOrderMain.FirstOrDefaultAsync(s => s.PaperNum == paperNum);
 
             if (order == null)
             {
