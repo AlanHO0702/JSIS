@@ -30,12 +30,15 @@ builder.Services.AddRazorPages()
 // 註冊 API Controllers 服務（支援 [ApiController]）
 builder.Services.AddControllers();
 
+
 // 註冊 HttpClient，讓服務可注入 HttpClient 用於發送 HTTP 請求
 builder.Services.AddHttpClient();
 
 // 註冊 EF Core 的 PcbErpContext 資料庫上下文，並使用 appsettings.json 中的 DefaultConnection 連線字串
 builder.Services.AddDbContext<PcbErpContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddScoped<ITableDictionaryService, TableDictionaryService>();
 
 // 建立應用程式物件，進入中介軟體與路由設定階段
 var app = builder.Build();

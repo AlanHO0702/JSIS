@@ -1,6 +1,9 @@
 @page
 @model SpodOrdersModel
-
+@{
+    ViewData["DictModalId"] = "dictModal";
+    ViewData["DictTableName"] = "SpodOrderMain";
+}
 <style>
     body { background: #f7f9fb; }
     .container { max-width: 1100px; }
@@ -23,6 +26,19 @@
     .pagination .page-link { color: #3a72d9; border-radius: 6px !important; margin: 0 2px; }
     .pagination .page-item.active .page-link { background: #3a72d9; color: #fff; border: none; }
     .pagination .page-item.disabled .page-link { color: #aaa; pointer-events: none; background: #f1f4f8; }
+    .table-wrap {
+        max-width: 100%;            /* 不會超過container寬 */
+        overflow-x: auto;           /* 超過寬度自動出現橫向捲軸 */
+        margin: 0 auto;             /* 水平置中 */
+        background: #fff;           /* 可視需求 */
+        border-radius: 16px;
+        box-shadow: 0 2px 12px 0 #c3d4e6;
+    }
+    .table {
+        min-width: 1200px;          /* 最小寬，根據欄位數量調整 */
+        margin-bottom: 0;
+    }
+
 </style>
 
 <div class="container my-5">
@@ -34,43 +50,32 @@
             ~ @(Math.Min(Model.PageNumber * Model.PageSize, Model.TotalCount)) 筆
         </span>
     </div>
+    <div class="table-wrap">
+        <table class="table table-hover align-middle text-center">
+            <thead>
+                <tr>
+                    @foreach(var field in Model.TableFields)
+                    {
+                        <th>@(string.IsNullOrWhiteSpace(field.DisplayLabel) ? field.FieldName : field.DisplayLabel)</th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach(var order in Model.Orders)
+                {
+                    <tr class="row-link" data-url="/SpodOrderSubs/@order.PaperNum">
+                        @foreach(var field in Model.TableFields)
+                        {
+                            // 用反射讀出欄位值（欄位名不寫死）
+                            var val = order.GetType().GetProperty(field.FieldName)?.GetValue(order, null);
+                            <td>@val</td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
 
-    <table class="table table-hover align-middle text-center">
-        <thead>
-            <tr>
-                <th>單據號碼</th>
-                <th>日期</th>
-                <th>客戶代碼</th>
-                <th>客戶名稱</th>
-                <th>客戶訂單號</th>
-                <th>匯率</th>
-                <th>訂單狀態</th>
-            </tr>
-        </thead>
-        <tbody>
-        @foreach(var order in Model.Orders)
-        {
-            <tr class="row-link" data-url="/SpodOrderSubs/@order.PaperNum">
-                <td>@order.PaperNum</td>
-                <td>@order.PaperDate.ToString("yyyy/MM/dd")</td>
-                <td>@order.CustomerId</td>
-                <td>@order.CustomerId</td>
-                <td>@order.CustPonum</td>
-                <td>@order.RateToNt.ToString("F2")</td>
-                <td>
-                    @if (Model.GetStatusName(order.Finished) == "已確認")
-                    {
-                        <span class="status-done">@Model.GetStatusName(order.Finished)</span>
-                    }
-                    else
-                    {
-                        <span class="status-pending">@Model.GetStatusName(order.Finished)</span>
-                    }
-                </td>
-            </tr>
-        }
-        </tbody>
-    </table>
 
     <div class="pagination-bar">
     @if (Model.TotalPages > 1)
@@ -127,6 +132,10 @@
     }
     </div>
 </div>
+
+@await Html.PartialAsync("_FieldDictModal", Model.FieldDictList, ViewData)
+
+<script src="~/js/fieldDictModal.js"></script>
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {

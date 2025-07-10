@@ -3,6 +3,7 @@ namespace PcbErpApi.Models
 {
     public class UpdateDictFieldInput
     {
+        public string TableName { get; set; }
         public string FieldName { get; set; }
         public string DisplayLabel { get; set; }
         public string DataType { get; set; }
