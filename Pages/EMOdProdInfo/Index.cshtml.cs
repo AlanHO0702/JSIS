@@ -1,26 +1,21 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace PcbErpApi.Pages.EMOdProdInfo
 {
     public class IndexModel : PageModel
     {
-        private readonly PcbErpContext _context;
+        private readonly ITableDictionaryService _dictService;
 
-        public IndexModel(PcbErpContext context)
+        public IndexModel(ITableDictionaryService dictService)
         {
-            _context = context;
+            _dictService = dictService;
         }
 
-        // 這裡改成只留 ViewModel，移除原本的 List<CurdTableFieldLang>
         public List<DynamicFieldViewModel> DynamicFields { get; set; } = new();
-
-        // 動態表單資料
         [BindProperty]
         public Dictionary<string, string> DynamicFormData { get; set; } = new();
 
@@ -78,56 +73,27 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             // 你有需要可以再加
         }
 
-public void OnGet()
-{
-    // 用反射取得欄位名稱與型別
-    var modelFieldTypes = typeof(EmodProdInfo)
-        .GetProperties()
-        .ToDictionary(p => p.Name, p => GetInputType(p.PropertyType));
-
-    // 取得資料庫定義（不管 DataType 有沒有）
-    FieldDictList = _context.CURdTableFields
-        .Where(x => x.TableName == "EMOdProdInfo")
-        .OrderBy(x => x.SerialNum)
-        .ToList();
-
-    // 合併: 若 DataType 沒填就補 model 的型別
-    foreach (var f in FieldDictList)
-    {
-        if (string.IsNullOrWhiteSpace(f.DataType) && modelFieldTypes.TryGetValue(f.FieldName, out var dt))
+        public void OnGet()
         {
-            f.DataType = dt;
+            // 資料庫設定（型別自動補齊，直接交給 Service 處理）
+            FieldDictList = _dictService.GetFieldDict("EMOdProdInfo", typeof(EmodProdInfo));
+
+            // 產生 DynamicFields 給前端表單
+            DynamicFields = FieldDictList
+                .Where(x => x.Visible == 1)
+                .Select(x => new DynamicFieldViewModel
+                {
+                    FieldName = x.FieldName,
+                    DisplayLabel = x.DisplayLabel,
+                    SerialNum = (int)x.SerialNum,
+                    DataType = x.DataType
+                }).ToList();
         }
-    }
-    // 可見欄位 (動態表單)
-    DynamicFields = FieldDictList
-        .Where(x => x.Visible == 1)
-        .Select(x => new DynamicFieldViewModel
-        {
-            FieldName = x.FieldName,
-            DisplayLabel = x.DisplayLabel,
-            SerialNum = (int)x.SerialNum,
-            DataType = x.DataType
-        }).ToList();
-}
 
-// 型別轉 input type
-private string GetInputType(Type type)
-{
-    if (type == typeof(int) || type == typeof(double) || type == typeof(decimal) || type == typeof(float))
-        return "number";
-    if (type == typeof(DateTime))
-        return "date";
-    if (type == typeof(bool))
-        return "checkbox";
-    return "text";
-}
         public IActionResult OnPost()
         {
             TempData["Success"] = "儲存成功！";
             return Page();
         }
-    
-
     }
 }

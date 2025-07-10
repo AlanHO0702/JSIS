@@ -6,10 +6,12 @@ using Microsoft.AspNetCore.Mvc;
 public class SpodOrdersModel : PageModel
 {
     private readonly HttpClient _httpClient;
+    private readonly ITableDictionaryService _dictService;
 
-    public SpodOrdersModel(IHttpClientFactory httpClientFactory)
+    public SpodOrdersModel(IHttpClientFactory httpClientFactory, ITableDictionaryService dictService)
     {
         _httpClient = httpClientFactory.CreateClient();
+        _dictService = dictService;
     }
 
     public List<SpodOrderMain> Orders { get; set; } = new();
@@ -17,7 +19,8 @@ public class SpodOrdersModel : PageModel
     public int PageNumber { get; set; } = 1;
     public int TotalCount { get; set; }
     public int TotalPages => (int)Math.Ceiling((TotalCount) / (double)PageSize);
-
+    public List<CURdTableField> FieldDictList { get; set; }
+    public List<TableFieldViewModel> TableFields { get; set; } = new();
     public async Task OnGetAsync([FromQuery(Name = "page")] int? page)
     {
         PageNumber = page ?? 1;
@@ -26,6 +29,19 @@ public class SpodOrdersModel : PageModel
         var resp = await _httpClient.GetFromJsonAsync<ApiResult>(apiUrl);
         Orders = resp?.data ?? new List<SpodOrderMain>();
         TotalCount = resp?.totalCount ?? 0;
+
+ 
+        FieldDictList = _dictService.GetFieldDict("SpodOrderMain", typeof(SpodOrderMain));
+        TableFields = FieldDictList
+        .Where(x => x.Visible == 1) // 只取可見欄位
+        .OrderBy(x => x.SerialNum)
+        .Select(x => new TableFieldViewModel
+        {
+            FieldName = x.FieldName,
+            DisplayLabel = x.DisplayLabel,
+            SerialNum = x.SerialNum ?? 0,
+            Visible = x.Visible == 1
+        }).ToList();
     }
 
     // API Response 物件
@@ -58,4 +74,13 @@ public class SpodOrdersModel : PageModel
             _ => "light"
         };
     }
+
+    public class TableFieldViewModel
+    {
+        public string FieldName { get; set; }
+        public string DisplayLabel { get; set; }
+        public int SerialNum { get; set; }
+        public bool Visible { get; set; }
+    }
+
 }

@@ -33,8 +33,9 @@ public class DictApiController : ControllerBase
                         FieldNote = @FieldNote, 
                         SerialNum = @SerialNum, 
                         Visible = @Visible
-                    WHERE TableName = 'EMOdProdInfo' AND FieldName = @FieldName", conn);
+                    WHERE TableName = @TableName AND FieldName = @FieldName", conn);
 
+                cmd.Parameters.AddWithValue("@TableName", input.TableName ?? "");
                 cmd.Parameters.AddWithValue("@DisplayLabel", (object?)input.DisplayLabel ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@DataType", (object?)input.DataType ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@FieldNote", (object?)input.FieldNote ?? DBNull.Value);
