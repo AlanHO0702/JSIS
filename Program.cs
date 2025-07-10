@@ -40,7 +40,7 @@ builder.Services.AddDbContext<PcbErpContext>(options =>
 
 builder.Services.AddScoped<ITableDictionaryService, TableDictionaryService>();
 
-builder.Services.AddScoped<PagedQueryService>();
+builder.Services.AddScoped<PaginationService>();
 
 // 建立應用程式物件，進入中介軟體與路由設定階段
 var app = builder.Build();
