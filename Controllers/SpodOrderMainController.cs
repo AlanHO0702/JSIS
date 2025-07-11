@@ -10,12 +10,12 @@ namespace PcbErpApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class SPOdOrderMainsController : ControllerBase
+    public class SPOdOrderMainController : ControllerBase
     {
         private readonly PcbErpContext _context;
         private readonly PaginationService _pagedService;
 
-        public SPOdOrderMainsController(PcbErpContext context, PaginationService pagedService)
+        public SPOdOrderMainController(PcbErpContext context, PaginationService pagedService)
         {
             _context = context;
             _pagedService = pagedService;

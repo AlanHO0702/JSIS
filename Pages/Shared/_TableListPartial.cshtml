@@ -1,15 +1,16 @@
-@page
-@model SpodOrdersModel
+@model dynamic
+
 @{
-    ViewData["DictModalId"] = "dictModal";
-    ViewData["DictTableName"] = "SpodOrderMain";
-    var paginationVm = new PaginationModel {
-        PageNumber = Model.PageNumber,
-        TotalPages = Model.TotalPages,
-        RouteUrl = "/SPOdOrders",         // 換成你自己的頁面/路徑
-        PageParameterName = "page"        // 預設就是 page
-    };
+    var fields = Model.TableFields;
+    var items = Model.Items;
+    var totalCount = Model.TotalCount;
+    var pageNumber = Model.PageNumber;
+    var pageSize = Model.PageSize;
+    var subRouteTemplate = ViewData["SubRouteTemplate"] as string ?? "";
+        // PaginationModel 可直接由 Model 傳進來
+    var paginationVm = ViewData["PaginationVm"] as PaginationModel;
 }
+
 <style>
     body { background: #f7f9fb; }
     .container { max-width: 1100px; }
@@ -44,12 +45,11 @@
         min-width: 1200px;          /* 最小寬，根據欄位數量調整 */
         margin-bottom: 0;
     }
-
 </style>
 
 <div class="container my-5">
     <div class="title-row mb-4 border-bottom pb-2">
-        <h2 class="mb-0 text-primary" style="font-weight:700;letter-spacing:3px;">銷售訂單列表</h2>
+        <h2 class="mb-0 text-primary" style="font-weight:700;letter-spacing:3px;">@ViewData["TableTitle"]</h2>
         <span class="order-count">
             共 <span style="font-weight:bold">@Model.TotalCount</span> 筆，
             顯示第 @(((Model.PageNumber - 1) * Model.PageSize) + 1)
@@ -60,36 +60,40 @@
         <table class="table table-hover align-middle text-center">
             <thead>
                 <tr>
-                    @foreach(var field in Model.TableFields)
+                    @foreach(var field in fields)
                     {
                         <th>@(string.IsNullOrWhiteSpace(field.DisplayLabel) ? field.FieldName : field.DisplayLabel)</th>
                     }
                 </tr>
             </thead>
             <tbody>
-                @foreach(var order in Model.Orders)
+                @foreach(var item in items)
                 {
-                    <tr class="row-link" data-url="/SpodOrderSubs/@order.PaperNum">
-                        @foreach(var field in Model.TableFields)
+                    // 取得 key（如 PaperNum）來組路徑
+                    var paperNum = item.GetType().GetProperty("PaperNum")?.GetValue(item, null)?.ToString();
+                    var rowUrl = "";
+                    if (!string.IsNullOrEmpty(subRouteTemplate) && !string.IsNullOrEmpty(paperNum))
+                    {
+                        rowUrl = subRouteTemplate.Replace("{PaperNum}", paperNum);
+                    }
+                    <tr class="row-link" data-url="@rowUrl">
+                        @foreach(var field in fields)
                         {
-                            // 用反射讀出欄位值（欄位名不寫死）
-                            var val = order.GetType().GetProperty(field.FieldName)?.GetValue(order, null);
+                            var val = item.GetType().GetProperty(field.FieldName)?.GetValue(item, null);
                             <td>@val</td>
                         }
                     </tr>
                 }
             </tbody>
         </table>
-    </div>
-
     <div class="pagination-bar">
-        @await Html.PartialAsync("_Pagination", paginationVm)
+        @if (paginationVm != null)
+        {
+            @await Html.PartialAsync("_Pagination", paginationVm)
+        }
     </div>
 </div>
 
-@await Html.PartialAsync("_FieldDictModal", Model.FieldDictList, ViewData)
-
-<script src="~/js/fieldDictModal.js"></script>
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
