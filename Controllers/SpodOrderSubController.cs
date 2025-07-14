@@ -4,15 +4,15 @@ using PcbErpApi.Models;
 
 [Route("api/[controller]")]
 [ApiController]
-public class SpodOrderSubsController : ControllerBase
+public class SpodOrderSubController : ControllerBase
 {
     private readonly PcbErpContext _context;
-    public SpodOrderSubsController(PcbErpContext context)
+    public SpodOrderSubController(PcbErpContext context)
     {
         _context = context;
     }
 
-    // GET api/SpodOrderSubs?PaperNum=SA25050075
+    // GET api/SpodOrderSub?PaperNum=SA25050075
     [HttpGet]
     public ActionResult<List<SpodOrderSub>> Get([FromQuery] string PaperNum)
     {
