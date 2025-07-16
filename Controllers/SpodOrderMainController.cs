@@ -153,21 +153,27 @@ namespace PcbErpApi.Controllers
         /// </summary>
         /// <param name="paperNum">訂單號碼</param>
         /// <returns>NoContent 或錯誤訊息</returns>
-        [HttpDelete("{paperNum}")]
-        public async Task<IActionResult> DeleteSPOdOrderMain(string paperNum)
+   [HttpDelete("{paperNum}")]
+    public async Task<IActionResult> DeleteSPOdOrderMain(string paperNum)
+    {
+        try
         {
-            var order = await _context.SpodOrderMain
-                .FirstOrDefaultAsync(s => s.PaperNum == paperNum);
-            if (order == null)
-            {
-                return NotFound();
-            }
+            // 用原生 SQL 指令（這樣就不會有 OUTPUT 子句問題）
+            var rows = await _context.Database.ExecuteSqlRawAsync(
+                "DELETE FROM SpodOrderMain WHERE PaperNum = {0}", paperNum);
 
-            _context.SpodOrderMain.Remove(order);
-            await _context.SaveChangesAsync();
+            if (rows == 0)
+                return NotFound();
 
             return NoContent();
         }
+        catch (Exception ex)
+        {
+            // 回傳錯誤訊息到前端
+            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+        }
+    }
+
 
         /// <summary>
         /// 判斷訂單是否存在。
