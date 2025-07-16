@@ -6,7 +6,6 @@ namespace PcbErpApi.Data
     public partial class PcbErpContext : DbContext
     {
         public PcbErpContext(DbContextOptions<PcbErpContext> options) : base(options) { }
-        public DbSet<WorkOrder> WorkOrders => Set<WorkOrder>();
         public DbSet<SpodOrderMain> SpodOrderMain => Set<SpodOrderMain>();
         public DbSet<CurdUser> CurdUser => Set<CurdUser>();
         public DbSet<MindStockCostPn> MindStockCostPn => Set<MindStockCostPn>();

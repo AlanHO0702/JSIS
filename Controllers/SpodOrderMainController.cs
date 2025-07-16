@@ -10,6 +10,7 @@ namespace PcbErpApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
     public class SPOdOrderMainController : ControllerBase
     {
         private readonly PcbErpContext _context;
@@ -64,13 +65,53 @@ namespace PcbErpApi.Controllers
         /// <param name="order">訂單資料</param>
         /// <returns>建立成功的訂單資料</returns>
         [HttpPost]
-        public async Task<ActionResult<SpodOrderMain>> PostSPOdOrderMain(SpodOrderMain order)
+        public async Task<ActionResult<SpodOrderMain>> PostSPOdOrderMain()
         {
+            var prefix = "SA" + DateTime.Now.ToString("yyMM");
+            var lastToday = await _context.SpodOrderMain
+                .Where(x => x.PaperNum.StartsWith(prefix))
+                .OrderByDescending(x => x.PaperNum)
+                .FirstOrDefaultAsync();
+
+            string nextNum = GenerateNextPaperNum(lastToday?.PaperNum);
+
+            var order = new SpodOrderMain
+            {
+                PaperNum = nextNum,
+                PaperDate = DateTime.Now,
+                CustomerId = "",
+                SourCustomerId = "",
+                FdrCode = "",
+                // 其他預設
+            };
+
             _context.SpodOrderMain.Add(order);
             await _context.SaveChangesAsync();
 
             return CreatedAtAction(nameof(GetSPOdOrderMain), new { paperNum = order.PaperNum }, order);
         }
+
+
+        // 實作一個產生新單號的方法
+        private string GenerateNextPaperNum(string? lastPaperNum)
+        {
+            var prefix = "SA" + DateTime.Now.ToString("yyMM"); // SA2507
+
+            int nextSeq = 1;
+
+            // 如果有今天單號，流水號遞增
+            if (!string.IsNullOrEmpty(lastPaperNum) && lastPaperNum.StartsWith(prefix))
+            {
+                // 取流水號部分 (第6~9碼，4碼)
+                var lastSeq = int.Parse(lastPaperNum.Substring(6, 4));
+                nextSeq = lastSeq + 1;
+            }
+
+            // 補足4碼流水號，總長10碼
+            return prefix + nextSeq.ToString("D4");
+        }
+
+
 
         /// <summary>
         /// 根據 PaperNum 更新訂單資料。
