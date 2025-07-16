@@ -7,8 +7,11 @@
     var pageNumber = Model.PageNumber;
     var pageSize = Model.PageSize;
     var subRouteTemplate = ViewData["SubRouteTemplate"] as string ?? "";
-        // PaginationModel 可直接由 Model 傳進來
     var paginationVm = ViewData["PaginationVm"] as PaginationModel;
+
+    // 新增API路徑與單身頁路徑，從 ViewData 傳（預設值也可寫死）
+    var addApiUrl = ViewData["AddApiUrl"] as string ?? "/api/SPOdOrderMain";
+    var detailRouteTemplate = ViewData["SubRouteTemplate"] as string ?? "/SpodOrderSubs/{PaperNum}";
 }
 
 <style>
@@ -49,12 +52,15 @@
 
 <div class="container my-5">
     <div class="title-row mb-4 border-bottom pb-2">
-        <h2 class="mb-0 text-primary" style="font-weight:700;letter-spacing:3px;">@ViewData["TableTitle"]</h2>
+        <div style="display:flex;align-items:center;gap:16px;">
+            <h2 class="mb-0 text-primary" style="font-weight:700;letter-spacing:3px;">@ViewData["TableTitle"]</h2>
+            <button id="btnAddNew" class="btn btn-primary" style="font-weight:600;">＋新增</button>
+        </div>
         <span class="order-count">
             共 <span style="font-weight:bold">@Model.TotalCount</span> 筆，
             顯示第 @(((Model.PageNumber - 1) * Model.PageSize) + 1)
             ~ @(Math.Min(Model.PageNumber * Model.PageSize, Model.TotalCount)) 筆
-        </span>
+        </span>  
     </div>
     <div class="table-wrap">
         <table class="table table-hover align-middle text-center">
@@ -96,12 +102,56 @@
 
 
 <script>
-document.addEventListener("DOMContentLoaded", function () {
-    document.querySelectorAll(".row-link").forEach(function(row) {
-        row.addEventListener("click", function() {
-            var url = row.getAttribute("data-url");
-            if(url) window.location = url;
+    // Razor 變數傳到 JS
+    const addApiUrl = '@addApiUrl';
+    const detailRouteTemplate = '@detailRouteTemplate';
+
+    document.addEventListener("DOMContentLoaded", function () {
+        // 點擊行跳轉
+        document.querySelectorAll(".row-link").forEach(function(row) {
+            row.addEventListener("click", function() {
+                var url = row.getAttribute("data-url");
+                if(url) window.location = url;
+            });
+        });
+
+        // 新增單據
+        document.getElementById("btnAddNew").addEventListener("click", async function() {
+            if(!confirm("確定要新增一張新單據？")) return;
+
+            const resp = await fetch(addApiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+
+            if(resp.ok) {
+                const data = await resp.json();
+                // 支援大駝峰、小駝峰
+                const paperNum = data.paperNum || data.PaperNum || "";
+                if(paperNum) {
+                    // 用 detailRouteTemplate 替換 {PaperNum}
+                    var jumpUrl = detailRouteTemplate.replace("{PaperNum}", paperNum);
+                    window.location = jumpUrl;
+                } else {
+                    alert("新增成功，但未取得單號！");
+                    location.reload();
+                }
+            } else {
+                alert("建立失敗！");
+            }
         });
     });
+
+window.addEventListener('pageshow', function (event) {
+    // 只要是 back/forward 導航就 reload
+    if (event.persisted || (window.performance && window.performance.getEntriesByType("navigation")[0]?.type === "back_forward")) {
+        location.reload();
+    }
 });
+
+
+
+
+
 </script>
