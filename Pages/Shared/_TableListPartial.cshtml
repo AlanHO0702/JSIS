@@ -108,8 +108,10 @@
 </div>
 
 
+<!-- 這一行一定要在所有 <script> 之前獨立放，不要包在 <script> 裡！ -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
 <script>
-    // 全域變數先宣告
     let selectedPaperNum = null;
     const addApiUrl = '@addApiUrl';
     const detailRouteTemplate = '@detailRouteTemplate';
@@ -118,7 +120,6 @@
         // 點擊行：選取，不跳頁
         document.querySelectorAll(".row-link").forEach(function(row) {
             row.addEventListener("click", function(e) {
-                // 清除前一個選取
                 document.querySelectorAll(".row-link.selected").forEach(r => r.classList.remove("selected"));
                 row.classList.add("selected");
                 selectedPaperNum = row.getAttribute("data-paper-num");
@@ -133,7 +134,14 @@
 
         // 新增按鈕
         document.getElementById("btnAddNew").addEventListener("click", async function() {
-            if(!confirm("確定要新增一張新單據？")) return;
+            const result = await Swal.fire({
+                title: '確定要新增一張新單據？',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '確定',
+                cancelButtonText: '取消'
+            });
+            if (!result.isConfirmed) return;
 
             const resp = await fetch(addApiUrl, {
                 method: 'POST',
@@ -143,47 +151,60 @@
 
             if(resp.ok) {
                 const data = await resp.json();
-                // 支援大駝峰、小駝峰
                 const paperNum = data.paperNum || data.PaperNum || "";
                 if(paperNum) {
-                    // 用 detailRouteTemplate 替換 {PaperNum}
                     var jumpUrl = detailRouteTemplate.replace("{PaperNum}", paperNum);
                     window.location = jumpUrl;
                 } else {
-                    alert("新增成功，但未取得單號！");
+                    await Swal.fire({ icon: 'success', title: '新增成功，但未取得單號！' });
                     location.reload();
                 }
             } else {
-                alert("建立失敗！");
+                await Swal.fire({ icon: 'error', title: '建立失敗！' });
             }
         });
 
         // 作廢按鈕
         document.getElementById("btnBatchDelete").addEventListener("click", async function() {
             if (!selectedPaperNum) {
-                alert("請先點選一筆資料");
+                await Swal.fire({
+                    icon: 'warning',
+                    title: '請先點選一筆資料',
+                    confirmButtonText: '確定'
+                });
                 return;
             }
-            if (!confirm("確定要作廢這筆單據？")) return;
+            const result = await Swal.fire({
+                title: '確定要作廢這筆單據？',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '確定',
+                cancelButtonText: '取消'
+            });
+            if (!result.isConfirmed) return;
 
             let resp = await fetch(`/api/SPOdOrderMain/${selectedPaperNum}`, { method: "DELETE" });
             if (resp.ok) {
-                alert("作廢成功！");
+                await Swal.fire({
+                    icon: 'success',
+                    title: '作廢成功！'
+                });
                 location.reload();
             } else {
                 let errorMsg = "作廢失敗！";
                 try {
                     let result = await resp.json();
-                    if (result.error)
-                        errorMsg = result.error;
+                    if (result.error) errorMsg = result.error;
                 } catch (e) { }
-                alert(errorMsg);
+                await Swal.fire({
+                    icon: 'error',
+                    title: errorMsg
+                });
             }
         });
     });
 
     window.addEventListener('pageshow', function (event) {
-        // 只要是 back/forward 導航就 reload
         if (event.persisted || (window.performance && window.performance.getEntriesByType("navigation")[0]?.type === "back_forward")) {
             location.reload();
         }
