@@ -24,7 +24,7 @@ public class DictApiController : ControllerBase
         {
             await conn.OpenAsync();
 
-            foreach(var input in list)
+            foreach (var input in list)
             {
                 var cmd = new SqlCommand(@"
                     UPDATE CURdTableField 
@@ -44,6 +44,7 @@ public class DictApiController : ControllerBase
                 cmd.Parameters.AddWithValue("@FieldName", (object)input.FieldName);
 
                 await cmd.ExecuteNonQueryAsync();
+                
             }
         }
         return Ok(new { success = true });

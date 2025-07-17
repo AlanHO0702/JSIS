@@ -20,12 +20,18 @@ builder.Services.AddSwaggerGen(options =>
     options.IncludeXmlComments(xmlPath);
 });
 
+builder.Services.AddControllers().AddJsonOptions(options =>
+{
+    options.JsonSerializerOptions.PropertyNamingPolicy = null; // 保持原本 C# 的大寫
+});
+
+
 // 註冊 Razor Pages 服務，並設定 JSON 序列化時使用 camelCase 命名風格
-builder.Services.AddRazorPages()
-    .AddJsonOptions(options =>
+builder.Services.AddRazorPages();
+    /*.AddJsonOptions(options =>
     {
         options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-    });
+    });*/
 
 // 註冊 API Controllers 服務（支援 [ApiController]）
 builder.Services.AddControllers();

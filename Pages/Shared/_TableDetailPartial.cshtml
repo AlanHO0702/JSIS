@@ -1,5 +1,9 @@
 @model dynamic
 @{
+    // 單頭欄位
+    var headerFields = Model.HeaderTableFields; // 可視欄位
+    var headerData = Model.HeaderData; // 單頭資料 (Dictionary<string, object> 或你的單頭Model)
+    // 單身
     var fields = Model.TableFields;
     var items = Model.Items;
     var tableTitle = ViewData["TableTitle"] as string ?? "";
@@ -9,14 +13,27 @@
     <div class="erp-title">
         @tableTitle
     </div>
+        <!-- 單頭可編輯表單 -->
+    <form id="orderHeaderForm" class="erp-header-form mb-4">
+        <div class="row">
+            @foreach (var field in headerFields)
+            {
+                object v;
+                var val = headerData.TryGetValue(field.FieldName, out v) ? v : "";
+                <div class="col-md-2 mb-2">
+                    <label>@field.DisplayLabel</label>
+                    <input type="text" class="form-control" name="@field.FieldName" value="@val" />
+                </div>
+            }
+        </div>
+        <button type="submit" class="btn btn-primary">儲存單頭</button>
+    </form>
+
+    <!-- 單身明細 table -->
     <div class="erp-table-wrapper">
         <table class="erp-table">
             <thead>
                 <tr>
-                    @if (showRowNumber)
-                    {
-                        <th>項次</th>
-                    }
                     @foreach(var col in fields)
                     {
                         <th>@col.DisplayLabel</th>
@@ -34,13 +51,31 @@
                             {
                                 <td>@index</td>
                             }
-                            @foreach(var col in fields)
-                            {
-                                var val = item.GetType().GetProperty(col.FieldName)?.GetValue(item, null);
-                                <td>
-                                    @(val is DateTime dt ? dt.ToString("yyyy/MM/dd") : val)
-                                </td>
-                            }
+                                @foreach(var col in fields)
+                                {
+                                    object v = "";
+                                    // 如果 item 是 Dictionary<string, object>
+                                    if (item is IDictionary<string, object> dict)
+                                    {
+                                        dict.TryGetValue(col.FieldName, out v);
+                                    }
+                                    // 如果 item 是 ExpandoObject
+                                    else if (item is System.Dynamic.ExpandoObject exp)
+                                    {
+                                        var expDict = (IDictionary<string, object>)exp;
+                                        expDict.TryGetValue(col.FieldName, out v);
+                                    }
+                                    // 如果 item 是強型別物件
+                                    else
+                                    {
+                                        var prop = item.GetType().GetProperty(col.FieldName);
+                                        v = prop != null ? prop.GetValue(item, null) : "";
+                                    }
+                                    <td>
+                                        @(v is DateTime dt ? dt.ToString("yyyy/MM/dd") : v)
+                                    </td>
+                                }
+
                         </tr>
                         index++;
                     }
@@ -49,13 +84,42 @@
         </table>
     </div>
 </div>
-
+<!-- SweetAlert2 for提示 -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+document.getElementById('orderHeaderForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const formData = Object.fromEntries(new FormData(this));
+    // 你自己的儲存API路徑
+    const resp = await fetch('/api/OrderHeaderApi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+    });
+    if(resp.ok) {
+        Swal.fire({ icon: 'success', title: '儲存成功！' });
+    } else {
+        let msg = '儲存失敗';
+        try {
+            let result = await resp.json();
+            if (result.error) msg = result.error;
+        } catch {}
+        Swal.fire({ icon: 'error', title: msg });
+    }
+});
+</script>
 <style>
+body {
+    background: #f7f9fb !important;
+}
 .erp-detail-container {
-    background: #f7f9fb;
+    /* 只保留 spacing，不要再設 background 顏色 */
     min-height: 100vh;
     padding: 32px 0;
+    margin-left: 3vw;
+    margin-right: 3vw;
 }
+
 .erp-title {
     font-size: 1.6em;
     font-weight: 700;
@@ -68,9 +132,9 @@
     background: #fff;
     border-radius: 13px;
     box-shadow: 0 4px 18px 0 #c3d4e6;
-    padding: 12px 18px 8px 18px;
-    margin: 0 auto;
-    max-width: 1650px;
+    padding: 24px 32px 16px 32px;
+    margin: 0 auto 32px auto;
+    max-width: 1400px;
     overflow-x: auto;
 }
 .erp-table {
