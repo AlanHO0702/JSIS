@@ -5,6 +5,11 @@
     var level1Map = Model.Level1Map;
     var level2List = Model.GetCurrentLevel2();
     Layout = "_Layout";
+    var pageMap = new Dictionary<string, string> {
+        { "SA000002", "/SPOdOrderMain" },    // 銷售訂單
+        { "SPO000010", "/SaleOrder" },       // 銷貨單
+        // 其它功能請自行加入...
+    };
 }
 
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
@@ -80,6 +85,27 @@ body {
 .erp-list-group .list-group-item:hover {
     background: #f0f8ff;
 }
+.erp-list-group .list-group-item a,
+#favorite-list a {
+    color: #333 !important;
+    text-decoration: none !important;
+    transition: color 0.15s, text-decoration 0.15s;
+}
+.erp-list-group .list-group-item a:hover,
+#favorite-list a:hover {
+    color: #155cb5 !important;
+    text-decoration: underline !important;
+}
+/* 我的最愛區塊專用：去底線，hover再出現 */
+#favorite-list a {
+    color: #2766b5;
+    text-decoration: none;
+    transition: color 0.15s, text-decoration 0.15s;
+}
+#favorite-list a:hover {
+    color: #155cb5;
+    text-decoration: underline;
+}
 </style>
 
 <div class="container py-4">
@@ -124,23 +150,30 @@ body {
                     <div class="d-flex align-items-center mb-3">
                         <h4 class="erp-list-title mb-0 me-2">功能列表</h4>
                     </div>
-                    <ul id="level2-list" class="list-group erp-list-group">
-                        @foreach (var item in level2List)
+                   <ul id="level2-list" class="list-group erp-list-group">
+                    @foreach (var item in level2List)
+                    {
+                        if (item.ItemType == 4)
                         {
-                            if (item.ItemType == 4)
-                            {
-                                <li class="list-group-item p-0" id="li-@item.ItemId">
-                                    <hr class="m-0" />
-                                </li>
-                            }
-                            else
-                            {
-                                <li class="list-group-item d-flex justify-content-between align-items-center" id="li-@item.ItemId">
-                                    <span>@item.ItemId - @item.ItemName</span>
-                                    <button class="btn btn-outline-warning btn-sm" onclick="addToFavorite('@item.ItemId', '@item.ItemName', '@item.SuperId')">★</button>
-                                </li>
-                            }
+                            <li class="list-group-item p-0" id="li-@item.ItemId">
+                                <hr class="m-0" />
+                            </li>
                         }
+                        else
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center" id="li-@item.ItemId">
+                                @if (pageMap.ContainsKey(item.ItemId))
+                                {
+                                    <a href="@pageMap[item.ItemId]" style="flex:1">@item.ItemId - @item.ItemName</a>
+                                }
+                                else
+                                {
+                                    <span style="flex:1">@item.ItemId - @item.ItemName</span>
+                                }
+                                <button class="btn btn-outline-warning btn-sm" onclick="addToFavorite('@item.ItemId', '@item.ItemName', '@item.SuperId')">★</button>
+                            </li>
+                        }
+                    }
                     </ul>
                 }
                 else
@@ -167,7 +200,11 @@ body {
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 
 <script>
-    
+    const pageMap = {
+    "SA000002": "/SPOdOrderMain",
+    "SPO000010": "/SaleOrder",
+    // 其它功能自行補上
+    };
 
     const selectedLevel1Id = "@Model.SelectedLevel1Id";
 
@@ -214,19 +251,24 @@ body {
         }
 
         function renderFavorites() {
-            const list = document.getElementById('favorite-list');
-            const favs = getFavorites();
-            list.innerHTML = '';
-            favs.forEach(f => {
-                let li = document.createElement('li');
-                li.className = "list-group-item d-flex justify-content-between align-items-center";
-                li.setAttribute('data-itemid', f.itemId);
+        const list = document.getElementById('favorite-list');
+        const favs = getFavorites();
+        list.innerHTML = '';
+        favs.forEach(f => {
+            let li = document.createElement('li');
+            li.className = "list-group-item d-flex justify-content-between align-items-center";
+            li.setAttribute('data-itemid', f.itemId);
+            if (pageMap[f.itemId]) {
+                li.innerHTML = `<a href="${pageMap[f.itemId]}" style="cursor:pointer">${f.itemId} - ${f.itemName}</a>
+                    <button class="btn btn-outline-danger btn-sm" onclick="removeFavorite('${f.itemId}')">✕</button>`;
+            } else {
                 li.innerHTML = `<span style="cursor:pointer" onclick="location.href='?level1Id=${f.superId}'">${f.itemId} - ${f.itemName}</span>
-                                <button class="btn btn-outline-danger btn-sm" onclick="removeFavorite('${f.itemId}')">✕</button>`;
-                list.appendChild(li);
-            });
-            enableFavoriteSortable(); // 這裡加
-        }
+                    <button class="btn btn-outline-danger btn-sm" onclick="removeFavorite('${f.itemId}')">✕</button>`;
+            }
+            list.appendChild(li);
+        });
+        enableFavoriteSortable();
+    }
 
         function enableFavoriteSortable() {
             new Sortable(document.getElementById('favorite-list'), {

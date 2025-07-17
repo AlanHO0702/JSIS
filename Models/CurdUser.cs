@@ -51,5 +51,4 @@ public partial class CurdUser
 
     public string FlowCommtWidth { get; set; } = null!;
 
-    public int? IsAdmin { get; set; }
 }

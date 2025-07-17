@@ -1,4 +1,3 @@
-// /Pages/Shared/TableDetailModel.cs
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using PcbErpApi.Models;
 using System.Net.Http.Json;
@@ -18,13 +17,15 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
     public List<T> Items { get; set; } = new();
     public List<CURdTableField> FieldDictList { get; set; }
     public List<TableFieldViewModel> TableFields { get; set; } = new();
+    public Dictionary<string, object> HeaderData { get; set; }
+    public List<TableFieldViewModel> HeaderTableFields { get; set; }
 
     public abstract string ApiDetailUrl { get; }
     public virtual Dictionary<string, string>? ApiQueryParameters => null;
     public string MasterKey { get; set; }
     public abstract string TableName { get; }
 
-    // 這裡只要一個 FetchDataAsync，不要再寫方法宣告
+    // ⚠️ 這裡才是 protected method，寫在類別最外層
     protected async Task FetchDataAsync(string masterKey)
     {
         MasterKey = masterKey;
@@ -59,4 +60,3 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
 
     public virtual string GetDefaultMasterKeyName() => "PaperNum";
 }
-

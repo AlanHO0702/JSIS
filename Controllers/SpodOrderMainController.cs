@@ -169,9 +169,12 @@ namespace PcbErpApi.Controllers
         }
         catch (Exception ex)
         {
-            // 回傳錯誤訊息到前端
-            return BadRequest(new { error = ex.InnerException?.Message ?? ex.Message });
+            // 只取第一行（trigger常見訊息會在第一行）
+            string fullMsg = ex.InnerException?.Message ?? ex.Message;
+            string userMsg = fullMsg.Split('\n')[0]; // 取第一行
+            return BadRequest(new { error = userMsg });
         }
+
     }
 
 
