@@ -19,6 +19,8 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
     public List<TableFieldViewModel> TableFields { get; set; } = new();
     public Dictionary<string, object> HeaderData { get; set; }
     public List<TableFieldViewModel> HeaderTableFields { get; set; }
+    public List<(int TabNum, string TabTitle)> FieldTabs { get; set; } = new();
+
 
     public abstract string ApiDetailUrl { get; }
     public virtual Dictionary<string, string>? ApiQueryParameters => null;
@@ -56,6 +58,26 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 SerialNum = x.SerialNum ?? 0,
                 Visible = x.Visible == 1
             }).ToList();
+
+        FieldTabs = FieldDictList
+        .Where(x => x.Visible == 1 && (x.iShowWhere ?? 0) >= 0)
+        .Select(x => x.iShowWhere ?? 0)
+        .Distinct()
+        .OrderBy(x => x)
+        .Select(i => (i, i == 0 ? "主頁" : $"分頁{i}"))
+        .ToList();
+
+        HeaderTableFields = FieldDictList
+        .Where(x => x.Visible == 1)
+        .OrderBy(x => x.SerialNum)
+        .Select(x => new TableFieldViewModel
+        {
+            FieldName = x.FieldName,
+            DisplayLabel = x.DisplayLabel,
+            iFieldWidth = x.iFieldWidth
+        }).ToList();
+        
+        
     }
 
     public virtual string GetDefaultMasterKeyName() => "PaperNum";
