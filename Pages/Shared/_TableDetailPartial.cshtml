@@ -16,15 +16,23 @@
         <!-- 單頭可編輯表單 -->
     <form id="orderHeaderForm" class="erp-header-form mb-4">
         <div class="row">
-            @foreach (var field in headerFields)
-            {
-                object v;
-                var val = headerData.TryGetValue(field.FieldName, out v) ? v : "";
-                <div class="col-md-2 mb-2">
-                    <label>@field.DisplayLabel</label>
-                    <input type="text" class="form-control" name="@field.FieldName" value="@val" />
-                </div>
-            }
+            <ul id="header-fields" class="row list-unstyled">
+                @foreach (var field in headerFields)
+                {
+                    object v;
+                    var val = headerData.TryGetValue(field.FieldName, out v) ? v : "";
+                    var width = field.iFieldWidth ?? 160; // 若未設定則預設寬度
+
+                    <li class="col-md-2 mb-2 draggable-field"
+                        data-field="@field.FieldName"
+                        style="resize: horizontal; overflow: auto; width:@(field.iFieldWidth ?? 160)px;">
+                        <label>@field.DisplayLabel</label>
+                        <input type="text" class="form-control" name="@field.FieldName" value="@val" />
+                    </li>
+
+                }
+            </ul>
+
         </div>
         <button type="submit" class="btn btn-primary">儲存單頭</button>
     </form>
@@ -86,32 +94,92 @@
 </div>
 <!-- SweetAlert2 for提示 -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+<link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css" />
 <script>
-document.getElementById('orderHeaderForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    const formData = Object.fromEntries(new FormData(this));
-    // 你自己的儲存API路徑
-    const resp = await fetch('/api/OrderHeaderApi', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+    document.getElementById('orderHeaderForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const formData = Object.fromEntries(new FormData(this));
+        // 你自己的儲存API路徑
+        const resp = await fetch('/api/OrderHeaderApi', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+        if(resp.ok) {
+            Swal.fire({ icon: 'success', title: '儲存成功！' });
+        } else {
+            let msg = '儲存失敗';
+            try {
+                let result = await resp.json();
+                if (result.error) msg = result.error;
+            } catch {}
+            Swal.fire({ icon: 'error', title: msg });
+        }
     });
-    if(resp.ok) {
-        Swal.fire({ icon: 'success', title: '儲存成功！' });
-    } else {
-        let msg = '儲存失敗';
-        try {
-            let result = await resp.json();
-            if (result.error) msg = result.error;
-        } catch {}
-        Swal.fire({ icon: 'error', title: msg });
+
+ $(function () {
+    $("#header-fields").sortable({
+        handle: "label", // 只允許拖曳 label
+        update: function () {
+            saveLayoutChanges();
+        }
+    });
+
+    // 當欄位 resize 結束時儲存寬度
+    $(".draggable-field").on("mouseup", function () {
+        saveLayoutChanges();
+    });
+
+    function saveLayoutChanges() {
+        const layout = [];
+        $("#header-fields .draggable-field").each(function () {
+            const field = $(this).data("field");
+            const width = Math.round($(this).outerWidth());
+
+            if (field && typeof field === "string" && field.trim() !== "") {
+                layout.push({ fieldName: field, width: width });
+            }
+        });
+
+        if (layout.length === 0) return;
+
+        console.log("🔧 Layout Updates:", layout); // ✅ 除錯用
+
+        const currentTableName = "@Model.HeaderTableName".toLowerCase();
+
+        fetch("/api/TableFieldLayout/SaveHeaderLayout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+            tableName: currentTableName, // ⚠ 動態傳入你的 TableName
+            layoutUpdates: layout
+        })
+        })
+        .then(res => {
+            if (!res.ok) {
+                Swal.fire("儲存失敗", "", "error");
+            }
+        })
+        .catch(err => {
+            console.error("儲存失敗", err);
+        });
     }
+
+
 });
+
 </script>
 <style>
 body {
     background: #f7f9fb !important;
 }
+
+.draggable-field label {
+    cursor: move;
+}
+
 .erp-detail-container {
     /* 只保留 spacing，不要再設 background 顏色 */
     min-height: 100vh;
