@@ -10,5 +10,6 @@ namespace PcbErpApi.Models
         public string FieldNote { get; set; }
         public int? SerialNum { get; set; }
         public int? Visible { get; set; }
+        public int? iShowWhere { get; set; }
     }
 }

@@ -74,7 +74,10 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
         {
             FieldName = x.FieldName,
             DisplayLabel = x.DisplayLabel,
-            iFieldWidth = x.iFieldWidth
+            iFieldWidth = x.iFieldWidth,
+            iFieldHeight = x.iFieldHeight,
+            iFieldTop = x.iFieldTop ,
+            iFieldLeft= x.iFieldLeft
         }).ToList();
         
         

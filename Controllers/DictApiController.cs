@@ -49,14 +49,16 @@ public class DictApiController : ControllerBase
         }
         return Ok(new { success = true });
     }
- public class DictLayoutInput
-{
-    public string FieldName { get; set; }
-    public int? iShowWhere { get; set; }
-    public int? iLayRow { get; set; }
-    public int? iLayColumn { get; set; }
-    public int? iFieldWidth { get; set; }
-    public int? iFieldHeight { get; set; }
+    public class DictLayoutInput
+    {
+        public string FieldName { get; set; }
+        public int? iShowWhere { get; set; }
+        public int? iLayRow { get; set; }
+        public int? iLayColumn { get; set; }
+        public int? iFieldWidth { get; set; }
+        public int? iFieldHeight { get; set; }
+        public int? iFieldTop { get; set; }
+        public int? iFieldLeft { get; set; }
 }
 
 [HttpPost]
@@ -70,13 +72,16 @@ public async Task<IActionResult> UpdateDictFieldsLayout([FromBody] List<DictLayo
             var cmd = new SqlCommand(@"
                 UPDATE CURdTableField 
                 SET iShowWhere = @iShowWhere, iLayRow = @iLayRow, iLayColumn = @iLayColumn, 
-                    iFieldWidth = @iFieldWidth, iFieldHeight = @iFieldHeight
+                    iFieldWidth = @iFieldWidth, iFieldHeight = @iFieldHeight,
+                    iFieldTop = @iFieldTop, iFieldLeft = @iFieldLeft
                 WHERE FieldName = @FieldName", conn);
             cmd.Parameters.AddWithValue("@iShowWhere", (object)input.iShowWhere ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@iLayRow", (object)input.iLayRow ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@iLayColumn", (object)input.iLayColumn ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@iFieldWidth", (object)input.iFieldWidth ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@iFieldHeight", (object)input.iFieldHeight ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@iFieldTop", (object)input.iFieldTop ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@iFieldLeft", (object)input.iFieldLeft ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@FieldName", input.FieldName ?? "");
             await cmd.ExecuteNonQueryAsync();
         }
