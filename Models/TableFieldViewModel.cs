@@ -7,6 +7,8 @@ public class TableFieldViewModel
     public int? iLayColumn { get; set; }
     public int? iFieldWidth { get; set; }
     public int? iFieldHeight { get; set; }
+    public int? iFieldTop { get; set; }
+    public int? iFieldLeft { get; set; }
     public bool Visible { get; set; } = true;
     public int SerialNum { get; set; }
 }

@@ -35,7 +35,10 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
                 DisplayLabel = x.DisplayLabel,
                 SerialNum = x.SerialNum ?? 0,
                 Visible = x.Visible == 1,
-                iFieldWidth = x.iFieldWidth ?? 160  // 加這行！預設 160
+                iFieldWidth = x.iFieldWidth ?? 160,  // 加這行！預設 160
+                iFieldHeight = x.iFieldHeight ?? 22,  
+                iFieldTop = x.iFieldTop ?? 0,  // 加這行！預設 160
+                iFieldLeft = x.iFieldLeft ?? 0  
             }).ToList();
 
 
