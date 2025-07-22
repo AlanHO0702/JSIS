@@ -16,7 +16,7 @@ public class TableFieldLayoutController : ControllerBase
         _context = context;
     }
 
-    [HttpPost("SaveHeaderLayout")]
+   [HttpPost("SaveHeaderLayout")]
     public async Task<IActionResult> SaveHeaderLayout([FromBody] SaveHeaderLayoutRequest request)
     {
         if (request == null)
@@ -24,47 +24,49 @@ public class TableFieldLayoutController : ControllerBase
 
         var tableName = request.TableName;
         var layoutDict = request.LayoutUpdates
-            .Select((x, i) => new { x.FieldName, x.Width, x.Height, x.Top, x.Left  })
+            .Select(x => new { x.FieldName, x.Width, x.Height, x.Top, x.Left })
             .ToDictionary(x => x.FieldName.ToLower(), x => x);
 
-        // 1. 查出所有欄位名稱
-        var allFieldNames = await _context.CURdTableFields
-            .Where(x => x.TableName == tableName)
-            .Select(x => x.FieldName)
-            .ToListAsync();
-
-        // 3. 準備排序順序
-        int serial = 0;
-        var sortedFieldNames = layoutDict.Keys.ToList();
-        sortedFieldNames.AddRange(allFieldNames
-            .Where(fn => !layoutDict.ContainsKey(fn.ToLower()))
-            .Select(fn => fn.ToLower()));
-
-        // 4. 一筆一筆更新（不經過 EF tracking，可避免 Trigger OUTPUT 問題）
-        foreach (var fieldName in sortedFieldNames.Distinct())
+        // 只更新傳入的欄位
+        foreach (var layout in layoutDict.Values)
         {
-            if (!layoutDict.TryGetValue(fieldName, out var layout))
-            {
-                layout = new { FieldName = fieldName, Width = 160, Height = 22, Top = 0, Left = 0 };
-            }
+            var entity = await _context.CURdTableFields
+                .FirstOrDefaultAsync(f => f.TableName == tableName && f.FieldName.ToLower() == layout.FieldName.ToLower());
 
-            await _context.Database.ExecuteSqlRawAsync(@"
-                UPDATE CURdTableField
-                SET  iFieldWidth = @Width, iFieldHeight = @Height,
-                iFieldTop = @Top, iFieldLeft = @Left 
-                WHERE LOWER(FieldName) = @FieldName AND TableName = @TableName",
-                new[] {
-                    new SqlParameter("@Width", layout.Width),
-                    new SqlParameter("@Height", layout.Height),
-                    new SqlParameter("@FieldName", fieldName),
-                    new SqlParameter("@TableName", tableName),
-                    new SqlParameter("@Top", layout.Top),
-                    new SqlParameter("@Left", layout.Left)
-                });
+            if (entity != null)
+            {
+                bool skipPositionUpdate = layout.Top == 0 && layout.Left == 0
+                    && (entity.iFieldTop ?? 0) != 0 && (entity.iFieldLeft ?? 0) != 0;
+
+                if (!skipPositionUpdate)
+                {
+                    entity.iFieldTop = layout.Top;
+                    entity.iFieldLeft = layout.Left;
+                }
+
+                entity.iFieldWidth = layout.Width;
+                entity.iFieldHeight = layout.Height;
+
+                // 更新資料庫（此處如果 EF tracking 不需要，也可整合為一筆）
+                await _context.Database.ExecuteSqlRawAsync(@"
+                    UPDATE CURdTableField
+                    SET  iFieldWidth = @Width, iFieldHeight = @Height,
+                        iFieldTop = @Top, iFieldLeft = @Left 
+                    WHERE LOWER(FieldName) = @FieldName AND TableName = @TableName",
+                    new[] {
+                        new SqlParameter("@Width", layout.Width),
+                        new SqlParameter("@Height", layout.Height),
+                        new SqlParameter("@FieldName", layout.FieldName),
+                        new SqlParameter("@TableName", tableName),
+                        new SqlParameter("@Top", layout.Top),
+                        new SqlParameter("@Left", layout.Left)
+                    });
+            }
         }
 
         return Ok();
     }
+
 
     public class SaveHeaderLayoutRequest
     {

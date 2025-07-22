@@ -8,48 +8,70 @@
     var items = Model.Items;
     var tableTitle = ViewData["TableTitle"] as string ?? "";
     var showRowNumber = ViewData["ShowRowNumber"] as bool? ?? true;
-}
+    var headerFieldsList = ((IEnumerable<TableFieldViewModel>)Model.HeaderTableFields).ToList();
+
+    var groupedTabs = headerFieldsList
+        .Where(f => (f.iShowWhere ?? 1) > 0) // ➜ 過濾掉 iShowWhere 為 0 的欄位
+        .GroupBy(f => f.iShowWhere ?? 1)
+        .OrderBy(g => g.Key)
+        .ToDictionary(g => g.Key, g => g.ToList());
+    }
 <div class="erp-detail-container">
     <div class="erp-title">
         @tableTitle
     </div>
         <!-- 單頭可編輯表單 -->
-    <form id="orderHeaderForm" class="erp-header-form mb-4">
+        <form id="orderHeaderForm" class="erp-header-form mb-4">
         <div class="row">
-            <ul id="header-fields" class="list-unstyled">
-                @foreach (var field in headerFields)
+            <!-- ✅ Tabs 切換列 -->
+            <ul class="nav nav-tabs" id="headerTabs" role="tablist">
+                @foreach (var tab in groupedTabs.Keys)
                 {
-                    object v;
-                    var val = headerData.TryGetValue(field.FieldName, out v) ? v : "";
-                    var top = field.iFieldTop ?? 0;
-                    var left = field.iFieldLeft ?? 0;
-                    var width = field.iFieldWidth ?? 160;
-                    var height = field.iFieldHeight ?? 22;
-
-                    /*<li class="draggable-field"
-                        data-field="@field.FieldName"
-                        style="display: inline-block; vertical-align: top; overflow: visible;">
-                        <label>@field.DisplayLabel</label>
-                        <textarea class="form-control resizable-input"
-                            name="@field.FieldName"
-                            data-field="@field.FieldName"
-                            style="resize: both; width:@(width)px; height:@(Height)px;">@val</textarea>
-                    </li>*/
-                    <li class="draggable-field"
-                        data-field="@field.FieldName"
-                        style="top:@(top)px; left:@(left)px;">
-                        <label>@field.DisplayLabel</label>
-                        <textarea class="form-control resizable-input"
-                                name="@field.FieldName"
-                                style="resize: both; width:@(width)px; height:@(height)px;">@val</textarea>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link @(tab == 1 ? "active" : "")"
+                                id="tab-@tab-tab"
+                                data-bs-toggle="tab"
+                                data-bs-target="#tab-@tab"
+                                type="button" role="tab">
+                            分頁 @tab
+                        </button>
                     </li>
-
-
                 }
             </ul>
+
+            <!-- ✅ Tabs 對應內容 -->
+            <div class="tab-content" id="headerTabContent">
+                @foreach (var tab in groupedTabs)
+                {
+                    <div class="tab-pane fade @(tab.Key == 1 ? "show active" : "")"
+                        id="tab-@tab.Key" role="tabpanel">
+                        <ul class="list-unstyled header-fields-tab" style="position: relative; min-height: 300px;">
+                            @foreach (var field in tab.Value)
+                            {
+                                object v;
+                                var val = headerData.TryGetValue(field.FieldName, out v) ? v : "";
+                                var top = field.iFieldTop ?? 0;
+                                var left = field.iFieldLeft ?? 0;
+                                var width = field.iFieldWidth ?? 160;
+                                var height = field.iFieldHeight ?? 44;
+
+                                <li class="draggable-field"
+                                    data-field="@field.FieldName"
+                                    style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
+                                    <label>@field.DisplayLabel</label>
+                                    <textarea class="form-control resizable-input"
+                                        name="@field.FieldName">@val</textarea>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                }
+            </div>
         </div>
+
         <button type="submit" class="btn btn-primary">儲存單頭</button>
     </form>
+
 
     <!-- 單身明細 table -->
     <div class="erp-table-wrapper">
@@ -133,61 +155,78 @@
     });
 
     $(function () {
-        const layoutCache = {};
-        let debounceTimer;
+    let debounceTimer;
 
-        function debounceSave() {
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(saveLayoutChanges, 400);
-        }
+    function debounceSave() {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(saveLayoutChanges, 400);
+    }
 
-        function saveLayoutChanges() {
-            const layout = [];
+    function saveLayoutChanges() {
+        const layout = [];
 
-            $(".draggable-field").each(function () {
-                const $li = $(this);
-                const field = $li.data("field");
-                const $textarea = $li.find("textarea");
-
-                if (!field) return;
-
-                layout.push({
-                    fieldName: field,
-                    top: Math.round($li.position().top),
-                    left: Math.round($li.position().left),
-                    width: Math.round($textarea.outerWidth()),
-                    height: Math.round($textarea.outerHeight())
-                });
-            });
-
-            if (layout.length === 0) return;
-
-            fetch("/api/TableFieldLayout/SaveHeaderLayout", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    tableName: "@Model.HeaderTableName".toLowerCase(),
-                    layoutUpdates: layout
-                })
-            }).catch(err => console.error("儲存失敗", err));
-        }
-
-        $(".draggable-field").each(function () {
+        // ✅ 只抓當前 tab-pane 下的欄位
+        const $activeTab = $(".tab-pane.active");
+        $activeTab.find(".draggable-field").each(function () {
             const $li = $(this);
-            const $textarea = $li.find("textarea");
+            const field = $li.data("field");
 
-            $li.draggable({
-                containment: "#header-fields",
-                stop: debounceSave
-            });
+            if (!field) return;
 
-
-            $textarea.resizable({
-                handles: "se",
-                stop: debounceSave
+            layout.push({
+                fieldName: field,
+                top: Math.round($li.position().top),
+                left: Math.round($li.position().left),
+                width: Math.round($li.outerWidth()),
+                height: Math.round($li.outerHeight())
             });
         });
+
+
+        if (layout.length === 0) return;
+
+        fetch("/api/TableFieldLayout/SaveHeaderLayout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                tableName: "@Model.HeaderTableName".toLowerCase(),
+                layoutUpdates: layout
+            })
+        }).catch(err => console.error("儲存失敗", err));
+    }
+
+    $(".draggable-field").each(function () {
+        const $li = $(this);
+
+        // 拖曳
+        $li.draggable({
+            containment: $li.closest(".header-fields-tab"),
+            handle: "label",
+            start: function (event, ui) {
+                $(this).data("startPos", ui.position);
+            },
+            stop: function (event, ui) {
+                const start = $(this).data("startPos");
+                if (start.top !== ui.position.top || start.left !== ui.position.left) {
+                    debounceSave();
+                }
+            }
+        });
+
+        // 只讓 li resizable，textarea 自動撐滿
+        $li.resizable({
+            handles: "se",
+            minWidth: 100,
+            minHeight: 30,
+            stop: function () {
+                debounceSave();
+            }
+        });
+
     });
+});
+
+
 </script>
 <style>
 body {
@@ -199,7 +238,6 @@ body {
     min-height: 300px;
     background: rgba(0,0,0,0.03); /* 開發階段用來看邊界 */
 }
-
 
 .erp-detail-container {
     /* 只保留 spacing，不要再設 background 顏色 */
@@ -271,32 +309,35 @@ body {
 }
 
 .draggable-field {
-    padding: 4px;
-    box-sizing: border-box;
-    background: transparent; /* 避免突兀白底 */
-    overflow: hidden; /* 防止子元素溢出撐大 */
     position: absolute;
-    z-index: 1;
-    max-width: none;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    overflow: hidden;
+    background: transparent;
 }
-
 
 .draggable-field label {
     cursor: move;
-    display: block;
-    margin-bottom: 4px;
-    font-size: 0.9em;
+    font-size: 0.85em;
+    margin-bottom: 2px;
+    flex-shrink: 0;
 }
 
 textarea.resizable-input {
-    border-radius: 4px;
+    flex-grow: 1;
+    width: 100%;
+    height: 100%;
+    resize: none; /* 禁用 textarea 本身的 resize */
+    box-sizing: border-box;
     padding: 4px 6px;
     font-size: 0.9em;
-    line-height: 1.2;
-    resize: none; /* 由 jQuery UI 控制 resize */
 }
 
-
-
+.header-fields-tab {
+    position: relative;
+    min-height: 300px;
+    background: rgba(0,0,0,0.03);
+}
 
 </style>
