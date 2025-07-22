@@ -46,7 +46,8 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // �
                 FieldName = x.FieldName, // 欄位名稱
                 DisplayLabel = x.DisplayLabel, // 顯示標籤
                 SerialNum = x.SerialNum ?? 0, // 序號，若為空給 0
-                Visible = x.Visible == 1 // 是否可見
+                Visible = x.Visible == 1, // 是否可見
+                iShowWhere=x.iShowWhere
             }).ToList(); // 形成清單
     } // 方法結束
 
