@@ -16,6 +16,7 @@ namespace PcbErpApi.Data
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
         public virtual DbSet<EmodProdInfo> EmodProdInfos { get; set; }
         public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
+        public DbSet<AJNdClassMoney> AJNdClassMoney { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<CurdUser>(entity =>
@@ -679,6 +680,9 @@ namespace PcbErpApi.Data
                 entity.Property(e => e.ILayRow).HasColumnName("iLayRow");
                 entity.Property(e => e.IShowWhere).HasColumnName("iShowWhere");
             });
+
+            modelBuilder.Entity<AJNdClassMoney>()
+            .HasKey(e => new { e.MoneyCode, e.UseId });
 
             OnModelCreatingPartial(modelBuilder);
         }
