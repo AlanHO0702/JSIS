@@ -39,13 +39,15 @@
                 }
             </ul>
 
-            <!-- ✅ Tabs 對應內容 -->
-            <div class="tab-content" id="headerTabContent">
+                <!-- ✅ Tabs 對應內容 -->
+               <div class="tab-content" id="headerTabContent">
                 @foreach (var tab in groupedTabs)
                 {
                     <div class="tab-pane fade @(tab.Key == 1 ? "show active" : "")"
                         id="tab-@tab.Key" role="tabpanel">
-                        <ul class="list-unstyled header-fields-tab" style="position: relative; min-height: 300px;">
+                        <ul class="list-unstyled header-fields-tab"
+                            data-tab-index="@tab.Key"
+                            style="position: relative; min-height: 400px;">
                             @foreach (var field in tab.Value)
                             {
                                 object v;
@@ -57,18 +59,19 @@
 
                                 <li class="draggable-field"
                                     data-field="@field.FieldName"
+                                    data-tab="@tab.Key"
                                     style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
                                     <label>@field.DisplayLabel</label>
                                     <textarea class="form-control resizable-input"
-                                        name="@field.FieldName">@val</textarea>
+                                            name="@field.FieldName">@val</textarea>
                                 </li>
                             }
                         </ul>
                     </div>
                 }
             </div>
-        </div>
 
+        </div>
         <button type="submit" class="btn btn-primary">儲存單頭</button>
     </form>
 
@@ -165,23 +168,27 @@
     function saveLayoutChanges() {
         const layout = [];
 
-        // ✅ 只抓當前 tab-pane 下的欄位
-        const $activeTab = $(".tab-pane.active");
-        $activeTab.find(".draggable-field").each(function () {
+        // ✅ 暫時顯示所有 tab-pane
+        const hiddenTabs = $(".tab-pane").not(".show");
+        hiddenTabs.addClass("temporary-show").addClass("show").css("display", "block");
+
+        $(".draggable-field").each(function () {
             const $li = $(this);
             const field = $li.data("field");
-
-            if (!field) return;
+            const tabIndex = parseInt($li.attr("data-tab")) || 1;
 
             layout.push({
                 fieldName: field,
                 top: Math.round($li.position().top),
                 left: Math.round($li.position().left),
                 width: Math.round($li.outerWidth()),
-                height: Math.round($li.outerHeight())
+                height: Math.round($li.outerHeight()),
+                ishowWhere: tabIndex
             });
         });
 
+        // ✅ 還原 tab-pane 狀態
+        hiddenTabs.removeClass("show").removeClass("temporary-show").css("display", "");
 
         if (layout.length === 0) return;
 
@@ -198,32 +205,83 @@
     $(".draggable-field").each(function () {
         const $li = $(this);
 
-        // 拖曳
         $li.draggable({
-            containment: $li.closest(".header-fields-tab"),
             handle: "label",
-            start: function (event, ui) {
-                $(this).data("startPos", ui.position);
+            helper: function () {
+                return $("<div>")
+                    .text($(this).find("label").text())
+                    .css({
+                        width: "80px",
+                        height: "55px",
+                        background: "#eef",
+                        border: "1px dashed #999",
+                        padding: "4px",
+                        "font-size": "0.9em"
+                    });
             },
-            stop: function (event, ui) {
-                const start = $(this).data("startPos");
-                if (start.top !== ui.position.top || start.left !== ui.position.left) {
-                    debounceSave();
-                }
+            appendTo: "body",
+            zIndex: 10000,
+            start: function () {
+                $(this).hide(); // ✅ 拖曳時原本隱藏，避免混淆
+            },
+            stop: function () {
+                $(this).show();
             }
         });
 
-        // 只讓 li resizable，textarea 自動撐滿
         $li.resizable({
             handles: "se",
-            minWidth: 100,
+            minWidth: 50,
             minHeight: 30,
-            stop: function () {
-                debounceSave();
-            }
+            stop: debounceSave
         });
-
     });
+
+    $(".header-fields-tab").droppable({
+        accept: ".draggable-field",
+        tolerance: "pointer", //intersect是要物件中心點拖到才會觸發，改成游標觸碰
+        over: function () {
+            $(this).addClass("drop-hover");
+        },
+        out: function () {
+            $(this).removeClass("drop-hover");
+        },     
+        drop: function (event, ui) {
+            $(this).removeClass("drop-hover");
+            const $dropZone = $(this);
+            const $item = $(ui.draggable);
+            const newTabIndex = parseInt($dropZone.data("tab-index")) || 1;
+
+            // ➤ 移動 item 並更新屬性與位置
+            $item.appendTo($dropZone);
+            $item.attr("data-tab", newTabIndex);
+
+            $item.css({
+                top: ui.offset.top - $dropZone.offset().top,
+                left: ui.offset.left - $dropZone.offset().left,
+                position: "absolute"
+            });
+
+            debounceSave();
+        }
+    });
+
+
+    let dragTabSwitchTimer = null;
+
+    $("#headerTabs button").droppable({
+        accept: ".draggable-field",
+        over: function (event, ui) {
+            const $tabBtn = $(this);
+            dragTabSwitchTimer = setTimeout(() => {
+                $tabBtn.trigger("click");
+            }, 600); // 滑過 600ms 自動切換分頁
+        },
+        out: function () {
+            clearTimeout(dragTabSwitchTimer);
+        }
+    });
+
 });
 
 
@@ -338,6 +396,16 @@ textarea.resizable-input {
     position: relative;
     min-height: 300px;
     background: rgba(0,0,0,0.03);
+}
+
+.drop-hover {
+    background-color: #cce5ff !important;
+    border-radius: 4px;
+}
+
+.nav-link.drag-hover {
+    background-color: #f3faff;
+    font-weight: bold;
 }
 
 </style>
