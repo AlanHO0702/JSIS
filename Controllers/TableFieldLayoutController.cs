@@ -24,7 +24,7 @@ public class TableFieldLayoutController : ControllerBase
 
         var tableName = request.TableName;
         var layoutDict = request.LayoutUpdates
-            .Select(x => new { x.FieldName, x.Width, x.Height, x.Top, x.Left })
+            .Select(x => new { x.FieldName, x.Width, x.Height, x.Top, x.Left, x.iShowWhere })
             .ToDictionary(x => x.FieldName.ToLower(), x => x);
 
         // 只更新傳入的欄位
@@ -51,7 +51,8 @@ public class TableFieldLayoutController : ControllerBase
                 await _context.Database.ExecuteSqlRawAsync(@"
                     UPDATE CURdTableField
                     SET  iFieldWidth = @Width, iFieldHeight = @Height,
-                        iFieldTop = @Top, iFieldLeft = @Left 
+                        iFieldTop = @Top, iFieldLeft = @Left ,
+                        iShowWhere = @iShowWhere 
                     WHERE LOWER(FieldName) = @FieldName AND TableName = @TableName",
                     new[] {
                         new SqlParameter("@Width", layout.Width),
@@ -59,7 +60,8 @@ public class TableFieldLayoutController : ControllerBase
                         new SqlParameter("@FieldName", layout.FieldName),
                         new SqlParameter("@TableName", tableName),
                         new SqlParameter("@Top", layout.Top),
-                        new SqlParameter("@Left", layout.Left)
+                        new SqlParameter("@Left", layout.Left),
+                        new SqlParameter("@iShowWhere", layout.iShowWhere)
                     });
             }
         }
@@ -81,6 +83,7 @@ public class TableFieldLayoutController : ControllerBase
         public int Height { get; set; } // 👈 加入欄位高度
         public int Top { get; set; }
         public int Left { get; set; }
+        public int iShowWhere { get; set; }  // 👈➕ 加上這行
 
     }
 
@@ -93,6 +96,7 @@ public class TableFieldLayoutController : ControllerBase
         public int SerialNum { get; set; }
         public int Top { get; set; }
         public int Left { get; set; }
+        public int iShowWhere { get; set; }  // 👈➕ 加上這行
 
     }
 
