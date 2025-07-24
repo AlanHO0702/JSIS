@@ -16,6 +16,8 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // �
         _dictService = dictService; // 儲存欄位字典服務
     } // 建構子結束
 
+    public Dictionary<string, Dictionary<string, string>> LookupDisplayMap { get; set; } = new();
+
     public List<T> Items { get; set; } = new(); // 目前頁面的資料集合
     public int PageSize { get; set; } = 50; // 每頁筆數預設為 50
     public int PageNumber { get; set; } = 1; // 目前頁碼，預設 1
@@ -38,17 +40,48 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // �
         TotalCount = resp?.totalCount ?? 0; // API 回傳的總筆數
 
         FieldDictList = _dictService.GetFieldDict(TableName, typeof(T)); // 取得欄位字典資料
-        TableFields = FieldDictList // 轉換為顯示用欄位
-            .Where(x => x.Visible == 1) // 只取可見欄位
-            .OrderBy(x => x.SerialNum) // 依序號排序
-            .Select(x => new TableFieldViewModel // 轉成 ViewModel
-            { // 開始設定屬性
-                FieldName = x.FieldName, // 欄位名稱
-                DisplayLabel = x.DisplayLabel, // 顯示標籤
-                SerialNum = x.SerialNum ?? 0, // 序號，若為空給 0
-                Visible = x.Visible == 1, // 是否可見
-                iShowWhere=x.iShowWhere
-            }).ToList(); // 形成清單
+        TableFields = FieldDictList
+            .Where(x => x.Visible == 1)
+            .OrderBy(x => x.SerialNum)
+            .GroupBy(x => x.FieldName) // <<<<<<<<<<<<<<<<<<< 去除重複 FieldName
+            .Select(g => {
+                var x = g.First(); // 同名只取一個
+                return new TableFieldViewModel {
+                    FieldName = x.FieldName,
+                    DisplayLabel = x.DisplayLabel,
+                    SerialNum = x.SerialNum ?? 0,
+                    Visible = x.Visible == 1,
+                    iShowWhere = x.iShowWhere
+                };
+            }).ToList();
+
+        ViewData["Fields"] = TableFields;
+
+        var lookupMaps = _dictService.GetOCXLookups(TableName);
+
+        foreach (var item in Items)
+        {
+            var key = typeof(T).GetProperty("PaperNum")?.GetValue(item)?.ToString();
+            if (string.IsNullOrEmpty(key)) continue;
+
+            if (!LookupDisplayMap.ContainsKey(key))
+                LookupDisplayMap[key] = new Dictionary<string, string>();
+
+            foreach (var map in lookupMaps)
+            {
+                var keyProp = typeof(T).GetProperty(map.KeySelfName);
+                var keyValue = keyProp?.GetValue(item)?.ToString();
+
+                if (!string.IsNullOrEmpty(keyValue) && map.LookupValues.TryGetValue(keyValue, out var display))
+                {
+                    LookupDisplayMap[key][map.FieldName] = display;
+                }
+            }
+        }
+
+        ((PageModel)this).ViewData["LookupDisplayMap"] = LookupDisplayMap;
+
+
     } // 方法結束
 
     public class ApiResult // 對應 API 回傳格式

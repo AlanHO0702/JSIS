@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using PcbErpApi.Helpers;
 using PcbErpApi.Models;
 using System.Net.Http.Json;
 using System.Reflection;
@@ -7,6 +8,10 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
 {
     protected readonly HttpClient _httpClient;
     protected readonly ITableDictionaryService _dictService;
+
+    public Dictionary<string, Dictionary<string, string>> LookupDisplayMap { get; set; } = new();
+
+
 
     public TableDetailModel(IHttpClientFactory httpClientFactory, ITableDictionaryService dictService)
     {
@@ -78,10 +83,39 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
             iFieldHeight = x.iFieldHeight,
             iFieldTop = x.iFieldTop,
             iFieldLeft = x.iFieldLeft,
-            iShowWhere= x.iShowWhere
+            iShowWhere = x.iShowWhere
         }).ToList();
-        
-        
+
+        var lookupMaps = _dictService.GetOCXLookups(TableName);
+
+       // --- 明細 Mapping（舊的）---
+           foreach (var item in Items)
+            {
+                // 取 PaperNum、Item
+                var paperNum = typeof(T).GetProperty("PaperNum")?.GetValue(item)?.ToString();
+                var itemNo   = typeof(T).GetProperty("Item")?.GetValue(item)?.ToString();
+
+                var rowKey = $"{paperNum}_{itemNo}";  // ← 改成這個
+                if (string.IsNullOrEmpty(rowKey)) continue;
+                if (!LookupDisplayMap.ContainsKey(rowKey))
+                    LookupDisplayMap[rowKey] = new Dictionary<string, string>();
+
+                foreach (var map in lookupMaps)
+                {
+                    var fieldProp = typeof(T).GetProperty(map.KeySelfName);
+                    var keyValue = fieldProp?.GetValue(item)?.ToString();
+                    if (!string.IsNullOrEmpty(keyValue) && map.LookupValues.TryGetValue(keyValue, out var display))
+                    {
+                        LookupDisplayMap[rowKey][map.FieldName] = display;
+                    }
+                }
+            }
+
+        // --- 新增：單頭（HeaderData）Mapping ---
+        var headerLookupMaps = _dictService.GetOCXLookups("SPOdOrderMain");
+        var headerLookupDict = LookupDisplayHelper.BuildHeaderLookupMap(HeaderData, headerLookupMaps);
+        // ➜ 給 View 用
+        ViewData["LookupDisplayMap"] = LookupDisplayMap; 
     }
 
     public virtual string GetDefaultMasterKeyName() => "PaperNum";

@@ -16,6 +16,7 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
     // 新增這兩個
     public Dictionary<string, object>? HeaderData { get; set; }
     public List<TableFieldViewModel>? HeaderTableFields { get; set; }
+    public Dictionary<string, Dictionary<string, string>> HeaderLookupDisplayMap { get; set; } = new();
 
     public async Task OnGetAsync(string PaperNum)
     {
@@ -25,6 +26,7 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
 
         // 2. 取得單頭欄位字典（可視欄位）
         var headerFieldDicts = _dictService.GetFieldDict("SPOdOrderMain", typeof(SpodOrderMain));
+
 
         HeaderTableFields = headerFieldDicts
             .Where(x => x.Visible == 1)
@@ -39,12 +41,33 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
                 iFieldHeight = x.iFieldHeight ?? 22,
                 iFieldTop = x.iFieldTop ?? 0,  // 加這行！預設 160
                 iFieldLeft = x.iFieldLeft ?? 0,
-                iShowWhere= x.iShowWhere ?? 0    
+                iShowWhere = x.iShowWhere ?? 0
             }).ToList();
 
 
         // 3. 抓單身資料
         await FetchDataAsync(PaperNum);
+
+        // 4. 單頭區塊的 lookup mapping（用單頭 TableName！）
+        var headerLookupMaps = _dictService.GetOCXLookups("SPOdOrderMain");
+        // 加這行：單頭 Header 區塊專用的 lookup
+
+
+        var headerKey = PaperNum;
+        HeaderLookupDisplayMap[headerKey] = new Dictionary<string, string>();
+        foreach (var map in headerLookupMaps)
+        {
+            if (HeaderData != null && HeaderData.TryGetValue(map.KeySelfName, out var keyValueObj))
+            {
+                var keyValue = keyValueObj?.ToString();
+                if (!string.IsNullOrEmpty(keyValue) && map.LookupValues.TryGetValue(keyValue, out var display))
+                {
+                    HeaderLookupDisplayMap[headerKey][map.FieldName] = display;
+                }
+            }
+        }
+
+        ViewData["HeaderLookupDisplayMap"] = HeaderLookupDisplayMap;
     }
 }
 

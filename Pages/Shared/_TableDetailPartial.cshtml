@@ -1,4 +1,5 @@
 @model dynamic
+@using PcbErpApi.Helpers
 @{
     // 單頭欄位
     var headerFields = Model.HeaderTableFields; // 可視欄位
@@ -15,7 +16,13 @@
         .GroupBy(f => f.iShowWhere ?? 1)
         .OrderBy(g => g.Key)
         .ToDictionary(g => g.Key, g => g.ToList());
-    }
+
+    var lookupMap = ViewData["LookupDisplayMap"] as Dictionary<string, Dictionary<string, string>>;
+
+    var PaperNum = headerData.ContainsKey("PaperNum") ? headerData["PaperNum"]?.ToString() ?? "" : "";
+    var headerLookupMap = ViewData["HeaderLookupDisplayMap"] as Dictionary<string, Dictionary<string, string>>;
+}
+
 <div class="erp-detail-container">
     <div class="erp-title">
         @tableTitle
@@ -40,36 +47,42 @@
             </ul>
 
                 <!-- ✅ Tabs 對應內容 -->
-               <div class="tab-content" id="headerTabContent">
-                @foreach (var tab in groupedTabs)
-                {
-                    <div class="tab-pane fade @(tab.Key == 1 ? "show active" : "")"
-                        id="tab-@tab.Key" role="tabpanel">
-                        <ul class="list-unstyled header-fields-tab"
-                            data-tab-index="@tab.Key"
-                            style="position: relative; min-height: 400px;">
-                            @foreach (var field in tab.Value)
-                            {
-                                object v;
-                                var val = headerData.TryGetValue(field.FieldName, out v) ? v : "";
-                                var top = field.iFieldTop ?? 0;
-                                var left = field.iFieldLeft ?? 0;
-                                var width = field.iFieldWidth ?? 160;
-                                var height = field.iFieldHeight ?? 44;
+              <div class="tab-content" id="headerTabContent">
+                    @foreach (var tab in groupedTabs)
+                    {
+                        <div class="tab-pane fade @(tab.Key == 1 ? "show active" : "")"
+                            id="tab-@tab.Key" role="tabpanel">
+                            <ul class="list-unstyled header-fields-tab"
+                                data-tab-index="@tab.Key"
+                                style="position: relative; min-height: 400px;">
+                                @foreach (var field in tab.Value)
+                                {
+                                    object v;
+                                    var val = headerData.TryGetValue(field.FieldName, out v) ? v?.ToString() : "";
+                                    //var displayText = LookupDisplayHelper.GetLookupDisplay(ViewData, Model.MasterKey, field.FieldName) ?? val;
+                                    var displayText = LookupDisplayHelper.GetLookupDisplay(ViewData, PaperNum, field.FieldName, "HeaderLookupDisplayMap") ?? val;
 
-                                <li class="draggable-field"
-                                    data-field="@field.FieldName"
-                                    data-tab="@tab.Key"
-                                    style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
-                                    <label>@field.DisplayLabel</label>
-                                    <textarea class="form-control resizable-input"
-                                            name="@field.FieldName">@val</textarea>
-                                </li>
-                            }
-                        </ul>
-                    </div>
-                }
-            </div>
+
+                                    var top = field.iFieldTop ?? 0;
+                                    var left = field.iFieldLeft ?? 0;
+                                    var width = field.iFieldWidth ?? 160;
+                                    var height = field.iFieldHeight ?? 44;
+
+                                    <li class="draggable-field"
+                                        data-field="@field.FieldName"
+                                        data-tab="@tab.Key"
+                                        style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
+                                        <label>@field.DisplayLabel</label>
+                                        <textarea class="form-control resizable-input"
+                                                name="@field.FieldName">@displayText</textarea>
+                                    </li>
+                                }
+
+                            </ul>
+                        </div>
+                    }
+                </div>
+
 
         </div>
         <button type="submit" class="btn btn-primary">儲存單頭</button>
@@ -88,45 +101,46 @@
                 </tr>
             </thead>
             <tbody>
-                @if (items != null)
-                {
-                    var index = 1;
-                    foreach (var item in items)
+                    @if (items != null)
                     {
-                        <tr>
-                            @if (showRowNumber)
-                            {
-                                <td>@index</td>
-                            }
+                        var index = 1;
+                        foreach (var item in items)
+                        {
+                            <tr>
                                 @foreach(var col in fields)
                                 {
                                     object v = "";
-                                    // 如果 item 是 Dictionary<string, object>
                                     if (item is IDictionary<string, object> dict)
-                                    {
                                         dict.TryGetValue(col.FieldName, out v);
-                                    }
-                                    // 如果 item 是 ExpandoObject
                                     else if (item is System.Dynamic.ExpandoObject exp)
                                     {
                                         var expDict = (IDictionary<string, object>)exp;
                                         expDict.TryGetValue(col.FieldName, out v);
                                     }
-                                    // 如果 item 是強型別物件
                                     else
                                     {
                                         var prop = item.GetType().GetProperty(col.FieldName);
                                         v = prop != null ? prop.GetValue(item, null) : "";
                                     }
+                                    // lookup display
+                                    var paperNum = item.GetType().GetProperty("PaperNum")?.GetValue(item, null)?.ToString();
+                                    var itemNo = item.GetType().GetProperty("Item")?.GetValue(item, null)?.ToString();
+                                    var rowKey = $"{paperNum}_{itemNo}";
+                                    string display = null;
+                                    if (lookupMap != null && lookupMap.TryGetValue(rowKey, out var dict2))
+                                    {
+                                        dict2.TryGetValue(col.FieldName, out display);
+                                    }
                                     <td>
-                                        @(v is DateTime dt ? dt.ToString("yyyy/MM/dd") : v)
+                                        @(display ?? (v is DateTime dt ? dt.ToString("yyyy/MM/dd") : v?.ToString()))
                                     </td>
                                 }
-                        </tr>
-                        index++;
+                            </tr>
+                            index++;
+                        }
                     }
-                }
-            </tbody>
+                    </tbody>
+
         </table>
     </div>
 </div>
