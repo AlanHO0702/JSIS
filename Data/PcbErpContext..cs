@@ -13,6 +13,7 @@ namespace PcbErpApi.Data
         public DbSet<SpodOrderSub> SpodOrderSub { get; set; }
         public DbSet<CurdSystemSelect> CurdSystemSelects { get; set; }
         public DbSet<CURdTableField> CURdTableFields { get; set; }
+        public DbSet<CURdOCXTableFieldLK> CURdOCXTableFieldLK { get; set; }
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
         public virtual DbSet<EmodProdInfo> EmodProdInfos { get; set; }
         public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
@@ -96,6 +97,9 @@ namespace PcbErpApi.Data
 
             modelBuilder.Entity<CURdTableField>()
             .HasKey(e => new { e.TableName, e.FieldName }); // 這裡改成你真正的複合主鍵欄位
+
+            modelBuilder.Entity<CURdOCXTableFieldLK>()
+            .HasKey(e => new { e.TableName, e.FieldName,e.KeyFieldName,e.KeySelfName }); // 這裡改成你真正的複合主鍵欄位
 
             modelBuilder.Entity<CURdTableField>().ToTable("CURdTableField");
 

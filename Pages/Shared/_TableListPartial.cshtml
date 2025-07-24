@@ -1,7 +1,7 @@
 @model dynamic
 
 @{
-    var fields = Model.TableFields;
+    var fields = ViewData["Fields"] as List<TableFieldViewModel>;
     var items = Model.Items;
     var totalCount = Model.TotalCount;
     var pageNumber = Model.PageNumber;
@@ -12,6 +12,10 @@
     // 新增API路徑與單身頁路徑，從 ViewData 傳（預設值也可寫死）
     var addApiUrl = ViewData["AddApiUrl"] as string ?? "/api/SPOdOrderMain";
     var detailRouteTemplate = ViewData["SubRouteTemplate"] as string ?? "/SpodOrderSubs/{PaperNum}";
+    var lookupMapData = ViewData["LookupDisplayMap"] as Dictionary<string, Dictionary<string, string>>;
+    var keyFieldName = ViewData["KeyFieldName"]?.ToString() ?? "PaperNum";
+
+    
 }
 
 <style>
@@ -83,19 +87,40 @@
                 @foreach(var item in items)
                 {
                     // 取得 key（如 PaperNum）來組路徑
-                    var paperNum = item.GetType().GetProperty("PaperNum")?.GetValue(item, null)?.ToString();
+                    // route 替換
+                    var keyValue = item.GetType().GetProperty(keyFieldName)?.GetValue(item, null)?.ToString();
                     var rowUrl = "";
-                    if (!string.IsNullOrEmpty(subRouteTemplate) && !string.IsNullOrEmpty(paperNum))
+                    if (!string.IsNullOrEmpty(subRouteTemplate) && !string.IsNullOrEmpty(keyValue))
                     {
-                        rowUrl = subRouteTemplate.Replace("{PaperNum}", paperNum);
+                        rowUrl = subRouteTemplate.Replace("{PaperNum}", keyValue); // 這邊還是用 {PaperNum} 字串
                     }
-                    <tr class="row-link" data-url="@rowUrl" data-paper-num="@paperNum">
-                        @foreach(var field in fields)
+
+                    <tr class="row-link" data-url="@rowUrl" data-paper-num="@keyValue">
+                        @foreach (var field in fields)
                         {
-                            var val = item.GetType().GetProperty(field.FieldName)?.GetValue(item, null);
-                            <td>@val</td>
+                            var keyObj = item.GetType().GetProperty(keyFieldName)?.GetValue(item);
+                            var paperKey = keyObj?.ToString();
+                            string valStr = "";
+                            Dictionary<string, string>? lookupMap = null;
+                            string display = "";
+
+                            if (!string.IsNullOrEmpty(paperKey) &&
+                                lookupMapData != null &&
+                                lookupMapData.TryGetValue(paperKey, out lookupMap) &&
+                                lookupMap != null &&
+                                lookupMap.TryGetValue(field.FieldName, out display))
+                            {
+                                valStr = display;
+                            }
+                            else
+                            {
+                                valStr = item.GetType().GetProperty(field.FieldName)?.GetValue(item, null)?.ToString() ?? "";
+                            }
+                            
+                            <td>@valStr</td>
                         }
                     </tr>
+
                 }
             </tbody>
         </table>
