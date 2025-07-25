@@ -1,6 +1,7 @@
 // /Pages/Shared/TableListModel.cs
 using Microsoft.AspNetCore.Mvc; // 導入 MVC 相關功能
 using Microsoft.AspNetCore.Mvc.RazorPages; // 導入 Razor Pages
+using PcbErpApi.Helpers;
 using PcbErpApi.Models; // 導入專案模型
 using System.Net.Http.Json; // 提供 HttpClient JSON 擴充
 using System.Reflection; // 反射功能
@@ -59,27 +60,21 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // �
 
         var lookupMaps = _dictService.GetOCXLookups(TableName);
 
-        foreach (var item in Items)
-        {
-            var key = typeof(T).GetProperty("PaperNum")?.GetValue(item)?.ToString();
-            if (string.IsNullOrEmpty(key)) continue;
+            // 如果只用 PaperNum 當 key
+            LookupDisplayMap = LookupDisplayHelper.BuildLookupDisplayMap(
+                Items,
+                lookupMaps,
+                item => typeof(T).GetProperty("PaperNum")?.GetValue(item)?.ToString() ?? ""
+            );
 
-            if (!LookupDisplayMap.ContainsKey(key))
-                LookupDisplayMap[key] = new Dictionary<string, string>();
+            // 或者複合主鍵（如 PaperNum + Item）:
+            // LookupDisplayMap = LookupDisplayHelper.BuildLookupDisplayMap(
+            //     Items,
+            //     lookupMaps,
+            //     item => $"{typeof(T).GetProperty("PaperNum")?.GetValue(item)}_{typeof(T).GetProperty("Item")?.GetValue(item)}"
+            // );
 
-            foreach (var map in lookupMaps)
-            {
-                var keyProp = typeof(T).GetProperty(map.KeySelfName);
-                var keyValue = keyProp?.GetValue(item)?.ToString();
-
-                if (!string.IsNullOrEmpty(keyValue) && map.LookupValues.TryGetValue(keyValue, out var display))
-                {
-                    LookupDisplayMap[key][map.FieldName] = display;
-                }
-            }
-        }
-
-        ((PageModel)this).ViewData["LookupDisplayMap"] = LookupDisplayMap;
+            ViewData["LookupDisplayMap"] = LookupDisplayMap;
 
 
     } // 方法結束
