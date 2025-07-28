@@ -138,7 +138,9 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 iFieldHeight = x.iFieldHeight,
                 iFieldTop = x.iFieldTop,
                 iFieldLeft = x.iFieldLeft,
-                iShowWhere = x.iShowWhere
+                iShowWhere = x.iShowWhere,
+                DataType = x.DataType,
+                FormatStr = x.FormatStr 
             }).ToList();
 
         // Lookup Map 資料 (單身 + 單頭)

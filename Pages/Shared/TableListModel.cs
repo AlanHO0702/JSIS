@@ -47,12 +47,15 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // �
             .GroupBy(x => x.FieldName) // <<<<<<<<<<<<<<<<<<< 去除重複 FieldName
             .Select(g => {
                 var x = g.First(); // 同名只取一個
-                return new TableFieldViewModel {
+                return new TableFieldViewModel
+                {
                     FieldName = x.FieldName,
                     DisplayLabel = x.DisplayLabel,
                     SerialNum = x.SerialNum ?? 0,
                     Visible = x.Visible == 1,
-                    iShowWhere = x.iShowWhere
+                    iShowWhere = x.iShowWhere,
+                    DataType = x.DataType,
+                    FormatStr = x.FormatStr
                 };
             }).ToList();
 

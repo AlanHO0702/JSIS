@@ -55,7 +55,12 @@
     tr.selected td, tr.selected:hover td {
         background-color: #ffe6e6 !important;
     }
-
+    .highlight {
+        background-color: #ffd !important;
+    }
+    .ghost {
+        opacity: 0.5;
+    }
 
 
 </style>
@@ -76,10 +81,12 @@
     <div class="table-wrap">
         <table class="table table-hover align-middle text-center">
             <thead>
-                <tr>
-                    @foreach(var field in fields)
+                <tr id="table-header-row">
+                    @foreach (var field in fields)
                     {
-                        <th>@(string.IsNullOrWhiteSpace(field.DisplayLabel) ? field.FieldName : field.DisplayLabel)</th>
+                        <th draggable="true" data-field="@field.FieldName" data-serial="@field.SerialNum">
+                            @(string.IsNullOrWhiteSpace(field.DisplayLabel) ? field.FieldName : field.DisplayLabel)
+                        </th>
                     }
                 </tr>
             </thead>
@@ -114,7 +121,29 @@
                             }
                             else
                             {
-                                valStr = item.GetType().GetProperty(field.FieldName)?.GetValue(item, null)?.ToString() ?? "";
+                                var rawValue = item.GetType().GetProperty(field.FieldName)?.GetValue(item, null);
+                                if (rawValue != null)
+                                {
+                                    if (!string.IsNullOrEmpty(field.FormatStr))
+                                    {
+                                        if (field.DataType?.ToLower() == "date" && rawValue is DateTime dt)
+                                        {
+                                            valStr = dt.ToString(field.FormatStr); // 例如 yyyy/MM/dd
+                                        }
+                                        else if (field.DataType?.ToLower() == "number" && rawValue is IFormattable fmt)
+                                        {
+                                            valStr = fmt.ToString(field.FormatStr, null); // 例如 ###,###,##0.00
+                                        }
+                                        else
+                                        {
+                                            valStr = rawValue.ToString();
+                                        }
+                                    }
+                                    else
+                                    {
+                                        valStr = rawValue.ToString();
+                                    }
+                                }
                             }
                             
                             <td>@valStr</td>
@@ -135,6 +164,7 @@
 
 <!-- 這一行一定要在所有 <script> 之前獨立放，不要包在 <script> 裡！ -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
 <script>
     let selectedPaperNum = null;
@@ -227,6 +257,47 @@
                 });
             }
         });
+
+         // ✅ 拖曳表頭欄位
+        const headerRow = document.getElementById("table-header-row");
+
+        if (headerRow) {
+           Sortable.create(headerRow, {
+                        animation: 150,
+                        swap: true,                     // ✅ 使用 swap 模式
+                        swapClass: 'highlight',         // ✅ 拖曳時加 highlight 效果
+                        ghostClass: 'ghost',            // 可選：拖曳時原位置樣式
+                        onEnd: function () {
+                            const newOrder = Array.from(headerRow.children).map((th, index) => ({
+                                fieldName: th.dataset.field,
+                                serialNum: index + 1
+                            }));
+
+                            fetch('/api/TableFieldLayout/SaveSerialOrder', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    tableName: 'SPOdOrderMain',
+                                    fieldOrders: newOrder
+                                })
+                            })
+                            .then(res => {
+                                if (!res.ok) throw new Error("更新失敗");
+                                return res.json();
+                            })
+                            .then(() => {
+                                location.reload();
+                            })
+                            .catch(err => {
+                                console.error(err);
+                                Swal.fire({ icon: 'error', title: '欄位順序儲存失敗！' });
+                            });
+                        }
+                    });
+
+        }
+
+
     });
 
     window.addEventListener('pageshow', function (event) {
@@ -234,5 +305,7 @@
             location.reload();
         }
     });
+
+
 </script>
 
