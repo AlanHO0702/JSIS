@@ -140,7 +140,10 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 iFieldLeft = x.iFieldLeft,
                 iShowWhere = x.iShowWhere,
                 DataType = x.DataType,
-                FormatStr = x.FormatStr 
+                FormatStr = x.FormatStr,
+                LookupTable = x.LookupTable,
+                LookupKeyField = x.LookupKeyField,
+                LookupResultField = x.LookupResultField 
             }).ToList();
 
         // Lookup Map 資料 (單身 + 單頭)

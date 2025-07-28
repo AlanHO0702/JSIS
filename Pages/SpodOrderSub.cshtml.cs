@@ -119,7 +119,10 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
                 iFieldLeft = x.iFieldLeft ?? 0,
                 iShowWhere = x.iShowWhere ?? 0,
                 DataType = x.DataType,
-                FormatStr = x.FormatStr 
+                FormatStr = x.FormatStr,
+                LookupTable = x.LookupTable,
+                LookupKeyField = x.LookupKeyField,
+                LookupResultField = x.LookupResultField  
             }).ToList();
 
         // Step 3：呼叫樣板方法 FetchDataAsync 載入單身資料與 lookup map

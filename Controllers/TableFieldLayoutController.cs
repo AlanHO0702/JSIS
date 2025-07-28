@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
@@ -5,15 +6,18 @@ using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 
 
+
 [Route("api/[controller]")]
 [ApiController]
 public class TableFieldLayoutController : ControllerBase
 {
     private readonly PcbErpContext _context;
+    private readonly string _connStr;
 
-    public TableFieldLayoutController(PcbErpContext context)
+    public TableFieldLayoutController(PcbErpContext context, IConfiguration config)
     {
         _context = context;
+        _connStr = config.GetConnectionString("DefaultConnection");
     }
 
    [HttpPost("SaveHeaderLayout")]
@@ -91,6 +95,43 @@ public class TableFieldLayoutController : ControllerBase
         }
 
         return Ok(new { success = true }); // ✅ 回傳 JSON 給前端
+    }
+
+
+    [HttpGet("LookupData")]
+    public async Task<IActionResult> GetLookupData(string table, string key, string result)
+    {
+        bool IsValidCol(string s)
+            => s.Split(',').All(part => System.Text.RegularExpressions.Regex.IsMatch(part.Trim(), @"^[A-Za-z0-9_]+$"));
+
+        if (!IsValidCol(key) || !IsValidCol(result))
+            return BadRequest("Invalid column!");
+
+        var resultFields = result.Split(',').Select(x => $"[{x.Trim()}]").ToArray();
+        string selectResult = string.Join(", ", resultFields.Select((col, idx) => $"{col} as [result{idx}]"));
+        var sql = $"SELECT [{key.Trim()}] as [key], {selectResult} FROM [{table.Trim()}]";
+
+        var list = new List<Dictionary<string, object>>();
+        using (var conn = new SqlConnection(_connStr))
+        using (var cmd = new SqlCommand(sql, conn))
+        {
+            await conn.OpenAsync();
+            using (var reader = await cmd.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    var row = new Dictionary<string, object>();
+                    row["key"] = reader["key"];
+                    // 多個 result 欄位
+                    for (int i = 0; i < resultFields.Length; i++)
+                    {
+                        row[$"result{i}"] = reader[$"result{i}"];
+                    }
+                    list.Add(row);
+                }
+            }
+        }
+        return Ok(list);
     }
 
     // 專用 DTO 類別
