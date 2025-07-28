@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using PcbErpApi.Models;
 using static SpodOrdersModel;
@@ -57,6 +58,50 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
             $"{baseUrl}/api/SPOdOrderMain/{PaperNum}"
         );
 
+        // Step 1.5：轉換 HeaderData 中的 JsonElement 成實際型別
+        if (HeaderData != null)
+        {
+            var keys = HeaderData.Keys.ToList();
+            foreach (var key in keys)
+            {
+                if (HeaderData[key] is JsonElement je)
+                {
+                    object? realValue = null;
+                    switch (je.ValueKind)
+                    {
+                        case JsonValueKind.String:
+                            if (DateTime.TryParse(je.GetString(), out var dt))
+                                realValue = dt;
+                            else
+                                realValue = je.GetString();
+                            break;
+                        case JsonValueKind.Number:
+                            if (je.TryGetInt32(out var i32))
+                                realValue = i32;
+                            else if (je.TryGetInt64(out var i64))
+                                realValue = i64;
+                            else if (je.TryGetDecimal(out var dec))
+                                realValue = dec;
+                            else
+                                realValue = je.GetDouble();
+                            break;
+                        case JsonValueKind.True:
+                        case JsonValueKind.False:
+                            realValue = je.GetBoolean();
+                            break;
+                        case JsonValueKind.Null:
+                            realValue = null;
+                            break;
+                        default:
+                            realValue = je.ToString();
+                            break;
+                    }
+
+                    HeaderData[key] = realValue; // 替換成轉換後的值
+                }
+            }
+        }
+
         // Step 2：取得單頭欄位設定（僅取 Visible 的欄位）
         var headerFieldDicts = _dictService.GetFieldDict("SPOdOrderMain", typeof(SpodOrderMain));
         HeaderTableFields = headerFieldDicts
@@ -72,7 +117,9 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
                 iFieldHeight = x.iFieldHeight ?? 22,
                 iFieldTop = x.iFieldTop ?? 0,
                 iFieldLeft = x.iFieldLeft ?? 0,
-                iShowWhere = x.iShowWhere ?? 0
+                iShowWhere = x.iShowWhere ?? 0,
+                DataType = x.DataType,
+                FormatStr = x.FormatStr 
             }).ToList();
 
         // Step 3：呼叫樣板方法 FetchDataAsync 載入單身資料與 lookup map

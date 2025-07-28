@@ -1,5 +1,6 @@
 @model dynamic
 @using PcbErpApi.Helpers
+@using System.Text.Json
 @{
     // 單頭欄位
     var headerFields = Model.HeaderTableFields; // 可視欄位
@@ -20,8 +21,9 @@
     var lookupMap = ViewData["LookupDisplayMap"] as Dictionary<string, Dictionary<string, string>>;
 
     var PaperNum = headerData.ContainsKey("PaperNum") ? headerData["PaperNum"]?.ToString() ?? "" : "";
+
     var headerLookupMap = ViewData["HeaderLookupMap"] as Dictionary<string, string>;
-        
+    
 }
 
 <div class="erp-detail-container">
@@ -56,14 +58,42 @@
                             <ul class="list-unstyled header-fields-tab"
                                 data-tab-index="@tab.Key"
                                 style="position: relative; min-height: 400px;">
-                                @foreach (var field in tab.Value)
+                               @foreach (var field in tab.Value)
                                 {
-                                    object v;
-                                    var val = headerData.TryGetValue(field.FieldName, out v) ? v?.ToString() : "";
-                                    //var displayText = LookupDisplayHelper.GetLookupDisplay(ViewData, Model.MasterKey, field.FieldName) ?? val;
-                                    //var displayText = LookupDisplayHelper.GetLookupDisplay(ViewData, PaperNum, field.FieldName, "HeaderLookupDisplayMap") ?? val;
-                                    var displayText = headerLookupMap != null && headerLookupMap.TryGetValue(field.FieldName, out var val2) ? val2 : val;
+                                    object rawValue = null;
+                                    headerData?.TryGetValue(field.FieldName, out rawValue);
+                                    string displayText = "";
 
+                                    // 1. lookup 優先顯示
+                                    if (headerLookupMap != null && headerLookupMap.TryGetValue(field.FieldName, out var lookupVal))
+                                    {
+                                        displayText = lookupVal;
+                                    }
+                                    else if (rawValue != null)
+                                    {
+                                        if (!string.IsNullOrEmpty(field.FormatStr))
+                                        {
+                                            // 日期格式
+                                            if (field.DataType?.ToLower() == "date" && rawValue is DateTime dt)
+                                            {
+                                                // nn 轉 mm
+                                                displayText = dt.ToString(field.FormatStr.Replace("nn", "mm"));
+                                            }
+                                            // 數字格式
+                                            else if (field.DataType?.ToLower() == "number" && rawValue is IFormattable fmt)
+                                            {
+                                                displayText = fmt.ToString(field.FormatStr, null);
+                                            }
+                                            else
+                                            {
+                                                displayText = rawValue.ToString();
+                                            }
+                                        }
+                                        else
+                                        {
+                                            displayText = rawValue.ToString();
+                                        }
+                                    }
 
                                     var top = field.iFieldTop ?? 0;
                                     var left = field.iFieldLeft ?? 0;
@@ -79,7 +109,6 @@
                                                 name="@field.FieldName">@displayText</textarea>
                                     </li>
                                 }
-
                             </ul>
                         </div>
                     }

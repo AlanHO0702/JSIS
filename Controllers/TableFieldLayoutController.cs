@@ -52,7 +52,7 @@ public class TableFieldLayoutController : ControllerBase
                     UPDATE CURdTableField
                     SET  iFieldWidth = @Width, iFieldHeight = @Height,
                         iFieldTop = @Top, iFieldLeft = @Left ,
-                        iShowWhere = @iShowWhere 
+                        iShowWhere = @iShowWhere
                     WHERE LOWER(FieldName) = @FieldName AND TableName = @TableName",
                     new[] {
                         new SqlParameter("@Width", layout.Width),
@@ -62,6 +62,7 @@ public class TableFieldLayoutController : ControllerBase
                         new SqlParameter("@Top", layout.Top),
                         new SqlParameter("@Left", layout.Left),
                         new SqlParameter("@iShowWhere", layout.iShowWhere)
+    
                     });
             }
         }
@@ -69,6 +70,41 @@ public class TableFieldLayoutController : ControllerBase
         return Ok();
     }
 
+    [HttpPost("SaveSerialOrder")]
+    public async Task<IActionResult> SaveSerialOrder([FromBody] SaveSerialOrderRequest request)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.TableName))
+            return BadRequest("Invalid request");
+
+        foreach (var field in request.FieldOrders)
+        {
+            await _context.Database.ExecuteSqlRawAsync(@"
+                UPDATE CURdTableField
+                SET SerialNum = @SerialNum
+                WHERE LOWER(FieldName) = @FieldName AND TableName = @TableName",
+                new[]
+                {
+                    new SqlParameter("@SerialNum", field.SerialNum),
+                    new SqlParameter("@FieldName", field.FieldName),
+                    new SqlParameter("@TableName", request.TableName)
+                });
+        }
+
+        return Ok(new { success = true }); // ✅ 回傳 JSON 給前端
+    }
+
+    // 專用 DTO 類別
+    public class SaveSerialOrderRequest
+    {
+        public string TableName { get; set; } = "";
+        public List<FieldSerialUpdate> FieldOrders { get; set; } = new();
+    }
+
+    public class FieldSerialUpdate
+    {
+        public string FieldName { get; set; } = "";
+        public int SerialNum { get; set; }
+    }
 
     public class SaveHeaderLayoutRequest
     {
