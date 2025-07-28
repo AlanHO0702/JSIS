@@ -13,4 +13,7 @@ public class TableFieldViewModel
     public int SerialNum { get; set; }
     public string? DataType { get; set; }
     public string? FormatStr { get; set; }
+    public string? LookupTable { get; set; }
+    public string? LookupKeyField { get; set; }
+    public string? LookupResultField { get; set; }
 }

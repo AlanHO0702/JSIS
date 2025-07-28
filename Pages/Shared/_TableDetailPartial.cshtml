@@ -23,7 +23,6 @@
     var PaperNum = headerData.ContainsKey("PaperNum") ? headerData["PaperNum"]?.ToString() ?? "" : "";
 
     var headerLookupMap = ViewData["HeaderLookupMap"] as Dictionary<string, string>;
-    
 }
 
 <div class="erp-detail-container">
@@ -100,14 +99,40 @@
                                     var width = field.iFieldWidth ?? 160;
                                     var height = field.iFieldHeight ?? 44;
 
-                                    <li class="draggable-field"
-                                        data-field="@field.FieldName"
-                                        data-tab="@tab.Key"
-                                        style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
-                                        <label>@field.DisplayLabel</label>
-                                        <textarea class="form-control resizable-input"
-                                                name="@field.FieldName">@displayText</textarea>
-                                    </li>
+
+                                     // 判斷有 lookup table 設定
+                                    if (!string.IsNullOrWhiteSpace(field.LookupTable) &&
+                                        !string.IsNullOrWhiteSpace(field.LookupKeyField) &&
+                                        !string.IsNullOrWhiteSpace(field.LookupResultField))
+                                    {
+                                        // 下拉選單元件（用 select）
+                                        <li class="draggable-field"
+                                            data-field="@field.FieldName"
+                                            data-tab="@tab.Key"
+                                            style="top:@(field.iFieldTop ?? 0)px; left:@(field.iFieldLeft ?? 0)px; width:@(field.iFieldWidth ?? 160)px; height:@(field.iFieldHeight ?? 44)px;">
+                                            <label>@field.DisplayLabel</label>
+                                            <select class="form-select lookup-dropdown"
+                                                    name="@field.FieldName"
+                                                    data-table="@field.LookupTable"
+                                                    data-key="@field.LookupKeyField"
+                                                    data-result="@field.LookupResultField.Replace(" ", "")"
+                                                    data-selected="@rawValue"> 
+                                                <option value="">--請選擇--</option>
+                                            </select>
+                                            <span class="lookup-label"></span> 
+                                        </li>
+                                    }
+                                    else
+                                    {
+                                        <li class="draggable-field"
+                                            data-field="@field.FieldName"
+                                            data-tab="@tab.Key"
+                                            style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
+                                            <label>@field.DisplayLabel</label>
+                                            <textarea class="form-control resizable-input"
+                                                    name="@field.FieldName">@displayText</textarea>
+                                        </li>
+                                    }
                                 }
                             </ul>
                         </div>
@@ -167,7 +192,6 @@
                         }
                     }
                     </tbody>
-
         </table>
     </div>
 </div>
@@ -199,133 +223,163 @@
     });
 
     $(function () {
-    let debounceTimer;
+        let debounceTimer;
 
-    function debounceSave() {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(saveLayoutChanges, 400);
-    }
+        function debounceSave() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(saveLayoutChanges, 400);
+        }
 
-    function saveLayoutChanges() {
-        const layout = [];
+        function saveLayoutChanges() {
+            const layout = [];
 
-        // ✅ 暫時顯示所有 tab-pane
-        const hiddenTabs = $(".tab-pane").not(".show");
-        hiddenTabs.addClass("temporary-show").addClass("show").css("display", "block");
+            // ✅ 暫時顯示所有 tab-pane
+            const hiddenTabs = $(".tab-pane").not(".show");
+            hiddenTabs.addClass("temporary-show").addClass("show").css("display", "block");
+
+            $(".draggable-field").each(function () {
+                const $li = $(this);
+                const field = $li.data("field");
+                const tabIndex = parseInt($li.attr("data-tab")) || 1;
+
+                layout.push({
+                    fieldName: field,
+                    top: Math.round($li.position().top),
+                    left: Math.round($li.position().left),
+                    width: Math.round($li.outerWidth()),
+                    height: Math.round($li.outerHeight()),
+                    ishowWhere: tabIndex
+                });
+            });
+
+            // ✅ 還原 tab-pane 狀態
+            hiddenTabs.removeClass("show").removeClass("temporary-show").css("display", "");
+
+            if (layout.length === 0) return;
+
+            fetch("/api/TableFieldLayout/SaveHeaderLayout", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    tableName: "@Model.HeaderTableName".toLowerCase(),
+                    layoutUpdates: layout
+                })
+            }).catch(err => console.error("儲存失敗", err));     
+        }
 
         $(".draggable-field").each(function () {
             const $li = $(this);
-            const field = $li.data("field");
-            const tabIndex = parseInt($li.attr("data-tab")) || 1;
 
-            layout.push({
-                fieldName: field,
-                top: Math.round($li.position().top),
-                left: Math.round($li.position().left),
-                width: Math.round($li.outerWidth()),
-                height: Math.round($li.outerHeight()),
-                ishowWhere: tabIndex
+            $li.draggable({
+                handle: "label",
+                helper: function () {
+                    return $("<div>")
+                        .text($(this).find("label").text())
+                        .css({
+                            width: "80px",
+                            height: "55px",
+                            background: "#eef",
+                            border: "1px dashed #999",
+                            padding: "4px",
+                            "font-size": "0.9em"
+                        });
+                },
+                appendTo: "body",
+                zIndex: 10000,
+                start: function () {
+                    $(this).hide(); // ✅ 拖曳時原本隱藏，避免混淆
+                },
+                stop: function () {
+                    $(this).show();
+                }
+            });
+
+            $li.resizable({
+                handles: "se",
+                minWidth: 50,
+                minHeight: 30,
+                stop: debounceSave
             });
         });
 
-        // ✅ 還原 tab-pane 狀態
-        hiddenTabs.removeClass("show").removeClass("temporary-show").css("display", "");
-
-        if (layout.length === 0) return;
-
-        fetch("/api/TableFieldLayout/SaveHeaderLayout", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                tableName: "@Model.HeaderTableName".toLowerCase(),
-                layoutUpdates: layout
-            })
-        }).catch(err => console.error("儲存失敗", err));
-    }
-
-    $(".draggable-field").each(function () {
-        const $li = $(this);
-
-        $li.draggable({
-            handle: "label",
-            helper: function () {
-                return $("<div>")
-                    .text($(this).find("label").text())
-                    .css({
-                        width: "80px",
-                        height: "55px",
-                        background: "#eef",
-                        border: "1px dashed #999",
-                        padding: "4px",
-                        "font-size": "0.9em"
-                    });
+        $(".header-fields-tab").droppable({
+            accept: ".draggable-field",
+            tolerance: "pointer", //intersect是要物件中心點拖到才會觸發，改成游標觸碰
+            over: function () {
+                $(this).addClass("drop-hover");
             },
-            appendTo: "body",
-            zIndex: 10000,
-            start: function () {
-                $(this).hide(); // ✅ 拖曳時原本隱藏，避免混淆
-            },
-            stop: function () {
-                $(this).show();
+            out: function () {
+                $(this).removeClass("drop-hover");
+            },     
+            drop: function (event, ui) {
+                $(this).removeClass("drop-hover");
+                const $dropZone = $(this);
+                const $item = $(ui.draggable);
+                const newTabIndex = parseInt($dropZone.data("tab-index")) || 1;
+
+                // ➤ 移動 item 並更新屬性與位置
+                $item.appendTo($dropZone);
+                $item.attr("data-tab", newTabIndex);
+
+                $item.css({
+                    top: ui.offset.top - $dropZone.offset().top,
+                    left: ui.offset.left - $dropZone.offset().left,
+                    position: "absolute"
+                });
+
+                debounceSave();
             }
         });
 
-        $li.resizable({
-            handles: "se",
-            minWidth: 50,
-            minHeight: 30,
-            stop: debounceSave
+
+        let dragTabSwitchTimer = null;
+
+        $("#headerTabs button").droppable({
+            accept: ".draggable-field",
+            over: function (event, ui) {
+                const $tabBtn = $(this);
+                dragTabSwitchTimer = setTimeout(() => {
+                    $tabBtn.trigger("click");
+                }, 600); // 滑過 600ms 自動切換分頁
+            },
+            out: function () {
+                clearTimeout(dragTabSwitchTimer);
+            }
         });
-    });
 
-    $(".header-fields-tab").droppable({
-        accept: ".draggable-field",
-        tolerance: "pointer", //intersect是要物件中心點拖到才會觸發，改成游標觸碰
-        over: function () {
-            $(this).addClass("drop-hover");
-        },
-        out: function () {
-            $(this).removeClass("drop-hover");
-        },     
-        drop: function (event, ui) {
-            $(this).removeClass("drop-hover");
-            const $dropZone = $(this);
-            const $item = $(ui.draggable);
-            const newTabIndex = parseInt($dropZone.data("tab-index")) || 1;
+        $('.lookup-dropdown').each(function() {
+            var $select = $(this);
+            var table = $select.data('table');
+            var key = $select.data('key');
+            var result = $select.data('result');
+            var selected = $select.data('selected');
 
-            // ➤ 移動 item 並更新屬性與位置
-            $item.appendTo($dropZone);
-            $item.attr("data-tab", newTabIndex);
-
-            $item.css({
-                top: ui.offset.top - $dropZone.offset().top,
-                left: ui.offset.left - $dropZone.offset().left,
-                position: "absolute"
+            $.getJSON(`/api/TableFieldLayout/LookupData?table=${table}&key=${key}&result=${result}`, function(data) {
+                $select.empty().append('<option value="">--請選擇--</option>');
+                for (var i = 0; i < data.length; i++) {
+                    var val = data[i].key;
+                    var txt = [];
+                    for (var prop in data[i]) {
+                        if (prop.startsWith('result')) txt.push(data[i][prop]);
+                    }
+                    var label = txt.join(' - ');  // 顯示多個欄位
+                    var opt = $('<option>')
+                        .attr('value', val)
+                        .text(label);
+                    if (val == selected)
+                        opt.attr('selected', true);
+                    $select.append(opt);
+                }
+                // 設定初始 label 顯示
+                $select.next('.lookup-label').text($select.find('option:selected').text());
             });
 
-            debounceSave();
-        }
+            // select change 時更新旁邊 label（純顯示）
+            $select.on('change', function() {
+                $(this).next('.lookup-label').text($(this).find('option:selected').text());
+            });
+        });
     });
-
-
-    let dragTabSwitchTimer = null;
-
-    $("#headerTabs button").droppable({
-        accept: ".draggable-field",
-        over: function (event, ui) {
-            const $tabBtn = $(this);
-            dragTabSwitchTimer = setTimeout(() => {
-                $tabBtn.trigger("click");
-            }, 600); // 滑過 600ms 自動切換分頁
-        },
-        out: function () {
-            clearTimeout(dragTabSwitchTimer);
-        }
-    });
-
-});
-
-
 </script>
 <style>
 body {
@@ -448,5 +502,35 @@ textarea.resizable-input {
     background-color: #f3faff;
     font-weight: bold;
 }
+
+/* 統一所有 header form 內欄位字型大小 */
+.erp-header-form select,
+.erp-header-form textarea,
+.erp-header-form input,
+.erp-header-form {
+    font-size: 0.95em;  /* 改大一點，更清楚 */
+}
+
+.erp-header-form select.form-select {
+    font-size: 1em !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    line-height: 1.15 !important;
+    padding-top: 2px !important;
+    padding-bottom: 2px !important;
+    padding-left: 6px !important;
+    padding-right: 30px !important;
+    /* 下拉icon換小一點並微調靠右 */
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url('data:image/svg+xml;utf8,<svg width="11" height="11" fill="gray" xmlns="http://www.w3.org/2000/svg"><path d="M2 4.5l3.5 3.5L9 4.5" stroke="gray" stroke-width="2" fill="none" stroke-linecap="round"/></svg>');
+    background-repeat: no-repeat;
+    background-position: right 10px center;  /* 靠右10px */
+    background-size: 14px 14px;
+    box-shadow: none !important; /* 移除陰影 */
+    border-radius: 5px !important;
+}
+
 
 </style>
