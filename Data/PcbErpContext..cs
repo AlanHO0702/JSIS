@@ -12,6 +12,7 @@ namespace PcbErpApi.Data
         public DbSet<CurdSysItem> CurdSysItems { get; set; }
         public DbSet<SpodOrderSub> SpodOrderSub { get; set; }
         public DbSet<CurdSystemSelect> CurdSystemSelects { get; set; }
+        public DbSet<CurdPaperSelected> CURdPaperSelected { get; set; }
         public DbSet<CURdTableField> CURdTableFields { get; set; }
         public DbSet<CURdOCXTableFieldLK> CURdOCXTableFieldLK { get; set; }
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
@@ -299,6 +300,56 @@ namespace PcbErpApi.Data
                     .HasMaxLength(16)
                     .IsUnicode(false);
             });
+
+             modelBuilder.Entity<CurdPaperSelected>(entity =>
+            {
+                entity.HasKey(e => new { e.PaperId, e.TableName, e.ColumnName, e.DefaultEqual });
+
+                entity.ToTable("CURdPaperSelected", tb =>
+                    {
+                        tb.HasTrigger("CURdPaperSelected_tD");
+                        tb.HasTrigger("CURdPaperSelected_tI");
+                    });
+
+                entity.Property(e => e.PaperId)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.TableName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.ColumnName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.DefaultEqual)
+                    .HasMaxLength(10)
+                    .IsUnicode(false);
+                entity.Property(e => e.AliasName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.ColumnCaption).HasMaxLength(50);
+                entity.Property(e => e.CommandText)
+                    .HasMaxLength(255)
+                    .IsUnicode(false);
+                entity.Property(e => e.DefaultValue).HasMaxLength(1024);
+                entity.Property(e => e.EditMask)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.IReadOnly).HasColumnName("iReadOnly");
+                entity.Property(e => e.IVisible)
+                    .HasDefaultValue(1)
+                    .HasColumnName("iVisible");
+                entity.Property(e => e.ParamType).HasDefaultValue(6);
+                entity.Property(e => e.ParamValue)
+                    .HasMaxLength(255)
+                    .IsUnicode(false);
+                entity.Property(e => e.SuperId)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.TableKind)
+                    .HasMaxLength(12)
+                    .IsUnicode(false);
+            });
+
 
             modelBuilder.Entity<EmodProdInfo>(entity =>
             {
