@@ -41,6 +41,7 @@ public class TableDictionaryService : ITableDictionaryService
             {
                 f.DataType = dt;
             }
+
         }
         return fields;
     }

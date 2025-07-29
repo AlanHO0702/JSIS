@@ -55,7 +55,8 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // æ³
                     Visible = x.Visible == 1,
                     iShowWhere = x.iShowWhere,
                     DataType = x.DataType,
-                    FormatStr = x.FormatStr
+                    FormatStr = x.FormatStr,
+                    LookupResultField= x.LookupResultField
                 };
             }).ToList();
 

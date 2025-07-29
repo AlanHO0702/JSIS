@@ -84,7 +84,7 @@
                 <tr id="table-header-row">
                     @foreach (var field in fields)
                     {
-                        <th draggable="true" data-field="@field.FieldName" data-serial="@field.SerialNum">
+                        <th class="sortable" draggable="true" data-field="@field.FieldName" data-serial="@field.SerialNum">
                             @(string.IsNullOrWhiteSpace(field.DisplayLabel) ? field.FieldName : field.DisplayLabel)
                         </th>
                     }
@@ -296,6 +296,48 @@
                     });
 
         }
+           // --- 下面是新加的"雙擊表頭欄位排序" ---
+            let lastSort = { col: null, asc: true };
+
+            function getCellValue(tr, idx) {
+                const cell = tr.children[idx];
+                // 數字欄位自動去除逗號
+                let val = cell ? cell.textContent.trim().replace(/,/g, '') : '';
+                if (val === '') return 0; // 空值視為0
+                if (!isNaN(val)) return parseFloat(val); // 若為數字就轉 float
+                return val;
+            }
+
+            document.querySelectorAll("th.sortable").forEach(function (th, idx) {
+                th.addEventListener("dblclick", function () {
+                    const table = th.closest('table');
+                    const tbody = table.querySelector('tbody');
+                    const rows = Array.from(tbody.querySelectorAll('tr'));
+                    const colIdx = idx;
+
+                    // 切換正序/反序
+                    let asc = true;
+                    if (lastSort.col === colIdx) asc = !lastSort.asc;
+                    lastSort = { col: colIdx, asc: asc };
+
+                    rows.sort((a, b) => {
+                        let aVal = getCellValue(a, colIdx);
+                        let bVal = getCellValue(b, colIdx);
+
+                        // 數字/日期排數字，其他欄位用字串
+                        if (typeof aVal === "number" && typeof bVal === "number") {
+                            return asc ? aVal - bVal : bVal - aVal;
+                        }
+                        // 字串排序（不區分大小寫）
+                        aVal = aVal + '';
+                        bVal = bVal + '';
+                        return asc ? aVal.localeCompare(bVal, 'zh-Hant') : bVal.localeCompare(aVal, 'zh-Hant');
+                    });
+
+                    // 重新插入排序後的 row
+                    rows.forEach(tr => tbody.appendChild(tr));
+                });
+            });
 
 
     });

@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.SqlClient; // 這個要using
+using Microsoft.Data.SqlClient; 
 using PcbErpApi.Data;
 using PcbErpApi.Models;
 using System.Collections.Generic;
@@ -23,28 +23,56 @@ public class DictApiController : ControllerBase
         using (var conn = new SqlConnection(_connStr))
         {
             await conn.OpenAsync();
+            
 
-            foreach (var input in list)
+           foreach (var input in list)
             {
-                var cmd = new SqlCommand(@"
-                    UPDATE CURdTableField 
-                    SET DisplayLabel = @DisplayLabel, 
-                        DataType = @DataType, 
-                        FieldNote = @FieldNote, 
-                        SerialNum = @SerialNum, 
-                        Visible = @Visible
-                    WHERE TableName = @TableName AND FieldName = @FieldName", conn);
+                var cmd = new SqlCommand();
+                var sql = "UPDATE CURdTableField SET ";
+                var setList = new List<string>();
 
                 cmd.Parameters.AddWithValue("@TableName", input.TableName ?? "");
-                cmd.Parameters.AddWithValue("@DisplayLabel", (object?)input.DisplayLabel ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@DataType", (object?)input.DataType ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@FieldNote", (object?)input.FieldNote ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@SerialNum", (object?)input.SerialNum ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@Visible", (object?)input.Visible ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@FieldName", (object)input.FieldName);
+                cmd.Parameters.AddWithValue("@FieldName", input.FieldName ?? "");
+
+                if (input.DisplayLabel != null)
+                {
+                    setList.Add("DisplayLabel = @DisplayLabel");
+                    cmd.Parameters.AddWithValue("@DisplayLabel", input.DisplayLabel);
+                }
+                if (input.DataType != null)
+                {
+                    setList.Add("DataType = @DataType");
+                    cmd.Parameters.AddWithValue("@DataType", input.DataType);
+                }
+                if (input.FieldNote != null)
+                {
+                    setList.Add("FieldNote = @FieldNote");
+                    cmd.Parameters.AddWithValue("@FieldNote", input.FieldNote);
+                }
+                if (input.SerialNum != null)
+                {
+                    setList.Add("SerialNum = @SerialNum");
+                    cmd.Parameters.AddWithValue("@SerialNum", input.SerialNum);
+                }
+                if (input.Visible != null)
+                {
+                    setList.Add("Visible = @Visible");
+                    cmd.Parameters.AddWithValue("@Visible", input.Visible);
+                }
+                if (input.LookupResultField != null)
+                {
+                    setList.Add("LookupResultField = @LookupResultField");
+                    cmd.Parameters.AddWithValue("@LookupResultField", input.LookupResultField);
+                }
+
+                if (setList.Count == 0) continue; // 沒有欄位要改就 skip
+
+                sql += string.Join(", ", setList);
+                sql += " WHERE TableName = @TableName AND FieldName = @FieldName";
+                cmd.CommandText = sql;
+                cmd.Connection = conn;
 
                 await cmd.ExecuteNonQueryAsync();
-
             }
         }
         return Ok(new { success = true });

@@ -114,7 +114,8 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 FieldName = x.FieldName,
                 DisplayLabel = x.DisplayLabel,
                 SerialNum = x.SerialNum ?? 0,
-                Visible = true
+                Visible = true,
+                LookupResultField= x.LookupResultField
             }).ToList();
 
         // 分頁資訊：根據 iShowWhere 分群
@@ -143,7 +144,7 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 FormatStr = x.FormatStr,
                 LookupTable = x.LookupTable,
                 LookupKeyField = x.LookupKeyField,
-                LookupResultField = x.LookupResultField 
+                LookupResultField= x.LookupResultField
             }).ToList();
 
         // Lookup Map 資料 (單身 + 單頭)
