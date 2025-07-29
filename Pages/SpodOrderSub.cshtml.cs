@@ -100,6 +100,11 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
                     HeaderData[key] = realValue; // 替換成轉換後的值
                 }
             }
+
+            // ✅【這裡加手動預設值補值，只補沒資料的欄位】
+            if (!HeaderData.ContainsKey("RateToNT") || HeaderData["RateToNT"] == null)
+                HeaderData["RateToNT"] = 1;
+         
         }
 
         // Step 2：取得單頭欄位設定（僅取 Visible 的欄位）
