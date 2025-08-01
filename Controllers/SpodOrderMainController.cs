@@ -29,7 +29,25 @@ namespace PcbErpApi.Controllers
             _pagedService = pagedService;
             _logger = logger;
         }
-            // 前端傳入的物件，裡面有 filters 清單
+
+        // 分頁查詢 GET: api/SPOdOrderMains/paged?page=1&pageSize=50
+        [HttpGet("paged")]
+        public async Task<IActionResult> GetPaged(
+            [FromQuery] int page = 1, 
+            [FromQuery] int pageSize = 50, 
+            [FromQuery] string? PaperNum = null
+        )
+        {
+            var query = _context.SpodOrderMain.AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(PaperNum))
+            query = query.Where(x => x.PaperNum.Contains(PaperNum));
+
+            var orderedQuery = query.OrderByDescending(o => o.PaperDate);
+            var result = await _pagedService.GetPagedAsync(orderedQuery, page, pageSize);
+            return Ok(new { totalCount = result.TotalCount, data = result.Data });
+        }
+        // 前端傳入的物件，裡面有 filters 清單
         public class QueryFilterRequest
         {
             public List<QueryParamDto> filters { get; set; }

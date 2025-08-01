@@ -38,18 +38,15 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // �
     public List<TableFieldViewModel> TableFields { get; set; } = new(); // 供表格顯示的欄位
 
     public abstract string TableName { get; } // 對應資料表名稱
-    public virtual string ApiPagedUrl => $"/api/{TableName}"; // 取得分頁 API 路徑
+    public virtual string ApiPagedUrl => $"/api/{TableName}/paged"; // 取得分頁 API 路徑
 
-    public virtual async Task OnGetAsync(string paperNum, int? page, int? pageSize)
+    public virtual async Task OnGetAsync()
     {
-        PageNumber = page ?? 1;
-        PageSize = pageSize ?? 50;
+        // 預設頁碼/每頁
+        PageNumber = int.TryParse(Request.Query["page"], out var pg) ? pg : 1;
+        PageSize = int.TryParse(Request.Query["pageSize"], out var ps) ? ps : 50;
 
-        var filters = new List<QueryParam>
-        {
-            new QueryParam { Field = "PaperNum", Op = QueryOp.Contains, Value = paperNum ?? "" }
-        };
-        // 1. 取得查詢欄位設定（本地資料庫查詢，仍然可以保留）
+        // 取得查詢欄位設定（cache/service 取最快）
         QueryFields = _context.CURdPaperSelected
             .Where(x => x.TableName == TableName && x.IVisible == 1)
             .OrderBy(x => x.SortOrder)
@@ -68,14 +65,35 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // �
 
         ViewData["QueryFields"] = QueryFields;
 
-        // 2. 取得欄位定義（本地字典服務）
+        // 組查詢參數
+        var queryList = new List<string>();
+        foreach (var field in QueryFields)
+        {
+            var val = Request.Query[field.ColumnName].ToString();
+            if (!string.IsNullOrWhiteSpace(val))
+            {
+                queryList.Add($"{field.ColumnName}={Uri.EscapeDataString(val)}");
+            }
+        }
+
+        var queryStr = string.Join("&", queryList);
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        var apiUrl = $"{baseUrl}{ApiPagedUrl}?page={PageNumber}&pageSize={PageSize}";
+        if (!string.IsNullOrWhiteSpace(queryStr))
+            apiUrl += "&" + queryStr;
+
+        var resp = await _httpClient.GetFromJsonAsync<ApiResult>(apiUrl);
+
+        Items = resp?.data ?? new List<T>();
+        TotalCount = resp?.totalCount ?? 0;
+
+        // 欄位、lookup設定
         FieldDictList = _dictService.GetFieldDict(TableName, typeof(T));
         TableFields = FieldDictList
             .Where(x => x.Visible == 1)
             .OrderBy(x => x.SerialNum)
             .GroupBy(x => x.FieldName)
-            .Select(g =>
-            {
+            .Select(g => {
                 var x = g.First();
                 return new TableFieldViewModel
                 {
@@ -91,36 +109,92 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // �
             }).ToList();
         ViewData["Fields"] = TableFields;
 
-        // 3. 呼叫 API 取得分頁資料
-            var requestObj = new
+        var lookupMaps = _dictService.GetOCXLookups(TableName);
+        LookupDisplayMap = LookupDisplayHelper.BuildLookupDisplayMap(
+            Items,
+            lookupMaps,
+            item => typeof(T).GetProperty("PaperNum")?.GetValue(item)?.ToString() ?? ""
+        );
+        ViewData["LookupDisplayMap"] = LookupDisplayMap;
+    }
+    public virtual async Task<IActionResult> OnPostAsync()
+    {
+        foreach (var k in Request.Form.Keys)
+        {
+            _logger.LogInformation($"{k} = {Request.Form[k]}");
+        }
+        // 1. 取得分頁參數
+        PageNumber = int.TryParse(Request.Form["page"], out var pg) ? pg : 1;
+        PageSize = int.TryParse(Request.Form["pageSize"], out var ps) ? ps : 50;
+
+        // 2. 取得查詢欄位設定（通常這不會變動，cache/service 較快）
+        QueryFields = _context.CURdPaperSelected
+            .Where(x => x.TableName == TableName && x.IVisible == 1)
+            .OrderBy(x => x.SortOrder)
+            .Select(x => new QueryFieldViewModel
             {
-                filters = new List<object>
+                ColumnName = x.ColumnName,
+                ColumnCaption = x.ColumnCaption,
+                DataType = x.DataType,
+                ControlType = x.ControlType ?? 0,
+                EditMask = x.EditMask,
+                DefaultValue = x.DefaultValue,
+                DefaultEqual = x.DefaultEqual,
+                SortOrder = x.SortOrder
+            })
+            .ToList();
+
+        ViewData["QueryFields"] = QueryFields;
+
+        // 3. 組查詢參數物件（改用 POST）
+                // 4. 呼叫 API（POST）
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        var apiUrl = $"{baseUrl}/api/{TableName}/pagedQuery";
+        var filters = new List<object>();
+        foreach (var field in QueryFields)
+        {
+            var val = Request.Form[field.ColumnName].ToString();
+            var op = Request.Form["Cond_" + field.ColumnName].ToString();
+            if (!string.IsNullOrWhiteSpace(val))
+            {
+                filters.Add(new {
+                    Field = field.ColumnName,
+                    Op = op,
+                    Value = val
+                });
+            }
+        }
+        filters.Add(new { Field = "page", Op = "", Value = PageNumber.ToString() });
+        filters.Add(new { Field = "pageSize", Op = "", Value = PageSize.ToString() });
+        var queryObj = new { filters = filters };
+        var resp = await _httpClient.PostAsJsonAsync(apiUrl, queryObj);
+        var result = await resp.Content.ReadFromJsonAsync<ApiResult>();
+
+        Items = result?.data ?? new List<T>();
+        TotalCount = result?.totalCount ?? 0;
+
+        // 5. 欄位、lookup設定
+        FieldDictList = _dictService.GetFieldDict(TableName, typeof(T));
+        TableFields = FieldDictList
+            .Where(x => x.Visible == 1)
+            .OrderBy(x => x.SerialNum)
+            .GroupBy(x => x.FieldName)
+            .Select(g => {
+                var x = g.First();
+                return new TableFieldViewModel
                 {
-                    new { Field = "PaperNum", Op = "Contains", Value = paperNum ?? "" },
-                    new { Field = "page", Op = "Equal", Value = PageNumber.ToString() },
-                    new { Field = "pageSize", Op = "Equal", Value = PageSize.ToString() }
-                }
-            };
+                    FieldName = x.FieldName,
+                    DisplayLabel = x.DisplayLabel,
+                    SerialNum = x.SerialNum ?? 0,
+                    Visible = x.Visible == 1,
+                    iShowWhere = x.iShowWhere,
+                    DataType = x.DataType,
+                    FormatStr = x.FormatStr,
+                    LookupResultField = x.LookupResultField
+                };
+            }).ToList();
+        ViewData["Fields"] = TableFields;
 
-        var resp = await _httpClient.PostAsJsonAsync(ApiPagedUrl + "/pagedQuery", requestObj);
-
-        if (resp.IsSuccessStatusCode)
-        {
-            var json = await resp.Content.ReadAsStringAsync();
-            // 用 System.Text.Json 反序列化成 ApiResult<T>
-            var result = JsonSerializer.Deserialize<ApiResult>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-            Items = result?.data ?? new List<T>();
-            TotalCount = result?.totalCount ?? 0;
-        }
-        else
-        {
-            // 如果 API 呼叫失敗，可以處理錯誤或直接查空資料
-            Items = new List<T>();
-            TotalCount = 0;
-        }
-
-        // 4. 產生 Lookup 顯示資料（本地字典服務）
         var lookupMaps = _dictService.GetOCXLookups(TableName);
         LookupDisplayMap = LookupDisplayHelper.BuildLookupDisplayMap(
             Items,
@@ -129,13 +203,7 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // �
         );
         ViewData["LookupDisplayMap"] = LookupDisplayMap;
 
-        // 5. 設定分頁資料
-        ViewData["PaginationVm"] = new PaginationModel
-        {
-            PageNumber = PageNumber,
-            TotalPages = (int)Math.Ceiling(TotalCount / (double)PageSize),
-            RouteUrl = $"/{TableName}"
-        };
+        return Page();
     }
 
 
