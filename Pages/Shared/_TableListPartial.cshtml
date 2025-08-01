@@ -1,7 +1,8 @@
+@using PcbErpApi.Models
 @model dynamic
 
 @{
-    var fields = Model.TableFields;
+    var fields = ViewData["Fields"] as List<TableFieldViewModel>;
     var items = Model.Items;
     var totalCount = Model.TotalCount;
     var pageNumber = Model.PageNumber;
@@ -12,6 +13,10 @@
     // 新增API路徑與單身頁路徑，從 ViewData 傳（預設值也可寫死）
     var addApiUrl = ViewData["AddApiUrl"] as string ?? "/api/SPOdOrderMain";
     var detailRouteTemplate = ViewData["SubRouteTemplate"] as string ?? "/SpodOrderSubs/{PaperNum}";
+    var lookupMapData = ViewData["LookupDisplayMap"] as Dictionary<string, Dictionary<string, string>>;
+    var keyFieldName = ViewData["KeyFieldName"]?.ToString() ?? "PaperNum";
+
+    
 }
 
 <style>
@@ -51,8 +56,25 @@
     tr.selected td, tr.selected:hover td {
         background-color: #ffe6e6 !important;
     }
-
-
+    .highlight {
+        background-color: #ffd !important;
+    }
+    .ghost {
+        opacity: 0.5;
+    }
+    #search-panel {
+    background: #f8fafb;
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-top: 12px;
+    margin-bottom: 18px;
+    box-shadow: 0 2px 6px 0 #e2e8f0;
+    }
+    #search-panel label {
+        margin-bottom: 2px;
+        font-size: 0.93em;
+        color: #286bb5;
+    }
 
 </style>
 
@@ -62,6 +84,7 @@
             <h2 class="mb-0 text-primary" style="font-weight:700;letter-spacing:3px;">@ViewData["TableTitle"]</h2>
             <button id="btnAddNew" class="btn btn-primary" style="font-weight:600;">新增</button>
             <button id="btnBatchDelete" class="btn btn-danger" style="font-weight:600;">作廢</button>
+            <button id="btnSearch" class="btn btn-info" style="font-weight:600;">查詢</button>
         </div>
         <span class="order-count">
             共 <span style="font-weight:bold">@Model.TotalCount</span> 筆，
@@ -69,13 +92,22 @@
             ~ @(Math.Min(Model.PageNumber * Model.PageSize, Model.TotalCount)) 筆
         </span>  
     </div>
+    <!-- 查詢條件彈窗 -->
+    <div class="modal fade" id="searchModal" tabindex="-1" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        @await Html.PartialAsync("_QueryPanelPartial", ViewData["QueryFields"] as List<QueryFieldViewModel>)
+    </div>
+    </div>
+
     <div class="table-wrap">
         <table class="table table-hover align-middle text-center">
             <thead>
-                <tr>
-                    @foreach(var field in fields)
+                <tr id="table-header-row">
+                    @foreach (var field in fields)
                     {
-                        <th>@(string.IsNullOrWhiteSpace(field.DisplayLabel) ? field.FieldName : field.DisplayLabel)</th>
+                        <th class="sortable" draggable="true" data-field="@field.FieldName" data-serial="@field.SerialNum">
+                            @(string.IsNullOrWhiteSpace(field.DisplayLabel) ? field.FieldName : field.DisplayLabel)
+                        </th>
                     }
                 </tr>
             </thead>
@@ -83,19 +115,62 @@
                 @foreach(var item in items)
                 {
                     // 取得 key（如 PaperNum）來組路徑
-                    var paperNum = item.GetType().GetProperty("PaperNum")?.GetValue(item, null)?.ToString();
+                    // route 替換
+                    var keyValue = item.GetType().GetProperty(keyFieldName)?.GetValue(item, null)?.ToString();
                     var rowUrl = "";
-                    if (!string.IsNullOrEmpty(subRouteTemplate) && !string.IsNullOrEmpty(paperNum))
+                    if (!string.IsNullOrEmpty(subRouteTemplate) && !string.IsNullOrEmpty(keyValue))
                     {
-                        rowUrl = subRouteTemplate.Replace("{PaperNum}", paperNum);
+                        rowUrl = subRouteTemplate.Replace("{PaperNum}", keyValue); // 這邊還是用 {PaperNum} 字串
                     }
-                    <tr class="row-link" data-url="@rowUrl" data-paper-num="@paperNum">
-                        @foreach(var field in fields)
+
+                    <tr class="row-link" data-url="@rowUrl" data-paper-num="@keyValue">
+                        @foreach (var field in fields)
                         {
-                            var val = item.GetType().GetProperty(field.FieldName)?.GetValue(item, null);
-                            <td>@val</td>
+                            var keyObj = item.GetType().GetProperty(keyFieldName)?.GetValue(item);
+                            var paperKey = keyObj?.ToString();
+                            string valStr = "";
+                            Dictionary<string, string>? lookupMap = null;
+                            string display = "";
+
+                            if (!string.IsNullOrEmpty(paperKey) &&
+                                lookupMapData != null &&
+                                lookupMapData.TryGetValue(paperKey, out lookupMap) &&
+                                lookupMap != null &&
+                                lookupMap.TryGetValue(field.FieldName, out display))
+                            {
+                                valStr = display;
+                            }
+                            else
+                            {
+                                var rawValue = item.GetType().GetProperty(field.FieldName)?.GetValue(item, null);
+                                if (rawValue != null)
+                                {
+                                    if (!string.IsNullOrEmpty(field.FormatStr))
+                                    {
+                                        if (field.DataType?.ToLower() == "date" && rawValue is DateTime dt)
+                                        {
+                                            valStr = dt.ToString(field.FormatStr); // 例如 yyyy/MM/dd
+                                        }
+                                        else if (field.DataType?.ToLower() == "number" && rawValue is IFormattable fmt)
+                                        {
+                                            valStr = fmt.ToString(field.FormatStr, null); // 例如 ###,###,##0.00
+                                        }
+                                        else
+                                        {
+                                            valStr = rawValue.ToString();
+                                        }
+                                    }
+                                    else
+                                    {
+                                        valStr = rawValue.ToString();
+                                    }
+                                }
+                            }
+                            
+                            <td>@valStr</td>
                         }
                     </tr>
+
                 }
             </tbody>
         </table>
@@ -110,6 +185,7 @@
 
 <!-- 這一行一定要在所有 <script> 之前獨立放，不要包在 <script> 裡！ -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
 <script>
     let selectedPaperNum = null;
@@ -202,6 +278,102 @@
                 });
             }
         });
+
+         // ✅ 拖曳表頭欄位
+        const headerRow = document.getElementById("table-header-row");
+
+        if (headerRow) {
+           Sortable.create(headerRow, {
+                        animation: 150,
+                        swap: true,                     // ✅ 使用 swap 模式
+                        swapClass: 'highlight',         // ✅ 拖曳時加 highlight 效果
+                        ghostClass: 'ghost',            // 可選：拖曳時原位置樣式
+                        onEnd: function () {
+                            const newOrder = Array.from(headerRow.children).map((th, index) => ({
+                                fieldName: th.dataset.field,
+                                serialNum: index + 1
+                            }));
+
+                            fetch('/api/TableFieldLayout/SaveSerialOrder', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    tableName: 'SPOdOrderMain',
+                                    fieldOrders: newOrder
+                                })
+                            })
+                            .then(res => {
+                                if (!res.ok) throw new Error("更新失敗");
+                                return res.json();
+                            })
+                            .then(() => {
+                                location.reload();
+                            })
+                            .catch(err => {
+                                console.error(err);
+                                Swal.fire({ icon: 'error', title: '欄位順序儲存失敗！' });
+                            });
+                        }
+                    });
+
+        }
+           // --- 下面是新加的"雙擊表頭欄位排序" ---
+            let lastSort = { col: null, asc: true };
+
+            function getCellValue(tr, idx) {
+                const cell = tr.children[idx];
+                // 數字欄位自動去除逗號
+                let val = cell ? cell.textContent.trim().replace(/,/g, '') : '';
+                if (val === '') return 0; // 空值視為0
+                if (!isNaN(val)) return parseFloat(val); // 若為數字就轉 float
+                return val;
+            }
+
+            document.querySelectorAll("th.sortable").forEach(function (th, idx) {
+                th.addEventListener("dblclick", function () {
+                    const table = th.closest('table');
+                    const tbody = table.querySelector('tbody');
+                    const rows = Array.from(tbody.querySelectorAll('tr'));
+                    const colIdx = idx;
+
+                    // 切換正序/反序
+                    let asc = true;
+                    if (lastSort.col === colIdx) asc = !lastSort.asc;
+                    lastSort = { col: colIdx, asc: asc };
+
+                    rows.sort((a, b) => {
+                        let aVal = getCellValue(a, colIdx);
+                        let bVal = getCellValue(b, colIdx);
+
+                        // 數字/日期排數字，其他欄位用字串
+                        if (typeof aVal === "number" && typeof bVal === "number") {
+                            return asc ? aVal - bVal : bVal - aVal;
+                        }
+                        // 字串排序（不區分大小寫）
+                        aVal = aVal + '';
+                        bVal = bVal + '';
+                        return asc ? aVal.localeCompare(bVal, 'zh-Hant') : bVal.localeCompare(aVal, 'zh-Hant');
+                    });
+
+                    // 重新插入排序後的 row
+                    rows.forEach(tr => tbody.appendChild(tr));
+                });
+            });
+
+            // 查詢按鈕
+            document.getElementById('btnSearch').addEventListener('click', function () {
+                var modal = new bootstrap.Modal(document.getElementById('searchModal'));
+                modal.show();
+            });
+
+            document.getElementById('searchForm').addEventListener('submit', function (e) {
+                e.preventDefault();
+                // 取出查詢欄位
+                const params = new URLSearchParams(new FormData(this)).toString();
+                // 跳頁帶參數最簡單
+                window.location = `?${params}`;
+            });
+
     });
 
     window.addEventListener('pageshow', function (event) {
@@ -209,5 +381,7 @@
             location.reload();
         }
     });
+
+
 </script>
 

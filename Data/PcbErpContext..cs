@@ -12,7 +12,9 @@ namespace PcbErpApi.Data
         public DbSet<CurdSysItem> CurdSysItems { get; set; }
         public DbSet<SpodOrderSub> SpodOrderSub { get; set; }
         public DbSet<CurdSystemSelect> CurdSystemSelects { get; set; }
+        public DbSet<CurdPaperSelected> CURdPaperSelected { get; set; }
         public DbSet<CURdTableField> CURdTableFields { get; set; }
+        public DbSet<CURdOCXTableFieldLK> CURdOCXTableFieldLK { get; set; }
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
         public virtual DbSet<EmodProdInfo> EmodProdInfos { get; set; }
         public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
@@ -98,10 +100,257 @@ namespace PcbErpApi.Data
             modelBuilder.Entity<CURdTableField>()
             .HasKey(e => new { e.TableName, e.FieldName }); // 這裡改成你真正的複合主鍵欄位
 
+            modelBuilder.Entity<CURdOCXTableFieldLK>()
+            .HasKey(e => new { e.TableName, e.FieldName,e.KeyFieldName,e.KeySelfName }); // 這裡改成你真正的複合主鍵欄位
+
             modelBuilder.Entity<CURdTableField>().ToTable("CURdTableField");
 
             modelBuilder.Entity<SpodOrderSub>()
             .HasKey(x => new { x.PaperNum, x.Item });
+
+            modelBuilder.Entity<SpodOrderMain>(entity =>
+            {
+                entity.HasKey(e => e.PaperNum);
+
+                entity.ToTable("SPOdOrderMain", tb =>
+                    {
+                        tb.HasTrigger("SPOdOrderMain_tD");
+                        tb.HasTrigger("SPOdOrderMain_tU");
+                        tb.HasTrigger("SPOdOrderMain_tU_Upper");
+                    });
+
+                entity.Property(e => e.PaperNum)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.ArchivesNo).HasMaxLength(255);
+                entity.Property(e => e.Assistant).HasMaxLength(40);
+                entity.Property(e => e.BuildDate).HasColumnType("datetime");
+                entity.Property(e => e.CancelDate).HasColumnType("datetime");
+                entity.Property(e => e.CancelUser)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.Commerce).HasDefaultValue((byte)1);
+                entity.Property(e => e.Condition).HasMaxLength(20);
+                entity.Property(e => e.CustPonum)
+                    .HasMaxLength(50)
+                    .HasColumnName("CustPONum");
+                entity.Property(e => e.CustomerId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false)
+                    .HasDefaultValue("");
+                entity.Property(e => e.Cycle).HasMaxLength(20);
+                entity.Property(e => e.Deducted)
+                    .HasDefaultValueSql("('0')")
+                    .HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.DeliverType)
+                    .HasMaxLength(10)
+                    .IsUnicode(false);
+                entity.Property(e => e.DepartId)
+                    .HasMaxLength(12)
+                    .IsUnicode(false);
+                entity.Property(e => e.DepositTotal).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.DisTrig).HasDefaultValue(0);
+                entity.Property(e => e.DllHeadFirst)
+                    .HasMaxLength(4)
+                    .IsUnicode(false)
+                    .HasColumnName("dllHeadFirst");
+                entity.Property(e => e.DllPaperType).HasColumnName("dllPaperType");
+                entity.Property(e => e.DllPaperTypeName)
+                    .HasMaxLength(24)
+                    .HasColumnName("dllPaperTypeName");
+                entity.Property(e => e.FdrCode)
+                    .HasMaxLength(16)
+                    .IsUnicode(false)
+                    .HasDefaultValue("");
+                entity.Property(e => e.FileName).HasMaxLength(50);
+                entity.Property(e => e.FilePath).HasMaxLength(50);
+                entity.Property(e => e.FinishDate).HasColumnType("datetime");
+                entity.Property(e => e.FinishUser)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.FromType).HasDefaultValue(0);
+                entity.Property(e => e.IndirectAddr).HasMaxLength(255);
+                entity.Property(e => e.InvoiceNotes).HasMaxLength(50);
+                entity.Property(e => e.IsCm).HasColumnName("IsCM");
+                entity.Property(e => e.IsConsignment)
+                    .HasDefaultValueSql("('0')")
+                    .HasColumnName("isConsignment");
+                entity.Property(e => e.IsPnlprice)
+                    .HasDefaultValue(0)
+                    .HasColumnName("isPNLPrice");
+                entity.Property(e => e.Isproduce).HasDefaultValue((byte)1);
+                entity.Property(e => e.NonIoupdate).HasColumnName("NonIOUpdate");
+                entity.Property(e => e.Notes).HasMaxLength(255);
+                entity.Property(e => e.NotesDecim1).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.NotesDecim10).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.NotesDecim2).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.NotesDecim3).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.NotesDecim4).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.NotesDecim5).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.NotesDecim6).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.NotesDecim7).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.NotesDecim8).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.NotesDecim9).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.NotesVarch1).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch10).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch11).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch12).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch13).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch14).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch15).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch16).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch17).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch18).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch19).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch2).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch20).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch21).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch22).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch23).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch24).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch25).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch26).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch27).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch28).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch29).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch3).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch30).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch31).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch32).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch33).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch34).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch35).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch36).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch37).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch38).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch39).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch4).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch40).HasMaxLength(60);
+                entity.Property(e => e.NotesVarch5).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch6).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch7).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch8).HasMaxLength(255);
+                entity.Property(e => e.NotesVarch9).HasMaxLength(255);
+                entity.Property(e => e.Other).HasMaxLength(30);
+                entity.Property(e => e.OutAddr).HasMaxLength(255);
+                entity.Property(e => e.OutDate).HasColumnType("datetime");
+                entity.Property(e => e.PaperDate)
+                    .HasDefaultValueSql("(getdate())")
+                    .HasColumnType("datetime");
+                entity.Property(e => e.PaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false)
+                    .HasColumnName("PaperID");
+                entity.Property(e => e.PkgTitle).HasMaxLength(255);
+                entity.Property(e => e.Pkgtype)
+                    .HasMaxLength(50)
+                    .HasColumnName("PKGType");
+                entity.Property(e => e.Pokind).HasColumnName("POKind");
+                entity.Property(e => e.Potype).HasColumnName("POType");
+                entity.Property(e => e.PreOrderNum)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.PrjId)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.RateToNt)
+                    .HasDefaultValue(1m)
+                    .HasColumnType("decimal(24, 8)")
+                    .HasColumnName("RateToNT");
+                entity.Property(e => e.RejectNum)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.SalesId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.ShipTerm)
+                    .HasMaxLength(255)
+                    .IsUnicode(false);
+                entity.Property(e => e.ShipTo).HasMaxLength(255);
+                entity.Property(e => e.SourCustomerId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false)
+                    .HasDefaultValue("");
+                entity.Property(e => e.SourNum2)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.Standard).HasMaxLength(20);
+                entity.Property(e => e.Standard1).HasMaxLength(10);
+                entity.Property(e => e.SubTotal).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.SupplierId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.Tax).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.Total).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.TotalAmountOg).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.TradeId)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.TradePaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false);
+                entity.Property(e => e.TradePaperNum)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.TransPlace).HasMaxLength(255);
+                entity.Property(e => e.UpdateDate).HasColumnType("datetime");
+                entity.Property(e => e.UseId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.UserId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+            });
+
+             modelBuilder.Entity<CurdPaperSelected>(entity =>
+            {
+                entity.HasKey(e => new { e.PaperId, e.TableName, e.ColumnName, e.DefaultEqual });
+
+                entity.ToTable("CURdPaperSelected", tb =>
+                    {
+                        tb.HasTrigger("CURdPaperSelected_tD");
+                        tb.HasTrigger("CURdPaperSelected_tI");
+                    });
+
+                entity.Property(e => e.PaperId)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.TableName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.ColumnName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.DefaultEqual)
+                    .HasMaxLength(10)
+                    .IsUnicode(false);
+                entity.Property(e => e.AliasName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.ColumnCaption).HasMaxLength(50);
+                entity.Property(e => e.CommandText)
+                    .HasMaxLength(255)
+                    .IsUnicode(false);
+                entity.Property(e => e.DefaultValue).HasMaxLength(1024);
+                entity.Property(e => e.EditMask)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.IReadOnly).HasColumnName("iReadOnly");
+                entity.Property(e => e.IVisible)
+                    .HasDefaultValue(1)
+                    .HasColumnName("iVisible");
+                entity.Property(e => e.ParamType).HasDefaultValue(6);
+                entity.Property(e => e.ParamValue)
+                    .HasMaxLength(255)
+                    .IsUnicode(false);
+                entity.Property(e => e.SuperId)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.TableKind)
+                    .HasMaxLength(12)
+                    .IsUnicode(false);
+            });
+
 
             modelBuilder.Entity<EmodProdInfo>(entity =>
             {
