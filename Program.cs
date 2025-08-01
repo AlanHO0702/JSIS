@@ -2,12 +2,15 @@ using System.Reflection;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using PcbErpApi;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
 
 // 建立 WebApplication 的建構器，負責設定與註冊服務
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
+
 
 // 註冊 Swagger API 文件產生器與 Explorer，方便生成與瀏覽 API 文件
 builder.Services.AddEndpointsApiExplorer();
@@ -36,6 +39,13 @@ builder.Services.AddRazorPages();
 // 註冊 API Controllers 服務（支援 [ApiController]）
 builder.Services.AddControllers();
 
+
+builder.Services.Configure<ApiSettings>(builder.Configuration.GetSection("PcbErpApi"));
+builder.Services.AddHttpClient("MyApiClient", (sp, client) =>
+{
+    var apiSettings = sp.GetRequiredService<IOptions<ApiSettings>>().Value;
+    client.BaseAddress = new Uri(apiSettings.HostAddress);
+});
 
 // 註冊 HttpClient，讓服務可注入 HttpClient 用於發送 HTTP 請求
 builder.Services.AddHttpClient();

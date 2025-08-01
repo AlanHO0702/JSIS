@@ -929,8 +929,119 @@ namespace PcbErpApi.Data
                 entity.Property(e => e.IShowWhere).HasColumnName("iShowWhere");
             });
 
+            modelBuilder.Entity<PaginationModel>().HasNoKey();
+            modelBuilder.Entity<PaginationViewModel>().HasNoKey();
+            modelBuilder.Entity<QueryFieldViewModel>().HasNoKey();
+            modelBuilder.Entity<TableFieldViewModel>().HasNoKey();
+            modelBuilder.Entity<UpdateDictFieldInput>().HasNoKey();
+            modelBuilder.Entity<AddItemRequest>().HasNoKey();
+
+            // 針對每個 entity 有 decimal 欄位時，自動設定 HasPrecision
+
+            modelBuilder.Entity<AddItemRequest>(entity =>
+            {
+                foreach (var prop in typeof(AddItemRequest).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<CURdOCXTableFieldLK>(entity =>
+            {
+                foreach (var prop in typeof(CURdOCXTableFieldLK).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<CurdPaperSelected>(entity =>
+            {
+                foreach (var prop in typeof(CurdPaperSelected).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<CurdSysItem>(entity =>
+            {
+                foreach (var prop in typeof(CurdSysItem).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<CurdSystemSelect>(entity =>
+            {
+                foreach (var prop in typeof(CurdSystemSelect).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<CURdTableField>(entity =>
+            {
+                foreach (var prop in typeof(CURdTableField).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<CurdTableFieldLang>(entity =>
+            {
+                foreach (var prop in typeof(CurdTableFieldLang).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<CurdUser>(entity =>
+            {
+                foreach (var prop in typeof(CurdUser).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<EmodProdInfo>(entity =>
+            {
+                foreach (var prop in typeof(EmodProdInfo).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<MindStockCostPn>(entity =>
+            {
+                foreach (var prop in typeof(MindStockCostPn).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<SpodOrderMain>(entity =>
+            {
+                foreach (var prop in typeof(SpodOrderMain).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<SpodOrderSub>(entity =>
+            {
+                foreach (var prop in typeof(SpodOrderSub).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            // 以下這些通常不用加 (ViewModel, InputModel, 非 DB Entity)
+            // PaginationModel, PaginationViewModel, QueryFieldViewModel, TableFieldViewModel, UpdateDictFieldInput
+
+
             OnModelCreatingPartial(modelBuilder);
         }
+
+
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
 
     }

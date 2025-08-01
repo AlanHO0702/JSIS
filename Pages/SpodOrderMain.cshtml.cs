@@ -7,8 +7,9 @@ using PcbErpApi.Data;
 public class SpodOrdersModel : TableListModel<SpodOrderMain>
 {
 
-    public SpodOrdersModel(IHttpClientFactory httpClientFactory, ITableDictionaryService dictService,PcbErpContext context)
-        : base(httpClientFactory, dictService, context) { }
+    private readonly ILogger<TableListModel<SpodOrderMain>> _logger;
+    public SpodOrdersModel(IHttpClientFactory httpClientFactory, ITableDictionaryService dictService, PcbErpContext context,ILogger<TableListModel<SpodOrderMain>> logger)
+        : base(httpClientFactory, dictService, context, logger) {  _logger = logger;}
 
     public override string TableName => "SpodOrderMain";
 
