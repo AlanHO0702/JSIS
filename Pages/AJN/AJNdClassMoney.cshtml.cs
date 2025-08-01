@@ -30,11 +30,30 @@ public class AJNdClassMoneyModel : PageModel
     public string SortColumn { get; set; }
     public string SortDirection { get; set; } = "ASC";
 
-    // ★ 核心：儲存「實體欄位名稱」與「顯示名稱」
+    // ★ 核心：儲存「實體欄位名稱」與「顯示名稱」 主檔資料
     public List<AJNdClassMoney> ExchangeRates { get; set; }
+
+    // 新增：被選取的幣別代號（從 query string 傳入）
+    [BindProperty(SupportsGet = true)]
+    public byte? SelectedMoneyCode { get; set; }
+
+    // 新增：該幣別的匯率歷史資料
+    public List<AJNdClassMoneyHis> RateHistories { get; set; } = new();
 
     public async Task OnGetAsync()
     {
-        ExchangeRates = await _context.AJNdClassMoney.ToListAsync();
+        // 取得所有幣別主檔
+        ExchangeRates = await _context.AJNdClassMoney
+            .OrderBy(m => m.MoneyCode)
+            .ToListAsync();
+
+        // 若有選擇幣別，載入該幣別的匯率歷史
+        if (SelectedMoneyCode.HasValue)
+        {
+            RateHistories = await _context.AJNdClassMoneyHis
+                .Where(h => h.MoneyCode == SelectedMoneyCode.Value)
+                .OrderByDescending(h => h.RateDate)
+                .ToListAsync();
+        }
     }
 }

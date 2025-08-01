@@ -19,6 +19,7 @@ namespace PcbErpApi.Data
         public virtual DbSet<EmodProdInfo> EmodProdInfos { get; set; }
         public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
         public DbSet<AJNdClassMoney> AJNdClassMoney { get; set; }
+	    public DbSet<AJNdClassMoneyHis> AJNdClassMoneyHis { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<CurdUser>(entity =>
@@ -932,6 +933,15 @@ namespace PcbErpApi.Data
 
             modelBuilder.Entity<AJNdClassMoney>()
             .HasKey(e => new { e.MoneyCode, e.UseId });
+
+            modelBuilder.Entity<AJNdClassMoneyHis>()
+            .HasKey(his => new { his.MoneyCode, his.UseId });
+
+            modelBuilder.Entity<AJNdClassMoneyHis>()
+            .HasOne(his => his.Money)
+            .WithMany(m => m.Histories)
+            .HasForeignKey(his => new { his.MoneyCode, his.UseId }) // 🔑 指定複合外鍵
+            .HasPrincipalKey(m => new { m.MoneyCode, m.UseId });     // 🔑 指定主表的複合主鍵或替代鍵
 
             OnModelCreatingPartial(modelBuilder);
         }

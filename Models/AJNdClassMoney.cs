@@ -21,4 +21,5 @@ public class AJNdClassMoney
     public byte? AmountOgStr { get; set; }
     public string? MoneyAccId { get; set; }
     public string? MoneySubAccId { get; set; }
+    public ICollection<AJNdClassMoneyHis> Histories { get; set; } = new List<AJNdClassMoneyHis>();
 }
