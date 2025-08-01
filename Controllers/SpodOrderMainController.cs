@@ -7,6 +7,9 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Threading.Tasks;
 using PcbErpApi.Helpers;
+using static PcbErpApi.Helpers.DynamicQueryHelper;
+using System.Text.Json;
+using Microsoft.Extensions.Logging; // 記得加這行 using
 
 namespace PcbErpApi.Controllers
 {
@@ -15,85 +18,93 @@ namespace PcbErpApi.Controllers
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
     public class SPOdOrderMainController : ControllerBase
     {
+
         private readonly PcbErpContext _context;
         private readonly PaginationService _pagedService;
+        private readonly ILogger<SPOdOrderMainController> _logger;
 
-        public SPOdOrderMainController(PcbErpContext context, PaginationService pagedService)
+        public SPOdOrderMainController(PcbErpContext context, PaginationService pagedService, ILogger<SPOdOrderMainController> logger)
         {
             _context = context;
             _pagedService = pagedService;
+            _logger = logger;
+        }
+            // 前端傳入的物件，裡面有 filters 清單
+        public class QueryFilterRequest
+        {
+            public List<QueryParamDto> filters { get; set; }
         }
 
-        // 分頁查詢 GET: api/SPOdOrderMains/paged?page=1&pageSize=50
-        [HttpGet("paged")]
-        public async Task<IActionResult> GetPaged(
-            [FromQuery] int page = 1, 
-            [FromQuery] int pageSize = 50, 
-            [FromQuery] string? PaperNum = null
-        )
+        public class QueryParamDto
         {
-            var query = _context.SpodOrderMain.AsQueryable();
-
-            if (!string.IsNullOrWhiteSpace(PaperNum))
-            query = query.Where(x => x.PaperNum.Contains(PaperNum));
-
-            var orderedQuery = query.OrderByDescending(o => o.PaperDate);
-            var result = await _pagedService.GetPagedAsync(orderedQuery, page, pageSize);
-            return Ok(new { totalCount = result.TotalCount, data = result.Data });
+            public string Field { get; set; }
+            public string Op { get; set; }
+            public string Value { get; set; }
         }
 
-        [HttpPost("pagedQuery")]
-        public async Task<IActionResult> GetPagedAuto([FromBody] Dictionary<string, string> queryParams)
+      [HttpPost("pagedQuery")]
+        public async Task<IActionResult> GetPagedAuto([FromBody] QueryFilterRequest request)
         {
-            var query = _context.SpodOrderMain.AsQueryable();
+            var filters = request?.filters ?? new List<QueryParamDto>();
+            _logger.LogInformation("收到的過濾條件：{@filters}", filters);
 
-            // 取得所有 CURdPaperSelected 設定為查詢條件的欄位
-            var queryFieldDefs = _context.CURdPaperSelected
-                .Where(x => x.TableName == "SPOdOrderMain" && x.IVisible == 1)
-                .ToList();
-
-            // 動態組 where 條件
-            foreach (var field in queryFieldDefs)
+            // 如果 filters 是空，新增一個永遠成立的條件
+            if (!filters.Any())
             {
-                var col = field.ColumnName;
-                if (!queryParams.TryGetValue(col, out var value)) continue;
-                if (string.IsNullOrWhiteSpace(value)) continue;
-
-                var prop = typeof(SpodOrderMain).GetProperty(col);
-                if (prop == null) continue;
-
-                // 常見 DataType:
-                // 0: 字串, 1: 日期, 2: 數字, 3: 金額...（根據你的 DataType 定義）
-                switch (field.DataType)
-                {
-                    case 0: // 字串類 like
-                        query = query.WhereDynamicStringContains(col, value);
-                        break;
-                    case 1: // 日期類，支援範圍查詢
-                        if (col.ToLower().Contains("start") && DateTime.TryParse(value, out var d1))
-                            query = query.WhereDateGreaterThan(col.Replace("Start", ""), d1);
-                        else if (col.ToLower().Contains("end") && DateTime.TryParse(value, out var d2))
-                            query = query.WhereDateLessThanOrEqual(col.Replace("End", ""), d2);
-                        else if (DateTime.TryParse(value, out var dt))
-                            query = query.WhereDynamicDateEquals(col, dt);
-                        break;
-                    case 2: // 數字完全相等
-                        if (decimal.TryParse(value, out var dnum))
-                            query = query.WhereDynamicDecimalEquals(col, dnum);
-                        break;
-                    default:
-                        // 其他型別依需求擴充
-                        break;
-                }
+                filters.Add(new QueryParamDto { Field = "PaperNum", Op = "Contains", Value = "" });
             }
 
-            // 分頁/排序略
-            var page = queryParams.ContainsKey("page") ? int.Parse(queryParams["page"]) : 1;
-            var pageSize = queryParams.ContainsKey("pageSize") ? int.Parse(queryParams["pageSize"]) : 50;
+            // 過濾掉分頁參數，避免變成 Where 條件
+            var filterConditions = filters
+                .Where(x => !string.IsNullOrEmpty(x.Value) && x.Field.ToLower() != "page" && x.Field.ToLower() != "pagesize")
+                .Select(x => new QueryParam
+                {
+                    Field = x.Field,
+                    Op = ParseOp(x.Op),
+                    Value = x.Value
+                })
+                .ToList();
 
-            var result = await _pagedService.GetPagedAsync(query.OrderByDescending(x => x.PaperDate), page, pageSize);
+            _logger.LogInformation("解析後的查詢條件：{@filterConditions}", filterConditions);
+
+            IQueryable<SpodOrderMain> query = _context.SpodOrderMain.AsQueryable();
+            try
+            {
+                query = query.ApplyDynamicWhere(filterConditions);
+            }
+            catch(Exception ex)
+            {
+                _logger.LogError(ex, "套用動態條件時發生錯誤");
+                return BadRequest("查詢條件格式錯誤");
+            }
+
+            // EF Core Log 需要另外開啟，這裡簡單取得 SQL 字串(可用於調試)
+            try
+            {
+                var sql = query.ToQueryString();
+                _logger.LogInformation("產生的 SQL：{Sql}", sql);
+            }
+            catch
+            {
+                // 不要讓這影響主流程
+            }
+
+            var page = filters.FirstOrDefault(x => x.Field.ToLower() == "page")?.Value ?? "1";
+            var pageSize = filters.FirstOrDefault(x => x.Field.ToLower() == "pagesize")?.Value ?? "50";
+
+            if (!int.TryParse(page, out int pageNumber))
+                pageNumber = 1;
+            if (!int.TryParse(pageSize, out int pageSizeNumber))
+                pageSizeNumber = 50;
+
+            var result = await _pagedService.GetPagedAsync(query.OrderByDescending(x => x.PaperDate), pageNumber, pageSizeNumber);
+
+            _logger.LogInformation("查詢結果總筆數：{TotalCount}", result.TotalCount);
+
             return Ok(new { totalCount = result.TotalCount, data = result.Data });
         }
+
+
 
         /// <summary>
         /// 取得所有銷售訂單資料。

@@ -3,6 +3,7 @@
 
 @{
     var fields = ViewData["Fields"] as List<TableFieldViewModel>;
+    if (fields == null) { <text>查無欄位設定</text>; return; }
     var items = Model.Items;
     var totalCount = Model.TotalCount;
     var pageNumber = Model.PageNumber;
@@ -15,8 +16,6 @@
     var detailRouteTemplate = ViewData["SubRouteTemplate"] as string ?? "/SpodOrderSubs/{PaperNum}";
     var lookupMapData = ViewData["LookupDisplayMap"] as Dictionary<string, Dictionary<string, string>>;
     var keyFieldName = ViewData["KeyFieldName"]?.ToString() ?? "PaperNum";
-
-    
 }
 
 <style>
@@ -279,10 +278,10 @@
             }
         });
 
-         // ✅ 拖曳表頭欄位
-        const headerRow = document.getElementById("table-header-row");
+            // ✅ 拖曳表頭欄位
+            const headerRow = document.getElementById("table-header-row");
 
-        if (headerRow) {
+            if (headerRow) {
            Sortable.create(headerRow, {
                         animation: 150,
                         swap: true,                     // ✅ 使用 swap 模式
@@ -316,7 +315,7 @@
                         }
                     });
 
-        }
+            }
            // --- 下面是新加的"雙擊表頭欄位排序" ---
             let lastSort = { col: null, asc: true };
 
@@ -366,14 +365,60 @@
                 modal.show();
             });
 
-            document.getElementById('searchForm').addEventListener('submit', function (e) {
+              document.getElementById('searchForm').addEventListener('submit', function (e) {
                 e.preventDefault();
-                // 取出查詢欄位
-                const params = new URLSearchParams(new FormData(this)).toString();
-                // 跳頁帶參數最簡單
-                window.location = `?${params}`;
-            });
+                const form = this;
+                const formData = new FormData(form);
+                const paperNum = formData.get("PaperNum") || "";
+                const params = new URLSearchParams();
+                    params.set("page", "1");
+                    params.set("pageSize", "50");
+                    params.set("paperNum", paperNum);
 
+                window.location.href = window.location.pathname + "?" + params.toString();
+                
+                const filters = [];
+                for (const [key, value] of formData.entries()) {
+                    if (!value) continue;
+
+                    if (key.startsWith("Cond_")) continue;
+
+                    const fieldName = key;
+                    const opKey = "Cond_" + fieldName;
+                    const opValue = formData.get(opKey) || "Equal";
+
+                    // 確保首字大寫，其他小寫
+                    const opEnum = opValue.charAt(0).toUpperCase() + opValue.slice(1).toLowerCase();
+
+                    filters.push({
+                        Field: fieldName,
+                        Op: opEnum,
+                        Value: value
+                    });
+                }
+
+                // 分頁參數
+                filters.push({ Field: "page", Op: "Equal", Value: "1" });
+                filters.push({ Field: "pageSize", Op: "Equal", Value: "50" });
+
+                fetch('/api/SPOdOrderMain/pagedQuery', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filters })
+                })
+                .then(res => {
+                    if (!res.ok) throw new Error("查詢失敗");
+                    return res.json();
+                })
+                .then(data => {
+                    console.log("查詢結果", data);
+                    location.reload();  // 簡單重新載入
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert("查詢發生錯誤");
+                });
+            });
     });
 
     window.addEventListener('pageshow', function (event) {
