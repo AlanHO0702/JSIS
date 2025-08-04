@@ -9,7 +9,8 @@ using System.Threading.Tasks;
 using PcbErpApi.Helpers;
 using static PcbErpApi.Helpers.DynamicQueryHelper;
 using System.Text.Json;
-using Microsoft.Extensions.Logging; // 記得加這行 using
+using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization; // 記得加這行 using
 
 namespace PcbErpApi.Controllers
 {
@@ -55,8 +56,11 @@ namespace PcbErpApi.Controllers
 
         public class QueryParamDto
         {
+            [JsonPropertyName("Field")]
             public string Field { get; set; }
+            [JsonPropertyName("Op")]
             public string Op { get; set; }
+            [JsonPropertyName("Value")]
             public string Value { get; set; }
         }
 
@@ -64,8 +68,6 @@ namespace PcbErpApi.Controllers
         public async Task<IActionResult> GetPagedAuto([FromBody] QueryFilterRequest request)
         {
             var filters = request?.filters ?? new List<QueryParamDto>();
-            _logger.LogInformation("收到的過濾條件：{@filters}", filters);
-
             // 如果 filters 是空，新增一個永遠成立的條件
             if (!filters.Any())
             {
@@ -74,16 +76,14 @@ namespace PcbErpApi.Controllers
 
             // 過濾掉分頁參數，避免變成 Where 條件
             var filterConditions = filters
-                .Where(x => !string.IsNullOrEmpty(x.Value) && x.Field.ToLower() != "page" && x.Field.ToLower() != "pagesize")
-                .Select(x => new QueryParam
-                {
-                    Field = x.Field,
-                    Op = ParseOp(x.Op),
-                    Value = x.Value
-                })
-                .ToList();
-
-            _logger.LogInformation("解析後的查詢條件：{@filterConditions}", filterConditions);
+            .Where(x => !string.IsNullOrEmpty(x.Value) && x.Field.ToLower() != "page" && x.Field.ToLower() != "pagesize")
+            .Select(x => new QueryParam
+            {
+                Field = x.Field,
+                Op = ParseOp(x.Op),
+                Value = x.Value
+            })
+            .ToList();
 
             IQueryable<SpodOrderMain> query = _context.SpodOrderMain.AsQueryable();
             try
@@ -96,17 +96,6 @@ namespace PcbErpApi.Controllers
                 return BadRequest("查詢條件格式錯誤");
             }
 
-            // EF Core Log 需要另外開啟，這裡簡單取得 SQL 字串(可用於調試)
-            try
-            {
-                var sql = query.ToQueryString();
-                _logger.LogInformation("產生的 SQL：{Sql}", sql);
-            }
-            catch
-            {
-                // 不要讓這影響主流程
-            }
-
             var page = filters.FirstOrDefault(x => x.Field.ToLower() == "page")?.Value ?? "1";
             var pageSize = filters.FirstOrDefault(x => x.Field.ToLower() == "pagesize")?.Value ?? "50";
 
@@ -116,8 +105,6 @@ namespace PcbErpApi.Controllers
                 pageSizeNumber = 50;
 
             var result = await _pagedService.GetPagedAsync(query.OrderByDescending(x => x.PaperDate), pageNumber, pageSizeNumber);
-
-            _logger.LogInformation("查詢結果總筆數：{TotalCount}", result.TotalCount);
 
             return Ok(new { totalCount = result.TotalCount, data = result.Data });
         }
