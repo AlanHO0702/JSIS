@@ -105,8 +105,21 @@ namespace PcbErpApi.Controllers
                 pageSizeNumber = 50;
 
             var result = await _pagedService.GetPagedAsync(query.OrderByDescending(x => x.PaperDate), pageNumber, pageSizeNumber);
+            
+            // ★ 這裡是重點：查出所有 lookup 設定（不要自己寫死） 
+            // TableDictionaryService 應該有一個 GetOCXLookups 方法
+            var tableDictService = new TableDictionaryService(_context); // 建議用依賴注入
+                var lookupMaps = tableDictService.GetOCXLookups("SPOdOrderMain");
 
-            return Ok(new { totalCount = result.TotalCount, data = result.Data });
+                // ★ 動態組 lookupMapData，直接全包所有 lookup 欄位
+                var lookupMapData = LookupDisplayHelper.BuildLookupDisplayMap(
+                    result.Data,
+                    lookupMaps,
+                    (SpodOrderMain item) => item.PaperNum?.Trim() ?? ""
+                );
+
+
+            return Ok(new { totalCount = result.TotalCount, data = result.Data, lookupMapData });
         }
 
 

@@ -136,6 +136,22 @@
     const addApiUrl = '@addApiUrl';
     const detailRouteTemplate = '@detailRouteTemplate';
 
+    function saveQueryState(filters, pageNumber) {
+        localStorage.setItem("orderListQueryFilters", JSON.stringify(filters));
+        localStorage.setItem("orderListPageNumber", String(pageNumber));
+    }
+
+    function loadQueryState() {
+        const filtersStr = localStorage.getItem("orderListQueryFilters");
+        const pageStr = localStorage.getItem("orderListPageNumber");
+        return {
+            filters: filtersStr ? JSON.parse(filtersStr) : null,
+            pageNumber: pageStr ? parseInt(pageStr) : null
+        };
+    }
+
+    let lastQueryFilters = [];
+
     document.addEventListener("DOMContentLoaded", function () {
         // 點擊行：選取，不跳頁
         document.querySelectorAll(".row-link").forEach(function(row) {
@@ -308,50 +324,60 @@
             document.getElementById('btnSearch').addEventListener('click', function () {
                 var modal = new bootstrap.Modal(document.getElementById('searchModal'));
                 modal.show();
+                // 關鍵！等 modal 彈出後填入查詢欄位
+                setTimeout(function () {
+                    restoreSearchForm(lastQueryFilters);
+                }, 100); // 100ms是保險，基本50~100ms都可
             });
 
             // 查詢表單 submit 攔截 → fetch API 送 JSON
             document.getElementById('searchForm').addEventListener('submit', async function (e) {
-            e.preventDefault();
-            let filters = [];
-            document.querySelectorAll('#searchForm [name]').forEach(function (el) {
-                let name = el.name;
-                let value = el.value;
-                if (name.startsWith('Cond_') && value) {
-                    let fieldKey = name.replace('Cond_', '');
-                    let fieldInput = document.querySelector(`#searchForm [name='${fieldKey}']`);
-                    let fieldValue = fieldInput ? fieldInput.value : '';
-                    if (fieldValue) {
+                e.preventDefault();
+                let filters = [];
+
+                // 只找查詢值 input/select（不找條件符號）
+                document.querySelectorAll('#searchForm [name]').forEach(function (el) {
+                    let name = el.name;
+                    if (name.startsWith('Cond_')) return; // 跳過條件select
+                    let condName = 'Cond_' + name;
+                    let cond = document.querySelector(`#searchForm [name='${condName}']`);
+                    let op = cond ? cond.value : '';
+                    let value = el.value;
+                    if (value) {
                         filters.push({
-                            Field: fieldKey.replace(/\d+$/, ""),
-                            Op: value,
-                            Value: fieldValue
+                            Field: name.replace(/\d+$/, ""), // 去除尾數字還原原始欄位
+                            Op: op,
+                            Value: value
                         });
                     }
+                });
+
+                // 固定分頁參數
+                filters.push({ Field: "page", Op: "", Value: "1" });
+                filters.push({ Field: "pageSize", Op: "", Value: "@Model.PageSize" });
+
+                lastQueryFilters = filters.slice();
+                saveQueryState(lastQueryFilters, 1);
+
+                const resp = await fetch('/api/SpodOrderMain/pagedQuery', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filters })
+                });
+
+                if (!resp.ok) {
+                    Swal.fire({ icon: 'error', title: '查詢失敗' });
+                    return;
                 }
-            });
-            filters.push({ Field: "page", Op: "", Value: "1" });
-            filters.push({ Field: "pageSize", Op: "", Value: "@Model.PageSize" });
+                const result = await resp.json();
+                window._lookupMapData = result.lookupMapData;
 
-            lastQueryFilters = filters.slice(); // **記錄查詢條件**
-
-            const resp = await fetch('/api/SpodOrderMain/pagedQuery', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filters })
+                renderTable(result.data);
+                renderPagination(result.totalCount, @Model.PageSize, 1);
+                renderOrderCount(result.totalCount, @Model.PageSize, 1);
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('searchModal')).hide();
             });
 
-            if (!resp.ok) {
-                Swal.fire({ icon: 'error', title: '查詢失敗' });
-                return;
-            }
-            const result = await resp.json();
-
-            renderTable(result.data);
-            renderPagination(result.totalCount, @Model.PageSize, 1);
-            renderOrderCount(result.totalCount, @Model.PageSize, 1);
-            bootstrap.Modal.getOrCreateInstance(document.getElementById('searchModal')).hide();
-        });
 
         function renderTable(data) {
             const tbody = document.getElementById('dataTbody');
@@ -487,7 +513,7 @@
 
         }
         // 你可記錄當前查詢條件，以便查下一頁時重用
-        let lastQueryFilters = [];
+
 
         function doQuery(page = 1) {
             // 以 lastQueryFilters 當作查詢條件（如果是查詢表單送出時也要同步更新 lastQueryFilters）
@@ -501,12 +527,15 @@
             if (!foundPage) filters.push({ Field: "page", Op: "", Value: String(page) });
             if (!foundPageSize) filters.push({ Field: "pageSize", Op: "", Value: "@Model.PageSize" });
 
+            saveQueryState(filters, page);
+
             fetch('/api/SpodOrderMain/pagedQuery', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ filters })
             }).then(resp => resp.json())
             .then(result => {
+                window._lookupMapData = result.lookupMapData;   // <--- 必加這行
                 renderTable(result.data);
                 renderPagination(result.totalCount, @Model.PageSize, page);
                 renderOrderCount(result.totalCount, @Model.PageSize, page);
@@ -519,8 +548,35 @@
             document.getElementById('orderCountInfo').innerHTML = `共 <span style="font-weight:bold">${totalCount}</span> 筆，顯示第 ${start} ~ ${end} 筆`;
         }
 
+        function restoreSearchForm(filters) {
+            if (!filters) return;
+            filters.forEach(f => {
+                if (f.Field !== "page" && f.Field !== "pageSize") {
+                    // 同時找多組 CustomerId5, CustomerId6 ... input
+                    let inputEls = document.querySelectorAll(`#searchForm [name^='${f.Field}']`);
+                    inputEls.forEach(el => {
+                        // 只帶空值才填
+                        if (!el.value) el.value = f.Value;
+                    });
+                }
+                let condEls = document.querySelectorAll(`#searchForm [name^='Cond_${f.Field}']`);
+                condEls.forEach(condEl => {
+                    if (condEl && f.Op) condEl.value = f.Op;
+                });
+            });
+        }
 
-        renderTable(@Html.Raw(Json.Serialize(Model.Items)));
+
+        // 檢查 localStorage 有查詢條件就自動查詢，否則顯示初始
+        const { filters, pageNumber } = loadQueryState();
+        if (filters && filters.length > 0) {
+            lastQueryFilters = filters;
+            restoreSearchForm(filters);  // 還原查詢表單
+            doQuery(pageNumber || 1);
+        } else {
+            renderTable(@Html.Raw(Json.Serialize(Model.Items)));
+        }
+
     });
 
     window.addEventListener('pageshow', function (event) {
