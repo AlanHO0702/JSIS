@@ -16,8 +16,10 @@
     var detailRouteTemplate = ViewData["SubRouteTemplate"] as string ?? "/SpodOrderSubs/{PaperNum}";
     var lookupMapData = ViewData["LookupDisplayMap"] as Dictionary<string, Dictionary<string, string>>;
     var keyFieldName = ViewData["KeyFieldName"]?.ToString() ?? "PaperNum";
+    var tableName = ViewData["DictTableName"]?.ToString() ?? "SPOdOrderMain";
 }
 <script>
+    window._tableName = "@tableName";
     window._tableFields = @Html.Raw(Json.Serialize(fields));
     window._lookupMapData = @Html.Raw(Json.Serialize(lookupMapData ?? new Dictionary<string, Dictionary<string, string>>()));
     window._keyFieldName = "@keyFieldName";
@@ -258,7 +260,7 @@
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
-                                    tableName: 'SPOdOrderMain',
+                                    tableName: window._tableName,
                                     fieldOrders: newOrder
                                 })
                             })
@@ -359,11 +361,15 @@
                 lastQueryFilters = filters.slice();
                 saveQueryState(lastQueryFilters, 1);
 
-                const resp = await fetch('/api/SpodOrderMain/pagedQuery', {
+                const resp = await fetch('/api/PagedQuery/PagedQuery', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filters })
+                    body: JSON.stringify({
+                        table: 'SPOdOrderMain',    // ← 指定你查哪個表
+                        filters: filters           // ← 原本組好的查詢條件
+                    })
                 });
+
 
                 if (!resp.ok) {
                     Swal.fire({ icon: 'error', title: '查詢失敗' });
@@ -529,10 +535,13 @@
 
             saveQueryState(filters, page);
 
-            fetch('/api/SpodOrderMain/pagedQuery', {
+            fetch('/api/PagedQuery/PagedQuery', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filters })
+                body: JSON.stringify({
+                    table: window._tableName,    // ← 指定你查哪個表
+                    filters: filters           // ← 原本組好的查詢條件
+                })
             }).then(resp => resp.json())
             .then(result => {
                 window._lookupMapData = result.lookupMapData;   // <--- 必加這行
