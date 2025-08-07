@@ -2,15 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
-using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Expressions;
-using System.Threading.Tasks;
-using PcbErpApi.Helpers;
-using static PcbErpApi.Helpers.DynamicQueryHelper;
-using System.Text.Json;
-using Microsoft.Extensions.Logging;
-using System.Text.Json.Serialization; // 記得加這行 using
+
 
 namespace PcbErpApi.Controllers
 {
