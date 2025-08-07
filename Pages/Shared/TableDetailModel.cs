@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using PcbErpApi.Data;
 using PcbErpApi.Helpers;
 using PcbErpApi.Models;
 using System.Net.Http.Json;
@@ -62,14 +63,17 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
 
     // 預設的主鍵欄位名稱
     public virtual string GetDefaultMasterKeyName() => "PaperNum";
+    public List<QueryFieldViewModel> QueryFields { get; set; } = new();
+    private readonly PcbErpContext _context;
 
     #endregion
 
     #region 建構子
 
-    public TableDetailModel(IHttpClientFactory httpClientFactory, ITableDictionaryService dictService)
+    public TableDetailModel(IHttpClientFactory httpClientFactory, PcbErpContext context, ITableDictionaryService dictService)
     {
         _httpClient = httpClientFactory.CreateClient();
+        _context = context;
         _dictService = dictService;
     }
 
@@ -115,7 +119,7 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 DisplayLabel = x.DisplayLabel,
                 SerialNum = x.SerialNum ?? 0,
                 Visible = true,
-                LookupResultField= x.LookupResultField
+                LookupResultField = x.LookupResultField
             }).ToList();
 
         // 分頁資訊：根據 iShowWhere 分群
@@ -144,7 +148,7 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 FormatStr = x.FormatStr,
                 LookupTable = x.LookupTable,
                 LookupKeyField = x.LookupKeyField,
-                LookupResultField= x.LookupResultField
+                LookupResultField = x.LookupResultField
             }).ToList();
 
         // Lookup Map 資料 (單身 + 單頭)
@@ -162,6 +166,26 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
         // 單頭 lookup 值轉換
         var headerLookupDict = LookupDisplayHelper.BuildHeaderLookupMap(HeaderData, headerLookupMaps);
         ViewData["HeaderLookupMap"] = headerLookupDict;
+        
+
+        // 取得查詢欄位設定（cache/service 取最快）
+        QueryFields = _context.CURdPaperSelected
+            .Where(x => x.TableName == HeaderTableName && x.IVisible == 1)
+            .OrderBy(x => x.SortOrder)
+            .Select(x => new QueryFieldViewModel
+            {
+                ColumnName = x.ColumnName,
+                ColumnCaption = x.ColumnCaption,
+                DataType = x.DataType,
+                ControlType = x.ControlType ?? 0,
+                EditMask = x.EditMask,
+                DefaultValue = x.DefaultValue,
+                DefaultEqual = x.DefaultEqual,
+                SortOrder = x.SortOrder
+            })
+            .ToList();
+
+        ViewData["QueryFields"] = QueryFields;
     }
 
     #endregion

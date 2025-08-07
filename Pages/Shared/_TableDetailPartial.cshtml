@@ -26,9 +26,21 @@
 }
 
 <div class="erp-detail-container">
-    <div class="erp-title">
-        @tableTitle
+    <div class="d-flex align-items-center mb-4" style="gap:0px;">
+        <h2 class="erp-title mb-0" style="font-size:2em;margin-bottom:0;padding-bottom:0;line-height:1.2;display:flex;align-items:center;">
+            @tableTitle
+        </h2>
+        <div style="ms-2">
+            @await Html.PartialAsync("_TableToolbar", new TableToolbarModel {
+                SearchBtnId = "btnSubSearch",
+                AddBtnId = "btnSubAddNew",
+                DeleteBtnId = "btnSubBatchDelete",
+                QueryFields = ViewData["QueryFields"] as List<QueryFieldViewModel>,
+                ModalId = "searchModal"
+            })
+        </div>
     </div>
+
         <!-- 單頭可編輯表單 -->
         <form id="orderHeaderForm" class="erp-header-form mb-4">
         <div class="row">
@@ -204,8 +216,32 @@
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+<script src="~/js/toolbarHandler.js"></script>
 <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css" />
 <script>
+    const paperNum = "@PaperNum";
+    window.selectedPaperNum = '@(Model.HeaderData["PaperNum"] ?? "")';
+
+    // 用共用 ToolbarHandler class
+    new ToolbarHandler({
+        searchBtnId: "btnSubSearch",
+        addBtnId: "btnSubAddNew",
+        deleteBtnId: "btnSubBatchDelete",
+        getSelectedId: () => paperNum,  // 單身頁固定傳這個
+        modalId: "searchModal",
+        formId: "searchForm",
+        addApiUrl: "/api/SPOdOrderMain",
+        deleteApiUrlFn: id => `/api/SPOdOrderMain/${id || paperNum}`,
+        detailRouteTemplate: "/SpodOrderSub/{PaperNum}",
+        tableName: "SPOdOrderMain",
+        renderTable: null,    // 不用
+        renderPagination: null,
+        renderOrderCount: null,
+        restoreSearchForm: null,
+        queryRedirectUrl: "/SpodOrderMain" // ← 指定要跳回的主畫面路徑
+    });
+
+
     document.getElementById('orderHeaderForm').addEventListener('submit', async function(e) {
         e.preventDefault();
         const formData = Object.fromEntries(new FormData(this));
@@ -385,6 +421,10 @@
             });
         });
     });
+
+    // 單身頁自動存值
+    localStorage.setItem("lastViewedPaperNum", window.selectedPaperNum); // Razor 寫入目前單號
+
 </script>
 <style>
 body {
@@ -413,6 +453,7 @@ body {
     padding-left: 18px;
     letter-spacing: 3px;
 }
+
 .erp-table-wrapper {
     background: #fff;
     border-radius: 13px;
