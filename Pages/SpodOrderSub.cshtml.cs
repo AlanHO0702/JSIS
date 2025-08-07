@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using PcbErpApi.Data;
 using PcbErpApi.Models;
 using static SpodOrdersModel;
 
@@ -26,8 +27,8 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
     /// <summary>
     /// 注入 HttpClient 與欄位服務
     /// </summary>
-    public SpodOrderSubModel(IHttpClientFactory httpClientFactory, ITableDictionaryService dictService)
-        : base(httpClientFactory, dictService) { }
+    public SpodOrderSubModel(IHttpClientFactory httpClientFactory, PcbErpContext context,ITableDictionaryService dictService)
+        : base(httpClientFactory, context, dictService) { }
 
     #endregion
 

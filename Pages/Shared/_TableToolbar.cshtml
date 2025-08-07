@@ -1,0 +1,173 @@
+@model TableToolbarModel
+<div class="btn-toolbar" style="gap:12px;">
+    <button id="@Model.SearchBtnId" class="btn toolbar-btn" type="button">@Model.SearchText</button>
+    <button id="btnViewEditToggle" class="btn toolbar-btn" type="button">修改</button>
+    <button id="@Model.AddBtnId" class="btn toolbar-btn" type="button">@Model.AddText</button>
+    <button id="btnConfirm" class="btn toolbar-btn success" type="button" >確認</button>
+    <button id="btnCancel" class="btn toolbar-btn danger" type="button">退審</button>
+    <button id="@Model.DeleteBtnId" class="btn toolbar-btn danger" type="button">@Model.DeleteText</button>
+</div>
+<!-- 查詢條件彈窗 -->
+
+@if (Model.QueryFields != null) {
+    <div class="modal fade" id="@(Model.ModalId ?? "searchModal")">
+        <div class="modal-dialog modal-lg">
+            @await Html.PartialAsync("_QueryPanelPartial", Model.QueryFields)
+        </div>
+    </div>
+}
+
+<script>
+
+    document.addEventListener("DOMContentLoaded", function () {
+        const btn = document.getElementById('btnViewEditToggle');
+        if (!btn) return; // 沒有這個按鈕直接跳過
+
+        let isEdit = false; // 預設是瀏覽
+
+        btn.addEventListener('click', function () {
+            isEdit = !isEdit;
+            btn.textContent = isEdit ? '保留' : '修改';
+
+            // 切換欄位狀態
+            document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select').forEach(el => {
+                el.disabled = !isEdit;  // 瀏覽時全部 disabled，修改時可編輯
+            });
+        });
+
+        // 頁面載入時預設全部 disabled
+        document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select').forEach(el => {
+            el.disabled = true;
+        });
+
+        const btnConfirm = document.getElementById('btnConfirm');
+        if (btnConfirm) {
+            btnConfirm.addEventListener('click', async function () {
+                // 假設有全域變數 tableName、paperNum、userId
+                const tableName = window._tableName || 'SPOdOrderMain'; // 預設表名
+                const paperNum = window.selectedPaperNum;
+                //const paperNum = document.querySelector('[name="PaperNum"]')?.value || window._paperNum;
+                const userId = window._userId || 'admin';  // TODO: 換成實際登入者
+
+                if (!paperNum) {
+                    Swal.fire({ icon: 'warning', title: '查無單號！' });
+                    return;
+                }
+
+                const result = await Swal.fire({
+                    title: '確定要執行確認？',
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonText: '確定',
+                    cancelButtonText: '取消'
+                });
+                if (!result.isConfirmed) return;
+
+                // 你可以讓 EOC/AtFinished 後端預設，也可以在這邊選
+                const resp = await fetch('/api/PaperAction/DoAction', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        paperId: tableName,
+                        paperNum: paperNum,
+                        userId: userId,
+                        eoc: 1,
+                        aftFinished: 1
+                    })
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    Swal.fire({ icon: 'success', title: data.message || '確認成功' });
+                    location.reload(); // 確認成功後重新載入頁面
+                } else {
+                    const msg = await resp.text();
+                    Swal.fire({ icon: 'error', title: msg || '確認失敗' });
+                }
+            });
+        }
+
+
+        const btnCancel = document.getElementById('btnCancel');
+        if (btnCancel) {
+            btnCancel.addEventListener('click', async function () {
+                // 假設有全域變數 tableName、paperNum、userId
+                const tableName = window._tableName || 'SPOdOrderMain'; // 預設表名
+                const paperNum = window.selectedPaperNum;
+                const userId = window._userId || 'admin';  // TODO: 換成實際登入者
+
+                if (!paperNum) {
+                    Swal.fire({ icon: 'warning', title: '查無單號！' });
+                    return;
+                }
+
+                const result = await Swal.fire({
+                    title: '確定要執行退審？',
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonText: '確定',
+                    cancelButtonText: '取消'
+                });
+                if (!result.isConfirmed) return;
+
+                // 你可以讓 EOC/AtFinished 後端預設，也可以在這邊選
+                const resp = await fetch('/api/PaperAction/DoAction', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        paperId: tableName,
+                        paperNum: paperNum,
+                        userId: userId,
+                        eoc: 0,
+                        aftFinished: 3 // 退審時 AftFinished 設為 0
+                    })
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    Swal.fire({ icon: 'success', title: data.message || '退審成功' });
+                    location.reload(); // 退審成功後重新載入頁面
+                } else {
+                    const msg = await resp.text();
+                    Swal.fire({ icon: 'error', title: msg || '退審失敗' });
+                }
+            });
+        }
+    });
+</script>
+<style>
+    .toolbar {
+    display: flex;
+    gap: 18px;
+    }
+
+    .toolbar-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #2564b3;
+    color: #fff;
+    border: none;
+    border-radius: 11px;
+    font-size: 1.08em;
+    font-weight: 500;
+    padding: 6px 14px;
+    box-shadow: 0 2px 10px 0 #c5d9f1;
+    transition: background 0.18s, transform 0.11s;
+    cursor: pointer;
+    }
+
+    .toolbar-btn.success {
+    background: #0e7444;
+    }
+    .toolbar-btn.danger {
+    background: #df3c4b;
+    }
+
+    .toolbar-btn:hover, .toolbar-btn:focus {
+    transform: translateY(-1px) scale(1.03);
+    }
+
+    .toolbar-btn i {
+    font-size: 1.08em;
+    }
+
+</style>
