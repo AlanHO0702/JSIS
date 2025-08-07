@@ -15,6 +15,7 @@ namespace PcbErpApi.Data
         public DbSet<CurdPaperSelected> CURdPaperSelected { get; set; }
         public DbSet<CURdTableField> CURdTableFields { get; set; }
         public DbSet<CURdOCXTableFieldLK> CURdOCXTableFieldLK { get; set; }
+        public DbSet<MindMatInfo> MindMatInfo { get; set; }
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
         public virtual DbSet<EmodProdInfo> EmodProdInfos { get; set; }
         public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
@@ -95,6 +96,9 @@ namespace PcbErpApi.Data
                     .IsUnicode(false);
                 entity.Property(e => e.UserSignGraph).HasColumnType("image");
             });
+
+            modelBuilder.Entity<MindMatInfo>()
+            .HasKey(e => new { e.Partnum, e.Revision });  // ✅ 複合主鍵設定
 
             modelBuilder.Entity<CURdTableField>()
             .HasKey(e => new { e.TableName, e.FieldName }); // 這裡改成你真正的複合主鍵欄位
