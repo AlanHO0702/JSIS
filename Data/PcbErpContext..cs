@@ -16,6 +16,8 @@ namespace PcbErpApi.Data
         public DbSet<CURdTableField> CURdTableFields { get; set; }
         public DbSet<CURdOCXTableFieldLK> CURdOCXTableFieldLK { get; set; }
         public DbSet<MindMatInfo> MindMatInfo { get; set; }
+        public virtual DbSet<AjndJourMain> AjndJourMain { get; set; }
+        public virtual DbSet<AjndJourSub> AjndJourSub { get; set; }
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
         public virtual DbSet<EmodProdInfo> EmodProdInfos { get; set; }
         public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
@@ -97,6 +99,152 @@ namespace PcbErpApi.Data
                     .HasMaxLength(512)
                     .IsUnicode(false);
                 entity.Property(e => e.UserSignGraph).HasColumnType("image");
+            });
+
+            modelBuilder.Entity<AjndJourMain>(entity =>
+            {
+                entity.HasKey(e => e.PaperNum);
+
+                entity.ToTable("AJNdJourMain", tb =>
+                    {
+                        tb.HasTrigger("AJNdJourMain_tD");
+                        tb.HasTrigger("AJNdJourMain_tUI");
+                    });
+
+                entity.Property(e => e.PaperNum)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.Accountant)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.BuildDate).HasColumnType("datetime");
+                entity.Property(e => e.CancelDate).HasColumnType("datetime");
+                entity.Property(e => e.CancelUser)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.DisTrig).HasDefaultValue(0);
+                entity.Property(e => e.DllHeadFirst)
+                    .HasMaxLength(4)
+                    .IsUnicode(false)
+                    .HasColumnName("dllHeadFirst");
+                entity.Property(e => e.DllPaperType).HasColumnName("dllPaperType");
+                entity.Property(e => e.DllPaperTypeName)
+                    .HasMaxLength(24)
+                    .HasColumnName("dllPaperTypeName");
+                entity.Property(e => e.FinishDate).HasColumnType("datetime");
+                entity.Property(e => e.FinishUser)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.IsCost).HasDefaultValue(0);
+                entity.Property(e => e.JourDate).HasColumnType("datetime");
+                entity.Property(e => e.JourId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.JourType).HasDefaultValue(3);
+                entity.Property(e => e.Notes).HasMaxLength(255);
+                entity.Property(e => e.PaperDate)
+                    .HasDefaultValueSql("(getdate())")
+                    .HasColumnType("datetime");
+                entity.Property(e => e.PaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false);
+                entity.Property(e => e.RateToNt)
+                    .HasColumnType("decimal(24, 8)")
+                    .HasColumnName("RateToNT");
+                entity.Property(e => e.SourNum)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.TotalAmount).HasColumnType("decimal(18, 4)");
+                entity.Property(e => e.TotalAmountOg).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.UseId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.UserId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+            });
+
+            modelBuilder.Entity<AjndJourSub>(entity =>
+            {
+                entity.HasKey(e => new { e.PaperNum, e.Item });
+
+                entity.ToTable("AJNdJourSub", tb =>
+                    {
+                        tb.HasTrigger("AJNdJourSub_tD");
+                        tb.HasTrigger("AJNdJourSub_tIU");
+                    });
+
+                entity.Property(e => e.PaperNum)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.AccId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false);
+                entity.Property(e => e.Amount).HasColumnType("decimal(18, 4)");
+                entity.Property(e => e.AmountOg).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.AnaCode1)
+                    .HasMaxLength(24)
+                    .HasColumnName("AnaCode_1");
+                entity.Property(e => e.AnaCode2)
+                    .HasMaxLength(24)
+                    .HasColumnName("AnaCode_2");
+                entity.Property(e => e.AnaCode3)
+                    .HasMaxLength(24)
+                    .HasColumnName("AnaCode_3");
+                entity.Property(e => e.AnaCode4)
+                    .HasMaxLength(24)
+                    .HasColumnName("AnaCode_4");
+                entity.Property(e => e.AnaCode5)
+                    .HasMaxLength(24)
+                    .HasColumnName("AnaCode_5");
+                entity.Property(e => e.AnaCode6)
+                    .HasMaxLength(24)
+                    .HasColumnName("AnaCode_6");
+                entity.Property(e => e.BudgetCode)
+                    .HasMaxLength(12)
+                    .IsUnicode(false);
+                entity.Property(e => e.ChkIn).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.ChkOut).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.Comment).HasMaxLength(255);
+                entity.Property(e => e.CompanyId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.DepartId)
+                    .HasMaxLength(12)
+                    .IsUnicode(false);
+                entity.Property(e => e.MoneyCode).HasDefaultValue(0);
+                entity.Property(e => e.Notes).HasMaxLength(255);
+                entity.Property(e => e.OgIn).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.OgOut).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.OpenAmount).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.OpenAmountOg).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.PayBackDate).HasColumnType("datetime");
+                entity.Property(e => e.PrjId)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.ProjectId).HasMaxLength(16);
+                entity.Property(e => e.ProjectRate)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.RateToNt)
+                    .HasDefaultValue(0m)
+                    .HasColumnType("decimal(24, 8)")
+                    .HasColumnName("RateToNT");
+                entity.Property(e => e.RelationUseId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.SourNum)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.SourNum2)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.SourPaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false);
+                entity.Property(e => e.SubAccId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
             });
 
             modelBuilder.Entity<MindMatInfo>()

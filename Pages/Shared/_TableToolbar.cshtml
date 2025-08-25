@@ -6,6 +6,7 @@
     <button id="btnConfirm" class="btn toolbar-btn success" type="button" >確認</button>
     <button id="btnCancel" class="btn toolbar-btn danger" type="button">退審</button>
     <button id="@Model.DeleteBtnId" class="btn toolbar-btn danger" type="button">@Model.DeleteText</button>
+    <button id="btnPrint" class="btn toolbar-btn" type="button">印單據</button>
 </div>
 <!-- 查詢條件彈窗 -->
 
@@ -17,23 +18,52 @@
     </div>
 }
 
+
 <script>
+    const _reportSpName = "@(Model.ReportSpName)";
 
     document.addEventListener("DOMContentLoaded", function () {
         const btn = document.getElementById('btnViewEditToggle');
-        if (!btn) return; // 沒有這個按鈕直接跳過
+        if (!btn) return;
 
-        let isEdit = false; // 預設是瀏覽
+        // 先宣告：要封鎖的狀態
+        const BLOCK_STATUSES = ['已確認', '已結案', '已作廢'];
+
+        // 先宣告：讀單據狀態（找 label=單據狀態 的那個 li）
+        function getHeaderValueByLabel(labelText) {
+            const $li = $('.draggable-field').filter(function () {
+            return $(this).children('label').first().text().trim() === labelText;
+            }).first();
+            if (!$li.length) return null;
+
+            const $ctrl = $li.find('select, input, textarea').first();
+            if (!$ctrl.length) return null;
+
+            if ($ctrl.is('select')) return $ctrl.find('option:selected').text().trim();
+            return ($ctrl.val() || '').toString().trim();
+        }
+
+        let isEdit = false; // 預設瀏覽
 
         btn.addEventListener('click', function () {
+            // 先檢查狀態
+            const status = getHeaderValueByLabel('單據狀態') || '';
+            if (BLOCK_STATUSES.includes(status)) {
+            Swal.fire({
+                icon: 'warning',
+                title: '無法修改',
+                text: `此單據狀態為「${status}」，不可進行修改。`
+            });
+            return; // 阻止切換編輯模式
+            }
+
+            // 正常切換瀏覽/編輯
             isEdit = !isEdit;
             btn.textContent = isEdit ? '保留' : '修改';
-
-            // 切換欄位狀態
-            document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select').forEach(el => {
-                el.disabled = !isEdit;  // 瀏覽時全部 disabled，修改時可編輯
-            });
+            document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
+            .forEach(el => el.disabled = !isEdit);
         });
+
 
         // 頁面載入時預設全部 disabled
         document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select').forEach(el => {
@@ -131,6 +161,61 @@
                 }
             });
         }
+
+        const btnPrint = document.getElementById('btnPrint');
+        if (btnPrint) {
+            btnPrint.addEventListener('click', async function () {
+                // 取得單號（可依你專案的取法）
+                const paperNum = window.selectedPaperNum 
+                            || document.querySelector('[name="PaperNum"]')?.value;
+
+                if (!paperNum) {
+                    Swal.fire({ icon: 'warning', title: '查無單號！' });
+                    return;
+                }
+                
+                if (!_reportSpName) {
+                    Swal.fire({ icon: 'warning', title: '缺少報表對應的 SP 名稱！' });
+                    return;
+                }
+
+                // 呼叫後端 API
+                const res = await fetch("/api/report/generate-url", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ 
+                        paperNum: paperNum, 
+                        spName: _reportSpName,// 👈 這裡指定要跑哪個 SP
+                        reportName: _reportSpName
+                    })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    const reportUrl = data.reportUrl;
+
+                    // ✅ 這裡有兩種做法：
+                    // 1. 直接開新視窗
+                    /*
+                    window.open(reportUrl, "_blank");
+                    */
+                    // 2. 或者用 SweetAlert2 顯示 iframe 預覽
+                    
+                    Swal.fire({
+                        title: '報表預覽',
+                        html: `<iframe src="${reportUrl}" width="100%" height="600px" frameborder="0"></iframe>`,
+                        width: '80%',
+                        heightAuto: false,
+                        showCloseButton: true,
+                        showConfirmButton: false
+                    });
+                    
+                } else {
+                    Swal.fire({ icon: 'error', title: '❌ 報表產生失敗！' });
+                }
+            });
+        }
+
     });
 </script>
 <style>

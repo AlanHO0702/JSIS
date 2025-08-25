@@ -84,7 +84,7 @@ class ToolbarHandler {
             let resp = await fetch(this.deleteApiUrlFn(selectedId), { method: "DELETE" });
             if (resp.ok) {
                 await Swal.fire({ icon: 'success', title: '作廢成功！' });
-                window.location = "/"+this.tableName;  // 換成你的單身主列表路徑
+                window.location.href = this.queryRedirectUrl;
             } else {
                 let errorMsg = "作廢失敗！";
                 try {
