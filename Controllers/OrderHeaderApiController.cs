@@ -12,23 +12,26 @@ public class OrderHeaderApiController : ControllerBase
 
     // [欄位名稱] => [型別字串，如 int、decimal、nvarchar、datetime]
     private static Dictionary<string, string> _spodOrderMainFieldTypes;
+    private static Dictionary<string, bool> _spodOrderMainFieldNullable; // ✅ 新增
     private readonly object _fieldLock = new object();
 
     private void EnsureTableFields()
     {
-        if (_spodOrderMainFieldTypes == null)
+        if (_spodOrderMainFieldTypes == null || _spodOrderMainFieldNullable == null)
         {
             lock (_fieldLock)
             {
-                if (_spodOrderMainFieldTypes == null)
+                if (_spodOrderMainFieldTypes == null || _spodOrderMainFieldNullable == null)
                 {
                     _spodOrderMainFieldTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    _spodOrderMainFieldNullable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
                     using (var conn = new SqlConnection(_connStr))
                     {
                         conn.Open();
                         var cmd = conn.CreateCommand();
                         cmd.CommandText = @"
-                            SELECT COLUMN_NAME, DATA_TYPE
+                            SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
                             FROM INFORMATION_SCHEMA.COLUMNS
                             WHERE TABLE_NAME = 'SpodOrderMain'
                         ";
@@ -38,7 +41,10 @@ public class OrderHeaderApiController : ControllerBase
                             {
                                 var col = reader.GetString(0);
                                 var typ = reader.GetString(1);
+                                var isNullable = reader.GetString(2);
+
                                 _spodOrderMainFieldTypes[col] = typ;
+                                _spodOrderMainFieldNullable[col] = isNullable.Equals("YES", StringComparison.OrdinalIgnoreCase);
                             }
                         }
                     }
@@ -98,70 +104,11 @@ public class OrderHeaderApiController : ControllerBase
             object dbVal = dbRow.ContainsKey(key) ? dbRow[key] : null;
 
             string dbType = _spodOrderMainFieldTypes[key].ToLower();
+	    
+	        object newValFinal = ConvertJsonToDbType(newVal, dbType); // <-- 你原本的轉型邏輯抽出去
 
-            // 轉型
-            object newValFinal = null;
-            if (newVal is JsonElement je)
-            {
-                if (dbType == "int" || dbType == "smallint" || dbType == "tinyint")
-                {
-                    if (je.ValueKind == JsonValueKind.Number) newValFinal = je.GetInt32();
-                    else if (je.ValueKind == JsonValueKind.String && int.TryParse(je.GetString(), out var v)) newValFinal = v;
-                }
-                else if (dbType == "bigint")
-                {
-                    if (je.ValueKind == JsonValueKind.Number) newValFinal = je.GetInt64();
-                    else if (je.ValueKind == JsonValueKind.String && long.TryParse(je.GetString(), out var v)) newValFinal = v;
-                }
-                else if (dbType == "decimal" || dbType == "numeric" || dbType == "money" || dbType == "smallmoney")
-                {
-                    if (je.ValueKind == JsonValueKind.Number) newValFinal = je.GetDecimal();
-                    else if (je.ValueKind == JsonValueKind.String && decimal.TryParse(je.GetString(), out var v)) newValFinal = v;
-                }
-                else if (dbType == "bit")
-                {
-                    if (je.ValueKind == JsonValueKind.True || je.ValueKind == JsonValueKind.False)
-                        newValFinal = je.GetBoolean();
-                    else if (je.ValueKind == JsonValueKind.Number)
-                        newValFinal = je.GetInt32() != 0;
-                    else if (je.ValueKind == JsonValueKind.String && bool.TryParse(je.GetString(), out var bVal))
-                        newValFinal = bVal;
-                    else if (je.ValueKind == JsonValueKind.String && int.TryParse(je.GetString(), out var iVal))
-                        newValFinal = iVal != 0;
-                }
-                else if (dbType == "datetime" || dbType == "smalldatetime" || dbType == "date" || dbType == "datetime2")
-                {
-                    if (je.ValueKind == JsonValueKind.String && DateTime.TryParse(je.GetString(), out var dtVal))
-                        newValFinal = dtVal;
-                }
-                else if (dbType == "nvarchar" || dbType == "varchar")
-                {
-                    newValFinal = je.GetString();
-                }
-                else
-                {
-                    newValFinal = je.ToString();
-                }
-            }
-            else if (dbType == "int" && newVal is string s1)
-            {
-                if (int.TryParse(s1, out var v)) newValFinal = v;
-            }
-            else if ((dbType == "decimal" || dbType == "numeric" || dbType == "money" || dbType == "smallmoney") && newVal is string s2)
-            {
-                if (decimal.TryParse(s2, out var v)) newValFinal = v;
-            }
-            else if (dbType == "nvarchar" || dbType == "varchar")
-            {
-                newValFinal = newVal?.ToString();
-            }
-            else
-            {
-                newValFinal = newVal;
-            }
-
-            // 與 DB 的值做比對（簡單處理 DBNull、null、ToString 等等，可自行優化）
             object dbValCompare = dbVal is DBNull ? null : dbVal;
+
             bool isDifferent;
             if (newValFinal == null && dbValCompare == null)
                 isDifferent = false;
@@ -174,6 +121,12 @@ public class OrderHeaderApiController : ControllerBase
 
             if (isDifferent)
             {
+                // ✅ 避免把 NOT NULL 欄位更新成 NULL
+                if (newValFinal == null && !_spodOrderMainFieldNullable[key])
+                {
+                    continue; // 跳過，不更新
+                }
+
                 updateFields.Add(key);
                 updateValues[key] = newValFinal ?? DBNull.Value;
             }
@@ -182,7 +135,7 @@ public class OrderHeaderApiController : ControllerBase
         if (!updateFields.Any())
             return Ok(new { updated = false });
 
-        // Step 3: 組出只更新有異動的欄位
+        // Step 3: 組 UPDATE SQL (保持原本程式)
         var setClause = string.Join(", ", updateFields.Select(k => $"{k}=@{k}"));
         var sql = $"UPDATE SpodOrderMain SET {setClause} WHERE PaperNum=@PaperNum";
 
@@ -218,7 +171,57 @@ public class OrderHeaderApiController : ControllerBase
 
             await cmd.ExecuteNonQueryAsync();
         }
+        
+        // Step 4: 更新完，再查一次最新資料 (因為 Trigger 可能改了其他欄位)
+        Dictionary<string, object> latestRow = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        using (var conn = new SqlConnection(_connStr))
+        {
+            await conn.OpenAsync();
+            var selectCmd = conn.CreateCommand();
+            selectCmd.CommandText = "SELECT * FROM SpodOrderMain WHERE PaperNum=@PaperNum";
+            selectCmd.Parameters.AddWithValue("@PaperNum", paperNum);
 
-        return Ok(new { updated = true, fields = updateFields });
+            using (var reader = await selectCmd.ExecuteReaderAsync())
+            {
+                if (await reader.ReadAsync())
+                {
+                    for (int i = 0; i < reader.FieldCount; i++)
+                    {
+                        latestRow[reader.GetName(i)] = reader.GetValue(i);
+                    }
+                }
+            }
+        }
+
+        return Ok(new { updated = true, fields = updateFields, data = latestRow });
+
     }
+
+    // 你原本的轉型邏輯可以放這裡
+    private object ConvertJsonToDbType(object newVal, string dbType)
+    {
+        if (newVal == null) return null;
+
+        if (newVal is JsonElement je)
+        {
+            // ✅ 空字串要視為 null
+            if (je.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(je.GetString()))
+                return null;
+
+            if (dbType == "int" && je.ValueKind == JsonValueKind.Number) return je.GetInt32();
+            if (dbType == "bigint" && je.ValueKind == JsonValueKind.Number) return je.GetInt64();
+            if ((dbType == "decimal" || dbType == "numeric" || dbType == "money") && je.ValueKind == JsonValueKind.Number) return je.GetDecimal();
+            if (dbType == "bit" && (je.ValueKind == JsonValueKind.True || je.ValueKind == JsonValueKind.False)) return je.GetBoolean();
+            if (dbType.Contains("date") && je.ValueKind == JsonValueKind.String && DateTime.TryParse(je.GetString(), out var dt)) return dt;
+            if ((dbType == "nvarchar" || dbType == "varchar") && je.ValueKind == JsonValueKind.String) return je.GetString();
+            return je.ToString();
+        }
+
+        // ✅ 如果是 string 且為空，直接回傳 null
+        if (newVal is string s && string.IsNullOrWhiteSpace(s))
+            return null;
+
+        return newVal;
+    }
+
 }

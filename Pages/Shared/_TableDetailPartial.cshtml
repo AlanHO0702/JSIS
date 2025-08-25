@@ -254,26 +254,57 @@
     });
 
 
-    document.getElementById('orderHeaderForm').addEventListener('submit', async function(e) {
+    document.getElementById('orderHeaderForm').addEventListener('submit', async function (e) {
         e.preventDefault();
+
         const formData = Object.fromEntries(new FormData(this));
-        // 你自己的儲存API路徑
+
         const resp = await fetch('/api/OrderHeaderApi/SaveOrderHeader', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(formData)
         });
-        if(resp.ok) {
-            Swal.fire({ icon: 'success', title: '儲存成功！' });
+
+        if (resp.ok) {
+            const result = await resp.json();
+            if (result.updated) {
+                Swal.fire({
+                    icon: 'success',
+                    title: '儲存成功！',
+                    timer: 1000,
+                    showConfirmButton: false
+                }).then(() => {
+                    
+                    // ✅ 儲存一個狀態，讓 reload 後知道要進入修改模式
+                    localStorage.setItem("afterSave", "1");
+                    // ✅ 整頁刷新
+                    location.reload();
+                });
+            } else {
+                Swal.fire({ icon: 'info', title: '沒有資料異動' });
+            }
         } else {
             let msg = '儲存失敗';
             try {
                 let result = await resp.json();
                 if (result.error) msg = result.error;
-            } catch {}
+            } catch { }
             Swal.fire({ icon: 'error', title: msg });
         }
     });
+
+    // ✅ 頁面載入完成後，判斷是不是刷新回來的狀態
+    window.addEventListener('load', () => {
+        // 例如利用 localStorage 記錄狀態
+        if (localStorage.getItem("afterSave") === "1") {
+            localStorage.removeItem("afterSave");
+
+            // 自動點擊修改按鈕
+            document.getElementById("btnViewEditToggle")?.click();
+        }
+    });
+
+
 
     $(function () {
         let debounceTimer;
