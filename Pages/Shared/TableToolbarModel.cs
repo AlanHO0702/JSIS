@@ -10,4 +10,6 @@ public class TableToolbarModel
     public string DeleteText { get; set; } = "作廢";
     public string ModalId { get; set; } = "searchModal";
     public List<QueryFieldViewModel> QueryFields { get; set; }
+    // ✅ 新增一個屬性，讓不同單據指定對應的 SP
+    public string ReportSpName { get; set; } = "";
 }

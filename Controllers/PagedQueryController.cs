@@ -67,7 +67,7 @@ namespace PcbErpApi.Controllers
             if (!int.TryParse(page, out int pageNumber)) pageNumber = 1;
             if (!int.TryParse(pageSize, out int pageSizeNumber)) pageSizeNumber = 50;
 
-            switch (tableName?.ToLower())
+            switch (tableName?.ToLower())//注意資料表要換成小寫對應
             {
                 case "spodordermain":
                     {
@@ -101,6 +101,38 @@ namespace PcbErpApi.Controllers
 
                         return Ok(new { totalCount = result.TotalCount, data = result.Data, lookupMapData });
                     }
+                case "ajndjourmain":
+                    {
+                        IQueryable<AjndJourMain> query = _context.AjndJourMain.AsQueryable();
+                        query = query.ApplyDynamicWhere(filterConditions);
+
+                        var result = await _pagedService.GetPagedAsync(
+                            query.OrderByDescending(x => x.PaperDate), pageNumber, pageSizeNumber);
+
+                        var tableDictService = new TableDictionaryService(_context);
+                        var lookupMaps = tableDictService.GetOCXLookups(tableName);
+
+                        var lookupMapData = LookupDisplayHelper.BuildLookupDisplayMap(
+                            result.Data, lookupMaps, (AjndJourMain item) => item.PaperNum?.Trim() ?? "");
+
+                        return Ok(new { totalCount = result.TotalCount, data = result.Data, lookupMapData });
+                    }
+                case "ajndjoursub":
+                    {
+                        IQueryable<AjndJourSub> query = _context.AjndJourSub.AsQueryable();
+                        query = query.ApplyDynamicWhere(filterConditions);
+
+                        var result = await _pagedService.GetPagedAsync(
+                            query.OrderByDescending(x => x.Item), pageNumber, pageSizeNumber);
+
+                        var tableDictService = new TableDictionaryService(_context);
+                        var lookupMaps = tableDictService.GetOCXLookups(tableName);
+
+                        var lookupMapData = LookupDisplayHelper.BuildLookupDisplayMap(
+                            result.Data, lookupMaps, (AjndJourSub item) => item.PaperNum?.Trim() ?? "");
+
+                        return Ok(new { totalCount = result.TotalCount, data = result.Data, lookupMapData });
+                    }    
                 // 依需求再加其他表
                 default:
                     return BadRequest("不支援的 Table");

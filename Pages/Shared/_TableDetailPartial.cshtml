@@ -11,6 +11,13 @@
     var tableTitle = ViewData["TableTitle"] as string ?? "";
     var showRowNumber = ViewData["ShowRowNumber"] as bool? ?? true;
     var headerFieldsList = ((IEnumerable<TableFieldViewModel>)Model.HeaderTableFields).ToList();
+    var addApiUrl = ViewData["AddApiUrl"]?.ToString() ?? "";
+    var detailRouteTemplate = ViewData["SubRouteTemplate"]?.ToString() ?? "";
+    var tableName = ViewData["DictTableName"]?.ToString() ?? "";
+    var keyFieldName = ViewData["KeyFieldName"]?.ToString() ?? "PaperNum";
+    var queryRedirectUrl = ViewData["QueryRedirectUrl"]?.ToString() ?? "";
+    var DeleteApiUrl = ViewData["DeleteApiUrl"]?.ToString() ?? "";
+    
 
     var groupedTabs = headerFieldsList
         .Where(f => (f.iShowWhere ?? 1) > 0) // ➜ 過濾掉 iShowWhere 為 0 的欄位
@@ -23,6 +30,7 @@
     var PaperNum = headerData.ContainsKey("PaperNum") ? headerData["PaperNum"]?.ToString() ?? "" : "";
 
     var headerLookupMap = ViewData["HeaderLookupMap"] as Dictionary<string, string>;
+
 }
 
 <div class="erp-detail-container">
@@ -36,7 +44,8 @@
                 AddBtnId = "btnSubAddNew",
                 DeleteBtnId = "btnSubBatchDelete",
                 QueryFields = ViewData["QueryFields"] as List<QueryFieldViewModel>,
-                ModalId = "searchModal"
+                ModalId = "searchModal",
+                ReportSpName = ViewData["ReportSpName"]?.ToString() ?? ""   // 👈 從外層再傳進來
             })
         </div>
     </div>
@@ -68,7 +77,7 @@
                             id="tab-@tab.Key" role="tabpanel">
                             <ul class="list-unstyled header-fields-tab"
                                 data-tab-index="@tab.Key"
-                                style="position: relative; min-height: 400px;">
+                                style="position: relative">
                                @foreach (var field in tab.Value)
                                 {
                                     object rawValue = null;
@@ -117,6 +126,8 @@
                                     var width = field.iFieldWidth ?? 160;
                                     var height = field.iFieldHeight ?? 44;
 
+                                    var liClass = "draggable-field inline"; // 永遠橫排
+
 
                                      // 判斷有 lookup table 設定
                                     if (!string.IsNullOrWhiteSpace(field.LookupTable) &&
@@ -124,7 +135,7 @@
                                         !string.IsNullOrWhiteSpace(field.LookupResultField))
                                     {
                                         // 下拉選單元件（用 select）
-                                        <li class="draggable-field"
+                                        <li class="@liClass"
                                             data-field="@field.FieldName"
                                             data-tab="@tab.Key"
                                             style="top:@(field.iFieldTop ?? 0)px; left:@(field.iFieldLeft ?? 0)px; width:@(field.iFieldWidth ?? 160)px; height:@(field.iFieldHeight ?? 44)px;">
@@ -141,7 +152,7 @@
                                     }
                                     else
                                     {
-                                        <li class="draggable-field"
+                                        <li class="@liClass"
                                             data-field="@field.FieldName"
                                             data-tab="@tab.Key"
                                             style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
@@ -220,6 +231,7 @@
 <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css" />
 <script>
     const paperNum = "@PaperNum";
+    const QueryRedirectUrl = "@(ViewData["QueryRedirectUrl"])";
     window.selectedPaperNum = '@(Model.HeaderData["PaperNum"] ?? "")';
 
     // 用共用 ToolbarHandler class
@@ -227,18 +239,18 @@
         searchBtnId: "btnSubSearch",
         addBtnId: "btnSubAddNew",
         deleteBtnId: "btnSubBatchDelete",
-        getSelectedId: () => paperNum,  // 單身頁固定傳這個
+        getSelectedId: () => paperNum,  // 單身頁固定傳單號
         modalId: "searchModal",
         formId: "searchForm",
-        addApiUrl: "/api/SPOdOrderMain",
-        deleteApiUrlFn: id => `/api/SPOdOrderMain/${id || paperNum}`,
-        detailRouteTemplate: "/SpodOrderSub/{PaperNum}",
-        tableName: "SPOdOrderMain",
-        renderTable: null,    // 不用
+        addApiUrl: "@addApiUrl",  
+        deleteApiUrlFn: id => `/api/@DeleteApiUrl/${id || paperNum}`,
+        detailRouteTemplate: "@detailRouteTemplate",  
+        tableName: "@tableName",  
+        renderTable: null,
         renderPagination: null,
         renderOrderCount: null,
         restoreSearchForm: null,
-        queryRedirectUrl: "/SpodOrderMain" // ← 指定要跳回的主畫面路徑
+        queryRedirectUrl: QueryRedirectUrl   // 👈 一定要包成字串
     });
 
 
@@ -317,8 +329,8 @@
                     return $("<div>")
                         .text($(this).find("label").text())
                         .css({
-                            width: "80px",
-                            height: "55px",
+                            width: "80px",   
+                            height: $li.outerHeight() + "px", // 跟欄位一樣高
                             background: "#eef",
                             border: "1px dashed #999",
                             padding: "4px",
@@ -420,6 +432,31 @@
                 $(this).next('.lookup-label').text($(this).find('option:selected').text());
             });
         });
+
+        // 進畫面只做一次：把每個分頁的容器高度設成「最底欄位 + 偏移」
+        function setInitialTabHeights(offsetPx = 10) {
+        // 先把隱藏分頁暫時顯示出來，好量高度
+        const hiddenTabs = $(".tab-pane").not(".show");
+        hiddenTabs.addClass("tmp-show").addClass("show").css("display", "block");
+
+        $(".header-fields-tab").each(function () {
+            let maxBottom = 0;
+            $(this).children(".draggable-field").each(function () {
+            const $el = $(this);
+            const bottom = $el.position().top + $el.outerHeight();
+            if (bottom > maxBottom) maxBottom = bottom;
+            });
+            // 設定容器高度 = 最底欄位 + 預留空間
+            $(this).height(Math.max(0, Math.ceil(maxBottom + offsetPx)));
+        });
+
+        // 還原剛剛暫時顯示的分頁
+        hiddenTabs.removeClass("show tmp-show").css("display", "");
+        }
+
+        // 首次渲染後執行（多包一層，確保 DOM 都到位）
+        requestAnimationFrame(() => setInitialTabHeights(10)); // 想多一點就改這個數字
+
     });
 
     // 單身頁自動存值
@@ -537,6 +574,8 @@ textarea.resizable-input {
     position: relative;
     min-height: 300px;
     background: rgba(0,0,0,0.03);
+    min-height: 120px;       /* 先給一個小的安全值 */
+    padding-bottom: 8px;
 }
 
 .drop-hover {
@@ -596,6 +635,54 @@ textarea.resizable-input {
     border-color: #bdd2f7 #bdd2f7 #fff #bdd2f7 !important;
     box-shadow: 0 2px 6px 0 #e4ecf7;
     font-weight: bold;
+}
+
+/* 橫排：標題 + 欄位 */
+.draggable-field.inline {
+    position: absolute;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    box-sizing: border-box;
+    overflow: hidden;
+    background: transparent;
+
+    /* 關鍵：讓 jQuery UI 設的 width(px) 生效 */
+    /* 刪掉 width:auto!important; */
+    flex: 0 0 auto;          /* 不要讓 flex 重新計算寬度，使用元素自己的 px 寬 */
+    min-width: 100px;        /* 自行調整 */
+    max-width: 100%;
+}
+.draggable-field.inline label {
+    cursor: move;
+    flex: 0 0 auto;          /* 標題不吃寬 */
+    margin: 0 6px 0 0;
+    font-size: 0.9em;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+.draggable-field.inline .field-control {
+    flex: 1 1 auto;
+    height: 100%;
+    display: flex;
+}
+.draggable-field.inline .field-control > * {
+    width: 100%;
+}
+/* 讓輸入控件吃剩餘空間，外層 li 調寬時一起變 */
+.draggable-field.inline textarea,
+.draggable-field.inline input,
+.draggable-field.inline .form-select {
+    flex: 1 1 auto;
+    width: 100%;
+    height: 100%;
+    min-height: 32px;
+    line-height: 1.2;
+    resize: none;
+    padding: 4px 6px;
+    font-size: 0.95em;
 }
 
 
