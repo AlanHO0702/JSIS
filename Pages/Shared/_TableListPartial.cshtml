@@ -23,7 +23,6 @@
     window._tableFields = @Html.Raw(Json.Serialize(fields));
     window._lookupMapData = @Html.Raw(Json.Serialize(lookupMapData ?? new Dictionary<string, Dictionary<string, string>>()));
     window._keyFieldName = "@keyFieldName";
-    window._subRouteTemplate = "@subRouteTemplate";
 </script>
 
 <style>
@@ -161,11 +160,15 @@
             searchBtnId: "btnSearch",
             addBtnId: "btnAddNew",
             deleteBtnId: "btnBatchDelete",
-            modalId: "searchModal",
-            formId: "searchForm",
+            getSelectedId: () => {
+                const selectedRow = document.querySelector("#dataTbody tr.selected");
+                return selectedRow ? selectedRow.getAttribute("data-paper-num") : null;
+            },   // ← 這裡加上逗號 !!!
+            modalId: "searchModal",   // 一定要加
+            formId: "searchForm",     // 一定要加
             addApiUrl: "@addApiUrl",
             deleteApiUrlFn: (id) => `/api/${"@tableName"}/${id}`,
-            detailRouteTemplate: "@detailRouteTemplate",
+            detailRouteTemplate: "@(detailRouteTemplate)",
             tableName: "@tableName",
             pageSize: 50,
             renderTable: renderTable,
@@ -264,7 +267,7 @@
             const fields = window._tableFields;
             const lookupMapData = window._lookupMapData;
             const keyFieldName = window._keyFieldName;
-            const subRouteTemplate = window._subRouteTemplate;
+            const subRouteTemplate = "@(detailRouteTemplate)";
 
             data.forEach(item => {
                 const keyValue = item[keyFieldName] || "";
@@ -453,7 +456,7 @@
 
         function highlightLastViewedRow() {
             const lastPaperNum = localStorage.getItem("lastViewedPaperNum");
-            console.log('highlight row', lastPaperNum); // ←看有沒有抓到
+            //console.log('highlight row', lastPaperNum); // ←看有沒有抓到
             if (!lastPaperNum) return;
 
             const tr = document.querySelector(`tr[data-paper-num="${lastPaperNum}"]`);
@@ -478,6 +481,31 @@
 
     });
 
+    // List 頁：點修改 → 跳轉前檢查
+    btnViewEditToggle.addEventListener("click", () => {
+        const id = window.selectedPaperNum;
+        if (!id) {
+            Swal.fire({ icon: 'warning', title: '請先選擇一筆單據' });
+            return;
+        }
+
+        const row = document.querySelector(`tr[data-paper-num="${id}"]`);
+        const status = row?.querySelector("td:nth-child(6)")?.textContent.trim() || '';
+
+        if (window.BLOCK_STATUSES && window.BLOCK_STATUSES.includes(status)) {
+            Swal.fire({
+                icon: 'warning',
+                title: '無法修改',
+                text: `此單據狀態為「${status}」，不可進行修改。`
+            });
+            return; // 阻止跳轉
+        }
+
+        const url = detailRouteTemplate.replace("{PaperNum}", id);
+        window.location.href = url;
+    });
+    
+    
     window.addEventListener('pageshow', function (event) {
         if (event.persisted || (window.performance && window.performance.getEntriesByType("navigation")[0]?.type === "back_forward")) {
             //location.reload();

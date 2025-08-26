@@ -1,3 +1,5 @@
+// 共用封鎖狀態 (全域一次就好)
+window.BLOCK_STATUSES = ['已確認', '已結案', '已作廢'];
 class ToolbarHandler {
     constructor(opts) {
         this.searchBtnId = opts.searchBtnId;
@@ -18,7 +20,7 @@ class ToolbarHandler {
         this.lastQueryFilters = [];
         this.getSelectedId = opts.getSelectedId || (() => window.selectedPaperNum || null);
         this.queryRedirectUrl = opts.queryRedirectUrl || null;
-
+    
         this.init();
     }
 
@@ -162,9 +164,6 @@ class ToolbarHandler {
             bootstrap.Modal.getOrCreateInstance(document.getElementById(this.modalId)).hide();
         };
 
-
-        
-    }
-
+    };
 
 }

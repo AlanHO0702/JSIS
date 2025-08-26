@@ -34,10 +34,10 @@
 }
 
 <div class="erp-detail-container">
-    <div class="d-flex align-items-center mb-4" style="gap:0px;">
-        <h2 class="erp-title mb-0" style="font-size:2em;margin-bottom:0;padding-bottom:0;line-height:1.2;display:flex;align-items:center;">
-            @tableTitle
-        </h2>
+    <div class="d-flex align-items-center mb-4" style="gap:12px;">
+        <button type="submit" class="btn toolbar-btn" form="orderHeaderForm">
+            儲存單頭
+        </button>
         <div style="ms-2">
             @await Html.PartialAsync("_TableToolbar", new TableToolbarModel {
                 SearchBtnId = "btnSubSearch",
@@ -51,7 +51,7 @@
     </div>
 
         <!-- 單頭可編輯表單 -->
-        <form id="orderHeaderForm" class="erp-header-form mb-4">
+        <form id="orderHeaderForm" class="erp-header-form">
         <div class="row">
             <!-- ✅ Tabs 切換列 -->
             <ul class="nav nav-tabs" id="headerTabs" role="tablist">
@@ -167,7 +167,6 @@
                     }
                 </div>
         </div>
-        <button type="submit" class="btn btn-primary">儲存單頭</button>
     </form>
     <!-- 單身明細 table -->
     <div class="erp-table-wrapper">
@@ -293,6 +292,48 @@
         }
     });
 
+
+    const btn = document.getElementById('btnViewEditToggle');
+    let isEdit = false;
+
+    // Detail 頁專用：讀取單頭表單某個 label 的值
+    function getHeaderValueByLabel(labelText) {
+        const $li = $('.draggable-field').filter(function () {
+            return $(this).children('label').first().text().trim() === labelText;
+        }).first();
+        if (!$li.length) return null;
+
+        const $ctrl = $li.find('select, input, textarea').first();
+        if (!$ctrl.length) return null;
+
+        if ($ctrl.is('select')) return $ctrl.find('option:selected').text().trim();
+        return ($ctrl.val() || '').toString().trim();
+    }
+
+    // Detail 頁：點修改 → 切換編輯模式前檢查
+    btn.addEventListener('click', function () {
+        const status = getHeaderValueByLabel('單據狀態') || '';
+        if (window.BLOCK_STATUSES && window.BLOCK_STATUSES.includes(status)) {
+            Swal.fire({
+                icon: 'warning',
+                title: '無法修改',
+                text: `此單據狀態為「${status}」，不可進行修改。`
+            });
+            return; // 阻止切換編輯模式
+        }
+
+        // ✅ 狀態允許 → 切換編輯模式
+        isEdit = !isEdit;
+        btn.textContent = isEdit ? '保留' : '修改';
+        document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
+            .forEach(el => el.disabled = !isEdit);
+    });
+
+    // 初始：全部 disable
+    document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
+        .forEach(el => el.disabled = true);
+
+    
     // ✅ 頁面載入完成後，判斷是不是刷新回來的狀態
     window.addEventListener('load', () => {
         // 例如利用 localStorage 記錄狀態
@@ -524,12 +565,12 @@ body {
 
 .erp-table-wrapper {
     background: #fff;
-    border-radius: 13px;
     box-shadow: 0 4px 18px 0 #c3d4e6;
-    padding: 24px 32px 16px 32px;
-    margin: 0 auto 32px auto;
     max-width: 1400px;
     overflow-x: auto;
+    padding: 8px !important;   /* 上方內距小一點 */
+    border-radius: 0 0 13px 13px;  /* 上方圓角取消，跟單頭銜接 */
+    border: 1px solid #d6dbe5;  
 }
 .erp-table {
     width: 100%;
@@ -542,12 +583,14 @@ body {
     background: #e7ecf3;
 }
 .erp-table th, .erp-table td {
+    background: #f1f5fb;            /* ✅ 改成淡藍灰，跟外框白色做出對比 */
     padding: 7px 12px;
     border-bottom: 1px solid #c5d1e4;
     white-space: nowrap;
     text-align: center;
     font-weight: 500;
     border-right: 1px solid #dde4ed;
+    height: 34px; 
 }
 .erp-table th:last-child, .erp-table td:last-child {
     border-right: none;
@@ -603,10 +646,11 @@ textarea.resizable-input {
 
 .header-fields-tab {
     position: relative;
-    min-height: 300px;
-    background: rgba(0,0,0,0.03);
-    min-height: 120px;       /* 先給一個小的安全值 */
+    min-height: 120px;
     padding-bottom: 8px;
+    background: #eef2f9 !important;  /* ✅ 改這裡，跟明細欄位背景同色 */
+    box-shadow: 0 2px 6px rgba(0,0,0,0.04);  /* 輕微陰影 */
+    
 }
 
 .drop-hover {
