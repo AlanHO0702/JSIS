@@ -17,7 +17,8 @@
     var keyFieldName = ViewData["KeyFieldName"]?.ToString() ?? "PaperNum";
     var queryRedirectUrl = ViewData["QueryRedirectUrl"]?.ToString() ?? "";
     var DeleteApiUrl = ViewData["DeleteApiUrl"]?.ToString() ?? "";
-    
+
+
 
     var groupedTabs = headerFieldsList
         .Where(f => (f.iShowWhere ?? 1) > 0) // ➜ 過濾掉 iShowWhere 為 0 的欄位
@@ -30,13 +31,14 @@
     var PaperNum = headerData.ContainsKey("PaperNum") ? headerData["PaperNum"]?.ToString() ?? "" : "";
 
     var headerLookupMap = ViewData["HeaderLookupMap"] as Dictionary<string, string>;
+        
 
 }
 
 <div class="erp-detail-container">
     <div class="d-flex align-items-center mb-4" style="gap:12px;">
         <button type="submit" class="btn toolbar-btn" form="orderHeaderForm">
-            儲存單頭
+            儲存
         </button>
         <div style="ms-2">
             @await Html.PartialAsync("_TableToolbar", new TableToolbarModel {
@@ -91,28 +93,8 @@
                                     }
                                     else if (rawValue != null)
                                     {
-                                        if (!string.IsNullOrEmpty(field.FormatStr))
-                                        {
-                                            // 日期格式
-                                            if (field.DataType?.ToLower() == "date" && rawValue is DateTime dt)
-                                            {
-                                                // nn 轉 mm
-                                                displayText = dt.ToString(field.FormatStr.Replace("nn", "mm"));
-                                            }
-                                            // 數字格式
-                                            else if (field.DataType?.ToLower() == "number" && rawValue is IFormattable fmt)
-                                            {
-                                                displayText = fmt.ToString(field.FormatStr, null);
-                                            }
-                                            else
-                                            {
-                                                displayText = rawValue.ToString();
-                                            }
-                                        }
-                                        else
-                                        {
-                                            displayText = rawValue.ToString();
-                                        }
+                                        //輸出格式用Helper轉型
+                                        displayText = FormatHelper.FormatValue(rawValue, field.DataType, field.FormatStr);
 
                                         // ✅ 這裡補：數值型若為空，顯示 0
                                         if (string.IsNullOrWhiteSpace(displayText) && field.DataType?.ToLower() == "number")
@@ -185,7 +167,11 @@
                         var index = 1;
                         foreach (var item in items)
                         {
-                            <tr>
+                            // 這兩個取值你本來就有
+                            var paperNum = item.GetType().GetProperty("PaperNum")?.GetValue(item, null)?.ToString();
+                            var itemNo   = item.GetType().GetProperty("Item")?.GetValue(item, null)?.ToString();
+
+                            <tr data-paper-num="@paperNum" data-item="@itemNo" data-state="unchanged">
                                 @foreach(var col in fields)
                                 {
                                     object v = "";
@@ -201,24 +187,47 @@
                                         var prop = item.GetType().GetProperty(col.FieldName);
                                         v = prop != null ? prop.GetValue(item, null) : "";
                                     }
-                                    // lookup display
-                                    var paperNum = item.GetType().GetProperty("PaperNum")?.GetValue(item, null)?.ToString();
-                                    var itemNo = item.GetType().GetProperty("Item")?.GetValue(item, null)?.ToString();
+
                                     var rowKey = $"{paperNum}_{itemNo}";
                                     string display = null;
+            
                                     if (lookupMap != null && lookupMap.TryGetValue(rowKey, out var dict2))
                                     {
                                         dict2.TryGetValue(col.FieldName, out display);
                                     }
-                                    <td>
-                                        @(display ?? (v is DateTime dt ? dt.ToString("yyyy/MM/dd") : v?.ToString()))
-                                    </td>
+                                        
+                                        // 計算顯示值，先看 lookup，其次走格式化
+                                        string cellValue;
+                                        if (!string.IsNullOrEmpty(display))
+                                        {
+                                            cellValue = display;
+                                        }
+                                        else
+                                        {
+                                            cellValue = FormatHelper.FormatValue(v, col.DataType, col.FormatStr);
+                                        }
+
+                                        // 預先算好 name，避免 Razor 解析錯誤
+                                        var inputName = $"Details[{index}].{col.FieldName}";
+
+                                        <td>                                        
+                                            <span class="cell-view">@cellValue</span>
+
+                                            <input type="text"
+                                                class="form-control form-control-sm cell-edit d-none w-100"
+                                                name="@inputName"
+                                                data-field="@col.FieldName"         
+                                                data-init="@cellValue"             
+                                                value="@cellValue" />
+                                                
+                                        </td>
+
                                 }
                             </tr>
                             index++;
                         }
                     }
-                    </tbody>
+            </tbody>
         </table>
     </div>
 </div>
@@ -231,8 +240,13 @@
 <script>
     const paperNum = "@PaperNum";
     const QueryRedirectUrl = "@(ViewData["QueryRedirectUrl"])";
+    const HEADER_TABLE = "@(Model.HeaderTableName ?? "")".trim();   // 例：SpodOrderMain
+    const DETAIL_TABLE = "@(tableName ?? "")".trim();               // 例：SpodOrderSub（你上面 var tableName = ViewData["DictTableName"]...）
     window.selectedPaperNum = '@(Model.HeaderData["PaperNum"] ?? "")';
     window._detailRouteTemplate = "@queryRedirectUrl";
+      // 單頭欄位定義 & 單身欄位定義
+    window._headerFields = @Html.Raw(JsonSerializer.Serialize(headerFieldsList));
+    window._detailFields = @Html.Raw(JsonSerializer.Serialize(fields));
 
     // 用共用 ToolbarHandler class
     new ToolbarHandler({
@@ -257,43 +271,118 @@
     document.getElementById('orderHeaderForm').addEventListener('submit', async function (e) {
         e.preventDefault();
 
-        const formData = Object.fromEntries(new FormData(this));
+        // 1) 單頭：取表單 → 物件
+        const header = Object.fromEntries(new FormData(this));
+        // 單頭數字去千分位
+        normalizeNumberFields(header, window._headerFields);
 
+        // 2) 單身：蒐集變動列
+        const details = collectDetails();                 // 你下方的 helper
+        normalizeDetailsNumbers(details, window._detailFields);
+
+        // 3) 組 payload（不要再重抓一次 FormData 以免覆蓋）
+        const payload = {
+        ...header,
+        Details: details,                               // 一定要帶給後端
+        __headerTable: HEADER_TABLE,                    // 表名從頁面帶
+        __detailTable: DETAIL_TABLE || undefined        // 沒明細可不帶
+        };
+
+        try {
         const resp = await fetch('/api/OrderHeaderApi/SaveOrderHeader', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formData)
+            body: JSON.stringify(payload)
         });
 
+        // 4) 顯示結果
         if (resp.ok) {
             const result = await resp.json();
             if (result.updated) {
-                Swal.fire({
-                    icon: 'success',
-                    title: '儲存成功！',
-                    timer: 1000,
-                    showConfirmButton: false
-                }).then(() => {
-                    
-                    // ✅ 儲存一個狀態，讓 reload 後知道要進入修改模式
-                    localStorage.setItem("afterSave", "1");
-                    // ✅ 整頁刷新
-                    location.reload();
-                });
+            await Swal.fire({ icon: 'success', title: '儲存成功！', timer: 1000, showConfirmButton: false });
+            localStorage.setItem("afterSave", "1");
+            location.reload();
             } else {
-                Swal.fire({ icon: 'info', title: '沒有資料異動' });
+            Swal.fire({ icon: 'info', title: '沒有資料異動' });
             }
         } else {
+            // 盡量把伺服器回應內容顯示出來便於除錯
             let msg = '儲存失敗';
             try {
-                let result = await resp.json();
-                if (result.error) msg = result.error;
-            } catch { }
+            const txt = await resp.text();
+            msg = txt || msg;
+            } catch {}
             Swal.fire({ icon: 'error', title: msg });
+        }
+        } catch (err) {
+        console.error(err);
+        Swal.fire({ icon: 'error', title: '網路或伺服器錯誤' });
         }
     });
 
+    function collectDetails() {
+        const rows = document.querySelectorAll('.erp-table tbody tr');
+        const details = [];
 
+        rows.forEach(tr => {
+            // 判斷是否需要送：新增/刪除一定送；其他只有變更才送
+            let changed = (tr.dataset.state === 'added' || tr.dataset.state === 'deleted');
+
+            const row = {
+            __state: tr.dataset.state || 'modified',           // 後端會再做欄位差異比對
+            PaperNum: tr.dataset.paperNum || '@PaperNum'
+            };
+
+            // 把每格 input 收集成物件
+            tr.querySelectorAll('.cell-edit').forEach(inp => {
+            const field = inp.dataset.field;
+            if (!field) return;
+
+            const val = (inp.value ?? '').toString();
+            row[field] = val;
+
+            // 如果不是新增/刪除，檢查是否改過
+            if (!changed && (val !== (inp.dataset.init ?? ''))) changed = true;
+            });
+
+            // 確保有 Item（如果明細沒有顯示 Item 欄，改用 data-item）
+            if (row.Item == null && tr.dataset.item) row.Item = tr.dataset.item;
+
+            if (changed) {
+            // 如果沒設定 __state（像純修改），統一標成 modified
+            if (row.__state === 'unchanged') row.__state = 'modified';
+            details.push(row);
+            }
+        });
+
+        return details;
+    }
+
+    // 把數字欄位的字串去千分位（1,234 -> 1234）
+    function normalizeNumberFields(obj, fieldDefs) {
+    (fieldDefs || []).forEach(f => {
+        if ((f.DataType || '').toLowerCase() === 'number') {
+        const k = f.FieldName;
+        if (obj[k] != null) obj[k] = obj[k].toString().replace(/,/g, '');
+        }
+    });
+    }
+
+    function normalizeDetailsNumbers(detailRows, fieldDefs) {
+    const numberFields = (fieldDefs || []).filter(f => (f.DataType || '').toLowerCase() === 'number')
+                                            .map(f => f.FieldName.toLowerCase());
+    detailRows.forEach(r => {
+        numberFields.forEach(fn => {
+        // 欄位可能用不同大小寫，統一找一次
+        Object.keys(r).forEach(k => {
+            if (k.toLowerCase() === fn && r[k] != null) r[k] = r[k].toString().replace(/,/g, '');
+        });
+        });
+    });
+    }
+
+    
+    
     const btn = document.getElementById('btnViewEditToggle');
     let isEdit = false;
 
@@ -326,8 +415,27 @@
         // ✅ 狀態允許 → 切換編輯模式
         isEdit = !isEdit;
         btn.textContent = isEdit ? '保留' : '修改';
+
+        // 單頭切換
         document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
             .forEach(el => el.disabled = !isEdit);
+
+        // 單身切換
+        document.querySelectorAll('.erp-table .cell-view').forEach(el => {
+            el.classList.toggle('d-none', isEdit);
+        });
+        document.querySelectorAll('.erp-table .cell-edit').forEach(el => {
+            el.classList.toggle('d-none', !isEdit);
+        });
+
+        // 任何一格被改，就把那一列標成 modified（新增列請標成 added；刪除列標 deleted）
+        document.querySelectorAll('.erp-table .cell-edit').forEach(inp => {
+        inp.addEventListener('input', () => {
+            const tr = inp.closest('tr');
+            if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
+        });
+        });
+
     });
 
     // 初始：全部 disable
@@ -760,6 +868,41 @@ textarea.resizable-input {
     padding: 4px 6px;
     font-size: 0.95em;
 }
+
+.erp-table td {
+    position: relative;
+    padding: 0; /* 拿掉 padding，讓 input 填滿 */
+}
+
+.erp-table td .cell-edit {
+    width: 100% !important;
+    height: 100% !important;
+    box-sizing: border-box;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    background: #fff !important; /* 編輯時白底 */
+
+    /* 🔑 關鍵：繼承表格字體和對齊 */
+    font-size: inherit !important;
+    font-weight: inherit !important;
+    font-family: inherit !important;
+    line-height: inherit !important;
+    text-align: inherit !important;
+    padding: 0 4px; /* 跟 <span> 一致的 padding */
+}
+
+.erp-table td .cell-view {
+    display: inline-block;
+    width: 100%;
+    text-align: inherit;
+}
+
+
+.erp-table td .cell-edit {
+    background: #fff !important; /* 修改模式才顯示白底 */
+}
+
 
 
 </style>

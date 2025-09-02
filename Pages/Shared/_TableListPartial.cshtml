@@ -82,6 +82,24 @@
         font-size: 0.93em;
         color: #286bb5;
     }
+    .table-hscroll-proxy{
+    position: sticky;     /* 黏在視窗頂端 */
+    top: 0;               /* 如果上面有固定工具列，改成相對高度 */
+    z-index: 100;         /* 比表頭更高，避免被蓋住 */
+    background: #fff;     /* 看起來乾淨 */
+    }
+
+    .hscroll-track{
+    height: 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-gutter: stable both-edges; /* 留出滾動條空間，避免忽隱忽現 */
+    border-bottom: 1px solid #eaeef4;
+    }
+
+    .hscroll-spacer{ height: 1px; }  /* 只負責撐寬度 */
+
+
 
 </style>
 
@@ -105,6 +123,12 @@
         </span>
     </div>
 
+    <!-- 頂端同步卷軸（放在 table-wrap 外面） -->
+    <div class="table-hscroll-proxy" id="tableHScrollTop">
+    <div class="hscroll-track" id="hscrollTop">
+        <div class="hscroll-spacer" id="hscrollSpacer"></div>
+    </div>
+    </div>
 
     <div class="table-wrap">
         <table class="table table-hover align-middle text-center">
@@ -296,25 +320,20 @@
                     } else {
                         // 原始值
                         let rawValue = item[field.FieldName];
-                        if (rawValue != null) {
-                            // 格式化
-                            if (field.FormatStr) {
-                                if (field.DataType && field.DataType.toLowerCase() === "date") {
-                                    let dt = new Date(rawValue);
-                                    if (!isNaN(dt.getTime())) {
-                                        // 只支援 yyyy/MM/dd
-                                        valStr = dt.toLocaleDateString("zh-TW"); 
-                                    } else {
-                                        valStr = rawValue;
-                                    }
-                                } else if (field.DataType && field.DataType.toLowerCase() === "number") {
-                                    valStr = Number(rawValue).toLocaleString();
-                                } else {
-                                    valStr = rawValue;
-                                }
-                            } else {
-                                valStr = rawValue;
-                            }
+                        const dt = (field.DataType || "").toLowerCase();
+
+                        // 後端已做格式化，通常會是字串；前端不要再轉
+                        if (rawValue === null || rawValue === undefined) {
+                        valStr = "";
+                        } else if (typeof rawValue === "string") {
+                        // 例如 "4,644"、"2025/06/26 上午 10:57:14"：直接用
+                        valStr = rawValue;
+                        } else if (dt === "number" && typeof rawValue === "number") {
+                        // 少數還回 number 的情況下，補個千分位
+                        valStr = rawValue.toLocaleString();
+                        } else {
+                        // 其他型別就做保守轉字串
+                        valStr = String(rawValue);
                         }
                     }
                     const td = document.createElement('td');
@@ -341,6 +360,9 @@
                     if(url) window.location = url;
                 });
             });
+            // 重新產生列之後，更新頂端卷軸寬度
+            if (window.refreshHScrollWidth) window.refreshHScrollWidth();
+
         }
 
         function renderPagination(totalCount, pageSize, pageNumber) {
@@ -482,6 +504,48 @@
         }
 
     });
+
+
+    (function initTopHScroll(){
+    const wrap   = document.querySelector('.table-wrap');           // 真正可左右捲的容器
+    if (!wrap) return;
+    const table  = wrap.querySelector('table');
+    const topBar = document.getElementById('hscrollTop');
+    const spacer = topBar?.querySelector('.hscroll-spacer');
+
+    if (!table || !topBar || !spacer) return;
+
+    function measure(){
+        // 讓頂端假的卷軸寬度 == 表格實際滾動寬
+        spacer.style.width = table.scrollWidth + 'px';
+        // 初次載入也同步一下位置
+        topBar.scrollLeft = wrap.scrollLeft;
+    }
+
+    let syncing = false;
+    topBar.addEventListener('scroll', () => {
+        if (syncing) return;
+        syncing = true;
+        wrap.scrollLeft = topBar.scrollLeft;
+        syncing = false;
+    });
+
+    wrap.addEventListener('scroll', () => {
+        if (syncing) return;
+        syncing = true;
+        topBar.scrollLeft = wrap.scrollLeft;
+        syncing = false;
+    });
+
+    window.addEventListener('resize', measure);
+
+    // 給外面呼叫（換頁或重新繪製表格後）
+    window.refreshHScrollWidth = measure;
+
+    // 初次
+    measure();
+    })();
+
 
     // List 頁：點修改 → 跳轉前檢查
     btnViewEditToggle.addEventListener("click", () => {
