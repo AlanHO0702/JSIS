@@ -119,7 +119,9 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 DisplayLabel = x.DisplayLabel,
                 SerialNum = x.SerialNum ?? 0,
                 Visible = true,
-                LookupResultField = x.LookupResultField
+                LookupResultField = x.LookupResultField,
+                DataType = x.DataType,
+                FormatStr = x.FormatStr
             }).ToList();
 
         // 分頁資訊：根據 iShowWhere 分群
