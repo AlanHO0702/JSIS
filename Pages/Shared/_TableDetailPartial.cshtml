@@ -33,7 +33,7 @@
 }
 
 <div class="erp-detail-container">
-    <div class="d-flex align-items-center mb-4" style="gap:12px;">
+    <div id="topToolbar" class="d-flex align-items-center mb-4" style="gap:12px;">
         <div class="btn-group" role="group" aria-label="row-nav" style="gap:6px;">
             <button type="button" class="btn btn-outline-primary" id="btnPrev">上一筆</button>
             <button type="button" class="btn btn-outline-primary" id="btnNext">下一筆</button>
@@ -52,6 +52,12 @@
             })
         </div>
     </div>
+
+    <div class="action-rail">
+      <button id="btnCalcAmount" class="fab">金額計算</button>
+      <!-- 之後可以再加別的按鈕 -->
+    </div>
+
 
         <!-- 單頭可編輯表單 -->
         <form id="orderHeaderForm" class="erp-header-form">
@@ -782,6 +788,39 @@ initRowNavigation();
 // 8) 其他：把最後檢視的單號存在 localStorage
 // ============================
 localStorage.setItem("lastViewedPaperNum", window.selectedPaperNum);
+
+// ============================
+// 9) 其他：金額計算按鈕（若頁面有
+document.getElementById('btnCalcAmount')?.addEventListener('click', async () => {
+  const paper = (PAGE.paperNum || window.selectedPaperNum || '').trim();
+  if (!paper) return Swal.fire({icon:'info', title:'沒有單號'});
+
+  try {
+    const resp = await fetch('/api/StoredProc/exec', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        Key: 'CalcOrderAmount',      // 對應 _registry 的 key
+        Args: { PaperNum: paper }    // 必填參數
+      })
+    });
+
+    const raw = await resp.text();
+    let data;
+    try { data = JSON.parse(raw); } catch { data = { ok:false, error: raw }; }
+
+    if (resp.ok && data.ok) {
+      Swal.fire({icon:'success', title:'計算完成', timer:900, showConfirmButton:false});
+      location.reload();
+    } else {
+      Swal.fire({icon:'error', title:'呼叫失敗', text: data.error || `HTTP ${resp.status}`});
+    }
+  } catch (e) {
+    Swal.fire({icon:'error', title:'網路錯誤', text: String(e)});
+  }
+});
+
+
 </script>
 
 <style>
@@ -874,5 +913,70 @@ body { background: #f7f9fb !important; }
    ========================================= */
 .highlight-red { color:#e53b2d; font-weight:700; }
 .highlight-blue{ color:#2564b3; font-weight:700; }
+
+/* =========================================
+   E) 左側浮動按鈕群
+   ========================================= */
+/* 把左側行動軌道（浮動鈕）預留寬度抽成變數 */
+:root{
+  --fab-left: 12px;      /* 浮動鈕距離視窗左側 */
+  --fab-width: 100px;    /* 浮動鈕實際寬度（含內距，可微調） */
+  --fab-gap: 20px;       /* 浮動鈕右側緩衝 */
+  --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap));
+}
+
+/* 浮動按鈕 */
+.fab{
+  position: fixed;
+  left: var(--fab-left);
+  top: 80px;
+  min-width: var(--fab-width);
+  padding: 8px 12px;
+  background:#ffc107; color:#090101; font-weight:700;
+  border-radius:10px; cursor:pointer;
+  box-shadow:0 6px 16px rgba(0,0,0,.2); z-index: 1200;
+}
+.fab:hover{ filter:brightness(0.95); }
+
+/* 內容容器左邊預留的安全邊界（＝ 按鈕位置 + 按鈕寬 + 緩衝距離） */
+/* 仍保留內容整體的左側預留空間（避免被浮動鈕擋住） */
+.erp-detail-container{
+  margin-left: var(--rail-reserve);
+  margin-right: 3vw;
+  padding: 32px 0;
+}
+/* 移除「金額計算」按鈕的黑色外框/outline */
+#btnCalcAmount {
+  border: 0 !important;
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent; /* 移除行動裝置點擊高亮 */
+}
+
+/* 針對聚焦/按下狀態再保險一次 */
+#btnCalcAmount:focus,
+#btnCalcAmount:focus-visible,
+#btnCalcAmount:active {
+  outline: none !important;
+  box-shadow: 0 6px 16px rgba(0,0,0,.2) !important; /* 保留陰影，不要黑框 */
+}
+
+/* 若你把它改成 <button>，Firefox 會多一層內框，順便去掉 */
+#btnCalcAmount::-moz-focus-inner {
+  border: 0 !important;
+}
+
+/* 只有最上面工具列要「吃回去」那段預留寬，往左移回去 */
+#topToolbar{
+  margin-left: calc(-1 * var(--rail-reserve)) !important;
+  padding-left: 0 !important;
+  justify-content: flex-start !important;
+}
+
+/* 若某些框架樣式還加了左邊距，再保險清掉 */
+#topToolbar > .ms-2,
+#topToolbar .btn-toolbar{
+  margin-left: 0 !important;
+}
+
 </style>
 
