@@ -18,8 +18,6 @@
     var queryRedirectUrl = ViewData["QueryRedirectUrl"]?.ToString() ?? "";
     var DeleteApiUrl = ViewData["DeleteApiUrl"]?.ToString() ?? "";
 
-
-
     var groupedTabs = headerFieldsList
         .Where(f => (f.iShowWhere ?? 1) > 0) // ➜ 過濾掉 iShowWhere 為 0 的欄位
         .GroupBy(f => f.iShowWhere ?? 1)
@@ -32,15 +30,18 @@
 
     var headerLookupMap = ViewData["HeaderLookupMap"] as Dictionary<string, string>;
         
-
 }
 
 <div class="erp-detail-container">
     <div class="d-flex align-items-center mb-4" style="gap:12px;">
+        <div class="btn-group" role="group" aria-label="row-nav" style="gap:6px;">
+            <button type="button" class="btn btn-outline-primary" id="btnPrev">上一筆</button>
+            <button type="button" class="btn btn-outline-primary" id="btnNext">下一筆</button>
+        </div>
         <button type="submit" class="btn toolbar-btn" form="orderHeaderForm">
             儲存
         </button>
-        <div style="ms-2">
+        <div class="ms-2">
             @await Html.PartialAsync("_TableToolbar", new TableToolbarModel {
                 SearchBtnId = "btnSubSearch",
                 AddBtnId = "btnSubAddNew",
@@ -152,6 +153,14 @@
     </form>
     <!-- 單身明細 table -->
     <div class="erp-table-wrapper">
+    <div class="d-flex justify-content-start mb-2">
+        <button type="button" id="btnAddDetailRow" class="btn btn-outline-secondary btn-sm">
+            ＋
+        </button>
+        <button type="button" class="btn btn-outline-danger btn-sm" id="btnRowDelete" title="刪除當前列">－</button>
+    </div>
+    
+
         <table class="erp-table">
             <thead>
                 <tr>
@@ -238,671 +247,632 @@
 <script src="~/js/toolbarHandler.js"></script>
 <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css" />
 <script>
-    const paperNum = "@PaperNum";
-    const QueryRedirectUrl = "@(ViewData["QueryRedirectUrl"])";
-    const HEADER_TABLE = "@(Model.HeaderTableName ?? "")".trim();   // 例：SpodOrderMain
-    const DETAIL_TABLE = "@(tableName ?? "")".trim();               // 例：SpodOrderSub（你上面 var tableName = ViewData["DictTableName"]...）
-    window.selectedPaperNum = '@(Model.HeaderData["PaperNum"] ?? "")';
-    window._detailRouteTemplate = "@queryRedirectUrl";
-      // 單頭欄位定義 & 單身欄位定義
-    window._headerFields = @Html.Raw(JsonSerializer.Serialize(headerFieldsList));
-    window._detailFields = @Html.Raw(JsonSerializer.Serialize(fields));
+// ============================
+// 0) 頁面常數／Razor 注入
+// ============================
+const PAGE = {
+  paperNum: "@PaperNum",
+  keyField: "PaperNum",
+  headerTable: ("@(Model.HeaderTableName ?? "")".trim() || "").toLowerCase(), // e.g. spodordermain
+  detailTable: "@(tableName ?? "")".trim(),                                   // e.g. SpodOrderSub
+  queryRedirectUrl: "@(ViewData["QueryRedirectUrl"])",
+  addApiUrl: "@addApiUrl",
+  deleteApiUrl: "@DeleteApiUrl",
+  detailRouteTemplate: "@detailRouteTemplate",
+  headerFields: @Html.Raw(JsonSerializer.Serialize(headerFieldsList)),
+  detailFields: @Html.Raw(JsonSerializer.Serialize(fields))
+};
 
-    // 用共用 ToolbarHandler class
-    new ToolbarHandler({
-        searchBtnId: "btnSubSearch",
-        addBtnId: "btnSubAddNew",
-        deleteBtnId: "btnSubBatchDelete",
-        getSelectedId: () => paperNum,  // 單身頁固定傳單號
-        modalId: "searchModal",
-        formId: "searchForm",
-        addApiUrl: "@addApiUrl",  
-        deleteApiUrlFn: id => `/api/@DeleteApiUrl/${id || paperNum}`,
-        detailRouteTemplate: "@detailRouteTemplate",  
-        tableName: "@tableName",  
-        renderTable: null,
-        renderPagination: null,
-        renderOrderCount: null,
-        restoreSearchForm: null,
-        queryRedirectUrl: QueryRedirectUrl   // 👈 一定要包成字串
-    });
+// 讓其它工具可以取到目前單號
+window.selectedPaperNum = '@(Model.HeaderData["PaperNum"] ?? "")';
 
+// ============================
+// 1) Toolbar Handler 啟動
+// ============================
+// 調用你原本的共用 ToolbarHandler（用單號當 key）
+// 自動推導本頁的路徑樣板：/SpodOrderSub/{0}
+  // 目前單號
+  const PAPER_NUM = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(PaperNum ?? ""));
+  // 從後端傳進來的「返回主頁面」基底路徑，例如 "/SpodOrderMain"
+  const QUERY_REDIRECT_URL = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+    ViewData["QueryRedirectUrl"]?.ToString() ?? ""
+  ));
 
-    document.getElementById('orderHeaderForm').addEventListener('submit', async function (e) {
-        e.preventDefault();
+  const PAGE_PAPER_NUM = ("@PaperNum" || "").trim();
+  const KEY_FIELD = ("@(keyFieldName ?? "PaperNum")" || "PaperNum").trim();
 
-        // 1) 單頭：取表單 → 物件
-        const header = Object.fromEntries(new FormData(this));
-        // 單頭數字去千分位
-        normalizeNumberFields(header, window._headerFields);
+  // 1) 從主程式帶進來的「返回主頁面」基底路徑，補上 /{0}
+  const backToMainTpl = (PAGE.queryRedirectUrl || '').trim()
+    ? PAGE.queryRedirectUrl.replace(/\/$/, '') + '/{0}'
+    : '';
 
-        // 2) 單身：蒐集變動列
-        const details = collectDetails();                 // 你下方的 helper
-        normalizeDetailsNumbers(details, window._detailFields);
+  // 2) 從伺服器帶來的子頁樣板（主頁→單身），把 {PaperNum} 正規化成 {0}
+  const subTpl = (PAGE.detailRouteTemplate || '')
+    .replace(/\{PaperNum\}/gi, '{0}');
 
-        // 3) 組 payload（不要再重抓一次 FormData 以免覆蓋）
-        const payload = {
-        ...header,
-        Details: details,                               // 一定要帶給後端
-        __headerTable: HEADER_TABLE,                    // 表名從頁面帶
-        __detailTable: DETAIL_TABLE || undefined        // 沒明細可不帶
-        };
+  // 3) 在單身頁優先用 backToMainTpl（切回主頁），否則就用 subTpl（主頁切到單身）
+  const finalSwitchTpl = backToMainTpl || subTpl;
 
-        try {
-        const resp = await fetch('/api/OrderHeaderApi/SaveOrderHeader', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+  // 防呆：log 一下
+  console.debug('[Switch template]', finalSwitchTpl);
 
-        // 4) 顯示結果
-        if (resp.ok) {
-            const result = await resp.json();
-            if (result.updated) {
-            await Swal.fire({ icon: 'success', title: '儲存成功！', timer: 1000, showConfirmButton: false });
-            localStorage.setItem("afterSave", "1");
-            location.reload();
-            } else {
-            Swal.fire({ icon: 'info', title: '沒有資料異動' });
-            }
-        } else {
-            // 盡量把伺服器回應內容顯示出來便於除錯
-            let msg = '儲存失敗';
-            try {
-            const txt = await resp.text();
-            msg = txt || msg;
-            } catch {}
-            Swal.fire({ icon: 'error', title: msg });
-        }
-        } catch (err) {
-        console.error(err);
-        Swal.fire({ icon: 'error', title: '網路或伺服器錯誤' });
-        }
-    });
+  new ToolbarHandler({
+    searchBtnId: "btnSubSearch",
+    addBtnId: "btnSubAddNew",
+    deleteBtnId: "btnSubBatchDelete",
+    getSelectedId: () => (PAGE.paperNum || window.selectedPaperNum || ''), // 確保有單號
+    modalId: "searchModal",
+    formId: "searchForm",
+    addApiUrl: PAGE.addApiUrl,
+    deleteApiUrlFn: id => `/api/${PAGE.deleteApiUrl}/${id || PAGE.paperNum}`,
+    detailRouteTemplate: finalSwitchTpl,   // ← 這裡換成剛算好的樣板
+    tableName: "@tableName",
+    renderTable: null,
+    renderPagination: null,
+    renderOrderCount: null,
+    restoreSearchForm: null,
+    queryRedirectUrl: PAGE.queryRedirectUrl
+  });
 
-    function collectDetails() {
-        const rows = document.querySelectorAll('.erp-table tbody tr');
-        const details = [];
+// 手動接管「切換」按鈕：單身頁 → 主頁
+(function hookToggleBackToMain() {
+  // 找到切換鈕（按 id；找不到再以文字比對）
+  const rawBtn = document.getElementById('btnToggle') ||
+    Array.from(document.querySelectorAll('button, a'))
+      .find(el => (el.textContent || '').trim() === '切換');
+  if (!rawBtn) return;
 
-        rows.forEach(tr => {
-            // 判斷是否需要送：新增/刪除一定送；其他只有變更才送
-            let changed = (tr.dataset.state === 'added' || tr.dataset.state === 'deleted');
+  // 用 clone 置換掉原元素，清空原本所有事件監聽（包含 ToolbarHandler 綁的）
+  const btn = rawBtn.cloneNode(true);
+  rawBtn.replaceWith(btn);
 
-            const row = {
-            __state: tr.dataset.state || 'modified',           // 後端會再做欄位差異比對
-            PaperNum: tr.dataset.paperNum || '@PaperNum'
-            };
+  // 我們自己的處理器（用捕獲階段 + 停止冒泡，保險）
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
 
-            // 把每格 input 收集成物件
-            tr.querySelectorAll('.cell-edit').forEach(inp => {
-            const field = inp.dataset.field;
-            if (!field) return;
-
-            const val = (inp.value ?? '').toString();
-            row[field] = val;
-
-            // 如果不是新增/刪除，檢查是否改過
-            if (!changed && (val !== (inp.dataset.init ?? ''))) changed = true;
-            });
-
-            // 確保有 Item（如果明細沒有顯示 Item 欄，改用 data-item）
-            if (row.Item == null && tr.dataset.item) row.Item = tr.dataset.item;
-
-            if (changed) {
-            // 如果沒設定 __state（像純修改），統一標成 modified
-            if (row.__state === 'unchanged') row.__state = 'modified';
-            details.push(row);
-            }
-        });
-
-        return details;
+    const base = (QUERY_REDIRECT_URL || '').trim().replace(/\/$/, ''); // 例如 /SpodOrderMain
+    if (!base) {
+      Swal.fire({ icon: 'error', title: '未提供返回主頁路徑' });
+      return;
     }
 
-    // 把數字欄位的字串去千分位（1,234 -> 1234）
-    function normalizeNumberFields(obj, fieldDefs) {
-    (fieldDefs || []).forEach(f => {
-        if ((f.DataType || '').toLowerCase() === 'number') {
-        const k = f.FieldName;
-        if (obj[k] != null) obj[k] = obj[k].toString().replace(/,/g, '');
-        }
-    });
+    const id = (PAGE_PAPER_NUM || window.selectedPaperNum || '').trim();
+    const sep = base.includes('?') ? '&' : '?';
+    const url = id ? `${base}${sep}${encodeURIComponent(KEY_FIELD)}=${encodeURIComponent(id)}` : base;
+
+    location.href = url;
+  }, { capture: true });
+})();
+
+// ============================
+// 2) 共用小工具（數值處理、字串化）
+// ============================
+function normalizeNumberFields(obj, fieldDefs) {
+  (fieldDefs || []).forEach(f => {
+    if ((f.DataType || '').toLowerCase() === 'number') {
+      const k = f.FieldName;
+      if (obj[k] != null) obj[k] = obj[k].toString().replace(/,/g, '');
     }
-
-    function normalizeDetailsNumbers(detailRows, fieldDefs) {
-    const numberFields = (fieldDefs || []).filter(f => (f.DataType || '').toLowerCase() === 'number')
-                                            .map(f => f.FieldName.toLowerCase());
-    detailRows.forEach(r => {
-        numberFields.forEach(fn => {
-        // 欄位可能用不同大小寫，統一找一次
-        Object.keys(r).forEach(k => {
-            if (k.toLowerCase() === fn && r[k] != null) r[k] = r[k].toString().replace(/,/g, '');
-        });
-        });
+  });
+}
+function normalizeDetailsNumbers(detailRows, fieldDefs) {
+  const numberFields = (fieldDefs || [])
+    .filter(f => (f.DataType || '').toLowerCase() === 'number')
+    .map(f => f.FieldName.toLowerCase());
+  detailRows.forEach(r => {
+    numberFields.forEach(fn => {
+      Object.keys(r).forEach(k => {
+        if (k.toLowerCase() === fn && r[k] != null) r[k] = r[k].toString().replace(/,/g, '');
+      });
     });
-    }
+  });
+}
+// 依欄位型別把 raw 轉字串（避免 [object Object]）
+function toCellString(raw, colMeta) {
+  if (raw == null) return '';
+  if (typeof raw === 'object') return '';
+  let s = String(raw);
+  const dt = (colMeta?.DataType || '').toLowerCase();
+  if (dt.includes('date')) {
+    const d = new Date(s); if (!isNaN(d)) return d.toISOString().slice(0,10);
+  }
+  if (dt === 'number') return s.replace(/,/g, '');
+  return s;
+}
 
-    
-    
-    const btn = document.getElementById('btnViewEditToggle');
-    let isEdit = false;
+// ============================
+// 3) 明細列 收集 / 新增 / 刪除 / 整列選取
+// ============================
 
-    // Detail 頁專用：讀取單頭表單某個 label 的值
-    function getHeaderValueByLabel(labelText) {
-        const $li = $('.draggable-field').filter(function () {
-            return $(this).children('label').first().text().trim() === labelText;
-        }).first();
-        if (!$li.length) return null;
-
-        const $ctrl = $li.find('select, input, textarea').first();
-        if (!$ctrl.length) return null;
-
-        if ($ctrl.is('select')) return $ctrl.find('option:selected').text().trim();
-        return ($ctrl.val() || '').toString().trim();
-    }
-
-    // Detail 頁：點修改 → 切換編輯模式前檢查
-    btn.addEventListener('click', function () {
-        const status = getHeaderValueByLabel('單據狀態') || '';
-        if (window.BLOCK_STATUSES && window.BLOCK_STATUSES.includes(status)) {
-            Swal.fire({
-                icon: 'warning',
-                title: '無法修改',
-                text: `此單據狀態為「${status}」，不可進行修改。`
-            });
-            return; // 阻止切換編輯模式
-        }
-
-        // ✅ 狀態允許 → 切換編輯模式
-        isEdit = !isEdit;
-        btn.textContent = isEdit ? '保留' : '修改';
-
-        // 單頭切換
-        document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
-            .forEach(el => el.disabled = !isEdit);
-
-        // 單身切換
-        document.querySelectorAll('.erp-table .cell-view').forEach(el => {
-            el.classList.toggle('d-none', isEdit);
-        });
-        document.querySelectorAll('.erp-table .cell-edit').forEach(el => {
-            el.classList.toggle('d-none', !isEdit);
-        });
-
-        // 任何一格被改，就把那一列標成 modified（新增列請標成 added；刪除列標 deleted）
-        document.querySelectorAll('.erp-table .cell-edit').forEach(inp => {
-        inp.addEventListener('input', () => {
-            const tr = inp.closest('tr');
-            if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
-        });
-        });
-
+// 3-1 收集目前表格所有「有變動」的明細列
+function collectDetails() {
+  const rows = document.querySelectorAll('.erp-table tbody tr');
+  const details = [];
+  rows.forEach(tr => {
+    let changed = (tr.dataset.state === 'added' || tr.dataset.state === 'deleted'); // 新增/刪除一定送
+    const row = {
+      __state: tr.dataset.state || 'modified',
+      PaperNum: tr.dataset.paperNum || PAGE.paperNum
+    };
+    tr.querySelectorAll('.cell-edit').forEach(inp => {
+      const field = inp.dataset.field;
+      if (!field) return;
+      const val = (inp.value ?? '').toString();
+      row[field] = val;
+      if (!changed && (val !== (inp.dataset.init ?? ''))) changed = true;
     });
+    if (row.Item == null && tr.dataset.item) row.Item = tr.dataset.item;
+    if (changed) {
+      if (row.__state === 'unchanged') row.__state = 'modified';
+      details.push(row);
+    }
+  });
+  return details;
+}
 
-    // 初始：全部 disable
+// 3-2 新增一列（呼叫後端插 DB，再回填到前端並立刻可編輯）
+async function onAddRowClick() {
+  if (!PAGE.detailTable) {
+    Swal.fire({icon:'error', title:'找不到明細表名（DETAIL_TABLE）'}); 
+    return;
+  }
+  try {
+    const res = await fetch('/api/OrderHeaderApi/AddDetailRow', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ detailTable: PAGE.detailTable, paperNum: PAGE.paperNum })
+    });
+    const json = await res.json();
+    if (!res.ok || !json?.ok) throw new Error(json?.error || '新增失敗');
+    appendDetailRowFromServer(json.row || {});
+  } catch (err) {
+    Swal.fire({icon:'error', title:'新增明細失敗', text: String(err.message || err)});
+  }
+}
+
+// 3-3 將後端新插入的那筆 row 追加到表格；狀態標成 unchanged（因為已在 DB）
+function appendDetailRowFromServer(row) {
+  const tbody = document.querySelector('.erp-table tbody');
+  const tr = document.createElement('tr');
+  tr.dataset.paperNum = row.PaperNum || PAGE.paperNum;
+  tr.dataset.item = row.Item;
+  tr.dataset.state = 'unchanged';
+
+  let tdsHtml = '';
+  (PAGE.detailFields || []).forEach((col) => {
+    const v = toCellString(row[col.FieldName], col);
+    const inputName = `Details[${tbody.rows.length + 1}].${col.FieldName}`;
+    tdsHtml += `
+      <td>
+        <span class="cell-view">${v}</span>
+        <input type="text"
+          class="form-control form-control-sm cell-edit d-none w-100"
+          name="${inputName}"
+          data-field="${col.FieldName}"
+          data-init="${v}"
+          value="${v}">
+      </td>`;
+  });
+  tr.innerHTML = tdsHtml;
+  tbody.appendChild(tr);
+
+  // 這列立刻可編輯＋高亮
+  makeRowEditable(tr);
+  selectRow(tr);
+
+  // 輸入 ⇒ 標記 modified（除非是新增）
+  tr.querySelectorAll('.cell-edit').forEach(inp => {
+    inp.addEventListener('input', () => {
+      if (tr.dataset.state !== 'added') tr.dataset.state = 'modified';
+    });
+  });
+}
+
+// 3-4 刪除目前選取列（新列：前端移除；舊列：呼叫後端刪除）
+async function onDeleteRowClick() {
+  const tr = document.querySelector('.erp-table tbody tr.row-selected');
+  if (!tr) { Swal.fire({icon:'info', title:'請先點選要刪除的明細列'}); return; }
+
+  const pn = tr.dataset.paperNum || PAGE.paperNum;
+  const item = tr.dataset.item || '';
+  if (!pn || !item) {
+    Swal.fire({icon:'error', title:'無法判斷單號或項次'}); return;
+  }
+
+  const { isConfirmed } = await Swal.fire({
+    icon: 'question', title: '刪除這一筆明細？', showCancelButton: true, confirmButtonText: '刪除', cancelButtonText: '取消'
+  });
+  if (!isConfirmed) return;
+
+  if (tr.dataset.state === 'added') { // 未入庫
+    const next = tr.nextElementSibling || tr.previousElementSibling;
+    tr.remove(); if (next) selectRow(next);
+    return;
+  }
+
+  try {
+    const url = `/api/OrderHeaderApi/DeleteRow`
+      + `?table=${encodeURIComponent(PAGE.detailTable)}`
+      + `&paperNum=${encodeURIComponent(pn)}`
+      + `&item=${encodeURIComponent(item)}`;
+    const res = await fetch(url, { method: 'DELETE' });
+    if (!res.ok) throw new Error(await res.text());
+
+    const next = tr.nextElementSibling || tr.previousElementSibling;
+    tr.remove(); if (next) selectRow(next);
+    Swal.fire({icon:'success', title:'刪除完成', timer:900, showConfirmButton:false});
+  } catch (err) {
+    Swal.fire({icon:'error', title:'刪除失敗', text: String(err)});
+  }
+}
+
+// 3-5 整列選取＆讓該列可編輯
+const tbodyEl = document.querySelector('.erp-table tbody');
+function selectRow(tr) {
+  if (!tr) return;
+  document.querySelectorAll('.erp-table tbody tr.row-selected')
+    .forEach(r => r.classList.remove('row-selected'));
+  tr.classList.add('row-selected');
+}
+function makeRowEditable(tr) {
+  tr.querySelectorAll('.cell-view').forEach(el => el.classList.add('d-none'));
+  tr.querySelectorAll('.cell-edit').forEach(el => el.classList.remove('d-none'));
+  const first = tr.querySelector('.cell-edit[data-field="PartNum"]') || tr.querySelector('.cell-edit');
+  first?.focus(); first?.select?.();
+}
+tbodyEl.addEventListener('click',  e => { const tr = e.target.closest('tr'); if (tr) selectRow(tr); });
+tbodyEl.addEventListener('focusin', e => { const tr = e.target.closest('tr'); if (tr) selectRow(tr); });
+document.getElementById('btnAddDetailRow')?.addEventListener('click', onAddRowClick);
+document.getElementById('btnSubAddNew')?.addEventListener('click', (e)=>{ e.preventDefault(); onAddRowClick(); });
+document.getElementById('btnRowDelete')?.addEventListener('click', onDeleteRowClick);
+
+// ============================
+// 4) 儲存單頭＋單身（組 payload → 呼叫 API）
+// ============================
+document.getElementById('orderHeaderForm').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  const header = Object.fromEntries(new FormData(this));
+  normalizeNumberFields(header, PAGE.headerFields);
+
+  const details = collectDetails();
+  normalizeDetailsNumbers(details, PAGE.detailFields);
+
+  const payload = {
+    ...header,
+    Details: details,
+    __headerTable: PAGE.headerTable,
+    __detailTable: PAGE.detailTable || undefined
+  };
+
+  try {
+    const resp = await fetch('/api/OrderHeaderApi/SaveOrderHeader', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    if (resp.ok) {
+      const result = await resp.json();
+      if (result.updated) {
+        await Swal.fire({ icon: 'success', title: '儲存成功！', timer: 1000, showConfirmButton: false });
+        localStorage.setItem("afterSave", "1"); location.reload();
+      } else {
+        Swal.fire({ icon: 'info', title: '沒有資料異動' });
+      }
+    } else {
+      let msg = '儲存失敗'; try { const txt = await resp.text(); msg = txt || msg; } catch {}
+      Swal.fire({ icon: 'error', title: msg });
+    }
+  } catch (err) {
+    Swal.fire({ icon: 'error', title: '網路或伺服器錯誤' });
+  }
+});
+
+// ============================
+// 5) 檢視/編輯模式切換（若頁面有該按鈕）
+// ============================
+const editBtn = document.getElementById('btnViewEditToggle');
+if (editBtn) {
+  let isEdit = false;
+  const getHeaderValueByLabel = (labelText) => {
+    const $li = $('.draggable-field').filter(function () {
+      return $(this).children('label').first().text().trim() === labelText;
+    }).first();
+    if (!$li.length) return null;
+    const $ctrl = $li.find('select, input, textarea').first();
+    if (!$ctrl.length) return null;
+    if ($ctrl.is('select')) return $ctrl.find('option:selected').text().trim();
+    return ($ctrl.val() || '').toString().trim();
+  };
+
+  editBtn.addEventListener('click', function () {
+    const status = getHeaderValueByLabel('單據狀態') || '';
+    if (window.BLOCK_STATUSES && window.BLOCK_STATUSES.includes(status)) {
+      Swal.fire({ icon: 'warning', title: '無法修改', text: `此單據狀態為「${status}」，不可進行修改。`}); return;
+    }
+    isEdit = !isEdit; editBtn.textContent = isEdit ? '保留' : '修改';
     document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
-        .forEach(el => el.disabled = true);
-
-    
-    // ✅ 頁面載入完成後，判斷是不是刷新回來的狀態
-    window.addEventListener('load', () => {
-        // 例如利用 localStorage 記錄狀態
-        if (localStorage.getItem("afterSave") === "1") {
-            localStorage.removeItem("afterSave");
-
-            // 自動點擊修改按鈕
-            document.getElementById("btnViewEditToggle")?.click();
-        }
+      .forEach(el => el.disabled = !isEdit);
+    document.querySelectorAll('.erp-table .cell-view').forEach(el => el.classList.toggle('d-none', isEdit));
+    document.querySelectorAll('.erp-table .cell-edit').forEach(el => el.classList.toggle('d-none', !isEdit));
+    document.querySelectorAll('.erp-table .cell-edit').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const tr = inp.closest('tr'); if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
+      });
     });
+  });
 
+  // 頁面刷新後自動回到編輯狀態（若剛剛存檔成功）
+  window.addEventListener('load', () => {
+    document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
+      .forEach(el => el.disabled = true);
+    if (localStorage.getItem("afterSave") === "1") {
+      localStorage.removeItem("afterSave");
+      document.getElementById("btnViewEditToggle")?.click();
+    }
+  });
+}
 
+// ============================
+// 6) Header 版面拖拉儲存 / Lookup 下拉初始化（jQuery）
+// ============================
+$(function () {
+  let debounceTimer;
+  const debounceSave = () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(saveLayoutChanges, 400); };
 
-    $(function () {
-        let debounceTimer;
-
-        function debounceSave() {
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(saveLayoutChanges, 400);
-        }
-
-        function saveLayoutChanges() {
-            const layout = [];
-
-            // ✅ 暫時顯示所有 tab-pane
-            const hiddenTabs = $(".tab-pane").not(".show");
-            hiddenTabs.addClass("temporary-show").addClass("show").css("display", "block");
-
-            $(".draggable-field").each(function () {
-                const $li = $(this);
-                const field = $li.data("field");
-                const tabIndex = parseInt($li.attr("data-tab")) || 1;
-
-                layout.push({
-                    fieldName: field,
-                    top: Math.round($li.position().top),
-                    left: Math.round($li.position().left),
-                    width: Math.round($li.outerWidth()),
-                    height: Math.round($li.outerHeight()),
-                    ishowWhere: tabIndex
-                });
-            });
-
-            // ✅ 還原 tab-pane 狀態
-            hiddenTabs.removeClass("show").removeClass("temporary-show").css("display", "");
-
-            if (layout.length === 0) return;
-
-            fetch("/api/TableFieldLayout/SaveHeaderLayout", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    tableName: "@Model.HeaderTableName".toLowerCase(),
-                    layoutUpdates: layout
-                })
-            }).catch(err => console.error("儲存失敗", err));     
-        }
-
-        $(".draggable-field").each(function () {
-            const $li = $(this);
-
-            $li.draggable({
-                handle: "label",
-                helper: function () {
-                    return $("<div>")
-                        .text($(this).find("label").text())
-                        .css({
-                            width: "80px",   
-                            height: $li.outerHeight() + "px", // 跟欄位一樣高
-                            background: "#eef",
-                            border: "1px dashed #999",
-                            padding: "4px",
-                            "font-size": "0.9em"
-                        });
-                },
-                appendTo: "body",
-                zIndex: 10000,
-                start: function () {
-                    $(this).hide(); // ✅ 拖曳時原本隱藏，避免混淆
-                },
-                stop: function () {
-                    $(this).show();
-                }
-            });
-
-            $li.resizable({
-                handles: "se",
-                minWidth: 50,
-                minHeight: 30,
-                stop: debounceSave
-            });
-        });
-
-        $(".header-fields-tab").droppable({
-            accept: ".draggable-field",
-            tolerance: "pointer", //intersect是要物件中心點拖到才會觸發，改成游標觸碰
-            over: function () {
-                $(this).addClass("drop-hover");
-            },
-            out: function () {
-                $(this).removeClass("drop-hover");
-            },     
-            drop: function (event, ui) {
-                $(this).removeClass("drop-hover");
-                const $dropZone = $(this);
-                const $item = $(ui.draggable);
-                const newTabIndex = parseInt($dropZone.data("tab-index")) || 1;
-
-                // ➤ 移動 item 並更新屬性與位置
-                $item.appendTo($dropZone);
-                $item.attr("data-tab", newTabIndex);
-
-                $item.css({
-                    top: ui.offset.top - $dropZone.offset().top,
-                    left: ui.offset.left - $dropZone.offset().left,
-                    position: "absolute"
-                });
-
-                debounceSave();
-            }
-        });
-
-
-        let dragTabSwitchTimer = null;
-
-        $("#headerTabs button").droppable({
-            accept: ".draggable-field",
-            over: function (event, ui) {
-                const $tabBtn = $(this);
-                dragTabSwitchTimer = setTimeout(() => {
-                    $tabBtn.trigger("click");
-                }, 600); // 滑過 600ms 自動切換分頁
-            },
-            out: function () {
-                clearTimeout(dragTabSwitchTimer);
-            }
-        });
-
-        $('.lookup-dropdown').each(function() {
-            var $select = $(this);
-            var table = $select.data('table');
-            var key = $select.data('key');
-            var result = $select.data('result');
-            var selected = $select.data('selected');
-
-            $.getJSON(`/api/TableFieldLayout/LookupData?table=${table}&key=${key}&result=${result}`, function(data) {
-                $select.empty().append('<option value="">--請選擇--</option>');
-                for (var i = 0; i < data.length; i++) {
-                    var val = data[i].key;
-                    var txt = [];
-                    for (var prop in data[i]) {
-                        if (prop.startsWith('result')) txt.push(data[i][prop]);
-                    }
-                    var label = txt.join(' - ');  // 顯示多個欄位
-                    var opt = $('<option>')
-                        .attr('value', val)
-                        .text(label);
-                    if (val == selected)
-                        opt.attr('selected', true);
-                    $select.append(opt);
-                }
-                // 設定初始 label 顯示
-                $select.next('.lookup-label').text($select.find('option:selected').text());
-            });
-
-            // select change 時更新旁邊 label（純顯示）
-            $select.on('change', function() {
-                $(this).next('.lookup-label').text($(this).find('option:selected').text());
-            });
-        });
-
-        // 進畫面只做一次：把每個分頁的容器高度設成「最底欄位 + 偏移」
-        function setInitialTabHeights(offsetPx = 10) {
-        // 先把隱藏分頁暫時顯示出來，好量高度
-        const hiddenTabs = $(".tab-pane").not(".show");
-        hiddenTabs.addClass("tmp-show").addClass("show").css("display", "block");
-
-        $(".header-fields-tab").each(function () {
-            let maxBottom = 0;
-            $(this).children(".draggable-field").each(function () {
-            const $el = $(this);
-            const bottom = $el.position().top + $el.outerHeight();
-            if (bottom > maxBottom) maxBottom = bottom;
-            });
-            // 設定容器高度 = 最底欄位 + 預留空間
-            $(this).height(Math.max(0, Math.ceil(maxBottom + offsetPx)));
-        });
-
-        // 還原剛剛暫時顯示的分頁
-        hiddenTabs.removeClass("show tmp-show").css("display", "");
-        }
-
-        // 首次渲染後執行（多包一層，確保 DOM 都到位）
-        requestAnimationFrame(() => setInitialTabHeights(10)); // 想多一點就改這個數字
-
+  function saveLayoutChanges() {
+    const layout = [];
+    const hiddenTabs = $(".tab-pane").not(".show");
+    hiddenTabs.addClass("temporary-show").addClass("show").css("display", "block");
+    $(".draggable-field").each(function () {
+      const $li = $(this);
+      layout.push({
+        fieldName: $li.data("field"),
+        top: Math.round($li.position().top),
+        left: Math.round($li.position().left),
+        width: Math.round($li.outerWidth()),
+        height: Math.round($li.outerHeight()),
+        ishowWhere: parseInt($li.attr("data-tab")) || 1
+      });
     });
+    hiddenTabs.removeClass("show").removeClass("temporary-show").css("display", "");
+    if (!layout.length) return;
 
-    // 單身頁自動存值
-    localStorage.setItem("lastViewedPaperNum", window.selectedPaperNum); // Razor 寫入目前單號
+    fetch("/api/TableFieldLayout/SaveHeaderLayout", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tableName: "@Model.HeaderTableName".toLowerCase(), layoutUpdates: layout })
+    }).catch(()=>{});
+  }
 
+  // draggable + resizable
+  $(".draggable-field").each(function () {
+    const $li = $(this);
+    $li.draggable({
+      handle: "label",
+      helper: function () {
+        return $("<div>").text($(this).find("label").text()).css({
+          width: "80px", height: $li.outerHeight() + "px",
+          background: "#eef", border: "1px dashed #999", padding: "4px", "font-size": "0.9em"
+        });
+      },
+      appendTo: "body", zIndex: 10000,
+      start: function () { $(this).hide(); },
+      stop:  function () { $(this).show(); }
+    });
+    $li.resizable({ handles: "se", minWidth: 50, minHeight: 30, stop: debounceSave });
+  });
+
+  // droppable 區域（跨分頁拖曳）
+  $(".header-fields-tab").droppable({
+    accept: ".draggable-field", tolerance: "pointer",
+    over: function () { $(this).addClass("drop-hover"); },
+    out:  function () { $(this).removeClass("drop-hover"); },
+    drop: function (event, ui) {
+      $(this).removeClass("drop-hover");
+      const $zone = $(this);
+      const $item = $(ui.draggable);
+      const newTabIndex = parseInt($zone.data("tab-index")) || 1;
+      $item.appendTo($zone).attr("data-tab", newTabIndex).css({
+        top: ui.offset.top - $zone.offset().top,
+        left: ui.offset.left - $zone.offset().left,
+        position: "absolute"
+      });
+      debounceSave();
+    }
+  });
+
+  // 拖過分頁標籤自動切換
+  let dragTabSwitchTimer = null;
+  $("#headerTabs button").droppable({
+    accept: ".draggable-field",
+    over: function () { const $tabBtn = $(this); dragTabSwitchTimer = setTimeout(() => { $tabBtn.trigger("click"); }, 600); },
+    out:  function () { clearTimeout(dragTabSwitchTimer); }
+  });
+
+  // Lookup 下拉載入
+  $('.lookup-dropdown').each(function() {
+    const $select = $(this);
+    const table = $select.data('table'), key = $select.data('key'),
+          result = $select.data('result'), selected = $select.data('selected');
+    $.getJSON(`/api/TableFieldLayout/LookupData?table=${table}&key=${key}&result=${result}`, function(data) {
+      $select.empty().append('<option value="">--請選擇--</option>');
+      (data || []).forEach(row => {
+        const val = row.key;
+        const label = Object.keys(row).filter(p => p.startsWith('result')).map(p => row[p]).join(' - ');
+        const $opt = $('<option>').val(val).text(label);
+        if (val == selected) $opt.attr('selected', true);
+        $select.append($opt);
+      });
+      $select.next('.lookup-label').text($select.find('option:selected').text());
+    });
+    $select.on('change', function() {
+      $(this).next('.lookup-label').text($(this).find('option:selected').text());
+    });
+  });
+
+  // Tab 高度一次性調整（以便容器能包住欄位）
+  function setInitialTabHeights(offsetPx = 10) {
+    const hiddenTabs = $(".tab-pane").not(".show");
+    hiddenTabs.addClass("tmp-show").addClass("show").css("display", "block");
+    $(".header-fields-tab").each(function () {
+      let maxBottom = 0;
+      $(this).children(".draggable-field").each(function () {
+        const $el = $(this);
+        maxBottom = Math.max(maxBottom, $el.position().top + $el.outerHeight());
+      });
+      $(this).height(Math.max(0, Math.ceil(maxBottom + offsetPx)));
+    });
+    hiddenTabs.removeClass("show tmp-show").css("display", "");
+  }
+  requestAnimationFrame(() => setInitialTabHeights(10));
+});
+
+// ============================
+// 7) 上一筆 / 下一筆（依列表查詢結果）
+// ============================
+const NAV_BTN_PREV = document.getElementById('btnPrev');
+const NAV_BTN_NEXT = document.getElementById('btnNext');
+let navIds = [], navIndex = -1;
+
+function loadLastFilters() {
+  try { const s = localStorage.getItem("orderListQueryFilters"); return s ? JSON.parse(s) : []; }
+  catch { return []; }
+}
+function getDetailBasePath() { return location.pathname.replace(/\/[^\/]+$/, "/"); }
+function gotoPaper(pn) { if (!pn) return; localStorage.setItem("lastViewedPaperNum", pn); location.href = getDetailBasePath() + pn; }
+function updateNavButtons() {
+  const hasPrev = navIndex > 0;
+  const hasNext = navIndex >= 0 && navIndex < navIds.length - 1;
+  NAV_BTN_PREV.disabled = !hasPrev;
+  NAV_BTN_NEXT.disabled = !hasNext;
+  NAV_BTN_PREV.onclick = () => hasPrev && gotoPaper(navIds[navIndex - 1]);
+  NAV_BTN_NEXT.onclick = () => hasNext && gotoPaper(navIds[navIndex + 1]);
+}
+async function fetchIdListByApi(filters) {
+  const res = await fetch('/api/PagedQuery/IdList', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table: PAGE.headerTable, keyField: PAGE.keyField, filters: filters || [] })
+  });
+  const json = await res.json();
+  return Array.isArray(json.ids) ? json.ids : [];
+}
+async function fetchIdListByPagedQuery(filters) {
+  const fs = [...(filters || []), {Field:"page",Op:"",Value:"1"}, {Field:"pageSize",Op:"",Value:"999999"}];
+  const res = await fetch('/api/PagedQuery/PagedQuery', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table: PAGE.headerTable, filters: fs })
+  });
+  const json = await res.json();
+  const rows = Array.isArray(json.data) ? json.data : [];
+  return rows.map(r => r[PAGE.keyField]).filter(Boolean);
+}
+async function initRowNavigation() {
+  try {
+    const filters = loadLastFilters();
+    try { navIds = await fetchIdListByApi(filters); }
+    catch { navIds = await fetchIdListByPagedQuery(filters); }
+    navIndex = navIds.indexOf(PAGE.paperNum);
+    updateNavButtons();
+  } catch {
+    NAV_BTN_PREV.disabled = true; NAV_BTN_NEXT.disabled = true;
+  }
+}
+initRowNavigation();
+
+// ============================
+// 8) 其他：把最後檢視的單號存在 localStorage
+// ============================
+localStorage.setItem("lastViewedPaperNum", window.selectedPaperNum);
 </script>
+
 <style>
-body {
-    background: #f7f9fb !important;
-}
+/* =========================================
+   A) 全局/版面
+   ========================================= */
+body { background: #f7f9fb !important; }
+.erp-detail-container { min-height: 100vh; padding: 32px 0; margin-left: 3vw; margin-right: 3vw; }
 
-#header-fields {
-    position: relative;
-    min-height: 300px;
-    background: rgba(0,0,0,0.03); /* 開發階段用來看邊界 */
-}
-
-.erp-detail-container {
-    /* 只保留 spacing，不要再設 background 顏色 */
-    min-height: 100vh;
-    padding: 32px 0;
-    margin-left: 3vw;
-    margin-right: 3vw;
-}
-
-.erp-title {
-    font-size: 1.6em;
-    font-weight: 700;
-    color: #235eb8;
-    margin-bottom: 22px;
-    padding-left: 18px;
-    letter-spacing: 3px;
-}
-
-.erp-table-wrapper {
-    background: #fff;
-    box-shadow: 0 4px 18px 0 #c3d4e6;
-    max-width: 1400px;
-    overflow-x: auto;
-    padding: 8px !important;   /* 上方內距小一點 */
-    border-radius: 0 0 13px 13px;  /* 上方圓角取消，跟單頭銜接 */
-    border: 1px solid #d6dbe5;  
-}
-.erp-table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    font-size: 1.06em;
-    background: #fff;
-}
-.erp-table thead tr {
-    background: #e7ecf3;
-}
-.erp-table th, .erp-table td {
-    background: #f1f5fb;            /* ✅ 改成淡藍灰，跟外框白色做出對比 */
-    padding: 7px 12px;
-    border-bottom: 1px solid #c5d1e4;
-    white-space: nowrap;
-    text-align: center;
-    font-weight: 500;
-    border-right: 1px solid #dde4ed;
-    height: 34px; 
-}
-.erp-table th:last-child, .erp-table td:last-child {
-    border-right: none;
-}
-
-.erp-table th {
-    color: #124d8b;
-    font-weight: 700;
-    font-size: 1.05em;
-    letter-spacing: 1px;
-    background: #e7ecf3;
-}
-.erp-table tbody tr:nth-child(even) {
-    background: #f6f9fd;
-}
-.erp-table tbody tr:hover {
-    background: #eef7ff;
-}
-.highlight-red {
-    color: #e53b2d;
-    font-weight: 700;
-}
-.highlight-blue {
-    color: #2564b3;
-    font-weight: 700;
-}
-
-.draggable-field {
-    position: absolute;
-    display: flex;
-    flex-direction: column;
-    box-sizing: border-box;
-    overflow: hidden;
-    background: transparent;
-}
-
-.draggable-field label {
-    cursor: move;
-    font-size: 0.85em;
-    margin-bottom: 2px;
-    flex-shrink: 0;
-}
-
-textarea.resizable-input {
-    flex-grow: 1;
-    width: 100%;
-    height: 100%;
-    resize: none; /* 禁用 textarea 本身的 resize */
-    box-sizing: border-box;
-    padding: 4px 6px;
-    font-size: 0.9em;
-}
-
-.header-fields-tab {
-    position: relative;
-    min-height: 120px;
-    padding-bottom: 8px;
-    background: #eef2f9 !important;  /* ✅ 改這裡，跟明細欄位背景同色 */
-    box-shadow: 0 2px 6px rgba(0,0,0,0.04);  /* 輕微陰影 */
-    
-}
-
-.drop-hover {
-    background-color: #cce5ff !important;
-    border-radius: 4px;
-}
-
-.nav-link.drag-hover {
-    background-color: #f3faff;
-    font-weight: bold;
-}
-
-/* 統一所有 header form 內欄位字型大小 */
+/* =========================================
+   B) Header 表單 & Tabs
+   ========================================= */
+.erp-header-form,
 .erp-header-form select,
 .erp-header-form textarea,
-.erp-header-form input,
-.erp-header-form {
-    font-size: 0.95em;  /* 改大一點，更清楚 */
+.erp-header-form input { font-size: 0.95em; }
+
+.erp-header-form select.form-select{
+  font-size: 1em !important; height: 32px !important; min-height: 32px !important; line-height: 1.15 !important;
+  padding: 2px 30px 2px 6px !important; appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  background-image: url('data:image/svg+xml;utf8,<svg width="11" height="11" fill="gray" xmlns="http://www.w3.org/2000/svg"><path d="M2 4.5l3.5 3.5L9 4.5" stroke="gray" stroke-width="2" fill="none" stroke-linecap="round"/></svg>');
+  background-repeat: no-repeat; background-position: right 10px center; background-size: 14px 14px; box-shadow: none !important; border-radius: 5px !important;
+}
+.header-fields-tab{
+  position: relative; min-height: 120px; padding-bottom: 8px;
+  background: #eef2f9 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+}
+.drop-hover{ background-color:#cce5ff !important; border-radius:4px; }
+
+.erp-header-form .nav-tabs .nav-link{ border-radius:8px 8px 0 0 !important; padding:7px 18px; font-size:1.05em; font-weight:500; color:#235eb8; }
+.erp-header-form .nav-tabs .nav-link.active{
+  background:#fff; color:#124d8b; border-color:#bdd2f7 #bdd2f7 #fff #bdd2f7 !important; box-shadow:0 2px 6px 0 #e4ecf7; font-weight:bold;
 }
 
-.erp-header-form select.form-select {
-    font-size: 1em !important;
-    height: 32px !important;
-    min-height: 32px !important;
-    line-height: 1.15 !important;
-    padding-top: 2px !important;
-    padding-bottom: 2px !important;
-    padding-left: 6px !important;
-    padding-right: 30px !important;
-    /* 下拉icon換小一點並微調靠右 */
-    appearance: none;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    background-image: url('data:image/svg+xml;utf8,<svg width="11" height="11" fill="gray" xmlns="http://www.w3.org/2000/svg"><path d="M2 4.5l3.5 3.5L9 4.5" stroke="gray" stroke-width="2" fill="none" stroke-linecap="round"/></svg>');
-    background-repeat: no-repeat;
-    background-position: right 10px center;  /* 靠右10px */
-    background-size: 14px 14px;
-    box-shadow: none !important; /* 移除陰影 */
-    border-radius: 5px !important;
-}
-
-
-
-/* 分頁按鈕圓角、字型微調 */
-.erp-header-form .nav-tabs .nav-link {
-    border-radius: 8px 8px 0 0 !important;
-    padding: 7px 18px 7px 18px;
-    font-size: 1.05em;
-    font-weight: 500;
-    color: #235eb8;
-}
-
-/* 選中的分頁強調色、陰影、無邊 */
-.erp-header-form .nav-tabs .nav-link.active {
-    background: #fff;
-    color: #124d8b;
-    border-color: #bdd2f7 #bdd2f7 #fff #bdd2f7 !important;
-    box-shadow: 0 2px 6px 0 #e4ecf7;
-    font-weight: bold;
-}
-
-/* 橫排：標題 + 欄位 */
-.draggable-field.inline {
-    position: absolute;
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 4px;
-    box-sizing: border-box;
-    overflow: hidden;
-    background: transparent;
-
-    /* 關鍵：讓 jQuery UI 設的 width(px) 生效 */
-    /* 刪掉 width:auto!important; */
-    flex: 0 0 auto;          /* 不要讓 flex 重新計算寬度，使用元素自己的 px 寬 */
-    min-width: 100px;        /* 自行調整 */
-    max-width: 100%;
-}
-.draggable-field.inline label {
-    cursor: move;
-    flex: 0 0 auto;          /* 標題不吃寬 */
-    margin: 0 6px 0 0;
-    font-size: 0.9em;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    overflow: hidden;
-}
-.draggable-field.inline .field-control {
-    flex: 1 1 auto;
-    height: 100%;
-    display: flex;
-}
-.draggable-field.inline .field-control > * {
-    width: 100%;
-}
-/* 讓輸入控件吃剩餘空間，外層 li 調寬時一起變 */
+/* draggable 欄位（橫排 label + 控件） */
+.draggable-field{ position:absolute; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; background:transparent; }
+.draggable-field.inline{ display:flex; flex-direction:row; align-items: center; gap:4px; flex:0 0 auto; min-width:100px; max-width:100%; }
+.draggable-field label{ cursor:move; font-size:0.85em; margin:0 6px 0 0; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
+.draggable-field.inline .field-control{ flex:1 1 auto; height:100%; display:flex; }
 .draggable-field.inline textarea,
 .draggable-field.inline input,
-.draggable-field.inline .form-select {
-    flex: 1 1 auto;
-    width: 100%;
-    height: 100%;
-    min-height: 32px;
-    line-height: 1.2;
-    resize: none;
-    padding: 4px 6px;
-    font-size: 0.95em;
+.draggable-field.inline .form-select{
+  flex:1 1 auto; width:100%; height:100%; min-height:32px; line-height:1.2; resize:none; padding:4px 6px; font-size:0.95em;
+}
+.draggable-field.inline label{
+  white-space: nowrap !important;     /* 單列顯示 */
+  overflow: visible !important;       /* 不裁切 */
+  text-overflow: clip !important;     /* 不顯示 … */
+  max-width: none !important;         /* 讓標籤可撐開（必要時手動調寬 li） */
 }
 
-.erp-table td {
-    position: relative;
-    padding: 0; /* 拿掉 padding，讓 input 填滿 */
+/* =========================================
+   C) 明細表格（視覺 & 編輯）
+   ========================================= */
+.erp-table-wrapper{
+  background:#fff; box-shadow:0 4px 18px 0 #c3d4e6; max-width:1400px; overflow-x:auto;
+  padding:8px !important; border-radius:0 0 13px 13px; border:1px solid #d6dbe5;
+}
+.erp-table{ width:100%; border-collapse:separate; border-spacing:0; font-size:1.06em; background:#fff; }
+.erp-table thead tr{ background:#e7ecf3; }
+.erp-table th, .erp-table td{
+  background:#f1f5fb; padding:7px 12px; border-bottom:1px solid #c5d1e4; white-space:nowrap; text-align:center;
+  font-weight:500; border-right:1px solid #dde4ed; height:34px;
+}
+.erp-table th:last-child, .erp-table td:last-child{ border-right:none; }
+.erp-table th{ color:#124d8b; font-weight:700; font-size:1.05em; letter-spacing:1px; background:#e7ecf3; }
+.erp-table tbody tr:nth-child(even){ background:#f6f9fd; }
+.erp-table tbody tr:hover{ background:#eef7ff; }
+
+/* 顯示/編輯雙層：span 顯示、input 編輯（切換 display） */
+.erp-table td{ position:relative; padding:0; }
+.erp-table td .cell-view{ display:inline-block; width:100%; text-align:inherit; }
+.erp-table td .cell-edit{
+  width:100% !important; height:100% !important; box-sizing:border-box; margin:0; border:none; border-radius:0;
+  background:#fff !important; font-size:inherit !important; font-weight:inherit !important; font-family:inherit !important;
+  line-height:inherit !important; text-align:inherit !important; padding:0 4px;
 }
 
-.erp-table td .cell-edit {
-    width: 100% !important;
-    height: 100% !important;
-    box-sizing: border-box;
-    margin: 0;
-    border: none;
-    border-radius: 0;
-    background: #fff !important; /* 編輯時白底 */
-
-    /* 🔑 關鍵：繼承表格字體和對齊 */
-    font-size: inherit !important;
-    font-weight: inherit !important;
-    font-family: inherit !important;
-    line-height: inherit !important;
-    text-align: inherit !important;
-    padding: 0 4px; /* 跟 <span> 一致的 padding */
+/* 整列選取高亮＆左側藍條 */
+.erp-table tbody tr.row-selected > td{ background:#fff8c6 !important; }
+.erp-table tbody tr.row-selected > td:first-child{ position:relative; }
+.erp-table tbody tr.row-selected > td:first-child::after{
+  content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:#0d6efd; border-radius:2px;
 }
+/* 移除預設 focus 藍框（避免只看到某一格有外框） */
+.erp-table td:focus, .erp-table td *:focus{ outline:none !important; box-shadow:none !important; }
 
-.erp-table td .cell-view {
-    display: inline-block;
-    width: 100%;
-    text-align: inherit;
-}
-
-
-.erp-table td .cell-edit {
-    background: #fff !important; /* 修改模式才顯示白底 */
-}
-
-
-
+/* =========================================
+   D) 其它色彩強調（若有需要）
+   ========================================= */
+.highlight-red { color:#e53b2d; font-weight:700; }
+.highlight-blue{ color:#2564b3; font-weight:700; }
 </style>
+

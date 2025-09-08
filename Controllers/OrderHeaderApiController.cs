@@ -102,8 +102,8 @@ public class OrderHeaderApiController : ControllerBase
             return BadRequest("__headerTable 必填");
 
         const string headerKey = "PaperNum";
-        const string detailFk  = "PaperNum";
-        const string detailPk  = "Item";   // int 自動遞增
+        const string detailFk = "PaperNum";
+        const string detailPk = "Item";   // int 自動遞增
 
         // 取出 Details（若有）
         List<Dictionary<string, object>> details = null;
@@ -120,7 +120,7 @@ public class OrderHeaderApiController : ControllerBase
         var headerMeta = EnsureMeta(headerTable);
         GuardIdentifier(headerKey, headerMeta);
         var keyDbType = headerMeta.Types[headerKey];
-        var keyValue  = ConvertJsonToDbType(keyObj, keyDbType);
+        var keyValue = ConvertJsonToDbType(keyObj, keyDbType);
         if (keyValue == null) return BadRequest("主鍵值不可為空");
 
         TableMeta detailMeta = null;
@@ -161,7 +161,7 @@ public class OrderHeaderApiController : ControllerBase
 
                 var dbType = headerMeta.Types[k].ToLowerInvariant();
                 var newVal = ConvertJsonToDbType(v, dbType);
-                var dbVal  = dbRow.TryGetValue(k, out var dv) ? (dv is DBNull ? null : dv) : null;
+                var dbVal = dbRow.TryGetValue(k, out var dv) ? (dv is DBNull ? null : dv) : null;
 
                 bool diff = (newVal, dbVal) switch
                 {
@@ -250,8 +250,9 @@ public class OrderHeaderApiController : ControllerBase
                         pkMaybe = newItem;
                     }
                     var itemKey = pkMaybe.Value;
+                    var exists = currentSubs.ContainsKey(itemKey);
 
-                    if (state == "added" || !currentSubs.ContainsKey(itemKey))
+                    if (!exists)
                     {
                         var cols = new List<string>();
                         var pars = new List<string>();
@@ -261,7 +262,7 @@ public class OrderHeaderApiController : ControllerBase
                         {
                             if (!detailMeta.Types.ContainsKey(kv.Key)) continue;
                             var dbType = detailMeta.Types[kv.Key].ToLowerInvariant();
-                            var val    = ConvertJsonToDbType(kv.Value, dbType);
+                            var val = ConvertJsonToDbType(kv.Value, dbType);
                             if (val == null && !detailMeta.Nullable[kv.Key]) continue;
 
                             cols.Add($"[{kv.Key}]");
@@ -290,7 +291,7 @@ public class OrderHeaderApiController : ControllerBase
 
                             var dbType = detailMeta.Types[kv.Key].ToLowerInvariant();
                             var newVal = ConvertJsonToDbType(kv.Value, dbType);
-                            var dbVal  = dbRowSub.TryGetValue(kv.Key, out var v) ? (v is DBNull ? null : v) : null;
+                            var dbVal = dbRowSub.TryGetValue(kv.Key, out var v) ? (v is DBNull ? null : v) : null;
 
                             bool diff = (newVal, dbVal) switch
                             {
@@ -405,8 +406,8 @@ public class OrderHeaderApiController : ControllerBase
             {
                 JsonValueKind.String => je.GetString(),
                 JsonValueKind.Number => je.ToString(),
-                JsonValueKind.True   => "true",
-                JsonValueKind.False  => "false",
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
                 _ => je.ToString()
             };
             return ParseStringForDbType(s, dbType);
@@ -452,4 +453,144 @@ public class OrderHeaderApiController : ControllerBase
         var o = ConvertJsonToDbType(v, "int");
         return o is int i ? i : (int?)null;
     }
+
+    public class AddDetailRowReq
+    {
+        public string DetailTable { get; set; } // ex: "SpodOrderSub"
+        public string PaperNum { get; set; }    // 目前單號
+    }
+
+    private static readonly Regex _safeName = new(@"^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled);
+    private static string SafeTable(string t)
+    {
+        if (string.IsNullOrWhiteSpace(t) || !_safeName.IsMatch(t))
+            throw new ArgumentException("illegal table name");
+        return t;
+    }
+
+    // 取表欄位型別/可空性（簡易快取）
+    private static readonly Dictionary<string, (Dictionary<string, string> types, Dictionary<string, bool> nullable)> _tableMeta
+        = new(StringComparer.OrdinalIgnoreCase);
+
+    private (Dictionary<string, string> types, Dictionary<string, bool> nullable) GetTableMeta(string table)
+    {
+        if (_tableMeta.TryGetValue(table, out var m)) return m;
+
+        var types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var nullable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        using var conn = new SqlConnection(_connStr);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME = @t";
+        cmd.Parameters.AddWithValue("@t", table);
+
+        using var rd = cmd.ExecuteReader();
+        while (rd.Read())
+        {
+            types[rd.GetString(0)] = rd.GetString(1);
+            nullable[rd.GetString(0)] = rd.GetString(2).Equals("YES", StringComparison.OrdinalIgnoreCase);
+        }
+
+        _tableMeta[table] = (types, nullable);
+        return (types, nullable);
+    }
+
+    [HttpPost("AddDetailRow")]
+    public async Task<IActionResult> AddDetailRow([FromBody] AddDetailRowReq req)
+    {
+        if (req == null || string.IsNullOrWhiteSpace(req.PaperNum))
+            return BadRequest("paperNum required");
+        if (string.IsNullOrWhiteSpace(req.DetailTable))
+            return BadRequest("detailTable required");
+
+        var table = SafeTable(req.DetailTable.Trim()); // 防注入
+        var (types, nullable) = GetTableMeta(table);
+
+        if (!types.ContainsKey("PaperNum") || !types.ContainsKey("Item"))
+            return BadRequest("Detail table must have PaperNum & Item");
+
+        using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        using var tran = conn.BeginTransaction();
+
+        try
+        {
+            // 1) 取下一個項次
+            int nextItem;
+            using (var c = new SqlCommand($@"SELECT ISNULL(MAX([Item]),0)+1 FROM [{table}] WHERE [PaperNum]=@PaperNum", conn, tran))
+            {
+                c.Parameters.Add(MakeTypedParam("@PaperNum", req.PaperNum, types["PaperNum"]));
+                var v = await c.ExecuteScalarAsync();
+                nextItem = Convert.ToInt32(v);
+            }
+
+            // 2) 動態組 INSERT 欄位：必填 PaperNum, Item；若有 PartNum，一律預設 "----"
+            var cols = new List<string> { "PaperNum", "Item" };
+            var pars = new List<string> { "@PaperNum", "@Item" };
+
+            using var ins = new SqlCommand() { Connection = conn, Transaction = tran };
+            ins.Parameters.Add(MakeTypedParam("@PaperNum", req.PaperNum, types["PaperNum"]));
+            ins.Parameters.Add(MakeTypedParam("@Item", nextItem, types["Item"]));
+
+            // ★ PartNum 預設值 ----
+            if (types.ContainsKey("PartNum"))
+            {
+                cols.Add("PartNum");
+                pars.Add("@PartNum");
+                ins.Parameters.Add(MakeTypedParam("@PartNum", "----", types["PartNum"]));
+            }
+
+            // 如將來還有其他 NOT NULL 欄位要補預設，可在這裡依型別再加：
+            // if (types.ContainsKey("Qty") && !nullable["Qty"]) { cols.Add("Qty"); pars.Add("@Qty"); ins.Parameters.Add(MakeTypedParam("@Qty", 0, types["Qty"])); }
+            // ...
+
+            ins.CommandText = $"INSERT INTO [{table}]({string.Join(",", cols.Select(c => $"[{c}]"))}) VALUES({string.Join(",", pars)})";
+            await ins.ExecuteNonQueryAsync();
+
+            // 3) 抓回整列
+            var row = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            using (var s = new SqlCommand($@"SELECT * FROM [{table}] WHERE [PaperNum]=@PaperNum AND [Item]=@Item", conn, tran))
+            {
+                s.Parameters.Add(MakeTypedParam("@PaperNum", req.PaperNum, types["PaperNum"]));
+                s.Parameters.Add(MakeTypedParam("@Item", nextItem, types["Item"]));
+                using var rd = await s.ExecuteReaderAsync();
+                if (await rd.ReadAsync())
+                {
+                    for (int i = 0; i < rd.FieldCount; i++)
+                        row[rd.GetName(i)] = rd.GetValue(i);
+                }
+            }
+
+            tran.Commit();
+            return Ok(new { ok = true, row });
+        }
+        catch (Exception ex)
+        {
+            tran.Rollback();
+            return BadRequest(new { ok = false, error = ex.Message });
+        }
+    }
+    
+    // DELETE /api/OrderDetailApi/DeleteRow?table=SpodOrderSub&paperNum=...&item=...
+    [HttpDelete("DeleteRow")]
+    public async Task<IActionResult> DeleteRow([FromQuery] string table, [FromQuery] string paperNum, [FromQuery] int item)
+    {
+        if (string.IsNullOrWhiteSpace(table) || string.IsNullOrWhiteSpace(paperNum))
+            return BadRequest("table/paperNum 不可為空");
+
+        using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        var sql = $"DELETE FROM {table} WHERE PaperNum=@PaperNum AND Item=@Item";
+        using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+        cmd.Parameters.AddWithValue("@Item", item);
+        var n = await cmd.ExecuteNonQueryAsync();
+        return Ok(new { deleted = n });
+    }
+
+
 }
