@@ -134,6 +134,65 @@ public class TableFieldLayoutController : ControllerBase
         return Ok(list);
     }
 
+    public class DetailColWidthDto
+    {
+        public string tableName { get; set; } = "";
+        public List<ColItem> cols { get; set; } = new();
+        public class ColItem { public string fieldName { get; set; } = ""; public int width { get; set; } }
+    }
+
+[HttpPost("SaveDetailLayout")]
+public async Task<IActionResult> SaveDetailLayout([FromBody] DetailColWidthDto dto)
+{
+    if (string.IsNullOrWhiteSpace(dto.tableName))
+        return BadRequest("tableName is required");
+    if (dto.cols == null || dto.cols.Count == 0)
+        return Ok(new { ok = true, updated = 0 });
+
+    // 正規化表名與欄名（去 []/dbo.、小寫）
+    static string Clean(string s) => (s ?? "")
+        .Trim()
+        .Trim('[', ']')
+        .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase);
+
+    var tname = Clean(dto.tableName).ToLowerInvariant();
+
+    // 去重、保留最終寬度
+    var items = dto.cols
+        .Where(c => !string.IsNullOrWhiteSpace(c.fieldName))
+        .Select(c => new { field = Clean(c.fieldName).ToLowerInvariant(), width = Math.Max(50, c.width) })
+        .GroupBy(x => x.field)
+        .Select(g => g.Last())       // 同欄位最後一次為主
+        .ToList();
+
+    int updated = 0;
+
+    // 逐欄位用參數化 SQL 更新（容忍 TableName 有/沒有 dbo.）
+    const string sql = @"
+UPDATE CURdTableField
+SET iFieldWidth = @W
+WHERE LOWER(FieldName) = @F
+  AND (
+        LOWER(TableName) = @TN               -- 'spodordersub'
+     OR LOWER(REPLACE(TableName,'dbo.','')) = @TN
+     )";
+
+    foreach (var it in items)
+    {
+        var n = await _context.Database.ExecuteSqlRawAsync(
+            sql,
+            new SqlParameter("@W", it.width),
+            new SqlParameter("@F", it.field),
+            new SqlParameter("@TN", tname)
+        );
+        // 不管影響列數是否為 0，都視為一次更新嘗試；你也可改成 if (n > 0) updated++;
+        updated += n;
+    }
+
+    return Ok(new { ok = true, updated, table = tname, fields = items.Select(i => new { i.field, i.width }) });
+}
+
+
     // 專用 DTO 類別
     public class SaveSerialOrderRequest
     {

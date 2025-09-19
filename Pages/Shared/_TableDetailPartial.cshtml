@@ -169,12 +169,18 @@
     </div>
         <table class="erp-table">
             <thead>
-                <tr>
-                    @foreach(var col in fields)
-                    {
-                        <th>@col.DisplayLabel</th>
-                    }
-                </tr>
+              <tr>
+                @foreach (var col in fields)   // ← 不要寫 var dynamic
+                {
+                    var initWidth = (col.iFieldWidth ?? 120);   // ← int? 就給預設 120
+
+                    <th data-field="@col.FieldName"
+                        style="width:@(initWidth)px; position:relative;"> 
+                      <span class="th-text">@col.DisplayLabel</span>
+                      <span class="col-resizer" draggable="false"></span>
+                    </th>
+                }
+              </tr>
             </thead>
             <tbody>
                     @if (items != null)
@@ -916,6 +922,111 @@ document.getElementById('btnClearDetails')?.addEventListener('click', async () =
     // 例如：你不想 reload，可在這裡自己處理
     // console.log('confirmed:', res);
   });
+
+
+//單身拖曳欄位寬度調整
+
+(function enableDetailColumnResize(){
+  const table = document.querySelector('.erp-table');
+  if (!table) return;
+
+ const detailTableName = (PAGE.detailTable || '')
+  .replace(/^dbo\./i, '')
+  .trim()
+  .toLowerCase();
+  const saveUrl = '/api/TableFieldLayout/SaveDetailLayout';         // ← 後端API(第4點)
+  let isDown = false, startX = 0, startWidth = 0, th, thIndex = -1;
+
+  // 取目前所有 <th>
+  const ths = Array.from(table.querySelectorAll('thead th'));
+
+  // 根據欄位代碼，快速找該欄所有 td
+  function columnCells(index){
+    return Array.from(table.querySelectorAll(`tbody tr td:nth-child(${index+1})`));
+  }
+
+  // 儲存目前所有欄位寬度（去抖動）
+  let saveTimer = null;
+  function debounceSave(){
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(persistWidths, 400);
+  }
+
+  async function persistWidths(){
+    try{
+      const payload = {
+        tableName: detailTableName,   // e.g. 'spodordersub'
+        cols: ths.map(th => ({
+          fieldName: th.dataset.field,
+          width: Math.round(th.getBoundingClientRect().width)
+        }))
+      };
+      // 後端存 DB；若你還沒建 API，先暫存 localStorage 也可
+      await fetch(saveUrl, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      }).catch(()=>{});
+      // local fallback（可留可去）
+      localStorage.setItem(`colwidth:${detailTableName}`, JSON.stringify(payload.cols));
+    }catch(e){}
+  }
+
+  // 載入時，若 localStorage/後端有寬度就套用（保險）
+  (function applyInitialWidths(){
+    try{
+      const raw = localStorage.getItem(`colwidth:${detailTableName}`);
+      if (!raw) return;
+      const cols = JSON.parse(raw) || [];
+      cols.forEach(c => {
+        const th = ths.find(x => (x.dataset.field||'').toLowerCase() === (c.fieldName||'').toLowerCase());
+        if (!th) return;
+        th.style.width = `${c.width}px`;
+        const idx = ths.indexOf(th);
+        columnCells(idx).forEach(td => td.style.width = `${c.width}px`);
+      });
+    }catch(e){}
+  })();
+
+  // 綁定每個把手
+  ths.forEach((h, idx) => {
+    const handle = h.querySelector('.col-resizer');
+    if (!handle) return;
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      isDown = true;
+      th = h; thIndex = idx;
+      startX = e.pageX;
+      startWidth = th.getBoundingClientRect().width;
+      document.body.classList.add('resizing');
+      th.classList.add('resizing');
+      columnCells(thIndex).forEach(td => td.classList.add('resizing'));
+    });
+  });
+
+  // 拖曳過程：動態設定寬度
+  document.addEventListener('mousemove', (e) => {
+    if (!isDown || !th) return;
+    const dx = e.pageX - startX;
+    const newW = Math.max(50, startWidth + dx); // 最小 50
+    th.style.width = `${newW}px`;
+    columnCells(thIndex).forEach(td => td.style.width = `${newW}px`);
+  });
+
+  // 放開滑鼠：結束＋儲存
+  document.addEventListener('mouseup', () => {
+    if (!isDown) return;
+    isDown = false;
+    document.body.classList.remove('resizing');
+    th?.classList.remove('resizing');
+    columnCells(thIndex).forEach(td => td.classList.remove('resizing'));
+    debounceSave();
+    th = null; thIndex = -1;
+  });
+})();
+
+
+
 </script>
 
 <style>
@@ -1088,6 +1199,32 @@ body { background: #f7f9fb !important; }
 #topToolbar .btn-toolbar{
   margin-left: 0 !important;
 }
+
+/* 讓表格用固定布局，欄寬才會照 px 生效 */
+.erp-table { table-layout: fixed; }
+
+/* th 要是定位容器（你 inline 已有 position:relative 也 OK） */
+.erp-table th { position: relative; }
+
+/* 右側拖曳把手：要「有寬度」+ 指標樣式，才看得到、點得到 */
+.erp-table th .col-resizer{
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 12px;             /* ← 把手寬一點好抓 */
+  cursor: col-resize;
+  user-select: none;
+  z-index: 2;
+}
+
+/* 視覺上的小抓把（可選） */
+.erp-table th .col-resizer::before {
+  content: none !important;  /* 不畫任何東西 */
+}
+
+/* 拖曳時讓游標維持 col-resize（含整欄） */
+.erp-table th.resizing, .erp-table td.resizing, body.resizing { cursor: col-resize !important; }
 
 
 
