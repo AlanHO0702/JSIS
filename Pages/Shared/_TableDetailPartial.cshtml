@@ -55,6 +55,8 @@
 
     <div class="action-rail">
       <button id="btnCalcAmount" class="fab">金額計算</button>
+      <button id="btnClearDetails" class="fab fab-red">清除單身</button>
+      <button id="btnSearchDetails" class="fab">搜尋</button> <!-- 👈 新的 -->
       <!-- 之後可以再加別的按鈕 -->
     </div>
 
@@ -165,8 +167,6 @@
         </button>
         <button type="button" class="btn btn-outline-danger btn-sm" id="btnRowDelete" title="刪除當前列">－</button>
     </div>
-    
-
         <table class="erp-table">
             <thead>
                 <tr>
@@ -246,12 +246,29 @@
         </table>
     </div>
 </div>
+
+
+
 <!-- SweetAlert2 for提示 -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
 <script src="~/js/toolbarHandler.js"></script>
 <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css" />
+
+<!-- 呼叫元件 -->
+@await Html.PartialAsync("_OrderDetailPicker",
+  new DetailPickerConfig{
+      ModalId = "detailPicker",
+      PaperNum = PaperNum,
+      FetchApi = "/api/OrderDetailSearch/fetch",
+      InsertApi = "/api/OrderDetailSearch/insert",
+      //Dicts = new Dictionary<string, LookupConfig>{
+      //  ["PartNum"] = new LookupConfig{ Table="SPOdOCXOrderPOChice",         Key="PartNum",          Result="PartNum,MatName" },
+      //  ["CustomerPartNum"] = new LookupConfig{ Table="CustomerMaterial", Key="CustomerPartNum", Result="CustomerPartNum,CustomerName" }
+      //}
+  })
+
 <script>
 // ============================
 // 0) 頁面常數／Razor 注入
@@ -789,6 +806,20 @@ initRowNavigation();
 // ============================
 localStorage.setItem("lastViewedPaperNum", window.selectedPaperNum);
 
+// 依 header 欄位「標籤文字」抓顯示值（select 取文字，其它取 value）
+function getHeaderValueByLabel(labelText) {
+  const li = Array.from(document.querySelectorAll('.draggable-field'))
+    .find(el => (el.querySelector('label')?.textContent || '').trim() === labelText);
+  if (!li) return '';
+  const ctrl = li.querySelector('select, input, textarea');
+  if (!ctrl) return '';
+  if (ctrl.tagName.toLowerCase() === 'select') {
+    const opt = ctrl.options[ctrl.selectedIndex];
+    return (opt?.text || opt?.value || '').trim();
+  }
+  return (ctrl.value || '').trim();
+}
+
 // ============================
 // 9) 其他：金額計算按鈕（若頁面有
 document.getElementById('btnCalcAmount')?.addEventListener('click', async () => {
@@ -820,7 +851,71 @@ document.getElementById('btnCalcAmount')?.addEventListener('click', async () => 
   }
 });
 
+document.getElementById('btnClearDetails')?.addEventListener('click', async () => {
+  const paper = (PAGE.paperNum || window.selectedPaperNum || '').trim();
+  const paperId = (PAGE.detailTable || '').trim().replace(/^dbo\./i, '');
+  if (!paper)  return Swal.fire({icon:'info',  title:'沒有單號'});
+  if (!paperId) return Swal.fire({icon:'info',  title:'缺少單身表名（PaperId）'});
 
+  // ① 狀態限制
+  const status = getHeaderValueByLabel('單據狀態') || '';
+  const ALLOW  = ['作業中', '審核中'];
+  const BLOCK  = ['已確認', '已結案', '作廢中'];
+
+  if (BLOCK.includes(status) || !ALLOW.includes(status)) {
+    return Swal.fire({
+      icon: 'warning',
+      title: '此狀態不可清除',
+      html: `單據狀態：<b>${status || '（空）'}</b>`
+    });
+  }
+
+  // ② 二次確認
+  const { isConfirmed } = await Swal.fire({
+    icon: 'warning',
+    title: '確定要清除這張單的所有單身嗎？',
+    html: `單號：<b>${paper}</b><br>表：<code>${paperId}</code><br>狀態：<b>${status}</b>`,
+    showCancelButton: true, confirmButtonText: '清除', cancelButtonText: '取消'
+  });
+  if (!isConfirmed) return;
+
+  // ③ 呼叫 SP
+  try {
+    const resp = await fetch('/api/StoredProc/exec', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        Key: 'ClearOrderDetails',
+        Args: { PaperNum: paper, PaperId: paperId, Item: 0 }
+      })
+    });
+
+    const raw = await resp.text();
+    let data; try { data = JSON.parse(raw); } catch { data = { ok:false, error: raw }; }
+
+    if (resp.ok && data.ok) {
+      const msg = (data.rows != null) ? `已清除 ${data.rows} 筆` : '清除完成';
+      await Swal.fire({icon:'success', title: msg, timer:900, showConfirmButton:false});
+      location.reload();
+    } else {
+      Swal.fire({icon:'error', title:'清除失敗', text: data.error || `HTTP ${resp.status}`});
+    }
+  } catch (e) {
+    Swal.fire({icon:'error', title:'網路錯誤', text: String(e)});
+  }
+});
+
+  // 綁定外頁的「搜尋」按鈕
+  document.getElementById('btnSearchDetails')?.addEventListener('click', ()=>{
+    const paper = (window.selectedPaperNum || '').trim();
+    window.OrderDetailPicker_detailPicker.open({ paperNum: paper });
+  });
+
+  // 可選：攔截元件的確定事件
+  $('#detailPicker').on('odp:confirmed', function(e, res){
+    // 例如：你不想 reload，可在這裡自己處理
+    // console.log('confirmed:', res);
+  });
 </script>
 
 <style>
@@ -925,18 +1020,34 @@ body { background: #f7f9fb !important; }
   --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap));
 }
 
-/* 浮動按鈕 */
-.fab{
+/* 讓整個按鈕欄固定在左側；每顆按鈕在欄位內垂直排列 */
+.action-rail{
   position: fixed;
   left: var(--fab-left);
   top: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 900;
+}
+
+
+/* 浮動按鈕 */
+.fab{
+  position: relative; /* 不再用 fixed，讓它跟著 action-rail 排列 */
   min-width: var(--fab-width);
   padding: 8px 12px;
   background:#ffc107; color:#090101; font-weight:700;
   border-radius:10px; cursor:pointer;
-  box-shadow:0 6px 16px rgba(0,0,0,.2); z-index: 1200;
+  box-shadow:0 6px 16px rgba(0,0,0,.2);
+  border: 0;
 }
 .fab:hover{ filter:brightness(0.95); }
+
+/* 紅色風格：清除單身 */
+.fab-red{
+  background:#dc3545; color:#fff;
+}
 
 /* 內容容器左邊預留的安全邊界（＝ 按鈕位置 + 按鈕寬 + 緩衝距離） */
 /* 仍保留內容整體的左側預留空間（避免被浮動鈕擋住） */
@@ -977,6 +1088,8 @@ body { background: #f7f9fb !important; }
 #topToolbar .btn-toolbar{
   margin-left: 0 !important;
 }
+
+
 
 </style>
 

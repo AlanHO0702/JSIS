@@ -1,0 +1,255 @@
+@model PcbErpApi.Models.DetailPickerConfig
+@using System.Text.Json
+
+@{
+  var cfgJson = JsonSerializer.Serialize(Model);
+  var ckId = $"{Model.ModalId}_ckReplace";
+}
+
+<div class="modal fade" id="@Model.ModalId" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content order-detail-picker">
+      <div class="modal-header">
+        <h5 class="modal-title">搜尋並挑選明細</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body">
+        <!-- 查詢條件（純輸入，無辭典） -->
+        <form class="row g-2 mb-3 odp-fetch-form">
+          <div class="col-md-3">
+            <label class="form-label">料號</label>
+            <input class="form-control" name="PartNum">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">客戶料號/名稱</label>
+            <input class="form-control" name="MatName">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">分類</label>
+            <input class="form-control" name="MatClass">
+          </div>
+          <div class="col-md-2 d-flex align-items-end gap-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="IncludeMat" checked>
+              <label class="form-check-label">含材料</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="Calc">
+              <label class="form-check-label">計算可用</label>
+            </div>
+          </div>
+          <div class="col-12">
+            <button type="button" class="btn btn-primary odp-btn-fetch">資料重取</button>
+          </div>
+        </form>
+
+        <!-- 挑選區 -->
+        <div class="row odp-picker-row">
+          <!-- 左：可選 -->
+          <div class="col-5 odp-col">
+            <div class="odp-scroll">
+              <table class="table table-sm table-striped mb-0 odp-available">
+                <thead>
+                  <tr>
+                    <th style="width:36px;"></th>
+                    <th>料號</th>
+                    <th>客戶料號</th>
+                    <th class="text-end" style="width:120px;">可用</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 中：移動按鈕 -->
+          <div class="col-2 odp-transfer">
+            <button class="btn btn-outline-primary odp-right" type="button">&rarr;</button>
+            <button class="btn btn-outline-secondary odp-left" type="button">&larr;</button>
+            @if (Model.ShowReplace)
+            {
+              <div class="form-check mt-4 odp-replace">
+                <input id="@ckId" class="form-check-input" type="checkbox">
+                <label class="form-check-label" for="@ckId">取代已存在</label>
+              </div>
+            }
+          </div>
+
+          <!-- 右：已選 -->
+          <div class="col-5 odp-col">
+            <div class="odp-scroll">
+              <table class="table table-sm table-striped mb-0 odp-selected">
+                <thead>
+                  <tr>
+                    <th style="width:36px;"></th>
+                    <th>料號</th>
+                    <th class="text-end" style="width:120px;">庫存</th>
+                    <th class="text-end" style="width:120px;">可用</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-success odp-confirm">確定</button>
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const CFG = @Html.Raw(cfgJson);
+  const $modal = $('#'+CFG.ModalId);
+  const $avail = $modal.find('.odp-available tbody');
+  const $sel   = $modal.find('.odp-selected tbody');
+
+  // 內部狀態
+  const STATE = { paperNum: CFG.PaperNum || '' };
+
+  // 對外 API
+  const API = {
+    open(opts){
+      STATE.paperNum = (opts?.paperNum || STATE.paperNum || '').trim();
+      $modal.modal('show');
+    }
+  };
+  window['OrderDetailPicker_'+CFG.ModalId] = API;
+
+  // 綁定事件
+  $modal.find('.odp-btn-fetch').on('click', onFetch);
+  $modal.find('.odp-right').on('click', moveRight);
+  $modal.find('.odp-left').on('click', moveLeft);
+  $modal.find('.odp-confirm').on('click', onConfirm);
+
+  // ① 資料重取（無辭典）
+  async function onFetch(){
+    const formEl = $modal.find('.odp-fetch-form')[0];
+    const form = Object.fromEntries(new FormData(formEl).entries());
+
+    const payload = {
+      PartNum:  (form.PartNum  ?? '').trim(),
+      MatName:  (form.MatName  ?? '').trim(),
+      MatClass: (form.MatClass ?? '').trim(),
+      IncludeMat: !!$modal.find('.odp-fetch-form [name=IncludeMat]').prop('checked'),
+      Calc:       !!$modal.find('.odp-fetch-form [name=Calc]').prop('checked')
+    };
+
+    const resp = await fetch(CFG.FetchApi, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const res = await resp.json();
+    if (!res.ok) return Swal.fire({icon:'error', title:'查詢失敗'});
+
+    $avail.empty();
+    (res.data || []).forEach(row=>{
+      const part    = row.PartNum || row.partnum || '';
+      const custPn  = row.CustomerPartNum || row.customerpartnum || '';
+      const canUse  = row.CanUseQnty ?? row.canuseqnty ?? 0;
+      const stock   = row.StockQnty ?? row.stockqnty ?? 0;
+
+      $avail.append(`
+        <tr data-part="${part}" data-stock="${stock}" data-canuse="${canUse}">
+          <td><input type="checkbox" class="form-check-input odp-chk"></td>
+          <td>${part ?? ''}</td>
+          <td>${custPn ?? ''}</td>
+          <td class="text-end">${canUse}</td>
+        </tr>
+      `);
+    });
+  }
+
+  // ② → 右邊
+  function moveRight(){
+    $avail.find('tr').has('.odp-chk:checked').each(function(){
+      const $tr   = $(this);
+      const part  = $tr.data('part') ?? '';
+      const stock = $tr.data('stock') ?? 0;
+      const canuse= $tr.data('canuse') ?? 0;
+
+      $sel.append(`
+        <tr data-part="${part}">
+          <td><input type="checkbox" class="form-check-input odp-sel"></td>
+          <td>${part}</td>
+          <td><input class="form-control form-control-sm text-end" value="${stock}"></td>
+          <td><input class="form-control form-control-sm text-end" value="${canuse}"></td>
+        </tr>
+      `);
+      $tr.remove();
+    });
+  }
+
+  // ③ ← 左邊
+  function moveLeft(){
+    $sel.find('tr').has('.odp-sel:checked').each(function(){
+      const $tr   = $(this);
+      const part  = $tr.data('part') ?? '';
+      const stock = $tr.find('td:eq(2) input').val() || 0;
+      const canuse= $tr.find('td:eq(3) input').val() || 0;
+
+      $avail.append(`
+        <tr data-part="${part}" data-stock="${stock}" data-canuse="${canuse}">
+          <td><input type="checkbox" class="form-check-input odp-chk"></td>
+          <td>${part}</td>
+          <td></td>
+          <td class="text-end">${canuse}</td>
+        </tr>
+      `);
+      $tr.remove();
+    });
+  }
+
+  // ④ 確定
+  async function onConfirm(e){
+    e.preventDefault();
+    const rows = [];
+    $sel.find('tr').each(function(){
+      rows.push({
+        PartNum:    $(this).data('part'),
+        StockQnty:  parseFloat($(this).find('td:eq(2) input').val() || 0),
+        CanUseQnty: parseFloat($(this).find('td:eq(3) input').val() || 0)
+      });
+    });
+    if (!rows.length) return Swal.fire({icon:'info', title:'尚未選擇任何項目'});
+
+    const payload = {
+      DllPaperNum: (STATE.paperNum || '').trim(),
+      Replace: !!document.getElementById('@ckId')?.checked,
+      Rows: rows
+    };
+
+    const resp = await fetch(CFG.InsertApi, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const res = await resp.json();
+
+    if (res.ok){
+      $modal.trigger('odp:confirmed', [res]); // 對外事件
+      await Swal.fire({icon:'success', title:`匯入完成（${res.rows} 筆）`, timer:1000, showConfirmButton:false});
+      location.reload();
+    } else {
+      Swal.fire({icon:'error', title:'匯入失敗', text: res.error || ''});
+    }
+  }
+})();
+</script>
+
+<style>
+/* 輕量版樣式，讓元件自成一體 */
+.order-detail-picker .modal-body{ display:flex; flex-direction:column; max-height:75vh; }
+.order-detail-picker .odp-picker-row{ flex:1 1 auto; min-height:0; display:flex; gap:1rem; }
+.order-detail-picker .odp-col{ display:flex; flex-direction:column; min-width:0; }
+.order-detail-picker .odp-scroll{ flex:1 1 0; min-height:0; overflow:auto; border:1px solid #e5e7eb; border-radius:8px; }
+.order-detail-picker .odp-transfer{ display:flex; flex-direction:column; justify-content:center; align-items:center; gap:.75rem; flex:0 0 96px; }
+.order-detail-picker .odp-transfer .btn{ width:48px; height:40px; padding:0; font-size:20px; }
+.order-detail-picker .odp-replace{ display:inline-flex; align-items:center; justify-content:center; gap:.4rem; white-space:nowrap; font-size:14px; }
+.order-detail-picker thead th{ position:sticky; top:0; background:#fff; z-index:1; }
+</style>

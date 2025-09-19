@@ -11,15 +11,23 @@ using PcbErpApi.Data;
 public class StoredProcController : ControllerBase
 {
     private readonly string _cs;
-
     // 白名單：前端 key -> SP 名稱 + 必填/可選參數
     private static readonly Dictionary<string, StoredProcDef> _registry =
         new(StringComparer.OrdinalIgnoreCase)
     {
         ["CalcOrderAmount"] = new StoredProcDef(
-            ProcName: "SPOdOrderTotal",
+            ProcName: "dbo.SPOdOrderTotal",            // 有 schema 比較保險
             RequiredParams: new[] { "PaperNum" }
-        )
+        ),
+
+        // ★ 清除單身（三參數版）
+        ["ClearOrderDetails"] = new StoredProcDef(
+            ProcName: "dbo.SPodClearAllSub",           // 你的 SP 名
+            RequiredParams: new[] { "PaperNum", "PaperId", "Item" }
+            // 若想把 Item 當可選，就：
+            // RequiredParams: new[] { "PaperNum", "PaperId" },
+            // OptionalParams: new[] { "Item" }
+        ),
     };
 
     public StoredProcController(IConfiguration cfg, PcbErpContext db)
