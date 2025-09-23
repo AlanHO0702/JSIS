@@ -1,6 +1,8 @@
 using System.Reflection;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using PcbErpApi;
@@ -92,6 +94,20 @@ app.MapControllerRoute(
 // 將 Razor Pages 頁面路由映射（.cshtml）
 app.MapRazorPages();
 
+app.MapGet("/__routes", (IEnumerable<EndpointDataSource> sources) =>
+{
+    var routes = sources.SelectMany(s => s.Endpoints)
+        .OfType<RouteEndpoint>()
+        .Select(e => new {
+            Template = e.RoutePattern.RawText,
+            Controller = e.Metadata.OfType<ControllerActionDescriptor>().FirstOrDefault()?.ControllerName,
+            Action     = e.Metadata.OfType<ControllerActionDescriptor>().FirstOrDefault()?.ActionName,
+            Page       = e.Metadata.OfType<PageActionDescriptor>().FirstOrDefault()?.ViewEnginePath
+        })
+        .OrderBy(r => r.Template)
+        .ToList();
+    return Results.Json(routes);
+});
 // 啟用 Swagger 介面和 JSON 文件，方便開發與測試 API
 app.UseSwagger();
 app.UseSwaggerUI();
