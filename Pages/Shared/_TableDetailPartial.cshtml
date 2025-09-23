@@ -265,14 +265,12 @@
 <!-- 呼叫元件 -->
 @await Html.PartialAsync("_OrderDetailPicker",
   new DetailPickerConfig{
-      ModalId = "detailPicker",
-      PaperNum = PaperNum,
-      FetchApi = "/api/OrderDetailSearch/fetch",
-      InsertApi = "/api/OrderDetailSearch/insert",
-      //Dicts = new Dictionary<string, LookupConfig>{
-      //  ["PartNum"] = new LookupConfig{ Table="SPOdOCXOrderPOChice",         Key="PartNum",          Result="PartNum,MatName" },
-      //  ["CustomerPartNum"] = new LookupConfig{ Table="CustomerMaterial", Key="CustomerPartNum", Result="CustomerPartNum,CustomerName" }
-      //}
+      ModalId       = "detailPicker",
+      PaperNum      = PaperNum,
+      FetchApi      = "/api/OrderDetailSearch/fetch",
+      InsertApi     = "/api/OrderDetailSearch/insert",
+      DictTableName = "SPOdOCXOrderPOChice",   // ★ 你要的辭典表
+      DictUrlBase   = "/DataDict/EditList"     // ★ 你們能直接 GET 的辭典頁（若是 /CURdTableField/EditList 就改那條）
   })
 
 <script>
@@ -294,6 +292,11 @@ const PAGE = {
 
 // 讓其它工具可以取到目前單號
 window.selectedPaperNum = '@(Model.HeaderData["PaperNum"] ?? "")';
+
+// ★ 再保險一次：頁面載入後，用公開 API 指定辭典表（之後若要換，只改這一行即可）
+document.addEventListener('DOMContentLoaded', () => {
+  window['OrderDetailPicker_detailPicker']?.setDictTableName('SPOdOCXOrderPOChice');
+});
 
 // ============================
 // 1) Toolbar Handler 啟動
@@ -1072,10 +1075,10 @@ body { background: #f7f9fb !important; }
   flex:1 1 auto; width:100%; height:100%; min-height:32px; line-height:1.2; resize:none; padding:4px 6px; font-size:0.95em;
 }
 .draggable-field.inline label{
-  white-space: nowrap !important;     /* 單列顯示 */
-  overflow: visible !important;       /* 不裁切 */
-  text-overflow: clip !important;     /* 不顯示 … */
-  max-width: none !important;         /* 讓標籤可撐開（必要時手動調寬 li） */
+  white-space: nowrap !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  max-width: none !important;
 }
 
 /* =========================================
@@ -1111,11 +1114,11 @@ body { background: #f7f9fb !important; }
 .erp-table tbody tr.row-selected > td:first-child::after{
   content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:#0d6efd; border-radius:2px;
 }
-/* 移除預設 focus 藍框（避免只看到某一格有外框） */
+/* 移除預設 focus 藍框 */
 .erp-table td:focus, .erp-table td *:focus{ outline:none !important; box-shadow:none !important; }
 
 /* =========================================
-   D) 其它色彩強調（若有需要）
+   D) 其它
    ========================================= */
 .highlight-red { color:#e53b2d; font-weight:700; }
 .highlight-blue{ color:#2564b3; font-weight:700; }
@@ -1123,110 +1126,23 @@ body { background: #f7f9fb !important; }
 /* =========================================
    E) 左側浮動按鈕群
    ========================================= */
-/* 把左側行動軌道（浮動鈕）預留寬度抽成變數 */
-:root{
-  --fab-left: 12px;      /* 浮動鈕距離視窗左側 */
-  --fab-width: 100px;    /* 浮動鈕實際寬度（含內距，可微調） */
-  --fab-gap: 20px;       /* 浮動鈕右側緩衝 */
-  --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap));
-}
-
-/* 讓整個按鈕欄固定在左側；每顆按鈕在欄位內垂直排列 */
-.action-rail{
-  position: fixed;
-  left: var(--fab-left);
-  top: 80px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  z-index: 900;
-}
-
-
-/* 浮動按鈕 */
-.fab{
-  position: relative; /* 不再用 fixed，讓它跟著 action-rail 排列 */
-  min-width: var(--fab-width);
-  padding: 8px 12px;
-  background:#ffc107; color:#090101; font-weight:700;
-  border-radius:10px; cursor:pointer;
-  box-shadow:0 6px 16px rgba(0,0,0,.2);
-  border: 0;
-}
+:root{ --fab-left: 12px; --fab-width: 100px; --fab-gap: 20px; --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap)); }
+.action-rail{ position: fixed; left: var(--fab-left); top: 80px; display: flex; flex-direction: column; gap: 10px; z-index: 900; }
+.fab{ position: relative; min-width: var(--fab-width); padding: 8px 12px; background:#ffc107; color:#090101; font-weight:700;
+  border-radius:10px; cursor:pointer; box-shadow:0 6px 16px rgba(0,0,0,.2); border: 0; }
 .fab:hover{ filter:brightness(0.95); }
+.fab-red{ background:#dc3545; color:#fff; }
+.erp-detail-container{ margin-left: var(--rail-reserve); margin-right: 3vw; padding: 32px 0; }
+#btnCalcAmount { border: 0 !important; outline: none !important; -webkit-tap-highlight-color: transparent; }
+#btnCalcAmount:focus, #btnCalcAmount:focus-visible, #btnCalcAmount:active { outline: none !important; box-shadow: 0 6px 16px rgba(0,0,0,.2) !important; }
+#btnCalcAmount::-moz-focus-inner { border: 0 !important; }
+#topToolbar{ margin-left: calc(-1 * var(--rail-reserve)) !important; padding-left: 0 !important; justify-content: flex-start !important; }
+#topToolbar > .ms-2, #topToolbar .btn-toolbar{ margin-left: 0 !important; }
 
-/* 紅色風格：清除單身 */
-.fab-red{
-  background:#dc3545; color:#fff;
-}
-
-/* 內容容器左邊預留的安全邊界（＝ 按鈕位置 + 按鈕寬 + 緩衝距離） */
-/* 仍保留內容整體的左側預留空間（避免被浮動鈕擋住） */
-.erp-detail-container{
-  margin-left: var(--rail-reserve);
-  margin-right: 3vw;
-  padding: 32px 0;
-}
-/* 移除「金額計算」按鈕的黑色外框/outline */
-#btnCalcAmount {
-  border: 0 !important;
-  outline: none !important;
-  -webkit-tap-highlight-color: transparent; /* 移除行動裝置點擊高亮 */
-}
-
-/* 針對聚焦/按下狀態再保險一次 */
-#btnCalcAmount:focus,
-#btnCalcAmount:focus-visible,
-#btnCalcAmount:active {
-  outline: none !important;
-  box-shadow: 0 6px 16px rgba(0,0,0,.2) !important; /* 保留陰影，不要黑框 */
-}
-
-/* 若你把它改成 <button>，Firefox 會多一層內框，順便去掉 */
-#btnCalcAmount::-moz-focus-inner {
-  border: 0 !important;
-}
-
-/* 只有最上面工具列要「吃回去」那段預留寬，往左移回去 */
-#topToolbar{
-  margin-left: calc(-1 * var(--rail-reserve)) !important;
-  padding-left: 0 !important;
-  justify-content: flex-start !important;
-}
-
-/* 若某些框架樣式還加了左邊距，再保險清掉 */
-#topToolbar > .ms-2,
-#topToolbar .btn-toolbar{
-  margin-left: 0 !important;
-}
-
-/* 讓表格用固定布局，欄寬才會照 px 生效 */
+/* 讓表格用固定布局，欄寬才會照 px 生效 + 拖曳把手 */
 .erp-table { table-layout: fixed; }
-
-/* th 要是定位容器（你 inline 已有 position:relative 也 OK） */
 .erp-table th { position: relative; }
-
-/* 右側拖曳把手：要「有寬度」+ 指標樣式，才看得到、點得到 */
-.erp-table th .col-resizer{
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 12px;             /* ← 把手寬一點好抓 */
-  cursor: col-resize;
-  user-select: none;
-  z-index: 2;
-}
-
-/* 視覺上的小抓把（可選） */
-.erp-table th .col-resizer::before {
-  content: none !important;  /* 不畫任何東西 */
-}
-
-/* 拖曳時讓游標維持 col-resize（含整欄） */
+.erp-table th .col-resizer{ position: absolute; top: 0; right: 0; bottom: 0; width: 12px; cursor: col-resize; user-select: none; z-index: 2; }
+.erp-table th .col-resizer::before { content: none !important; }
 .erp-table th.resizing, .erp-table td.resizing, body.resizing { cursor: col-resize !important; }
-
-
-
 </style>
-

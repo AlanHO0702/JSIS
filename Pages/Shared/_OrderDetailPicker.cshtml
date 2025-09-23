@@ -2,60 +2,85 @@
 @using System.Text.Json
 
 @{
-  var cfgJson = JsonSerializer.Serialize(Model);
-  var ckId = $"{Model.ModalId}_ckReplace";
+    var cfg = Model ?? new PcbErpApi.Models.DetailPickerConfig();
+
+    // 不做任何預設，讓外層確實傳入要用的辭典表（例如：SPOdOCXOrderPOChice）
+    var dictTable = string.IsNullOrWhiteSpace(cfg.DictTableName) ? "" : cfg.DictTableName;
+
+    // UI 語系 -> LanguageId
+    string langId;
+    var ui = System.Globalization.CultureInfo.CurrentUICulture.Name; // zh-TW, en-US...
+    if (ui.StartsWith("zh", StringComparison.OrdinalIgnoreCase)) langId = "TW";
+    else if (ui.StartsWith("en", StringComparison.OrdinalIgnoreCase)) langId = "EN";
+    else langId = "TW";
+
+    var clientCfg = new {
+        cfg.ModalId,
+        cfg.PaperNum,
+        cfg.FetchApi,
+        cfg.InsertApi,
+        DictTableName = dictTable,
+        ShowReplace   = cfg.ShowReplace,
+        Lang          = langId
+    };
+    var cfgJson = JsonSerializer.Serialize(clientCfg);
+    var ckId = $"{cfg.ModalId}_ckReplace";
 }
 
-<div class="modal fade" id="@Model.ModalId" tabindex="-1">
-  <div class="modal-dialog modal-xl">
+<!-- Modal -->
+<div class="modal fade" id="@cfg.ModalId" tabindex="-1">
+  <!-- 自訂對話框尺寸：用 BS5 變數控寬高 -->
+  <div class="modal-dialog odp-dialog">
     <div class="modal-content order-detail-picker">
       <div class="modal-header">
         <h5 class="modal-title">搜尋並挑選明細</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="btnOpenFetchDict_@cfg.ModalId">資料辭典</button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
       </div>
 
       <div class="modal-body">
-        <!-- 查詢條件（純輸入，無辭典） -->
-        <form class="row g-2 mb-3 odp-fetch-form">
-          <div class="col-md-3">
-            <label class="form-label">料號</label>
-            <input class="form-control" name="PartNum">
+        <!-- 查詢條件（縮窄版；資料重取固定最右） -->
+        <form class="row g-2 mb-3 odp-fetch-form align-items-end">
+          <div class="col-auto">
+            <label class="form-label mb-1">料號</label>
+            <input id="odp_q_part" class="form-control form-control-sm" name="PartNum">
           </div>
-          <div class="col-md-3">
-            <label class="form-label">客戶料號/名稱</label>
-            <input class="form-control" name="MatName">
+          <div class="col-auto">
+            <label class="form-label mb-1">品名</label>
+            <input id="odp_q_name" class="form-control form-control-sm" name="MatName">
           </div>
-          <div class="col-md-2">
-            <label class="form-label">分類</label>
-            <input class="form-control" name="MatClass">
+          <div class="col-auto">
+            <label class="form-label mb-1">分類</label>
+            <input id="odp_q_class" class="form-control form-control-sm" name="MatClass">
           </div>
-          <div class="col-md-2 d-flex align-items-end gap-3">
+
+          <div class="col d-flex align-items-end gap-3 flex-wrap">
             <div class="form-check">
-              <input class="form-check-input" type="checkbox" name="IncludeMat" checked>
-              <label class="form-check-label">含材料</label>
+              <input class="form-check-input" type="checkbox" name="IncludeMat" id="odp_ck_inc" checked>
+              <label class="form-check-label" for="odp_ck_inc">含材料</label>
             </div>
             <div class="form-check">
-              <input class="form-check-input" type="checkbox" name="Calc">
-              <label class="form-check-label">計算可用</label>
+              <input class="form-check-input" type="checkbox" name="Calc" id="odp_ck_calc">
+              <label class="form-check-label" for="odp_ck_calc">計算可用</label>
             </div>
-          </div>
-          <div class="col-12">
-            <button type="button" class="btn btn-primary odp-btn-fetch">資料重取</button>
+
+            <!-- 永遠靠最右 -->
+            <button type="button" class="btn btn-primary odp-btn-fetch ms-auto">資料重取</button>
           </div>
         </form>
 
         <!-- 挑選區 -->
         <div class="row odp-picker-row">
-          <!-- 左：可選 -->
+          <!-- 左：可選（表頭由辭典產生） -->
           <div class="col-5 odp-col">
             <div class="odp-scroll">
               <table class="table table-sm table-striped mb-0 odp-available">
                 <thead>
                   <tr>
                     <th style="width:36px;"></th>
-                    <th>料號</th>
-                    <th>客戶料號</th>
-                    <th class="text-end" style="width:120px;">可用</th>
+                    <!-- 其餘由 JS 依 DictFields 製作 -->
                   </tr>
                 </thead>
                 <tbody></tbody>
@@ -63,11 +88,11 @@
             </div>
           </div>
 
-          <!-- 中：移動按鈕 -->
+          <!-- 中：移動 -->
           <div class="col-2 odp-transfer">
             <button class="btn btn-outline-primary odp-right" type="button">&rarr;</button>
             <button class="btn btn-outline-secondary odp-left" type="button">&larr;</button>
-            @if (Model.ShowReplace)
+            @if (cfg.ShowReplace)
             {
               <div class="form-check mt-4 odp-replace">
                 <input id="@ckId" class="form-check-input" type="checkbox">
@@ -76,20 +101,19 @@
             }
           </div>
 
-          <!-- 右：已選 -->
-          <div class="col-5 odp-col">
-            <div class="odp-scroll">
-              <table class="table table-sm table-striped mb-0 odp-selected">
-                <thead>
-                  <tr>
-                    <th style="width:36px;"></th>
-                    <th>料號</th>
-                    <th class="text-end" style="width:120px;">庫存</th>
-                    <th class="text-end" style="width:120px;">可用</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
+            <!-- 右：已選（表頭由辭典產生） -->
+            <div class="col-5 odp-col">
+              <div class="odp-scroll">
+                <table class="table table-sm table-striped mb-0 odp-selected">
+                  <thead>
+                    <tr>
+                      <th style="width:36px;"></th>
+                      <!-- 其餘由 JS 依 DictFields 製作 -->
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
@@ -106,33 +130,129 @@
 <script>
 (function(){
   const CFG = @Html.Raw(cfgJson);
+  const BTN_ID = 'btnOpenFetchDict_' + (CFG.ModalId || 'ODP');
+
   const $modal = $('#'+CFG.ModalId);
-  const $avail = $modal.find('.odp-available tbody');
-  const $sel   = $modal.find('.odp-selected tbody');
+  const $avail = $modal.find('.odp-available');
+  const $availHead = $avail.find('thead tr');
+  const $availBody = $avail.find('tbody');
 
-  // 內部狀態
-  const STATE = { paperNum: CFG.PaperNum || '' };
+  const $sel   = $modal.find('.odp-selected');
+  const $selHead = $sel.find('thead tr');
+  const $selBody = $sel.find('tbody');
 
-  // 對外 API
+  const STATE = { paperNum: CFG.PaperNum || '', dict: [], rows: [] };
+
   const API = {
-    open(opts){
-      STATE.paperNum = (opts?.paperNum || STATE.paperNum || '').trim();
-      $modal.modal('show');
+    open(opts){ STATE.paperNum = (opts?.paperNum || STATE.paperNum || '').trim(); $modal.modal('show'); },
+    setDictTableName(name){
+      CFG.DictTableName = (name || '').trim();
+      STATE.dict = [];
+      $availHead.find('th:not(:first)').remove();
+      $selHead.find('th:not(:first)').remove();
     }
   };
   window['OrderDetailPicker_'+CFG.ModalId] = API;
 
-  // 綁定事件
   $modal.find('.odp-btn-fetch').on('click', onFetch);
   $modal.find('.odp-right').on('click', moveRight);
   $modal.find('.odp-left').on('click', moveLeft);
   $modal.find('.odp-confirm').on('click', onConfirm);
 
-  // ① 資料重取（無辭典）
+  $modal.on('shown.bs.modal', () => {
+    if ((CFG.DictTableName || '').trim()){
+      ensureDict().catch(err => Swal.fire({icon:'error', title:'載入辭典失敗', text:String(err)}));
+    }
+  });
+
+  // 依辭典建立左右兩邊的表頭
+  function buildHeads(){
+    const ths = STATE.dict.map(c=>{
+      const w = Math.max(40, Number(c.DisplaySize ?? 120));
+      return `<th data-field="${c.FieldName}" data-type="${c.DataType}"
+                style="min-width:${w}px;width:${w}px;">${c.DisplayLabel ?? ''}</th>`;
+    }).join('');
+    $availHead.find('th:not(:first)').remove();
+    $selHead.find('th:not(:first)').remove();
+    $availHead.append(ths);
+    $selHead.append(ths);
+  }
+
+  // 取得辭典
+  async function ensureDict(){
+    if (STATE.dict.length) return STATE.dict;
+    if (!CFG.DictTableName || !CFG.DictTableName.trim()){
+      throw new Error('DictTableName is required');
+    }
+    const url = `/api/TableFieldLayout/DictFields?table=${encodeURIComponent(CFG.DictTableName)}&lang=${encodeURIComponent(CFG.Lang || 'TW')}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`DictFields HTTP ${res.status}`);
+    const data = await res.json();
+    if (!Array.isArray(data)) throw new Error('DictFields payload is not array');
+
+    const normalized = data.map(c => ({
+      FieldName:    c.FieldName ?? c.fieldName,
+      DisplayLabel: c.DisplayLabel ?? c.displayLabel,
+      DisplaySize:  c.DisplaySize ?? c.displaySize,
+      DataType:     (c.DataType ?? c.dataType ?? '').toLowerCase(),
+      FormatStr:    c.FormatStr ?? c.formatStr,
+      SerialNum:    c.SerialNum ?? c.serialNum,
+      Visible:      (c.Visible ?? c.visible) === true || (c.Visible ?? c.visible) === 1
+    }));
+    const rows = normalized.filter(x => x.Visible === true);
+    if (!rows.length) throw new Error('DictFields is empty (no Visible=1 columns)');
+    if (rows.some(x => !x.FieldName)) throw new Error('DictFields contains row without FieldName');
+
+    STATE.dict = rows;
+    buildHeads();             // <<== 左右一起建表頭
+    return STATE.dict;
+  }
+
+  // 打開辭典（略）... 保留你原本的 document.getElementById(BTN_ID) 監聽
+
+  // 工具：格式化儲存格
+  function fmtCell(val, col){
+    if (val == null) return '';
+    let s = String(val);
+    if ((col.DataType||'') === 'number'){
+      const n = Number(s.toString().replace(/,/g,'')); if (!Number.isNaN(n)) return n.toLocaleString();
+    }
+    if ((col.DataType||'').includes('date')){
+      const d = new Date(s); if (!isNaN(d)) return d.toISOString().slice(0,10);
+    }
+    return s;
+  }
+  const FN = (name)=> String(name||'').toLowerCase();
+
+  // 左側可選列渲染（不變）
+  function renderRows(rows){
+    const cols = STATE.dict;
+    const html = rows.map((r, i)=>{
+      const tds = cols.map(c=>{
+        const v = r[c.FieldName] ?? r[c.FieldName?.toLowerCase()] ?? r[c.FieldName?.toUpperCase()];
+        const cls = (c.DataType||'')==='number' ? 'text-end' : '';
+        return `<td class="${cls}">${fmtCell(v, c)}</td>`;
+      }).join('');
+      const part = r.PartNum ?? r.partnum ?? r.PARTNUM ?? '';
+      const stock = r.StockQnty ?? r.stockqnty ?? r.STOCKQNTY ?? 0;
+      const canuse = r.CanUseQnty ?? r.canuseqnty ?? r.CANUSEQNTY ?? 0;
+      return `
+        <tr data-idx="${i}" data-part="${part}" data-stock="${stock}" data-canuse="${canuse}">
+          <td><input type="checkbox" class="form-check-input odp-chk"></td>
+          ${tds}
+        </tr>`;
+    }).join('');
+    $availBody.html(html);
+  }
+
   async function onFetch(){
+    if (!CFG.DictTableName || !CFG.DictTableName.trim()){
+      return Swal.fire({icon:'error', title:'尚未設定辭典表', text:'請先設定 DictTableName（例如：SPOdOCXOrderPOChice）。'});
+    }
+    await ensureDict();
+
     const formEl = $modal.find('.odp-fetch-form')[0];
     const form = Object.fromEntries(new FormData(formEl).entries());
-
     const payload = {
       PartNum:  (form.PartNum  ?? '').trim(),
       MatName:  (form.MatName  ?? '').trim(),
@@ -141,80 +261,90 @@
       Calc:       !!$modal.find('.odp-fetch-form [name=Calc]').prop('checked')
     };
 
-    const resp = await fetch(CFG.FetchApi, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
+    const resp = await fetch(CFG.FetchApi, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     const res = await resp.json();
     if (!res.ok) return Swal.fire({icon:'error', title:'查詢失敗'});
-
-    $avail.empty();
-    (res.data || []).forEach(row=>{
-      const part    = row.PartNum || row.partnum || '';
-      const custPn  = row.CustomerPartNum || row.customerpartnum || '';
-      const canUse  = row.CanUseQnty ?? row.canuseqnty ?? 0;
-      const stock   = row.StockQnty ?? row.stockqnty ?? 0;
-
-      $avail.append(`
-        <tr data-part="${part}" data-stock="${stock}" data-canuse="${canUse}">
-          <td><input type="checkbox" class="form-check-input odp-chk"></td>
-          <td>${part ?? ''}</td>
-          <td>${custPn ?? ''}</td>
-          <td class="text-end">${canUse}</td>
-        </tr>
-      `);
-    });
+    STATE.rows = Array.isArray(res.data) ? res.data : [];
+    renderRows(STATE.rows);
   }
 
-  // ② → 右邊
+  // 右側列：依辭典產出，如果是 StockQnty / CanUseQnty 就用 input
+  function buildSelectedRow(rowObj, idx){
+    const cols = STATE.dict;
+    const part  = rowObj.PartNum    ?? rowObj.partnum    ?? rowObj.PARTNUM ?? '';
+    const stock = rowObj.StockQnty  ?? rowObj.stockqnty  ?? rowObj.STOCKQNTY ?? 0;
+    const canuse= rowObj.CanUseQnty ?? rowObj.canuseqnty ?? rowObj.CANUSEQNTY ?? 0;
+
+    const tds = cols.map(c=>{
+      const f = FN(c.FieldName);
+      const baseVal = rowObj[c.FieldName] ?? rowObj[f] ?? rowObj[c.FieldName?.toUpperCase()];
+
+      if (f === 'stockqnty') {
+        return `<td class="text-end"><input data-field="StockQnty" class="form-control form-control-sm text-end" value="${stock}"></td>`;
+      }
+      if (f === 'canuseqnty') {
+        return `<td class="text-end"><input data-field="CanUseQnty" class="form-control form-control-sm text-end" value="${canuse}"></td>`;
+      }
+      return `<td class="${(c.DataType||'')==='number'?'text-end':''}">${fmtCell(baseVal, c)}</td>`;
+    }).join('');
+
+    return `
+      <tr data-idx="${idx}" data-part="${part}">
+        <td><input type="checkbox" class="form-check-input odp-sel"></td>
+        ${tds}
+      </tr>`;
+  }
+
+  // 移到右邊
   function moveRight(){
-    $avail.find('tr').has('.odp-chk:checked').each(function(){
-      const $tr   = $(this);
-      const part  = $tr.data('part') ?? '';
-      const stock = $tr.data('stock') ?? 0;
-      const canuse= $tr.data('canuse') ?? 0;
-
-      $sel.append(`
-        <tr data-part="${part}">
-          <td><input type="checkbox" class="form-check-input odp-sel"></td>
-          <td>${part}</td>
-          <td><input class="form-control form-control-sm text-end" value="${stock}"></td>
-          <td><input class="form-control form-control-sm text-end" value="${canuse}"></td>
-        </tr>
-      `);
+    $availBody.find('tr').has('.odp-chk:checked').each(function(){
+      const $tr = $(this);
+      const idx = Number($tr.data('idx'));
+      const rowObj = STATE.rows[idx] || {};
+      $selBody.append(buildSelectedRow(rowObj, idx));
       $tr.remove();
     });
   }
 
-  // ③ ← 左邊
+  // 移回左邊（用目前右側的值建回左邊一列）
   function moveLeft(){
-    $sel.find('tr').has('.odp-sel:checked').each(function(){
-      const $tr   = $(this);
-      const part  = $tr.data('part') ?? '';
-      const stock = $tr.find('td:eq(2) input').val() || 0;
-      const canuse= $tr.find('td:eq(3) input').val() || 0;
+    $selBody.find('tr').has('.odp-sel:checked').each(function(){
+      const $tr = $(this);
+      const idx = Number($tr.data('idx'));
+      const row = Object.assign({}, STATE.rows[idx] || {});
+      // 把右側可能編過的兩個數值帶回原物件（只是視覺回填；真實要送 API 還是讀右邊）
+      const stock = Number($tr.find('[data-field=StockQnty]').val() || row.StockQnty || 0);
+      const canuse= Number($tr.find('[data-field=CanUseQnty]').val() || row.CanUseQnty || 0);
+      row.StockQnty = stock; row.CanUseQnty = canuse;
 
-      $avail.append(`
-        <tr data-part="${part}" data-stock="${stock}" data-canuse="${canuse}">
+      // 依辭典重畫成左側一列
+      const tds = STATE.dict.map(c=>{
+        const v = row[c.FieldName] ?? row[c.FieldName?.toLowerCase()] ?? row[c.FieldName?.toUpperCase()];
+        const cls = (c.DataType||'')==='number' ? 'text-end' : '';
+        return `<td class="${cls}">${fmtCell(v, c)}</td>`;
+      }).join('');
+
+      const part = row.PartNum ?? row.partnum ?? row.PARTNUM ?? '';
+      $availBody.append(`
+        <tr data-idx="${idx}" data-part="${part}" data-stock="${stock}" data-canuse="${canuse}">
           <td><input type="checkbox" class="form-check-input odp-chk"></td>
-          <td>${part}</td>
-          <td></td>
-          <td class="text-end">${canuse}</td>
+          ${tds}
         </tr>
       `);
       $tr.remove();
     });
   }
 
-  // ④ 確定
+  // 送出
   async function onConfirm(e){
     e.preventDefault();
     const rows = [];
-    $sel.find('tr').each(function(){
+    $selBody.find('tr').each(function(){
+      const $tr = $(this);
       rows.push({
-        PartNum:    $(this).data('part'),
-        StockQnty:  parseFloat($(this).find('td:eq(2) input').val() || 0),
-        CanUseQnty: parseFloat($(this).find('td:eq(3) input').val() || 0)
+        PartNum:    $tr.data('part') ?? '',
+        StockQnty:  parseFloat($tr.find('[data-field=StockQnty]').val() || 0),
+        CanUseQnty: parseFloat($tr.find('[data-field=CanUseQnty]').val() || 0)
       });
     });
     if (!rows.length) return Swal.fire({icon:'info', title:'尚未選擇任何項目'});
@@ -225,14 +355,10 @@
       Rows: rows
     };
 
-    const resp = await fetch(CFG.InsertApi, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
+    const resp = await fetch(CFG.InsertApi, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     const res = await resp.json();
-
     if (res.ok){
-      $modal.trigger('odp:confirmed', [res]); // 對外事件
+      $modal.trigger('odp:confirmed', [res]);
       await Swal.fire({icon:'success', title:`匯入完成（${res.rows} 筆）`, timer:1000, showConfirmButton:false});
       location.reload();
     } else {
@@ -240,16 +366,78 @@
     }
   }
 })();
+
 </script>
 
 <style>
-/* 輕量版樣式，讓元件自成一體 */
-.order-detail-picker .modal-body{ display:flex; flex-direction:column; max-height:75vh; }
-.order-detail-picker .odp-picker-row{ flex:1 1 auto; min-height:0; display:flex; gap:1rem; }
-.order-detail-picker .odp-col{ display:flex; flex-direction:column; min-width:0; }
-.order-detail-picker .odp-scroll{ flex:1 1 0; min-height:0; overflow:auto; border:1px solid #e5e7eb; border-radius:8px; }
-.order-detail-picker .odp-transfer{ display:flex; flex-direction:column; justify-content:center; align-items:center; gap:.75rem; flex:0 0 96px; }
-.order-detail-picker .odp-transfer .btn{ width:48px; height:40px; padding:0; font-size:20px; }
-.order-detail-picker .odp-replace{ display:inline-flex; align-items:center; justify-content:center; gap:.4rem; white-space:nowrap; font-size:14px; }
-.order-detail-picker thead th{ position:sticky; top:0; background:#fff; z-index:1; }
+/* --- Dialog 尺寸：用 BS5 變數控制，簡單穩定 --- */
+#@cfg.ModalId .odp-dialog{
+  /* 幾乎全寬、上下留 1vh 間距 */
+  --bs-modal-width: 98vw;
+  --bs-modal-margin: 1vh;
+}
+#@cfg.ModalId .odp-dialog .modal-content{
+  /* 高度 = 視窗高 - 上下 margin，並讓內容撐滿 */
+  height: calc(100vh - (var(--bs-modal-margin) * 2));
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- 內層排版：上方查詢 + 下方左右兩個表格 --- */
+#@cfg.ModalId .modal-body{
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;     /* 捲動交給內層 */
+}
+#@cfg.ModalId .odp-picker-row{
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 1rem;
+}
+#@cfg.ModalId .odp-col{
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+#@cfg.ModalId .odp-scroll{
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;       /* 左右表格各自可捲動 */
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+#@cfg.ModalId .odp-transfer{
+  flex: 0 0 96px;
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center; gap: .75rem;
+}
+#@cfg.ModalId .odp-transfer .btn{ width:48px; height:40px; padding:0; font-size:20px; }
+
+/* 表格外觀 */
+#@cfg.ModalId thead th{
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle;
+}
+#@cfg.ModalId table{ border-collapse: collapse; }
+#@cfg.ModalId th, #@cfg.ModalId td{ border:1px solid #dee2e6; vertical-align: middle; }
+
+/* --- 查詢區：縮窄欄位寬、把「資料重取」永遠靠最右 --- */
+#@cfg.ModalId .odp-fetch-form .form-label{ white-space:nowrap; }
+#odp_q_part  { width: 160px; }   /* 料號 */
+#odp_q_name  { width: 220px; }   /* 品名 */
+#odp_q_class { width: 140px; }   /* 分類 */
+#@cfg.ModalId .odp-fetch-form .col-auto{ margin-right:8px; }
+#@cfg.ModalId .odp-btn-fetch{ margin-left:auto; } /* 保險：永遠推到最右 */
+
+/* --- 手機/平板：直接全螢幕、去掉圓角（Razor 內請用 @@media） --- */
+@@media (max-width: 991.98px){
+  #@cfg.ModalId .odp-dialog{
+    --bs-modal-width: 100vw;
+    --bs-modal-margin: 0;
+  }
+  #@cfg.ModalId .odp-dialog .modal-content{ border-radius: 0; }
+}
+
+
 </style>
