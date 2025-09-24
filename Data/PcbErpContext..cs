@@ -15,11 +15,14 @@ namespace PcbErpApi.Data
         public DbSet<CurdPaperSelected> CURdPaperSelected { get; set; }
         public DbSet<CURdTableField> CURdTableFields { get; set; }
         public DbSet<CURdOCXTableFieldLK> CURdOCXTableFieldLK { get; set; }
+        public DbSet<MindMatInfo> MindMatInfo { get; set; }
+        public virtual DbSet<AjndJourMain> AjndJourMain { get; set; }
+        public virtual DbSet<AjndJourSub> AjndJourSub { get; set; }
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
         public virtual DbSet<EmodProdInfo> EmodProdInfos { get; set; }
         public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
-        public DbSet<AJNdClassMoney> AJNdClassMoney { get; set; }
-	    public DbSet<AJNdClassMoneyHis> AJNdClassMoneyHis { get; set; }
+        
+        public virtual DbSet<CurdBu> CurdBus { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<CurdUser>(entity =>
@@ -98,16 +101,246 @@ namespace PcbErpApi.Data
                 entity.Property(e => e.UserSignGraph).HasColumnType("image");
             });
 
+            modelBuilder.Entity<AjndJourMain>(entity =>
+            {
+                entity.HasKey(e => e.PaperNum);
+
+                entity.ToTable("AJNdJourMain", tb =>
+                    {
+                        tb.HasTrigger("AJNdJourMain_tD");
+                        tb.HasTrigger("AJNdJourMain_tUI");
+                    });
+
+                entity.Property(e => e.PaperNum)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.Accountant)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.BuildDate).HasColumnType("datetime");
+                entity.Property(e => e.CancelDate).HasColumnType("datetime");
+                entity.Property(e => e.CancelUser)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.DisTrig).HasDefaultValue(0);
+                entity.Property(e => e.DllHeadFirst)
+                    .HasMaxLength(4)
+                    .IsUnicode(false)
+                    .HasColumnName("dllHeadFirst");
+                entity.Property(e => e.DllPaperType).HasColumnName("dllPaperType");
+                entity.Property(e => e.DllPaperTypeName)
+                    .HasMaxLength(24)
+                    .HasColumnName("dllPaperTypeName");
+                entity.Property(e => e.FinishDate).HasColumnType("datetime");
+                entity.Property(e => e.FinishUser)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.IsCost).HasDefaultValue(0);
+                entity.Property(e => e.JourDate).HasColumnType("datetime");
+                entity.Property(e => e.JourId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.JourType).HasDefaultValue(3);
+                entity.Property(e => e.Notes).HasMaxLength(255);
+                entity.Property(e => e.PaperDate)
+                    .HasDefaultValueSql("(getdate())")
+                    .HasColumnType("datetime");
+                entity.Property(e => e.PaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false);
+                entity.Property(e => e.RateToNt)
+                    .HasColumnType("decimal(24, 8)")
+                    .HasColumnName("RateToNT");
+                entity.Property(e => e.SourNum)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.TotalAmount).HasColumnType("decimal(18, 4)");
+                entity.Property(e => e.TotalAmountOg).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.UseId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.UserId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+            });
+
+            modelBuilder.Entity<AjndJourSub>(entity =>
+            {
+                entity.HasKey(e => new { e.PaperNum, e.Item });
+
+                entity.ToTable("AJNdJourSub", tb =>
+                    {
+                        tb.HasTrigger("AJNdJourSub_tD");
+                        tb.HasTrigger("AJNdJourSub_tIU");
+                    });
+
+                entity.Property(e => e.PaperNum)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.AccId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false);
+                entity.Property(e => e.Amount).HasColumnType("decimal(18, 4)");
+                entity.Property(e => e.AmountOg).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.AnaCode1)
+                    .HasMaxLength(24)
+                    .HasColumnName("AnaCode_1");
+                entity.Property(e => e.AnaCode2)
+                    .HasMaxLength(24)
+                    .HasColumnName("AnaCode_2");
+                entity.Property(e => e.AnaCode3)
+                    .HasMaxLength(24)
+                    .HasColumnName("AnaCode_3");
+                entity.Property(e => e.AnaCode4)
+                    .HasMaxLength(24)
+                    .HasColumnName("AnaCode_4");
+                entity.Property(e => e.AnaCode5)
+                    .HasMaxLength(24)
+                    .HasColumnName("AnaCode_5");
+                entity.Property(e => e.AnaCode6)
+                    .HasMaxLength(24)
+                    .HasColumnName("AnaCode_6");
+                entity.Property(e => e.BudgetCode)
+                    .HasMaxLength(12)
+                    .IsUnicode(false);
+                entity.Property(e => e.ChkIn).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.ChkOut).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.Comment).HasMaxLength(255);
+                entity.Property(e => e.CompanyId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.DepartId)
+                    .HasMaxLength(12)
+                    .IsUnicode(false);
+                entity.Property(e => e.MoneyCode).HasDefaultValue(0);
+                entity.Property(e => e.Notes).HasMaxLength(255);
+                entity.Property(e => e.OgIn).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.OgOut).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.OpenAmount).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.OpenAmountOg).HasColumnType("decimal(24, 8)");
+                entity.Property(e => e.PayBackDate).HasColumnType("datetime");
+                entity.Property(e => e.PrjId)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.ProjectId).HasMaxLength(16);
+                entity.Property(e => e.ProjectRate)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.RateToNt)
+                    .HasDefaultValue(0m)
+                    .HasColumnType("decimal(24, 8)")
+                    .HasColumnName("RateToNT");
+                entity.Property(e => e.RelationUseId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.SourNum)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.SourNum2)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.SourPaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false);
+                entity.Property(e => e.SubAccId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+            });
+
+            modelBuilder.Entity<MindMatInfo>()
+            .HasKey(e => new { e.Partnum, e.Revision });  // ✅ 複合主鍵設定
+
             modelBuilder.Entity<CURdTableField>()
             .HasKey(e => new { e.TableName, e.FieldName }); // 這裡改成你真正的複合主鍵欄位
 
             modelBuilder.Entity<CURdOCXTableFieldLK>()
-            .HasKey(e => new { e.TableName, e.FieldName,e.KeyFieldName,e.KeySelfName }); // 這裡改成你真正的複合主鍵欄位
+            .HasKey(e => new { e.TableName, e.FieldName, e.KeyFieldName, e.KeySelfName }); // 這裡改成你真正的複合主鍵欄位
 
             modelBuilder.Entity<CURdTableField>().ToTable("CURdTableField");
 
             modelBuilder.Entity<SpodOrderSub>()
             .HasKey(x => new { x.PaperNum, x.Item });
+
+            modelBuilder.Entity<CurdBu>(entity =>
+            {
+                entity.HasKey(e => e.Buid);
+
+                entity.ToTable("CURdBU", tb =>
+                    {
+                        tb.HasTrigger("CURdBU_tI");
+                        tb.HasTrigger("CURdBU_tU");
+                    });
+
+                entity.Property(e => e.Buid)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .IsFixedLength()
+                    .HasColumnName("BUId");
+                entity.Property(e => e.Address).HasMaxLength(255);
+                entity.Property(e => e.BUseIdHead)
+                    .HasDefaultValue(1)
+                    .HasColumnName("bUseIdHead");
+                entity.Property(e => e.Buname)
+                    .HasMaxLength(24)
+                    .HasColumnName("BUName");
+                entity.Property(e => e.Butype).HasColumnName("BUType");
+                entity.Property(e => e.Company)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.Dbname)
+                    .HasMaxLength(24)
+                    .IsUnicode(false)
+                    .HasColumnName("DBName");
+                entity.Property(e => e.Dbserver)
+                    .HasMaxLength(24)
+                    .IsUnicode(false)
+                    .HasColumnName("DBServer");
+                entity.Property(e => e.DefaultDay4Ap)
+                    .HasDefaultValue(25)
+                    .HasColumnName("DefaultDay4AP");
+                entity.Property(e => e.EnglishAddr).HasMaxLength(255);
+                entity.Property(e => e.EnglishName).HasMaxLength(50);
+                entity.Property(e => e.Fax).HasMaxLength(50);
+                entity.Property(e => e.LoginName)
+                    .HasMaxLength(24)
+                    .IsUnicode(false)
+                    .HasDefaultValue("JSIS");
+                entity.Property(e => e.LoginPwd)
+                    .HasMaxLength(24)
+                    .IsUnicode(false)
+                    .HasDefaultValue("JSIS")
+                    .HasColumnName("LoginPWD");
+                entity.Property(e => e.Logo).HasColumnType("image");
+                entity.Property(e => e.Name).HasMaxLength(50);
+                entity.Property(e => e.Phone).HasMaxLength(50);
+                entity.Property(e => e.ReportServer)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.SocketServer)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.SuperId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .IsFixedLength();
+                entity.Property(e => e.ToBuid)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .IsFixedLength()
+                    .HasColumnName("ToBUId");
+                entity.Property(e => e.WebreportLocal)
+                    .HasMaxLength(50)
+                    .IsUnicode(false)
+                    .HasColumnName("WEBReportLocal");
+                entity.Property(e => e.WebreportServer)
+                    .HasMaxLength(50)
+                    .IsUnicode(false)
+                    .HasColumnName("WEBReportServer");
+                entity.Property(e => e.WebreportShare)
+                    .HasMaxLength(50)
+                    .IsUnicode(false)
+                    .HasColumnName("WEBReportShare");
+            });
 
             modelBuilder.Entity<SpodOrderMain>(entity =>
             {
@@ -303,55 +536,54 @@ namespace PcbErpApi.Data
                     .IsUnicode(false);
             });
 
-             modelBuilder.Entity<CurdPaperSelected>(entity =>
-            {
-                entity.HasKey(e => new { e.PaperId, e.TableName, e.ColumnName, e.DefaultEqual });
+            modelBuilder.Entity<CurdPaperSelected>(entity =>
+           {
+               entity.HasKey(e => new { e.PaperId, e.TableName, e.ColumnName, e.DefaultEqual });
 
-                entity.ToTable("CURdPaperSelected", tb =>
-                    {
-                        tb.HasTrigger("CURdPaperSelected_tD");
-                        tb.HasTrigger("CURdPaperSelected_tI");
-                    });
+               entity.ToTable("CURdPaperSelected", tb =>
+                   {
+                       tb.HasTrigger("CURdPaperSelected_tD");
+                       tb.HasTrigger("CURdPaperSelected_tI");
+                   });
 
-                entity.Property(e => e.PaperId)
-                    .HasMaxLength(50)
-                    .IsUnicode(false);
-                entity.Property(e => e.TableName)
-                    .HasMaxLength(50)
-                    .IsUnicode(false);
-                entity.Property(e => e.ColumnName)
-                    .HasMaxLength(50)
-                    .IsUnicode(false);
-                entity.Property(e => e.DefaultEqual)
-                    .HasMaxLength(10)
-                    .IsUnicode(false);
-                entity.Property(e => e.AliasName)
-                    .HasMaxLength(50)
-                    .IsUnicode(false);
-                entity.Property(e => e.ColumnCaption).HasMaxLength(50);
-                entity.Property(e => e.CommandText)
-                    .HasMaxLength(255)
-                    .IsUnicode(false);
-                entity.Property(e => e.DefaultValue).HasMaxLength(1024);
-                entity.Property(e => e.EditMask)
-                    .HasMaxLength(24)
-                    .IsUnicode(false);
-                entity.Property(e => e.IReadOnly).HasColumnName("iReadOnly");
-                entity.Property(e => e.IVisible)
-                    .HasDefaultValue(1)
-                    .HasColumnName("iVisible");
-                entity.Property(e => e.ParamType).HasDefaultValue(6);
-                entity.Property(e => e.ParamValue)
-                    .HasMaxLength(255)
-                    .IsUnicode(false);
-                entity.Property(e => e.SuperId)
-                    .HasMaxLength(24)
-                    .IsUnicode(false);
-                entity.Property(e => e.TableKind)
-                    .HasMaxLength(12)
-                    .IsUnicode(false);
-            });
-
+               entity.Property(e => e.PaperId)
+                   .HasMaxLength(50)
+                   .IsUnicode(false);
+               entity.Property(e => e.TableName)
+                   .HasMaxLength(50)
+                   .IsUnicode(false);
+               entity.Property(e => e.ColumnName)
+                   .HasMaxLength(50)
+                   .IsUnicode(false);
+               entity.Property(e => e.DefaultEqual)
+                   .HasMaxLength(10)
+                   .IsUnicode(false);
+               entity.Property(e => e.AliasName)
+                   .HasMaxLength(50)
+                   .IsUnicode(false);
+               entity.Property(e => e.ColumnCaption).HasMaxLength(50);
+               entity.Property(e => e.CommandText)
+                   .HasMaxLength(255)
+                   .IsUnicode(false);
+               entity.Property(e => e.DefaultValue).HasMaxLength(1024);
+               entity.Property(e => e.EditMask)
+                   .HasMaxLength(24)
+                   .IsUnicode(false);
+               entity.Property(e => e.IReadOnly).HasColumnName("iReadOnly");
+               entity.Property(e => e.IVisible)
+                   .HasDefaultValue(1)
+                   .HasColumnName("iVisible");
+               entity.Property(e => e.ParamType).HasDefaultValue(6);
+               entity.Property(e => e.ParamValue)
+                   .HasMaxLength(255)
+                   .IsUnicode(false);
+               entity.Property(e => e.SuperId)
+                   .HasMaxLength(24)
+                   .IsUnicode(false);
+               entity.Property(e => e.TableKind)
+                   .HasMaxLength(12)
+                   .IsUnicode(false);
+           });
 
             modelBuilder.Entity<EmodProdInfo>(entity =>
             {
@@ -931,20 +1163,119 @@ namespace PcbErpApi.Data
                 entity.Property(e => e.IShowWhere).HasColumnName("iShowWhere");
             });
 
-            modelBuilder.Entity<AJNdClassMoney>()
-            .HasKey(e => new { e.MoneyCode, e.UseId });
+            modelBuilder.Entity<PaginationModel>().HasNoKey();
+            modelBuilder.Entity<PaginationViewModel>().HasNoKey();
+            modelBuilder.Entity<QueryFieldViewModel>().HasNoKey();
+            modelBuilder.Entity<TableFieldViewModel>().HasNoKey();
+            modelBuilder.Entity<UpdateDictFieldInput>().HasNoKey();
+            modelBuilder.Entity<AddItemRequest>().HasNoKey();
 
-            modelBuilder.Entity<AJNdClassMoneyHis>()
-            .HasKey(his => new { his.MoneyCode, his.UseId });
+            // 針對每個 entity 有 decimal 欄位時，自動設定 HasPrecision
 
-            modelBuilder.Entity<AJNdClassMoneyHis>()
-            .HasOne(his => his.Money)
-            .WithMany(m => m.Histories)
-            .HasForeignKey(his => new { his.MoneyCode, his.UseId }) // 🔑 指定複合外鍵
-            .HasPrincipalKey(m => new { m.MoneyCode, m.UseId });     // 🔑 指定主表的複合主鍵或替代鍵
+            modelBuilder.Entity<AddItemRequest>(entity =>
+            {
+                foreach (var prop in typeof(AddItemRequest).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<CURdOCXTableFieldLK>(entity =>
+            {
+                foreach (var prop in typeof(CURdOCXTableFieldLK).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<CurdPaperSelected>(entity =>
+            {
+                foreach (var prop in typeof(CurdPaperSelected).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<CurdSysItem>(entity =>
+            {
+                foreach (var prop in typeof(CurdSysItem).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<CurdSystemSelect>(entity =>
+            {
+                foreach (var prop in typeof(CurdSystemSelect).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<CURdTableField>(entity =>
+            {
+                foreach (var prop in typeof(CURdTableField).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<CurdTableFieldLang>(entity =>
+            {
+                foreach (var prop in typeof(CurdTableFieldLang).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<CurdUser>(entity =>
+            {
+                foreach (var prop in typeof(CurdUser).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<EmodProdInfo>(entity =>
+            {
+                foreach (var prop in typeof(EmodProdInfo).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<MindStockCostPn>(entity =>
+            {
+                foreach (var prop in typeof(MindStockCostPn).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<SpodOrderMain>(entity =>
+            {
+                foreach (var prop in typeof(SpodOrderMain).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            modelBuilder.Entity<SpodOrderSub>(entity =>
+            {
+                foreach (var prop in typeof(SpodOrderSub).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
+                {
+                    entity.Property(prop.Name).HasPrecision(18, 6);
+                }
+            });
+
+            // 以下這些通常不用加 (ViewModel, InputModel, 非 DB Entity)
+            // PaginationModel, PaginationViewModel, QueryFieldViewModel, TableFieldViewModel, UpdateDictFieldInput
+
 
             OnModelCreatingPartial(modelBuilder);
         }
+
+
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
 
     }

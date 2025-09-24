@@ -6,9 +6,9 @@ using PcbErpApi.Data;
 
 public class CurdUsersModel : TableListModel<CurdUser>
 {
-
-    public CurdUsersModel(IHttpClientFactory httpClientFactory, ITableDictionaryService dictService,PcbErpContext context)
-        : base(httpClientFactory, dictService , context) { }
+    private readonly ILogger<TableListModel<CurdUser>> _logger;
+    public CurdUsersModel(IHttpClientFactory httpClientFactory, ITableDictionaryService dictService,PcbErpContext context,ILogger<TableListModel<CurdUser>> logger)
+        : base(httpClientFactory, dictService , context, logger) {_logger = logger; }
 
     public override string TableName => "CurdUsers";
 

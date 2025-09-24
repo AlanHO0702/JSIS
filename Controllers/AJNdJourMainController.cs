@@ -9,21 +9,21 @@ namespace PcbErpApi.Controllers
     [Route("api/[controller]")]
     [ApiController]
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
-    public class SPOdOrderMainController : ControllerBase
+    public class AJNdJourMainController : ControllerBase
     {
 
         private readonly PcbErpContext _context;
         private readonly PaginationService _pagedService;
-        private readonly ILogger<SPOdOrderMainController> _logger;
+        private readonly ILogger<AJNdJourMainController> _logger;
 
-        public SPOdOrderMainController(PcbErpContext context, PaginationService pagedService, ILogger<SPOdOrderMainController> logger)
+        public AJNdJourMainController(PcbErpContext context, PaginationService pagedService, ILogger<AJNdJourMainController> logger)
         {
             _context = context;
             _pagedService = pagedService;
             _logger = logger;
         }
 
-        // 分頁查詢 GET: api/SPOdOrderMains/paged?page=1&pageSize=50
+        // 分頁查詢 GET: api/AJNdJourMain/paged?page=1&pageSize=50
         [HttpGet("paged")]
         public async Task<IActionResult> GetPaged(
             [FromQuery] int page = 1, 
@@ -31,7 +31,7 @@ namespace PcbErpApi.Controllers
             [FromQuery] string? PaperNum = null
         )
         {
-            var query = _context.SpodOrderMain.AsQueryable();
+            var query = _context.AjndJourMain.AsQueryable();
 
             if (!string.IsNullOrWhiteSpace(PaperNum))
             query = query.Where(x => x.PaperNum.Contains(PaperNum));
@@ -43,24 +43,24 @@ namespace PcbErpApi.Controllers
    
 
         /// <summary>
-        /// 取得所有銷售訂單資料。
+        /// 取得所有總帳傳票資料。
         /// </summary>
-        /// <returns>銷售訂單清單</returns>
+        /// <returns>總帳傳票清單</returns>
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<SpodOrderMain>>> GetSPOdOrderMains()
+        public async Task<ActionResult<IEnumerable<AjndJourMain>>> GetAjndJourMains()
         {
-            return await _context.SpodOrderMain.ToListAsync();
+            return await _context.AjndJourMain.ToListAsync();
         }
 
         /// <summary>
-        /// 根據 PaperNum 取得單筆訂單資料。
+        /// 根據 PaperNum 取得單筆傳票資料。
         /// </summary>
-        /// <param name="paperNum">訂單號碼</param>
-        /// <returns>單一訂單資料</returns>
+        /// <param name="paperNum">傳票號碼</param>
+        /// <returns>單一傳票資料</returns>
         [HttpGet("{paperNum}")]
-        public async Task<ActionResult<SpodOrderMain>> GetSPOdOrderMain(string paperNum)
+        public async Task<ActionResult<AjndJourMain>> GetAjndJourMain(string paperNum)
         {
-            var order = await _context.SpodOrderMain.FirstOrDefaultAsync(s => s.PaperNum == paperNum);
+            var order = await _context.AjndJourMain.FirstOrDefaultAsync(s => s.PaperNum == paperNum);
 
             if (order == null)
             {
@@ -71,42 +71,38 @@ namespace PcbErpApi.Controllers
         }
 
         /// <summary>
-        /// 新增一筆訂單資料。
+        /// 新增一筆傳票資料。
         /// </summary>
-        /// <param name="order">訂單資料</param>
-        /// <returns>建立成功的訂單資料</returns>
+        /// <param name="order">傳票資料</param>
+        /// <returns>建立成功的傳票資料</returns>
         [HttpPost]
-        public async Task<ActionResult<SpodOrderMain>> PostSPOdOrderMain()
+        public async Task<ActionResult<AjndJourMain>> PostAjndJourMain()
         {
-            var prefix = "SA" + DateTime.Now.ToString("yyMM");
-            var lastToday = await _context.SpodOrderMain
+            var prefix = "114" + DateTime.Now.ToString("yyMM");
+            var lastToday = await _context.AjndJourMain
                 .Where(x => x.PaperNum.StartsWith(prefix))
                 .OrderByDescending(x => x.PaperNum)
                 .FirstOrDefaultAsync();
 
             string nextNum = GenerateNextPaperNum(lastToday?.PaperNum);
 
-            var order = new SpodOrderMain
+            var order = new AjndJourMain
             {
                 PaperNum = nextNum,
-                PaperDate = DateTime.Now,
-                CustomerId = "",
-                SourCustomerId = "",
-                FdrCode = "",
-                // 其他預設
+                PaperDate = DateTime.Now
             };
 
-            _context.SpodOrderMain.Add(order);
+            _context.AjndJourMain.Add(order);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetSPOdOrderMain), new { paperNum = order.PaperNum }, order);
+            return CreatedAtAction(nameof(GetAjndJourMain), new { paperNum = order.PaperNum }, order);
         }
 
 
         // 實作一個產生新單號的方法
         private string GenerateNextPaperNum(string? lastPaperNum)
         {
-            var prefix = "SA" + DateTime.Now.ToString("yyMM"); // SA2507
+            var prefix = "114" + DateTime.Now.ToString("yyMM"); // SA2507
 
             int nextSeq = 1;
 
@@ -125,13 +121,13 @@ namespace PcbErpApi.Controllers
 
 
         /// <summary>
-        /// 根據 PaperNum 更新訂單資料。
+        /// 根據 PaperNum 更新傳票資料。
         /// </summary>
-        /// <param name="paperNum">訂單號碼</param>
-        /// <param name="order">更新後的訂單資料</param>
+        /// <param name="paperNum">傳票號碼</param>
+        /// <param name="order">更新後的傳票資料</param>
         /// <returns>NoContent 或錯誤訊息</returns>
         [HttpPut("{paperNum}")]
-        public async Task<IActionResult> PutSPOdOrderMain(string paperNum, SpodOrderMain order)
+        public async Task<IActionResult> PutAjndJourMain(string paperNum, AjndJourMain order)
         {
             if (paperNum != order.PaperNum)
             {
@@ -146,7 +142,7 @@ namespace PcbErpApi.Controllers
             }
             catch (DbUpdateConcurrencyException)
             {
-                if (!SPOdOrderMainExists(paperNum))
+                if (!AjndJourMainExists(paperNum))
                 {
                     return NotFound();
                 }
@@ -160,18 +156,18 @@ namespace PcbErpApi.Controllers
         }
 
         /// <summary>
-        /// 根據 PaperNum 刪除訂單。
+        /// 根據 PaperNum 刪除傳票。
         /// </summary>
-        /// <param name="paperNum">訂單號碼</param>
+        /// <param name="paperNum">傳票號碼</param>
         /// <returns>NoContent 或錯誤訊息</returns>
    [HttpDelete("{paperNum}")]
-    public async Task<IActionResult> DeleteSPOdOrderMain(string paperNum)
+    public async Task<IActionResult> DeleteAjndJourMain(string paperNum)
     {
         try
         {
             // 用原生 SQL 指令（這樣就不會有 OUTPUT 子句問題）
             var rows = await _context.Database.ExecuteSqlRawAsync(
-                "DELETE FROM SpodOrderMain WHERE PaperNum = {0}", paperNum);
+                "DELETE FROM AjndJourMain WHERE PaperNum = {0}", paperNum);
 
             if (rows == 0)
                 return NotFound();
@@ -190,13 +186,13 @@ namespace PcbErpApi.Controllers
 
 
         /// <summary>
-        /// 判斷訂單是否存在。
+        /// 判斷傳票是否存在。
         /// </summary>
-        /// <param name="paperNum">訂單號碼</param>
+        /// <param name="paperNum">傳票號碼</param>
         /// <returns>布林值</returns>
-        private bool SPOdOrderMainExists(string paperNum)
+        private bool AjndJourMainExists(string paperNum)
         {
-            return _context.SpodOrderMain.Any(e => e.PaperNum == paperNum);
+            return _context.AjndJourMain.Any(e => e.PaperNum == paperNum);
         }
     }
 }

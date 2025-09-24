@@ -55,6 +55,36 @@ namespace PcbErpApi.Helpers // 你的 namespace
             var lambda = Expression.Lambda<Func<T, bool>>(body, param);
             return query.Where(lambda);
         }
+        public static IQueryable<T> WhereDynamicEqual<T>(this IQueryable<T> query, string propName, object value)
+        {
+            var param = Expression.Parameter(typeof(T));
+            var property = Expression.Property(param, propName);
+            var valueExpr = Expression.Constant(value, property.Type);
+            var body = Expression.Equal(property, valueExpr);
+            var lambda = Expression.Lambda<Func<T, bool>>(body, param);
+            return query.Where(lambda);
+        }
+
+        public static IQueryable<T> WhereDynamicDecimalGreaterOrEqual<T>(this IQueryable<T> query, string propName, decimal value)
+        {
+            var param = Expression.Parameter(typeof(T));
+            var property = Expression.Property(param, propName);
+            var valueExpr = Expression.Constant(value, typeof(decimal));
+            var body = Expression.GreaterThanOrEqual(property, valueExpr);
+            var lambda = Expression.Lambda<Func<T, bool>>(body, param);
+            return query.Where(lambda);
+        }
+
+        public static IQueryable<T> WhereDynamicDecimalLessOrEqual<T>(this IQueryable<T> query, string propName, decimal value)
+        {
+            var param = Expression.Parameter(typeof(T));
+            var property = Expression.Property(param, propName);
+            var valueExpr = Expression.Constant(value, typeof(decimal));
+            var body = Expression.LessThanOrEqual(property, valueExpr);
+            var lambda = Expression.Lambda<Func<T, bool>>(body, param);
+            return query.Where(lambda);
+        }
+
 
     }
 }

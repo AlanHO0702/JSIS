@@ -3,6 +3,7 @@
 
 @{
     var fields = ViewData["Fields"] as List<TableFieldViewModel>;
+    if (fields == null) { <text>查無欄位設定</text>; return; }
     var items = Model.Items;
     var totalCount = Model.TotalCount;
     var pageNumber = Model.PageNumber;
@@ -15,9 +16,15 @@
     var detailRouteTemplate = ViewData["SubRouteTemplate"] as string ?? "/SpodOrderSubs/{PaperNum}";
     var lookupMapData = ViewData["LookupDisplayMap"] as Dictionary<string, Dictionary<string, string>>;
     var keyFieldName = ViewData["KeyFieldName"]?.ToString() ?? "PaperNum";
-
-    
+    var tableName = ViewData["DictTableName"]?.ToString() ?? "SPOdOrderMain";
 }
+<script>
+    window._tableName = "@tableName";
+    window._tableFields = @Html.Raw(Json.Serialize(fields));
+    window._lookupMapData = @Html.Raw(Json.Serialize(lookupMapData ?? new Dictionary<string, Dictionary<string, string>>()));
+    window._keyFieldName = "@keyFieldName";
+    window._detailRouteTemplate = "@detailRouteTemplate";
+</script>
 
 <style>
     body { background: #f7f9fb; }
@@ -75,6 +82,24 @@
         font-size: 0.93em;
         color: #286bb5;
     }
+    .table-hscroll-proxy{
+    position: sticky;     /* 黏在視窗頂端 */
+    top: 0;               /* 如果上面有固定工具列，改成相對高度 */
+    z-index: 100;         /* 比表頭更高，避免被蓋住 */
+    background: #fff;     /* 看起來乾淨 */
+    }
+
+    .hscroll-track{
+    height: 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-gutter: stable both-edges; /* 留出滾動條空間，避免忽隱忽現 */
+    border-bottom: 1px solid #eaeef4;
+    }
+
+    .hscroll-spacer{ height: 1px; }  /* 只負責撐寬度 */
+
+
 
 </style>
 
@@ -82,20 +107,26 @@
     <div class="title-row mb-4 border-bottom pb-2">
         <div style="display:flex;align-items:center;gap:16px;">
             <h2 class="mb-0 text-primary" style="font-weight:700;letter-spacing:3px;">@ViewData["TableTitle"]</h2>
-            <button id="btnAddNew" class="btn btn-primary" style="font-weight:600;">新增</button>
-            <button id="btnBatchDelete" class="btn btn-danger" style="font-weight:600;">作廢</button>
-            <button id="btnSearch" class="btn btn-info" style="font-weight:600;">查詢</button>
+            @await Html.PartialAsync("_TableToolbar", new TableToolbarModel {
+                SearchBtnId = "btnSearch",
+                AddBtnId = "btnAddNew",
+                DeleteBtnId = "btnBatchDelete",
+                QueryFields = ViewData["QueryFields"] as List<QueryFieldViewModel>,
+                ModalId = "searchModal",
+                ReportSpName = ViewData["ReportSpName"]?.ToString() ?? ""   // 👈 從外層再傳進來
+            })
         </div>
-        <span class="order-count">
+        <span class="order-count" id="orderCountInfo">
             共 <span style="font-weight:bold">@Model.TotalCount</span> 筆，
             顯示第 @(((Model.PageNumber - 1) * Model.PageSize) + 1)
             ~ @(Math.Min(Model.PageNumber * Model.PageSize, Model.TotalCount)) 筆
-        </span>  
+        </span>
     </div>
-    <!-- 查詢條件彈窗 -->
-    <div class="modal fade" id="searchModal" tabindex="-1" aria-labelledby="searchModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        @await Html.PartialAsync("_QueryPanelPartial", ViewData["QueryFields"] as List<QueryFieldViewModel>)
+
+    <!-- 頂端同步卷軸（放在 table-wrap 外面） -->
+    <div class="table-hscroll-proxy" id="tableHScrollTop">
+    <div class="hscroll-track" id="hscrollTop">
+        <div class="hscroll-spacer" id="hscrollSpacer"></div>
     </div>
     </div>
 
@@ -111,74 +142,13 @@
                     }
                 </tr>
             </thead>
-            <tbody>
-                @foreach(var item in items)
-                {
-                    // 取得 key（如 PaperNum）來組路徑
-                    // route 替換
-                    var keyValue = item.GetType().GetProperty(keyFieldName)?.GetValue(item, null)?.ToString();
-                    var rowUrl = "";
-                    if (!string.IsNullOrEmpty(subRouteTemplate) && !string.IsNullOrEmpty(keyValue))
-                    {
-                        rowUrl = subRouteTemplate.Replace("{PaperNum}", keyValue); // 這邊還是用 {PaperNum} 字串
-                    }
-
-                    <tr class="row-link" data-url="@rowUrl" data-paper-num="@keyValue">
-                        @foreach (var field in fields)
-                        {
-                            var keyObj = item.GetType().GetProperty(keyFieldName)?.GetValue(item);
-                            var paperKey = keyObj?.ToString();
-                            string valStr = "";
-                            Dictionary<string, string>? lookupMap = null;
-                            string display = "";
-
-                            if (!string.IsNullOrEmpty(paperKey) &&
-                                lookupMapData != null &&
-                                lookupMapData.TryGetValue(paperKey, out lookupMap) &&
-                                lookupMap != null &&
-                                lookupMap.TryGetValue(field.FieldName, out display))
-                            {
-                                valStr = display;
-                            }
-                            else
-                            {
-                                var rawValue = item.GetType().GetProperty(field.FieldName)?.GetValue(item, null);
-                                if (rawValue != null)
-                                {
-                                    if (!string.IsNullOrEmpty(field.FormatStr))
-                                    {
-                                        if (field.DataType?.ToLower() == "date" && rawValue is DateTime dt)
-                                        {
-                                            valStr = dt.ToString(field.FormatStr); // 例如 yyyy/MM/dd
-                                        }
-                                        else if (field.DataType?.ToLower() == "number" && rawValue is IFormattable fmt)
-                                        {
-                                            valStr = fmt.ToString(field.FormatStr, null); // 例如 ###,###,##0.00
-                                        }
-                                        else
-                                        {
-                                            valStr = rawValue.ToString();
-                                        }
-                                    }
-                                    else
-                                    {
-                                        valStr = rawValue.ToString();
-                                    }
-                                }
-                            }
-                            
-                            <td>@valStr</td>
-                        }
-                    </tr>
-
-                }
+            <tbody id="dataTbody"></tbody>
+                <!-- 資料由 JS 動態產生 -->
             </tbody>
         </table>
-    <div class="pagination-bar">
-        @if (paginationVm != null)
-        {
-            @await Html.PartialAsync("_Pagination", paginationVm)
-        }
+    <div class="pagination-bar" id="paginationBar"> 
+        <!-- 資料由 JS 動態產生 -->
+        @if (paginationVm != null) { @await Html.PartialAsync("_Pagination", paginationVm) }
     </div>
 </div>
 
@@ -186,98 +156,53 @@
 <!-- 這一行一定要在所有 <script> 之前獨立放，不要包在 <script> 裡！ -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+<script src="~/js/toolbarHandler.js"></script>
 
 <script>
     let selectedPaperNum = null;
     const addApiUrl = '@addApiUrl';
     const detailRouteTemplate = '@detailRouteTemplate';
 
+    function saveQueryState(filters, pageNumber) {
+        localStorage.setItem("orderListQueryFilters", JSON.stringify(filters));
+        localStorage.setItem("orderListPageNumber", String(pageNumber));
+    }
+
+    function loadQueryState() {
+        const filtersStr = localStorage.getItem("orderListQueryFilters");
+        const pageStr = localStorage.getItem("orderListPageNumber");
+        return {
+            filters: filtersStr ? JSON.parse(filtersStr) : null,
+            pageNumber: pageStr ? parseInt(pageStr) : null
+        };
+    }
+
+    let lastQueryFilters = [];
+
     document.addEventListener("DOMContentLoaded", function () {
-        // 點擊行：選取，不跳頁
-        document.querySelectorAll(".row-link").forEach(function(row) {
-            row.addEventListener("click", function(e) {
-                document.querySelectorAll(".row-link.selected").forEach(r => r.classList.remove("selected"));
-                row.classList.add("selected");
-                selectedPaperNum = row.getAttribute("data-paper-num");
-            });
 
-            // 雙擊行：跳單身
-            row.addEventListener("dblclick", function() {
-                var url = row.getAttribute("data-url");
-                if(url) window.location = url;
-            });
+        new ToolbarHandler({
+            searchBtnId: "btnSearch",
+            addBtnId: "btnAddNew",
+            deleteBtnId: "btnBatchDelete",
+            getSelectedId: () => {
+                const selectedRow = document.querySelector("#dataTbody tr.selected");
+                return selectedRow ? selectedRow.getAttribute("data-paper-num") : null;
+            },   // ← 這裡加上逗號 !!!
+            modalId: "searchModal",   // 一定要加
+            formId: "searchForm",     // 一定要加
+            addApiUrl: "@addApiUrl",
+            deleteApiUrlFn: (id) => `/api/${"@tableName"}/${id}`,
+            detailRouteTemplate: "@(detailRouteTemplate)",
+            tableName: "@tableName",
+            pageSize: 50,
+            renderTable: renderTable,
+            renderPagination: renderPagination,
+            renderOrderCount: renderOrderCount,
+            restoreSearchForm: restoreSearchForm,
+            queryRedirectUrl: "/@tableName"
         });
 
-        // 新增按鈕
-        document.getElementById("btnAddNew").addEventListener("click", async function() {
-            const result = await Swal.fire({
-                title: '確定要新增一張新單據？',
-                icon: 'question',
-                showCancelButton: true,
-                confirmButtonText: '確定',
-                cancelButtonText: '取消'
-            });
-            if (!result.isConfirmed) return;
-
-            const resp = await fetch(addApiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({})
-            });
-
-            if(resp.ok) {
-                const data = await resp.json();
-                const paperNum = data.paperNum || data.PaperNum || "";
-                if(paperNum) {
-                    var jumpUrl = detailRouteTemplate.replace("{PaperNum}", paperNum);
-                    window.location = jumpUrl;
-                } else {
-                    await Swal.fire({ icon: 'success', title: '新增成功，但未取得單號！' });
-                    location.reload();
-                }
-            } else {
-                await Swal.fire({ icon: 'error', title: '建立失敗！' });
-            }
-        });
-
-        // 作廢按鈕
-        document.getElementById("btnBatchDelete").addEventListener("click", async function() {
-            if (!selectedPaperNum) {
-                await Swal.fire({
-                    icon: 'warning',
-                    title: '請先點選一筆資料',
-                    confirmButtonText: '確定'
-                });
-                return;
-            }
-            const result = await Swal.fire({
-                title: '確定要作廢這筆單據？',
-                icon: 'question',
-                showCancelButton: true,
-                confirmButtonText: '確定',
-                cancelButtonText: '取消'
-            });
-            if (!result.isConfirmed) return;
-
-            let resp = await fetch(`/api/SPOdOrderMain/${selectedPaperNum}`, { method: "DELETE" });
-            if (resp.ok) {
-                await Swal.fire({
-                    icon: 'success',
-                    title: '作廢成功！'
-                });
-                location.reload();
-            } else {
-                let errorMsg = "作廢失敗！";
-                try {
-                    let result = await resp.json();
-                    if (result.error) errorMsg = result.error;
-                } catch (e) { }
-                await Swal.fire({
-                    icon: 'error',
-                    title: errorMsg
-                });
-            }
-        });
 
          // ✅ 拖曳表頭欄位
         const headerRow = document.getElementById("table-header-row");
@@ -298,7 +223,7 @@
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
-                                    tableName: 'SPOdOrderMain',
+                                    tableName: window._tableName,
                                     fieldOrders: newOrder
                                 })
                             })
@@ -313,8 +238,8 @@
                                 console.error(err);
                                 Swal.fire({ icon: 'error', title: '欄位順序儲存失敗！' });
                             });
-                        }
-                    });
+                    }
+            });
 
         }
            // --- 下面是新加的"雙擊表頭欄位排序" ---
@@ -360,25 +285,296 @@
                 });
             });
 
-            // 查詢按鈕
-            document.getElementById('btnSearch').addEventListener('click', function () {
-                var modal = new bootstrap.Modal(document.getElementById('searchModal'));
-                modal.show();
+        function renderTable(data) {
+            const tbody = document.getElementById('dataTbody');
+            tbody.innerHTML = ""; // 清空
+
+            const fields = window._tableFields;
+            const lookupMapData = window._lookupMapData;
+            const keyFieldName = window._keyFieldName;
+            const subRouteTemplate = "@(detailRouteTemplate)";
+
+            data.forEach(item => {
+                const keyValue = item[keyFieldName] || "";
+                let rowUrl = "";
+                if (subRouteTemplate && keyValue)
+                    rowUrl = subRouteTemplate.replace("{PaperNum}", keyValue);
+
+                const tr = document.createElement('tr');
+                tr.className = "row-link";
+                tr.setAttribute('data-url', rowUrl);
+                tr.setAttribute('data-paper-num', keyValue);
+
+                fields.forEach(field => {
+                    let valStr = "";
+                    // lookup
+                    let display = "";
+                    if (
+                        keyValue &&
+                        lookupMapData &&
+                        lookupMapData[keyValue] &&
+                        lookupMapData[keyValue][field.FieldName]
+                    ) {
+                        display = lookupMapData[keyValue][field.FieldName];
+                        valStr = display;
+                    } else {
+                        // 原始值
+                        let rawValue = item[field.FieldName];
+                        const dt = (field.DataType || "").toLowerCase();
+
+                        // 後端已做格式化，通常會是字串；前端不要再轉
+                        if (rawValue === null || rawValue === undefined) {
+                        valStr = "";
+                        } else if (typeof rawValue === "string") {
+                        // 例如 "4,644"、"2025/06/26 上午 10:57:14"：直接用
+                        valStr = rawValue;
+                        } else if (dt === "number" && typeof rawValue === "number") {
+                        // 少數還回 number 的情況下，補個千分位
+                        valStr = rawValue.toLocaleString();
+                        } else {
+                        // 其他型別就做保守轉字串
+                        valStr = String(rawValue);
+                        }
+                    }
+                    const td = document.createElement('td');
+                    td.innerHTML = valStr ?? "";
+                    tr.appendChild(td);
+                });
+
+                tbody.appendChild(tr);
             });
 
-            document.getElementById('searchForm').addEventListener('submit', function (e) {
-                e.preventDefault();
-                // 取出查詢欄位
-                const params = new URLSearchParams(new FormData(this)).toString();
-                // 跳頁帶參數最簡單
-                window.location = `?${params}`;
+            highlightLastViewedRow();
+
+            // 點擊行：選取，不跳頁
+            document.querySelectorAll(".row-link").forEach(function(row) {
+                row.addEventListener("click", function(e) {
+                    document.querySelectorAll(".row-link.selected").forEach(r => r.classList.remove("selected"));
+                    row.classList.add("selected");
+                    window.selectedPaperNum = row.getAttribute("data-paper-num");
+                });
+
+            // 雙擊行：跳單身
+                row.addEventListener("dblclick", function() {
+                    var url = row.getAttribute("data-url");
+                    if(url) window.location = url;
+                });
             });
+            // 重新產生列之後，更新頂端卷軸寬度
+            if (window.refreshHScrollWidth) window.refreshHScrollWidth();
+
+        }
+
+        function renderPagination(totalCount, pageSize, pageNumber) {
+            const totalPages = Math.ceil(totalCount / pageSize);
+            if (totalPages <= 1) {
+                document.getElementById("paginationBar").innerHTML = "";
+                return;
+            }
+            let html = '<nav><ul class="pagination justify-content-center">';
+            html += `<li class="page-item ${pageNumber === 1 ? "disabled" : ""}">
+                <a class="page-link" href="#" data-page="${pageNumber - 1}">上一頁</a></li>`;
+
+            let start = Math.max(1, pageNumber - 2);
+            let end = Math.min(totalPages, pageNumber + 2);
+
+            if (start > 2) {
+                html += `<li class="page-item"><a class="page-link" href="#" data-page="1">1</a></li>`;
+                html += `<li class="page-item"><a class="page-link" href="#" data-page="2">2</a></li>`;
+                html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            } else {
+                for (let i = 1; i < start; i++) {
+                    html += `<li class="page-item"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+                }
+            }
+
+            for (let i = start; i <= end; i++) {
+                html += `<li class="page-item ${i === pageNumber ? "active" : ""}">
+                    <a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+            }
+
+            if (end < totalPages - 2) {
+                html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                html += `<li class="page-item"><a class="page-link" href="#" data-page="${totalPages - 1}">${totalPages - 1}</a></li>`;
+                html += `<li class="page-item"><a class="page-link" href="#" data-page="${totalPages}">${totalPages}</a></li>`;
+            } else {
+                for (let i = end + 1; i <= totalPages; i++) {
+                    html += `<li class="page-item"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+                }
+            }
+            html += `<li class="page-item ${pageNumber === totalPages ? "disabled" : ""}">
+                <a class="page-link" href="#" data-page="${pageNumber + 1}">下一頁</a></li>`;
+            html += '</ul></nav>';
+
+            document.getElementById("paginationBar").innerHTML = html;
+
+            // 綁定事件
+            document.querySelectorAll('#paginationBar a[data-page]').forEach(a => {
+                a.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    let targetPage = parseInt(this.getAttribute('data-page'));
+                    if (!isNaN(targetPage) && targetPage > 0) {
+                        doQuery(targetPage); // 用 AJAX 查新頁
+                    }
+                });
+            });
+
+        }
+        // 你可記錄當前查詢條件，以便查下一頁時重用
+
+
+        function doQuery(page = 1) {
+            // 以 lastQueryFilters 當作查詢條件（如果是查詢表單送出時也要同步更新 lastQueryFilters）
+            let filters = lastQueryFilters.slice();
+            // 找到並更新 page/pageSize
+            let foundPage = false, foundPageSize = false;
+            filters.forEach(f => {
+                if (f.Field === "page") { f.Value = String(page); foundPage = true; }
+                if (f.Field === "pageSize") { f.Value = "@Model.PageSize"; foundPageSize = true; }
+            });
+            if (!foundPage) filters.push({ Field: "page", Op: "", Value: String(page) });
+            if (!foundPageSize) filters.push({ Field: "pageSize", Op: "", Value: "@Model.PageSize" });
+
+            saveQueryState(filters, page);
+
+            fetch('/api/PagedQuery/PagedQuery', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    table: window._tableName,    // ← 指定你查哪個表
+                    filters: filters           // ← 原本組好的查詢條件
+                })
+            }).then(resp => resp.json())
+            .then(result => {
+                window._lookupMapData = result.lookupMapData;   // <--- 必加這行
+                renderTable(result.data);
+                renderPagination(result.totalCount, @Model.PageSize, page);
+                renderOrderCount(result.totalCount, @Model.PageSize, page);
+            });
+        }
+
+        function renderOrderCount(totalCount, pageSize, pageNumber) {
+            const start = (pageNumber - 1) * pageSize + 1;
+            const end = Math.min(pageNumber * pageSize, totalCount);
+            document.getElementById('orderCountInfo').innerHTML = `共 <span style="font-weight:bold">${totalCount}</span> 筆，顯示第 ${start} ~ ${end} 筆`;
+        }
+
+        function restoreSearchForm(filters) {
+            if (!filters) return;
+            filters.forEach(f => {
+                if (f.Field !== "page" && f.Field !== "pageSize") {
+                    // 同時找多組 CustomerId5, CustomerId6 ... input
+                    let inputEls = document.querySelectorAll(`#searchForm [name^='${f.Field}']`);
+                    inputEls.forEach(el => {
+                        // 只帶空值才填
+                        if (!el.value) el.value = f.Value;
+                    });
+                }
+                let condEls = document.querySelectorAll(`#searchForm [name^='Cond_${f.Field}']`);
+                condEls.forEach(condEl => {
+                    if (condEl && f.Op) condEl.value = f.Op;
+                });
+            });
+        }
+
+        function highlightLastViewedRow() {
+            const lastPaperNum = localStorage.getItem("lastViewedPaperNum");
+            //console.log('highlight row', lastPaperNum); // ←看有沒有抓到
+            if (!lastPaperNum) return;
+
+            const tr = document.querySelector(`tr[data-paper-num="${lastPaperNum}"]`);
+            if (tr) {
+                tr.classList.add('selected');
+                window.selectedPaperNum = lastPaperNum;   // 👈 補這行
+                tr.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+            // 清掉避免下次又 highlight
+            localStorage.removeItem("lastViewedPaperNum");
+        }
+
+
+        // 檢查 localStorage 有查詢條件就自動查詢，否則顯示初始
+        const { filters, pageNumber } = loadQueryState();
+        if (filters && filters.length > 0) {
+            lastQueryFilters = filters;
+            restoreSearchForm(filters);  // 還原查詢表單
+            doQuery(pageNumber || 1);
+        } else {
+            renderTable(@Html.Raw(Json.Serialize(Model.Items)));
+        }
 
     });
 
+
+    (function initTopHScroll(){
+    const wrap   = document.querySelector('.table-wrap');           // 真正可左右捲的容器
+    if (!wrap) return;
+    const table  = wrap.querySelector('table');
+    const topBar = document.getElementById('hscrollTop');
+    const spacer = topBar?.querySelector('.hscroll-spacer');
+
+    if (!table || !topBar || !spacer) return;
+
+    function measure(){
+        // 讓頂端假的卷軸寬度 == 表格實際滾動寬
+        spacer.style.width = table.scrollWidth + 'px';
+        // 初次載入也同步一下位置
+        topBar.scrollLeft = wrap.scrollLeft;
+    }
+
+    let syncing = false;
+    topBar.addEventListener('scroll', () => {
+        if (syncing) return;
+        syncing = true;
+        wrap.scrollLeft = topBar.scrollLeft;
+        syncing = false;
+    });
+
+    wrap.addEventListener('scroll', () => {
+        if (syncing) return;
+        syncing = true;
+        topBar.scrollLeft = wrap.scrollLeft;
+        syncing = false;
+    });
+
+    window.addEventListener('resize', measure);
+
+    // 給外面呼叫（換頁或重新繪製表格後）
+    window.refreshHScrollWidth = measure;
+
+    // 初次
+    measure();
+    })();
+
+
+    // List 頁：點修改 → 跳轉前檢查
+    btnViewEditToggle.addEventListener("click", () => {
+        const id = window.selectedPaperNum;
+        if (!id) {
+            Swal.fire({ icon: 'warning', title: '請先選擇一筆單據' });
+            return;
+        }
+
+        const row = document.querySelector(`tr[data-paper-num="${id}"]`);
+        const status = row?.querySelector("td:nth-child(6)")?.textContent.trim() || '';
+
+        if (window.BLOCK_STATUSES && window.BLOCK_STATUSES.includes(status)) {
+            Swal.fire({
+                icon: 'warning',
+                title: '無法修改',
+                text: `此單據狀態為「${status}」，不可進行修改。`
+            });
+            return; // 阻止跳轉
+        }
+
+        const url = detailRouteTemplate.replace("{PaperNum}", id);
+        window.location.href = url;
+    });
+    
+    
     window.addEventListener('pageshow', function (event) {
         if (event.persisted || (window.performance && window.performance.getEntriesByType("navigation")[0]?.type === "back_forward")) {
-            location.reload();
+            //location.reload();
         }
     });
 

@@ -1,11 +1,8 @@
 using System.Data;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
-
-
 
 [Route("api/[controller]")]
 [ApiController]
@@ -20,7 +17,10 @@ public class TableFieldLayoutController : ControllerBase
         _connStr = config.GetConnectionString("DefaultConnection");
     }
 
-   [HttpPost("SaveHeaderLayout")]
+    // =========================================
+    // 儲存 Header Layout
+    // =========================================
+    [HttpPost("SaveHeaderLayout")]
     public async Task<IActionResult> SaveHeaderLayout([FromBody] SaveHeaderLayoutRequest request)
     {
         if (request == null)
@@ -31,7 +31,6 @@ public class TableFieldLayoutController : ControllerBase
             .Select(x => new { x.FieldName, x.Width, x.Height, x.Top, x.Left, x.iShowWhere })
             .ToDictionary(x => x.FieldName.ToLower(), x => x);
 
-        // 只更新傳入的欄位
         foreach (var layout in layoutDict.Values)
         {
             var entity = await _context.CURdTableFields
@@ -51,14 +50,14 @@ public class TableFieldLayoutController : ControllerBase
                 entity.iFieldWidth = layout.Width;
                 entity.iFieldHeight = layout.Height;
 
-                // 更新資料庫（此處如果 EF tracking 不需要，也可整合為一筆）
                 await _context.Database.ExecuteSqlRawAsync(@"
                     UPDATE CURdTableField
                     SET  iFieldWidth = @Width, iFieldHeight = @Height,
-                        iFieldTop = @Top, iFieldLeft = @Left ,
-                        iShowWhere = @iShowWhere
+                         iFieldTop = @Top, iFieldLeft = @Left,
+                         iShowWhere = @iShowWhere
                     WHERE LOWER(FieldName) = @FieldName AND TableName = @TableName",
-                    new[] {
+                    new[]
+                    {
                         new SqlParameter("@Width", layout.Width),
                         new SqlParameter("@Height", layout.Height),
                         new SqlParameter("@FieldName", layout.FieldName),
@@ -66,7 +65,6 @@ public class TableFieldLayoutController : ControllerBase
                         new SqlParameter("@Top", layout.Top),
                         new SqlParameter("@Left", layout.Left),
                         new SqlParameter("@iShowWhere", layout.iShowWhere)
-    
                     });
             }
         }
@@ -74,6 +72,9 @@ public class TableFieldLayoutController : ControllerBase
         return Ok();
     }
 
+    // =========================================
+    // 儲存欄位排序
+    // =========================================
     [HttpPost("SaveSerialOrder")]
     public async Task<IActionResult> SaveSerialOrder([FromBody] SaveSerialOrderRequest request)
     {
@@ -94,10 +95,12 @@ public class TableFieldLayoutController : ControllerBase
                 });
         }
 
-        return Ok(new { success = true }); // ✅ 回傳 JSON 給前端
+        return Ok(new { success = true });
     }
 
-
+    // =========================================
+    // LookupData
+    // =========================================
     [HttpGet("LookupData")]
     public async Task<IActionResult> GetLookupData(string table, string key, string result)
     {
@@ -122,11 +125,8 @@ public class TableFieldLayoutController : ControllerBase
                 {
                     var row = new Dictionary<string, object>();
                     row["key"] = reader["key"];
-                    // 多個 result 欄位
                     for (int i = 0; i < resultFields.Length; i++)
-                    {
                         row[$"result{i}"] = reader[$"result{i}"];
-                    }
                     list.Add(row);
                 }
             }
@@ -134,13 +134,128 @@ public class TableFieldLayoutController : ControllerBase
         return Ok(list);
     }
 
-    // 專用 DTO 類別
+    // =========================================
+    // 儲存 Detail Layout
+    // =========================================
+    [HttpPost("SaveDetailLayout")]
+    public async Task<IActionResult> SaveDetailLayout([FromBody] DetailColWidthDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.tableName))
+            return BadRequest("tableName is required");
+        if (dto.cols == null || dto.cols.Count == 0)
+            return Ok(new { ok = true, updated = 0 });
+
+        static string Clean(string s) => (s ?? "")
+            .Trim().Trim('[', ']')
+            .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase);
+
+        var tname = Clean(dto.tableName).ToLowerInvariant();
+
+        var items = dto.cols
+            .Where(c => !string.IsNullOrWhiteSpace(c.fieldName))
+            .Select(c => new { field = Clean(c.fieldName).ToLowerInvariant(), width = Math.Max(50, c.width) })
+            .GroupBy(x => x.field)
+            .Select(g => g.Last())
+            .ToList();
+
+        int updated = 0;
+
+        const string sql = @"
+UPDATE CURdTableField
+SET iFieldWidth = @W
+WHERE LOWER(FieldName) = @F
+  AND (
+        LOWER(TableName) = @TN
+     OR LOWER(REPLACE(TableName,'dbo.','')) = @TN
+     )";
+
+        foreach (var it in items)
+        {
+            var n = await _context.Database.ExecuteSqlRawAsync(
+                sql,
+                new SqlParameter("@W", it.width),
+                new SqlParameter("@F", it.field),
+                new SqlParameter("@TN", tname)
+            );
+            updated += n;
+        }
+
+        return Ok(new { ok = true, updated, table = tname, fields = items.Select(i => new { i.field, i.width }) });
+    }
+
+    // =========================================
+    // 取得 DictFields (帶語系, 唯一版本)
+    // =========================================
+    [HttpGet("DictFields")]
+    public async Task<IActionResult> GetDictFields([FromQuery] string table, [FromQuery] string lang = "TW")
+    {
+        if (string.IsNullOrWhiteSpace(table))
+            return BadRequest("table is required.");
+
+        static string Clean(string s) => (s ?? "")
+            .Trim().Trim('[', ']')
+            .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase)
+            .ToLowerInvariant();
+
+        var tname = Clean(table);
+        var lname = string.IsNullOrWhiteSpace(lang) ? "TW" : lang.Trim();
+
+        const string SQL = @"
+SELECT
+    f.FieldName,
+    COALESCE(l.DisplayLabel, f.DisplayLabel, f.FieldName) AS DisplayLabel,
+    COALESCE(l.DisplaySize, f.DisplaySize) AS DisplaySize,
+    f.DataType,
+    f.FormatStr,
+    f.SerialNum,
+    Visible = CASE WHEN ISNULL(f.Visible,1)=1 THEN 1 ELSE 0 END
+FROM CURdTableField f WITH (NOLOCK)
+LEFT JOIN CURdTableFieldLang l WITH (NOLOCK)
+       ON l.TableName = f.TableName
+      AND l.FieldName = f.FieldName
+      AND l.LanguageId = @Lang
+WHERE ISNULL(f.Visible,1)=1
+  AND (LOWER(f.TableName)=@TN OR LOWER(REPLACE(f.TableName,'dbo.',''))=@TN)
+ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldName;";
+
+        var list = new List<DictFieldDto>();
+        await using var cn = new SqlConnection(_connStr);
+        await cn.OpenAsync();
+        await using var cmd = new SqlCommand(SQL, cn);
+        cmd.Parameters.Add(new SqlParameter("@TN", tname));
+        cmd.Parameters.Add(new SqlParameter("@Lang", lname));
+        using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            list.Add(new DictFieldDto {
+                FieldName    = rd["FieldName"]?.ToString() ?? "",
+                DisplayLabel = rd["DisplayLabel"]?.ToString() ?? "",
+                DisplaySize  = rd["DisplaySize"] as int?,
+                DataType     = rd["DataType"]?.ToString() ?? "",
+                FormatStr    = rd["FormatStr"]?.ToString() ?? "",
+                SerialNum    = rd["SerialNum"] as int?,
+                Visible      = (rd["Visible"]?.ToString() ?? "1") == "1"
+            });
+        }
+
+        return Ok(list);
+    }
+
+    // =========================================
+    // DTOs
+    // =========================================
+    public class DetailColWidthDto
+    {
+        public string tableName { get; set; } = "";
+        public List<ColItem> cols { get; set; } = new();
+        public class ColItem { public string fieldName { get; set; } = ""; public int width { get; set; } }
+    }
+
     public class SaveSerialOrderRequest
     {
         public string TableName { get; set; } = "";
         public List<FieldSerialUpdate> FieldOrders { get; set; } = new();
     }
-
     public class FieldSerialUpdate
     {
         public string FieldName { get; set; } = "";
@@ -152,18 +267,15 @@ public class TableFieldLayoutController : ControllerBase
         public string TableName { get; set; } = "";
         public List<FieldLayoutUpdate> LayoutUpdates { get; set; } = new();
     }
-
     public class FieldLayoutUpdate
     {
         public string FieldName { get; set; } = "";
         public int Width { get; set; }
-        public int Height { get; set; } // 👈 加入欄位高度
+        public int Height { get; set; }
         public int Top { get; set; }
         public int Left { get; set; }
-        public int iShowWhere { get; set; }  // 👈➕ 加上這行
-
+        public int iShowWhere { get; set; }
     }
-
 
     public class HeaderLayoutDto
     {
@@ -173,8 +285,17 @@ public class TableFieldLayoutController : ControllerBase
         public int SerialNum { get; set; }
         public int Top { get; set; }
         public int Left { get; set; }
-        public int iShowWhere { get; set; }  // 👈➕ 加上這行
-
+        public int iShowWhere { get; set; }
     }
 
+    public class DictFieldDto
+    {
+        public string FieldName { get; set; } = "";
+        public string DisplayLabel { get; set; } = "";
+        public int? DisplaySize { get; set; }
+        public string DataType { get; set; } = "";
+        public string FormatStr { get; set; } = "";
+        public int? SerialNum { get; set; }
+        public bool Visible { get; set; }
+    }
 }

@@ -7,7 +7,7 @@ using static SpodOrdersModel;
 /// <summary>
 /// SPOdOrderSub 單身頁面的 PageModel，繼承共用樣板 TableDetailModel
 /// </summary>
-public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
+public class AJNdJourSubModel : TableDetailModel<AjndJourSub>
 {
     #region 單頭/單身資料屬性
 
@@ -27,7 +27,7 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
     /// <summary>
     /// 注入 HttpClient 與欄位服務
     /// </summary>
-    public SpodOrderSubModel(IHttpClientFactory httpClientFactory, PcbErpContext context,ITableDictionaryService dictService)
+    public AJNdJourSubModel(IHttpClientFactory httpClientFactory, PcbErpContext context,ITableDictionaryService dictService)
         : base(httpClientFactory, context, dictService) { }
 
     #endregion
@@ -35,13 +35,13 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
     #region 覆寫樣板所需屬性
 
     // 單身資料表名稱
-    public override string TableName => "SPOdOrderSub";
+    public override string TableName => "AJNdJourSub";
 
     // 單身 API 相對路徑
-    public override string ApiDetailUrl => "/api/SpodOrderSub";
+    public override string ApiDetailUrl => "/api/AJNdJourSub";
 
     // 單頭資料表名稱
-    public override string HeaderTableName => "SPOdOrderMain";
+    public override string HeaderTableName => "AJNdJourMain";
 
     #endregion
 
@@ -56,7 +56,7 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
 
         // Step 1：取得單頭資料
         HeaderData = await _httpClient.GetFromJsonAsync<Dictionary<string, object>>(
-            $"{baseUrl}/api/SPOdOrderMain/{PaperNum}"
+            $"{baseUrl}/api/AJNdJourMain/{PaperNum}"
         );
 
         // Step 1.5：轉換 HeaderData 中的 JsonElement 成實際型別
@@ -109,7 +109,7 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
         }
 
         // Step 2：取得單頭欄位設定（僅取 Visible 的欄位）
-        var headerFieldDicts = _dictService.GetFieldDict("SPOdOrderMain", typeof(SpodOrderMain));
+        var headerFieldDicts = _dictService.GetFieldDict("AJNdJourMain", typeof(AjndJourMain));
         HeaderTableFields = headerFieldDicts
             .Where(x => x.Visible == 1)
             .OrderBy(x => x.SerialNum)
@@ -135,7 +135,7 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
         await FetchDataAsync(PaperNum);
 
         // Step 4：單頭區的 lookup 資料轉換（顯示用名稱）
-        var headerLookupMaps = _dictService.GetOCXLookups("SPOdOrderMain");
+        var headerLookupMaps = _dictService.GetOCXLookups("AJNdJourMain");
 
         // 建立單頭欄位的 lookup 顯示字典（以 PaperNum 作為 key）
         var headerKey = PaperNum;
