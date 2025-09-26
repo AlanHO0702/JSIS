@@ -54,9 +54,18 @@
     </div>
 
     <div class="action-rail">
+      <button id="btnSearchDetails" class="fab">搜尋</button> <!-- 👈 新的 -->
       <button id="btnCalcAmount" class="fab">金額計算</button>
       <button id="btnClearDetails" class="fab fab-red">清除單身</button>
-      <button id="btnSearchDetails" class="fab">搜尋</button> <!-- 👈 新的 -->
+      <button id="btn" class="fab">未定義</button>
+      <button id="btn" class="fab">未定義</button>
+      <button id="btn" class="fab">未定義</button>
+      <button id="btn" class="fab">未定義</button>
+      <button id="btn" class="fab">未定義</button>
+      <button id="btn" class="fab">未定義</button>
+      <button id="btn" class="fab">未定義</button>
+
+      
       <!-- 之後可以再加別的按鈕 -->
     </div>
 
@@ -502,6 +511,69 @@ function appendDetailRowFromServer(row) {
   });
 }
 
+// =============== 方向鍵 ↓：在最後一列時等同「＋」新增一筆 ===============
+// ↑/↓ 在單身表格做「同欄位上下移動」；到最後一列再自動新增
+let _arrowNavBusy = false;
+
+function _selectedRow() {
+  return document.querySelector('.erp-table tbody tr.row-selected');
+}
+function _focusSameCol(tr, colIdx) {
+  if (!tr) return;
+  selectRow(tr);
+  makeRowEditable(tr); // 讓該列進入可編輯
+  const target =
+    tr.children?.[colIdx]?.querySelector('.cell-edit') ||
+    tr.querySelector('.cell-edit');
+  target?.focus();
+  target?.select?.();
+}
+
+document.addEventListener('keydown', async (e) => {
+  const isUp   = e.key === 'ArrowUp';
+  const isDown = e.key === 'ArrowDown';
+  if (!isUp && !isDown) return;
+
+  // 只在編輯框內才攔截，不影響一般滾動
+  const input = e.target.closest?.('.cell-edit');
+  if (!input || input.classList.contains('d-none')) return;
+
+  const tr = input.closest('tr');
+  if (!tr || _arrowNavBusy) return;
+
+  const colIdx = Array.from(tr.children).indexOf(input.closest('td'));
+
+  // ↑：上一列（有就移、沒有就不動）
+  if (isUp) {
+    const prev = tr.previousElementSibling;
+    if (prev) {
+      e.preventDefault();
+      _focusSameCol(prev, colIdx);
+    }
+    return;
+  }
+
+  // ↓：下一列；若沒有下一列才自動新增
+  if (isDown) {
+    const next = tr.nextElementSibling;
+    e.preventDefault();
+    if (next) {
+      _focusSameCol(next, colIdx);
+      return;
+    }
+
+    // 沒有下一列 ⇒ 新增一筆
+    _arrowNavBusy = true;
+    try {
+      await onAddRowClick(); // 你原本的新增函式
+      const newTr = document.querySelector('.erp-table tbody tr:last-child');
+      _focusSameCol(newTr, colIdx);
+    } finally {
+      _arrowNavBusy = false;
+    }
+  }
+});
+
 // 3-4 刪除目前選取列（新列：前端移除；舊列：呼叫後端刪除）
 async function onDeleteRowClick() {
   const tr = document.querySelector('.erp-table tbody tr.row-selected');
@@ -789,10 +861,10 @@ async function fetchIdListByApi(filters) {
 }
 async function fetchIdListByPagedQuery(filters) {
   const fs = [...(filters || []), {Field:"page",Op:"",Value:"1"}, {Field:"pageSize",Op:"",Value:"999999"}];
-  const res = await fetch('/api/PagedQuery/PagedQuery', {
+  const res = await busyFetch('/api/PagedQuery/PagedQuery', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ table: PAGE.headerTable, filters: fs })
-  });
+  },'切換中…');
   const json = await res.json();
   const rows = Array.isArray(json.data) ? json.data : [];
   return rows.map(r => r[PAGE.keyField]).filter(Boolean);
