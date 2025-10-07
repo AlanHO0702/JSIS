@@ -3,50 +3,45 @@ using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
 
-[ApiController]
-[Route("api/[controller]")]
-public class EditItemApiController : ControllerBase
+namespace PcbErpApi.Controllers
 {
-    private readonly PcbErpContext _context;
-    public EditItemApiController(PcbErpContext context) => _context = context;
-
-    public class EditItemRequest
+    [ApiController]
+    [Route("api/[controller]")] // => /api/EditItemApi
+    public class EditItemApiController : ControllerBase
     {
-        public string ItemId { get; set; }
-        public string ItemName { get; set; }
-        public string SuperId { get; set; } // 加入 SuperId
-        public int ItemType { get; set; }
-    }
+        private readonly PcbErpContext _context;
+        public EditItemApiController(PcbErpContext context) => _context = context;
 
-    [HttpPost]
-    public async Task<IActionResult> Post([FromBody] EditItemRequest req)
-    {
-        var item = await _context.CurdSysItems.FirstOrDefaultAsync(x => x.ItemId == req.ItemId);
-        if (item == null)
-            return NotFound(new { success = false, message = "找不到該項目" });
+        public class EditItemDto
+        {
+            public string ItemId { get; set; } = "";
+            public string ItemName { get; set; } = "";
+            public string SuperId { get; set; } = "";
+            public int SerialNum { get; set; }
+            public int Enabled { get; set; }   // 0=停用, 1=啟用
+            public string Notes { get; set; } = "";
+        }
 
-            item.ItemName = req.ItemName.Trim();
-            item.SuperId = req.SuperId?.Trim();
-            item.ItemType = req.ItemType;
+        [HttpPost]
+        public async Task<IActionResult> Post([FromBody] EditItemDto dto)
+        {
+            if (string.IsNullOrWhiteSpace(dto.ItemId))
+                return BadRequest(new { success = false, message = "ItemId 不可空白" });
 
-            // 手動標記要更新的欄位
-            _context.Entry(item).Property(x => x.ItemName).IsModified = true;
-            _context.Entry(item).Property(x => x.SuperId).IsModified = true;
-            _context.Entry(item).Property(x => x.ItemType).IsModified = true;
+            var item = await _context.CurdSysItems
+                .FirstOrDefaultAsync(x => x.ItemId == dto.ItemId);
+
+            if (item == null)
+                return NotFound(new { success = false, message = "找不到項目" });
+
+            item.ItemName  = dto.ItemName?.Trim();
+            item.SuperId   = dto.SuperId?.Trim();
+            item.SerialNum = dto.SerialNum;
+            item.Enabled   = dto.Enabled;
+            item.Notes   = dto.Notes?.Trim();
 
             await _context.SaveChangesAsync();
-
-
-        return Ok(new
-        {
-            success = true,
-            item = new
-            {
-                item.ItemId,
-                item.ItemName,
-                item.SuperId,
-                item.ItemType
-            }
-        });
+            return Ok(new { success = true });
+        }
     }
 }
