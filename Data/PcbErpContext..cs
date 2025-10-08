@@ -15,6 +15,7 @@ namespace PcbErpApi.Data
         public DbSet<CurdPaperSelected> CURdPaperSelected { get; set; }
         public DbSet<CURdTableField> CURdTableFields { get; set; }
         public DbSet<CURdOCXTableFieldLK> CURdOCXTableFieldLK { get; set; }
+        public DbSet<CURdSysParams> CURdSysParams { get; set; } = default!;
         public DbSet<MindMatInfo> MindMatInfo { get; set; }
         public virtual DbSet<AjndJourMain> AjndJourMain { get; set; }
         public virtual DbSet<AjndJourSub> AjndJourSub { get; set; }
@@ -328,6 +329,18 @@ namespace PcbErpApi.Data
 
             modelBuilder.Entity<SpodOrderSub>()
             .HasKey(x => new { x.PaperNum, x.Item });
+
+            modelBuilder.Entity<CURdSysParams>(e =>
+            {
+                e.HasKey(x => new { x.SystemId, x.ParamId });   // ★ 複合主鍵
+
+                // （可選）若要保險再指定長度
+                e.Property(x => x.SystemId).HasMaxLength(8).IsRequired();
+                e.Property(x => x.ParamId).HasMaxLength(24).IsRequired();
+
+                e.ToTable(tb => tb.HasTrigger("CURdSysParams_tIU")); // ✅ EF 會改用普通 UPDATE
+          
+            });
 
             modelBuilder.Entity<CurdBu>(entity =>
             {
