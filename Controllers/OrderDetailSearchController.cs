@@ -10,7 +10,10 @@ public class OrderDetailSearchController : ControllerBase
 {
     private readonly string _cs;
     public OrderDetailSearchController(IConfiguration cfg)
-        => _cs = cfg.GetConnectionString("DefaultConnection");
+    {
+        _cs = cfg.GetConnectionString("DefaultConnection") 
+            ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
+    }
 
     // 工具：null → DBNull
     static object Db(object v) => v is null ? DBNull.Value : v;

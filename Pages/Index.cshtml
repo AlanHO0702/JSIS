@@ -41,7 +41,9 @@
     <div class="d-flex align-items-center mb-2">
       <h4 class="mb-0 me-2">功能列表</h4>
       <div class="ms-auto d-flex gap-2">
+        <button id="btnSysParams" class="btn btn-outline-primary" onclick="openSysParams()">系統參數設定</button>
         <button id="btnDict" class="btn btn-secondary" onclick="openDictModal()" disabled>辭典設定</button>
+        <button id="btnCustomBtns" class="btn btn-outline-secondary" onclick="openCustomBtnModal()" disabled>自訂按鈕</button>
         <button class="btn btn-primary" onclick="openAddModal()">新增功能</button>
       </div>
     </div>
@@ -212,6 +214,48 @@
   </div>
 </div>
 
+<!-- 自訂按鈕 Modal -->
+<div class="modal fade" id="customBtnModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">自訂按鈕（CURdOCXItemCustButton） - <span id="cbItemId"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm align-middle" id="customBtnTable">
+            <thead>
+              <tr>
+                <th style="width:64px;">序號</th>
+                <th style="width:100px;">設定</th>
+                <th style="min-width:120px;">按鈕代碼<br><small>ButtonName</small></th>
+                <th style="min-width:180px;">顯示名稱(中)<br><small>CustCaption</small></th>
+                <th style="min-width:180px;">顯示名稱(英)<br><small>CustCaptionE</small></th>
+                <th style="min-width:200px;">說明(中)<br><small>CustHint</small></th>
+                <th style="min-width:200px;">說明(英)<br><small>CustHintE</small></th>
+                <th style="min-width:180px;">OCX DLL<br><small>OCXName</small></th>
+                <th style="min-width:180px;">OCX 類別<br><small>CoClassName</small></th>
+                <th style="min-width:160px;">SP 名稱<br><small>SpName</small></th>
+                <th style="width:84px;">顯示<br><small>bVisible</small></th>
+                <th style="width:84px;">編輯可用<br><small>ChkCanUpdate</small></th>
+                <th style="width:84px;">需輸入數量<br><small>bNeedNum</small></th>
+                <th style="width:100px;">設計類型<br><small>DesignType</small></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="small text-muted">※ 欄位為中英對照（照圖二），布林欄位用 0/1 表示。</div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnCustomAddRow" type="button" class="btn btn-outline-secondary">新增一列</button>
+        <button id="btnCustomSave" type="button" class="btn btn-primary">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
@@ -256,6 +300,13 @@ window.selectItem = function(itemId) {
   if (li) li.classList.add('active');
   const btn = document.getElementById('btnDict');
   if (btn) btn.disabled = !selectedItemId;
+  const btnCustom = document.getElementById('btnCustomBtns');
+  if (btnCustom) btnCustom.disabled = !selectedItemId;
+
+
+    // ★ 點到功能時，同樣把「系統參數設定」按鈕啟用（因為 SelectedLevel1Id 已存在）
+  const btnSysParams = document.getElementById('btnSysParams');
+  if (btnSysParams) btnSysParams.disabled = !(selectedLevel1Id && selectedLevel1Id.length >= 3);
 };
 
 window.openAddModal = async function () {
@@ -319,6 +370,10 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (ex) {
       alertBox.textContent = "新增過程發生錯誤: " + ex.message; alertBox.classList.remove('d-none');
     }
+
+      // 依是否有 SelectedLevel1Id 來啟用/停用「系統參數設定」按鈕
+      const btnSysParams = document.getElementById('btnSysParams');
+      if (btnSysParams) btnSysParams.disabled = !(selectedLevel1Id && selectedLevel1Id.length >= 3);
   });
 
   // 編輯送出
@@ -597,7 +652,228 @@ async function saveReportRows(){
     alert(`儲存成功（${data.count} 筆）`);
   } catch (ex) { alert(ex.message || ex); }
 }
+
+// 依目前 SelectedLevel1Id 的前三碼，開啟系統參數設定頁
+window.openSysParams = function () {
+  const sys = (selectedLevel1Id || '').substring(0, 3);
+  if (!sys) { alert('請先在左側選擇子模組（或右側選一筆功能）'); return; }
+  location.href = `/SysParams?SelectedSystem=${encodeURIComponent(sys)}`;
+};
+
 window.saveReportRows = saveReportRows;
+
+/* ========= 自訂按鈕（CURdOCXItemCustButton） ========= */
+/* 後端 API 約定：
+   GET  /api/CustomButtonApi/ByItem/{itemId}
+        -> [{ ItemId, SerialNum, ButtonName, CustCaption, CustCaptionE, CustHint, CustHintE,
+              OCXName, CoClassName, SpName, bVisible, ChkCanUpdate, bNeedNum, DesignType }]
+   POST /api/CustomButtonApi/Save
+        -> { success:true, count:int }
+*/
+
+function numOrNull(v){ const s=String(v??'').trim(); if(s==='') return null; const n=Number(s); return Number.isFinite(n)?n:null; }
+function bTo01(v){ return (v===1||v==='1'||v===true||v==='true')?1:0; }
+
+window.openCustomBtnModal = async function(){
+  if(!selectedItemId){ alert('請先從右側選擇一筆功能'); return; }
+  try{
+    document.getElementById('cbItemId').textContent = selectedItemId;
+    const res = await fetch(`/api/CustomButtonApi/ByItem/${encodeURIComponent(selectedItemId)}`);
+    if(!res.ok) throw new Error('查詢失敗');
+    const rows = await res.json();
+
+    const tbody = document.querySelector('#customBtnTable tbody');
+    tbody.innerHTML = '';
+
+    (rows ?? []).forEach(r => appendCustomBtnRow(tbody, {
+      itemId:       r.ItemId ?? selectedItemId,
+      serialNum:    r.SerialNum ?? 0,
+      buttonName:   r.ButtonName ?? '',
+      capZh:        r.CustCaption ?? '',
+      capEn:        r.CustCaptionE ?? '',
+      hintZh:       r.CustHint ?? '',
+      hintEn:       r.CustHintE ?? '',
+      ocxName:      r.OCXName ?? '',
+      coClassName:  r.CoClassName ?? '',
+      spName:       r.SpName ?? '',
+      visible:      r.bVisible ?? 1,
+      canUpdate:    r.ChkCanUpdate ?? 1,
+      needNum:      r.bNeedNum ?? 0,
+      designType:   r.DesignType ?? 0
+    }));
+
+    document.getElementById('btnCustomAddRow').onclick = () => appendCustomBtnRow(tbody, {
+      itemId: selectedItemId, serialNum: (tbody.querySelectorAll('tr').length + 1)*10,
+      buttonName:'', capZh:'', capEn:'', hintZh:'', hintEn:'',
+      ocxName:'', coClassName:'', spName:'', visible:1, canUpdate:1, needNum:0, designType:0
+    });
+
+    document.getElementById('btnCustomSave').onclick = saveCustomButtons;
+
+    new bootstrap.Modal(document.getElementById('customBtnModal')).show();
+  }catch(ex){ alert('載入失敗：'+ex.message); }
+};
+
+function appendCustomBtnRow(tbody, r){
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <!-- 0 序號 -->
+    <td><input class="form-control form-control-sm text-end" value="${r.serialNum ?? ''}"></td>
+
+    <!-- 1 設定（按鈕放這裡） -->
+    <td class="text-center">
+      <button type="button" class="btn btn-sm btn-outline-secondary"
+              onclick="toggleBtnDetail(this)">查看設定</button>
+    </td>
+
+    <!-- 2 以後的欄位順序照 thead -->
+    <td><input class="form-control form-control-sm" value="${esc(r.buttonName)}"></td>
+    <td><input class="form-control form-control-sm" value="${esc(r.capZh)}"></td>
+    <td><input class="form-control form-control-sm" value="${esc(r.capEn)}"></td>
+    <td><input class="form-control form-control-sm" value="${esc(r.hintZh)}"></td>
+    <td><input class="form-control form-control-sm" value="${esc(r.hintEn)}"></td>
+    <td><input class="form-control form-control-sm" value="${esc(r.ocxName)}"></td>
+    <td><input class="form-control form-control-sm" value="${esc(r.coClassName)}"></td>
+    <td><input class="form-control form-control-sm" value="${esc(r.spName)}"></td>
+    <td><input class="form-control form-control-sm text-end" value="${showNum(r.visible)}"></td>
+    <td><input class="form-control form-control-sm text-end" value="${showNum(r.canUpdate)}"></td>
+    <td><input class="form-control form-control-sm text-end" value="${showNum(r.needNum)}"></td>
+    <td><input class="form-control form-control-sm text-end" value="${showNum(r.designType)}"></td>
+  `;
+  tr.dataset.itemId = r.itemId;
+  tbody.appendChild(tr);
+}
+
+function pick(obj, ...names) {
+  for (const n of names) {
+    if (obj && obj[n] !== undefined && obj[n] !== null) return obj[n];
+  }
+  return undefined;
+}
+
+async function toggleBtnDetail(btnEl){
+  const tr = btnEl.closest('tr');
+  const table = tr.closest('table');
+  const btnName = tr.querySelectorAll('td')[2].querySelector('input').value.trim();
+  const after = tr.nextElementSibling;
+
+  if (after && after.classList.contains('cb-detail')) { after.remove(); return; }
+
+  const detailTr = document.createElement('tr');
+  detailTr.className = 'cb-detail';
+  const colCount = table.tHead.querySelector('tr').cells.length; // 更穩定
+  detailTr.innerHTML = `<td colspan="${colCount}"><div class="p-2 small text-muted">載入中…</div></td>`;
+  tr.insertAdjacentElement('afterend', detailTr);
+
+  try{
+    const url = `/api/CustomButtonApi/Detail/${encodeURIComponent(selectedItemId)}/${encodeURIComponent(btnName)}`;
+    const res = await fetch(url);
+    if(!res.ok) throw new Error('查詢失敗');
+    const dto = await res.json();
+
+    // 兼容 PascalCase 與 camelCase
+    const searchParams = pick(dto, 'searchParams', 'SearchParams') || [];
+    const insertKeys   = pick(dto, 'insertKeys', 'InsertKeys') || [];
+
+    let html = `<div class="p-2">`;
+
+    if (searchParams.length){
+      html += `
+      <div class="mb-3">
+        <div class="d-flex align-items-center mb-1"><strong>搜尋參數（${searchParams.length}）</strong></div>
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm mb-0">
+            <thead>
+              <tr>
+                <th>ParamSN</th><th>ParamName</th><th>DisplayName</th>
+                <th>ControlType</th><th>CommandText</th>
+                <th>DefaultValue</th><th>DefaultType</th><th>iReadOnly</th><th>iVisible</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${searchParams.map(p => `
+                <tr>
+                  <td class="text-end">${pick(p,'paramSN','ParamSN') ?? ''}</td>
+                  <td>${esc(pick(p,'paramName','ParamName') ?? '')}</td>
+                  <td>${esc(pick(p,'displayName','DisplayName') ?? '')}</td>
+                  <td class="text-end">${pick(p,'controlType','ControlType') ?? ''}</td>
+                  <td class="text-break">${esc(pick(p,'commandText','CommandText') ?? '')}</td>
+                  <td>${esc(pick(p,'defaultValue','DefaultValue') ?? '')}</td>
+                  <td class="text-end">${pick(p,'defaultType','DefaultType') ?? ''}</td>
+                  <td class="text-end">${pick(p,'iReadOnly','IReadOnly','ireadOnly') ?? ''}</td>
+                  <td class="text-end">${pick(p,'iVisible','IVisible','ivisible') ?? ''}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+    }
+
+    if (insertKeys.length){
+      html += `
+      <div>
+        <div class="d-flex align-items-center mb-1"><strong>插入鍵（${insertKeys.length}）</strong></div>
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm mb-0">
+            <thead><tr><th>SeqNum</th><th>KeyFieldName</th><th>PositionType</th></tr></thead>
+            <tbody>
+              ${insertKeys.map(k => `
+                <tr>
+                  <td class="text-end">${pick(k,'seqNum','SeqNum') ?? ''}</td>
+                  <td>${esc(pick(k,'keyFieldName','KeyFieldName') ?? '')}</td>
+                  <td class="text-end">${pick(k,'positionType','PositionType') ?? ''}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+    }
+
+    if (searchParams.length === 0 && insertKeys.length === 0) {
+      html += `<div class="text-muted">（此按鈕沒有搜尋參數或插入鍵設定）</div>`;
+    }
+
+    html += `</div>`;
+    detailTr.firstElementChild.innerHTML = html;
+  }catch(ex){
+    detailTr.firstElementChild.innerHTML = `<div class="text-danger">載入失敗：${esc(ex.message||ex)}</div>`;
+  }
+}
+
+async function saveCustomButtons(){
+  try{
+    const tbody = document.querySelector('#customBtnTable tbody');
+    const trs = Array.from(tbody.querySelectorAll('tr'));
+    const payload = trs.map(tr=>{
+      const tds = tr.querySelectorAll('td');
+      return {
+        ItemId:        selectedItemId,
+        SerialNum:     numOrNull(tds[0].querySelector('input').value),   // 序號
+        ButtonName:    tds[2].querySelector('input').value.trim(),       // ← 2
+        CustCaption:   tds[3].querySelector('input').value,              // ← 3
+        CustCaptionE:  tds[4].querySelector('input').value,              // ← 4
+        CustHint:      tds[5].querySelector('input').value,              // ← 5
+        CustHintE:     tds[6].querySelector('input').value,              // ← 6
+        OCXName:       tds[7].querySelector('input').value,              // ← 7
+        CoClassName:   tds[8].querySelector('input').value,              // ← 8
+        SpName:        tds[9].querySelector('input').value,              // ← 9
+        bVisible:      bTo01(tds[10].querySelector('input').value),      // ← 10
+        ChkCanUpdate:  bTo01(tds[11].querySelector('input').value),      // ← 11
+        bNeedNum:      bTo01(tds[12].querySelector('input').value),      // ← 12
+        DesignType:    numOrNull(tds[13].querySelector('input').value)   // ← 13
+      };
+    });
+
+    const res = await fetch('/api/CustomButtonApi/Save', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if(!res.ok || data?.success !== true) throw new Error(data?.message || '儲存失敗');
+    alert(`已儲存 ${data.count} 筆自訂按鈕`);
+  }catch(ex){ alert('儲存失敗：'+ex.message); }
+}
+
+window.toggleBtnDetail = toggleBtnDetail;
 </script>
 
 <style>
@@ -637,4 +913,8 @@ window.saveReportRows = saveReportRows;
 
 #reportTable td input[inputmode="numeric"] { text-align: right; }
 
+#customBtnTable th, #customBtnTable td { white-space: nowrap; }
+#customBtnTable td input.form-control { width: 100%; }
+
+.cb-detail td { background:#fafafa; }
 </style>

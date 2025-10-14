@@ -1,5 +1,5 @@
 using System.Data;
-using System.Data.SqlClient;
+using Microsoft.Data.SqlClient;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -17,7 +17,8 @@ public class OrderHeaderApiController : ControllerBase
     public OrderHeaderApiController(PcbErpContext context, IConfiguration config)
     {
         _context = context;
-        _connStr = config.GetConnectionString("DefaultConnection");
+        _connStr = config.GetConnectionString("DefaultConnection") 
+            ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
     }
 
     // ===== 通用表結構快取 =====
@@ -74,7 +75,7 @@ public class OrderHeaderApiController : ControllerBase
         });
     }
 
-    private static void GuardIdentifier(string name, TableMeta meta = null)
+    private static void GuardIdentifier(string name, TableMeta? meta = null)
     {
         if (string.IsNullOrWhiteSpace(name) || !SafeIdent.IsMatch(name))
             throw new ArgumentException($"非法識別名稱：{name}");
@@ -82,7 +83,7 @@ public class OrderHeaderApiController : ControllerBase
             throw new ArgumentException($"欄位不存在：{name}");
     }
 
-    private static string GetMeta(Dictionary<string, object> body, string key)
+    private static string? GetMeta(Dictionary<string, object> body, string key)
     {
         if (!body.TryGetValue(key, out var v)) return null;
         body.Remove(key);
@@ -95,8 +96,8 @@ public class OrderHeaderApiController : ControllerBase
     public async Task<IActionResult> SaveOrderHeader([FromBody] Dictionary<string, object> body)
     {
         // 只收表名（關鍵欄位固定）
-        string headerTable = GetMeta(body, "__headerTable");            // 必填
-        string detailTable = GetMeta(body, "__detailTable");            // 可省略（不傳就不處理明細）
+        string? headerTable = GetMeta(body, "__headerTable");            // 必填
+        string? detailTable = GetMeta(body, "__detailTable");            // 可省略（不傳就不處理明細）
 
         if (string.IsNullOrWhiteSpace(headerTable))
             return BadRequest("__headerTable 必填");
@@ -106,9 +107,13 @@ public class OrderHeaderApiController : ControllerBase
         const string detailPk = "Item";   // int 自動遞增
 
         // 取出 Details（若有）
-        List<Dictionary<string, object>> details = null;
+        List<Dictionary<string, object>> details = new List<Dictionary<string, object>>();
         if (body.TryGetValue("Details", out var detailsObj) && detailsObj is JsonElement je && je.ValueKind == JsonValueKind.Array)
-            details = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(je.GetRawText());
+        {
+            var deserialized = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(je.GetRawText());
+            if (deserialized != null)
+                details = deserialized;
+        }
         body.Remove("Details");
 
         // 取單頭 PaperNum
@@ -123,7 +128,7 @@ public class OrderHeaderApiController : ControllerBase
         var keyValue = ConvertJsonToDbType(keyObj, keyDbType);
         if (keyValue == null) return BadRequest("主鍵值不可為空");
 
-        TableMeta detailMeta = null;
+        TableMeta? detailMeta = null;
         if (!string.IsNullOrWhiteSpace(detailTable))
         {
             GuardIdentifier(detailTable);

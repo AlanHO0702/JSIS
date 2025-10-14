@@ -39,12 +39,12 @@ public static class FormatHelper
                 }
                 catch
                 {
-                    return rawValue.ToString();
+                    return rawValue?.ToString() ?? string.Empty;
                 }
             }
         }
 
         // 預設
-        return rawValue.ToString();
+        return rawValue?.ToString() ?? string.Empty;
     }
 }
