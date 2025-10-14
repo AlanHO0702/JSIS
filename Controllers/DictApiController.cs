@@ -14,7 +14,9 @@ public class DictApiController : ControllerBase
 
     public DictApiController(PcbErpContext context, IConfiguration config)
     {
-        _connStr = config.GetConnectionString("DefaultConnection");
+        if (config == null)
+            throw new ArgumentNullException(nameof(config));
+        _connStr = config.GetConnectionString("DefaultConnection") ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
     }
 
     [HttpPost]
@@ -103,13 +105,13 @@ public async Task<IActionResult> UpdateDictFieldsLayout([FromBody] List<DictLayo
                     iFieldWidth = @iFieldWidth, iFieldHeight = @iFieldHeight,
                     iFieldTop = @iFieldTop, iFieldLeft = @iFieldLeft
                 WHERE FieldName = @FieldName", conn);
-            cmd.Parameters.AddWithValue("@iShowWhere", (object)input.iShowWhere ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@iLayRow", (object)input.iLayRow ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@iLayColumn", (object)input.iLayColumn ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@iFieldWidth", (object)input.iFieldWidth ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@iFieldHeight", (object)input.iFieldHeight ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@iFieldTop", (object)input.iFieldTop ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@iFieldLeft", (object)input.iFieldLeft ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@iShowWhere", input.iShowWhere.HasValue ? input.iShowWhere.Value : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@iLayRow", input.iLayRow.HasValue ? input.iLayRow.Value : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@iLayColumn", input.iLayColumn.HasValue ? input.iLayColumn.Value : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@iFieldWidth", input.iFieldWidth.HasValue ? input.iFieldWidth.Value : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@iFieldHeight", input.iFieldHeight.HasValue ? input.iFieldHeight.Value : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@iFieldTop", input.iFieldTop.HasValue ? input.iFieldTop.Value : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@iFieldLeft", input.iFieldLeft.HasValue ? input.iFieldLeft.Value : (object)DBNull.Value);
             cmd.Parameters.AddWithValue("@FieldName", input.FieldName ?? "");
             await cmd.ExecuteNonQueryAsync();
         }

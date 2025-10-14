@@ -14,7 +14,8 @@ public class TableFieldLayoutController : ControllerBase
     public TableFieldLayoutController(PcbErpContext context, IConfiguration config)
     {
         _context = context;
-        _connStr = config.GetConnectionString("DefaultConnection");
+        _connStr = config.GetConnectionString("DefaultConnection") 
+            ?? throw new InvalidOperationException("DefaultConnection string is missing in configuration.");
     }
 
     // =========================================

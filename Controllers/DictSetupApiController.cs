@@ -12,7 +12,8 @@ public class DictSetupApiController : ControllerBase
     private readonly string _connStr;
     public DictSetupApiController(IConfiguration config)
     {
-        _connStr = config.GetConnectionString("DefaultConnection");
+        _connStr = config.GetConnectionString("DefaultConnection") 
+            ?? throw new ArgumentNullException("DefaultConnection string is missing in configuration.");
     }
 
     // ===== 共用 =====
@@ -55,13 +56,13 @@ public class DictSetupApiController : ControllerBase
         {
             list.Add(new DictSetupRow
             {
-                TableName      = rd["TableName"]?.ToString(),
-                TableKind      = rd["TableKind"]?.ToString(),
-                MDKey          = rd["MDKey"]?.ToString(),
-                LocateKeys     = rd["LocateKeys"]?.ToString(),
-                OrderByField   = rd["OrderByField"]?.ToString(),
-                FilterSQL      = rd["FilterSQL"]?.ToString(),
-                RunSQLAfterAdd = rd["RunSQLAfterAdd"]?.ToString()
+                TableName      = rd["TableName"]?.ToString() ?? string.Empty,
+                TableKind      = rd["TableKind"]?.ToString() ?? string.Empty,
+                MDKey          = rd["MDKey"]?.ToString()!,
+                LocateKeys     = rd["LocateKeys"]?.ToString() ?? string.Empty,
+                OrderByField   = rd["OrderByField"]?.ToString() ?? string.Empty,
+                FilterSQL      = rd["FilterSQL"] == DBNull.Value ? null : rd["FilterSQL"]?.ToString(),
+                RunSQLAfterAdd = rd["RunSQLAfterAdd"]?.ToString() ?? string.Empty
             });
         }
 
@@ -172,25 +173,25 @@ UPDATE CURdOCXTableSetUp
         {
             list.Add(new CustButtonRow
             {
-                ButtonName     = rd["ButtonName"]?.ToString(),
-                CustCaption    = rd["CustCaption"]?.ToString(),
-                CustHint       = rd["CustHint"]?.ToString(),
-                OCXName        = rd["OCXName"]?.ToString(),
-                CoClassName    = rd["CoClassName"]?.ToString(),
+                ButtonName     = rd["ButtonName"]?.ToString() ?? string.Empty,
+                CustCaption    = rd["CustCaption"]?.ToString() ?? string.Empty,
+                CustHint       = rd["CustHint"]?.ToString() ?? string.Empty,
+                OCXName        = rd["OCXName"]?.ToString() ?? string.Empty,
+                CoClassName    = rd["CoClassName"]?.ToString() ?? string.Empty,
                 ChkCanbUpdate  = TryToInt(rd["ChkCanbUpdate"]),
                 ChkStatus      = TryToInt(rd["ChkStatus"]),
                 bVisible       = TryToInt(rd["bVisible"]),
                 bNeedNum       = TryToInt(rd["bNeedNum"]),
                 bNeedInEdit    = TryToInt(rd["bNeedInEdit"]),
                 DesignType     = TryToInt(rd["DesignType"]),
-                SpName         = rd["SpName"]?.ToString(),
+                SpName         = rd["SpName"]?.ToString() ?? string.Empty,
                 bSpHasResult   = TryToInt(rd["bSpHasResult"]),
-                SearchTemplate = rd["SearchTemplate"]?.ToString(),
-                MultiSelectDD  = rd["MultiSelectDD"]?.ToString(),
-                ExecSpName     = rd["ExecSpName"]?.ToString(),
+                SearchTemplate = rd["SearchTemplate"]?.ToString() ?? string.Empty,
+                MultiSelectDD  = rd["MultiSelectDD"]?.ToString() ?? string.Empty,
+                ExecSpName     = rd["ExecSpName"]?.ToString() ?? string.Empty,
                 AllowSelCount  = TryToInt(rd["AllowSelCount"]),
                 ReplaceExists  = TryToInt(rd["ReplaceExists"]),
-                DialogCaption  = rd["DialogCaption"]?.ToString(),
+                DialogCaption  = rd["DialogCaption"]?.ToString() ?? string.Empty,
                 SerialNum      = TryToInt(rd["SerialNum"])
             });
         }

@@ -1349,8 +1349,13 @@ namespace PcbErpApi.Data
                 }
             });
 
-            // 以下這些通常不用加 (ViewModel, InputModel, 非 DB Entity)
-            // PaginationModel, PaginationViewModel, QueryFieldViewModel, TableFieldViewModel, UpdateDictFieldInput
+            foreach (var prop in modelBuilder.Model.GetEntityTypes()
+                    .SelectMany(t => t.GetProperties())
+                    .Where(p => p.ClrType == typeof(decimal) || p.ClrType == typeof(decimal?)))
+            {
+                prop.SetPrecision(24);
+                prop.SetScale(8);
+            }
 
 
             OnModelCreatingPartial(modelBuilder);
