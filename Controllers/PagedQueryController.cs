@@ -4,6 +4,8 @@ using PcbErpApi.Models;
 using PcbErpApi.Helpers;
 using static PcbErpApi.Helpers.DynamicQueryHelper;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+using System.Reflection;
 
 namespace PcbErpApi.Controllers
 {
@@ -25,10 +27,10 @@ namespace PcbErpApi.Controllers
         // 共用 DTO
         public class QueryFilterRequest
         {
-            public string Table { get; set; }  
+            public string Table { get; set; }
             public List<QueryParamDto> filters { get; set; } = new();
         }
- 
+
         public class QueryParamDto
         {
             [JsonPropertyName("Field")]
@@ -51,43 +53,47 @@ namespace PcbErpApi.Controllers
             if (!filters.Any())
                 filters.Add(new QueryParamDto { Field = "PaperNum", Op = "Contains", Value = "" });
 
-            // 過濾掉 page/pageSize
-            var filterConditions = filters
-                .Where(x => !string.IsNullOrEmpty(x.Value) &&
-                            x.Field.ToLower() != "page" &&
-                            x.Field.ToLower() != "pagesize" &&
-                            !x.Field.StartsWith("__"))
-                .Select(x => new QueryParam
-                {
-                    Field = x.Field,
-                    Op = ParseOp(x.Op),
-                    Value = x.Value
-                }).ToList();
-
-            // 取得分頁參數
-            var page = filters.FirstOrDefault(x => x.Field.ToLower() == "page")?.Value ?? "1";
-            var pageSize = filters.FirstOrDefault(x => x.Field.ToLower() == "pagesize")?.Value ?? "50";
+            // 先取分頁參數 ─ 不需要 entityType
+            var page = filters.FirstOrDefault(x => x.Field.Equals("page", StringComparison.OrdinalIgnoreCase))?.Value ?? "1";
+            var pageSize = filters.FirstOrDefault(x => x.Field.Equals("pageSize", StringComparison.OrdinalIgnoreCase))?.Value ?? "50";
             if (!int.TryParse(page, out int pageNumber)) pageNumber = 1;
             if (!int.TryParse(pageSize, out int pageSizeNumber)) pageSizeNumber = 50;
 
-            // 1️⃣ 找到 DbSet 屬性
+            // 1) 取 DbSet / entityType / query
             var dbSetProp = _context.GetType().GetProperties()
-                .FirstOrDefault(p => p.Name.ToLower() == tableName);
+                .FirstOrDefault(p => p.Name.Equals(tableName, StringComparison.OrdinalIgnoreCase));
             if (dbSetProp == null)
                 return BadRequest($"找不到 Table {tableName}");
 
-            // 抓 IQueryable<T>
             var entityType = dbSetProp.PropertyType.GenericTypeArguments.First();
             var query = (IQueryable)dbSetProp.GetValue(_context);
 
-            // 2️⃣ 動態套用 where (ApplyDynamicWhere<T>)
+            // 2) 在這裡才用 entityType 來建立 filterConditions（映射別名 → 真欄位名）
+            var filterConditions = filters
+                .Where(x => !string.IsNullOrEmpty(x.Value)
+                        && !x.Field.Equals("page", StringComparison.OrdinalIgnoreCase)
+                        && !x.Field.Equals("pageSize", StringComparison.OrdinalIgnoreCase)
+                        && !(x.Field?.StartsWith("__") ?? false))
+                .Select(x =>
+                {
+                    var realField = NormalizeFieldToEntity(x.Field, entityType); // ★ 用到 entityType
+                    return new QueryParam
+                    {
+                        Field = realField,
+                        Op = ParseOp(x.Op),
+                        Value = x.Value
+                    };
+                })
+                .ToList();
+
+            // 3) 套 where
             var whereMethod = typeof(DynamicQueryHelper)
                 .GetMethod(nameof(DynamicQueryHelper.ApplyDynamicWhere))
                 .MakeGenericMethod(entityType);
 
             query = (IQueryable)whereMethod.Invoke(null, new object[] { query, filterConditions });
 
-            // 3️⃣ 找排序欄位
+            // 4) 排序
             var orderField = entityType.GetProperty("PaperDate") != null ? "PaperDate"
                         : entityType.GetProperty("Item") != null ? "Item"
                         : entityType.GetProperty("PaperNum") != null ? "PaperNum"
@@ -102,7 +108,7 @@ namespace PcbErpApi.Controllers
                 query = (IQueryable)orderMethod.Invoke(null, new object[] { query, orderField, true });
             }
 
-            // 4️⃣ 分頁查詢 (GetPagedAsync<T>)
+            // 5) 分頁
             var pagedMethod = typeof(PaginationService)
                 .GetMethod(nameof(PaginationService.GetPagedAsync))
                 .MakeGenericMethod(entityType);
@@ -112,13 +118,11 @@ namespace PcbErpApi.Controllers
 
             var resultProp = task.GetType().GetProperty("Result");
             var result = resultProp.GetValue(task);
-
             var dataProp = result.GetType().GetProperty("Data");
             var data = (IEnumerable<object>)dataProp.GetValue(result);
-
             var totalCount = (int)result.GetType().GetProperty("TotalCount").GetValue(result);
 
-            // 5️⃣ Lookup 與欄位定義
+            // 6) lookup 與欄位
             var tableDictService = new TableDictionaryService(_context);
             var lookupMaps = tableDictService.GetOCXLookups(tableName);
 
@@ -132,7 +136,6 @@ namespace PcbErpApi.Controllers
                 })
                 .ToList();
 
-            // 6️⃣ 格式化輸出
             var formattedData = data.Select(item =>
             {
                 var dict = new Dictionary<string, object>();
@@ -144,7 +147,6 @@ namespace PcbErpApi.Controllers
                 return dict;
             }).ToList();
 
-            // 7️⃣ Lookup Map
             var lookupMapData = LookupDisplayHelper.BuildLookupDisplayMap(
                 data, lookupMaps, item =>
                 {
@@ -155,8 +157,7 @@ namespace PcbErpApi.Controllers
             return Ok(new { totalCount, data = formattedData, lookupMapData });
         }
 
-
-      private object GetValue(object item, string fieldName)
+        private object GetValue(object item, string fieldName)
         {
             if (item is IDictionary<string, object> dict && dict.TryGetValue(fieldName, out var val))
                 return val;
@@ -176,5 +177,25 @@ namespace PcbErpApi.Controllers
             return source.Provider.CreateQuery<T>(mce);
         }
 
+        private static string NormalizeFieldToEntity(string field, Type entityType)
+        {
+            if (string.IsNullOrWhiteSpace(field)) return field;
+
+            // 先試精確對應（忽略大小寫）
+            var prop = entityType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                                .FirstOrDefault(p => p.Name.Equals(field, StringComparison.OrdinalIgnoreCase));
+            if (prop != null) return prop.Name;
+
+            // 允許 UI 別名：去尾碼（如 CustomerId5、CustomerId_2、CustomerIdTo、CustomerIdFrom）
+            var core = Regex.Replace(field, @"(?:_?(From|To))$", "", RegexOptions.IgnoreCase);
+            core = Regex.Replace(core, @"[_\-]?\d+$", "");   // 去掉最後的數字尾碼或 _2、-3
+
+            prop = entityType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                            .FirstOrDefault(p => p.Name.Equals(core, StringComparison.OrdinalIgnoreCase));
+            return prop?.Name ?? field; // 找不到就原樣返回（讓你看 log）
+        }
+
     }
+    
+    
 }
