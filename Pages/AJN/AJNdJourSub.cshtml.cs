@@ -12,10 +12,10 @@ public class AJNdJourSubModel : TableDetailModel<AjndJourSub>
     #region 單頭/單身資料屬性
 
     // 單頭資料（API 回傳 Dictionary 格式）
-    public Dictionary<string, object>? HeaderData { get; set; }
+    public new Dictionary<string, object>? HeaderData { get; set; }
 
     // 單頭欄位設定清單（含位置與顯示設定）
-    public List<TableFieldViewModel>? HeaderTableFields { get; set; }
+    public new List<TableFieldViewModel>? HeaderTableFields { get; set; }
 
     // 單頭欄位的 lookup 對應資料（每個 PaperNum 對應一份對照表）
     public Dictionary<string, Dictionary<string, string>> HeaderLookupDisplayMap { get; set; } = new();

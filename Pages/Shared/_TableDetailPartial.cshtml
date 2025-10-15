@@ -54,9 +54,18 @@
     </div>
 
     <div class="action-rail">
+      <button id="btnSearchDetails" class="fab">搜尋</button> <!-- 👈 新的 -->
       <button id="btnCalcAmount" class="fab">金額計算</button>
       <button id="btnClearDetails" class="fab fab-red">清除單身</button>
-      <button id="btnSearchDetails" class="fab">搜尋</button> <!-- 👈 新的 -->
+      <button id="btn" class="fab fab-blue">未定義</button>
+      <button id="btn" class="fab fab-blue">未定義</button>
+      <button id="btn" class="fab fab-blue">未定義</button>
+      <button id="btn" class="fab fab-blue">未定義</button>
+      <button id="btn" class="fab fab-blue">未定義</button>
+      <button id="btn" class="fab fab-blue">未定義</button>
+      <button id="btn" class="fab fab-blue">未定義</button>
+
+      
       <!-- 之後可以再加別的按鈕 -->
     </div>
 
@@ -445,15 +454,14 @@ function collectDetails() {
 }
 
 // 3-2 新增一列（呼叫後端插 DB，再回填到前端並立刻可編輯）
+let _addingRow = false;
 async function onAddRowClick() {
-  if (!PAGE.detailTable) {
-    Swal.fire({icon:'error', title:'找不到明細表名（DETAIL_TABLE）'}); 
-    return;
-  }
+  if (_addingRow) return;        // 節流
+  _addingRow = true;
   try {
     const res = await fetch('/api/OrderHeaderApi/AddDetailRow', {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ detailTable: PAGE.detailTable, paperNum: PAGE.paperNum })
     });
     const json = await res.json();
@@ -461,6 +469,8 @@ async function onAddRowClick() {
     appendDetailRowFromServer(json.row || {});
   } catch (err) {
     Swal.fire({icon:'error', title:'新增明細失敗', text: String(err.message || err)});
+  } finally {
+    _addingRow = false;
   }
 }
 
@@ -501,6 +511,133 @@ function appendDetailRowFromServer(row) {
     });
   });
 }
+
+// ===== 單身表格鍵盤捷徑（↑ ↓ F7 F8）加強版 =====
+(function initDetailRowHotkeys(){
+  const BLOCK_FIELDS = new Set(['item','Item']); // 不複製的欄位（項次等）
+  let curColIdx = 0;                              // 記錄目前欄位索引
+
+  function tdIndex(td){ return td ? Array.prototype.indexOf.call(td.parentElement.children, td) : 0; }
+  function selectedRow(){ return document.querySelector('.erp-table tbody tr.row-selected'); }
+  function getCellInput(tr, idx){
+    if (!tr) return null;
+    const td = tr.cells && tr.cells[idx] ? tr.cells[idx] : null;
+    return (td && td.querySelector('.cell-edit')) || tr.querySelector('.cell-edit');
+  }
+  function focusCell(tr, idx){
+    if (!tr) return;
+    selectRow(tr);
+    makeRowEditable(tr);
+    const inp = getCellInput(tr, idx);
+    if (inp){ inp.focus(); inp.select?.(); }
+  }
+ 
+  function syncView(td, val){
+    const span = td && td.querySelector ? td.querySelector('.cell-view') : null;
+    if (span) span.textContent = (val ?? '');
+  }
+
+
+  document.addEventListener('keydown', async (e) => {
+    try{
+      const key = e.key;
+      // 建立「目前操作脈絡」：可從 input、或從已選列 + curColIdx 推導
+      let input = e.target.closest?.('.cell-edit');
+      let curTr, curTd;
+
+      if (input && !input.classList.contains('d-none')) {
+        curTd = input.closest('td');
+        curTr = input.closest('tr');
+        curColIdx = tdIndex(curTd);            // 更新目前欄索引
+      } else {
+        curTr = selectedRow() || e.target.closest?.('tr');
+        if (!curTr) return;                    // 沒選列就不處理
+        makeRowEditable(curTr);
+        input = getCellInput(curTr, curColIdx) || curTr.querySelector('.cell-edit');
+        if (!input) return;
+        curTd = input.closest('td');
+      }
+
+      const prevTr = curTr.previousElementSibling;
+      const nextTr = curTr.nextElementSibling;
+
+      // ↑ 上一列
+      if (key === 'ArrowUp'){
+        if (prevTr){ e.preventDefault(); focusCell(prevTr, curColIdx); }
+        return;
+      }
+      // ↓ 下一列（沒有就自動新增）
+      if (key === 'ArrowDown'){
+        e.preventDefault();
+        if (nextTr){ focusCell(nextTr, curColIdx); return; }
+        await onAddRowClick();
+        const newTr = document.querySelector('.erp-table tbody tr:last-child');
+        focusCell(newTr, curColIdx);
+        return;
+      }
+
+      // F7：整列複製（跳過項次等）
+      if (key === 'F7' || e.keyCode === 118){
+      e.preventDefault();
+      if (!prevTr) return;
+
+      const prevMap = Object.create(null);
+      prevTr.querySelectorAll('.cell-edit').forEach(inp => {
+        prevMap[(inp.dataset.field||'').toLowerCase()] = inp;
+      });
+      curTr.querySelectorAll('.cell-edit').forEach(inp => {
+        const f = (inp.dataset.field||'').toLowerCase();
+        if (!f || BLOCK_FIELDS.has(f)) return;
+        const src = prevMap[f]; if (!src) return;
+        inp.value = src.value ?? '';
+        inp.dispatchEvent(new Event('input', {bubbles:true}));
+        syncView(inp.closest('td'), inp.value);
+      });
+      if (curTr.dataset.state !== 'added') curTr.dataset.state = 'modified';
+      input.focus(); input.select?.();
+      return;
+    }
+
+
+      // F8：只複製目前欄位（來源＝上一列同欄位）
+      if (key === 'F8' || e.keyCode === 119){
+        e.preventDefault();
+        if (!prevTr) return;
+
+        const field = (input.dataset.field||'').trim();
+        if (BLOCK_FIELDS.has(field)) return;
+
+        const prevInput = getCellInput(prevTr, curColIdx);
+        if (!prevInput) return;
+
+        input.value = prevInput.value ?? '';
+        input.dispatchEvent(new Event('input', {bubbles:true}));
+        syncView(curTd, input.value);
+        input.focus(); input.select?.();
+        return;
+      }
+    }catch(err){
+      console.error('[detail hotkeys] error:', err);
+    }
+  });
+
+  // 追蹤目前欄位索引（滑鼠點到哪一格/哪一個 input）
+  const tbody = document.querySelector('.erp-table tbody');
+  if (tbody){
+    tbody.addEventListener('click', (e) => {
+      const td = e.target.closest('td'); if (td) curColIdx = tdIndex(td);
+      const tr = e.target.closest('tr'); if (tr) selectRow(tr);
+    });
+    tbody.addEventListener('focusin', (e) => {
+      const inp = e.target.closest('.cell-edit');
+      if (inp){ curColIdx = tdIndex(inp.closest('td')); selectRow(inp.closest('tr')); }
+    });
+  }
+})();
+
+
+
+
 
 // 3-4 刪除目前選取列（新列：前端移除；舊列：呼叫後端刪除）
 async function onDeleteRowClick() {
@@ -789,10 +926,10 @@ async function fetchIdListByApi(filters) {
 }
 async function fetchIdListByPagedQuery(filters) {
   const fs = [...(filters || []), {Field:"page",Op:"",Value:"1"}, {Field:"pageSize",Op:"",Value:"999999"}];
-  const res = await fetch('/api/PagedQuery/PagedQuery', {
+  const res = await busyFetch('/api/PagedQuery/PagedQuery', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ table: PAGE.headerTable, filters: fs })
-  });
+  },'切換中…');
   const json = await res.json();
   const rows = Array.isArray(json.data) ? json.data : [];
   return rows.map(r => r[PAGE.keyField]).filter(Boolean);
@@ -1132,6 +1269,7 @@ body { background: #f7f9fb !important; }
   border-radius:10px; cursor:pointer; box-shadow:0 6px 16px rgba(0,0,0,.2); border: 0; }
 .fab:hover{ filter:brightness(0.95); }
 .fab-red{ background:#dc3545; color:#fff; }
+.fab-blue{ background:#3583dc; color:#fff; }
 .erp-detail-container{ margin-left: var(--rail-reserve); margin-right: 3vw; padding: 32px 0; }
 #btnCalcAmount { border: 0 !important; outline: none !important; -webkit-tap-highlight-color: transparent; }
 #btnCalcAmount:focus, #btnCalcAmount:focus-visible, #btnCalcAmount:active { outline: none !important; box-shadow: 0 6px 16px rgba(0,0,0,.2) !important; }

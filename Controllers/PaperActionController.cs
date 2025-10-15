@@ -4,7 +4,7 @@ using PcbErpApi.Models;
 using PcbErpApi.Helpers;
 using static PcbErpApi.Helpers.DynamicQueryHelper;
 using System.Text.Json.Serialization;
-using System.Data.SqlClient;
+using Microsoft.Data.SqlClient;
 using System.Data;
 
 namespace PcbErpApi.Controllers

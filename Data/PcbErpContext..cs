@@ -15,13 +15,15 @@ namespace PcbErpApi.Data
         public DbSet<CurdPaperSelected> CURdPaperSelected { get; set; }
         public DbSet<CURdTableField> CURdTableFields { get; set; }
         public DbSet<CURdOCXTableFieldLK> CURdOCXTableFieldLK { get; set; }
+        public DbSet<CURdSysParams> CURdSysParams { get; set; } = default!;
         public DbSet<MindMatInfo> MindMatInfo { get; set; }
         public virtual DbSet<AjndJourMain> AjndJourMain { get; set; }
         public virtual DbSet<AjndJourSub> AjndJourSub { get; set; }
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
         public virtual DbSet<EmodProdInfo> EmodProdInfos { get; set; }
         public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
-        
+        public virtual DbSet<CurdOcxtableSetUp> CurdOcxtableSetUp { get; set; }
+        public virtual DbSet<CurdPaperPaper> CurdPaperPaper { get; set; }
         public virtual DbSet<CurdBu> CurdBus { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -101,6 +103,36 @@ namespace PcbErpApi.Data
                 entity.Property(e => e.UserSignGraph).HasColumnType("image");
             });
 
+            modelBuilder.Entity<CurdPaperPaper>(entity =>
+            {
+                entity.HasKey(e => new { e.PaperId, e.SerialNum });
+
+                entity.ToTable("CURdPaperPaper", tb => tb.HasTrigger("CURdPaperPaper_tD"));
+
+                entity.Property(e => e.PaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false);
+                entity.Property(e => e.ClassName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.Enabled).HasDefaultValue(1);
+                entity.Property(e => e.ItemCount).HasDefaultValue(8);
+                entity.Property(e => e.ItemName).HasMaxLength(50);
+                entity.Property(e => e.LinkType).HasDefaultValue(1);
+                entity.Property(e => e.Notes).HasMaxLength(255);
+                entity.Property(e => e.ObjectName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.PrintItemId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .IsFixedLength();
+                entity.Property(e => e.ShowTitle).HasDefaultValue(1);
+                entity.Property(e => e.TableIndex)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+            });
+
             modelBuilder.Entity<AjndJourMain>(entity =>
             {
                 entity.HasKey(e => e.PaperNum);
@@ -161,6 +193,43 @@ namespace PcbErpApi.Data
                     .IsUnicode(false);
                 entity.Property(e => e.UserId)
                     .HasMaxLength(16)
+                    .IsUnicode(false);
+            });
+
+            modelBuilder.Entity<CurdOcxtableSetUp>(entity =>
+            {
+                entity.HasKey(e => new { e.ItemId, e.TableName });
+
+                entity.ToTable("CURdOCXTableSetUp");
+
+                entity.Property(e => e.ItemId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .IsFixedLength();
+                entity.Property(e => e.TableName).HasMaxLength(50);
+                entity.Property(e => e.FilterSql)
+                    .HasMaxLength(1024)
+                    .IsUnicode(false)
+                    .HasColumnName("FilterSQL");
+                entity.Property(e => e.LocateKeys)
+                    .HasMaxLength(255)
+                    .IsUnicode(false);
+                entity.Property(e => e.Mdkey)
+                    .HasMaxLength(255)
+                    .IsUnicode(false)
+                    .HasColumnName("MDKey");
+                entity.Property(e => e.OrderByField)
+                    .HasMaxLength(128)
+                    .IsUnicode(false);
+                entity.Property(e => e.RunSqlafterAdd)
+                    .HasMaxLength(255)
+                    .IsUnicode(false)
+                    .HasColumnName("RunSQLAfterAdd");
+                entity.Property(e => e.TableKind)
+                    .HasMaxLength(12)
+                    .IsUnicode(false);
+                entity.Property(e => e.TableShowWere)
+                    .HasMaxLength(12)
                     .IsUnicode(false);
             });
 
@@ -260,6 +329,18 @@ namespace PcbErpApi.Data
 
             modelBuilder.Entity<SpodOrderSub>()
             .HasKey(x => new { x.PaperNum, x.Item });
+
+            modelBuilder.Entity<CURdSysParams>(e =>
+            {
+                e.HasKey(x => new { x.SystemId, x.ParamId });   // ★ 複合主鍵
+
+                // （可選）若要保險再指定長度
+                e.Property(x => x.SystemId).HasMaxLength(8).IsRequired();
+                e.Property(x => x.ParamId).HasMaxLength(24).IsRequired();
+
+                e.ToTable(tb => tb.HasTrigger("CURdSysParams_tIU")); // ✅ EF 會改用普通 UPDATE
+          
+            });
 
             modelBuilder.Entity<CurdBu>(entity =>
             {
@@ -1268,8 +1349,13 @@ namespace PcbErpApi.Data
                 }
             });
 
-            // 以下這些通常不用加 (ViewModel, InputModel, 非 DB Entity)
-            // PaginationModel, PaginationViewModel, QueryFieldViewModel, TableFieldViewModel, UpdateDictFieldInput
+            foreach (var prop in modelBuilder.Model.GetEntityTypes()
+                    .SelectMany(t => t.GetProperties())
+                    .Where(p => p.ClrType == typeof(decimal) || p.ClrType == typeof(decimal?)))
+            {
+                prop.SetPrecision(24);
+                prop.SetScale(8);
+            }
 
 
             OnModelCreatingPartial(modelBuilder);

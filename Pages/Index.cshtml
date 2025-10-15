@@ -9,261 +9,912 @@
 
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
 
-<div style="display: flex; gap: 20px;">
-    <!-- 左側模組 -->
-    <div style="width: 240px;">
-        <h4>系統模組</h4>
-        <ul style="list-style: none; padding-left: 0;">
-            @foreach (var mod0 in level0)
+<div style="display:flex; gap:20px;">
+  <!-- 左側模組 -->
+  <div style="width:240px;">
+    <h4>系統模組</h4>
+    <ul style="list-style:none; padding-left:0;">
+      @foreach (var mod0 in level0)
+      {
+          var level1Id = $"level1-{mod0.ItemId}";
+          var shouldExpand = level1Map.ContainsKey(mod0.ItemId) && level1Map[mod0.ItemId].Any(x => x.ItemId == Model.SelectedLevel1Id);
+          <li>
+            <a href="javascript:void(0)" onclick="toggleChildren('@level1Id')" style="font-weight:bold;">▶ @mod0.ItemName</a>
+            @if (level1Map.ContainsKey(mod0.ItemId))
             {
-                var level1Id = $"level1-{mod0.ItemId}";
-                var shouldExpand = level1Map.ContainsKey(mod0.ItemId) && level1Map[mod0.ItemId].Any(x => x.ItemId == Model.SelectedLevel1Id);
-
-                <li>
-                    <a href="javascript:void(0)" onclick="toggleChildren('@level1Id')" style="font-weight: bold;">
-                        ▶ @mod0.ItemName
-                    </a>
-
-                    @if (level1Map.ContainsKey(mod0.ItemId))
-                    {
-                        <ul id="@level1Id" style="display: @(shouldExpand ? "block" : "none"); margin-left: 15px;">
-                            @foreach (var mod1 in level1Map[mod0.ItemId])
-                            {
-                                <li class="mb-1">
-                                    <a asp-page="/Index" asp-route-level1Id="@mod1.ItemId">@mod1.ItemName</a>
-                                </li>
-                            }
-                        </ul>
-                    }
-                </li>
+              <ul id="@level1Id" style="display:@(shouldExpand ? "block" : "none"); margin-left:15px;">
+                @foreach (var mod1 in level1Map[mod0.ItemId])
+                {
+                    <li class="mb-1"><a asp-page="/Index" asp-route-level1Id="@mod1.ItemId">@mod1.ItemName</a></li>
+                }
+              </ul>
             }
-        </ul>
+          </li>
+      }
+    </ul>
+  </div>
+
+  <!-- 右側功能列表 -->
+  <div style="width:700px;">
+  @if (level2List.Any())
+  {
+    <div class="d-flex align-items-center mb-2">
+      <h4 class="mb-0 me-2">功能列表</h4>
+      <div class="ms-auto d-flex gap-2">
+        <button id="btnSysParams" class="btn btn-outline-primary" onclick="openSysParams()">系統參數設定</button>
+        <button id="btnDict" class="btn btn-secondary" onclick="openDictModal()" disabled>辭典設定</button>
+        <button id="btnCustomBtns" class="btn btn-outline-secondary" onclick="openCustomBtnModal()" disabled>自訂按鈕</button>
+        <button class="btn btn-primary" onclick="openAddModal()">新增功能</button>
+      </div>
     </div>
 
-    <!-- 右側功能列表 -->
-    <div style="width: 700px;">
-        @if (level2List.Any())
+    <ul id="level2-list" class="list-group">
+      @foreach (var item in level2List)
+      {
+        if (item.ItemType == 4)
         {
-            <div class="d-flex align-items-center mb-2">
-                <h4 class="mb-0 me-2">功能列表</h4>
-                <button class="btn btn-primary" onclick="openAddModal()">新增功能</button>
-            </div>
-
-            <ul id="level2-list" class="list-group">
-                @foreach (var item in level2List)
-                {
-                    if (item.ItemType == 4)
-                    {
-                        <li class="list-group-item p-0" id="li-@item.ItemId">
-                            <hr class="m-0" />
-                        </li>
-                    }
-                    else
-                    {
-                        <li class="list-group-item" id="li-@item.ItemId"
-                            ondblclick="openEditModal('@item.ItemId', '@item.ItemName', '@item.SuperId', '@item.ItemType')"
-                            style="cursor: pointer;">
-                            @item.ItemId - @item.ItemName
-                        </li>
-
-                    }
-                }
-            </ul>
+          <li class="list-group-item p-0" id="li-@item.ItemId"><hr class="m-0" /></li>
         }
         else
         {
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <h4 class="mb-0">功能列表</h4>
-                <button class="btn btn-primary" onclick="openAddModal()">新增功能</button>
-            </div>
-
-            <p>請從左側展開模組並選擇子模組查看功能</p>
+          <li class="list-group-item selectable"
+              id="li-@item.ItemId"
+              data-item-id="@item.ItemId"
+              onclick="selectItem('@item.ItemId')"
+              ondblclick="openEditModal('@item.ItemId', '@item.ItemName', '@item.SuperId', '@item.SystemId', '@item.SerialNum', @((item.Enabled ?? 0)), '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Notes ?? ""))')"
+              style="cursor:pointer;">
+              @item.ItemId - @item.ItemName
+          </li>
         }
+      }
+    </ul>
+  }
+  else
+  {
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h4 class="mb-0">功能列表</h4>
+      <button class="btn btn-primary" onclick="openAddModal()">新增功能</button>
     </div>
+    <p>請從左側展開模組並選擇子模組查看功能</p>
+  }
+  </div>
 </div>
 
 <!-- 新增功能 Modal -->
 <div class="modal fade" id="addItemModal" tabindex="-1" aria-labelledby="addItemModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <form id="addItemForm" class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="addItemModalLabel">新增功能項目</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
-            </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label for="inputItemId" class="form-label">ITEMID</label>
-                    <input type="text" class="form-control" id="inputItemId" name="itemId" required />
-                </div>
-                <div class="mb-3">
-                    <label for="inputItemName" class="form-label">功能名稱</label>
-                    <input type="text" class="form-control" id="inputItemName" name="itemName" required />
-                </div>
-                <div class="mb-3">
-                    <label for="inputSuperId" class="form-label">SUPERID</label>
-                    <input type="text" class="form-control" id="inputSuperId" name="superId" required readonly />
-                    <div class="form-text">SUPERID 不可修改（上層模組 ID）</div>
-                </div>
-                <div id="modalAlert" class="alert alert-danger d-none" role="alert"></div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                <button type="submit" class="btn btn-primary">確認新增</button>
-            </div>
-        </form>
-    </div>
+  <div class="modal-dialog">
+    <form id="addItemForm" class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="addItemModalLabel">新增功能項目</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label for="inputItemId" class="form-label">ITEMID</label>
+          <input type="text" class="form-control" id="inputItemId" name="itemId" required />
+        </div>
+        <div class="mb-3">
+          <label for="inputItemName" class="form-label">功能名稱</label>
+          <input type="text" class="form-control" id="inputItemName" name="itemName" required />
+        </div>
+        <div class="mb-3">
+          <label for="inputSuperId" class="form-label">SUPERID</label>
+          <input type="text" class="form-control" id="inputSuperId" name="superId" required readonly />
+          <div class="form-text">SUPERID 不可修改（上層模組 ID）</div>
+        </div>
+        <div id="modalAlert" class="alert alert-danger d-none" role="alert"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="submit" class="btn btn-primary">確認新增</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <!-- 編輯功能 Modal -->
-<div class="modal fade" id="editItemModal" tabindex="-1" aria-labelledby="editItemModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <form id="editItemForm" class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="editItemModalLabel">編輯功能項目</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
-            </div>
-            <div class="modal-body">
-                <input type="hidden" id="editItemId" />
-                <div class="mb-3">
-                    <label for="editItemName" class="form-label">功能名稱</label>
-                    <input type="text" class="form-control" id="editItemName" required />
-                </div>
-                <div class="mb-3">
-                    <label for="editSuperId" class="form-label">SUPERID</label>
-                    <input type="text" class="form-control" id="editSuperId" readonly />
-                </div>
-                <div class="mb-3">
-                    <label for="editItemType" class="form-label">Item Type</label>
-                    <input type="number" class="form-control" id="editItemType" />
-                </div>
-                <div id="editAlert" class="alert alert-danger d-none" role="alert"></div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                <button type="submit" class="btn btn-primary">確認修改</button>
-            </div>
-        </form>
+<div class="modal fade" id="editItemModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <form id="editItemForm" class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">編輯功能項目</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editItemId" />
+        <div class="mb-3"><label class="form-label">功能名稱</label><input type="text" class="form-control" id="editItemName" required /></div>
+        <div class="mb-3"><label class="form-label">上層代碼</label><input type="text" class="form-control" id="editSuperId" readonly /></div>
+        <div class="mb-3"><label class="form-label">系統別</label><input type="text" class="form-control" id="editSystemId" readonly /></div>
+        <div class="mb-3"><label class="form-label">序號</label><input type="number" class="form-control" id="editSerialNum" /></div>
+        <div class="form-check mb-3"><input type="checkbox" class="form-check-input" id="editEnabled"><label class="form-check-label" for="editEnabled">功能啟用</label></div>
+        <div class="mb-3"><label class="form-label">功能說明</label><textarea class="form-control" id="editNotes" rows="3"></textarea></div>
+        <div id="editAlert" class="alert alert-danger d-none" role="alert"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="submit" class="btn btn-primary">確認修改</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 辭典設定 Modal -->
+<div class="modal fade" id="dictModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">辭典設定</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm align-middle" id="dictTable">
+            <thead>
+              <tr>
+                <th>DD資料表名稱</th>
+                <th>資料表區分</th>
+                <th>FixColumns數</th>
+                <th>對應Master的KEY</th>
+                <th>IndexFieldNames</th>
+                <th>排序欄位</th>
+                <th>Filter SQL</th>
+                <th>新增後執行SQL</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="small text-muted">※ 先在上表點選一列（Master1 才能開啟報表設定）。</div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnOpenReport" type="button" class="btn btn-outline-secondary" disabled>報表設定</button>
+        <button id="btnDictSave" type="button" class="btn btn-primary">儲存更新</button>
+      </div>
     </div>
+  </div>
+</div>
+
+<!-- 報表設定 Modal -->
+<div class="modal fade" id="reportModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">報表設定（CURdPaperPaper） - <span id="reportTitlePaperId"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm align-middle" id="reportTable">
+            <thead>
+              <tr>
+                <th>序號</th>
+                <th>項目名稱</th>
+                <th>啟用</th>
+                <th>備註</th>
+                <th>報表檔名</th>
+                <th>物件名稱</th>
+                <th>連結類型</th>
+                <th>顯示型態</th>
+                <th>輸出型態</th>
+                <th>顯示標題</th>
+                <th>顯示樹狀</th>
+                <th>表索引</th>
+                <th>項目數</th>
+                <th>列印項</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnReportSave" type="button" class="btn btn-primary">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 自訂按鈕 Modal -->
+<div class="modal fade" id="customBtnModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">自訂按鈕（CURdOCXItemCustButton） - <span id="cbItemId"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm align-middle" id="customBtnTable">
+            <thead>
+              <tr>
+                <th style="width:64px;">序號</th>
+                <th style="width:100px;">設定</th>
+                <th style="min-width:120px;">按鈕代碼<br><small>ButtonName</small></th>
+                <th style="min-width:180px;">顯示名稱(中)<br><small>CustCaption</small></th>
+                <th style="min-width:180px;">顯示名稱(英)<br><small>CustCaptionE</small></th>
+                <th style="min-width:200px;">說明(中)<br><small>CustHint</small></th>
+                <th style="min-width:200px;">說明(英)<br><small>CustHintE</small></th>
+                <th style="min-width:180px;">OCX DLL<br><small>OCXName</small></th>
+                <th style="min-width:180px;">OCX 類別<br><small>CoClassName</small></th>
+                <th style="min-width:160px;">SP 名稱<br><small>SpName</small></th>
+                <th style="width:84px;">顯示<br><small>bVisible</small></th>
+                <th style="width:84px;">編輯可用<br><small>ChkCanUpdate</small></th>
+                <th style="width:84px;">需輸入數量<br><small>bNeedNum</small></th>
+                <th style="width:100px;">設計類型<br><small>DesignType</small></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="small text-muted">※ 欄位為中英對照（照圖二），布林欄位用 0/1 表示。</div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnCustomAddRow" type="button" class="btn btn-outline-secondary">新增一列</button>
+        <button id="btnCustomSave" type="button" class="btn btn-primary">儲存</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
-    const selectedLevel1Id = "@Model.SelectedLevel1Id";
+/* ========= 共用工具 ========= */
+function normalizePaperRow(r){
+  return {
+    paperId     : r.paperId     ?? r.PaperId     ?? '',
+    serialNum   : r.serialNum   ?? r.SerialNum   ?? 0,
+    itemName    : r.itemName    ?? r.ItemName    ?? '',
+    enabled     : r.enabled     ?? r.Enabled     ?? 0,
+    notes       : r.notes       ?? r.Notes       ?? '',
+    className   : r.className   ?? r.ClassName   ?? '',
+    objectName  : r.objectName  ?? r.ObjectName  ?? '',
+    linkType    : r.linkType    ?? r.LinkType    ?? 0,
+    displayType : r.displayType ?? r.DisplayType ?? 0,
+    outputType  : r.outputType  ?? r.OutputType  ?? 0,
+    showTitle   : r.showTitle   ?? r.ShowTitle   ?? 0,
+    showTree    : r.showTree    ?? r.ShowTree    ?? 0,
+    tableIndex  : r.tableIndex  ?? r.TableIndex  ?? 0,
+    itemCount   : r.itemCount   ?? r.ItemCount   ?? 0,
+    printItemId : r.printItemId ?? r.PrintItemId ?? ''
+  };
+}
+function toNullableInt(v){ const s=String(v??'').trim(); if(s==='') return null; const n=Number(s); return Number.isFinite(n)?n:null; }
+function rToInt(v){ return toNullableInt(v); }
 
-    document.addEventListener('DOMContentLoaded', () => {
-        let addItemModal = new bootstrap.Modal(document.getElementById('addItemModal'));
-        let editItemModal = new bootstrap.Modal(document.getElementById('editItemModal'));
+/* ========= 頁面狀態 ========= */
+const selectedLevel1Id = "@Model.SelectedLevel1Id";
+let selectedItemId = null;         // 右側清單目前選到的功能
+let dictSelectedTr = null;         // 辭典表格目前選到的列（用來開報表設定）
 
-        window.toggleChildren = function (id) {
-            const el = document.getElementById(id);
-            if (el) el.style.display = el.style.display === "none" ? "block" : "none";
-        };
+/* ========= 對 HTML 直接呼叫的函式一律掛在 window ========= */
+window.toggleChildren = function (id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+};
 
-        window.openAddModal = async function () {
-            const superId = selectedLevel1Id;
-            if (!superId) return alert("請先點選左側的子模組");
+window.selectItem = function(itemId) {
+  selectedItemId = itemId;
+  document.querySelectorAll('#level2-list .selectable').forEach(li => li.classList.remove('active'));
+  const li = document.getElementById('li-' + itemId);
+  if (li) li.classList.add('active');
+  const btn = document.getElementById('btnDict');
+  if (btn) btn.disabled = !selectedItemId;
+  const btnCustom = document.getElementById('btnCustomBtns');
+  if (btnCustom) btnCustom.disabled = !selectedItemId;
 
-            const systemId = superId.substring(0, 3);
-            try {
-                const res = await fetch(`/api/ItemHelperApi/next-id?systemId=${systemId}`);
-                const data = await res.json();
-                document.getElementById('inputItemId').value = data.nextItemId || (systemId + "001");
-            } catch {
-                document.getElementById('inputItemId').value = systemId + "001";
-            }
 
-            document.getElementById('inputSuperId').value = superId;
-            document.getElementById('modalAlert').classList.add('d-none');
-            addItemModal.show();
-        };
+    // ★ 點到功能時，同樣把「系統參數設定」按鈕啟用（因為 SelectedLevel1Id 已存在）
+  const btnSysParams = document.getElementById('btnSysParams');
+  if (btnSysParams) btnSysParams.disabled = !(selectedLevel1Id && selectedLevel1Id.length >= 3);
+};
 
-        document.getElementById('addItemForm').addEventListener('submit', async function (e) {
-            e.preventDefault();
-            const itemId = inputItemId.value.trim();
-            const itemName = inputItemName.value.trim();
-            const superId = inputSuperId.value.trim();
-            const alertBox = document.getElementById('modalAlert');
+window.openAddModal = async function () {
+  const superId = selectedLevel1Id;
+  if (!superId) { alert("請先點選左側的子模組"); return; }
+  const systemId = superId.substring(0, 3);
+  try {
+    const res = await fetch(`/api/ItemHelperApi/next-id?systemId=${systemId}`);
+    const data = await res.json();
+    document.getElementById('inputItemId').value = data.nextItemId || (systemId + "001");
+  } catch {
+    document.getElementById('inputItemId').value = systemId + "001";
+  }
+  document.getElementById('inputSuperId').value = superId;
+  document.getElementById('modalAlert').classList.add('d-none');
+  new bootstrap.Modal(document.getElementById('addItemModal')).show();
+};
 
-            if (!itemId || !itemName || !superId) {
-                alertBox.textContent = "請填寫完整的資料";
-                alertBox.classList.remove('d-none');
-                return;
-            }
+window.openEditModal = function (itemId, itemName, superId, systemId, serialNum, enabled, Notes) {
+  document.getElementById('editItemId').value    = itemId;
+  document.getElementById('editItemName').value  = itemName;
+  document.getElementById('editSuperId').value   = superId;
+  document.getElementById('editSystemId').value  = systemId;
+  document.getElementById('editSerialNum').value = (serialNum ?? '');
+  document.getElementById('editNotes').value     = (Notes ?? '');
+  const isEnabled = (enabled === 1 || enabled === '1' || enabled === true || enabled === 'true');
+  document.getElementById('editEnabled').checked = isEnabled;
+  document.getElementById('editAlert').classList.add('d-none');
+  new bootstrap.Modal(document.getElementById('editItemModal')).show();
+};
 
-            try {
-                const res = await fetch("/api/AddItemApi", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ itemId, itemName, superId, itemType: 2 })
-                });
+/* ========= 新增 / 編輯提交 ========= */
+document.addEventListener('DOMContentLoaded', () => {
+  // 新增送出
+  document.getElementById('addItemForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const itemId   = document.getElementById('inputItemId').value.trim();
+    const itemName = document.getElementById('inputItemName').value.trim();
+    const superId  = document.getElementById('inputSuperId').value.trim();
+    const alertBox = document.getElementById('modalAlert');
+    if (!itemId || !itemName || !superId) {
+      alertBox.textContent = "請填寫完整的資料";
+      alertBox.classList.remove('d-none'); return;
+    }
+    try {
+      const res = await fetch("/api/AddItemApi", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId, itemName, superId, itemType: 2 })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) { alertBox.textContent = data?.message || "新增失敗"; alertBox.classList.remove('d-none'); return; }
+      const rightPanel = document.getElementById("level2-list");
+      const li = document.createElement("li");
+      li.className = "list-group-item selectable text-success";
+      li.id = "li-" + data.item.itemId;
+      li.setAttribute("onclick", `selectItem('${data.item.itemId}')`);
+      li.textContent = `${data.item.itemId} - ${data.item.itemName}`;
+      rightPanel.appendChild(li);
+      bootstrap.Modal.getInstance(document.getElementById('addItemModal')).hide();
+      alert("新增成功：" + data.item.itemId);
+    } catch (ex) {
+      alertBox.textContent = "新增過程發生錯誤: " + ex.message; alertBox.classList.remove('d-none');
+    }
 
-                const data = await res.json();
-                if (!res.ok || !data.success) {
-                    alertBox.textContent = data?.message || "新增失敗";
-                    alertBox.classList.remove('d-none');
-                    return;
-                }
+      // 依是否有 SelectedLevel1Id 來啟用/停用「系統參數設定」按鈕
+      const btnSysParams = document.getElementById('btnSysParams');
+      if (btnSysParams) btnSysParams.disabled = !(selectedLevel1Id && selectedLevel1Id.length >= 3);
+  });
 
-                const rightPanel = document.getElementById("level2-list");
-                const li = document.createElement("li");
-                li.className = "list-group-item text-success";
-                li.id = "li-" + data.item.itemId;
-                li.textContent = `${data.item.itemId} - ${data.item.itemName}`;
-                rightPanel.appendChild(li);
-                addItemModal.hide();
-                alert("新增成功：" + data.item.itemId);
-            } catch (ex) {
-                alertBox.textContent = "新增過程發生錯誤: " + ex.message;
-                alertBox.classList.remove('d-none');
-            }
-        });
+  // 編輯送出
+  document.getElementById('editItemForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const itemId    = document.getElementById('editItemId').value.trim();
+    const itemName  = document.getElementById('editItemName').value.trim();
+    const superId   = document.getElementById('editSuperId').value.trim();
+    const serialNum = Number(document.getElementById('editSerialNum').value || 0);
+    const enabled   = document.getElementById('editEnabled').checked ? 1 : 0;
+    const notes     = document.getElementById('editNotes').value;
+    const alertBox  = document.getElementById('editAlert');
+    if (!itemId || !itemName) { alertBox.textContent = "請填寫完整資料"; alertBox.classList.remove('d-none'); return; }
+    try {
+      const res = await fetch("/api/EditItemApi", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId, itemName, superId, serialNum, enabled, notes })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) { alertBox.textContent = data?.message || "更新失敗"; alertBox.classList.remove('d-none'); return; }
+      const li = document.getElementById("li-" + itemId);
+      if (li) li.textContent = `${itemId} - ${itemName}`;
+      bootstrap.Modal.getInstance(document.getElementById('editItemModal')).hide();
+      alert("更新成功！");
+    } catch (ex) { alertBox.textContent = "發生錯誤：" + ex.message; alertBox.classList.remove('d-none'); }
+  });
+});
 
-        window.openEditModal = function (itemId, itemName, superId, itemType) {
-            document.getElementById('editItemId').value = itemId;
-            document.getElementById('editItemName').value = itemName;
-            document.getElementById('editSuperId').value = superId;
-            document.getElementById('editItemType').value = itemType;
-            document.getElementById('editAlert').classList.add('d-none');
-            editItemModal.show();
-        };
+/* ========= 辭典設定 ========= */
+window.openDictModal = async function () {
+  if (!selectedItemId) { alert("請先從右側功能列表點選一筆項目。"); return; }
+  try {
+    const res = await fetch(`/api/DictSetupApi/Table/ByItem/${encodeURIComponent(selectedItemId)}`);
+    if (!res.ok) throw new Error("查詢失敗");
+    const data = await res.json();
 
-        document.getElementById('editItemForm').addEventListener('submit', async function (e) {
-            e.preventDefault();
-            const itemId = editItemId.value.trim();
-            const itemName = editItemName.value.trim();
-            const superId = editSuperId.value.trim();
-            const itemType = parseInt(editItemType.value);
-            const alertBox = document.getElementById('editAlert');
+    const tbody = document.querySelector("#dictTable tbody");
+    tbody.innerHTML = "";
+    dictSelectedTr = null;
+    refreshReportButton();
 
-            if (!itemId || !itemName) {
-                alertBox.textContent = "請填寫完整資料";
-                alertBox.classList.remove('d-none');
-                return;
-            }
+    if (Array.isArray(data) && data.length) {
+      data.forEach(row => {
+        const tr = document.createElement("tr");
+        tr.dataset.itemId    = row.ItemId || selectedItemId;
+        tr.dataset.tableName = row.TableName || "";
+        tr.dataset.tableKind = row.TableKind || "";
+        tr.dataset.paperId   = (row.TableName || "").toUpperCase();
 
-            try {
-                const res = await fetch("/api/EditItemApi", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ itemId, itemName, superId, itemType })
-                });
+        tr.innerHTML = `
+          <td class="text-secondary">${row.TableName ?? ""}</td>
+          <td><input class="form-control form-control-sm" value="${row.TableKind ?? ""}"/></td>
+          <td><input class="form-control form-control-sm" type="number" step="1" value="${row.FixColCount ?? ""}"/></td>
+          <td><input class="form-control form-control-sm" value="${row.MDKey ?? ""}"/></td>
+          <td><input class="form-control form-control-sm" value="${row.LocateKeys ?? ""}"/></td>
+          <td><input class="form-control form-control-sm" value="${row.OrderByField ?? ""}"/></td>
+          <td><textarea class="form-control form-control-sm" rows="2">${row.FilterSQL ?? ""}</textarea></td>
+          <td><textarea class="form-control form-control-sm" rows="2">${row.RunSQLAfterAdd ?? ""}</textarea></td>
+        `;
+        tbody.appendChild(tr);
+      });
 
-                const data = await res.json();
-                if (!res.ok || !data.success) {
-                    alertBox.textContent = data?.message || "更新失敗";
-                    alertBox.classList.remove('d-none');
-                    return;
-                }
+      // 列選取
+      tbody.onclick = (ev) => {
+        const tr = ev.target.closest("tr");
+        if (!tr) return;
+        tbody.querySelectorAll("tr").forEach(r => r.classList.remove("active"));
+        tr.classList.add("active");
+        dictSelectedTr = tr;
+        refreshReportButton();
+      };
+    } else {
+      tbody.innerHTML = `<tr><td colspan="8" class="text-center">（無對應設定）</td></tr>`;
+    }
 
-                const li = document.getElementById("li-" + itemId);
-                if (li) li.textContent = `${itemId} - ${itemName}`;
-                editItemModal.hide();
-                alert("更新成功！");
-            } catch (ex) {
-                alertBox.textContent = "發生錯誤：" + ex.message;
-                alertBox.classList.remove('d-none');
-            }
-        });
+    // 綁定按鈕
+    document.getElementById("btnDictSave").onclick = saveDictSetup;
+    document.getElementById("btnOpenReport").onclick = openSelectedReport;
+
+    new bootstrap.Modal(document.getElementById("dictModal")).show();
+  } catch (ex) { alert("載入辭典設定失敗：" + ex.message); }
+};
+
+function refreshReportButton(){
+  const btn = document.getElementById("btnOpenReport");
+  const isMaster = dictSelectedTr && (dictSelectedTr.dataset.tableKind || "").toLowerCase() === "master1";
+  btn.disabled = !isMaster;
+  btn.title = isMaster ? "開啟報表設定" : "請先在表格選取 Master1 列";
+}
+
+async function saveDictSetup() {
+  const rows = Array.from(document.querySelectorAll("#dictTable tbody tr"));
+  if (!rows.length) return;
+  const payload = rows.map(tr => {
+    const cells = tr.querySelectorAll("td");
+    return {
+      ItemId:        tr.dataset.itemId || "",
+      TableName:     tr.dataset.tableName || "",
+      TableKind:     cells[1]?.querySelector("input")?.value ?? null,
+      FixColCount:   toNullableInt(cells[2]?.querySelector("input")?.value),
+      MDKey:         cells[3]?.querySelector("input")?.value ?? null,
+      LocateKeys:    cells[4]?.querySelector("input")?.value ?? null,
+      OrderByField:  cells[5]?.querySelector("input")?.value ?? null,
+      FilterSQL:     cells[6]?.querySelector("textarea")?.value ?? null,
+      RunSQLAfterAdd:cells[7]?.querySelector("textarea")?.value ?? null
+    };
+  });
+  try {
+    const res = await fetch("/api/DictSetupApi/Table/UpdateByItem", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
     });
+    const data = await res.json();
+    if (!res.ok || data?.success !== true) throw new Error(data?.message || "更新失敗");
+    alert(`更新成功（共 ${data.count} 筆）`);
+  } catch (err) { alert("儲存失敗：" + err.message); }
+}
+
+/* ========= 共用工具（新增這兩個） ========= */
+function showNum(v) {               // 顯示用：保留空字串、不強轉
+  return (v === undefined || v === null) ? "" : String(v).trim();
+}
+function esc(s) {                   // 安全填入 input value
+  return String(s ?? "")
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+
+/* ========= 報表設定 ========= */
+async function openSelectedReport(){
+  const paperId = dictSelectedTr?.dataset?.paperId || "SPODORDERMAIN";
+  try {
+    const res = await fetch(`/api/DictSetupApi/Report/${encodeURIComponent(paperId)}`);
+    if (!res.ok) throw new Error("載入報表設定失敗");
+
+    const rows = (await res.json()).map(normalizePaperRow);
+
+    document.getElementById("reportTitlePaperId").textContent = paperId;
+    const tbody = document.querySelector("#reportTable tbody");
+    tbody.innerHTML = "";
+
+    rows.forEach(r => {
+      const tr = document.createElement("tr");
+      tr.dataset.paperId   = r.paperId || paperId;
+      tr.dataset.serialNum = r.serialNum ?? "";
+
+      tr.innerHTML = `
+        <!-- 1 序號 -->
+        <td>
+          <input class="form-control form-control-sm text-end"
+                 type="text" inputmode="numeric"
+                 value="${showNum(r.serialNum)}">
+        </td>
+
+        <!-- 2 項目名稱 -->
+        <td><input class="form-control form-control-sm"
+                   value="${esc(r.itemName)}"></td>
+
+        <!-- 3 啟用 -->
+        <td>
+          <input class="form-control form-control-sm text-end"
+                 type="text" inputmode="numeric"
+                 value="${showNum(r.enabled)}">
+        </td>
+
+        <!-- 4 備註 -->
+        <td><input class="form-control form-control-sm"
+                   value="${esc(r.notes)}"></td>
+
+        <!-- 5 報表檔名(ClassName) -->
+        <td><input class="form-control form-control-sm"
+                   value="${esc(r.className)}"></td>
+
+        <!-- 6 物件名稱(ObjectName) -->
+        <td><input class="form-control form-control-sm"
+                   value="${esc(r.objectName)}"></td>
+
+        <!-- 7 連結類型 -->
+        <td>
+          <input class="form-control form-control-sm text-end"
+                 type="text" inputmode="numeric"
+                 value="${showNum(r.linkType)}">
+        </td>
+
+        <!-- 8 顯示型態 -->
+        <td>
+          <input class="form-control form-control-sm text-end"
+                 type="text" inputmode="numeric"
+                 value="${showNum(r.displayType)}">
+        </td>
+
+        <!-- 9 輸出型態 -->
+        <td>
+          <input class="form-control form-control-sm text-end"
+                 type="text" inputmode="numeric"
+                 value="${showNum(r.outputType)}">
+        </td>
+
+        <!-- 10 顯示標題 -->
+        <td>
+          <input class="form-control form-control-sm text-end"
+                 type="text" inputmode="numeric"
+                 value="${showNum(r.showTitle)}">
+        </td>
+
+        <!-- 11 顯示樹狀 -->
+        <td>
+          <input class="form-control form-control-sm text-end"
+                 type="text" inputmode="numeric"
+                 value="${showNum(r.showTree)}">
+        </td>
+
+        <!-- 12 表索引 -->
+        <td>
+          <input class="form-control form-control-sm text-end"
+                 type="text" inputmode="numeric"
+                 value="${showNum(r.tableIndex)}">
+        </td>
+
+        <!-- 13 項目數 -->
+        <td>
+          <input class="form-control form-control-sm text-end"
+                 type="text" inputmode="numeric"
+                 value="${showNum(r.itemCount)}">
+        </td>
+
+        <!-- 14 列印項 -->
+        <td><input class="form-control form-control-sm"
+                   value="${esc(r.printItemId)}"></td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    document.getElementById("btnReportSave").onclick = saveReportRows;
+    new bootstrap.Modal(document.getElementById("reportModal")).show();
+  } catch (ex) {
+    alert(ex.message || ex);
+  }
+}
+
+window.openSelectedReport = openSelectedReport; // 讓按鈕可呼叫
+
+async function saveReportRows(){
+  try {
+    const tbody = document.querySelector("#reportTable tbody");
+    const trs = Array.from(tbody.querySelectorAll("tr"));
+    if (!trs.length) return;
+
+    const payload = trs.map(tr => {
+      const tds = tr.querySelectorAll("td");
+      return {
+        paperId     : tr.dataset.paperId || "",
+        serialNum   : rToInt(tds[0].querySelector("input").value),
+        itemName    : tds[1].querySelector("input").value,
+        enabled     : rToInt(tds[2].querySelector("input").value),
+        notes       : tds[3].querySelector("input").value,
+        className   : tds[4].querySelector("input").value,
+        objectName  : tds[5].querySelector("input").value,
+        linkType    : rToInt(tds[6].querySelector("input").value),
+        displayType : rToInt(tds[7].querySelector("input").value),
+        outputType  : rToInt(tds[8].querySelector("input").value),
+        showTitle   : rToInt(tds[9].querySelector("input").value),
+        showTree    : rToInt(tds[10].querySelector("input").value),
+        tableIndex  : rToInt(tds[11].querySelector("input").value),
+        itemCount   : rToInt(tds[12].querySelector("input").value),
+        printItemId : tds[13].querySelector("input").value
+      };
+    });
+
+    const res = await fetch("/api/DictSetupApi/Report/UpdateRows", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok || data?.success !== true) throw new Error(data?.message || "儲存失敗");
+    alert(`儲存成功（${data.count} 筆）`);
+  } catch (ex) { alert(ex.message || ex); }
+}
+
+// 依目前 SelectedLevel1Id 的前三碼，開啟系統參數設定頁
+window.openSysParams = function () {
+  const sys = (selectedLevel1Id || '').substring(0, 3);
+  if (!sys) { alert('請先在左側選擇子模組（或右側選一筆功能）'); return; }
+  location.href = `/SysParams?SelectedSystem=${encodeURIComponent(sys)}`;
+};
+
+window.saveReportRows = saveReportRows;
+
+/* ========= 自訂按鈕（CURdOCXItemCustButton） ========= */
+/* 後端 API 約定：
+   GET  /api/CustomButtonApi/ByItem/{itemId}
+        -> [{ ItemId, SerialNum, ButtonName, CustCaption, CustCaptionE, CustHint, CustHintE,
+              OCXName, CoClassName, SpName, bVisible, ChkCanUpdate, bNeedNum, DesignType }]
+   POST /api/CustomButtonApi/Save
+        -> { success:true, count:int }
+*/
+
+function numOrNull(v){ const s=String(v??'').trim(); if(s==='') return null; const n=Number(s); return Number.isFinite(n)?n:null; }
+function bTo01(v){ return (v===1||v==='1'||v===true||v==='true')?1:0; }
+
+window.openCustomBtnModal = async function(){
+  if(!selectedItemId){ alert('請先從右側選擇一筆功能'); return; }
+  try{
+    document.getElementById('cbItemId').textContent = selectedItemId;
+    const res = await fetch(`/api/CustomButtonApi/ByItem/${encodeURIComponent(selectedItemId)}`);
+    if(!res.ok) throw new Error('查詢失敗');
+    const rows = await res.json();
+
+    const tbody = document.querySelector('#customBtnTable tbody');
+    tbody.innerHTML = '';
+
+    (rows ?? []).forEach(r => appendCustomBtnRow(tbody, {
+      itemId:       r.ItemId ?? selectedItemId,
+      serialNum:    r.SerialNum ?? 0,
+      buttonName:   r.ButtonName ?? '',
+      capZh:        r.CustCaption ?? '',
+      capEn:        r.CustCaptionE ?? '',
+      hintZh:       r.CustHint ?? '',
+      hintEn:       r.CustHintE ?? '',
+      ocxName:      r.OCXName ?? '',
+      coClassName:  r.CoClassName ?? '',
+      spName:       r.SpName ?? '',
+      visible:      r.bVisible ?? 1,
+      canUpdate:    r.ChkCanUpdate ?? 1,
+      needNum:      r.bNeedNum ?? 0,
+      designType:   r.DesignType ?? 0
+    }));
+
+    document.getElementById('btnCustomAddRow').onclick = () => appendCustomBtnRow(tbody, {
+      itemId: selectedItemId, serialNum: (tbody.querySelectorAll('tr').length + 1)*10,
+      buttonName:'', capZh:'', capEn:'', hintZh:'', hintEn:'',
+      ocxName:'', coClassName:'', spName:'', visible:1, canUpdate:1, needNum:0, designType:0
+    });
+
+    document.getElementById('btnCustomSave').onclick = saveCustomButtons;
+
+    new bootstrap.Modal(document.getElementById('customBtnModal')).show();
+  }catch(ex){ alert('載入失敗：'+ex.message); }
+};
+
+function appendCustomBtnRow(tbody, r){
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <!-- 0 序號 -->
+    <td><input class="form-control form-control-sm text-end" value="${r.serialNum ?? ''}"></td>
+
+    <!-- 1 設定（按鈕放這裡） -->
+    <td class="text-center">
+      <button type="button" class="btn btn-sm btn-outline-secondary"
+              onclick="toggleBtnDetail(this)">查看設定</button>
+    </td>
+
+    <!-- 2 以後的欄位順序照 thead -->
+    <td><input class="form-control form-control-sm" value="${esc(r.buttonName)}"></td>
+    <td><input class="form-control form-control-sm" value="${esc(r.capZh)}"></td>
+    <td><input class="form-control form-control-sm" value="${esc(r.capEn)}"></td>
+    <td><input class="form-control form-control-sm" value="${esc(r.hintZh)}"></td>
+    <td><input class="form-control form-control-sm" value="${esc(r.hintEn)}"></td>
+    <td><input class="form-control form-control-sm" value="${esc(r.ocxName)}"></td>
+    <td><input class="form-control form-control-sm" value="${esc(r.coClassName)}"></td>
+    <td><input class="form-control form-control-sm" value="${esc(r.spName)}"></td>
+    <td><input class="form-control form-control-sm text-end" value="${showNum(r.visible)}"></td>
+    <td><input class="form-control form-control-sm text-end" value="${showNum(r.canUpdate)}"></td>
+    <td><input class="form-control form-control-sm text-end" value="${showNum(r.needNum)}"></td>
+    <td><input class="form-control form-control-sm text-end" value="${showNum(r.designType)}"></td>
+  `;
+  tr.dataset.itemId = r.itemId;
+  tbody.appendChild(tr);
+}
+
+function pick(obj, ...names) {
+  for (const n of names) {
+    if (obj && obj[n] !== undefined && obj[n] !== null) return obj[n];
+  }
+  return undefined;
+}
+
+async function toggleBtnDetail(btnEl){
+  const tr = btnEl.closest('tr');
+  const table = tr.closest('table');
+  const btnName = tr.querySelectorAll('td')[2].querySelector('input').value.trim();
+  const after = tr.nextElementSibling;
+
+  if (after && after.classList.contains('cb-detail')) { after.remove(); return; }
+
+  const detailTr = document.createElement('tr');
+  detailTr.className = 'cb-detail';
+  const colCount = table.tHead.querySelector('tr').cells.length; // 更穩定
+  detailTr.innerHTML = `<td colspan="${colCount}"><div class="p-2 small text-muted">載入中…</div></td>`;
+  tr.insertAdjacentElement('afterend', detailTr);
+
+  try{
+    const url = `/api/CustomButtonApi/Detail/${encodeURIComponent(selectedItemId)}/${encodeURIComponent(btnName)}`;
+    const res = await fetch(url);
+    if(!res.ok) throw new Error('查詢失敗');
+    const dto = await res.json();
+
+    // 兼容 PascalCase 與 camelCase
+    const searchParams = pick(dto, 'searchParams', 'SearchParams') || [];
+    const insertKeys   = pick(dto, 'insertKeys', 'InsertKeys') || [];
+
+    let html = `<div class="p-2">`;
+
+    if (searchParams.length){
+      html += `
+      <div class="mb-3">
+        <div class="d-flex align-items-center mb-1"><strong>搜尋參數（${searchParams.length}）</strong></div>
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm mb-0">
+            <thead>
+              <tr>
+                <th>ParamSN</th><th>ParamName</th><th>DisplayName</th>
+                <th>ControlType</th><th>CommandText</th>
+                <th>DefaultValue</th><th>DefaultType</th><th>iReadOnly</th><th>iVisible</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${searchParams.map(p => `
+                <tr>
+                  <td class="text-end">${pick(p,'paramSN','ParamSN') ?? ''}</td>
+                  <td>${esc(pick(p,'paramName','ParamName') ?? '')}</td>
+                  <td>${esc(pick(p,'displayName','DisplayName') ?? '')}</td>
+                  <td class="text-end">${pick(p,'controlType','ControlType') ?? ''}</td>
+                  <td class="text-break">${esc(pick(p,'commandText','CommandText') ?? '')}</td>
+                  <td>${esc(pick(p,'defaultValue','DefaultValue') ?? '')}</td>
+                  <td class="text-end">${pick(p,'defaultType','DefaultType') ?? ''}</td>
+                  <td class="text-end">${pick(p,'iReadOnly','IReadOnly','ireadOnly') ?? ''}</td>
+                  <td class="text-end">${pick(p,'iVisible','IVisible','ivisible') ?? ''}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+    }
+
+    if (insertKeys.length){
+      html += `
+      <div>
+        <div class="d-flex align-items-center mb-1"><strong>插入鍵（${insertKeys.length}）</strong></div>
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm mb-0">
+            <thead><tr><th>SeqNum</th><th>KeyFieldName</th><th>PositionType</th></tr></thead>
+            <tbody>
+              ${insertKeys.map(k => `
+                <tr>
+                  <td class="text-end">${pick(k,'seqNum','SeqNum') ?? ''}</td>
+                  <td>${esc(pick(k,'keyFieldName','KeyFieldName') ?? '')}</td>
+                  <td class="text-end">${pick(k,'positionType','PositionType') ?? ''}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+    }
+
+    if (searchParams.length === 0 && insertKeys.length === 0) {
+      html += `<div class="text-muted">（此按鈕沒有搜尋參數或插入鍵設定）</div>`;
+    }
+
+    html += `</div>`;
+    detailTr.firstElementChild.innerHTML = html;
+  }catch(ex){
+    detailTr.firstElementChild.innerHTML = `<div class="text-danger">載入失敗：${esc(ex.message||ex)}</div>`;
+  }
+}
+
+async function saveCustomButtons(){
+  try{
+    const tbody = document.querySelector('#customBtnTable tbody');
+    const trs = Array.from(tbody.querySelectorAll('tr'));
+    const payload = trs.map(tr=>{
+      const tds = tr.querySelectorAll('td');
+      return {
+        ItemId:        selectedItemId,
+        SerialNum:     numOrNull(tds[0].querySelector('input').value),   // 序號
+        ButtonName:    tds[2].querySelector('input').value.trim(),       // ← 2
+        CustCaption:   tds[3].querySelector('input').value,              // ← 3
+        CustCaptionE:  tds[4].querySelector('input').value,              // ← 4
+        CustHint:      tds[5].querySelector('input').value,              // ← 5
+        CustHintE:     tds[6].querySelector('input').value,              // ← 6
+        OCXName:       tds[7].querySelector('input').value,              // ← 7
+        CoClassName:   tds[8].querySelector('input').value,              // ← 8
+        SpName:        tds[9].querySelector('input').value,              // ← 9
+        bVisible:      bTo01(tds[10].querySelector('input').value),      // ← 10
+        ChkCanUpdate:  bTo01(tds[11].querySelector('input').value),      // ← 11
+        bNeedNum:      bTo01(tds[12].querySelector('input').value),      // ← 12
+        DesignType:    numOrNull(tds[13].querySelector('input').value)   // ← 13
+      };
+    });
+
+    const res = await fetch('/api/CustomButtonApi/Save', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if(!res.ok || data?.success !== true) throw new Error(data?.message || '儲存失敗');
+    alert(`已儲存 ${data.count} 筆自訂按鈕`);
+  }catch(ex){ alert('儲存失敗：'+ex.message); }
+}
+
+window.toggleBtnDetail = toggleBtnDetail;
 </script>
+
+<style>
+  #level2-list .selectable.active{
+    background-color:#cce5ff!important;
+    border-left:4px solid #004085;
+    color:#004085; font-weight:700;
+  }
+  #dictTable th, #reportTable th { white-space: nowrap; }
+  #dictTable tbody tr.active { outline:2px solid #0d6efd; background:#e7f1ff; }
+
+  /* 報表設定表格：調整欄寬 */
+/* 2 = 項目名稱、5 = 報表檔名(ClassName)、6 = 物件名稱(ObjectName) */
+#reportTable th:nth-child(2),
+#reportTable td:nth-child(2) {  /* 項目名稱 */
+  min-width: 200px;
+  width: 220px;
+}
+
+#reportTable th:nth-child(5),
+#reportTable td:nth-child(5) {  /* 報表檔名 */
+  min-width: 240px;
+  width: 260px;
+}
+
+#reportTable th:nth-child(6),
+#reportTable td:nth-child(6) {  /* 物件名稱 */
+  min-width: 240px;
+  width: 260px;
+}
+
+/* 讓輸入框吃滿儲存格寬度（保險） */
+#reportTable td input.form-control,
+#reportTable td textarea.form-control {
+  width: 100%;
+}
+
+#reportTable td input[inputmode="numeric"] { text-align: right; }
+
+#customBtnTable th, #customBtnTable td { white-space: nowrap; }
+#customBtnTable td input.form-control { width: 100%; }
+
+.cb-detail td { background:#fafafa; }
+</style>
