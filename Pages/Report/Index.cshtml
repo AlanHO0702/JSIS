@@ -1,0 +1,184 @@
+@page "/report"
+@model ReportPageModel
+@{
+    Layout = "_Layout";
+}
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
+
+<div class="container my-4">
+  <h3 class="text-primary fw-bold mb-3">訂單未交貨明細表</h3>
+
+  <!-- 查詢區 -->
+  <div class="card p-3 mb-4 shadow-sm">
+    <div class="row g-3 align-items-end">
+      <!-- 1 起始交期 -->
+      <div class="col-md-3">
+        <label class="form-label">起始交期</label>
+        <input type="date" id="BDelDate" class="form-control" placeholder="yyyy/MM/dd" />
+      </div>
+      <!-- 2 截止交期 -->
+      <div class="col-md-3">
+        <label class="form-label">截止交期</label>
+        <input type="date" id="EDelDate" class="form-control" placeholder="yyyy/MM/dd" />
+      </div>
+      <!-- 3 客戶代碼 (下拉) -->
+      <div class="col-md-3">
+        <label class="form-label">客戶代碼</label>
+        <select id="CustomerId" class="form-select">
+          <option value="">(不限)</option>
+        </select>
+      </div>
+      <!-- 12 客戶料號(模糊) -->
+      <div class="col-md-3">
+        <label class="form-label">客戶料號(模糊)</label>
+        <input type="text" id="CustomerPartNum" class="form-control" />
+      </div>
+
+      <!-- 5 品號(模糊) -->
+      <div class="col-md-3">
+        <label class="form-label">品號(模糊)</label>
+        <input type="text" id="PartNum" class="form-control" />
+      </div>
+      <!-- 4 上層客戶（原系統名稱空，保留為文字） -->
+      <div class="col-md-3">
+        <label class="form-label">上層客戶</label>
+        <input type="text" id="SourCustomerId" class="form-control" />
+      </div>
+      <!-- 6 公司別 (下拉，預設 A001) -->
+      <div class="col-md-3">
+        <label class="form-label">公司別</label>
+        <select id="UseId" class="form-select">
+          <option value="">(不限)</option>
+        </select>
+      </div>
+      <!-- 7 是否暫停 -->
+      <div class="col-md-3">
+        <label class="form-label">是否暫停</label>
+        <select id="IsHold" class="form-select">
+          <option value="0">非暫停</option>
+          <option value="1">暫停中</option>
+          <option value="255">不限</option>
+        </select>
+      </div>
+
+      <!-- 8 訂單種類 -->
+      <div class="col-md-3">
+        <label class="form-label">訂單種類</label>
+        <select id="PoType" class="form-select">
+          <option value="0">量產</option>
+          <option value="1">樣品</option>
+          <option value="255">不限</option>
+        </select>
+      </div>
+      <!-- 9 內製/外包 -->
+      <div class="col-md-3">
+        <label class="form-label">內製/外包</label>
+        <select id="OutNotIn" class="form-select">
+          <option value="0">內製</option>
+          <option value="1">外包</option>
+          <option value="255">不限</option>
+        </select>
+      </div>
+      <!-- 10 包含費用 -->
+      <div class="col-md-3">
+        <label class="form-label">包含費用</label>
+        <select id="IncludeCharge" class="form-select">
+          <option value="0">不包含</option>
+          <option value="1">包含</option>
+          <option value="2">僅顯示費用</option>
+        </select>
+      </div>
+      <!-- 11 交易條件 -->
+      <div class="col-md-3">
+        <label class="form-label">交易條件</label>
+        <select id="ShipTerm" class="form-select">
+          <option value="">(不限)</option>
+        </select>
+      </div>
+
+      <div class="col-12 text-end">
+        <button id="btnSearch" class="btn btn-primary px-4">查詢</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 資料顯示 -->
+  <div id="resultArea" class="card shadow-sm p-3" style="display:none;">
+    <div class="table-responsive">
+      <table class="table table-bordered table-hover align-middle text-center mb-0" id="resultTable">
+        <thead class="table-light" id="tableHead"></thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+async function loadSelect(key, elId, defaultVal) {
+  const res = await fetch(`/api/Report/lookup/${key}`);
+  if (!res.ok) return;
+  const data = await res.json();
+  const el = document.getElementById(elId);
+  data.forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o.value ?? '';
+    opt.textContent = o.text ?? '';
+    el.appendChild(opt);
+  });
+  if (defaultVal != null) el.value = defaultVal;
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  // 動態載入下拉：客戶、公司別、交易條件
+  await Promise.all([
+    loadSelect('customer', 'CustomerId', ''), // 不預設
+    loadSelect('bu',       'UseId',     'A001'),
+    loadSelect('shipterm', 'ShipTerm',  '')
+  ]);
+});
+
+document.getElementById('btnSearch').addEventListener('click', async () => {
+  const params = {
+    BDelDate:        document.getElementById('BDelDate').value || null,
+    EDelDate:        document.getElementById('EDelDate').value || null,
+    CustomerId:      document.getElementById('CustomerId').value,
+    CustomerPartNum: document.getElementById('CustomerPartNum').value,
+    IncludeCharge:   document.getElementById('IncludeCharge').value,
+    IsHold:          document.getElementById('IsHold').value,
+    OutNotIn:        document.getElementById('OutNotIn').value,
+    PartNum:         document.getElementById('PartNum').value,
+    PoType:          document.getElementById('PoType').value,
+    ShipTerm:        document.getElementById('ShipTerm').value,
+    SourCustomerId:  document.getElementById('SourCustomerId').value,
+    UseId:           document.getElementById('UseId').value
+  };
+
+  const req = { spName: "dbo.SPOd訂單未交貨明細表_QU", params };
+
+  const res = await fetch('/api/Report/exec', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req)
+  });
+
+  if (!res.ok) {
+    alert(await res.text());
+    return;
+  }
+
+  const data = await res.json();
+  renderTable(data.Columns, data.Rows);
+});
+
+function renderTable(columns, rows) {
+  const thead = document.getElementById('tableHead');
+  const tbody = document.getElementById('tableBody');
+
+  thead.innerHTML = `<tr>${columns.map(c=>`<th>${c}</th>`).join('')}</tr>`;
+  tbody.innerHTML = rows.map(r => {
+    const tds = columns.map(c => `<td>${r[c] ?? ''}</td>`).join('');
+    return `<tr>${tds}</tr>`;
+  }).join('');
+
+  document.getElementById('resultArea').style.display = '';
+}
+</script>
