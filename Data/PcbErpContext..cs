@@ -25,10 +25,150 @@ namespace PcbErpApi.Data
         public virtual DbSet<CurdOcxtableSetUp> CurdOcxtableSetUp { get; set; }
         public virtual DbSet<CurdPaperPaper> CurdPaperPaper { get; set; }
         public virtual DbSet<CurdBu> CurdBus { get; set; }
+        public virtual DbSet<FmedVProcNisToStd> FmedVProcNisToStd { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
 
+
+            modelBuilder.Entity<FmedVProcNisToStd>(entity =>
+        {
+            entity
+                .HasNoKey()
+                .ToView("FMEdV_ProcNIS_ToStd");
+            
+            entity.Property(e => e.AftProcNameString).HasMaxLength(255);
+            entity.Property(e => e.BNowPrePass).HasColumnName("bNowPrePass");
+            entity.Property(e => e.BprocCode)
+                .HasMaxLength(8)
+                .IsUnicode(false)
+                .HasColumnName("BProcCode");
+            entity.Property(e => e.CheckValue)
+                .HasMaxLength(1)
+                .IsUnicode(false);
+            entity.Property(e => e.CustomerId)
+                .HasMaxLength(16)
+                .IsUnicode(false);
+            entity.Property(e => e.DateCode)
+                .HasMaxLength(12)
+                .IsUnicode(false)
+                .IsFixedLength();
+            entity.Property(e => e.EqualFgpcs)
+                .HasColumnType("decimal(38, 6)")
+                .HasColumnName("EqualFGPCS");
+            entity.Property(e => e.ExpStkTime).HasColumnType("datetime");
+            entity.Property(e => e.FinishQnty).HasColumnType("decimal(24, 8)");
+            entity.Property(e => e.GoodPcs)
+                .HasColumnType("decimal(38, 6)")
+                .HasColumnName("GoodPCS");
+            entity.Property(e => e.HaltNotes).HasMaxLength(50);
+            entity.Property(e => e.HaltProc)
+                .HasMaxLength(8)
+                .IsUnicode(false);
+            entity.Property(e => e.HaltProcName).HasMaxLength(24);
+            entity.Property(e => e.Hdi)
+                .HasMaxLength(24)
+                .IsUnicode(false)
+                .HasColumnName("HDI");
+            entity.Property(e => e.IInIqc).HasColumnName("iInIQC");
+            entity.Property(e => e.IInIqcname)
+                .HasMaxLength(6)
+                .IsUnicode(false)
+                .HasColumnName("iInIQCName");
+            entity.Property(e => e.IIsUrgent).HasColumnName("iIsUrgent");
+            entity.Property(e => e.IIsWork).HasColumnName("iIsWork");
+            entity.Property(e => e.IOnProcTime).HasColumnName("iOnProcTime");
+            entity.Property(e => e.IsScback).HasColumnName("IsSCBack");
+            entity.Property(e => e.IssueNum)
+                .HasMaxLength(16)
+                .IsUnicode(false);
+            entity.Property(e => e.L_LLPcs)
+                .HasMaxLength(51)
+                .IsUnicode(false)
+                .HasColumnName("L_LLPcs");
+            entity.Property(e => e.LayerId)
+                .HasMaxLength(8)
+                .IsUnicode(false);
+            entity.Property(e => e.Lk_InTime)
+                .HasColumnType("datetime")
+                .HasColumnName("Lk_InTime");
+            entity.Property(e => e.LotNotes)
+                .HasMaxLength(12)
+                .IsUnicode(false);
+            entity.Property(e => e.LotNum)
+                .HasMaxLength(24)
+                .IsUnicode(false);
+            entity.Property(e => e.LotStatusName).HasMaxLength(24);
+            entity.Property(e => e.LotXoutQnty)
+                .HasColumnType("decimal(38, 8)")
+                .HasColumnName("LotXOutQnty");
+            entity.Property(e => e.Mark).HasMaxLength(30);
+            entity.Property(e => e.MatName).HasMaxLength(120);
+            entity.Property(e => e.MidVarchar_12)
+                .HasMaxLength(40)
+                .HasColumnName("MidVarchar_12");
+            entity.Property(e => e.MotherIssueNum)
+                .HasMaxLength(64)
+                .IsUnicode(false);
+            entity.Property(e => e.NickelRequestMax).HasColumnName("NickelRequestMAX");
+            entity.Property(e => e.PaperId)
+                .HasMaxLength(13)
+                .IsUnicode(false);
+            entity.Property(e => e.PaperNum)
+                .HasMaxLength(16)
+                .IsUnicode(false);
+            entity.Property(e => e.PartNum)
+                .HasMaxLength(24)
+                .IsUnicode(false);
+            entity.Property(e => e.Pivalue).HasColumnName("PIValue");
+            entity.Property(e => e.PivalueNis)
+                .HasColumnType("decimal(24, 8)")
+                .HasColumnName("PIValueNIS");
+            entity.Property(e => e.Pop).HasColumnName("POP");
+            entity.Property(e => e.Popname)
+                .HasMaxLength(24)
+                .HasColumnName("POPName");
+            entity.Property(e => e.ProcCode)
+                .HasMaxLength(8)
+                .IsUnicode(false);
+            entity.Property(e => e.ProcName).HasMaxLength(24);
+            entity.Property(e => e.ProgressNotes).HasMaxLength(255);
+            entity.Property(e => e.Qcstatus).HasColumnName("QCStatus");
+            entity.Property(e => e.QcstatusName)
+                .HasMaxLength(24)
+                .IsUnicode(false)
+                .HasColumnName("QCStatusName");
+            entity.Property(e => e.Qnty).HasColumnType("decimal(38, 8)");
+            entity.Property(e => e.RevNum)
+                .HasMaxLength(8)
+                .IsUnicode(false);
+            entity.Property(e => e.Revision)
+                .HasMaxLength(8)
+                .IsUnicode(false);
+            entity.Property(e => e.SStatusMut)
+                .HasMaxLength(24)
+                .HasColumnName("sStatusMUT");
+            entity.Property(e => e.SWorkSeq)
+                .HasMaxLength(24)
+                .HasColumnName("sWorkSeq");
+            entity.Property(e => e.Sc).HasColumnName("SC");
+            entity.Property(e => e.StockId)
+                .HasMaxLength(8)
+                .IsUnicode(false)
+                .IsFixedLength();
+            entity.Property(e => e.StrL_LLpiece)
+                .HasMaxLength(51)
+                .IsUnicode(false)
+                .HasColumnName("StrL_LLpiece");
+            entity.Property(e => e.Ultype)
+                .HasMaxLength(20)
+                .HasColumnName("ULType");
+            entity.Property(e => e.WorkDate).HasColumnType("datetime");
+            entity.Property(e => e.WorkProc)
+                .HasMaxLength(8)
+                .IsUnicode(false); 
+        });
+            
             modelBuilder.Entity<CurdUser>(entity =>
             {
                 entity.HasKey(e => e.UserId);
