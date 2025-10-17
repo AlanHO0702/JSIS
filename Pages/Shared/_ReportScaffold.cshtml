@@ -1,0 +1,293 @@
+@using System.Text.Json
+@{
+    // PageModel 端先把 ViewData["ReportConfig"], ["Fields"], ["FieldDictList"] 都準備好了
+    var cfg = (ReportConfig)ViewData["ReportConfig"];
+    var json = JsonSerializer.Serialize(cfg, new JsonSerializerOptions { PropertyNamingPolicy = null });
+        // 🔧 把辭典表名也丟給 partial
+    ViewData["DictTableName"] = cfg.DictTableName ?? "";
+}
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+
+<style>
+  #resultTable th, #resultTable td {
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+    transform: none !important;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+  #resultTable thead th {
+    background: #f5f8ff;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+</style>
+
+<div class="container my-4">
+  <h3 class="text-primary fw-bold mb-3">@cfg.Title</h3>
+
+  <!-- 查詢條件 -->
+  <div class="card p-3 mb-4 shadow-sm" id="queryPanel">
+    <div class="row g-3 align-items-end" id="paramRows">
+      @foreach (var def in cfg.ParamDefs)
+      {
+        <div class="col-md-3">
+          <label class="form-label">@def.Label</label>
+
+          @if (def.Ui == ParamUiType.Date)
+          {
+            <input type="date" class="form-control"
+                   id="@def.Name" name="@def.Name"
+                   value="" data-default="@def.DefaultValue" />
+          }
+          else if (def.Ui == ParamUiType.Select)
+          {
+            var lookupAttr = string.IsNullOrWhiteSpace(def.LookupKey)
+                ? ""
+                : $"data-lookup=\"{def.LookupKey}\"";
+
+            <select class="form-select"
+                    id="@def.Name" name="@def.Name"
+                    @Html.Raw(lookupAttr)
+                    data-default="@def.DefaultValue">
+              <option value=""></option>
+              @if (def.Options != null)
+              {
+                foreach (var (value, text) in def.Options)
+                {
+                  <option value="@value">@text</option>
+                }
+              }
+            </select>
+          }
+          else if (def.Ui == ParamUiType.Number)
+          {
+            <input type="number" class="form-control"
+                   id="@def.Name" name="@def.Name"
+                   value="" data-default="@def.DefaultValue" />
+          }
+          else
+          {
+            <input type="text" class="form-control"
+                   id="@def.Name" name="@def.Name"
+                   value="" data-default="@def.DefaultValue" />
+          }
+        </div>
+      }
+
+      <div class="col-12 text-end">
+        <button id="btnSearch" class="btn btn-primary px-4">查詢</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 結果 -->
+  <div id="resultArea" class="card shadow-sm p-3" style="display:none;">
+    <div class="table-responsive">
+      <table class="table table-bordered table-hover align-middle text-center mb-0" id="resultTable">
+        <thead class="table-light" id="tableHead"></thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+@* F3 共用辭典 Modal *@
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", Model.FieldDictList, ViewData)
+<script src="~/js/fieldDictModal.js"></script>
+<script>
+(function () {
+  // --- 後端傳來的報表設定 ---
+  const cfg = @Html.Raw(json);
+  cfg.ParamDefs = cfg.ParamDefs || [];
+
+  // --- 供 renderTable 使用的辭典欄位（只含 Visible=1，已排序） ---
+  window._tableFields = @Html.Raw(Json.Serialize(ViewData["Fields"] ?? new object()));
+
+  // ====== 通用工具 ======
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function todayOffset(expr){
+    if (!expr || !/^today([+-]\d+d)?$/i.test(expr)) return '';
+    const m = expr.match(/^today([+-]\d+)?d?$/i);
+    const d = new Date();
+    if (m && m[1]) d.setDate(d.getDate() + parseInt(m[1],10));
+    return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  }
+
+  async function loadLookup(key, el){
+    try{
+      const res = await fetch(`/api/Report/lookup/${key}`);
+      if (!res.ok) throw 0;
+      const data = await res.json(); // [{value,text}]
+      data.forEach(o=>{
+        const opt = document.createElement('option');
+        opt.value = o.value ?? '';
+        opt.textContent = o.text ?? '';
+        el.appendChild(opt);
+      });
+    }catch{
+      // 保底至少有一個 "(不限)"
+      if (!el.querySelector('option')) {
+        const opt = document.createElement('option');
+        opt.value = ''; opt.textContent = '(不限)';
+        el.appendChild(opt);
+      }
+    }
+  }
+
+  // ====== 初始化條件（載入下拉 + 套預設值） ======
+  async function initParams(){
+    const jobs = [];
+    (cfg.ParamDefs || []).forEach(def=>{
+      const el = document.getElementById(def.Name);
+      if (!el) return;
+      const key = el.dataset.lookup;  // 有 data-lookup 才打 API
+      if (key) jobs.push(loadLookup(key, el));
+    });
+    await Promise.all(jobs);
+
+    // 預設值（日期支援 today / today-120d ...）
+    (cfg.ParamDefs || []).forEach(def=>{
+      const el = document.getElementById(def.Name);
+      if (!el) return;
+      const defVal = el.dataset.default || def.DefaultValue || "";
+      if (def.Ui === 1 /* Date */ && typeof defVal === 'string' && defVal.startsWith('today')) {
+        el.value = todayOffset(defVal);
+      } else {
+        el.value = defVal;
+      }
+    });
+  }
+
+  // ====== 呼叫 SP ======
+  async function doSearch(){
+    const payload = { spName: cfg.SpName, params: {} };
+
+    (cfg.ParamDefs || []).forEach(def=>{
+      const el = document.getElementById(def.Name);
+      let v = el ? (el.value ?? "") : "";
+      // 後端希望不要 NULL，統一給空字串；UseId 預設 A001
+      if (def.Name === "UseId" && !v) v = "A001";
+      payload.params[def.Name] = v;
+    });
+
+    const res = await fetch('/api/Report/exec', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok){ alert(await res.text()); return; }
+
+    const data = await res.json();   // { Columns:[], Rows:[] }
+    // console.log('cols from API:', data.Columns);
+    // console.log('rows count:', Array.isArray(data.Rows) ? data.Rows.length : 0);
+    window.renderTable?.(data.Columns, data.Rows);
+  }
+
+  // ====== 繪表 ======
+  window.renderTable = function(apiColumns, rows){
+    const thead = document.getElementById('tableHead');
+    const tbody = document.getElementById('tableBody');
+
+    const dictFields = (window._tableFields || [])
+      .filter(f => f.Visible)
+      .sort((a,b) => (a.SerialNum ?? 0) - (b.SerialNum ?? 0));
+
+    // 後端欄位（忽略大小寫）；若沒給 Columns，就用第一列 rows 的 keys
+    let apiColsLower = [];
+    if (Array.isArray(apiColumns) && apiColumns.length) {
+      apiColsLower = apiColumns.map(c => String(c).toLowerCase());
+    } else if (Array.isArray(rows) && rows.length) {
+      apiColsLower = Object.keys(rows[0]).map(k => k.toLowerCase());
+    }
+
+    // 用忽略大小寫方式配對辭典欄位
+    let cols = dictFields.filter(f => apiColsLower.includes(String(f.FieldName).toLowerCase()));
+
+    // 若配不到就 fallback：把第一列的所有 key 全部顯示
+    if (!cols.length && Array.isArray(rows) && rows.length) {
+      const keys = Object.keys(rows[0]);
+      cols = keys.map(k => ({ FieldName: k, DisplayLabel: k, FormatStr: "" }));
+    }
+
+    // 表頭
+    thead.innerHTML = `<tr>${
+      cols.map(c => `<th>${(c.DisplayLabel || c.FieldName)}</th>`).join('')
+    }</tr>`;
+
+    // 格式化
+    function fmt(v, format) {
+      if (v == null || format === "") return v ?? "";
+      if (/^(yyyy\/MM\/dd|yyyy-MM-dd)$/.test(format)) {
+        const d = (typeof v === 'string') ? new Date(v) : v;
+        if (isNaN(d)) return v ?? "";
+        const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+        return format.includes('/') ? `${y}/${m}/${dd}` : `${y}-${m}-${dd}`;
+      }
+      if (typeof v === 'number' && /^#,#*0(\.[0#]+)?$/.test((format||'').replace(/ /g,''))) {
+        const m = format.match(/\.(0+|#+)?$/);
+        const max = m?.[0]?.length ? m[0].length-1 : 0;
+        return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: Math.max(0,max) });
+      }
+      return v;
+    }
+
+    // 表身
+    tbody.innerHTML = (rows || []).map(r => `<tr>${
+      cols.map(c => {
+        const raw = r[c.FieldName];
+        const text = fmt(raw, c.FormatStr || "");
+        return `<td>${text ?? ''}</td>`;
+      }).join('')
+    }</tr>`).join('');
+
+    document.getElementById('resultArea').style.display = '';
+  };
+
+   // ====== F3 辭典（欄位可視/中文/順序） ======
+  // 提供給 fieldDictModal.js 用
+  window._dictTableName = cfg.DictTableName || (cfg.TableName || "");
+  console.log('dict name =', window._dictTableName); // debug
+  function openFieldDict() {
+    const el = document.getElementById("fieldDictModal");
+    if (!el) return;
+
+    // 先載入 modal 內容（你的 fieldDictModal.js 會定義這個）
+    if (typeof window.initFieldDictModal === "function") {
+      // 帶 modalId，避免抓錯 tbody
+      window.initFieldDictModal(window._dictTableName, "fieldDictModal");
+    } else if (typeof window.loadFieldDict === "function") {
+      window.loadFieldDict(window._dictTableName);
+    }
+
+    // 顯示 Bootstrap Modal
+    const modal = new bootstrap.Modal(el);
+    modal.show();
+  }
+
+  // F3 熱鍵（避免在文字輸入中誤觸）
+  document.addEventListener("keydown", (e) => {
+    const tag = (e.target.tagName || "").toLowerCase();
+    const inText = tag === "input" || tag === "textarea" || e.target.isContentEditable;
+    if (e.key === "F3" && !inText) {
+      e.preventDefault();
+      openFieldDict();
+    }
+  });
+
+  // 儲存成功後，讓報表立刻套用最新中文/可視/順序
+  window.addEventListener("field-dict-saved", () => location.reload());
+
+
+  // 綁事件
+  document.addEventListener('DOMContentLoaded', () => {
+    initParams();
+    document.getElementById('btnSearch')?.addEventListener('click', e=>{
+      e.preventDefault();
+      doSearch();
+    });
+  });
+})();
+
+
+</script>

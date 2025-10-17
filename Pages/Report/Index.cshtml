@@ -1,9 +1,29 @@
 @page "/report"
 @model ReportPageModel
+@using PcbErpApi.Models
 @{
     Layout = "_Layout";
+    var fields = ViewData["Fields"] as List<TableFieldViewModel> ?? new();
+    var dictName = (ViewData["DictTableName"]?.ToString() ?? "SA000048");
 }
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
+
+<style>
+  /* ✅ 讓表頭與內容一律橫向顯示，避免中文字直書 */
+  #resultTable th, #resultTable td {
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+    transform: none !important;
+    white-space: nowrap;          /* 標題不要自動換行 */
+    vertical-align: middle;
+  }
+  /* 可視需要，讓表頭更好讀 */
+  #resultTable thead th {
+    background: #f5f8ff;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+</style>
 
 <div class="container my-4">
   <h3 class="text-primary fw-bold mb-3">訂單未交貨明細表</h3>
@@ -11,47 +31,39 @@
   <!-- 查詢區 -->
   <div class="card p-3 mb-4 shadow-sm">
     <div class="row g-3 align-items-end">
-      <!-- 1 起始交期 -->
       <div class="col-md-3">
         <label class="form-label">起始交期</label>
         <input type="date" id="BDelDate" class="form-control" placeholder="yyyy/MM/dd" />
       </div>
-      <!-- 2 截止交期 -->
       <div class="col-md-3">
         <label class="form-label">截止交期</label>
         <input type="date" id="EDelDate" class="form-control" placeholder="yyyy/MM/dd" />
       </div>
-      <!-- 3 客戶代碼 (下拉) -->
       <div class="col-md-3">
         <label class="form-label">客戶代碼</label>
         <select id="CustomerId" class="form-select">
           <option value="">(不限)</option>
         </select>
       </div>
-      <!-- 12 客戶料號(模糊) -->
       <div class="col-md-3">
         <label class="form-label">客戶料號(模糊)</label>
         <input type="text" id="CustomerPartNum" class="form-control" />
       </div>
 
-      <!-- 5 品號(模糊) -->
       <div class="col-md-3">
         <label class="form-label">品號(模糊)</label>
         <input type="text" id="PartNum" class="form-control" />
       </div>
-      <!-- 4 上層客戶（原系統名稱空，保留為文字） -->
       <div class="col-md-3">
         <label class="form-label">上層客戶</label>
         <input type="text" id="SourCustomerId" class="form-control" />
       </div>
-      <!-- 6 公司別 (下拉，預設 A001) -->
       <div class="col-md-3">
         <label class="form-label">公司別</label>
         <select id="UseId" class="form-select">
           <option value="">(不限)</option>
         </select>
       </div>
-      <!-- 7 是否暫停 -->
       <div class="col-md-3">
         <label class="form-label">是否暫停</label>
         <select id="IsHold" class="form-select">
@@ -61,7 +73,6 @@
         </select>
       </div>
 
-      <!-- 8 訂單種類 -->
       <div class="col-md-3">
         <label class="form-label">訂單種類</label>
         <select id="PoType" class="form-select">
@@ -70,7 +81,6 @@
           <option value="255">不限</option>
         </select>
       </div>
-      <!-- 9 內製/外包 -->
       <div class="col-md-3">
         <label class="form-label">內製/外包</label>
         <select id="OutNotIn" class="form-select">
@@ -79,7 +89,6 @@
           <option value="255">不限</option>
         </select>
       </div>
-      <!-- 10 包含費用 -->
       <div class="col-md-3">
         <label class="form-label">包含費用</label>
         <select id="IncludeCharge" class="form-select">
@@ -88,7 +97,6 @@
           <option value="2">僅顯示費用</option>
         </select>
       </div>
-      <!-- 11 交易條件 -->
       <div class="col-md-3">
         <label class="form-label">交易條件</label>
         <select id="ShipTerm" class="form-select">
@@ -113,8 +121,23 @@
   </div>
 </div>
 
+<!-- 依賴：jQuery + Bootstrap JS（Modal 用） -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- 把欄位辭典（可視、中文、順序、格式）送給前端 -->
 <script>
-async function loadSelect(key, elId, defaultVal) {
+  window._dictTableName = "@dictName";
+  window._tableFields = @Html.Raw(Json.Serialize(fields));   // 只會包含 Visible=1 的欄位，已依 SerialNum 排序
+</script>
+
+<!-- F3 共用辭典 Modal（直接用模型清單） -->
+@await Html.PartialAsync("_FieldDictModal", Model.FieldDictList, ViewData)
+<script src="~/js/fieldDictModal.js"></script>
+
+<script>
+// ============== 下拉載入 ==============
+async function loadSelect(key, elId, def) {
   const res = await fetch(`/api/Report/lookup/${key}`);
   if (!res.ok) return;
   const data = await res.json();
@@ -125,18 +148,18 @@ async function loadSelect(key, elId, defaultVal) {
     opt.textContent = o.text ?? '';
     el.appendChild(opt);
   });
-  if (defaultVal != null) el.value = defaultVal;
+  if (def != null) el.value = def;
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // 動態載入下拉：客戶、公司別、交易條件
   await Promise.all([
-    loadSelect('customer', 'CustomerId', ''), // 不預設
+    loadSelect('customer', 'CustomerId', ''),
     loadSelect('bu',       'UseId',     'A001'),
     loadSelect('shipterm', 'ShipTerm',  '')
   ]);
 });
 
+// ============== 呼叫報表 SP ==============
 document.getElementById('btnSearch').addEventListener('click', async () => {
   const params = {
     BDelDate:        document.getElementById('BDelDate').value || null,
@@ -160,25 +183,82 @@ document.getElementById('btnSearch').addEventListener('click', async () => {
     body: JSON.stringify(req)
   });
 
-  if (!res.ok) {
-    alert(await res.text());
-    return;
-  }
+  if (!res.ok) { alert(await res.text()); return; }
 
   const data = await res.json();
   renderTable(data.Columns, data.Rows);
 });
 
-function renderTable(columns, rows) {
+// ============== 格式化（日期 / 數字） ==============
+function fmt(v, format) {
+  if (v == null || format === "") return v ?? "";
+  if (/^(yyyy\/MM\/dd|yyyy-MM-dd)$/.test(format)) {
+    const d = (typeof v === 'string') ? new Date(v) : v;
+    if (isNaN(d)) return v ?? "";
+    const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+    return format.includes('/') ? `${y}/${m}/${dd}` : `${y}-${m}-${dd}`;
+  }
+  if (typeof v === 'number' && /^#,#*0(\.[0#]+)?$/.test((format||'').replace(/ /g,''))) {
+    const m = format.match(/\.(0+|#+)?$/);
+    const max = m?.[0]?.length ? m[0].length-1 : 0;
+    return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: Math.max(0,max) });
+  }
+  return v;
+}
+
+// ============== 以辭典欄位繪表（只顯示可視欄位，依序號） ==============
+function renderTable(apiColumns, rows) {
+  // 後端已過濾 Visible=1 並按 SerialNum 排序，但再保險一次
+  const dictFields = (window._tableFields || [])
+    .filter(f => f.Visible)
+    .sort((a,b) => (a.SerialNum||0) - (b.SerialNum||0));
+
+  // 僅取本次 SP 有回傳的欄位
+  const cols = dictFields.filter(f => apiColumns.includes(f.FieldName));
+
   const thead = document.getElementById('tableHead');
   const tbody = document.getElementById('tableBody');
 
-  thead.innerHTML = `<tr>${columns.map(c=>`<th>${c}</th>`).join('')}</tr>`;
-  tbody.innerHTML = rows.map(r => {
-    const tds = columns.map(c => `<td>${r[c] ?? ''}</td>`).join('');
-    return `<tr>${tds}</tr>`;
-  }).join('');
+  thead.innerHTML = `<tr>${
+    cols.map(c => `<th>${(c.DisplayLabel || c.FieldName)}</th>`).join('')
+  }</tr>`;
+
+  tbody.innerHTML = rows.map(r => `<tr>${
+    cols.map(c => {
+      const raw = r[c.FieldName];
+      const text = fmt(raw, c.FormatStr || "");
+      return `<td>${text ?? ''}</td>`;
+    }).join('')
+  }</tr>`).join('');
 
   document.getElementById('resultArea').style.display = '';
 }
+
+// ============== F3 快捷鍵（保留），移除右上角齒輪按鈕 ==============
+const FIELD_DICT_MODAL_ID = "fieldDictModal";
+function openFieldDict() {
+  const el = document.getElementById(FIELD_DICT_MODAL_ID);
+  if (!el) return;
+
+  if (typeof window.initFieldDictModal === "function") {
+    window.initFieldDictModal(window._dictTableName);
+  } else if (typeof window.loadFieldDict === "function") {
+    window.loadFieldDict(window._dictTableName);
+  }
+
+  const modal = new bootstrap.Modal(el);
+  modal.show();
+}
+
+document.addEventListener("keydown", (e) => {
+  const tag = (e.target.tagName || "").toLowerCase();
+  const inText = tag === "input" || tag === "textarea" || e.target.isContentEditable;
+  if (e.key === "F3" && !inText) {
+    e.preventDefault();
+    openFieldDict();
+  }
+});
+
+// F3 視窗儲存成功後，重新整理使中文/可視/順序立即生效
+window.addEventListener('field-dict-saved', () => location.reload());
 </script>
