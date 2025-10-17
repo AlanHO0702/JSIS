@@ -16,7 +16,7 @@ public class AJNdClassMoneyModel : PageModel
         _context = context;
     }
 
-    public int PageSize { get; set; } = 50; // 每頁筆數預設為 50
+    public int PageSize { get; set; } = 10; // 每頁筆數預設為 50
     public int PageNumber { get; set; } = 1; // 目前頁碼，預設 1
     public int TotalCount { get; set; } // 總資料筆數
     public int TotalPages => (int)Math.Ceiling((TotalCount) / (double)PageSize); // 計算總頁數
@@ -50,9 +50,15 @@ public class AJNdClassMoneyModel : PageModel
         // 若有選擇幣別，載入該幣別的匯率歷史
         if (SelectedMoneyCode.HasValue)
         {
-            RateHistories = await _context.AJNdClassMoneyHis
+            var query = _context.AJNdClassMoneyHis
                 .Where(h => h.MoneyCode == SelectedMoneyCode.Value)
-                .OrderByDescending(h => h.RateDate)
+                .OrderByDescending(h => h.RateDate);
+            
+            TotalCount = await query.CountAsync();
+
+            RateHistories = await query
+                .Skip((PageNumber-1) * PageSize)
+                .Take(PageSize)
                 .ToListAsync();
         }
     }
