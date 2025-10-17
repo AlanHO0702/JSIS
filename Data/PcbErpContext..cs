@@ -25,6 +25,8 @@ namespace PcbErpApi.Data
         public virtual DbSet<CurdOcxtableSetUp> CurdOcxtableSetUp { get; set; }
         public virtual DbSet<CurdPaperPaper> CurdPaperPaper { get; set; }
         public virtual DbSet<CurdBu> CurdBus { get; set; }
+        public virtual DbSet<AJNdClassMoney> AJNdClassMoney { get; set; }
+        public virtual DbSet<AJNdClassMoneyHis> AJNdClassMoneyHis { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<CurdUser>(entity =>
@@ -1357,6 +1359,22 @@ namespace PcbErpApi.Data
                 prop.SetScale(8);
             }
 
+            modelBuilder.Entity<AJNdClassMoney>(entity =>
+            {
+                entity.HasKey(e => new { e.MoneyCode, e.UseId });
+            });
+
+            // 設定 AJNdClassMoneyHis 的複合主鍵
+            modelBuilder.Entity<AJNdClassMoneyHis>()
+                .HasKey(his => new { his.MoneyCode, his.UseId, his.RateDate });
+
+            // 設定關聯關係：一個幣別對應多筆歷史記錄
+            modelBuilder.Entity<AJNdClassMoneyHis>()
+                .HasOne(his => his.Money)
+                .WithMany(m => m.Histories)
+                .HasForeignKey(his => new { his.MoneyCode, his.UseId })
+                .HasPrincipalKey(m => new { m.MoneyCode, m.UseId })
+                .OnDelete(DeleteBehavior.Cascade);
 
             OnModelCreatingPartial(modelBuilder);
         }

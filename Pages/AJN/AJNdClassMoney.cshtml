@@ -12,67 +12,128 @@
     var selectedCode = Model.SelectedMoneyCode; // 目前選中的幣別
 }
 
-<h2>幣別匯率主檔</h2>
+<style>
+    body { font-size: 13px; }
+    .currency-container { padding: 10px; font-family: "Microsoft JhengHei", Arial, sans-serif; max-width: 1400px; margin: 0 auto; }
+    .currency-main-section { margin-bottom: 10px; background-color: white; }
+    .currency-main-title { background-color: #f8f9fa; padding: 6px 10px; font-weight: bold; border-bottom: 1px solid #dee2e6; font-size: 14px; }
+    .currency-history-section { background-color: white; }
+    .currency-history-title { background-color: #e7f3ff; padding: 6px 10px; font-weight: bold; border-bottom: 1px solid #dee2e6; font-size: 14px; }
+    .currency-table { width: 100%; border-collapse: collapse; margin: 0; table-layout: fixed; font-size: 12px; }
+    .currency-table thead { background-color: #d4e6f1; }
+    .currency-table th { border: 1px solid #dee2e6; padding: 5px 8px; text-align: center; font-weight: bold; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .currency-table td { border: 1px solid #dee2e6; padding: 5px 8px; text-align: center; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .currency-table tbody tr { background-color: white; cursor: pointer; }
+    .currency-table tbody tr:hover { background-color: #e3f2fd; }
+    .currency-table tbody tr.selected { background-color: #87ceeb !important; }
+    .text-right { text-align: right !important; }
+    .row-number { width: 40px; background-color: #f0f0f0; }
+    .history-table { width: 100%; border-collapse: collapse; margin: 0; table-layout: fixed; font-size: 12px; }
+    .history-table thead { background-color: #e9ecef; }
+    .history-table th { border: 1px solid #dee2e6; padding: 5px 8px; text-align: center; font-weight: bold; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .history-table td { border: 1px solid #dee2e6; padding: 5px 8px; text-align: center; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .history-table tbody tr { background-color: white; }
+    .history-table tbody tr:hover { background-color: #f8f9fa; }
+    .history-table tbody tr:first-child { background-color: #cce5ff; }
+</style>
 
-<!-- 🔹 主檔表格（幣別） -->
-<table class="table table-bordered table-sm">
-    <thead>
-        <tr>
-            <th>幣別</th>
-            <th>英文名稱</th>
-            <th>匯率</th>
-            <th>科目代號</th>
-            <th>子科目代號</th>
-            <th>操作</th>
-        </tr>
-    </thead>
-    <tbody>
-        @foreach (var item in Model.ExchangeRates)
-        {
-            <tr class="@(item.MoneyCode == selectedCode ? "table-info" : "")">
-                <td>@item.MoneyCode</td>
-                <td>@item.EnglishName</td>
-                <td>@(item.RateToNT?.ToString("N3"))</td>
-                <td>@item.MoneyAccId</td>
-                <td>@item.MoneySubAccId</td>
-                <td>
-                    <form method="get">
-                        <input type="hidden" name="selected" value="@item.MoneyCode" />
-                        <button type="submit" class="btn btn-sm btn-outline-primary">查看匯率</button>
-                    </form>
-                </td>
-            </tr>
-        }
-    </tbody>
-</table>
-
-<!-- 🔸 明細表格（匯率歷史） -->
-@if (Model.RateHistories != null && Model.RateHistories.Any())
-{
-    <h4 class="mt-4">匯率歷史資料（@selectedCode）</h4>
-    <table class="table table-striped table-sm">
-        <thead>
-            <tr>
-                <th>生效日</th>
-                <th>中間匯率(出納)</th>
-                <th>海關買進匯率</th>
-                <th>海關賣出匯率</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var rate in Model.RateHistories)
-            {
+<div class="currency-container">
+    
+    <!-- 第一階段：幣別匯率設定 -->
+    <div class="currency-main-section">
+        <div class="currency-main-title">幣別匯率設定</div>
+        <table class="currency-table">
+            <thead>
                 <tr>
-                    <td>@rate.RateDate.ToString("yyyy/MM/dd")</td>
-                    <td>@(rate.RateToNT?.ToString("N3"))</td>
-                    <td>@(rate.RateToBuy?.ToString("N3"))</td>
-                    <td>@(rate.RateToSell?.ToString("N3"))</td>
+                    <th style="width: 6%;">項次</th>
+                    <th style="width: 15%;">幣別名稱</th>
+                    <th style="width: 15%;">英文名稱</th>
+                    <th style="width: 20%;">匯率</th>
+                    <th style="width: 22%;">幣別科目</th>
+                    <th style="width: 22%;">幣別子科目</th>
                 </tr>
+            </thead>
+            <tbody>
+                @{ int rowIndex = 1; }
+                @foreach (var item in Model.ExchangeRates)
+                {
+                    var isSelected = item.MoneyCode == selectedCode;
+                    var rowClass = isSelected ? "selected" : "";
+                    <tr class="@rowClass currency-row" data-money-code="@item.MoneyCode" onclick="selectCurrency('@item.MoneyCode')">
+                        <td class="row-number">@rowIndex</td>
+                        <td>@item.MoneyName</td>
+                        <td>@item.EnglishName</td>
+                        <td class="text-right">@(item.RateToNT?.ToString("N3") ?? "")</td>
+                        <td>@item.MoneyAccId</td>
+                        <td>@item.MoneySubAccId</td>
+                    </tr>
+                    rowIndex++;
+                }
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- 第二階段：幣別匯率歷史 -->
+    <div class="currency-history-section">
+        <div class="currency-history-title">幣別匯率歷史</div>
+        <table class="history-table">
+            <thead>
+                <tr>
+                    <th style="width: 25%;">生效日</th>
+                    <th style="width: 25%;">中間匯率</th>
+                    <th style="width: 25%;">直評匯率</th>
+                    <th style="width: 25%;">海關買進匯率/海關賣出匯率</th>
+                </tr>
+            </thead>
+            <tbody id="historyTableBody">
+                @if (Model.RateHistories != null && Model.RateHistories.Any())
+                {
+                    @foreach (var rate in Model.RateHistories)
+                    {
+                        <tr>
+                            <td>@rate.RateDate.ToString("yyyy/MM/dd")</td>
+                            <td class="text-right">@(rate.RateToNT?.ToString("N3") ?? "-")</td>
+                            <td class="text-right">@(rate.RateToBuy?.ToString("N3") ?? "-")</td>
+                            <td class="text-right">@(rate.RateToSell?.ToString("N3") ?? "-")</td>
+                        </tr>
+                    }
+                }
+                else
+                {
+                    <tr><td colspan="4" style="text-align:center;">請選擇上方幣別以查看歷史匯率</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    function selectCurrency(moneyCode) {
+        // 先移除原本選取的樣式
+        document.querySelectorAll('.currency-row').forEach(row => {
+            row.classList.remove('selected');
+        });
+
+        // 加上目前點選的樣式
+        const selectedRow = document.querySelector(`[data-money-code="${moneyCode}"]`);
+        if (selectedRow) {
+            selectedRow.classList.add('selected');
+        }
+
+        // ✅ 改這行：參數名稱要對應後端的 SelectedMoneyCode
+        const currentUrl = new URL(window.location.href);
+        currentUrl.searchParams.set("SelectedMoneyCode", moneyCode);
+        window.location.href = currentUrl.toString();
+    }
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        const selectedCode = '@selectedCode';
+        if (selectedCode) {
+            const selectedRow = document.querySelector(`[data-money-code="${selectedCode}"]`);
+            if (selectedRow) {
+                selectedRow.classList.add('selected');
+                selectedRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
-        </tbody>
-    </table>
-}
-else if (selectedCode != null)
-{
-    <p>查無幣別 <strong>@selectedCode</strong> 的匯率歷史資料。</p>
-}
+        }
+    }); 
+</script>
