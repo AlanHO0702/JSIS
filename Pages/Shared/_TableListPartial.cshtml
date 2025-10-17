@@ -3,6 +3,7 @@
 
 @{
     var fields = ViewData["Fields"] as List<TableFieldViewModel>;
+    if (fields == null) { <text>查無欄位設定</text>; return; }
     var items = Model.Items;
     var totalCount = Model.TotalCount;
     var pageNumber = Model.PageNumber;
@@ -15,9 +16,15 @@
     var detailRouteTemplate = ViewData["SubRouteTemplate"] as string ?? "/SpodOrderSubs/{PaperNum}";
     var lookupMapData = ViewData["LookupDisplayMap"] as Dictionary<string, Dictionary<string, string>>;
     var keyFieldName = ViewData["KeyFieldName"]?.ToString() ?? "PaperNum";
-
-    
+    var tableName = ViewData["DictTableName"]?.ToString() ?? "SPOdOrderMain";
 }
+<script>
+    window._tableName = "@tableName";
+    window._tableFields = @Html.Raw(Json.Serialize(fields));
+    window._lookupMapData = @Html.Raw(Json.Serialize(lookupMapData ?? new Dictionary<string, Dictionary<string, string>>()));
+    window._keyFieldName = "@keyFieldName";
+    window._detailRouteTemplate = "@detailRouteTemplate";
+</script>
 
 <style>
     body { background: #f7f9fb; }
@@ -75,6 +82,24 @@
         font-size: 0.93em;
         color: #286bb5;
     }
+    .table-hscroll-proxy{
+    position: sticky;     /* 黏在視窗頂端 */
+    top: 0;               /* 如果上面有固定工具列，改成相對高度 */
+    z-index: 100;         /* 比表頭更高，避免被蓋住 */
+    background: #fff;     /* 看起來乾淨 */
+    }
+
+    .hscroll-track{
+    height: 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-gutter: stable both-edges; /* 留出滾動條空間，避免忽隱忽現 */
+    border-bottom: 1px solid #eaeef4;
+    }
+
+    .hscroll-spacer{ height: 1px; }  /* 只負責撐寬度 */
+
+
 
 </style>
 
@@ -82,20 +107,26 @@
     <div class="title-row mb-4 border-bottom pb-2">
         <div style="display:flex;align-items:center;gap:16px;">
             <h2 class="mb-0 text-primary" style="font-weight:700;letter-spacing:3px;">@ViewData["TableTitle"]</h2>
-            <button id="btnAddNew" class="btn btn-primary" style="font-weight:600;">新增</button>
-            <button id="btnBatchDelete" class="btn btn-danger" style="font-weight:600;">作廢</button>
-            <button id="btnSearch" class="btn btn-info" style="font-weight:600;">查詢</button>
+            @await Html.PartialAsync("_TableToolbar", new TableToolbarModel {
+                SearchBtnId = "btnSearch",
+                AddBtnId = "btnAddNew",
+                DeleteBtnId = "btnBatchDelete",
+                QueryFields = ViewData["QueryFields"] as List<QueryFieldViewModel>,
+                ModalId = "searchModal",
+                ReportSpName = ViewData["ReportSpName"]?.ToString() ?? ""   // 👈 從外層再傳進來
+            })
         </div>
-        <span class="order-count">
+        <span class="order-count" id="orderCountInfo">
             共 <span style="font-weight:bold">@Model.TotalCount</span> 筆，
             顯示第 @(((Model.PageNumber - 1) * Model.PageSize) + 1)
             ~ @(Math.Min(Model.PageNumber * Model.PageSize, Model.TotalCount)) 筆
-        </span>  
+        </span>
     </div>
-    <!-- 查詢條件彈窗 -->
-    <div class="modal fade" id="searchModal" tabindex="-1" aria-labelledby="searchModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        @await Html.PartialAsync("_QueryPanelPartial", ViewData["QueryFields"] as List<QueryFieldViewModel>)
+
+    <!-- 頂端同步卷軸（放在 table-wrap 外面） -->
+    <div class="table-hscroll-proxy" id="tableHScrollTop">
+    <div class="hscroll-track" id="hscrollTop">
+        <div class="hscroll-spacer" id="hscrollSpacer"></div>
     </div>
     </div>
 
@@ -111,74 +142,13 @@
                     }
                 </tr>
             </thead>
-            <tbody>
-                @foreach(var item in items)
-                {
-                    // 取得 key（如 PaperNum）來組路徑
-                    // route 替換
-                    var keyValue = item.GetType().GetProperty(keyFieldName)?.GetValue(item, null)?.ToString();
-                    var rowUrl = "";
-                    if (!string.IsNullOrEmpty(subRouteTemplate) && !string.IsNullOrEmpty(keyValue))
-                    {
-                        rowUrl = subRouteTemplate.Replace("{PaperNum}", keyValue); // 這邊還是用 {PaperNum} 字串
-                    }
-
-                    <tr class="row-link" data-url="@rowUrl" data-paper-num="@keyValue">
-                        @foreach (var field in fields)
-                        {
-                            var keyObj = item.GetType().GetProperty(keyFieldName)?.GetValue(item);
-                            var paperKey = keyObj?.ToString();
-                            string valStr = "";
-                            Dictionary<string, string>? lookupMap = null;
-                            string display = "";
-
-                            if (!string.IsNullOrEmpty(paperKey) &&
-                                lookupMapData != null &&
-                                lookupMapData.TryGetValue(paperKey, out lookupMap) &&
-                                lookupMap != null &&
-                                lookupMap.TryGetValue(field.FieldName, out display))
-                            {
-                                valStr = display;
-                            }
-                            else
-                            {
-                                var rawValue = item.GetType().GetProperty(field.FieldName)?.GetValue(item, null);
-                                if (rawValue != null)
-                                {
-                                    if (!string.IsNullOrEmpty(field.FormatStr))
-                                    {
-                                        if (field.DataType?.ToLower() == "date" && rawValue is DateTime dt)
-                                        {
-                                            valStr = dt.ToString(field.FormatStr); // 例如 yyyy/MM/dd
-                                        }
-                                        else if (field.DataType?.ToLower() == "number" && rawValue is IFormattable fmt)
-                                        {
-                                            valStr = fmt.ToString(field.FormatStr, null); // 例如 ###,###,##0.00
-                                        }
-                                        else
-                                        {
-                                            valStr = rawValue.ToString();
-                                        }
-                                    }
-                                    else
-                                    {
-                                        valStr = rawValue.ToString();
-                                    }
-                                }
-                            }
-                            
-                            <td>@valStr</td>
-                        }
-                    </tr>
-
-                }
+            <tbody id="dataTbody"></tbody>
+                <!-- 資料由 JS 動態產生 -->
             </tbody>
         </table>
-    <div class="pagination-bar">
-        @if (paginationVm != null)
-        {
-            @await Html.PartialAsync("_Pagination", paginationVm)
-        }
+    <div class="pagination-bar" id="paginationBar"> 
+        <!-- 資料由 JS 動態產生 -->
+        @if (paginationVm != null) { @await Html.PartialAsync("_Pagination", paginationVm) }
     </div>
 </div>
 
@@ -187,201 +157,488 @@
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
+<!-- ✅ 在這裡插入 shim -->
 <script>
-    let selectedPaperNum = null;
-    const addApiUrl = '@addApiUrl';
-    const detailRouteTemplate = '@detailRouteTemplate';
+  (function () {
+    function pad2(n){ return String(n).padStart(2,'0'); }
+    function toYYYYMMDD(input){
+      if (!input) return input;
 
-    document.addEventListener("DOMContentLoaded", function () {
-        // 點擊行：選取，不跳頁
-        document.querySelectorAll(".row-link").forEach(function(row) {
-            row.addEventListener("click", function(e) {
-                document.querySelectorAll(".row-link.selected").forEach(r => r.classList.remove("selected"));
-                row.classList.add("selected");
-                selectedPaperNum = row.getAttribute("data-paper-num");
-            });
+      if (input instanceof Date && !isNaN(input)) {
+        return `${input.getFullYear()}-${pad2(input.getMonth()+1)}-${pad2(input.getDate())}`;
+      }
 
-            // 雙擊行：跳單身
-            row.addEventListener("dblclick", function() {
-                var url = row.getAttribute("data-url");
-                if(url) window.location = url;
-            });
-        });
+      const s = String(input).trim();
+      // 2025/10/15 或 2025.10.15 或 2025-10-15
+      if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(s)) {
+        const [y, m, d] = s.split(/[-/.]/).map(Number);
+        return `${y}-${pad2(m)}-${pad2(d)}`;
+      }
+      // 20251015
+      if (/^\d{8}$/.test(s)) {
+        return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
+      }
+      // 已是 yyyy-mm-dd(或後面有時間)
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
 
-        // 新增按鈕
-        document.getElementById("btnAddNew").addEventListener("click", async function() {
-            const result = await Swal.fire({
-                title: '確定要新增一張新單據？',
-                icon: 'question',
-                showCancelButton: true,
-                confirmButtonText: '確定',
-                cancelButtonText: '取消'
-            });
-            if (!result.isConfirmed) return;
+      return input;
+    }
 
-            const resp = await fetch(addApiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({})
-            });
+    if (!window.normalizeForDateInput) {
+      window.normalizeForDateInput = function (el, value) {
+        const type = (el?.type || '').toLowerCase();
+        const hint = (el?.dataset?.type || el?.dataset?.fieldType || el?.dataset?.field || '').toLowerCase();
 
-            if(resp.ok) {
-                const data = await resp.json();
-                const paperNum = data.paperNum || data.PaperNum || "";
-                if(paperNum) {
-                    var jumpUrl = detailRouteTemplate.replace("{PaperNum}", paperNum);
-                    window.location = jumpUrl;
-                } else {
-                    await Swal.fire({ icon: 'success', title: '新增成功，但未取得單號！' });
-                    location.reload();
-                }
-            } else {
-                await Swal.fire({ icon: 'error', title: '建立失敗！' });
-            }
-        });
-
-        // 作廢按鈕
-        document.getElementById("btnBatchDelete").addEventListener("click", async function() {
-            if (!selectedPaperNum) {
-                await Swal.fire({
-                    icon: 'warning',
-                    title: '請先點選一筆資料',
-                    confirmButtonText: '確定'
-                });
-                return;
-            }
-            const result = await Swal.fire({
-                title: '確定要作廢這筆單據？',
-                icon: 'question',
-                showCancelButton: true,
-                confirmButtonText: '確定',
-                cancelButtonText: '取消'
-            });
-            if (!result.isConfirmed) return;
-
-            let resp = await fetch(`/api/SPOdOrderMain/${selectedPaperNum}`, { method: "DELETE" });
-            if (resp.ok) {
-                await Swal.fire({
-                    icon: 'success',
-                    title: '作廢成功！'
-                });
-                location.reload();
-            } else {
-                let errorMsg = "作廢失敗！";
-                try {
-                    let result = await resp.json();
-                    if (result.error) errorMsg = result.error;
-                } catch (e) { }
-                await Swal.fire({
-                    icon: 'error',
-                    title: errorMsg
-                });
-            }
-        });
-
-         // ✅ 拖曳表頭欄位
-        const headerRow = document.getElementById("table-header-row");
-
-        if (headerRow) {
-           Sortable.create(headerRow, {
-                        animation: 150,
-                        swap: true,                     // ✅ 使用 swap 模式
-                        swapClass: 'highlight',         // ✅ 拖曳時加 highlight 效果
-                        ghostClass: 'ghost',            // 可選：拖曳時原位置樣式
-                        onEnd: function () {
-                            const newOrder = Array.from(headerRow.children).map((th, index) => ({
-                                fieldName: th.dataset.field,
-                                serialNum: index + 1
-                            }));
-
-                            fetch('/api/TableFieldLayout/SaveSerialOrder', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    tableName: 'SPOdOrderMain',
-                                    fieldOrders: newOrder
-                                })
-                            })
-                            .then(res => {
-                                if (!res.ok) throw new Error("更新失敗");
-                                return res.json();
-                            })
-                            .then(() => {
-                                location.reload();
-                            })
-                            .catch(err => {
-                                console.error(err);
-                                Swal.fire({ icon: 'error', title: '欄位順序儲存失敗！' });
-                            });
-                        }
-                    });
-
+        // date
+        if (type === 'date' || hint.includes('date')) {
+          return toYYYYMMDD(value);
         }
-           // --- 下面是新加的"雙擊表頭欄位排序" ---
-            let lastSort = { col: null, asc: true };
 
-            function getCellValue(tr, idx) {
-                const cell = tr.children[idx];
-                // 數字欄位自動去除逗號
-                let val = cell ? cell.textContent.trim().replace(/,/g, '') : '';
-                if (val === '') return 0; // 空值視為0
-                if (!isNaN(val)) return parseFloat(val); // 若為數字就轉 float
-                return val;
-            }
-
-            document.querySelectorAll("th.sortable").forEach(function (th, idx) {
-                th.addEventListener("dblclick", function () {
-                    const table = th.closest('table');
-                    const tbody = table.querySelector('tbody');
-                    const rows = Array.from(tbody.querySelectorAll('tr'));
-                    const colIdx = idx;
-
-                    // 切換正序/反序
-                    let asc = true;
-                    if (lastSort.col === colIdx) asc = !lastSort.asc;
-                    lastSort = { col: colIdx, asc: asc };
-
-                    rows.sort((a, b) => {
-                        let aVal = getCellValue(a, colIdx);
-                        let bVal = getCellValue(b, colIdx);
-
-                        // 數字/日期排數字，其他欄位用字串
-                        if (typeof aVal === "number" && typeof bVal === "number") {
-                            return asc ? aVal - bVal : bVal - aVal;
-                        }
-                        // 字串排序（不區分大小寫）
-                        aVal = aVal + '';
-                        bVal = bVal + '';
-                        return asc ? aVal.localeCompare(bVal, 'zh-Hant') : bVal.localeCompare(aVal, 'zh-Hant');
-                    });
-
-                    // 重新插入排序後的 row
-                    rows.forEach(tr => tbody.appendChild(tr));
-                });
-            });
-
-            // 查詢按鈕
-            document.getElementById('btnSearch').addEventListener('click', function () {
-                var modal = new bootstrap.Modal(document.getElementById('searchModal'));
-                modal.show();
-            });
-
-            document.getElementById('searchForm').addEventListener('submit', function (e) {
-                e.preventDefault();
-                // 取出查詢欄位
-                const params = new URLSearchParams(new FormData(this)).toString();
-                // 跳頁帶參數最簡單
-                window.location = `?${params}`;
-            });
-
-    });
-
-    window.addEventListener('pageshow', function (event) {
-        if (event.persisted || (window.performance && window.performance.getEntriesByType("navigation")[0]?.type === "back_forward")) {
-            location.reload();
+        // datetime-local: 'yyyy/mm/dd hh:mm' -> 'yyyy-mm-ddThh:mm'
+        if ((type === 'datetime-local' || hint.includes('datetime')) && typeof value === 'string') {
+          const m = value.trim().match(/^(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{8})\s+(\d{1,2}:\d{2})(?::\d{2})?$/);
+          if (m) {
+            const d = toYYYYMMDD(m[1]);
+            const t = m[2].slice(0,5);
+            return `${d}T${t}`;
+          }
         }
-    });
 
-
+        return value;
+      };
+    }
+  })();
 </script>
+
+<script src="~/js/toolbarHandler.js"></script>
+
+<script>
+/* ========= 1) 全域變數與常用函式：先宣告，避免 ReferenceError ========= */
+
+let selectedPaperNum = null;
+const addApiUrl = '@addApiUrl';
+const detailRouteTemplate = '@detailRouteTemplate';
+// 有 busyFetch 就用它，否則退回 fetch
+const http = (url, init, msg) =>
+  (window.busyFetch ? window.busyFetch(url, init, msg) : fetch(url, init));
+
+function saveQueryState(filters, pageNumber) {
+  localStorage.setItem("orderListQueryFilters", JSON.stringify(filters));
+  localStorage.setItem("orderListPageNumber", String(pageNumber));
+}
+function loadQueryState() {
+  const filtersStr = localStorage.getItem("orderListQueryFilters");
+  const pageStr = localStorage.getItem("orderListPageNumber");
+  return {
+    filters: filtersStr ? JSON.parse(filtersStr) : null,
+    pageNumber: pageStr ? parseInt(pageStr) : null
+  };
+}
+
+// 這個必須放很前面，供 ToolbarHandler 與回填使用
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function looksLikeDateField(el) {
+  const t  = (el?.getAttribute('type') || '').toLowerCase();
+  const n  = (el?.name || '').toLowerCase();
+  const df = (el?.dataset?.field || '').toLowerCase();
+  const ph = (el?.placeholder || '').toLowerCase();
+  return t === 'date' || n.includes('date') || df.includes('date') || ph.includes('yyyy');
+}
+
+function normalizeForInput(el, val) {
+  if (val == null) return val;
+  let s = String(val).trim();
+  if (!looksLikeDateField(el)) return s;
+
+  if (/^\d{4}\/\d{2}\/\d{2}$/.test(s)) return s.replace(/\//g, '-');            // 2025/08/01
+  if (/^\d{8}$/.test(s))               return s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6); // 20250801
+  if (/^\d{4}-\d{2}-\d{2}/.test(s))    return s.slice(0,10);                    // 2025-08-01T...
+  return s;
+}
+
+const needDrop = v => typeof v === 'string' && /select\s|\bgetdate\b|\bdateadd\b/i.test(v);
+
+// 先宣告，後面會賦值
+let lastQueryFilters = [];
+
+// CSS.escape polyfill（保險）
+if (typeof CSS === 'undefined' || typeof CSS.escape !== 'function') {
+  window.CSS = window.CSS || {};
+  CSS.escape = s => String(s).replace(/([^\w-])/g, '\\$1');
+}
+
+/* ========= 2) 還原查詢條件（安全版） ========= */
+function restoreSearchFormSafe(formEl, saved) {
+  if (!formEl) return;
+  try { if (typeof saved === 'string') saved = JSON.parse(saved); } catch { saved = null; }
+  if (!Array.isArray(saved) || !saved.length) return;
+
+  // 同時建立兩種索引：byKey 與 byField[陣列]
+  const byKey = Object.create(null);
+  const byField = Object.create(null);
+  saved.forEach(f => {
+    if (!f) return;
+    if (f.Key) byKey[f.Key] = f;
+    const fld = f.Field || '';
+    if (!byField[fld]) byField[fld] = [];
+    byField[fld].push(f);
+  });
+
+  const valueEls = Array.from(
+    formEl.querySelectorAll('[name]:not([name^="Cond_"]):not([type="hidden"])')
+  );
+
+  const namePos = Object.create(null);
+  valueEls.forEach(el => {
+    const name = el.name;
+    if (!name || name === '__RequestVerificationToken') return;
+
+    const idx = namePos[name] = (namePos[name] ?? 0);
+    namePos[name]++;
+
+    // 命中順序
+    let hit =
+      byKey[`${name}#${idx}`] ||
+      (byField[name] && byField[name][idx]) ||
+      (el.dataset.field && byField[el.dataset.field] && byField[el.dataset.field][idx]) ||
+      (byField[name] && byField[name][0]);
+
+    if (!hit) return;
+
+    // ✅ 改成（保護 + 不破壞既有值）：
+    const v = (typeof window.normalizeForDateInput === 'function')
+      ? window.normalizeForDateInput(el, hit.Value)
+  : hit.Value;
+    if (el.type === 'date') {
+      if (DATE_RE.test(String(v))) el.value = v; // 僅接受 yyyy-MM-dd
+    } else {
+      if (v != null) el.value = v;
+    }
+
+    // 回填同 index 的運算子
+    const condList = formEl.querySelectorAll(`[name="${CSS.escape('Cond_' + name)}"]`);
+    if (condList && condList.length > idx && hit.Op != null) {
+      condList[idx].value = hit.Op;
+    }
+  });
+}
+
+/* ========= 3) 表格繪製/換頁 ========= */
+function renderTable(data) {
+  const tbody = document.getElementById('dataTbody');
+  tbody.innerHTML = "";
+
+  const fields = window._tableFields;
+  const lookupMapData = window._lookupMapData;
+  const keyFieldName = window._keyFieldName;
+  const subRouteTemplate = "@(detailRouteTemplate)";
+
+  data.forEach(item => {
+    const keyValue = item[keyFieldName] || "";
+    let rowUrl = "";
+    if (subRouteTemplate && keyValue) rowUrl = subRouteTemplate.replace("{PaperNum}", keyValue);
+
+    const tr = document.createElement('tr');
+    tr.className = "row-link";
+    tr.setAttribute('data-url', rowUrl);
+    tr.setAttribute('data-paper-num', keyValue);
+
+    fields.forEach(field => {
+      let valStr = "";
+      if (keyValue && lookupMapData?.[keyValue]?.[field.FieldName]) {
+        valStr = lookupMapData[keyValue][field.FieldName];
+      } else {
+        let raw = item[field.FieldName];
+        const dt = (field.DataType || "").toLowerCase();
+        if (raw == null) valStr = "";
+        else if (typeof raw === "string") valStr = raw;
+        else if (dt === "number" && typeof raw === "number") valStr = raw.toLocaleString();
+        else valStr = String(raw);
+      }
+      const td = document.createElement('td');
+      td.innerHTML = valStr ?? "";
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+  });
+
+  highlightLastViewedRow();
+
+  document.querySelectorAll(".row-link").forEach(row => {
+    row.addEventListener("click", () => {
+      document.querySelectorAll(".row-link.selected").forEach(r => r.classList.remove("selected"));
+      row.classList.add("selected");
+      window.selectedPaperNum = row.getAttribute("data-paper-num");
+    });
+    row.addEventListener("dblclick", () => {
+      const url = row.getAttribute("data-url");
+      if (url) window.location = url;
+    });
+  });
+
+  if (window.refreshHScrollWidth) window.refreshHScrollWidth();
+}
+
+function renderPagination(totalCount, pageSize, pageNumber) {
+  const totalPages = Math.ceil(totalCount / pageSize);
+  if (totalPages <= 1) { document.getElementById("paginationBar").innerHTML = ""; return; }
+
+  let html = '<nav><ul class="pagination justify-content-center">';
+  html += `<li class="page-item ${pageNumber === 1 ? "disabled" : ""}">
+            <a class="page-link" href="#" data-page="${pageNumber - 1}">上一頁</a></li>`;
+
+  let start = Math.max(1, pageNumber - 2);
+  let end   = Math.min(totalPages, pageNumber + 2);
+
+  if (start > 2) {
+    html += `<li class="page-item"><a class="page-link" href="#" data-page="1">1</a></li>`;
+    html += `<li class="page-item"><a class="page-link" href="#" data-page="2">2</a></li>`;
+    html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+  } else {
+    for (let i = 1; i < start; i++) {
+      html += `<li class="page-item"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+    }
+  }
+
+  for (let i = start; i <= end; i++) {
+    html += `<li class="page-item ${i === pageNumber ? "active" : ""}">
+              <a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+  }
+
+  if (end < totalPages - 2) {
+    html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+    html += `<li class="page-item"><a class="page-link" href="#" data-page="${totalPages - 1}">${totalPages - 1}</a></li>`;
+    html += `<li class="page-item"><a class="page-link" href="#" data-page="${totalPages}">${totalPages}</a></li>`;
+  } else {
+    for (let i = end + 1; i <= totalPages; i++) {
+      html += `<li class="page-item"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+    }
+  }
+
+  html += `<li class="page-item ${pageNumber === totalPages ? "disabled" : ""}">
+            <a class="page-link" href="#" data-page="${pageNumber + 1}">下一頁</a></li>`;
+  html += '</ul></nav>';
+
+  document.getElementById("paginationBar").innerHTML = html;
+
+  document.querySelectorAll('#paginationBar a[data-page]').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      const targetPage = parseInt(a.getAttribute('data-page'));
+      if (!isNaN(targetPage) && targetPage > 0) doQuery(targetPage);
+    });
+  });
+}
+
+function renderOrderCount(totalCount, pageSize, pageNumber) {
+  const start = (pageNumber - 1) * pageSize + 1;
+  const end   = Math.min(pageNumber * pageSize, totalCount);
+  document.getElementById('orderCountInfo').innerHTML =
+    `共 <span style="font-weight:bold">${totalCount}</span> 筆，顯示第 ${start} ~ ${end} 筆`;
+}
+
+function doQuery(page = 1) {
+  let filters = lastQueryFilters.slice();
+  let hasPage = false, hasSize = false;
+
+  filters.forEach(f => {
+    if (f.Field === "page")     { f.Value = String(page); hasPage = true; }
+    if (f.Field === "pageSize") { f.Value = "@Model.PageSize"; hasSize = true; }
+  });
+  if (!hasPage) filters.push({ Field: "page", Op: "", Value: String(page) });
+  if (!hasSize) filters.push({ Field: "pageSize", Op: "", Value: "@Model.PageSize" });
+
+  saveQueryState(filters, page);
+
+  http('/api/PagedQuery/PagedQuery', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table: window._tableName, filters })
+  }, '讀取資料中…')
+    .then(r => r.json())
+    .then(result => {
+      window._lookupMapData = result.lookupMapData;
+      renderTable(result.data);
+      renderPagination(result.totalCount, @Model.PageSize, page);
+      renderOrderCount(result.totalCount, @Model.PageSize, page);
+    })
+    .catch(err => Swal.fire({ icon:'error', title:'查詢失敗', text: String(err) }));
+
+}
+
+function highlightLastViewedRow() {
+  const lastPaperNum = localStorage.getItem("lastViewedPaperNum");
+  if (!lastPaperNum) return;
+  const tr = document.querySelector(`tr[data-paper-num="${lastPaperNum}"]`);
+  if (tr) {
+    tr.classList.add('selected');
+    window.selectedPaperNum = lastPaperNum;
+    tr.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  localStorage.removeItem("lastViewedPaperNum");
+}
+
+/* ========= 4) DOMContentLoaded：初始化、清理舊資料、回填、第一次查詢 ========= */
+
+document.addEventListener("DOMContentLoaded", function () {
+  // 建立 ToolbarHandler
+  new ToolbarHandler({
+    searchBtnId: "btnSearch",
+    addBtnId: "btnAddNew",
+    deleteBtnId: "btnBatchDelete",
+    getSelectedId: () => {
+      const selectedRow = document.querySelector("#dataTbody tr.selected");
+      return selectedRow ? selectedRow.getAttribute("data-paper-num") : null;
+    },
+    modalId: "searchModal",
+    formId: "searchForm",
+    addApiUrl: "@addApiUrl",
+    deleteApiUrlFn: (id) => `/api/${"@tableName"}/${id}`,
+    detailRouteTemplate: "@(detailRouteTemplate)",
+    tableName: "@tableName",
+    pageSize: 50,
+    renderTable,
+    renderPagination,
+    renderOrderCount,
+    restoreSearchForm: restoreSearchFormSafe,
+    queryRedirectUrl: "/@tableName"
+  });
+
+  const form = document.getElementById('searchForm');
+    form?.addEventListener('submit', () => {
+    const formSel = '#searchForm';
+    const filters = [];
+    const valueEls = Array.from(
+        document.querySelectorAll(`${formSel} [name]:not([name^="Cond_"]):not([type="hidden"])`)
+    );
+    const namePos = Object.create(null);
+
+    valueEls.forEach(el => {
+        const name = el.name;
+        if (!name || name === '__RequestVerificationToken') return;
+
+        const idx = namePos[name] = (namePos[name] ?? 0);
+        namePos[name]++;
+
+        let val = normalizeForInput(el, el.value);
+        if (val == null || val === '') return;
+
+        const condList = document.querySelectorAll(`${formSel} [name="${CSS.escape('Cond_' + name)}"]`);
+        const op = (condList && condList.length > idx) ? (condList[idx].value || '') : '';
+
+        filters.push({
+        Key: `${name}#${idx}`,
+        Field: el.dataset.field || name,
+        Op: op,
+        Value: val
+        });
+    });
+
+    // 分頁重置
+    filters.push({ Field: 'page', Op: '', Value: '1' });
+    filters.push({ Field: 'pageSize', Op: '', Value: String(@Model.PageSize) });
+
+    lastQueryFilters = filters.slice();
+    saveQueryState(lastQueryFilters, 1);
+    });
+
+  // 打開 Modal 後再回填一次，避免 UI 元件覆蓋
+  document.getElementById('searchModal')
+    ?.addEventListener('shown.bs.modal', () => {
+      const formEl = document.getElementById('searchForm');
+      const saved = JSON.parse(localStorage.getItem('orderListQueryFilters') || '[]');
+      if (formEl && Array.isArray(saved) && saved.length) restoreSearchFormSafe(formEl, saved);
+    });
+
+  // 拖曳表頭（可留可去）
+  const headerRow = document.getElementById("table-header-row");
+  if (headerRow && window.Sortable) {
+    Sortable.create(headerRow, {
+      animation: 150,
+      swap: true,
+      swapClass: 'highlight',
+      ghostClass: 'ghost',
+      onEnd: function () {
+        const newOrder = Array.from(headerRow.children).map((th, index) => ({
+          fieldName: th.dataset.field, serialNum: index + 1
+        }));
+        http('/api/TableFieldLayout/SaveSerialOrder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tableName: window._tableName, fieldOrders: newOrder })
+        }, '儲存欄位順序…')
+          .then(res => { if (!res.ok) throw new Error("更新失敗"); return res.json(); })
+          .then(() => location.reload())
+          .catch(() => Swal.fire({ icon: 'error', title: '欄位順序儲存失敗！' }));
+      }
+    });
+  }
+
+  // 清理/正規化 localStorage 的舊條件並回填 + 首次查詢
+  const state = loadQueryState();
+  const formEl = document.getElementById('searchForm');
+  const cleaned = (state.filters || [])
+    .filter(f => {
+      if (!f) return false;
+      const isDate = /date/i.test(String(f.Field || ''));
+      return !(isDate && needDrop(f.Value)); // 移除看起來像 SQL 的日期值
+    })
+    .map(f => {
+      if (/date/i.test(String(f.Field || ''))) {
+        f.Value = normalizeForDateInput({ type: 'date' }, f.Value);
+      }
+      return f;
+    });
+
+  if (cleaned.length) {
+    lastQueryFilters = cleaned;
+    restoreSearchFormSafe(formEl, cleaned);
+    doQuery(state.pageNumber || 1);
+  } else {
+    renderTable(@Html.Raw(Json.Serialize(Model.Items)));
+  }
+
+  // 切換（檢查是否允許修改）
+  document.getElementById('btnViewEditToggle')?.addEventListener('click', () => {
+    const id = window.selectedPaperNum;
+    if (!id) return Swal.fire({ icon: 'warning', title: '請先選擇一筆單據' });
+
+    const row = document.querySelector(`tr[data-paper-num="${id}"]`);
+    const status = row?.querySelector("td:nth-child(6)")?.textContent.trim() || '';
+    if (window.BLOCK_STATUSES?.includes(status)) {
+      return Swal.fire({ icon: 'warning', title: '無法修改', text: `此單據狀態為「${status}」，不可進行修改。` });
+    }
+    const url = detailRouteTemplate.replace("{PaperNum}", id);
+    window.location.href = url;
+  });
+});
+
+/* ========= 5) 同步頂端水平捲軸 ========= */
+(function initTopHScroll(){
+  const wrap   = document.querySelector('.table-wrap');
+  if (!wrap) return;
+  const table  = wrap.querySelector('table');
+  const topBar = document.getElementById('hscrollTop');
+  const spacer = topBar?.querySelector('.hscroll-spacer');
+  if (!table || !topBar || !spacer) return;
+
+  function measure(){
+    spacer.style.width = table.scrollWidth + 'px';
+    topBar.scrollLeft = wrap.scrollLeft;
+  }
+  let syncing = false;
+  topBar.addEventListener('scroll', () => {
+    if (syncing) return; syncing = true; wrap.scrollLeft = topBar.scrollLeft; syncing = false;
+  });
+  wrap.addEventListener('scroll', () => {
+    if (syncing) return; syncing = true; topBar.scrollLeft = wrap.scrollLeft; syncing = false;
+  });
+  window.addEventListener('resize', measure);
+  window.refreshHScrollWidth = measure;
+  measure();
+})();
+</script>
+
 

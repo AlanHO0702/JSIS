@@ -2,11 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
-using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Expressions;
-using System.Threading.Tasks;
-using PcbErpApi.Helpers;
+
 
 namespace PcbErpApi.Controllers
 {
@@ -15,13 +11,16 @@ namespace PcbErpApi.Controllers
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
     public class SPOdOrderMainController : ControllerBase
     {
+
         private readonly PcbErpContext _context;
         private readonly PaginationService _pagedService;
+        private readonly ILogger<SPOdOrderMainController> _logger;
 
-        public SPOdOrderMainController(PcbErpContext context, PaginationService pagedService)
+        public SPOdOrderMainController(PcbErpContext context, PaginationService pagedService, ILogger<SPOdOrderMainController> logger)
         {
             _context = context;
             _pagedService = pagedService;
+            _logger = logger;
         }
 
         // 分頁查詢 GET: api/SPOdOrderMains/paged?page=1&pageSize=50
@@ -41,59 +40,7 @@ namespace PcbErpApi.Controllers
             var result = await _pagedService.GetPagedAsync(orderedQuery, page, pageSize);
             return Ok(new { totalCount = result.TotalCount, data = result.Data });
         }
-
-        [HttpPost("pagedQuery")]
-        public async Task<IActionResult> GetPagedAuto([FromBody] Dictionary<string, string> queryParams)
-        {
-            var query = _context.SpodOrderMain.AsQueryable();
-
-            // 取得所有 CURdPaperSelected 設定為查詢條件的欄位
-            var queryFieldDefs = _context.CURdPaperSelected
-                .Where(x => x.TableName == "SPOdOrderMain" && x.IVisible == 1)
-                .ToList();
-
-            // 動態組 where 條件
-            foreach (var field in queryFieldDefs)
-            {
-                var col = field.ColumnName;
-                if (!queryParams.TryGetValue(col, out var value)) continue;
-                if (string.IsNullOrWhiteSpace(value)) continue;
-
-                var prop = typeof(SpodOrderMain).GetProperty(col);
-                if (prop == null) continue;
-
-                // 常見 DataType:
-                // 0: 字串, 1: 日期, 2: 數字, 3: 金額...（根據你的 DataType 定義）
-                switch (field.DataType)
-                {
-                    case 0: // 字串類 like
-                        query = query.WhereDynamicStringContains(col, value);
-                        break;
-                    case 1: // 日期類，支援範圍查詢
-                        if (col.ToLower().Contains("start") && DateTime.TryParse(value, out var d1))
-                            query = query.WhereDateGreaterThan(col.Replace("Start", ""), d1);
-                        else if (col.ToLower().Contains("end") && DateTime.TryParse(value, out var d2))
-                            query = query.WhereDateLessThanOrEqual(col.Replace("End", ""), d2);
-                        else if (DateTime.TryParse(value, out var dt))
-                            query = query.WhereDynamicDateEquals(col, dt);
-                        break;
-                    case 2: // 數字完全相等
-                        if (decimal.TryParse(value, out var dnum))
-                            query = query.WhereDynamicDecimalEquals(col, dnum);
-                        break;
-                    default:
-                        // 其他型別依需求擴充
-                        break;
-                }
-            }
-
-            // 分頁/排序略
-            var page = queryParams.ContainsKey("page") ? int.Parse(queryParams["page"]) : 1;
-            var pageSize = queryParams.ContainsKey("pageSize") ? int.Parse(queryParams["pageSize"]) : 50;
-
-            var result = await _pagedService.GetPagedAsync(query.OrderByDescending(x => x.PaperDate), page, pageSize);
-            return Ok(new { totalCount = result.TotalCount, data = result.Data });
-        }
+   
 
         /// <summary>
         /// 取得所有銷售訂單資料。

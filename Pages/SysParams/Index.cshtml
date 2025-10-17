@@ -1,0 +1,512 @@
+@page
+@model PcbErpApi.Pages.SysParams.IndexModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "系統參數設定";
+}
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+
+<div class="sysparams-page">
+  <!-- 左側系統別 -->
+  <div class="left-panel">
+    <div class="left-title">系統別</div>
+    <ul class="list-group sys-list">
+      @foreach (var sys in Model.SystemList)
+      {
+          var active = string.Equals(sys, Model.SelectedSystem, System.StringComparison.OrdinalIgnoreCase);
+          <li class="list-group-item @(active ? "active" : "")">
+              <a asp-page="/SysParams/Index"
+                 asp-route-SelectedSystem="@sys"
+                 class="sys-link">@sys</a>
+          </li>
+      }
+    </ul>
+  </div>
+
+  <!-- 右側內容 -->
+  <div class="right-panel">
+    <div class="right-title d-flex align-items-center gap-2">
+      <div>系統參數設定 - <span class="badge bg-secondary">@Model.SelectedSystem</span></div>
+      <div class="ms-auto d-flex gap-2">
+        <button id="btnAdd" class="btn btn-success btn-sm">新增</button>
+        <button id="btnEdit" class="btn btn-outline-secondary btn-sm">編輯</button>
+        <button id="btnDelete" class="btn btn-danger btn-sm d-none" disabled>刪除</button>
+        <button id="btnSave" class="btn btn-primary btn-sm d-none">儲存</button>
+        <button id="btnCancel" class="btn btn-secondary btn-sm d-none">取消</button>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="table table-bordered table-sm align-middle sys-table" id="tbl">
+        <colgroup>
+          <col style="width:44px">          <!-- 勾選 -->
+          <col style="width:220px">         <!-- 參數代碼 -->
+          <col>                             <!-- 說明（彈性，吃剩下的空間） -->
+          <col style="width:140px">         <!-- 參數值（固定寬） -->
+          <col style="width:160px">         <!-- 最後異動日 -->
+          <col style="width:100px">         <!-- 允許修改 -->
+          <col style="width:100px">         <!-- 鎖定 -->
+          <col style="width:80px">          <!-- 參數類別 -->
+          <col style="width:80px">          <!-- 下拉類別 -->
+          <col style="width:260px">         <!-- 詳細說明 -->
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="col-sel text-center"></th>
+            <th class="col-paramid">參數代碼</th>
+            <th class="col-notes">說明</th>
+            <th class="col-value">參數值</th>
+            <th class="col-lastdate">最後異動日</th>
+            <th class="col-yesno text-center">允許使用者修改</th>
+            <th class="col-yesno text-center">鎖定</th>
+            <th class="col-num text-end">參數類別</th>
+            <th class="col-num text-end">下拉類別</th>
+            <th class="col-note2">詳細說明</th>
+          </tr>
+        </thead>
+        <tbody>
+          @if (Model.Rows.Count == 0)
+          {
+            <tr><td colspan="10" class="text-center text-muted">（無資料）</td></tr>
+          }
+          else
+          {
+            @foreach (var r in Model.Rows)
+          {
+            <tr data-systemid="@r.SystemId" data-paramid="@r.ParamId">
+              <td class="col-sel text-center">
+                <input type="checkbox" class="row-sel" disabled />
+              </td>
+              <td class="cell-id">@r.ParamId</td>
+              <td>
+                <input class="form-control form-control-sm fld-notes"
+                      value="@r.Notes" disabled data-orig="@r.Notes"
+                      data-title="說明（@r.ParamId）" />
+              </td>
+
+              <td style="min-width:140px;">
+                <input class="form-control form-control-sm fld-value"
+                      value="@r.Value" disabled data-orig="@r.Value" />
+              </td>
+
+              <td class="text-nowrap">@r.LastDate?.ToString("yyyy/MM/dd HH:mm")</td>
+
+              <td class="text-center">
+                <input type="checkbox" class="form-check-input fld-allow"
+                      disabled @(r.AllowUserUpdate==1 ? "checked" : null)
+                      data-orig="@(r.AllowUserUpdate==1 ? "1" : "0")" />
+              </td>
+
+              <td class="text-center">
+                <input type="checkbox" class="form-check-input fld-lock"
+                      disabled @(r.IsLock==1 ? "checked" : null)
+                      data-orig="@(r.IsLock==1 ? "1" : "0")" />
+              </td>
+
+              <td>
+                <input type="number"
+                      class="form-control form-control-sm text-end fld-paramtype"
+                      value="@r.ParamType" disabled data-orig="@r.ParamType" />
+              </td>
+
+
+              <td>
+                <input type="number"
+                      class="form-control form-control-sm text-end fld-combostyle"
+                      value="@r.ComboStyle" disabled data-orig="@r.ComboStyle" />
+              </td>
+
+   
+              <td>
+                <input class="form-control form-control-sm fld-note2"
+                      value="@r.Note2" disabled data-orig="@r.Note2"
+                      data-title="詳細說明（@r.ParamId）" />
+              </td>
+            </tr>
+          }
+          }
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+@* 說明/詳細說明：全文視窗 *@
+<div class="modal fade" id="notesModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="notesModalTitle">說明</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+      </div>
+      <div class="modal-body">
+        <textarea id="notesModalText" class="form-control" rows="14"></textarea>
+        <div id="notesHelp" class="form-text mt-1"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnCopyNotes" type="button" class="btn btn-outline-secondary">複製</button>
+        <button id="btnApplyNotes" type="button" class="btn btn-primary">套用到欄位</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">關閉</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+/* ===== Layout 基本框架 ===== */
+.sysparams-page{
+  display:flex;
+  gap:16px;
+  height:calc(100vh - 88px);
+  padding:12px 16px;
+  box-sizing:border-box;
+}
+
+/* ===== 左欄（3 碼） ===== */
+.left-panel{ width:120px; min-width:120px; flex-shrink:0; display:flex; flex-direction:column; }
+.left-title{ font-size:18px; font-weight:600; margin-bottom:8px; }
+.sys-list{ flex:1 1 auto; overflow:auto; border:1px solid #dee2e6; border-radius:.375rem; }
+.sys-list .list-group-item{ padding:0; background:#fff; color:#212529; border:none; border-bottom:1px solid #e9ecef; }
+.sys-list .list-group-item:last-child{ border-bottom:none; }
+.sys-link{ display:block; padding:6px 8px; text-decoration:none; color:#212529 !important; text-align:center; font-weight:600; }
+.sys-list .list-group-item:not(.active) .sys-link:hover{ background:#f1f3f5; }
+.sys-list .list-group-item.active{ background:#0d6efd; color:#fff; }
+.sys-list .list-group-item.active .sys-link{ color:#fff !important; }
+
+/* ===== 右欄 ===== */
+.right-panel{ flex:1 1 auto; min-width:0; display:flex; flex-direction:column; }
+.right-title{ font-size:20px; font-weight:600; margin-bottom:8px; }
+
+/* ===== 表格容器：可水平/垂直滾動，表頭 sticky ===== */
+.table-wrap{
+  flex:1 1 auto;
+  overflow-x:auto;
+  overflow-y:auto;
+  border:1px solid #dee2e6;
+  border-radius:.375rem;
+  background:#fff;
+  scrollbar-gutter:stable;
+}
+
+
+/* 表格固定欄寬策略：其餘寬度交給說明欄 */
+.sys-table {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 1800px;  /* 視需要：整表最小寬，避免太擠 */
+}
+.sys-table thead th{ position:sticky; top:0; z-index:2; background:#f8f9fa; white-space:nowrap; }
+.sys-table th, .sys-table td{ vertical-align:middle; }
+.sys-table td{ word-break:break-word; }
+
+/* 讓輸入框吃滿儲存格（但欄寬由 colgroup 控制） */
+.sys-table td input.form-control {
+  width: 100%;
+}
+
+/* 勾選欄 */
+.col-sel{ width:44px; white-space:nowrap; }
+.col-sel input[type="checkbox"]{ transform:scale(1.1); cursor:pointer; }
+
+/* 參數代碼：現在是第 2 欄 */
+.sys-table th:nth-child(2),
+.sys-table td:nth-child(2),
+.sys-table td.cell-id{
+  width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+
+/* 參數值欄保持單行顯示、省略號（避免看起來在變寬） */
+.sys-table td:nth-child(4) input.fld-value {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 說明：現在第 3 欄 */
+.sys-table th:nth-child(3), .sys-table td:nth-child(3){
+  white-space:normal; word-break:break-word;
+}
+
+/* 參數值：第 4 欄 */
+.sys-table th:nth-child(4), .sys-table td:nth-child(4){
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+
+/* 最後異動日：第 5 欄 */
+.sys-table th:nth-child(5), .sys-table td:nth-child(5){
+  width:160px; white-space:nowrap;
+}
+
+/* 允許 / 鎖定：第 6、7 欄 */
+.sys-table th:nth-child(6), .sys-table td:nth-child(6),
+.sys-table th:nth-child(7), .sys-table td:nth-child(7){
+  width:120px; white-space:nowrap; text-align:center;
+}
+
+/* 參數類別 / 下拉類別：第 8、9 欄 */
+.sys-table th:nth-child(8), .sys-table td:nth-child(8),
+.sys-table th:nth-child(9), .sys-table td:nth-child(9){
+  width:80px; white-space:nowrap; text-align:right;
+}
+
+/* 詳細說明：第 10 欄 */
+.sys-table th:nth-child(10), .sys-table td:nth-child(10){
+  min-width:260px; white-space:normal; word-break:break-word;
+}
+
+/* 讓 disabled 的說明欄也能雙擊（事件穿透） */
+.sys-table input.fld-notes[disabled],
+.sys-table input.fld-note2[disabled]{
+  pointer-events: none;
+}
+
+
+/* 小螢幕 */
+@@media (max-width: 992px){
+  .left-panel{ width:100px; min-width:100px; }
+  .col-note2{ min-width:220px; }
+}
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(() => {
+  const tbl       = document.getElementById('tbl');
+  const btnEdit   = document.getElementById('btnEdit');
+  const btnSave   = document.getElementById('btnSave');
+  const btnCancel = document.getElementById('btnCancel');
+  const btnAdd    = document.getElementById('btnAdd');
+  const btnDelete = document.getElementById('btnDelete');
+  const selectedSystem = "@Model.SelectedSystem";
+
+  function setEditing(on){
+    // 欄位啟用/停用
+    tbl.querySelectorAll('input.form-control, input.form-check-input').forEach(inp=>{
+      inp.disabled = !on;
+    });
+    // 勾選欄（只在編輯時啟用）
+    tbl.querySelectorAll('input.row-sel').forEach(chk=>{
+      chk.disabled = !on;
+      chk.checked  = false;
+    });
+
+    // 按鈕顯示
+    btnEdit.classList.toggle('d-none', on);
+    btnSave.classList.toggle('d-none', !on);
+    btnCancel.classList.toggle('d-none', !on);
+    btnDelete.classList.toggle('d-none', !on);
+    btnDelete.disabled = true;
+  }
+
+  btnEdit?.addEventListener('click', ()=> setEditing(true));
+
+  btnCancel?.addEventListener('click', ()=>{
+    // 還原為 data-orig
+    tbl.querySelectorAll('input.form-control').forEach(inp=>{
+      inp.value = inp.dataset.orig ?? '';
+    });
+    tbl.querySelectorAll('input.form-check-input').forEach(chk=>{
+      if (chk.classList.contains('row-sel')) { chk.checked = false; return; }
+      chk.checked = (chk.dataset.orig ?? '0') === '1';
+    });
+    setEditing(false);
+  });
+
+  // 只要有勾任一列就啟用刪除
+  function refreshDeleteState(){
+    btnDelete.disabled = !tbl.querySelector('.row-sel:not(:disabled):checked');
+  }
+  tbl.addEventListener('change', (e)=>{
+    if (e.target.classList?.contains('row-sel')) refreshDeleteState();
+  });
+
+  // 刪除（多選）
+  btnDelete?.addEventListener('click', async ()=>{
+    const picks = Array.from(tbl.querySelectorAll('.row-sel:checked')).map(chk=>{
+      const tr = chk.closest('tr');
+      return { tr, systemId: tr.dataset.systemid, paramId: tr.dataset.paramid };
+    });
+    if (!picks.length) return;
+
+    const preview = picks.slice(0,8).map(p=>p.paramId).join(', ') + (picks.length>8?' ...':'');
+    if (!confirm(`確定要刪除 ${picks.length} 筆參數？\n${preview}`)) return;
+
+    try{
+      const res = await fetch('/api/SysParamsApi/delete-rows', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(picks.map(p=>({ systemId:p.systemId, paramId:p.paramId })))
+      });
+      const data = await res.json();
+      if (!res.ok || data.success!==true) throw new Error(data.message || '刪除失敗');
+
+      picks.forEach(p=> p.tr.remove());
+      refreshDeleteState();
+      alert(`已刪除 ${data.count ?? picks.length} 筆。`);
+    }catch(ex){
+      alert(ex.message || ex);
+    }
+  });
+
+  // ===== 儲存 =====
+  btnSave?.addEventListener('click', async () => {
+    const rows = [];
+    tbl.querySelectorAll('tbody tr').forEach(tr => {
+      const sys = tr.dataset.systemid, pid = tr.dataset.paramid;
+      if (!sys || !pid) return;
+
+      const get = sel => tr.querySelector(sel);
+      const notes = get('.fld-notes')?.value ?? null;
+      const val = get('.fld-value')?.value ?? null;
+      const allow = get('.fld-allow')?.checked ? 1 : 0;
+      const lock = get('.fld-lock')?.checked ? 1 : 0;
+      const ptype = Number(get('.fld-paramtype')?.value ?? 0);
+      const csty = Number(get('.fld-combostyle')?.value ?? 0);
+      const note2 = get('.fld-note2')?.value ?? null;
+
+      const changed =
+        (get('.fld-notes')?.dataset.orig ?? '') != (notes ?? '') ||
+        (get('.fld-value')?.dataset.orig ?? '') != (val ?? '') ||
+        (get('.fld-allow')?.dataset.orig ?? '0') != String(allow) ||
+        (get('.fld-lock')?.dataset.orig ?? '0') != String(lock) ||
+        Number(get('.fld-paramtype')?.dataset.orig ?? 0) != ptype ||
+        Number(get('.fld-combostyle')?.dataset.orig ?? 0) != csty ||
+        (get('.fld-note2')?.dataset.orig ?? '') != (note2 ?? '');
+
+      if (changed) {
+        rows.push({
+          systemId: sys, paramId: pid,
+          notes, value: val,
+          paramType: ptype, comboStyle: csty,
+          isLock: lock, allowUserUpdate: allow,
+          note2
+        });
+      }
+    });
+
+    if (rows.length === 0) {
+      alert("沒有變更。");
+      setEditing(false);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/SysParamsApi/update-rows', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rows)
+      });
+      const data = await res.json();
+      if (!res.ok || data.success !== true) throw new Error(data.message || '儲存失敗');
+
+      // 更新 data-orig
+      tbl.querySelectorAll('tbody tr').forEach(tr => {
+        const upd = sel => {
+          const el = tr.querySelector(sel);
+          if (!el) return;
+          el.dataset.orig = el.type === 'checkbox'
+            ? (el.checked ? '1' : '0')
+            : (el.value ?? '');
+        };
+        ['.fld-notes', '.fld-value', '.fld-note2', '.fld-paramtype', '.fld-combostyle', '.fld-allow', '.fld-lock'].forEach(upd);
+      });
+
+      alert(`已儲存 ${data.count} 筆變更。`);
+      setEditing(false);
+      location.reload(); // 更新「最後異動日」
+    } catch (ex) {
+      alert(ex.message || ex);
+    }
+  });
+
+  // ===== 新增 =====
+  btnAdd?.addEventListener('click', async () => {
+    const sys = selectedSystem?.trim();
+    if (!sys) { alert('請先選擇左側系統別'); return; }
+
+    const pid = prompt('參數代碼 (ParamId)？');
+    if (!pid || !pid.trim()) { alert('ParamId 必填'); return; }
+
+    const notes = prompt('說明（可空白）', '') ?? '';
+    const value = prompt('參數值（可空白）', '') ?? '';
+
+    const payload = {
+      systemId: sys,
+      paramId: pid.trim(),
+      notes, value,
+      paramType: 0, comboStyle: 0,
+      isLock: 0, allowUserUpdate: 0,
+      note2: ''
+    };
+
+    try {
+      const res = await fetch('/api/SysParamsApi/create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok || data.success !== true) throw new Error(data.message || '新增失敗');
+
+      alert('新增成功！將重新整理以顯示新資料。');
+      location.reload();
+    } catch (ex) {
+      alert(ex.message || ex);
+    }
+  });
+
+  // ===== 說明/詳細說明：雙擊開窗 =====
+  const notesModal = new bootstrap.Modal(document.getElementById('notesModal'));
+  const notesTitle = document.getElementById('notesModalTitle');
+  const notesText = document.getElementById('notesModalText');
+  const btnCopy = document.getElementById('btnCopyNotes');
+  const btnApply = document.getElementById('btnApplyNotes');
+  const notesHelp = document.getElementById('notesHelp');
+  let currentInput = null;
+
+  const isEditing = () => !btnSave.classList.contains('d-none'); // 判斷是否編輯中
+
+ // ===== 雙擊「說明／詳細說明」→ Modal =====
+  tbl.addEventListener('dblclick', (ev) => {
+    // 不管點到哪，先找最近的 td，再在 td 內找目標 input
+    const td = ev.target.closest('td');
+    if (!td) return;
+
+    const input = td.querySelector('input.fld-notes, input.fld-note2');
+    if (!input) return;
+
+    currentInput = input;
+
+    const editable = isEditing();
+    notesTitle.textContent =
+      input.dataset.title || (input.classList.contains('fld-note2') ? '詳細說明' : '說明');
+
+    notesText.value = input.value || '';
+    notesText.readOnly = !editable;
+    btnApply.disabled = !editable;
+    notesHelp.textContent = editable
+      ? '可編輯內容後按「套用到欄位」，再按「儲存」寫回資料庫。'
+      : '唯讀模式（若要修改，請先按「編輯」）。';
+
+    notesModal.show();
+  });
+
+  // 複製
+  btnCopy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(notesText.value || '');
+      btnCopy.textContent = '已複製';
+      setTimeout(() => btnCopy.textContent = '複製', 1000);
+    } catch { }
+  });
+
+  // 套用回欄位
+  btnApply.addEventListener('click', () => {
+    if (!currentInput) return;
+    if (currentInput.disabled) return;
+    currentInput.value = notesText.value ?? '';
+    notesModal.hide();
+  });
+})();
+</script>
+

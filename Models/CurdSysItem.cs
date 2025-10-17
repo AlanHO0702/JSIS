@@ -18,5 +18,6 @@ public partial class CurdSysItem
     public int LevelNo { get; set; }
     public string? SuperId { get; set; }
     public int ItemType { get; set; }
+    public string? Notes { get; set; }
 
 }

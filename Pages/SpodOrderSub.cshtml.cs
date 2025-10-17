@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using PcbErpApi.Data;
 using PcbErpApi.Models;
 using static SpodOrdersModel;
 
@@ -11,10 +12,10 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
     #region 單頭/單身資料屬性
 
     // 單頭資料（API 回傳 Dictionary 格式）
-    public Dictionary<string, object>? HeaderData { get; set; }
+    public new Dictionary<string, object>? HeaderData { get; set; }
 
     // 單頭欄位設定清單（含位置與顯示設定）
-    public List<TableFieldViewModel>? HeaderTableFields { get; set; }
+    public new List<TableFieldViewModel>? HeaderTableFields { get; set; }
 
     // 單頭欄位的 lookup 對應資料（每個 PaperNum 對應一份對照表）
     public Dictionary<string, Dictionary<string, string>> HeaderLookupDisplayMap { get; set; } = new();
@@ -26,8 +27,8 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
     /// <summary>
     /// 注入 HttpClient 與欄位服務
     /// </summary>
-    public SpodOrderSubModel(IHttpClientFactory httpClientFactory, ITableDictionaryService dictService)
-        : base(httpClientFactory, dictService) { }
+    public SpodOrderSubModel(IHttpClientFactory httpClientFactory, PcbErpContext context,ITableDictionaryService dictService)
+        : base(httpClientFactory, context, dictService) { }
 
     #endregion
 
