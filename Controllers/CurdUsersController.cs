@@ -2,17 +2,23 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 
 [ApiController]
 [Route("api/[controller]")]
 public class CurdUsersController : ControllerBase
 {
-    private readonly PcbErpContext _context;
+        private readonly PcbErpContext _context;
+        private readonly PaginationService _pagedService;
 
-    public CurdUsersController(PcbErpContext context)
-    {
-        _context = context;
-    }
+        public CurdUsersController(PcbErpContext context, PaginationService pagedService)
+        {
+            _context = context;
+            _pagedService = pagedService;
+        }
+
 
     // GET: api/CurdUsers
     [HttpGet]
@@ -30,6 +36,14 @@ public class CurdUsersController : ControllerBase
         return user;
     }
 
+         // 分頁查詢 GET: api/SPOdOrderMains/paged?page=1&pageSize=50
+        [HttpGet("paged")]
+        public async Task<IActionResult> GetPaged(int page = 1, int pageSize = 50)
+        {
+            var query = _context.CurdUsers.OrderByDescending(o => o.UserId);
+            var result = await _pagedService.GetPagedAsync(query, page, pageSize);
+            return Ok(new { totalCount = result.TotalCount, data = result.Data });
+        }   
     // POST: api/CurdUsers
     [HttpPost]
     public async Task<ActionResult<CurdUser>> PostCurdUser(CurdUser user)

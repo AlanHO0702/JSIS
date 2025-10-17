@@ -2,9 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+
 
 namespace PcbErpApi.Controllers
 {
@@ -13,23 +11,36 @@ namespace PcbErpApi.Controllers
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
     public class SPOdOrderMainController : ControllerBase
     {
+
         private readonly PcbErpContext _context;
         private readonly PaginationService _pagedService;
+        private readonly ILogger<SPOdOrderMainController> _logger;
 
-        public SPOdOrderMainController(PcbErpContext context, PaginationService pagedService)
+        public SPOdOrderMainController(PcbErpContext context, PaginationService pagedService, ILogger<SPOdOrderMainController> logger)
         {
             _context = context;
             _pagedService = pagedService;
+            _logger = logger;
         }
 
         // 分頁查詢 GET: api/SPOdOrderMains/paged?page=1&pageSize=50
         [HttpGet("paged")]
-        public async Task<IActionResult> GetPaged(int page = 1, int pageSize = 50)
+        public async Task<IActionResult> GetPaged(
+            [FromQuery] int page = 1, 
+            [FromQuery] int pageSize = 50, 
+            [FromQuery] string? PaperNum = null
+        )
         {
-            var query = _context.SpodOrderMain.OrderByDescending(o => o.PaperDate);
-            var result = await _pagedService.GetPagedAsync(query, page, pageSize);
+            var query = _context.SpodOrderMain.AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(PaperNum))
+            query = query.Where(x => x.PaperNum.Contains(PaperNum));
+
+            var orderedQuery = query.OrderByDescending(o => o.PaperDate);
+            var result = await _pagedService.GetPagedAsync(orderedQuery, page, pageSize);
             return Ok(new { totalCount = result.TotalCount, data = result.Data });
         }
+   
 
         /// <summary>
         /// 取得所有銷售訂單資料。

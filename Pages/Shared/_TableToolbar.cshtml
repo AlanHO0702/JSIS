@@ -1,0 +1,269 @@
+@model TableToolbarModel
+<div class="btn-toolbar" style="gap:12px;">
+    <button id="@Model.SearchBtnId" class="btn toolbar-btn" type="button">@Model.SearchText</button>
+    <button id="btnSwitch" class="btn toolbar-btn" type="button">切換</button>
+    <button id="btnViewEditToggle" class="btn toolbar-btn" type="button">修改</button>
+    <button id="@Model.AddBtnId" class="btn toolbar-btn" type="button">@Model.AddText</button>
+    <button id="btnConfirm" class="btn toolbar-btn success" type="button" >確認</button>
+    <button id="btnCancel" class="btn toolbar-btn danger" type="button">退審</button>
+    <button id="@Model.DeleteBtnId" class="btn toolbar-btn danger" type="button">@Model.DeleteText</button>
+    <button id="btnPrint" class="btn toolbar-btn" type="button">印單據</button>
+</div>
+<!-- 查詢條件彈窗 -->
+
+@if (Model.QueryFields != null) {
+    <div class="modal fade" id="@(Model.ModalId ?? "searchModal")">
+        <div class="modal-dialog modal-lg">
+            @await Html.PartialAsync("_QueryPanelPartial", Model.QueryFields)
+        </div>
+    </div>
+}
+
+
+<script>
+    const _reportSpName = "@(Model.ReportSpName)";
+    // 原本：const fetcher = window.http || window.busyFetch || fetch.bind(window);
+    const fetcher = (...args) =>
+    (window.http || window.busyFetch || fetch.bind(window))(...args);
+
+
+    document.addEventListener("DOMContentLoaded", function () {
+        const btn = document.getElementById('btnViewEditToggle');
+        if (!btn) return;
+
+        // 先宣告：要封鎖的狀態
+        const BLOCK_STATUSES = ['已確認', '已結案', '已作廢'];
+
+        // 先宣告：讀單據狀態（找 label=單據狀態 的那個 li）
+        function getHeaderValueByLabel(labelText) {
+            const $li = $('.draggable-field').filter(function () {
+            return $(this).children('label').first().text().trim() === labelText;
+            }).first();
+            if (!$li.length) return null;
+
+            const $ctrl = $li.find('select, input, textarea').first();
+            if (!$ctrl.length) return null;
+
+            if ($ctrl.is('select')) return $ctrl.find('option:selected').text().trim();
+            return ($ctrl.val() || '').toString().trim();
+        }
+
+        let isEdit = false; // 預設瀏覽
+
+        // 頁面載入時預設全部 disabled
+        document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select').forEach(el => {
+            el.disabled = true;
+        });
+
+        const btnConfirm = document.getElementById('btnConfirm');
+        if (btnConfirm) {
+            btnConfirm.addEventListener('click', async function () {
+                // 假設有全域變數 tableName、paperNum、userId
+                const tableName = window._tableName || 'SPOdOrderMain'; // 預設表名
+                const paperNum = window.selectedPaperNum;
+                //const paperNum = document.querySelector('[name="PaperNum"]')?.value || window._paperNum;
+                const userId = window._userId || 'admin';  // TODO: 換成實際登入者
+
+                if (!paperNum) {
+                    Swal.fire({ icon: 'warning', title: '查無單號！' });
+                    return;
+                }
+
+                const result = await Swal.fire({
+                    title: '確定要執行確認？',
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonText: '確定',
+                    cancelButtonText: '取消'
+                });
+                if (!result.isConfirmed) return;
+
+                // 你可以讓 EOC/AtFinished 後端預設，也可以在這邊選
+                const resp = await fetcher('/api/PaperAction/DoAction', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        paperId: tableName,
+                        paperNum: paperNum,
+                        userId: userId,
+                        eoc: 1,
+                        aftFinished: 1
+                    })
+                }, '確認中…');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    Swal.fire({ icon: 'success', title: data.message || '確認成功' });
+                    location.reload(); // 確認成功後重新載入頁面
+                } else {
+                    const msg = await resp.text();
+                    Swal.fire({ icon: 'error', title: msg || '確認失敗' });
+                }
+            });
+        }
+
+
+        const btnCancel = document.getElementById('btnCancel');
+        if (btnCancel) {
+            btnCancel.addEventListener('click', async function () {
+                // 假設有全域變數 tableName、paperNum、userId
+                const tableName = window._tableName || 'SPOdOrderMain'; // 預設表名
+                const paperNum = window.selectedPaperNum;
+                const userId = window._userId || 'admin';  // TODO: 換成實際登入者
+
+                if (!paperNum) {
+                    Swal.fire({ icon: 'warning', title: '查無單號！' });
+                    return;
+                }
+
+                const result = await Swal.fire({
+                    title: '確定要執行退審？',
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonText: '確定',
+                    cancelButtonText: '取消'
+                });
+                if (!result.isConfirmed) return;
+
+                // 你可以讓 EOC/AtFinished 後端預設，也可以在這邊選
+                const resp = await fetcher('/api/PaperAction/DoAction', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        paperId: tableName,
+                        paperNum: paperNum,
+                        userId: userId,
+                        eoc: 0,
+                        aftFinished: 3 // 退審時 AftFinished 設為 0
+                    })
+                }, '退審中…');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    Swal.fire({ icon: 'success', title: data.message || '退審成功' });
+                    location.reload(); // 退審成功後重新載入頁面
+                } else {
+                    const msg = await resp.text();
+                    Swal.fire({ icon: 'error', title: msg || '退審失敗' });
+                }
+            });
+        }
+
+        const btnPrint = document.getElementById('btnPrint');
+        if (btnPrint) {
+            btnPrint.addEventListener('click', async function () {
+                // 取得單號（可依你專案的取法）
+                const paperNum = window.selectedPaperNum 
+                            || document.querySelector('[name="PaperNum"]')?.value;
+
+                if (!paperNum) {
+                    Swal.fire({ icon: 'warning', title: '查無單號！' });
+                    return;
+                }
+                
+                if (!_reportSpName) {
+                    Swal.fire({ icon: 'warning', title: '缺少報表對應的 SP 名稱！' });
+                    return;
+                }
+
+                // 呼叫後端 API
+                const res = await fetch("/api/report/generate-url", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ 
+                        paperNum: paperNum, 
+                        spName: _reportSpName,// 👈 這裡指定要跑哪個 SP
+                        reportName: _reportSpName
+                    })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    const reportUrl = data.reportUrl;
+
+                    // ✅ 這裡有兩種做法：
+                    // 1. 直接開新視窗
+                    /*
+                    window.open(reportUrl, "_blank");
+                    */
+                    // 2. 或者用 SweetAlert2 顯示 iframe 預覽
+                    
+                    Swal.fire({
+                        //title: '報表預覽',
+                        html: `<iframe src="${reportUrl}" width="100%" height="600px" frameborder="0"></iframe>`,
+                        width: '80%',
+                        heightAuto: false,
+                        showCloseButton: true,
+                        showConfirmButton: false
+                    });
+                    
+                } else {
+                    Swal.fire({ icon: 'error', title: '❌ 報表產生失敗！' });
+                }
+            });
+        }
+
+        const btnSwitch = document.getElementById("btnSwitch");
+        if (btnSwitch) {
+            btnSwitch.addEventListener("click", function () {
+                // 這裡直接取選中的單號
+                const id = (window.getSelectedId && window.getSelectedId()) 
+                            || window.selectedPaperNum;
+
+                if (!id) {
+                    Swal.fire({ icon: 'warning', title: '請先選擇一筆單據' });
+                    return;
+                }
+
+                // 這個 template 從 Razor 傳進來，已經有 "/SpodOrderSubs/{PaperNum}" 之類的
+                const tpl = window._detailRouteTemplate; 
+                if (!tpl) {
+                    Swal.fire({ icon: 'error', title: '未設定切換路徑' });
+                    return;
+                }
+
+                const url = tpl.replace("{PaperNum}", id);
+                window.location.href = url;
+            });
+        }
+
+
+
+    });
+</script>
+<style>
+    .toolbar {
+    display: flex;
+    gap: 18px;
+    }
+
+    .toolbar-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #2564b3;
+    color: #fff;
+    border: none;
+    border-radius: 11px;
+    font-size: 1.08em;
+    font-weight: 500;
+    padding: 6px 14px;
+    box-shadow: 0 2px 10px 0 #c5d9f1;
+    transition: background 0.18s, transform 0.11s;
+    cursor: pointer;
+    }
+
+    .toolbar-btn.success {
+    background: #0e7444;
+    }
+    .toolbar-btn.danger {
+    background: #df3c4b;
+    }
+
+    .toolbar-btn:hover, .toolbar-btn:focus {
+    transform: translateY(-1px) scale(1.03);
+    }
+
+    .toolbar-btn i {
+    font-size: 1.08em;
+    }
+
+</style>

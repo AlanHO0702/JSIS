@@ -11,5 +11,6 @@ namespace PcbErpApi.Models
         public int? SerialNum { get; set; }
         public int? Visible { get; set; }
         public int? iShowWhere { get; set; }
+        public string? LookupResultField { get; set; }
     }
 }

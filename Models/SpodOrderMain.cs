@@ -1,16 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
 
 namespace PcbErpApi.Models;
 
-[Table("SpodOrderMain")]
 public partial class SpodOrderMain
 {
-    
-    [Key]
-    public string? PaperNum { get; set; } = null!;
+    public string PaperNum { get; set; } = null!;
 
     public DateTime PaperDate { get; set; }
 
@@ -34,9 +29,9 @@ public partial class SpodOrderMain
 
     public string? Notes { get; set; }
 
-    public string? CustomerId { get; set; } = null!;
+    public string CustomerId { get; set; } = null!;
 
-    public string? SourCustomerId { get; set; } = null!;
+    public string SourCustomerId { get; set; } = null!;
 
     public int PayWayCode { get; set; }
 
@@ -74,7 +69,7 @@ public partial class SpodOrderMain
 
     public string? ShipTerm { get; set; }
 
-    public string? FdrCode { get; set; } = null!;
+    public string FdrCode { get; set; } = null!;
 
     public string? PkgTitle { get; set; }
 

@@ -25,7 +25,13 @@ function saveAllDictFields(tableSelector = '.dictTableBody', apiUrl = '/api/Dict
             DataType: tr.querySelector('input[data-field="DataType"]').value,
             FieldNote: tr.querySelector('input[data-field="FieldNote"]').value,
             SerialNum: serialNumValue === "" ? null : parseInt(serialNumValue, 10),
-            Visible: visibleValue
+            Visible: visibleValue,
+            LookupResultField: (function(){
+                const el = tr.querySelector('input[data-field="LookupResultField"]');
+                if (!el) return null;
+                return el.value.trim() === "" ? null : el.value.trim();
+            })()
+
         };
     });
 

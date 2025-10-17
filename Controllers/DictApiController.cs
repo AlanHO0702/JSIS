@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.SqlClient; // 這個要using
+using Microsoft.Data.SqlClient; 
 using PcbErpApi.Data;
 using PcbErpApi.Models;
 using System.Collections.Generic;
@@ -14,7 +14,9 @@ public class DictApiController : ControllerBase
 
     public DictApiController(PcbErpContext context, IConfiguration config)
     {
-        _connStr = config.GetConnectionString("DefaultConnection");
+        if (config == null)
+            throw new ArgumentNullException(nameof(config));
+        _connStr = config.GetConnectionString("DefaultConnection") ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
     }
 
     [HttpPost]
@@ -23,28 +25,56 @@ public class DictApiController : ControllerBase
         using (var conn = new SqlConnection(_connStr))
         {
             await conn.OpenAsync();
+            
 
-            foreach (var input in list)
+           foreach (var input in list)
             {
-                var cmd = new SqlCommand(@"
-                    UPDATE CURdTableField 
-                    SET DisplayLabel = @DisplayLabel, 
-                        DataType = @DataType, 
-                        FieldNote = @FieldNote, 
-                        SerialNum = @SerialNum, 
-                        Visible = @Visible
-                    WHERE TableName = @TableName AND FieldName = @FieldName", conn);
+                var cmd = new SqlCommand();
+                var sql = "UPDATE CURdTableField SET ";
+                var setList = new List<string>();
 
                 cmd.Parameters.AddWithValue("@TableName", input.TableName ?? "");
-                cmd.Parameters.AddWithValue("@DisplayLabel", (object?)input.DisplayLabel ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@DataType", (object?)input.DataType ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@FieldNote", (object?)input.FieldNote ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@SerialNum", (object?)input.SerialNum ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@Visible", (object?)input.Visible ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@FieldName", (object)input.FieldName);
+                cmd.Parameters.AddWithValue("@FieldName", input.FieldName ?? "");
+
+                if (input.DisplayLabel != null)
+                {
+                    setList.Add("DisplayLabel = @DisplayLabel");
+                    cmd.Parameters.AddWithValue("@DisplayLabel", input.DisplayLabel);
+                }
+                if (input.DataType != null)
+                {
+                    setList.Add("DataType = @DataType");
+                    cmd.Parameters.AddWithValue("@DataType", input.DataType);
+                }
+                if (input.FieldNote != null)
+                {
+                    setList.Add("FieldNote = @FieldNote");
+                    cmd.Parameters.AddWithValue("@FieldNote", input.FieldNote);
+                }
+                if (input.SerialNum != null)
+                {
+                    setList.Add("SerialNum = @SerialNum");
+                    cmd.Parameters.AddWithValue("@SerialNum", input.SerialNum);
+                }
+                if (input.Visible != null)
+                {
+                    setList.Add("Visible = @Visible");
+                    cmd.Parameters.AddWithValue("@Visible", input.Visible);
+                }
+                if (input.LookupResultField != null)
+                {
+                    setList.Add("LookupResultField = @LookupResultField");
+                    cmd.Parameters.AddWithValue("@LookupResultField", input.LookupResultField);
+                }
+
+                if (setList.Count == 0) continue; // 沒有欄位要改就 skip
+
+                sql += string.Join(", ", setList);
+                sql += " WHERE TableName = @TableName AND FieldName = @FieldName";
+                cmd.CommandText = sql;
+                cmd.Connection = conn;
 
                 await cmd.ExecuteNonQueryAsync();
-
             }
         }
         return Ok(new { success = true });
@@ -75,13 +105,13 @@ public async Task<IActionResult> UpdateDictFieldsLayout([FromBody] List<DictLayo
                     iFieldWidth = @iFieldWidth, iFieldHeight = @iFieldHeight,
                     iFieldTop = @iFieldTop, iFieldLeft = @iFieldLeft
                 WHERE FieldName = @FieldName", conn);
-            cmd.Parameters.AddWithValue("@iShowWhere", (object)input.iShowWhere ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@iLayRow", (object)input.iLayRow ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@iLayColumn", (object)input.iLayColumn ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@iFieldWidth", (object)input.iFieldWidth ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@iFieldHeight", (object)input.iFieldHeight ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@iFieldTop", (object)input.iFieldTop ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@iFieldLeft", (object)input.iFieldLeft ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@iShowWhere", input.iShowWhere.HasValue ? input.iShowWhere.Value : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@iLayRow", input.iLayRow.HasValue ? input.iLayRow.Value : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@iLayColumn", input.iLayColumn.HasValue ? input.iLayColumn.Value : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@iFieldWidth", input.iFieldWidth.HasValue ? input.iFieldWidth.Value : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@iFieldHeight", input.iFieldHeight.HasValue ? input.iFieldHeight.Value : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@iFieldTop", input.iFieldTop.HasValue ? input.iFieldTop.Value : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@iFieldLeft", input.iFieldLeft.HasValue ? input.iFieldLeft.Value : (object)DBNull.Value);
             cmd.Parameters.AddWithValue("@FieldName", input.FieldName ?? "");
             await cmd.ExecuteNonQueryAsync();
         }
