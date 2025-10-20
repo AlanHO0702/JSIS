@@ -109,8 +109,9 @@ namespace PcbErpApi.Controllers
             var sql = (key ?? string.Empty).ToLowerInvariant() switch
             {
                 "customer" => "select CompanyID as value, ShortName as text from AJNdCustomer(nolock) order by CompanyID",
-                "bu"       => "select BUId as value, BUName as text from CURdBU(nolock)",
+                "bu" => "select BUId as value, BUName as text from CURdBU(nolock)",
                 "shipterm" => "select ShipTerm as value, ShipTermName as text from SPOdShipTerm(nolock) union select 255,'不限'",
+                "finished" => "select finished as value, finishedname as text from CURdPaperFinished(nolock) union select 5,'已完成及已結案' union select 255,'不設限'",
                 _ => throw new ArgumentException("lookup key not allowed")
             };
 

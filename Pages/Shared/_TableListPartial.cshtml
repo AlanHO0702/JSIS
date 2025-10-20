@@ -156,6 +156,60 @@
 <!-- 這一行一定要在所有 <script> 之前獨立放，不要包在 <script> 裡！ -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+
+<!-- ✅ 在這裡插入 shim -->
+<script>
+  (function () {
+    function pad2(n){ return String(n).padStart(2,'0'); }
+    function toYYYYMMDD(input){
+      if (!input) return input;
+
+      if (input instanceof Date && !isNaN(input)) {
+        return `${input.getFullYear()}-${pad2(input.getMonth()+1)}-${pad2(input.getDate())}`;
+      }
+
+      const s = String(input).trim();
+      // 2025/10/15 或 2025.10.15 或 2025-10-15
+      if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(s)) {
+        const [y, m, d] = s.split(/[-/.]/).map(Number);
+        return `${y}-${pad2(m)}-${pad2(d)}`;
+      }
+      // 20251015
+      if (/^\d{8}$/.test(s)) {
+        return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
+      }
+      // 已是 yyyy-mm-dd(或後面有時間)
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+
+      return input;
+    }
+
+    if (!window.normalizeForDateInput) {
+      window.normalizeForDateInput = function (el, value) {
+        const type = (el?.type || '').toLowerCase();
+        const hint = (el?.dataset?.type || el?.dataset?.fieldType || el?.dataset?.field || '').toLowerCase();
+
+        // date
+        if (type === 'date' || hint.includes('date')) {
+          return toYYYYMMDD(value);
+        }
+
+        // datetime-local: 'yyyy/mm/dd hh:mm' -> 'yyyy-mm-ddThh:mm'
+        if ((type === 'datetime-local' || hint.includes('datetime')) && typeof value === 'string') {
+          const m = value.trim().match(/^(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{8})\s+(\d{1,2}:\d{2})(?::\d{2})?$/);
+          if (m) {
+            const d = toYYYYMMDD(m[1]);
+            const t = m[2].slice(0,5);
+            return `${d}T${t}`;
+          }
+        }
+
+        return value;
+      };
+    }
+  })();
+</script>
+
 <script src="~/js/toolbarHandler.js"></script>
 
 <script>
@@ -252,7 +306,10 @@ function restoreSearchFormSafe(formEl, saved) {
 
     if (!hit) return;
 
-    const v = normalizeForDateInput(el, hit.Value);
+    // ✅ 改成（保護 + 不破壞既有值）：
+    const v = (typeof window.normalizeForDateInput === 'function')
+      ? window.normalizeForDateInput(el, hit.Value)
+  : hit.Value;
     if (el.type === 'date') {
       if (DATE_RE.test(String(v))) el.value = v; // 僅接受 yyyy-MM-dd
     } else {
