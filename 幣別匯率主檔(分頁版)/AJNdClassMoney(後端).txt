@@ -17,6 +17,10 @@ public class AJNdClassMoneyModel : PageModel
         _context = context;
     }
 
+    public int PageSize { get; set; } = 10; // 每頁筆數預設為 10
+    public int PageNumber { get; set; } = 1; // 目前頁碼，預設 1
+    public int TotalCount { get; set; } // 總資料筆數
+    public int TotalPages => (int)Math.Ceiling((TotalCount) / (double)PageSize); // 計算總頁數
     public List<CURdTableField> FieldDictList { get; set; } // 欄位定義清單
     public List<string> Columns { get; set; } = new();
     public DataTable TableData { get; set; } = new();
@@ -36,6 +40,11 @@ public class AJNdClassMoneyModel : PageModel
     // 該幣別的匯率歷史資料
     public List<AJNdClassMoneyHis> RateHistories { get; set; } = new();
 
+    // ✅ 歷史分頁專用
+    [BindProperty(SupportsGet = true)]
+    public int HistoryPageNumber { get; set; } = 1;
+    public int HistoryTotalPages => (int)Math.Ceiling((double)TotalCount / PageSize);
+
     public async Task OnGetAsync()
     {
         // 取得所有幣別主檔
@@ -49,8 +58,13 @@ public class AJNdClassMoneyModel : PageModel
             var query = _context.AJNdClassMoneyHis
                 .Where(h => h.MoneyCode == SelectedMoneyCode.Value)
                 .OrderByDescending(h => h.RateDate);
+            
+            TotalCount = await query.CountAsync();
 
-            RateHistories = await query.ToListAsync();
+            RateHistories = await query
+                .Skip((HistoryPageNumber - 1) * PageSize)
+                .Take(PageSize)
+                .ToListAsync();
         }
     }
 }
