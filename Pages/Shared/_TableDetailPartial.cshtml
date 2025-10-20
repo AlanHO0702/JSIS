@@ -29,6 +29,9 @@
     var PaperNum = headerData.ContainsKey("PaperNum") ? headerData["PaperNum"]?.ToString() ?? "" : "";
 
     var headerLookupMap = ViewData["HeaderLookupMap"] as Dictionary<string, string>;
+
+    string actionPartial = (ViewData["ActionRailPartial"] as string)
+                           ?? "~/Pages/Shared/_ActionRail.Empty.cshtml";
         
 }
 
@@ -53,22 +56,9 @@
         </div>
     </div>
 
-    <div class="action-rail">
-      <button id="btnSearchDetails" class="fab">搜尋</button> <!-- 👈 新的 -->
-      <button id="btnCalcAmount" class="fab">金額計算</button>
-      <button id="btnClearDetails" class="fab fab-red">清除單身</button>
-      <button id="btn" class="fab fab-blue">未定義</button>
-      <button id="btn" class="fab fab-blue">未定義</button>
-      <button id="btn" class="fab fab-blue">未定義</button>
-      <button id="btn" class="fab fab-blue">未定義</button>
-      <button id="btn" class="fab fab-blue">未定義</button>
-      <button id="btn" class="fab fab-blue">未定義</button>
-      <button id="btn" class="fab fab-blue">未定義</button>
-
-      
-      <!-- 之後可以再加別的按鈕 -->
-    </div>
-
+        <div class="action-rail">
+          @await Html.PartialAsync(actionPartial, (object)Model)
+        </div>
 
         <!-- 單頭可編輯表單 -->
         <form id="orderHeaderForm" class="erp-header-form">
@@ -423,6 +413,30 @@ function toCellString(raw, colMeta) {
   return s;
 }
 
+function withTemporarilyEnabled(formEl, callback) {
+  const disabledEls = Array.from(formEl.querySelectorAll('input:disabled, select:disabled, textarea:disabled'));
+  disabledEls.forEach(el => el.disabled = false);
+  try {
+    return callback();
+  } finally {
+    disabledEls.forEach(el => el.disabled = true);
+  }
+}
+
+// 把單頭表單收集成物件（會自動處理 disabled）
+function collectHeaderFormData() {
+  const form = document.getElementById('orderHeaderForm');
+  return withTemporarilyEnabled(form, () => Object.fromEntries(new FormData(form)));
+}
+
+// 安全取得單號（優先 PAGE.paperNum；沒有就從單頭抓 PaperNum）
+function getPaperNum() {
+  const p1 = (PAGE.paperNum || window.selectedPaperNum || '').trim();
+  if (p1) return p1;
+  const header = collectHeaderFormData();
+  return (header.PaperNum || header.papernum || '').toString().trim();
+}
+
 // ============================
 // 3) 明細列 收集 / 新增 / 刪除 / 整列選取
 // ============================
@@ -702,9 +716,12 @@ document.getElementById('btnRowDelete')?.addEventListener('click', onDeleteRowCl
 // ============================
 document.getElementById('orderHeaderForm').addEventListener('submit', async function (e) {
   e.preventDefault();
-  const header = Object.fromEntries(new FormData(this));
+
+  // ★ 1) 單頭 ─ 會自動把 disabled 欄位也取到
+  const header = collectHeaderFormData();
   normalizeNumberFields(header, PAGE.headerFields);
 
+  // ★ 2) 單身
   const details = collectDetails();
   normalizeDetailsNumbers(details, PAGE.detailFields);
 
@@ -717,13 +734,16 @@ document.getElementById('orderHeaderForm').addEventListener('submit', async func
 
   try {
     const resp = await fetch('/api/OrderHeaderApi/SaveOrderHeader', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     });
     if (resp.ok) {
       const result = await resp.json();
       if (result.updated) {
         await Swal.fire({ icon: 'success', title: '儲存成功！', timer: 1000, showConfirmButton: false });
-        localStorage.setItem("afterSave", "1"); location.reload();
+        localStorage.setItem("afterSave", "1");
+        location.reload();
       } else {
         Swal.fire({ icon: 'info', title: '沒有資料異動' });
       }
@@ -966,103 +986,6 @@ function getHeaderValueByLabel(labelText) {
   return (ctrl.value || '').trim();
 }
 
-// ============================
-// 9) 其他：金額計算按鈕（若頁面有
-document.getElementById('btnCalcAmount')?.addEventListener('click', async () => {
-  const paper = (PAGE.paperNum || window.selectedPaperNum || '').trim();
-  if (!paper) return Swal.fire({icon:'info', title:'沒有單號'});
-
-  try {
-    const resp = await fetch('/api/StoredProc/exec', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        Key: 'CalcOrderAmount',      // 對應 _registry 的 key
-        Args: { PaperNum: paper }    // 必填參數
-      })
-    });
-
-    const raw = await resp.text();
-    let data;
-    try { data = JSON.parse(raw); } catch { data = { ok:false, error: raw }; }
-
-    if (resp.ok && data.ok) {
-      Swal.fire({icon:'success', title:'計算完成', timer:900, showConfirmButton:false});
-      location.reload();
-    } else {
-      Swal.fire({icon:'error', title:'呼叫失敗', text: data.error || `HTTP ${resp.status}`});
-    }
-  } catch (e) {
-    Swal.fire({icon:'error', title:'網路錯誤', text: String(e)});
-  }
-});
-
-document.getElementById('btnClearDetails')?.addEventListener('click', async () => {
-  const paper = (PAGE.paperNum || window.selectedPaperNum || '').trim();
-  const paperId = (PAGE.detailTable || '').trim().replace(/^dbo\./i, '');
-  if (!paper)  return Swal.fire({icon:'info',  title:'沒有單號'});
-  if (!paperId) return Swal.fire({icon:'info',  title:'缺少單身表名（PaperId）'});
-
-  // ① 狀態限制
-  const status = getHeaderValueByLabel('單據狀態') || '';
-  const ALLOW  = ['作業中', '審核中'];
-  const BLOCK  = ['已確認', '已結案', '作廢中'];
-
-  if (BLOCK.includes(status) || !ALLOW.includes(status)) {
-    return Swal.fire({
-      icon: 'warning',
-      title: '此狀態不可清除',
-      html: `單據狀態：<b>${status || '（空）'}</b>`
-    });
-  }
-
-  // ② 二次確認
-  const { isConfirmed } = await Swal.fire({
-    icon: 'warning',
-    title: '確定要清除這張單的所有單身嗎？',
-    html: `單號：<b>${paper}</b><br>表：<code>${paperId}</code><br>狀態：<b>${status}</b>`,
-    showCancelButton: true, confirmButtonText: '清除', cancelButtonText: '取消'
-  });
-  if (!isConfirmed) return;
-
-  // ③ 呼叫 SP
-  try {
-    const resp = await fetch('/api/StoredProc/exec', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        Key: 'ClearOrderDetails',
-        Args: { PaperNum: paper, PaperId: paperId, Item: 0 }
-      })
-    });
-
-    const raw = await resp.text();
-    let data; try { data = JSON.parse(raw); } catch { data = { ok:false, error: raw }; }
-
-    if (resp.ok && data.ok) {
-      const msg = (data.rows != null) ? `已清除 ${data.rows} 筆` : '清除完成';
-      await Swal.fire({icon:'success', title: msg, timer:900, showConfirmButton:false});
-      location.reload();
-    } else {
-      Swal.fire({icon:'error', title:'清除失敗', text: data.error || `HTTP ${resp.status}`});
-    }
-  } catch (e) {
-    Swal.fire({icon:'error', title:'網路錯誤', text: String(e)});
-  }
-});
-
-  // 綁定外頁的「搜尋」按鈕
-  document.getElementById('btnSearchDetails')?.addEventListener('click', ()=>{
-    const paper = (window.selectedPaperNum || '').trim();
-    window.OrderDetailPicker_detailPicker.open({ paperNum: paper });
-  });
-
-  // 可選：攔截元件的確定事件
-  $('#detailPicker').on('odp:confirmed', function(e, res){
-    // 例如：你不想 reload，可在這裡自己處理
-    // console.log('confirmed:', res);
-  });
-
 
 //單身拖曳欄位寬度調整
 
@@ -1165,7 +1088,16 @@ document.getElementById('btnClearDetails')?.addEventListener('click', async () =
   });
 })();
 
+ // 任何輸入變更都視為未儲存
+  window.__unsavedChanges = false;
+  document.addEventListener('input', (e) => {
+    if (e.target.closest('.erp-header-form, .erp-table')) {
+      window.__unsavedChanges = true;
+    }
+  });
 
+  // 儲存成功時清除旗標（你原本儲存成功會 reload，這裡只是保險）
+  window.addEventListener('pageshow', () => { window.__unsavedChanges = false; });
 
 </script>
 
@@ -1260,13 +1192,41 @@ body { background: #f7f9fb !important; }
 .highlight-red { color:#e53b2d; font-weight:700; }
 .highlight-blue{ color:#2564b3; font-weight:700; }
 
-/* =========================================
-   E) 左側浮動按鈕群
-   ========================================= */
-:root{ --fab-left: 12px; --fab-width: 100px; --fab-gap: 20px; --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap)); }
-.action-rail{ position: fixed; left: var(--fab-left); top: 80px; display: flex; flex-direction: column; gap: 10px; z-index: 900; }
-.fab{ position: relative; min-width: var(--fab-width); padding: 8px 12px; background:#ffc107; color:#090101; font-weight:700;
-  border-radius:10px; cursor:pointer; box-shadow:0 6px 16px rgba(0,0,0,.2); border: 0; }
+/* --- Action Rail 基礎版位 & 內容右移（固定在樣板）--- */
+:root{
+  --fab-left: 12px;
+  --fab-width: 100px;
+  --fab-gap: 20px;
+  --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap));
+}
+
+.action-rail{
+  position: fixed;
+  left: var(--fab-left);
+  top: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 900;
+}
+
+/* 內容往右騰出空間；toolbar 往回補，維持視覺對齊 */
+.erp-detail-container{ margin-left: var(--rail-reserve); }
+#topToolbar{ margin-left: calc(-1 * var(--rail-reserve)) !important; }
+
+/* 按鈕的共同外觀（保持在樣板，讓所有頁面一致） */
+.fab{
+  position: relative;
+  min-width: var(--fab-width);
+  padding: 8px 12px;
+  background:#ffc107;
+  color:#090101;
+  font-weight:700;
+  border-radius:10px;
+  cursor:pointer;
+  box-shadow:0 6px 16px rgba(0,0,0,.2);
+  border:0;
+}
 .fab:hover{ filter:brightness(0.95); }
 .fab-red{ background:#dc3545; color:#fff; }
 .fab-blue{ background:#3583dc; color:#fff; }
