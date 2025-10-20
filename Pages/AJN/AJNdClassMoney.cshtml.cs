@@ -6,8 +6,9 @@ using PcbErpApi.Data;
 using PcbErpApi.Models; // 導入專案模型
 using Microsoft.EntityFrameworkCore;
 
+// 幣別匯率主檔的頁面模型
 public class AJNdClassMoneyModel : PageModel
-{ // 開始類別定義
+{   // 開始類別定義
     private readonly IConfiguration _configuration; // 用於讀取配置
     private readonly PcbErpContext _context;
     public AJNdClassMoneyModel(IConfiguration configuration, PcbErpContext context)
@@ -16,7 +17,7 @@ public class AJNdClassMoneyModel : PageModel
         _context = context;
     }
 
-    public int PageSize { get; set; } = 10; // 每頁筆數預設為 50
+    public int PageSize { get; set; } = 10; // 每頁筆數預設為 10
     public int PageNumber { get; set; } = 1; // 目前頁碼，預設 1
     public int TotalCount { get; set; } // 總資料筆數
     public int TotalPages => (int)Math.Ceiling((TotalCount) / (double)PageSize); // 計算總頁數
@@ -26,19 +27,23 @@ public class AJNdClassMoneyModel : PageModel
 
     [BindProperty(SupportsGet = true)]
     public string TableName { get; set; }
-
     public string SortColumn { get; set; }
     public string SortDirection { get; set; } = "ASC";
 
     // ★ 核心：儲存「實體欄位名稱」與「顯示名稱」 主檔資料
     public List<AJNdClassMoney> ExchangeRates { get; set; }
 
-    // 新增：被選取的幣別代號（從 query string 傳入）
+    // 被選取的幣別代號（從 query string 傳入）
     [BindProperty(SupportsGet = true)]
     public byte? SelectedMoneyCode { get; set; }
 
-    // 新增：該幣別的匯率歷史資料
+    // 該幣別的匯率歷史資料
     public List<AJNdClassMoneyHis> RateHistories { get; set; } = new();
+
+    // ✅ 歷史分頁專用
+    [BindProperty(SupportsGet = true)]
+    public int HistoryPageNumber { get; set; } = 1;
+    public int HistoryTotalPages => (int)Math.Ceiling((double)TotalCount / PageSize);
 
     public async Task OnGetAsync()
     {
@@ -57,7 +62,7 @@ public class AJNdClassMoneyModel : PageModel
             TotalCount = await query.CountAsync();
 
             RateHistories = await query
-                .Skip((PageNumber-1) * PageSize)
+                .Skip((HistoryPageNumber - 1) * PageSize)
                 .Take(PageSize)
                 .ToListAsync();
         }
