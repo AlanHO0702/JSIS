@@ -13,7 +13,6 @@ using PcbErpApi.Models;
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
 
-
 // 註冊 Swagger API 文件產生器與 Explorer，方便生成與瀏覽 API 文件
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -30,7 +29,6 @@ builder.Services.AddControllers().AddJsonOptions(options =>
     options.JsonSerializerOptions.PropertyNamingPolicy = null; // 保持原本 C# 的大寫
 });
 
-
 // 註冊 Razor Pages 服務，並設定 JSON 序列化時使用 camelCase 命名風格
 builder.Services.AddRazorPages();
     /*.AddJsonOptions(options =>
@@ -40,7 +38,6 @@ builder.Services.AddRazorPages();
 
 // 註冊 API Controllers 服務（支援 [ApiController]）
 builder.Services.AddControllers();
-
 
 builder.Services.Configure<ApiSettings>(builder.Configuration.GetSection("PcbErpApi"));
 builder.Services.AddHttpClient("MyApiClient", (sp, client) =>
