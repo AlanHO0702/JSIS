@@ -1,0 +1,120 @@
+@model dynamic
+
+<div class="action-rail">
+  <button type="button" class="fab" data-action="importOrder">匯入訂單</button>
+  <button type="button" class="fab" data-action="recalc">重算</button>
+  <button type="button" class="fab" data-action="lock">Lock</button>
+  <button type="button" class="fab fab-red" data-action="clearDetails" id="btnClearDetails">清除單身</button>
+  <button type="button" class="fab" data-action="toIssue">轉領料單</button>
+  <button type="button" class="fab" data-action="print">列印工單</button>
+  <button type="button" class="fab" data-action="unlock">解除Lock</button>
+</div>
+
+<script>
+// ---- 共用：狀態名稱對照與抓狀態碼（先 DOM，抓不到才打 API） ----
+function statusName(code){
+  const map = {0:'作業中', 1:'已確認', 2:'作廢中', 4:'已結案'}; // 依你實際定義調整
+  return map[Number(code)] ?? `代碼:${code}`;
+}
+
+async function getStatusCode(paperNum){
+  // 嘗試從頁面讀 hidden/input
+  const el = document.querySelector('[name="Finished"],[data-bind="Finished"],[name="Status"],[data-bind="Status"]');
+  const v  = el?.value ?? el?.textContent;
+  const n  = Number(v);
+  if (Number.isFinite(n)) return n;
+
+  // 撈不到再打單頭 API
+  const r = await fetch(`/api/FMEdIssueMain/${encodeURIComponent(paperNum)}`);
+  if (!r.ok) return null;
+  const m = await r.json();
+  const code = m.Finished ?? m.Status;
+  return (code === undefined || code === null) ? null : Number(code);
+}
+
+// ---- 事件代理：所有 action 都走這裡 ----
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.fab[data-action]');
+  if (!btn) return;
+
+  const action = btn.dataset.action;
+
+  // 取共同參數
+  let paper, paperId;
+  try {
+    paper   = getPaperNum?.();                                  // 你現有的 helper
+    paperId = (PAGE?.detailTable || '').trim().replace(/^dbo\./i, '');
+  } catch (err) {
+    console.error('[param error]', err);
+    return Swal.fire({icon:'error', title:'前端函式未定義', text: String(err)});
+  }
+
+  if (!paper)  return Swal.fire({icon:'info',  title:'沒有單號'});
+  if (!paperId && action === 'clearDetails') // 清除用得到
+    return Swal.fire({icon:'info', title:'缺少單身表名（PaperId）'});
+
+  switch (action) {
+    case 'clearDetails': {
+      e.preventDefault(); e.stopPropagation();
+
+      // 用「數字狀態碼」判斷是否可清
+      const BLOCK_CODES = [1, 2, 3, 4]; // 已確認/作廢中/已審核/已結案（依實際調整）
+      const code = await getStatusCode(paper);
+      console.log('[status code]', code);
+
+      if (code != null && BLOCK_CODES.includes(code)) {
+        return Swal.fire({
+          icon:'warning',
+          title:'此狀態不可清除',
+          html:`單據狀態：<b>${statusName(code)}</b>`
+        });
+      }
+
+      const { isConfirmed } = await Swal.fire({
+        icon:'warning',
+        title:'確定要清除這張單的所有單身嗎？',
+        html:`單號：<b>${paper}</b><br>表：<code>${paperId}</code>`,
+        showCancelButton:true, confirmButtonText:'清除', cancelButtonText:'取消'
+      });
+      if (!isConfirmed) return;
+
+      try {
+        const payload = { Key: 'FMEdIssueClearLayer', Args: { PaperNum: paper } };
+        console.log('[fetch] POST /api/StoredProc/exec', payload);
+
+        const resp = await fetch('/api/StoredProc/exec', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const raw = await resp.text();
+        console.log('[fetch resp]', resp.status, raw);
+
+        let data; try { data = JSON.parse(raw); } catch { data = { ok:false, error: raw }; }
+
+        if (resp.ok && data.ok) {
+          const msg = (data.rows != null) ? `已清除 ${data.rows} 筆` : '清除完成';
+          await Swal.fire({icon:'success', title: msg, timer:900, showConfirmButton:false});
+          location.reload();
+        } else {
+          Swal.fire({icon:'error', title:'清除失敗', text: data.error || `HTTP ${resp.status}`});
+        }
+      } catch (e2) {
+        console.error('[fetch error]', e2);
+        Swal.fire({icon:'error', title:'網路錯誤', text: String(e2)});
+      }
+      break;
+    }
+
+    case 'recalc':
+    case 'importOrder':
+    case 'lock':
+    case 'unlock':
+    case 'toIssue':
+    case 'print': {
+      Swal.fire({ icon:'info', title:'尚未實作', text:`功能：${action}` });
+      break;
+    }
+  }
+});
+</script>
