@@ -14,21 +14,29 @@ public class StoredProcController : ControllerBase
     // 白名單：前端 key -> SP 名稱 + 必填/可選參數
     private static readonly Dictionary<string, StoredProcDef> _registry =
         new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["CalcOrderAmount"] = new StoredProcDef(
+        {
+            ["CalcOrderAmount"] = new StoredProcDef(
             ProcName: "dbo.SPOdOrderTotal",            // 有 schema 比較保險
             RequiredParams: new[] { "PaperNum" }
         ),
 
-        // ★ 清除單身（三參數版）
-        ["ClearOrderDetails"] = new StoredProcDef(
+            // ★ 清除單身（三參數版）
+            ["ClearOrderDetails"] = new StoredProcDef(
             ProcName: "dbo.SPodClearAllSub",           // 你的 SP 名
             RequiredParams: new[] { "PaperNum", "PaperId", "Item" }
             // 若想把 Item 當可選，就：
             // RequiredParams: new[] { "PaperNum", "PaperId" },
             // OptionalParams: new[] { "Item" }
         ),
-    };
+
+            // 新增：製令單清除
+            ["FMEdIssueClearLayer"] = new StoredProcDef(
+            ProcName: "dbo.FMEdIssueClearLayer",
+            // 依你的 SP 參數調整 ↓↓↓
+            RequiredParams: new[] { "PaperNum" }
+        )
+
+        };
 
     public StoredProcController(IConfiguration cfg, PcbErpContext db)
     {
@@ -43,6 +51,8 @@ public class StoredProcController : ControllerBase
     [HttpPost("exec")]
     public async Task<IActionResult> Exec([FromBody] ExecSpRequest req)
     {
+        Console.WriteLine($"[StoredProc.Exec] Key={req?.Key}, Args={JsonSerializer.Serialize(req?.Args)}");
+
         if (string.IsNullOrWhiteSpace(req?.Key) || !_registry.TryGetValue(req.Key, out var def))
             return BadRequest(new { ok = false, error = "未知的作業代碼" });
 

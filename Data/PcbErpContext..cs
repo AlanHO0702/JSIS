@@ -7,10 +7,12 @@ namespace PcbErpApi.Data
     {
         public PcbErpContext(DbContextOptions<PcbErpContext> options) : base(options) { }
         public DbSet<SpodOrderMain> SpodOrderMain => Set<SpodOrderMain>();
+        public DbSet<SPOdMPSOutMain> SPOdMPSOutMain => Set<SPOdMPSOutMain>();
         public DbSet<CurdUser> CurdUser => Set<CurdUser>();
         public DbSet<MindStockCostPn> MindStockCostPn => Set<MindStockCostPn>();
         public DbSet<CurdSysItem> CurdSysItems { get; set; }
         public DbSet<SpodOrderSub> SpodOrderSub { get; set; }
+        public DbSet<SpodOrderSub> SPOdMPSOutSub { get; set; }
         public DbSet<CurdSystemSelect> CurdSystemSelects { get; set; }
         public DbSet<CurdPaperSelected> CURdPaperSelected { get; set; }
         public DbSet<CURdTableField> CURdTableFields { get; set; }
@@ -28,6 +30,8 @@ namespace PcbErpApi.Data
         public virtual DbSet<FmedVProcNisToStd> FmedVProcNisToStd { get; set; }
         public virtual DbSet<FmedIssueMain> FmedIssueMain { get; set; }
         public virtual DbSet<FmedIssueSub> FmedIssueSub { get; set; }
+        public virtual DbSet<AJNdClassMoney> AJNdClassMoney { get; set; }
+        public virtual DbSet<AJNdClassMoneyHis> AJNdClassMoneyHis { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
 
@@ -1739,6 +1743,22 @@ namespace PcbErpApi.Data
                 prop.SetScale(8);
             }
 
+            modelBuilder.Entity<AJNdClassMoney>(entity =>
+            {
+                entity.HasKey(e => new { e.MoneyCode, e.UseId });
+            });
+
+            // 設定 AJNdClassMoneyHis 的複合主鍵
+            modelBuilder.Entity<AJNdClassMoneyHis>()
+                .HasKey(his => new { his.MoneyCode, his.UseId, his.RateDate });
+
+            // 設定關聯關係：一個幣別對應多筆歷史記錄
+            modelBuilder.Entity<AJNdClassMoneyHis>()
+                .HasOne(his => his.Money)
+                .WithMany(m => m.Histories)
+                .HasForeignKey(his => new { his.MoneyCode, his.UseId })
+                .HasPrincipalKey(m => new { m.MoneyCode, m.UseId })
+                .OnDelete(DeleteBehavior.Cascade);
 
             OnModelCreatingPartial(modelBuilder);
         }

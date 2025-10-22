@@ -29,6 +29,9 @@
     var PaperNum = headerData.ContainsKey("PaperNum") ? headerData["PaperNum"]?.ToString() ?? "" : "";
 
     var headerLookupMap = ViewData["HeaderLookupMap"] as Dictionary<string, string>;
+
+    string actionPartial = (ViewData["ActionRailPartial"] as string)
+                           ?? "~/Pages/Shared/_ActionRail.Empty.cshtml";
         
 }
 
@@ -53,22 +56,9 @@
         </div>
     </div>
 
-    <div class="action-rail">
-      <button id="btnSearchDetails" class="fab">搜尋</button> <!-- 👈 新的 -->
-      <button id="btnCalcAmount" class="fab">金額計算</button>
-      <button id="btnClearDetails" class="fab fab-red">清除單身</button>
-      <button id="btn" class="fab fab-blue">未定義</button>
-      <button id="btn" class="fab fab-blue">未定義</button>
-      <button id="btn" class="fab fab-blue">未定義</button>
-      <button id="btn" class="fab fab-blue">未定義</button>
-      <button id="btn" class="fab fab-blue">未定義</button>
-      <button id="btn" class="fab fab-blue">未定義</button>
-      <button id="btn" class="fab fab-blue">未定義</button>
-
-      
-      <!-- 之後可以再加別的按鈕 -->
-    </div>
-
+        <div class="action-rail">
+          @await Html.PartialAsync(actionPartial, (object)Model)
+        </div>
 
         <!-- 單頭可編輯表單 -->
         <form id="orderHeaderForm" class="erp-header-form">
@@ -299,90 +289,97 @@ const PAGE = {
   detailFields: @Html.Raw(JsonSerializer.Serialize(fields))
 };
 
+// 放在最前面（辭典開關）
+window.__DICT_OPEN__ = false;
+
 // 讓其它工具可以取到目前單號
 window.selectedPaperNum = '@(Model.HeaderData["PaperNum"] ?? "")';
 
-// ★ 再保險一次：頁面載入後，用公開 API 指定辭典表（之後若要換，只改這一行即可）
+// ★ 指定辭典表
 document.addEventListener('DOMContentLoaded', () => {
   window['OrderDetailPicker_detailPicker']?.setDictTableName('SPOdOCXOrderPOChice');
 });
 
+// ★ 綁定辭典 Modal 顯示/關閉，鎖焦點
+$('#detailPicker')
+  .on('shown.bs.modal', function () {
+    window.__DICT_OPEN__ = true;
+    $(this).find('input,textarea,select').filter(':visible:enabled').first().trigger('focus');
+  })
+  .on('hidden.bs.modal', function () {
+    window.__DICT_OPEN__ = false;
+  });
+
+// ★ 防止「儲存」按鈕被自動聚焦
+(function guardSaveButtonFocus(){
+  const saveBtn = document.querySelector('#topToolbar button[type="submit"]');
+  if (!saveBtn) return;
+  $('#detailPicker').on('shown.bs.modal', function(){
+    saveBtn.setAttribute('data-prev-tabindex', saveBtn.getAttribute('tabindex') ?? '');
+    saveBtn.setAttribute('tabindex', '-1');
+    saveBtn.blur();
+  });
+  $('#detailPicker').on('hidden.bs.modal', function(){
+    const prev = saveBtn.getAttribute('data-prev-tabindex');
+    if (prev === '') saveBtn.removeAttribute('tabindex');
+    else saveBtn.setAttribute('tabindex', prev);
+    saveBtn.removeAttribute('data-prev-tabindex');
+  });
+})();
+
 // ============================
 // 1) Toolbar Handler 啟動
 // ============================
-// 調用你原本的共用 ToolbarHandler（用單號當 key）
 // 自動推導本頁的路徑樣板：/SpodOrderSub/{0}
-  // 目前單號
-  const PAPER_NUM = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(PaperNum ?? ""));
-  // 從後端傳進來的「返回主頁面」基底路徑，例如 "/SpodOrderMain"
-  const QUERY_REDIRECT_URL = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
-    ViewData["QueryRedirectUrl"]?.ToString() ?? ""
-  ));
+const PAPER_NUM = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(PaperNum ?? ""));
+const QUERY_REDIRECT_URL = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+  ViewData["QueryRedirectUrl"]?.ToString() ?? ""
+));
 
-  const PAGE_PAPER_NUM = ("@PaperNum" || "").trim();
-  const KEY_FIELD = ("@(keyFieldName ?? "PaperNum")" || "PaperNum").trim();
+const PAGE_PAPER_NUM = ("@PaperNum" || "").trim();
+const KEY_FIELD = ("@(keyFieldName ?? "PaperNum")" || "PaperNum").trim();
 
-  // 1) 從主程式帶進來的「返回主頁面」基底路徑，補上 /{0}
-  const backToMainTpl = (PAGE.queryRedirectUrl || '').trim()
-    ? PAGE.queryRedirectUrl.replace(/\/$/, '') + '/{0}'
-    : '';
+const backToMainTpl = (PAGE.queryRedirectUrl || '').trim()
+  ? PAGE.queryRedirectUrl.replace(/\/$/, '') + '/{0}'
+  : '';
+const subTpl = (PAGE.detailRouteTemplate || '').replace(/\{PaperNum\}/gi, '{0}');
+const finalSwitchTpl = backToMainTpl || subTpl;
 
-  // 2) 從伺服器帶來的子頁樣板（主頁→單身），把 {PaperNum} 正規化成 {0}
-  const subTpl = (PAGE.detailRouteTemplate || '')
-    .replace(/\{PaperNum\}/gi, '{0}');
+console.debug('[Switch template]', finalSwitchTpl);
 
-  // 3) 在單身頁優先用 backToMainTpl（切回主頁），否則就用 subTpl（主頁切到單身）
-  const finalSwitchTpl = backToMainTpl || subTpl;
+new ToolbarHandler({
+  searchBtnId: "btnSubSearch",
+  addBtnId: "btnSubAddNew",
+  deleteBtnId: "btnSubBatchDelete",
+  getSelectedId: () => (PAGE.paperNum || window.selectedPaperNum || ''),
+  modalId: "searchModal",
+  formId: "searchForm",
+  addApiUrl: PAGE.addApiUrl,
+  deleteApiUrlFn: id => `/api/${PAGE.deleteApiUrl}/${id || PAGE.paperNum}`,
+  detailRouteTemplate: finalSwitchTpl,
+  tableName: "@tableName",
+  renderTable: null,
+  renderPagination: null,
+  renderOrderCount: null,
+  restoreSearchForm: null,
+  queryRedirectUrl: PAGE.queryRedirectUrl
+});
 
-  // 防呆：log 一下
-  console.debug('[Switch template]', finalSwitchTpl);
-
-  new ToolbarHandler({
-    searchBtnId: "btnSubSearch",
-    addBtnId: "btnSubAddNew",
-    deleteBtnId: "btnSubBatchDelete",
-    getSelectedId: () => (PAGE.paperNum || window.selectedPaperNum || ''), // 確保有單號
-    modalId: "searchModal",
-    formId: "searchForm",
-    addApiUrl: PAGE.addApiUrl,
-    deleteApiUrlFn: id => `/api/${PAGE.deleteApiUrl}/${id || PAGE.paperNum}`,
-    detailRouteTemplate: finalSwitchTpl,   // ← 這裡換成剛算好的樣板
-    tableName: "@tableName",
-    renderTable: null,
-    renderPagination: null,
-    renderOrderCount: null,
-    restoreSearchForm: null,
-    queryRedirectUrl: PAGE.queryRedirectUrl
-  });
-
-// 手動接管「切換」按鈕：單身頁 → 主頁
+// 單身頁 → 主頁 切換
 (function hookToggleBackToMain() {
-  // 找到切換鈕（按 id；找不到再以文字比對）
   const rawBtn = document.getElementById('btnToggle') ||
     Array.from(document.querySelectorAll('button, a'))
       .find(el => (el.textContent || '').trim() === '切換');
   if (!rawBtn) return;
-
-  // 用 clone 置換掉原元素，清空原本所有事件監聽（包含 ToolbarHandler 綁的）
   const btn = rawBtn.cloneNode(true);
   rawBtn.replaceWith(btn);
-
-  // 我們自己的處理器（用捕獲階段 + 停止冒泡，保險）
   btn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
-
-    const base = (QUERY_REDIRECT_URL || '').trim().replace(/\/$/, ''); // 例如 /SpodOrderMain
-    if (!base) {
-      Swal.fire({ icon: 'error', title: '未提供返回主頁路徑' });
-      return;
-    }
-
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+    const base = (QUERY_REDIRECT_URL || '').trim().replace(/\/$/, '');
+    if (!base) { Swal.fire({ icon: 'error', title: '未提供返回主頁路徑' }); return; }
     const id = (PAGE_PAPER_NUM || window.selectedPaperNum || '').trim();
     const sep = base.includes('?') ? '&' : '?';
     const url = id ? `${base}${sep}${encodeURIComponent(KEY_FIELD)}=${encodeURIComponent(id)}` : base;
-
     location.href = url;
   }, { capture: true });
 })();
@@ -410,7 +407,6 @@ function normalizeDetailsNumbers(detailRows, fieldDefs) {
     });
   });
 }
-// 依欄位型別把 raw 轉字串（避免 [object Object]）
 function toCellString(raw, colMeta) {
   if (raw == null) return '';
   if (typeof raw === 'object') return '';
@@ -422,41 +418,46 @@ function toCellString(raw, colMeta) {
   if (dt === 'number') return s.replace(/,/g, '');
   return s;
 }
+function withTemporarilyEnabled(formEl, callback) {
+  const disabledEls = Array.from(formEl.querySelectorAll('input:disabled, select:disabled, textarea:disabled'));
+  disabledEls.forEach(el => el.disabled = false);
+  try { return callback(); } finally { disabledEls.forEach(el => el.disabled = true); }
+}
+function collectHeaderFormData() {
+  const form = document.getElementById('orderHeaderForm');
+  return withTemporarilyEnabled(form, () => Object.fromEntries(new FormData(form)));
+}
+function getPaperNum() {
+  const p1 = (PAGE.paperNum || window.selectedPaperNum || '').trim();
+  if (p1) return p1;
+  const header = collectHeaderFormData();
+  return (header.PaperNum || header.papernum || '').toString().trim();
+}
 
 // ============================
 // 3) 明細列 收集 / 新增 / 刪除 / 整列選取
 // ============================
-
-// 3-1 收集目前表格所有「有變動」的明細列
 function collectDetails() {
   const rows = document.querySelectorAll('.erp-table tbody tr');
   const details = [];
   rows.forEach(tr => {
-    let changed = (tr.dataset.state === 'added' || tr.dataset.state === 'deleted'); // 新增/刪除一定送
-    const row = {
-      __state: tr.dataset.state || 'modified',
-      PaperNum: tr.dataset.paperNum || PAGE.paperNum
-    };
+    let changed = (tr.dataset.state === 'added' || tr.dataset.state === 'deleted');
+    const row = { __state: tr.dataset.state || 'modified', PaperNum: tr.dataset.paperNum || PAGE.paperNum };
     tr.querySelectorAll('.cell-edit').forEach(inp => {
-      const field = inp.dataset.field;
-      if (!field) return;
+      const field = inp.dataset.field; if (!field) return;
       const val = (inp.value ?? '').toString();
       row[field] = val;
       if (!changed && (val !== (inp.dataset.init ?? ''))) changed = true;
     });
     if (row.Item == null && tr.dataset.item) row.Item = tr.dataset.item;
-    if (changed) {
-      if (row.__state === 'unchanged') row.__state = 'modified';
-      details.push(row);
-    }
+    if (changed) { if (row.__state === 'unchanged') row.__state = 'modified'; details.push(row); }
   });
   return details;
 }
 
-// 3-2 新增一列（呼叫後端插 DB，再回填到前端並立刻可編輯）
 let _addingRow = false;
 async function onAddRowClick() {
-  if (_addingRow) return;        // 節流
+  if (_addingRow) return;
   _addingRow = true;
   try {
     const res = await fetch('/api/OrderHeaderApi/AddDetailRow', {
@@ -469,12 +470,9 @@ async function onAddRowClick() {
     appendDetailRowFromServer(json.row || {});
   } catch (err) {
     Swal.fire({icon:'error', title:'新增明細失敗', text: String(err.message || err)});
-  } finally {
-    _addingRow = false;
-  }
+  } finally { _addingRow = false; }
 }
 
-// 3-3 將後端新插入的那筆 row 追加到表格；狀態標成 unchanged（因為已在 DB）
 function appendDetailRowFromServer(row) {
   const tbody = document.querySelector('.erp-table tbody');
   const tr = document.createElement('tr');
@@ -499,24 +497,17 @@ function appendDetailRowFromServer(row) {
   });
   tr.innerHTML = tdsHtml;
   tbody.appendChild(tr);
-
-  // 這列立刻可編輯＋高亮
   makeRowEditable(tr);
   selectRow(tr);
-
-  // 輸入 ⇒ 標記 modified（除非是新增）
   tr.querySelectorAll('.cell-edit').forEach(inp => {
-    inp.addEventListener('input', () => {
-      if (tr.dataset.state !== 'added') tr.dataset.state = 'modified';
-    });
+    inp.addEventListener('input', () => { if (tr.dataset.state !== 'added') tr.dataset.state = 'modified'; });
   });
 }
 
-// ===== 單身表格鍵盤捷徑（↑ ↓ F7 F8）加強版 =====
+// ===== 鍵盤捷徑（↑ ↓ F7 F8），加上 modal 短路 =====
 (function initDetailRowHotkeys(){
-  const BLOCK_FIELDS = new Set(['item','Item']); // 不複製的欄位（項次等）
-  let curColIdx = 0;                              // 記錄目前欄位索引
-
+  const BLOCK_FIELDS = new Set(['item','Item']);
+  let curColIdx = 0;
   function tdIndex(td){ return td ? Array.prototype.indexOf.call(td.parentElement.children, td) : 0; }
   function selectedRow(){ return document.querySelector('.erp-table tbody tr.row-selected'); }
   function getCellInput(tr, idx){
@@ -526,32 +517,31 @@ function appendDetailRowFromServer(row) {
   }
   function focusCell(tr, idx){
     if (!tr) return;
-    selectRow(tr);
-    makeRowEditable(tr);
-    const inp = getCellInput(tr, idx);
-    if (inp){ inp.focus(); inp.select?.(); }
+    selectRow(tr); makeRowEditable(tr);
+    const inp = getCellInput(tr, idx); if (inp){ inp.focus(); inp.select?.(); }
   }
- 
   function syncView(td, val){
     const span = td && td.querySelector ? td.querySelector('.cell-view') : null;
     if (span) span.textContent = (val ?? '');
   }
 
-
   document.addEventListener('keydown', async (e) => {
     try{
+      // ★ modal 打開時，完全不處理
+      if (window.__DICT_OPEN__) return;
+      if (e.target.closest && e.target.closest('.modal')) return;
+
       const key = e.key;
-      // 建立「目前操作脈絡」：可從 input、或從已選列 + curColIdx 推導
       let input = e.target.closest?.('.cell-edit');
       let curTr, curTd;
 
       if (input && !input.classList.contains('d-none')) {
         curTd = input.closest('td');
         curTr = input.closest('tr');
-        curColIdx = tdIndex(curTd);            // 更新目前欄索引
+        curColIdx = tdIndex(curTd);
       } else {
         curTr = selectedRow() || e.target.closest?.('tr');
-        if (!curTr) return;                    // 沒選列就不處理
+        if (!curTr) return;
         makeRowEditable(curTr);
         input = getCellInput(curTr, curColIdx) || curTr.querySelector('.cell-edit');
         if (!input) return;
@@ -561,12 +551,7 @@ function appendDetailRowFromServer(row) {
       const prevTr = curTr.previousElementSibling;
       const nextTr = curTr.nextElementSibling;
 
-      // ↑ 上一列
-      if (key === 'ArrowUp'){
-        if (prevTr){ e.preventDefault(); focusCell(prevTr, curColIdx); }
-        return;
-      }
-      // ↓ 下一列（沒有就自動新增）
+      if (key === 'ArrowUp'){ if (prevTr){ e.preventDefault(); focusCell(prevTr, curColIdx); } return; }
       if (key === 'ArrowDown'){
         e.preventDefault();
         if (nextTr){ focusCell(nextTr, curColIdx); return; }
@@ -576,86 +561,71 @@ function appendDetailRowFromServer(row) {
         return;
       }
 
-      // F7：整列複製（跳過項次等）
       if (key === 'F7' || e.keyCode === 118){
-      e.preventDefault();
-      if (!prevTr) return;
+        e.preventDefault();
+        if (!prevTr) return;
+        const prevMap = Object.create(null);
+        prevTr.querySelectorAll('.cell-edit').forEach(inp => {
+          prevMap[(inp.dataset.field||'').toLowerCase()] = inp;
+        });
+        curTr.querySelectorAll('.cell-edit').forEach(inp => {
+          const f = (inp.dataset.field||'').toLowerCase();
+          if (!f || BLOCK_FIELDS.has(f)) return;
+          const src = prevMap[f]; if (!src) return;
+          inp.value = src.value ?? '';
+          inp.dispatchEvent(new Event('input', {bubbles:true}));
+          syncView(inp.closest('td'), inp.value);
+        });
+        if (curTr.dataset.state !== 'added') curTr.dataset.state = 'modified';
+        input.focus(); input.select?.();
+        return;
+      }
 
-      const prevMap = Object.create(null);
-      prevTr.querySelectorAll('.cell-edit').forEach(inp => {
-        prevMap[(inp.dataset.field||'').toLowerCase()] = inp;
-      });
-      curTr.querySelectorAll('.cell-edit').forEach(inp => {
-        const f = (inp.dataset.field||'').toLowerCase();
-        if (!f || BLOCK_FIELDS.has(f)) return;
-        const src = prevMap[f]; if (!src) return;
-        inp.value = src.value ?? '';
-        inp.dispatchEvent(new Event('input', {bubbles:true}));
-        syncView(inp.closest('td'), inp.value);
-      });
-      if (curTr.dataset.state !== 'added') curTr.dataset.state = 'modified';
-      input.focus(); input.select?.();
-      return;
-    }
-
-
-      // F8：只複製目前欄位（來源＝上一列同欄位）
       if (key === 'F8' || e.keyCode === 119){
         e.preventDefault();
         if (!prevTr) return;
-
         const field = (input.dataset.field||'').trim();
         if (BLOCK_FIELDS.has(field)) return;
-
-        const prevInput = getCellInput(prevTr, curColIdx);
-        if (!prevInput) return;
-
+        const prevInput = getCellInput(prevTr, curColIdx); if (!prevInput) return;
         input.value = prevInput.value ?? '';
         input.dispatchEvent(new Event('input', {bubbles:true}));
         syncView(curTd, input.value);
         input.focus(); input.select?.();
         return;
       }
-    }catch(err){
-      console.error('[detail hotkeys] error:', err);
-    }
+    }catch(err){ console.error('[detail hotkeys] error:', err); }
   });
 
-  // 追蹤目前欄位索引（滑鼠點到哪一格/哪一個 input）
   const tbody = document.querySelector('.erp-table tbody');
   if (tbody){
     tbody.addEventListener('click', (e) => {
+      if (window.__DICT_OPEN__ || e.target.closest('.modal')) return;
       const td = e.target.closest('td'); if (td) curColIdx = tdIndex(td);
       const tr = e.target.closest('tr'); if (tr) selectRow(tr);
     });
     tbody.addEventListener('focusin', (e) => {
+      if (window.__DICT_OPEN__ || e.target.closest('.modal')) return;
       const inp = e.target.closest('.cell-edit');
       if (inp){ curColIdx = tdIndex(inp.closest('td')); selectRow(inp.closest('tr')); }
     });
   }
 })();
 
-
-
-
-
-// 3-4 刪除目前選取列（新列：前端移除；舊列：呼叫後端刪除）
+// 3-4 刪除目前選取列
 async function onDeleteRowClick() {
   const tr = document.querySelector('.erp-table tbody tr.row-selected');
   if (!tr) { Swal.fire({icon:'info', title:'請先點選要刪除的明細列'}); return; }
 
   const pn = tr.dataset.paperNum || PAGE.paperNum;
   const item = tr.dataset.item || '';
-  if (!pn || !item) {
-    Swal.fire({icon:'error', title:'無法判斷單號或項次'}); return;
-  }
+  if (!pn || !item) { Swal.fire({icon:'error', title:'無法判斷單號或項次'}); return; }
 
   const { isConfirmed } = await Swal.fire({
     icon: 'question', title: '刪除這一筆明細？', showCancelButton: true, confirmButtonText: '刪除', cancelButtonText: '取消'
   });
   if (!isConfirmed) return;
 
-  if (tr.dataset.state === 'added') { // 未入庫
+  if (tr.dataset.state === 'added') {
     const next = tr.nextElementSibling || tr.previousElementSibling;
     tr.remove(); if (next) selectRow(next);
     return;
@@ -668,7 +638,6 @@ async function onDeleteRowClick() {
       + `&item=${encodeURIComponent(item)}`;
     const res = await fetch(url, { method: 'DELETE' });
     if (!res.ok) throw new Error(await res.text());
-
     const next = tr.nextElementSibling || tr.previousElementSibling;
     tr.remove(); if (next) selectRow(next);
     Swal.fire({icon:'success', title:'刪除完成', timer:900, showConfirmButton:false});
@@ -681,8 +650,7 @@ async function onDeleteRowClick() {
 const tbodyEl = document.querySelector('.erp-table tbody');
 function selectRow(tr) {
   if (!tr) return;
-  document.querySelectorAll('.erp-table tbody tr.row-selected')
-    .forEach(r => r.classList.remove('row-selected'));
+  document.querySelectorAll('.erp-table tbody tr.row-selected').forEach(r => r.classList.remove('row-selected'));
   tr.classList.add('row-selected');
 }
 function makeRowEditable(tr) {
@@ -691,29 +659,29 @@ function makeRowEditable(tr) {
   const first = tr.querySelector('.cell-edit[data-field="PartNum"]') || tr.querySelector('.cell-edit');
   first?.focus(); first?.select?.();
 }
-tbodyEl.addEventListener('click',  e => { const tr = e.target.closest('tr'); if (tr) selectRow(tr); });
-tbodyEl.addEventListener('focusin', e => { const tr = e.target.closest('tr'); if (tr) selectRow(tr); });
+tbodyEl.addEventListener('click',  e => {
+  if (window.__DICT_OPEN__ || e.target.closest('.modal')) return;
+  const tr = e.target.closest('tr'); if (tr) selectRow(tr);
+});
+tbodyEl.addEventListener('focusin', e => {
+  if (window.__DICT_OPEN__ || e.target.closest('.modal')) return;
+  const tr = e.target.closest('tr'); if (tr) selectRow(tr);
+});
 document.getElementById('btnAddDetailRow')?.addEventListener('click', onAddRowClick);
 document.getElementById('btnSubAddNew')?.addEventListener('click', (e)=>{ e.preventDefault(); onAddRowClick(); });
 document.getElementById('btnRowDelete')?.addEventListener('click', onDeleteRowClick);
 
 // ============================
-// 4) 儲存單頭＋單身（組 payload → 呼叫 API）
+// 4) 儲存單頭＋單身
 // ============================
 document.getElementById('orderHeaderForm').addEventListener('submit', async function (e) {
   e.preventDefault();
-  const header = Object.fromEntries(new FormData(this));
+  const header = collectHeaderFormData();
   normalizeNumberFields(header, PAGE.headerFields);
-
   const details = collectDetails();
   normalizeDetailsNumbers(details, PAGE.detailFields);
 
-  const payload = {
-    ...header,
-    Details: details,
-    __headerTable: PAGE.headerTable,
-    __detailTable: PAGE.detailTable || undefined
-  };
+  const payload = { ...header, Details: details, __headerTable: PAGE.headerTable, __detailTable: PAGE.detailTable || undefined };
 
   try {
     const resp = await fetch('/api/OrderHeaderApi/SaveOrderHeader', {
@@ -731,13 +699,11 @@ document.getElementById('orderHeaderForm').addEventListener('submit', async func
       let msg = '儲存失敗'; try { const txt = await resp.text(); msg = txt || msg; } catch {}
       Swal.fire({ icon: 'error', title: msg });
     }
-  } catch (err) {
-    Swal.fire({ icon: 'error', title: '網路或伺服器錯誤' });
-  }
+  } catch (err) { Swal.fire({ icon: 'error', title: '網路或伺服器錯誤' }); }
 });
 
 // ============================
-// 5) 檢視/編輯模式切換（若頁面有該按鈕）
+// 5) 檢視/編輯模式切換（避開 modal 內元素）
 // ============================
 const editBtn = document.getElementById('btnViewEditToggle');
 if (editBtn) {
@@ -760,7 +726,7 @@ if (editBtn) {
     }
     isEdit = !isEdit; editBtn.textContent = isEdit ? '保留' : '修改';
     document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
-      .forEach(el => el.disabled = !isEdit);
+      .forEach(el => { if (!el.closest('.modal')) el.disabled = !isEdit; }); // ★ 不影響 modal 裡的欄位
     document.querySelectorAll('.erp-table .cell-view').forEach(el => el.classList.toggle('d-none', isEdit));
     document.querySelectorAll('.erp-table .cell-edit').forEach(el => el.classList.toggle('d-none', !isEdit));
     document.querySelectorAll('.erp-table .cell-edit').forEach(inp => {
@@ -770,10 +736,9 @@ if (editBtn) {
     });
   });
 
-  // 頁面刷新後自動回到編輯狀態（若剛剛存檔成功）
   window.addEventListener('load', () => {
     document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
-      .forEach(el => el.disabled = true);
+      .forEach(el => { if (!el.closest('.modal')) el.disabled = true; });
     if (localStorage.getItem("afterSave") === "1") {
       localStorage.removeItem("afterSave");
       document.getElementById("btnViewEditToggle")?.click();
@@ -812,7 +777,6 @@ $(function () {
     }).catch(()=>{});
   }
 
-  // draggable + resizable
   $(".draggable-field").each(function () {
     const $li = $(this);
     $li.draggable({
@@ -830,15 +794,13 @@ $(function () {
     $li.resizable({ handles: "se", minWidth: 50, minHeight: 30, stop: debounceSave });
   });
 
-  // droppable 區域（跨分頁拖曳）
   $(".header-fields-tab").droppable({
     accept: ".draggable-field", tolerance: "pointer",
     over: function () { $(this).addClass("drop-hover"); },
     out:  function () { $(this).removeClass("drop-hover"); },
     drop: function (event, ui) {
       $(this).removeClass("drop-hover");
-      const $zone = $(this);
-      const $item = $(ui.draggable);
+      const $zone = $(this), $item = $(ui.draggable);
       const newTabIndex = parseInt($zone.data("tab-index")) || 1;
       $item.appendTo($zone).attr("data-tab", newTabIndex).css({
         top: ui.offset.top - $zone.offset().top,
@@ -849,7 +811,6 @@ $(function () {
     }
   });
 
-  // 拖過分頁標籤自動切換
   let dragTabSwitchTimer = null;
   $("#headerTabs button").droppable({
     accept: ".draggable-field",
@@ -857,7 +818,6 @@ $(function () {
     out:  function () { clearTimeout(dragTabSwitchTimer); }
   });
 
-  // Lookup 下拉載入
   $('.lookup-dropdown').each(function() {
     const $select = $(this);
     const table = $select.data('table'), key = $select.data('key'),
@@ -878,7 +838,6 @@ $(function () {
     });
   });
 
-  // Tab 高度一次性調整（以便容器能包住欄位）
   function setInitialTabHeights(offsetPx = 10) {
     const hiddenTabs = $(".tab-pane").not(".show");
     hiddenTabs.addClass("tmp-show").addClass("show").css("display", "block");
@@ -896,7 +855,7 @@ $(function () {
 });
 
 // ============================
-// 7) 上一筆 / 下一筆（依列表查詢結果）
+// 7) 上一筆 / 下一筆
 // ============================
 const NAV_BTN_PREV = document.getElementById('btnPrev');
 const NAV_BTN_NEXT = document.getElementById('btnNext');
@@ -951,8 +910,6 @@ initRowNavigation();
 // 8) 其他：把最後檢視的單號存在 localStorage
 // ============================
 localStorage.setItem("lastViewedPaperNum", window.selectedPaperNum);
-
-// 依 header 欄位「標籤文字」抓顯示值（select 取文字，其它取 value）
 function getHeaderValueByLabel(labelText) {
   const li = Array.from(document.querySelectorAll('.draggable-field'))
     .find(el => (el.querySelector('label')?.textContent || '').trim() === labelText);
@@ -966,157 +923,31 @@ function getHeaderValueByLabel(labelText) {
   return (ctrl.value || '').trim();
 }
 
-// ============================
-// 9) 其他：金額計算按鈕（若頁面有
-document.getElementById('btnCalcAmount')?.addEventListener('click', async () => {
-  const paper = (PAGE.paperNum || window.selectedPaperNum || '').trim();
-  if (!paper) return Swal.fire({icon:'info', title:'沒有單號'});
-
-  try {
-    const resp = await fetch('/api/StoredProc/exec', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        Key: 'CalcOrderAmount',      // 對應 _registry 的 key
-        Args: { PaperNum: paper }    // 必填參數
-      })
-    });
-
-    const raw = await resp.text();
-    let data;
-    try { data = JSON.parse(raw); } catch { data = { ok:false, error: raw }; }
-
-    if (resp.ok && data.ok) {
-      Swal.fire({icon:'success', title:'計算完成', timer:900, showConfirmButton:false});
-      location.reload();
-    } else {
-      Swal.fire({icon:'error', title:'呼叫失敗', text: data.error || `HTTP ${resp.status}`});
-    }
-  } catch (e) {
-    Swal.fire({icon:'error', title:'網路錯誤', text: String(e)});
-  }
-});
-
-document.getElementById('btnClearDetails')?.addEventListener('click', async () => {
-  const paper = (PAGE.paperNum || window.selectedPaperNum || '').trim();
-  const paperId = (PAGE.detailTable || '').trim().replace(/^dbo\./i, '');
-  if (!paper)  return Swal.fire({icon:'info',  title:'沒有單號'});
-  if (!paperId) return Swal.fire({icon:'info',  title:'缺少單身表名（PaperId）'});
-
-  // ① 狀態限制
-  const status = getHeaderValueByLabel('單據狀態') || '';
-  const ALLOW  = ['作業中', '審核中'];
-  const BLOCK  = ['已確認', '已結案', '作廢中'];
-
-  if (BLOCK.includes(status) || !ALLOW.includes(status)) {
-    return Swal.fire({
-      icon: 'warning',
-      title: '此狀態不可清除',
-      html: `單據狀態：<b>${status || '（空）'}</b>`
-    });
-  }
-
-  // ② 二次確認
-  const { isConfirmed } = await Swal.fire({
-    icon: 'warning',
-    title: '確定要清除這張單的所有單身嗎？',
-    html: `單號：<b>${paper}</b><br>表：<code>${paperId}</code><br>狀態：<b>${status}</b>`,
-    showCancelButton: true, confirmButtonText: '清除', cancelButtonText: '取消'
-  });
-  if (!isConfirmed) return;
-
-  // ③ 呼叫 SP
-  try {
-    const resp = await fetch('/api/StoredProc/exec', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        Key: 'ClearOrderDetails',
-        Args: { PaperNum: paper, PaperId: paperId, Item: 0 }
-      })
-    });
-
-    const raw = await resp.text();
-    let data; try { data = JSON.parse(raw); } catch { data = { ok:false, error: raw }; }
-
-    if (resp.ok && data.ok) {
-      const msg = (data.rows != null) ? `已清除 ${data.rows} 筆` : '清除完成';
-      await Swal.fire({icon:'success', title: msg, timer:900, showConfirmButton:false});
-      location.reload();
-    } else {
-      Swal.fire({icon:'error', title:'清除失敗', text: data.error || `HTTP ${resp.status}`});
-    }
-  } catch (e) {
-    Swal.fire({icon:'error', title:'網路錯誤', text: String(e)});
-  }
-});
-
-  // 綁定外頁的「搜尋」按鈕
-  document.getElementById('btnSearchDetails')?.addEventListener('click', ()=>{
-    const paper = (window.selectedPaperNum || '').trim();
-    window.OrderDetailPicker_detailPicker.open({ paperNum: paper });
-  });
-
-  // 可選：攔截元件的確定事件
-  $('#detailPicker').on('odp:confirmed', function(e, res){
-    // 例如：你不想 reload，可在這裡自己處理
-    // console.log('confirmed:', res);
-  });
-
-
-//單身拖曳欄位寬度調整
-
+// 單身拖曳欄位寬度調整
 (function enableDetailColumnResize(){
   const table = document.querySelector('.erp-table');
   if (!table) return;
 
- const detailTableName = (PAGE.detailTable || '')
-  .replace(/^dbo\./i, '')
-  .trim()
-  .toLowerCase();
-  const saveUrl = '/api/TableFieldLayout/SaveDetailLayout';         // ← 後端API(第4點)
+  const detailTableName = (PAGE.detailTable || '').replace(/^dbo\./i, '').trim().toLowerCase();
+  const saveUrl = '/api/TableFieldLayout/SaveDetailLayout';
   let isDown = false, startX = 0, startWidth = 0, th, thIndex = -1;
-
-  // 取目前所有 <th>
   const ths = Array.from(table.querySelectorAll('thead th'));
+  function columnCells(index){ return Array.from(table.querySelectorAll(`tbody tr td:nth-child(${index+1})`)); }
 
-  // 根據欄位代碼，快速找該欄所有 td
-  function columnCells(index){
-    return Array.from(table.querySelectorAll(`tbody tr td:nth-child(${index+1})`));
-  }
-
-  // 儲存目前所有欄位寬度（去抖動）
   let saveTimer = null;
-  function debounceSave(){
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(persistWidths, 400);
-  }
+  function debounceSave(){ clearTimeout(saveTimer); saveTimer = setTimeout(persistWidths, 400); }
 
   async function persistWidths(){
     try{
-      const payload = {
-        tableName: detailTableName,   // e.g. 'spodordersub'
-        cols: ths.map(th => ({
-          fieldName: th.dataset.field,
-          width: Math.round(th.getBoundingClientRect().width)
-        }))
-      };
-      // 後端存 DB；若你還沒建 API，先暫存 localStorage 也可
-      await fetch(saveUrl, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(payload)
-      }).catch(()=>{});
-      // local fallback（可留可去）
+      const payload = { tableName: detailTableName, cols: ths.map(th => ({ fieldName: th.dataset.field, width: Math.round(th.getBoundingClientRect().width) })) };
+      await fetch(saveUrl, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) }).catch(()=>{});
       localStorage.setItem(`colwidth:${detailTableName}`, JSON.stringify(payload.cols));
     }catch(e){}
   }
 
-  // 載入時，若 localStorage/後端有寬度就套用（保險）
   (function applyInitialWidths(){
     try{
-      const raw = localStorage.getItem(`colwidth:${detailTableName}`);
-      if (!raw) return;
+      const raw = localStorage.getItem(`colwidth:${detailTableName}`); if (!raw) return;
       const cols = JSON.parse(raw) || [];
       cols.forEach(c => {
         const th = ths.find(x => (x.dataset.field||'').toLowerCase() === (c.fieldName||'').toLowerCase());
@@ -1128,32 +959,26 @@ document.getElementById('btnClearDetails')?.addEventListener('click', async () =
     }catch(e){}
   })();
 
-  // 綁定每個把手
   ths.forEach((h, idx) => {
     const handle = h.querySelector('.col-resizer');
     if (!handle) return;
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      isDown = true;
-      th = h; thIndex = idx;
-      startX = e.pageX;
-      startWidth = th.getBoundingClientRect().width;
-      document.body.classList.add('resizing');
-      th.classList.add('resizing');
+      isDown = true; th = h; thIndex = idx;
+      startX = e.pageX; startWidth = th.getBoundingClientRect().width;
+      document.body.classList.add('resizing'); th.classList.add('resizing');
       columnCells(thIndex).forEach(td => td.classList.add('resizing'));
     });
   });
 
-  // 拖曳過程：動態設定寬度
   document.addEventListener('mousemove', (e) => {
     if (!isDown || !th) return;
     const dx = e.pageX - startX;
-    const newW = Math.max(50, startWidth + dx); // 最小 50
+    const newW = Math.max(50, startWidth + dx);
     th.style.width = `${newW}px`;
     columnCells(thIndex).forEach(td => td.style.width = `${newW}px`);
   });
 
-  // 放開滑鼠：結束＋儲存
   document.addEventListener('mouseup', () => {
     if (!isDown) return;
     isDown = false;
@@ -1165,9 +990,14 @@ document.getElementById('btnClearDetails')?.addEventListener('click', async () =
   });
 })();
 
-
-
+// 未儲存旗標
+window.__unsavedChanges = false;
+document.addEventListener('input', (e) => {
+  if (e.target.closest('.erp-header-form, .erp-table')) window.__unsavedChanges = true;
+});
+window.addEventListener('pageshow', () => { window.__unsavedChanges = false; });
 </script>
+
 
 <style>
 /* =========================================
@@ -1260,13 +1090,41 @@ body { background: #f7f9fb !important; }
 .highlight-red { color:#e53b2d; font-weight:700; }
 .highlight-blue{ color:#2564b3; font-weight:700; }
 
-/* =========================================
-   E) 左側浮動按鈕群
-   ========================================= */
-:root{ --fab-left: 12px; --fab-width: 100px; --fab-gap: 20px; --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap)); }
-.action-rail{ position: fixed; left: var(--fab-left); top: 80px; display: flex; flex-direction: column; gap: 10px; z-index: 900; }
-.fab{ position: relative; min-width: var(--fab-width); padding: 8px 12px; background:#ffc107; color:#090101; font-weight:700;
-  border-radius:10px; cursor:pointer; box-shadow:0 6px 16px rgba(0,0,0,.2); border: 0; }
+/* --- Action Rail 基礎版位 & 內容右移（固定在樣板）--- */
+:root{
+  --fab-left: 12px;
+  --fab-width: 100px;
+  --fab-gap: 20px;
+  --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap));
+}
+
+.action-rail{
+  position: fixed;
+  left: var(--fab-left);
+  top: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 900;
+}
+
+/* 內容往右騰出空間；toolbar 往回補，維持視覺對齊 */
+.erp-detail-container{ margin-left: var(--rail-reserve); }
+#topToolbar{ margin-left: calc(-1 * var(--rail-reserve)) !important; }
+
+/* 按鈕的共同外觀（保持在樣板，讓所有頁面一致） */
+.fab{
+  position: relative;
+  min-width: var(--fab-width);
+  padding: 8px 12px;
+  background:#ffc107;
+  color:#090101;
+  font-weight:700;
+  border-radius:10px;
+  cursor:pointer;
+  box-shadow:0 6px 16px rgba(0,0,0,.2);
+  border:0;
+}
 .fab:hover{ filter:brightness(0.95); }
 .fab-red{ background:#dc3545; color:#fff; }
 .fab-blue{ background:#3583dc; color:#fff; }
