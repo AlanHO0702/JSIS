@@ -1,28 +1,24 @@
 // /wwwroot/js/fieldDictModal.js
-// 完整版：載入 → 排序 → 綁定 → 儲存（含 TableName/DataType/FormatStr 等欄位）
+// 載入 → 排序 → 綁定 → 儲存（支援伺服端已渲染 tbody、可配置 API）
 
-(function(){
+(function () {
+  // 可在頁面先設：window.FIELD_DICT_GET_API / window.FIELD_DICT_SAVE_API / window.SUPPRESS_DICT_FETCH_ALERT
+  const GET_API  = window.FIELD_DICT_GET_API  || '/api/TableFieldLayout/GetTableFields';
+  const SAVE_API = window.FIELD_DICT_SAVE_API || '/api/DictApi/UpdateDictFields';
+  const QUIET    = !!window.SUPPRESS_DICT_FETCH_ALERT;
 
-  // ===== 顯示（會先載入再 show） =====
-  window.showDictModal = async function(modalId = 'fieldDictModal', tableName = window._dictTableName) {
+  // ===== 顯示（會先 init 再 show） =====
+  window.showDictModal = async function (modalId = 'fieldDictModal', tableName = window._dictTableName) {
     const el = document.getElementById(modalId);
     if (!el) { console.warn('找不到辭典 Modal 元件:', modalId); return; }
     await window.initFieldDictModal(tableName, modalId);
     new bootstrap.Modal(el).show();
   };
 
-  // ===== 初始化：撈資料、排序、綁到 tbody =====
-  window.initFieldDictModal = async function(tableName, modalId = 'fieldDictModal') {
-    const tname = tableName || window._dictTableName || '';
+  // ===== 初始化：撈資料（若 tbody 已有資料就不覆蓋）、排序、綁定 =====
+  window.initFieldDictModal = async function (tableName, modalId = 'fieldDictModal') {
+    const tname = (tableName || window._dictTableName || '').trim();
     if (!tname) { alert('沒有指定辭典表名'); return; }
-
-    const url = `/api/TableFieldLayout/GetTableFields?tableName=${encodeURIComponent(tname)}`;
-    const res = await fetch(url);
-    if (!res.ok) { alert("載入辭典欄位失敗"); return; }
-
-    const rows = await res.json();
-    // 依序號，空值放最後
-    rows.sort((a,b) => (Number(a.SerialNum ?? 9999)) - (Number(b.SerialNum ?? 9999)));
 
     const scope = document.getElementById(modalId) || document;
     const tbody =
@@ -32,40 +28,61 @@
 
     if (!tbody) { console.warn('找不到辭典 tbody'); return; }
 
-    tbody.innerHTML = rows.map(x => `
-      <tr data-tablename="${x.TableName || tname}" data-fieldname="${x.FieldName}">
-        <td style="width:80px">
-          <input data-field="SerialNum" value="${x.SerialNum ?? ''}" class="form-control form-control-sm" />
-        </td>
-        <td style="min-width:180px">
-          <input data-field="FieldName" value="${x.FieldName ?? ''}" class="form-control form-control-sm" readonly />
-        </td>
-        <td style="min-width:220px">
-          <input data-field="DisplayLabel" value="${x.DisplayLabel ?? ''}" class="form-control form-control-sm" />
-        </td>
-        <td class="text-center" style="width:60px">
-          <input type="checkbox" data-field="Visible" ${x.Visible === 1 ? 'checked' : ''} />
-        </td>
-        <td style="width:140px">
-          <input data-field="DataType" value="${x.DataType ?? ''}" class="form-control form-control-sm" />
-        </td>
-        <td style="width:160px">
-          <input data-field="FormatStr" value="${x.FormatStr ?? ''}" class="form-control form-control-sm" />
-        </td>
-        <td>
-          <input data-field="FieldNote" value="${x.FieldNote ?? ''}" class="form-control form-control-sm" />
-        </td>
-      </tr>
-    `).join('');
+    const alreadyHasRows = tbody.children && tbody.children.length > 0;
 
-    // 初次載入後做一次穩定排序（若使用者手動改序號也能按鈕再次排序）
+    // 若頁面已經 server-side 渲染出資料，就**不再覆蓋**；只在空的時候才去撈 API
+    if (!alreadyHasRows) {
+      try {
+        const url = `${GET_API}?tableName=${encodeURIComponent(tname)}`;
+        const res = await fetch(url);
+        if (!res.ok) {
+          if (!QUIET) alert('載入辭典欄位失敗');
+        } else {
+          const rows = await res.json();
+          // 依序號，空值放最後
+          rows.sort((a, b) => (Number(a.SerialNum ?? 9999)) - (Number(b.SerialNum ?? 9999)));
+
+          tbody.innerHTML = rows.map(x => `
+            <tr data-tablename="${x.TableName || tname}" data-fieldname="${x.FieldName}">
+              <td style="width:80px">
+                <input data-field="SerialNum" value="${x.SerialNum ?? ''}" class="form-control form-control-sm" />
+              </td>
+              <td style="min-width:180px">
+                <input data-field="FieldName" value="${x.FieldName ?? ''}" class="form-control form-control-sm" readonly />
+              </td>
+              <td style="min-width:220px">
+                <input data-field="DisplayLabel" value="${x.DisplayLabel ?? ''}" class="form-control form-control-sm" />
+              </td>
+              <td class="text-center" style="width:60px">
+                <input type="checkbox" data-field="Visible" ${(+x.Visible === 1 ? 'checked' : '')} />
+              </td>
+              <td style="width:140px">
+                <input data-field="DataType" value="${x.DataType ?? ''}" class="form-control form-control-sm" />
+              </td>
+              <td style="width:160px">
+                <input data-field="FormatStr" value="${x.FormatStr ?? ''}" class="form-control form-control-sm" />
+              </td>
+              <td>
+                <input data-field="FieldNote" value="${x.FieldNote ?? ''}" class="form-control form-control-sm" />
+              </td>
+            </tr>
+          `).join('');
+        }
+      } catch (err) {
+        if (!QUIET) alert('載入辭典欄位失敗');
+        console.warn('[fieldDictModal] fetch error:', err);
+      }
+    } else {
+      // 已有資料（Razor 產生），什麼都不做
+    }
+
+    // 穩定排序 + 綁保存
     sortDictTbody(tbody);
-    // 綁定「全部儲存」按鈕
     bindSaveButton(tbody);
   };
 
-  // ===== 排序 tbody（依 SerialNum，其次 FieldName） =====
-  function sortDictTbody(tbody){
+  // ===== 排序（SerialNum → FieldName） =====
+  function sortDictTbody(tbody) {
     if (!tbody) return;
     const rows = Array.from(tbody.querySelectorAll('tr'));
     rows.sort((a, b) => {
@@ -82,69 +99,68 @@
     rows.forEach(tr => tbody.appendChild(tr));
   }
 
-  // ===== 儲存動作（含 TableName fallback 與 DataType/FormatStr 送出） =====
-  function saveAllDictFields(tableSelector = '#fieldDictTable tbody', apiUrl = '/api/DictApi/UpdateDictFields') {
-    document.body.style.cursor = "wait";
+  // ===== 儲存（含 TableName fallback、帶 DataType/FormatStr） =====
+  function saveAllDictFields(tableSelector = '#fieldDictTable tbody', apiUrl = SAVE_API) {
+    document.body.style.cursor = 'wait';
 
     const rows = document.querySelectorAll(`${tableSelector} tr`);
     const data = Array.from(rows).map(tr => {
       const serialNumValue = tr.querySelector('input[data-field="SerialNum"]')?.value ?? '';
       const visibleValue   = tr.querySelector('input[data-field="Visible"]')?.checked ? 1 : 0;
       return {
-        TableName: tr.getAttribute('data-tablename') || window._dictTableName || '', // ✅ 關鍵：fallback
+        TableName: tr.getAttribute('data-tablename') || window._dictTableName || '',
         FieldName: tr.getAttribute('data-fieldname') || '',
         DisplayLabel: tr.querySelector('input[data-field="DisplayLabel"]')?.value ?? '',
         DataType:     tr.querySelector('input[data-field="DataType"]')?.value ?? '',
         FormatStr:    tr.querySelector('input[data-field="FormatStr"]')?.value ?? '',
         FieldNote:    tr.querySelector('input[data-field="FieldNote"]')?.value ?? '',
-        SerialNum: serialNumValue === '' ? null : parseInt(serialNumValue, 10),
-        Visible: visibleValue,
-        // 若未使用可留著，後端會忽略 null
-        LookupResultField: (()=>{
+        SerialNum:    serialNumValue === '' ? null : parseInt(serialNumValue, 10),
+        Visible:      visibleValue,
+        LookupResultField: (() => {
           const el = tr.querySelector('input[data-field="LookupResultField"]');
           if (!el) return null;
           const v = el.value.trim();
-          return v === "" ? null : v;
+          return v === '' ? null : v;
         })()
       };
     });
 
-    // Debug
-    console.log('UpdateDictFields payload:', data);
-
     fetch(apiUrl, {
       method: 'POST',
-      headers: { "Content-Type": "application/json" },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     })
-    .then(res => res.json())
-    .then(result => {
-      document.body.style.cursor = "default";
-      if (result.success) {
-        alert("全部儲存成功！");
-        window.dispatchEvent(new Event('field-dict-saved'));
-      } else {
-        alert(result.message || "儲存失敗！");
-      }
-    })
-    .catch(err => {
-      document.body.style.cursor = "default";
-      alert("API 失敗: " + err);
-    });
+      .then(res => res.json())
+      .then(result => {
+        document.body.style.cursor = 'default';
+        if (result?.success) {
+          alert('全部儲存成功！');
+          window.dispatchEvent(new Event('field-dict-saved'));
+          setTimeout(() => location.reload(), 300);
+        } else {
+          alert(result?.message || '儲存失敗！');
+        }
+      })
+      .catch(err => {
+        document.body.style.cursor = 'default';
+        alert('API 失敗: ' + err);
+      });
   }
 
-  // ===== 綁定「全部儲存」按鈕（依你 Modal 內按鈕 id 調整） =====
-  function bindSaveButton(tbody){
+  // 讓外面 onclick="saveAllDictFields('#xxx .dictTableBody')" 可直接用
+  window.saveAllDictFields = saveAllDictFields;
+
+  // ===== 綁「全部儲存」按鈕（若有固定 id） =====
+  function bindSaveButton(tbody) {
     const btn = document.getElementById('btnDictSaveAll');
     if (!btn) return;
     btn.onclick = () => {
-      // 儲存前再排一次順序（可選）
       sortDictTbody(tbody);
-      saveAllDictFields('#fieldDictTable tbody', '/api/DictApi/UpdateDictFields');
+      saveAllDictFields('#fieldDictTable tbody', SAVE_API);
     };
   }
 
-  // （可選）頁面載入就把既有 DOM 的辭典表做一次排序
+  // 頁面載入就把現有 DOM 做一次排序（如果有的話）
   document.addEventListener('DOMContentLoaded', () => {
     const tbody =
       document.querySelector('#fieldDictTable tbody') ||
@@ -153,4 +169,35 @@
     if (tbody) sortDictTbody(tbody);
   });
 
+  // ===== 全域 F3 快捷鍵（自動找 modalId） =====
+  (function bindGlobalF3Once() {
+    if (window.__fieldDictF3Bound) return;
+    window.__fieldDictF3Bound = true;
+
+    function resolveModalId() {
+      if (document.getElementById('fieldDictModal')) return 'fieldDictModal';
+      const el =
+        document.querySelector('[data-role="field-dict-modal"]') ||
+        document.querySelector('#fieldDictTable')?.closest('.modal') ||
+        document.querySelector('.modal[id*="FieldDictModal"]') ||
+        document.querySelector('.modal[id*="dictModal"]');
+      return el?.id || null;
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'F3' || e.repeat) return;
+      e.preventDefault();
+
+      const modalId = resolveModalId();
+      if (!modalId) { console.warn('找不到辭典 Modal 元件 (自動偵測失敗)'); return; }
+
+      const tname =
+        (window._dictTableName && String(window._dictTableName).trim()) ||
+        document.body?.dataset?.dictTable ||
+        document.querySelector('meta[name="dict-table"]')?.content || '';
+
+      if (!tname) { alert('沒有指定辭典表名 (window._dictTableName)'); return; }
+      window.showDictModal(modalId, tname);
+    });
+  })();
 })();
