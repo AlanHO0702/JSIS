@@ -7,10 +7,12 @@ namespace PcbErpApi.Data
     {
         public PcbErpContext(DbContextOptions<PcbErpContext> options) : base(options) { }
         public DbSet<SpodOrderMain> SpodOrderMain => Set<SpodOrderMain>();
+        public DbSet<SPOdMPSOutMain> SPOdMPSOutMain => Set<SPOdMPSOutMain>();
         public DbSet<CurdUser> CurdUser => Set<CurdUser>();
         public DbSet<MindStockCostPn> MindStockCostPn => Set<MindStockCostPn>();
         public DbSet<CurdSysItem> CurdSysItems { get; set; }
         public DbSet<SpodOrderSub> SpodOrderSub { get; set; }
+        public DbSet<SpodOrderSub> SPOdMPSOutSub { get; set; }
         public DbSet<CurdSystemSelect> CurdSystemSelects { get; set; }
         public DbSet<CurdPaperSelected> CURdPaperSelected { get; set; }
         public DbSet<CURdTableField> CURdTableFields { get; set; }
