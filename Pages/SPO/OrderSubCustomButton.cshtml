@@ -1,0 +1,85 @@
+@model dynamic
+
+<div class="action-rail">
+  <button type="button" id="btnSearchDetails" class="fab">搜尋</button>
+  <button type="button" id="btnCalcAmount"  class="fab">金額計算</button>
+  <button type="button" id="btnClearDetails" class="fab fab-red">清除單身</button>
+</div>
+
+<script>
+// 1) 金額計算
+document.getElementById('btnCalcAmount')?.addEventListener('click', async (e) => {
+  e.preventDefault(); e.stopPropagation();
+  const paper = getPaperNum();
+  if (!paper) return Swal.fire({icon:'info', title:'沒有單號'});
+
+  try {
+    const resp = await fetch('/api/StoredProc/exec', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ Key: 'CalcOrderAmount', Args: { PaperNum: paper } })
+    });
+    const raw = await resp.text();
+    let data; try { data = JSON.parse(raw); } catch { data = { ok:false, error: raw }; }
+    if (resp.ok && data.ok) {
+      await Swal.fire({icon:'success', title:'計算完成', timer:900, showConfirmButton:false});
+      location.reload();
+    } else {
+      Swal.fire({icon:'error', title:'呼叫失敗', text: data.error || `HTTP ${resp.status}`});
+    }
+  } catch (e2) {
+    Swal.fire({icon:'error', title:'網路錯誤', text: String(e2)});
+  }
+});
+
+// 2) 清除單身
+document.getElementById('btnClearDetails')?.addEventListener('click', async (e) => {
+  e.preventDefault(); e.stopPropagation();
+
+  const paper   = getPaperNum();
+  const paperId = (PAGE.detailTable || '').trim().replace(/^dbo\./i, '');
+  if (!paper)  return Swal.fire({icon:'info', title:'沒有單號'});
+  if (!paperId) return Swal.fire({icon:'info', title:'缺少單身表名（PaperId）'});
+
+  const status = getHeaderValueByLabel('單據狀態') || '';
+  const ALLOW  = ['作業中', '審核中'];
+  const BLOCK  = ['已確認', '已結案', '作廢中'];
+  if (BLOCK.includes(status) || !ALLOW.includes(status)) {
+    return Swal.fire({ icon:'warning', title:'此狀態不可清除', html:`單據狀態：<b>${status || '（空）'}</b>`});
+  }
+
+  const { isConfirmed } = await Swal.fire({
+    icon:'warning',
+    title:'確定要清除這張單的所有單身嗎？',
+    html:`單號：<b>${paper}</b><br>表：<code>${paperId}</code><br>狀態：<b>${status}</b>`,
+    showCancelButton:true, confirmButtonText:'清除', cancelButtonText:'取消'
+  });
+  if (!isConfirmed) return;
+
+  try {
+    const resp = await fetch('/api/StoredProc/exec', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ Key:'ClearOrderDetails', Args:{ PaperNum: paper, PaperId: paperId, Item: 0 } })
+    });
+    const raw = await resp.text();
+    let data; try { data = JSON.parse(raw); } catch { data = { ok:false, error: raw }; }
+    if (resp.ok && data.ok) {
+      const msg = (data.rows != null) ? `已清除 ${data.rows} 筆` : '清除完成';
+      await Swal.fire({icon:'success', title: msg, timer:900, showConfirmButton:false});
+      location.reload(); // 重新載入就會看到單身空了
+    } else {
+      Swal.fire({icon:'error', title:'清除失敗', text: data.error || `HTTP ${resp.status}`});
+    }
+  } catch (e2) {
+    Swal.fire({icon:'error', title:'網路錯誤', text: String(e2)});
+  }
+});
+
+// 3) 搜尋明細
+document.getElementById('btnSearchDetails')?.addEventListener('click', (e)=>{
+  e.preventDefault(); e.stopPropagation();
+  const paper = getPaperNum();
+  window.OrderDetailPicker_detailPicker?.open({ paperNum: paper });
+});
+</script>
