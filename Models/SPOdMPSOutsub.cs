@@ -1,118 +1,83 @@
-using System;
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
+﻿using System;
+using System.Collections.Generic;
 
-namespace PcbErpApi.Models
+namespace PcbErpApi.Models;
+
+public partial class SPOdMPSOutSub
 {
-    // [Table("SPOdMPSOutSub")] // 若資料表名不同，解除註解並填正確表名
-    public class SPOdMPSOutSub
-    {
-        [MaxLength(16)]
-        public string PaperNum { get; set; } = string.Empty;
+    public string PaperNum { get; set; } = null!;
 
-        public int Item { get; set; }
+    public int Item { get; set; }
 
-        [MaxLength(16)]
-        public string? SourNum { get; set; }
+    public string? SourNum { get; set; }
 
-        public int? SourItem { get; set; }
+    public int? SourItem { get; set; }
 
-        [MaxLength(510)]
-        public string? Notes { get; set; }
+    public string? Notes { get; set; }
 
-        [MaxLength(24)]
-        public string PartNum { get; set; } = string.Empty;
+    public string PartNum { get; set; } = null!;
 
-        [MaxLength(8)]
-        public string Revision { get; set; } = string.Empty;
+    public string Revision { get; set; } = null!;
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal Qnty { get; set; }
+    public decimal Qnty { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal PNLQnty { get; set; }
+    public decimal Pnlqnty { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal PNLPrice { get; set; }
+    public decimal Pnlprice { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal UnitPrice { get; set; }
+    public decimal UnitPrice { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal SubTotal { get; set; }
+    public decimal SubTotal { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal NOSLPiece { get; set; }
+    public decimal Noslpiece { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal FreeLPiece { get; set; }
+    public decimal FreeLpiece { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal AmountFinish { get; set; }
+    public decimal AmountFinish { get; set; }
 
-        [MaxLength(120)]
-        public string? Reason { get; set; }
+    public string? Reason { get; set; }
 
-        [MaxLength(1020)]
-        public string? InvoiceNotes { get; set; }
+    public string? InvoiceNotes { get; set; }
 
-        [MaxLength(16)]
-        public string? TransHubNum { get; set; }
+    public string? TransHubNum { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal? Amount { get; set; }
+    public decimal? Amount { get; set; }
 
-        public byte POP { get; set; }
+    public byte Pop { get; set; }
 
-        [MaxLength(32)]
-        public string? SourPaperId { get; set; }
+    public string? SourPaperId { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal? UOMQnty { get; set; }
+    public decimal? Uomqnty { get; set; }
 
-        [MaxLength(4)]
-        public string? UOM { get; set; }
+    public string? Uom { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal Ratio { get; set; }
+    public decimal Ratio { get; set; }
 
-        [MaxLength(24)]
-        public string? PrjId { get; set; }
+    public string? PrjId { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal RealQnty { get; set; }
+    public decimal RealQnty { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal TaxPrice { get; set; }
+    public decimal TaxPrice { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal TaxSubTotal { get; set; }
+    public decimal TaxSubTotal { get; set; }
 
-        [MaxLength(8)]
-        public string? StockId { get; set; }
+    public string? StockId { get; set; }
 
-        [MaxLength(240)]
-        public string? MatName { get; set; }
+    public string? MatName { get; set; }
 
-        [MaxLength(120)]
-        public string? EngGauge_Cus { get; set; }
+    public string? EngGaugeCus { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal Discount { get; set; }
+    public decimal Discount { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal ListPrice { get; set; }
+    public decimal ListPrice { get; set; }
 
-        public byte IsCash { get; set; }
+    public byte IsCash { get; set; }
 
-        public int InStrike { get; set; }
+    public int InStrike { get; set; }
 
-        [MaxLength(100)]
-        public string? CustPONum { get; set; }
+    public string? CustPonum { get; set; }
 
-        public int? IsNoInv { get; set; }
+    public int? IsNoInv { get; set; }
 
-        [Column(TypeName = "decimal(24,8)")]
-        public decimal? UOMPrice { get; set; }
-    }
+    public decimal? Uomprice { get; set; }
 }
