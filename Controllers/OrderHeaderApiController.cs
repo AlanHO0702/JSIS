@@ -512,11 +512,38 @@ public class OrderHeaderApiController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.DetailTable))
             return BadRequest("detailTable required");
 
-        var table = SafeTable(req.DetailTable.Trim()); // 防注入
+        var table = SafeTable(req.DetailTable.Trim());
         var (types, nullable) = GetTableMeta(table);
 
         if (!types.ContainsKey("PaperNum") || !types.ContainsKey("Item"))
             return BadRequest("Detail table must have PaperNum & Item");
+
+        // 🧩 1️⃣ 預設值設定區（依表名設定）
+        var tableDefaults = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase)
+        {
+            // 🔹 傳票明細
+            ["AJNdJourSub"] = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["AccId"] = "1101",       // 預設借方科目
+                ["SubAccId"] = "01",       // 預設借方科目
+                ["IsD"] = "1"          // 借貸別：1=借方, 2=貸方
+
+            },
+
+            // 🔹 銷貨單明細
+            ["SPOdOrderSub"] = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["PartNum"] = "----",
+                ["qnty"] = 0,
+                ["UnitPrice"] = 0,
+                ["SubTotal"] = 0
+            }
+        };
+
+        // 取當前表的自訂預設設定（若無則空字典）
+        var defaults = tableDefaults.TryGetValue(table, out var cfg)
+            ? cfg
+            : new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
         using var conn = new SqlConnection(_connStr);
         await conn.OpenAsync();
@@ -524,41 +551,59 @@ public class OrderHeaderApiController : ControllerBase
 
         try
         {
-            // 1) 取下一個項次
+            // 2️⃣ 取下一個項次
             int nextItem;
-            using (var c = new SqlCommand($@"SELECT ISNULL(MAX([Item]),0)+1 FROM [{table}] WHERE [PaperNum]=@PaperNum", conn, tran))
+            using (var c = new SqlCommand(
+                $@"SELECT ISNULL(MAX([Item]),0)+1 FROM [{table}] WHERE [PaperNum]=@PaperNum",
+                conn, tran))
             {
                 c.Parameters.Add(MakeTypedParam("@PaperNum", req.PaperNum, types["PaperNum"]));
                 var v = await c.ExecuteScalarAsync();
                 nextItem = Convert.ToInt32(v);
             }
 
-            // 2) 動態組 INSERT 欄位：必填 PaperNum, Item；若有 PartNum，一律預設 "----"
+            // 3️⃣ 動態組 INSERT 欄位
             var cols = new List<string> { "PaperNum", "Item" };
             var pars = new List<string> { "@PaperNum", "@Item" };
-
             using var ins = new SqlCommand() { Connection = conn, Transaction = tran };
             ins.Parameters.Add(MakeTypedParam("@PaperNum", req.PaperNum, types["PaperNum"]));
             ins.Parameters.Add(MakeTypedParam("@Item", nextItem, types["Item"]));
 
-            // ★ PartNum 預設值 ----
-            if (types.ContainsKey("PartNum"))
+            // 4️⃣ 自動補 NOT NULL 欄位的預設值
+            foreach (var col in types.Keys)
             {
-                cols.Add("PartNum");
-                pars.Add("@PartNum");
-                ins.Parameters.Add(MakeTypedParam("@PartNum", "----", types["PartNum"]));
-            }
+                if (cols.Contains(col, StringComparer.OrdinalIgnoreCase)) continue;
+                if (!defaults.ContainsKey(col) && nullable[col]) continue;
 
-            // 如將來還有其他 NOT NULL 欄位要補預設，可在這裡依型別再加：
-            // if (types.ContainsKey("Qty") && !nullable["Qty"]) { cols.Add("Qty"); pars.Add("@Qty"); ins.Parameters.Add(MakeTypedParam("@Qty", 0, types["Qty"])); }
-            // ...
+                object val = null;
+
+                // 1️⃣ 優先使用自訂預設表中的設定值
+                if (defaults.TryGetValue(col, out var preset))
+                    val = ConvertJsonToDbType(preset, types[col]);
+
+                // 2️⃣ 若沒有自訂設定則依型別給通用預設值
+                val ??= types[col].ToLowerInvariant() switch
+                {
+                    "int" or "smallint" or "tinyint" or "bigint" => 0,
+                    "decimal" or "numeric" or "money" or "smallmoney" => 0m,
+                    "bit" => false,
+                    var t when t.Contains("date") => DateTime.Now,
+                    _ => "----"
+                };
+
+                cols.Add(col);
+                pars.Add("@" + col);
+                ins.Parameters.Add(MakeTypedParam("@" + col, val, types[col]));
+            }
 
             ins.CommandText = $"INSERT INTO [{table}]({string.Join(",", cols.Select(c => $"[{c}]"))}) VALUES({string.Join(",", pars)})";
             await ins.ExecuteNonQueryAsync();
 
-            // 3) 抓回整列
+            // 5️⃣ 抓回整列
             var row = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-            using (var s = new SqlCommand($@"SELECT * FROM [{table}] WHERE [PaperNum]=@PaperNum AND [Item]=@Item", conn, tran))
+            using (var s = new SqlCommand(
+                $@"SELECT * FROM [{table}] WHERE [PaperNum]=@PaperNum AND [Item]=@Item",
+                conn, tran))
             {
                 s.Parameters.Add(MakeTypedParam("@PaperNum", req.PaperNum, types["PaperNum"]));
                 s.Parameters.Add(MakeTypedParam("@Item", nextItem, types["Item"]));
@@ -579,6 +624,8 @@ public class OrderHeaderApiController : ControllerBase
             return BadRequest(new { ok = false, error = ex.Message });
         }
     }
+
+
     
     // DELETE /api/OrderDetailApi/DeleteRow?table=SpodOrderSub&paperNum=...&item=...
     [HttpDelete("DeleteRow")]
