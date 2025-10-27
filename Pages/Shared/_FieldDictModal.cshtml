@@ -3,6 +3,135 @@
     var modalId = ViewData["DictModalId"] as string ?? "dictModal";
     var tableName = ViewData["DictTableName"] as string ?? "UnknownTable";
 }
+
+<style>
+/* ===== 外層容器 ===== */
+.table-fix-wrapper {
+  height: 70vh;
+  overflow: auto;
+  position: relative;
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: .25rem;
+  scrollbar-gutter: stable;
+}
+
+/* ===== 表格設定 ===== */
+.table-fix-cols {
+  border-collapse: separate !important;
+  border-spacing: 0;
+  table-layout: auto;
+  width: max-content;
+  min-width: 1600px;
+  display: block; /* ✅ sticky 關鍵 */
+  font-size: 0.9rem;
+}
+
+.table-fix-cols th,
+.table-fix-cols td {
+  white-space: nowrap;
+  border: 1px solid #dee2e6;
+  padding: 4px 8px;
+  position: relative;
+  background: #fff;
+  z-index: 1;
+  vertical-align: middle;
+}
+
+/* ===== 表頭固定頂部 ===== */
+.table-fix-cols thead th {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: #f1f3f5;
+  font-weight: 600;
+  color: #003366;
+  box-shadow: 0 2px 2px rgba(0,0,0,0.05);
+}
+
+/* ===== 定義前3欄寬度 ===== */
+:root {
+  --col1-width: 70px;
+  --col2-width: 180px;
+  --col3-width: 180px;
+}
+
+/* ===== Sticky 前三欄（thead + tbody） ===== */
+.table-fix-cols th:nth-child(1),
+.table-fix-cols td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  width: var(--col1-width);
+  min-width: var(--col1-width);
+  background: #f8f9fa;
+  z-index: 25;
+}
+
+.table-fix-cols th:nth-child(2),
+.table-fix-cols td:nth-child(2) {
+  position: sticky;
+  left: calc(var(--col1-width));
+  width: var(--col2-width);
+  min-width: var(--col2-width);
+  background: #f8f9fa;
+  z-index: 25;
+}
+
+.table-fix-cols th:nth-child(3),
+.table-fix-cols td:nth-child(3) {
+  position: sticky;
+  left: calc(var(--col1-width) + var(--col2-width));
+  width: var(--col3-width);
+  min-width: var(--col3-width);
+  background: #f8f9fa;
+  z-index: 25;
+}
+
+/* ===== 表頭層級比內容高 ===== */
+.table-fix-cols thead th:nth-child(-n+3) {
+  z-index: 35;
+}
+
+/* ===== 左側陰影（Excel感） ===== */
+.table-fix-cols th:nth-child(3)::after,
+.table-fix-cols td:nth-child(3)::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  background: linear-gradient(to right, rgba(0,0,0,0.08), transparent);
+  pointer-events: none;
+}
+
+/* ===== hover 效果 ===== */
+.table-fix-cols tbody tr:hover td {
+  background: #f8f9fc;
+}
+.table-fix-cols tbody tr:hover td:nth-child(-n+3) {
+  background: #eef2f7;
+}
+
+/* ===== Modal 內防止 sticky 被裁切 ===== */
+.modal-dialog-scrollable .modal-body {
+  overflow: visible !important;
+}
+
+/* ===== 固定表頭下方陰影 ===== */
+.table-fix-wrapper::after {
+  content: "";
+  position: sticky;
+  top: 36px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.1), transparent);
+  pointer-events: none;
+  z-index: 29;
+}
+</style>
+
 <div class="modal fade" id="@modalId" tabindex="-1" aria-labelledby="dictModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-scrollable">
     <div class="modal-content">
@@ -11,65 +140,65 @@
         <button type="button" class="btn btn-success ms-2" onclick="saveAllDictFields('#@modalId .dictTableBody')">全部儲存</button>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
+
       <div class="modal-body">
-        <table class="table table-bordered table-sm align-middle">
-          <thead>
-            <tr>
-              <th>序號</th>
-              <th>欄位名稱</th>
-              <th>顯示名稱</th>
-              <th>可視</th>
-              <th>型別</th>
-              <th>輸出格式</th>
-              <th>說明</th>
-              <!-- 下面自動加所有你想顯示的欄位（可照 SQL 結果列出） -->
-              <th>欄寬</th>
-              <th>標籤高</th>
-              <th>標籤Y</th>
-              <th>標籤X</th>
-              <th>標籤寬</th>
-              <th>欄位高</th>
-              <th>欄位Y</th>
-              <th>欄位X</th>
-              <th>欄位寬</th>
-              <th>搜尋表格</th>
-              <th>搜尋鍵</th>
-              <th>搜尋欄位</th>
-              <th style="display:none;">備註</th>
-              <!-- ...可再加其他必要欄位 -->
-            </tr>
-          </thead>
-          <tbody class="dictTableBody">
-            @foreach (var d in Model)
-            {
-                <tr data-tablename="@tableName" data-fieldname="@d.FieldName">
-                  <td><input data-field="SerialNum" type="number" value="@d.SerialNum" style="width:60px;" /></td>
-                  <td>@d.FieldName</td>
-                  <td><input data-field="DisplayLabel" value="@d.DisplayLabel" /></td>
-                  <td><input data-field="Visible" type="checkbox" @(d.Visible == 1 ? "checked" : "") /></td>
-                  <td>
-                      <input data-field="DataType" value="@d.DataType" readonly style="background:#f2f2f2; color:#8a9399; border:1px solid #dee2e6;" tabindex="-1" />
-                  </td>
-                  <td><input data-field="FormatStr" value="@d.FormatStr" /></td>
-                  <td><input data-field="FieldNote" value="@d.FieldNote" /></td>
-                  <td><input data-field="DisplaySize" value="@d.DisplaySize" style="width:50px;" /></td>
-                  <td><input data-field="iLabHeight" value="@d.iLabHeight" style="width:50px;" /></td>
-                  <td><input data-field="iLabTop" value="@d.iLabTop" style="width:50px;" /></td>
-                  <td><input data-field="iLabLeft" value="@d.iLabLeft" style="width:50px;" /></td>
-                  <td><input data-field="iLabWidth" value="@d.iLabWidth" style="width:50px;" /></td>
-                  <td><input data-field="iFieldHeight" value="@d.iFieldHeight" style="width:50px;" /></td>
-                  <td><input data-field="iFieldTop" value="@d.iFieldTop" style="width:50px;" /></td>
-                  <td><input data-field="iFieldLeft" value="@d.iFieldLeft" style="width:50px;" /></td>
-                  <td><input data-field="iFieldWidth" value="@d.iFieldWidth" style="width:50px;" /></td>
-                  <td><input data-field="LookupTable" value="@d.LookupTable" /></td>
-                  <td><input data-field="LookupKeyField" value="@d.LookupKeyField" /></td>
-                  <td><input data-field="LookupResultField" value="@d.LookupResultField" /></td>
-                  <td style="display:none;"><input data-field="IsNotesField" value="@d.IsNotesField" style="width:50px;" /></td>
-                  <!-- ...依你的欄位補齊 -->
-                </tr>
-            }
-          </tbody>
-        </table>
+        <div class="table-fix-wrapper">
+          <table class="table-fix-cols">
+            <thead>
+              <tr>
+                <th>序號</th>
+                <th>欄位名稱</th>
+                <th>顯示名稱</th>
+                <th>可視</th>
+                <th>頁籤</th>
+                <th>型別</th>
+                <th>輸出格式</th>
+                <th>說明</th>
+                <th>欄寬</th>
+                <th>標籤高</th>
+                <th>標籤Y</th>
+                <th>標籤X</th>
+                <th>標籤寬</th>
+                <th>欄位高</th>
+                <th>欄位Y</th>
+                <th>欄位X</th>
+                <th>欄位寬</th>
+                <th>搜尋表格</th>
+                <th>搜尋鍵</th>
+                <th>搜尋欄位</th>
+                <th style="display:none;">備註</th>
+              </tr>
+            </thead>
+            <tbody class="dictTableBody">
+              @foreach (var d in Model)
+              {
+                  <tr data-tablename="@tableName" data-fieldname="@d.FieldName">
+                    <td><input data-field="SerialNum" type="number" value="@d.SerialNum" style="width:60px;" /></td>
+                    <td>@d.FieldName</td>
+                    <td><input data-field="DisplayLabel" value="@d.DisplayLabel" /></td>
+                    <td><input data-field="Visible" type="checkbox" @(d.Visible == 1 ? "checked" : "") /></td>
+                    <td><input data-field="iShowWhere" value="@d.iShowWhere" style="width:50px;" /></td>
+                    <td><input data-field="DataType" value="@d.DataType" readonly style="background:#f2f2f2; color:#8a9399; border:1px solid #dee2e6;" tabindex="-1" /></td>
+                    <td><input data-field="FormatStr" value="@d.FormatStr" /></td>
+                    <td><input data-field="FieldNote" value="@d.FieldNote" /></td>
+                    <td><input data-field="DisplaySize" value="@d.DisplaySize" style="width:50px;" /></td>
+                    <td><input data-field="iLabHeight" value="@d.iLabHeight" style="width:50px;" /></td>
+                    <td><input data-field="iLabTop" value="@d.iLabTop" style="width:50px;" /></td>
+                    <td><input data-field="iLabLeft" value="@d.iLabLeft" style="width:50px;" /></td>
+                    <td><input data-field="iLabWidth" value="@d.iLabWidth" style="width:50px;" /></td>
+                    <td><input data-field="iFieldHeight" value="@d.iFieldHeight" style="width:50px;" /></td>
+                    <td><input data-field="iFieldTop" value="@d.iFieldTop" style="width:50px;" /></td>
+                    <td><input data-field="iFieldLeft" value="@d.iFieldLeft" style="width:50px;" /></td>
+                    <td><input data-field="iFieldWidth" value="@d.iFieldWidth" style="width:50px;" /></td>
+                    <td><input data-field="LookupTable" value="@d.LookupTable" /></td>
+                    <td><input data-field="LookupKeyField" value="@d.LookupKeyField" /></td>
+                    <td><input data-field="LookupResultField" value="@d.LookupResultField" /></td>
+                    <td style="display:none;"><input data-field="IsNotesField" value="@d.IsNotesField" style="width:50px;" /></td>
+                  </tr>
+              }
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>

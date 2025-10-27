@@ -100,10 +100,12 @@ public class DictApiController : ControllerBase
                 AddInt("iFieldTop", input.iFieldTop);
                 AddInt("iFieldLeft", input.iFieldLeft);
                 AddInt("iFieldWidth", input.iFieldWidth);
+                AddInt("iShowWhere", input.iShowWhere);
 
                 AddStr("LookupTable", input.LookupTable);
                 AddStr("LookupKeyField", input.LookupKeyField);
                 AddStr("IsNotesField", input.IsNotesField);
+                
 
                 if (setList.Count == 0) continue; // 沒有要更新的欄位就跳過
 
