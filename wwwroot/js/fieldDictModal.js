@@ -134,6 +134,7 @@ function saveAllDictFields(tableSelector = '#fieldDictTable tbody', apiUrl = SAV
       iFieldTop: getInt('iFieldTop'),
       iFieldLeft: getInt('iFieldLeft'),
       iFieldWidth: getInt('iFieldWidth'),
+      iShowWhere: getInt('iShowWhere'),
 
       // === 查詢設定 ===
       LookupTable: getVal('LookupTable'),

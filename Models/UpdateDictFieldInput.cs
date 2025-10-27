@@ -23,4 +23,5 @@ public class UpdateDictFieldInput
     public string LookupKeyField { get; set; }
     public string LookupResultField { get; set; }
     public string IsNotesField { get; set; }
+    public int? iShowWhere { get; set; }
 }
