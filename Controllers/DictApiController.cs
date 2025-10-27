@@ -19,15 +19,15 @@ public class DictApiController : ControllerBase
         _connStr = config.GetConnectionString("DefaultConnection") ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
     }
 
+    // ✅ 更新辭典欄位（含所有版面欄位）
     [HttpPost]
     public async Task<IActionResult> UpdateDictFields([FromBody] List<UpdateDictFieldInput> list)
     {
         using (var conn = new SqlConnection(_connStr))
         {
             await conn.OpenAsync();
-            
 
-           foreach (var input in list)
+            foreach (var input in list)
             {
                 var cmd = new SqlCommand();
                 var sql = "UPDATE CURdTableField SET ";
@@ -36,6 +36,7 @@ public class DictApiController : ControllerBase
                 cmd.Parameters.AddWithValue("@TableName", input.TableName ?? "");
                 cmd.Parameters.AddWithValue("@FieldName", input.FieldName ?? "");
 
+                // ===== 原本欄位 =====
                 if (input.DisplayLabel != null)
                 {
                     setList.Add("DisplayLabel = @DisplayLabel");
@@ -61,13 +62,50 @@ public class DictApiController : ControllerBase
                     setList.Add("Visible = @Visible");
                     cmd.Parameters.AddWithValue("@Visible", input.Visible);
                 }
+                if (input.FormatStr != null)
+                {
+                    setList.Add("FormatStr = @FormatStr");
+                    cmd.Parameters.AddWithValue("@FormatStr", input.FormatStr);
+                }
                 if (input.LookupResultField != null)
                 {
                     setList.Add("LookupResultField = @LookupResultField");
                     cmd.Parameters.AddWithValue("@LookupResultField", input.LookupResultField);
                 }
 
-                if (setList.Count == 0) continue; // 沒有欄位要改就 skip
+                // ===== 新增欄位：版面設定 =====
+                void AddInt(string name, int? value)
+                {
+                    if (value.HasValue)
+                    {
+                        setList.Add($"{name} = @{name}");
+                        cmd.Parameters.AddWithValue("@" + name, value.Value);
+                    }
+                }
+                void AddStr(string name, string? value)
+                {
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        setList.Add($"{name} = @{name}");
+                        cmd.Parameters.AddWithValue("@" + name, value);
+                    }
+                }
+
+                AddInt("DisplaySize", input.DisplaySize);
+                AddInt("iLabHeight", input.iLabHeight);
+                AddInt("iLabTop", input.iLabTop);
+                AddInt("iLabLeft", input.iLabLeft);
+                AddInt("iLabWidth", input.iLabWidth);
+                AddInt("iFieldHeight", input.iFieldHeight);
+                AddInt("iFieldTop", input.iFieldTop);
+                AddInt("iFieldLeft", input.iFieldLeft);
+                AddInt("iFieldWidth", input.iFieldWidth);
+
+                AddStr("LookupTable", input.LookupTable);
+                AddStr("LookupKeyField", input.LookupKeyField);
+                AddStr("IsNotesField", input.IsNotesField);
+
+                if (setList.Count == 0) continue; // 沒有要更新的欄位就跳過
 
                 sql += string.Join(", ", setList);
                 sql += " WHERE TableName = @TableName AND FieldName = @FieldName";
@@ -77,8 +115,10 @@ public class DictApiController : ControllerBase
                 await cmd.ExecuteNonQueryAsync();
             }
         }
+
         return Ok(new { success = true });
     }
+
     public class DictLayoutInput
     {
         public string FieldName { get; set; }
@@ -89,34 +129,35 @@ public class DictApiController : ControllerBase
         public int? iFieldHeight { get; set; }
         public int? iFieldTop { get; set; }
         public int? iFieldLeft { get; set; }
-}
-
-[HttpPost]
-public async Task<IActionResult> UpdateDictFieldsLayout([FromBody] List<DictLayoutInput> list)
-{
-    using (var conn = new SqlConnection(_connStr))
-    {
-        await conn.OpenAsync();
-        foreach (var input in list)
-        {
-            var cmd = new SqlCommand(@"
-                UPDATE CURdTableField 
-                SET iShowWhere = @iShowWhere, iLayRow = @iLayRow, iLayColumn = @iLayColumn, 
-                    iFieldWidth = @iFieldWidth, iFieldHeight = @iFieldHeight,
-                    iFieldTop = @iFieldTop, iFieldLeft = @iFieldLeft
-                WHERE FieldName = @FieldName", conn);
-            cmd.Parameters.AddWithValue("@iShowWhere", input.iShowWhere.HasValue ? input.iShowWhere.Value : (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("@iLayRow", input.iLayRow.HasValue ? input.iLayRow.Value : (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("@iLayColumn", input.iLayColumn.HasValue ? input.iLayColumn.Value : (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("@iFieldWidth", input.iFieldWidth.HasValue ? input.iFieldWidth.Value : (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("@iFieldHeight", input.iFieldHeight.HasValue ? input.iFieldHeight.Value : (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("@iFieldTop", input.iFieldTop.HasValue ? input.iFieldTop.Value : (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("@iFieldLeft", input.iFieldLeft.HasValue ? input.iFieldLeft.Value : (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("@FieldName", input.FieldName ?? "");
-            await cmd.ExecuteNonQueryAsync();
-        }
     }
-    return Ok();
-}
 
+    [HttpPost]
+    public async Task<IActionResult> UpdateDictFieldsLayout([FromBody] List<DictLayoutInput> list)
+    {
+        using (var conn = new SqlConnection(_connStr))
+        {
+            await conn.OpenAsync();
+            foreach (var input in list)
+            {
+                var cmd = new SqlCommand(@"
+                    UPDATE CURdTableField 
+                    SET iShowWhere = @iShowWhere, iLayRow = @iLayRow, iLayColumn = @iLayColumn, 
+                        iFieldWidth = @iFieldWidth, iFieldHeight = @iFieldHeight,
+                        iFieldTop = @iFieldTop, iFieldLeft = @iFieldLeft
+                    WHERE FieldName = @FieldName", conn);
+
+                cmd.Parameters.AddWithValue("@iShowWhere", input.iShowWhere.HasValue ? input.iShowWhere.Value : (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("@iLayRow", input.iLayRow.HasValue ? input.iLayRow.Value : (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("@iLayColumn", input.iLayColumn.HasValue ? input.iLayColumn.Value : (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("@iFieldWidth", input.iFieldWidth.HasValue ? input.iFieldWidth.Value : (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("@iFieldHeight", input.iFieldHeight.HasValue ? input.iFieldHeight.Value : (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("@iFieldTop", input.iFieldTop.HasValue ? input.iFieldTop.Value : (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("@iFieldLeft", input.iFieldLeft.HasValue ? input.iFieldLeft.Value : (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("@FieldName", input.FieldName ?? "");
+
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+        return Ok();
+    }
 }

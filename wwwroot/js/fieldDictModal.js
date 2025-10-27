@@ -99,53 +99,75 @@
     rows.forEach(tr => tbody.appendChild(tr));
   }
 
-  // ===== 儲存（含 TableName fallback、帶 DataType/FormatStr） =====
-  function saveAllDictFields(tableSelector = '#fieldDictTable tbody', apiUrl = SAVE_API) {
-    document.body.style.cursor = 'wait';
+  // ===== 儲存（完整版本：含欄位位置 + 搜尋設定 + 備註等） =====
+function saveAllDictFields(tableSelector = '#fieldDictTable tbody', apiUrl = SAVE_API) {
+  document.body.style.cursor = 'wait';
 
-    const rows = document.querySelectorAll(`${tableSelector} tr`);
-    const data = Array.from(rows).map(tr => {
-      const serialNumValue = tr.querySelector('input[data-field="SerialNum"]')?.value ?? '';
-      const visibleValue   = tr.querySelector('input[data-field="Visible"]')?.checked ? 1 : 0;
-      return {
-        TableName: tr.getAttribute('data-tablename') || window._dictTableName || '',
-        FieldName: tr.getAttribute('data-fieldname') || '',
-        DisplayLabel: tr.querySelector('input[data-field="DisplayLabel"]')?.value ?? '',
-        DataType:     tr.querySelector('input[data-field="DataType"]')?.value ?? '',
-        FormatStr:    tr.querySelector('input[data-field="FormatStr"]')?.value ?? '',
-        FieldNote:    tr.querySelector('input[data-field="FieldNote"]')?.value ?? '',
-        SerialNum:    serialNumValue === '' ? null : parseInt(serialNumValue, 10),
-        Visible:      visibleValue,
-        LookupResultField: (() => {
-          const el = tr.querySelector('input[data-field="LookupResultField"]');
-          if (!el) return null;
-          const v = el.value.trim();
-          return v === '' ? null : v;
-        })()
-      };
-    });
+  const rows = document.querySelectorAll(`${tableSelector} tr`);
+  const data = Array.from(rows).map(tr => {
+    const getVal = name => tr.querySelector(`input[data-field="${name}"]`)?.value ?? '';
+    const getInt = name => {
+      const v = getVal(name);
+      return v === '' ? null : parseInt(v, 10);
+    };
+    const getChk = name => tr.querySelector(`input[data-field="${name}"]`)?.checked ? 1 : 0;
 
-    fetch(apiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
+    return {
+      // === 基本欄位 ===
+      TableName: tr.getAttribute('data-tablename') || window._dictTableName || '',
+      FieldName: tr.getAttribute('data-fieldname') || '',
+
+      SerialNum: getInt('SerialNum'),
+      DisplayLabel: getVal('DisplayLabel'),
+      Visible: getChk('Visible'),
+      DataType: getVal('DataType'),
+      FormatStr: getVal('FormatStr'),
+      FieldNote: getVal('FieldNote'),
+
+      // === 版面欄位 ===
+      DisplaySize: getInt('DisplaySize'),
+      iLabHeight: getInt('iLabHeight'),
+      iLabTop: getInt('iLabTop'),
+      iLabLeft: getInt('iLabLeft'),
+      iLabWidth: getInt('iLabWidth'),
+      iFieldHeight: getInt('iFieldHeight'),
+      iFieldTop: getInt('iFieldTop'),
+      iFieldLeft: getInt('iFieldLeft'),
+      iFieldWidth: getInt('iFieldWidth'),
+
+      // === 查詢設定 ===
+      LookupTable: getVal('LookupTable'),
+      LookupKeyField: getVal('LookupKeyField'),
+      LookupResultField: getVal('LookupResultField'),
+
+      // === 其他欄位 ===
+      IsNotesField: getVal('IsNotesField')
+    };
+  });
+
+  // 送出 API
+  fetch(apiUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  })
+    .then(res => res.json())
+    .then(result => {
+      document.body.style.cursor = 'default';
+      if (result?.success) {
+        alert('全部儲存成功！');
+        window.dispatchEvent(new Event('field-dict-saved'));
+        setTimeout(() => location.reload(), 300);
+      } else {
+        alert(result?.message || '儲存失敗！');
+      }
     })
-      .then(res => res.json())
-      .then(result => {
-        document.body.style.cursor = 'default';
-        if (result?.success) {
-          alert('全部儲存成功！');
-          window.dispatchEvent(new Event('field-dict-saved'));
-          setTimeout(() => location.reload(), 300);
-        } else {
-          alert(result?.message || '儲存失敗！');
-        }
-      })
-      .catch(err => {
-        document.body.style.cursor = 'default';
-        alert('API 失敗: ' + err);
-      });
-  }
+    .catch(err => {
+      document.body.style.cursor = 'default';
+      alert('API 失敗: ' + err);
+    });
+}
+
 
   // 讓外面 onclick="saveAllDictFields('#xxx .dictTableBody')" 可直接用
   window.saveAllDictFields = saveAllDictFields;
