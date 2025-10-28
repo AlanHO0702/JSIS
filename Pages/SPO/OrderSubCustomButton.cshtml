@@ -4,6 +4,7 @@
   <button type="button" id="btnSearchDetails" class="fab">搜尋</button>
   <button type="button" id="btnCalcAmount"  class="fab">金額計算</button>
   <button type="button" id="btnClearDetails" class="fab fab-red">清除單身</button>
+  <button type="button" id="btnOutAddr" class="fab">出貨地址</button>
 </div>
 
 <script>
@@ -82,4 +83,84 @@ document.getElementById('btnSearchDetails')?.addEventListener('click', (e)=>{
   const paper = getPaperNum();
   window.OrderDetailPicker_detailPicker?.open({ paperNum: paper });
 });
+
+document.getElementById('btnOutAddr')?.addEventListener('click', async (e) => {
+  e.preventDefault(); e.stopPropagation();
+
+  const paperNum = getPaperNum();
+  const paperId = 'SPOdOrderMain';
+  if (!paperNum) return Swal.fire({ icon:'info', title:'沒有單號' });
+
+  // 1️⃣ 先載入出貨地址選項
+  const resp = await fetch(`/api/OrderSubButton/GetOutAddrOptions?paperId=${paperId}&paperNum=${paperNum}`);
+  const data = await resp.json();
+  if (!data.ok) return Swal.fire({ icon:'error', title:'載入失敗', text:data.error });
+
+  // 2️⃣ 顯示選擇視窗
+  const options = data.list.map(x => `<option value="${x.Addr}" data-title="${x.Title}">${x.Addr}</option>`).join('');
+  const { value: addr } = await Swal.fire({
+    title: data.label || '出貨地址',
+    html: `<select id="addrSel" class="swal2-select">${options}</select>`,
+    showCancelButton: true,
+    confirmButtonText: '確定',
+    cancelButtonText: '取消',
+    preConfirm: () => {
+      const sel = document.getElementById('addrSel');
+      return sel ? {
+        addr: sel.value,
+        title: sel.options[sel.selectedIndex].dataset.title
+      } : null;
+    }
+  });
+  if (!addr) return;
+
+  // 3️⃣ 更新到主檔
+  const updateResp = await fetch('/api/OrderSubButton/UpdateOutAddr', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      paperId, paperNum,
+      addr: addr.addr,
+      title: addr.title
+    })
+  });
+  const updateData = await updateResp.json();
+  if (updateData.ok) {
+    await Swal.fire({
+      icon: 'success',
+      title: '更新完成',
+      timer: 1000,
+      showConfirmButton: false
+    });
+
+    // ✅ 更新畫面值，不改掉標籤
+    const addrField = document.querySelector('input[name="TransPlace"], input[name="OutAddr"], textarea[name="TransPlace"], textarea[name="OutAddr"]');
+    const titleField = document.querySelector('input[name="PkgTitle"], input[name="ShipTo"], textarea[name="PkgTitle"], textarea[name="ShipTo"]');
+    
+    // 若是 input/textarea 直接設定 value
+    if (addrField) addrField.value = addr.addr;
+    if (titleField) titleField.value = addr.title;
+
+    // 若是顯示在 span 或 div 裡面，則更新內部 span
+    const addrValueEl = document.querySelector('[data-field="OutAddr"] span, [data-field="TransPlace"] span');
+    const titleValueEl = document.querySelector('[data-field="ShipTo"] span, [data-field="PkgTitle"] span');
+
+    if (addrValueEl) addrValueEl.textContent = addr.addr;
+    if (titleValueEl) titleValueEl.textContent = addr.title;
+
+    // ✅ 可選：閃爍提示使用者已更新
+    [addrField, titleField, addrValueEl, titleValueEl].forEach(el => {
+      if (!el) return;
+      el.style.transition = 'background-color 0.5s';
+      el.style.backgroundColor = '#fff8c4';
+      setTimeout(() => el.style.backgroundColor = '', 800);
+    });
+  }
+  else {
+    Swal.fire({ icon: 'error', title: '更新失敗', text: updateData.error });
+  }
+});
+
+
+
 </script>
