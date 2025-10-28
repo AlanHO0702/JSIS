@@ -82,19 +82,52 @@
     </div>
   </div>
 
-  <!-- 結果 -->
-  <div id="resultArea" class="card shadow-sm p-3" style="display:none;">
-    <div class="table-responsive">
-      <table class="table table-bordered table-hover align-middle text-center mb-0" id="resultTable">
-        <thead class="table-light" id="tableHead"></thead>
-        <tbody id="tableBody"></tbody>
-      </table>
+    <!-- ✅ 結果區塊：新增分頁 -->
+    <div id="resultTabs" class="card shadow-sm p-3" style="display:none;">
+      <ul class="nav nav-tabs" id="reportTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="tab-raw" data-bs-toggle="tab" data-bs-target="#tabRawPane" type="button" role="tab">原始資料</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-pivot" data-bs-toggle="tab" data-bs-target="#tabPivotPane" type="button" role="tab">樞紐分析</button>
+        </li>
+      </ul>
+
+      <div class="tab-content mt-3">
+        <!-- 原始資料分頁 -->
+        <div class="tab-pane fade show active" id="tabRawPane" role="tabpanel">
+          <div class="table-responsive">
+            <table class="table table-bordered table-hover align-middle text-center mb-0" id="resultTable">
+              <thead class="table-light" id="tableHead"></thead>
+              <tbody id="tableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 樞紐分析分頁 -->
+        <div class="tab-pane fade" id="tabPivotPane" role="tabpanel">
+          <div id="pivotContainer" style="height:70vh; overflow:auto;">
+            <div class="text-secondary text-center mt-5">尚未載入資料</div>
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
 </div>
 @* F3 共用辭典 Modal *@
 @await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", Model.FieldDictList, ViewData)
 <script src="~/js/fieldDictModal.js"></script>
+
+<!-- ✅ jQuery 本體 -->
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+<!-- ✅ jQuery UI（pivot 需要 sortable / draggable）-->
+<link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+<script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+
+<!-- ✅ 其他套件 -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdn.jsdelivr.net/npm/pivottable@2.23.0/dist/pivot.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/pivottable@2.23.0/dist/pivot.min.css" rel="stylesheet"/>
 <script>
 (function () {
   // --- 後端傳來的報表設定 ---
@@ -160,89 +193,121 @@
   }
 
   // ====== 呼叫 SP ======
-  async function doSearch(){
+  async function doSearch() {
     const payload = { spName: cfg.SpName, params: {} };
 
-    (cfg.ParamDefs || []).forEach(def=>{
+    (cfg.ParamDefs || []).forEach(def => {
       const el = document.getElementById(def.Name);
       let v = el ? (el.value ?? "") : "";
-      // 後端希望不要 NULL，統一給空字串；UseId 預設 A001
       if (def.Name === "UseId" && !v) v = "A001";
       payload.params[def.Name] = v;
     });
 
-    const res = await fetch('/api/Report/exec', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok){ alert(await res.text()); return; }
+    const btn = document.getElementById('btnSearch');
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 查詢中...';
 
-    const data = await res.json();   // { Columns:[], Rows:[] }
-    // console.log('cols from API:', data.Columns);
-    // console.log('rows count:', Array.isArray(data.Rows) ? data.Rows.length : 0);
-    window.renderTable?.(data.Columns, data.Rows);
+    // ✅ 改這裡
+    const resultTabs = document.getElementById('resultTabs');
+    if (resultTabs) resultTabs.style.display = 'none';
+
+    try {
+      const res = await fetch('/api/Report/exec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error(await res.text());
+
+      const data = await res.json();
+
+      if (!data.Rows || !Array.isArray(data.Rows) || data.Rows.length === 0) {
+        Swal.fire({
+          icon: 'info',
+          title: '查無資料',
+          text: '找不到符合條件的資料。',
+          confirmButtonText: '確定'
+        });
+        return;
+      }
+
+      window.renderTable?.(data.Columns, data.Rows);
+    } catch (err) {
+      console.error('查詢發生錯誤:', err);
+      Swal.fire({
+        icon: 'error',
+        title: '查詢失敗',
+        text: err.message || '系統錯誤，請稍後再試。',
+        confirmButtonText: '確定'
+      });
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+    }
   }
 
   // ====== 繪表 ======
-  window.renderTable = function(apiColumns, rows){
-    const thead = document.getElementById('tableHead');
-    const tbody = document.getElementById('tableBody');
+window.renderTable = function(apiColumns, rows) {
+  const thead = document.getElementById('tableHead');
+  const tbody = document.getElementById('tableBody');
 
-    const dictFields = (window._tableFields || [])
-      .filter(f => f.Visible)
-      .sort((a,b) => (a.SerialNum ?? 0) - (b.SerialNum ?? 0));
+  const dictFields = (window._tableFields || [])
+    .filter(f => f.Visible)
+    .sort((a,b) => (a.SerialNum ?? 0) - (b.SerialNum ?? 0));
 
-    // 後端欄位（忽略大小寫）；若沒給 Columns，就用第一列 rows 的 keys
-    let apiColsLower = [];
-    if (Array.isArray(apiColumns) && apiColumns.length) {
-      apiColsLower = apiColumns.map(c => String(c).toLowerCase());
-    } else if (Array.isArray(rows) && rows.length) {
-      apiColsLower = Object.keys(rows[0]).map(k => k.toLowerCase());
+  // 後端欄位（忽略大小寫）；若沒給 Columns，就用第一列 rows 的 keys
+  let apiColsLower = [];
+  if (Array.isArray(apiColumns) && apiColumns.length) {
+    apiColsLower = apiColumns.map(c => String(c).toLowerCase());
+  } else if (Array.isArray(rows) && rows.length) {
+    apiColsLower = Object.keys(rows[0]).map(k => k.toLowerCase());
+  }
+
+  // 用忽略大小寫方式配對辭典欄位
+  let cols = dictFields.filter(f => apiColsLower.includes(String(f.FieldName).toLowerCase()));
+
+  // 若配不到就 fallback：把第一列的所有 key 全部顯示
+  if (!cols.length && Array.isArray(rows) && rows.length) {
+    const keys = Object.keys(rows[0]);
+    cols = keys.map(k => ({ FieldName: k, DisplayLabel: k, FormatStr: "" }));
+  }
+
+  // 表頭
+  thead.innerHTML = `<tr>${
+    cols.map(c => `<th>${(c.DisplayLabel || c.FieldName)}</th>`).join('')
+  }</tr>`;
+
+  // 格式化
+  function fmt(v, format) {
+    if (v == null || format === "") return v ?? "";
+    if (/^(yyyy\/MM\/dd|yyyy-MM-dd)$/.test(format)) {
+      const d = (typeof v === 'string') ? new Date(v) : v;
+      if (isNaN(d)) return v ?? "";
+      const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+      return format.includes('/') ? `${y}/${m}/${dd}` : `${y}-${m}-${dd}`;
     }
-
-    // 用忽略大小寫方式配對辭典欄位
-    let cols = dictFields.filter(f => apiColsLower.includes(String(f.FieldName).toLowerCase()));
-
-    // 若配不到就 fallback：把第一列的所有 key 全部顯示
-    if (!cols.length && Array.isArray(rows) && rows.length) {
-      const keys = Object.keys(rows[0]);
-      cols = keys.map(k => ({ FieldName: k, DisplayLabel: k, FormatStr: "" }));
+    if (typeof v === 'number' && /^#,#*0(\.[0#]+)?$/.test((format||'').replace(/ /g,''))) {
+      const m = format.match(/\.(0+|#+)?$/);
+      const max = m?.[0]?.length ? m[0].length-1 : 0;
+      return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: Math.max(0,max) });
     }
+    return v;
+  }
 
-    // 表頭
-    thead.innerHTML = `<tr>${
-      cols.map(c => `<th>${(c.DisplayLabel || c.FieldName)}</th>`).join('')
-    }</tr>`;
+  // 表身
+  tbody.innerHTML = (rows || []).map(r => `<tr>${
+    cols.map(c => {
+      const raw = r[c.FieldName];
+      const text = fmt(raw, c.FormatStr || "");
+      return `<td>${text ?? ''}</td>`;
+    }).join('')
+  }</tr>`).join('');
 
-    // 格式化
-    function fmt(v, format) {
-      if (v == null || format === "") return v ?? "";
-      if (/^(yyyy\/MM\/dd|yyyy-MM-dd)$/.test(format)) {
-        const d = (typeof v === 'string') ? new Date(v) : v;
-        if (isNaN(d)) return v ?? "";
-        const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
-        return format.includes('/') ? `${y}/${m}/${dd}` : `${y}-${m}-${dd}`;
-      }
-      if (typeof v === 'number' && /^#,#*0(\.[0#]+)?$/.test((format||'').replace(/ /g,''))) {
-        const m = format.match(/\.(0+|#+)?$/);
-        const max = m?.[0]?.length ? m[0].length-1 : 0;
-        return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: Math.max(0,max) });
-      }
-      return v;
-    }
-
-    // 表身
-    tbody.innerHTML = (rows || []).map(r => `<tr>${
-      cols.map(c => {
-        const raw = r[c.FieldName];
-        const text = fmt(raw, c.FormatStr || "");
-        return `<td>${text ?? ''}</td>`;
-      }).join('')
-    }</tr>`).join('');
-
-    document.getElementById('resultArea').style.display = '';
-  };
+  // ✅ 改這裡，不要再用 resultArea
+  const resultTabs = document.getElementById('resultTabs');
+  if (resultTabs) resultTabs.style.display = '';
+};
 
    // ====== F3 辭典（欄位可視/中文/順序） ======
   // 提供給 fieldDictModal.js 用
@@ -287,7 +352,74 @@
       doSearch();
     });
   });
-})();
 
+  const resultTabs = document.getElementById('resultTabs');
+  const pivotContainer = document.getElementById('pivotContainer');
+
+  // ====== 標準 renderTable ======
+  const origRender = window.renderTable;
+  window.renderTable = function(cols, rows) {
+    origRender?.(cols, rows);
+
+    if (rows && rows.length > 0) {
+      if (resultTabs) resultTabs.style.display = '';
+      pivotContainer.innerHTML = '<div class="text-secondary text-center mt-5">載入中...</div>';
+      window._lastReportData = { cols, rows };  // ✅ 暫存給樞紐分析使用
+    } else {
+      if (resultTabs) resultTabs.style.display = 'none';
+      Swal.fire({ icon: 'info', title: '查無資料', text: '找不到符合條件的資料。' });
+    }
+  };
+
+  // ====== 點擊「樞紐分析」分頁時載入 PivotTable ======
+  document.getElementById('tab-pivot')?.addEventListener('shown.bs.tab', () => {
+    const data = window._lastReportData?.rows;
+    if (!data || !data.length) {
+      pivotContainer.innerHTML = '<div class="text-secondary text-center mt-5">尚未載入資料</div>';
+      return;
+    }
+
+    pivotContainer.innerHTML = '';
+
+    try {
+      // ✅ 取出辭典欄位（僅顯示可視欄位）
+      const dictFields = (window._tableFields || [])
+        .filter(f => f.Visible)
+        .sort((a,b) => (a.SerialNum ?? 0) - (b.SerialNum ?? 0));
+
+      // ✅ 建立中英文對照 map
+      const nameMap = {};
+      dictFields.forEach(f => {
+        const en = f.FieldName?.trim();
+        const zh = f.DisplayLabel?.trim() || en;
+        nameMap[en] = zh;
+      });
+
+      // ✅ 轉換資料：把每列的 key 從英文換成中文
+      const localizedData = data.map(row => {
+        const newRow = {};
+        Object.keys(row).forEach(k => {
+          if (nameMap[k]) newRow[nameMap[k]] = row[k];
+        });
+        return newRow;
+      });
+
+      // ✅ 取得欄位清單
+      const visibleCols = dictFields.map(f => f.DisplayLabel?.trim() || f.FieldName);
+
+      // ✅ 載入 pivotUI（改用中文欄位名）
+      $("#pivotContainer").pivotUI(localizedData, {
+        rows: [visibleCols[0] || ""],
+        cols: [visibleCols[1] || ""],
+        rendererName: "Table"
+      });
+
+    } catch (err) {
+      console.error(err);
+      pivotContainer.innerHTML = `<div class="alert alert-danger">載入樞紐分析發生錯誤：${err.message}</div>`;
+    }
+  });
+
+})();
 
 </script>
