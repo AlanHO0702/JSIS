@@ -22,65 +22,88 @@
     font-weight: 700;
     letter-spacing: 1px;
   }
+  /* 收合箭頭：展開時朝下、收合時旋轉 */
+  #btnToggleQuery.collapsed .chev { transform: rotate(-90deg); }
 </style>
 
 <div class="container my-4">
   <h3 class="text-primary fw-bold mb-3">@cfg.Title</h3>
 
-  <!-- 查詢條件 -->
-  <div class="card p-3 mb-4 shadow-sm" id="queryPanel">
-    <div class="row g-3 align-items-end" id="paramRows">
-      @foreach (var def in cfg.ParamDefs)
-      {
-        <div class="col-md-3">
-          <label class="form-label">@def.Label</label>
+  <!-- 查詢條件（可收合） -->
+  <div class="card shadow-sm mb-4" id="queryPanel">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <div class="fw-bold">查詢條件</div>
 
-          @if (def.Ui == ParamUiType.Date)
-          {
-            <input type="date" class="form-control"
-                   id="@def.Name" name="@def.Name"
-                   value="" data-default="@def.DefaultValue" />
-          }
-          else if (def.Ui == ParamUiType.Select)
-          {
-            var lookupAttr = string.IsNullOrWhiteSpace(def.LookupKey)
-                ? ""
-                : $"data-lookup=\"{def.LookupKey}\"";
+      <!-- 收合按鈕 -->
+      <button id="btnToggleQuery"
+              class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
+              type="button"
+              data-bs-toggle="collapse"
+              data-bs-target="#queryCollapse"
+              aria-expanded="true"
+              aria-controls="queryCollapse">
+        <span class="chev" style="display:inline-block; transition: transform .2s ease;">▾</span>
+        <span class="lbl">收合</span>
+      </button>
+    </div>
 
-            <select class="form-select"
-                    id="@def.Name" name="@def.Name"
-                    @Html.Raw(lookupAttr)
-                    data-default="@def.DefaultValue">
-              <option value=""></option>
-              @if (def.Options != null)
+    <div id="queryCollapse" class="collapse show">
+      <div class="card-body">
+        <div class="row g-3 align-items-end" id="paramRows">
+          @foreach (var def in cfg.ParamDefs)
+          {
+            <div class="col-md-3">
+              <label class="form-label">@def.Label</label>
+
+              @if (def.Ui == ParamUiType.Date)
               {
-                foreach (var (value, text) in def.Options)
-                {
-                  <option value="@value">@text</option>
-                }
+                <input type="date" class="form-control"
+                      id="@def.Name" name="@def.Name"
+                      value="" data-default="@def.DefaultValue" />
               }
-            </select>
-          }
-          else if (def.Ui == ParamUiType.Number)
-          {
-            <input type="number" class="form-control"
-                   id="@def.Name" name="@def.Name"
-                   value="" data-default="@def.DefaultValue" />
-          }
-          else
-          {
-            <input type="text" class="form-control"
-                   id="@def.Name" name="@def.Name"
-                   value="" data-default="@def.DefaultValue" />
-          }
-        </div>
-      }
+              else if (def.Ui == ParamUiType.Select)
+              {
+                var lookupAttr = string.IsNullOrWhiteSpace(def.LookupKey)
+                    ? ""
+                    : $"data-lookup=\"{def.LookupKey}\"";
 
-      <div class="col-12 text-end">
-        <button id="btnSearch" class="btn btn-primary px-4">查詢</button>
+                <select class="form-select"
+                        id="@def.Name" name="@def.Name"
+                        @Html.Raw(lookupAttr)
+                        data-default="@def.DefaultValue">
+                  <option value=""></option>
+                  @if (def.Options != null)
+                  {
+                    foreach (var (value, text) in def.Options)
+                    {
+                      <option value="@value">@text</option>
+                    }
+                  }
+                </select>
+              }
+              else if (def.Ui == ParamUiType.Number)
+              {
+                <input type="number" class="form-control"
+                      id="@def.Name" name="@def.Name"
+                      value="" data-default="@def.DefaultValue" />
+              }
+              else
+              {
+                <input type="text" class="form-control"
+                      id="@def.Name" name="@def.Name"
+                      value="" data-default="@def.DefaultValue" />
+              }
+            </div>
+          }
+
+          <div class="col-12 text-end">
+            <button id="btnSearch" class="btn btn-primary px-4">查詢</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
+
 
     <!-- ✅ 結果區塊：新增分頁 -->
     <div id="resultTabs" class="card shadow-sm p-3" style="display:none;">
@@ -90,6 +113,11 @@
         </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-pivot" data-bs-toggle="tab" data-bs-target="#tabPivotPane" type="button" role="tab">樞紐分析</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-chart" data-bs-toggle="tab" data-bs-target="#tabChartPane" type="button" role="tab">
+            圖表分析
+          </button>
         </li>
       </ul>
 
@@ -110,6 +138,25 @@
             <div class="text-secondary text-center mt-5">尚未載入資料</div>
           </div>
         </div>
+
+        <!-- 📊 圖表分析分頁 -->
+        <div class="tab-pane fade" id="tabChartPane" role="tabpanel">
+          <div class="mt-3">
+            <div class="d-flex align-items-center gap-3 mb-3">
+              <label class="form-label mb-0">圖表類型：</label>
+              <select id="chartType" class="form-select" style="width:180px;">
+                <option value="bar">長條圖</option>
+                <option value="line">折線圖</option>
+                <option value="pie">圓餅圖</option>
+              </select>
+              <button id="btnDrawChart" class="btn btn-success">重新產生圖表</button>
+            </div>
+            <div id="chartContainer">
+              <canvas id="pivotChart" style="width:100%; height:70vh;"></canvas>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
 </div>
@@ -128,11 +175,61 @@
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/pivottable@2.23.0/dist/pivot.min.js"></script>
 <link href="https://cdn.jsdelivr.net/npm/pivottable@2.23.0/dist/pivot.min.css" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
 <script>
 (function () {
   // --- 後端傳來的報表設定 ---
   const cfg = @Html.Raw(json);
-  cfg.ParamDefs = cfg.ParamDefs || [];
+
+  // === 查詢條件收合狀態：依報表名稱或 DictTableName 記憶 ===
+  const QUERY_KEY = `report:queryCollapsed:${(cfg.DictTableName || cfg.Title || 'default')}`;
+
+  function applyQueryCollapseRemember() {
+    const btn = document.getElementById('btnToggleQuery');
+    const pane = document.getElementById('queryCollapse');
+    if (!btn || !pane) return;
+
+    // 讀取記憶（'1' = 收合, '0'/null = 展開）
+    const collapsed = localStorage.getItem(QUERY_KEY) === '1';
+
+    // 直接修改 class 以符合記憶狀態
+    if (collapsed) {
+      pane.classList.remove('show');
+      btn.classList.add('collapsed');
+      btn.setAttribute('aria-expanded', 'false');
+      btn.querySelector('.lbl').textContent = '展開';
+    } else {
+      pane.classList.add('show');
+      btn.classList.remove('collapsed');
+      btn.setAttribute('aria-expanded', 'true');
+      btn.querySelector('.lbl').textContent = '收合';
+    }
+
+    // 綁定事件：每次切換時更新記憶
+    pane.addEventListener('shown.bs.collapse', () => {
+      btn.classList.remove('collapsed');
+      btn.setAttribute('aria-expanded', 'true');
+      btn.querySelector('.lbl').textContent = '收合';
+      localStorage.setItem(QUERY_KEY, '0');
+    });
+    pane.addEventListener('hidden.bs.collapse', () => {
+      btn.classList.add('collapsed');
+      btn.setAttribute('aria-expanded', 'false');
+      btn.querySelector('.lbl').textContent = '展開';
+      localStorage.setItem(QUERY_KEY, '1');
+    });
+  }
+
+  // 在 DOMContentLoaded 時套用
+  document.addEventListener('DOMContentLoaded', () => {
+    applyQueryCollapseRemember();
+  });
+
+  // ⚙️ 確保 ParamDefs 一定是陣列，不會是物件 {0:{},1:{}}
+  cfg.ParamDefs = Array.isArray(cfg.ParamDefs)
+    ? cfg.ParamDefs
+    : Object.values(cfg.ParamDefs || []);
 
   // --- 供 renderTable 使用的辭典欄位（只含 Visible=1，已排序） ---
   window._tableFields = @Html.Raw(Json.Serialize(ViewData["Fields"] ?? new object()));
@@ -154,12 +251,11 @@
       const data = await res.json(); // [{value,text}]
       data.forEach(o=>{
         const opt = document.createElement('option');
-        opt.value = o.value ?? '';
+        opt.value = String(o.value ?? '').trim();   // ⬅ 轉字串 + 去空白
         opt.textContent = o.text ?? '';
         el.appendChild(opt);
       });
     }catch{
-      // 保底至少有一個 "(不限)"
       if (!el.querySelector('option')) {
         const opt = document.createElement('option');
         opt.value = ''; opt.textContent = '(不限)';
@@ -169,28 +265,35 @@
   }
 
   // ====== 初始化條件（載入下拉 + 套預設值） ======
-  async function initParams(){
-    const jobs = [];
-    (cfg.ParamDefs || []).forEach(def=>{
+  async function initParams() {
+    cfg.ParamDefs = Array.isArray(cfg.ParamDefs) ? cfg.ParamDefs : Object.values(cfg.ParamDefs || {});
+    for (const def of cfg.ParamDefs) {
       const el = document.getElementById(def.Name);
-      if (!el) return;
-      const key = el.dataset.lookup;  // 有 data-lookup 才打 API
-      if (key) jobs.push(loadLookup(key, el));
-    });
-    await Promise.all(jobs);
+      if (!el) continue;
 
-    // 預設值（日期支援 today / today-120d ...）
-    (cfg.ParamDefs || []).forEach(def=>{
-      const el = document.getElementById(def.Name);
-      if (!el) return;
-      const defVal = el.dataset.default || def.DefaultValue || "";
-      if (def.Ui === 1 /* Date */ && typeof defVal === 'string' && defVal.startsWith('today')) {
+      const key = el.dataset.lookup;
+      // ⬇ 預設值一律轉字串並去空白
+      const defValRaw = el.dataset.default || def.DefaultValue || "";
+      const defVal = String(defValRaw).trim();
+
+      if (key) await loadLookup(key, el);
+
+      if (def.Ui === 1 && typeof defVal === "string" && defVal.startsWith("today")) {
         el.value = todayOffset(defVal);
       } else {
         el.value = defVal;
+        // 若仍沒選到（例如後端真的有多餘空白），再做一次比對修正
+        if (!el.value && el.options?.length > 0) {
+          for (const opt of el.options) {
+            if (String(opt.value).trim() === defVal) { el.value = opt.value; break; }
+          }
+        }
+        if (!el.value && el.options?.length > 0) el.selectedIndex = 0; // 最後保底
       }
-    });
+    }
   }
+
+
 
   // ====== 呼叫 SP ======
   async function doSearch() {
@@ -379,6 +482,20 @@ window.renderTable = function(apiColumns, rows) {
       return;
     }
 
+    // 只建立一次預設切換器
+    if (!document.getElementById('pivotPresets')) {
+      const bar = document.createElement('div');
+      bar.className = 'd-flex gap-2 align-items-center mb-2';
+      bar.innerHTML = `
+        <label class="form-label mb-0">預設：</label>
+        <select id="pivotPresets" class="form-select" style="width:240px;"></select>
+        <button id="pivotSavePreset" class="btn btn-outline-secondary">儲存目前配置</button>
+      `;
+      pivotContainer.before(bar);
+    }
+
+    buildPivotUI();     // ← 用新函數產生 pivotUI（見下）
+
     pivotContainer.innerHTML = '';
 
     try {
@@ -419,6 +536,201 @@ window.renderTable = function(apiColumns, rows) {
       pivotContainer.innerHTML = `<div class="alert alert-danger">載入樞紐分析發生錯誤：${err.message}</div>`;
     }
   });
+
+   // ===== 📊 圖表分頁 =====
+    let chartInstance = null;
+
+    document.getElementById('tab-chart')?.addEventListener('shown.bs.tab', () => {
+      refreshChartFromPivot();
+    });
+
+    // ✅ 自動從 PivotTable 讀取目前顯示的資料產生圖表（含智能縮放）
+    function refreshChartFromPivot() {
+      const pivotTable = document.querySelector('#pivotContainer .pvtTable');
+      const ctx = document.getElementById('pivotChart');
+      const chartType = document.getElementById('chartType').value || 'bar';
+      const chartContainer = document.getElementById('chartContainer');
+
+      if (!pivotTable) {
+        ctx.replaceWith(ctx.cloneNode(true)); // 清空
+        Swal.fire({ icon: 'info', title: '請先建立樞紐分析表格' });
+        return;
+      }
+
+      // 取出資料（欄位名稱與列資料）
+      const headers = [...pivotTable.querySelectorAll('thead tr:last-child th')]
+        .map(th => th.textContent.trim())
+        .filter(t => t !== 'Totals');
+      const rows = [...pivotTable.querySelectorAll('tbody tr')];
+
+      const labels = [];
+      const values = [];
+
+      rows.forEach(tr => {
+        const cells = tr.querySelectorAll('th,td');
+        if (cells.length < 2) return;
+        const label = cells[0].textContent.trim();
+        const valCell = cells[cells.length - 1].textContent.trim().replace(/,/g, '');
+        const val = parseFloat(valCell) || 0;
+        if (label && !isNaN(val)) {
+          labels.push(label);
+          values.push(val);
+        }
+      });
+
+      if (labels.length === 0) {
+        ctx.replaceWith(ctx.cloneNode(true));
+        Swal.fire({ icon: 'info', title: '無法從樞紐分析中擷取有效資料' });
+        return;
+      }
+
+      // ✅ 智能高度調整（最小 300，最大 600）
+      const dynamicHeight = Math.min(800, Math.max(400, labels.length * 25));
+      chartContainer.style.height = dynamicHeight + 'px';
+      chartContainer.style.overflowY = labels.length > 20 ? 'auto' : 'visible';
+
+      // 清除舊圖
+      if (chartInstance) chartInstance.destroy();
+
+      chartInstance = new Chart(ctx, {
+        type: chartType,
+        data: {
+          labels,
+          datasets: [{
+            label: headers[0] || '數值',
+            data: values,
+            backgroundColor: 'rgba(54,162,235,0.6)',
+            borderColor: 'rgba(54,162,235,1)',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false, // ✅ 關閉固定比例，允許高度自動撐開
+          plugins: {
+            legend: { position: 'top' },
+            title: { display: true, text: headers[0] || '樞紐分析圖表' }
+          },
+          scales: {
+            x: { title: { display: true, text: headers[0] || '分類' } },
+            y: { title: { display: true, text: '數值' } }
+          }
+        }
+      });
+    }
+
+    // ✅ 手動重新產生圖表
+    document.getElementById('btnDrawChart')?.addEventListener('click', () => {
+      refreshChartFromPivot();
+    });
+
+
+    // === 定義可切換的預設（依你的中文欄位名填）===
+  const PIVOT_PRESETS = {
+    '客戶 × 客戶簡稱（筆數）': {
+      rows: ['客戶代碼'],
+      cols: ['客戶簡稱'],
+      aggregatorName: 'Count',
+      rendererName: 'Table'
+    },
+    '交期(月) × 客戶（加總數量）': {
+      rows: ['交期(月)'],         // 你若沒有這欄，可在 localizedData 事先派生一欄
+      cols: ['客戶簡稱'],
+      aggregatorName: 'Sum',
+      vals: ['數量'],
+      rendererName: 'Heatmap'     // 也可用 Table Heatmap
+    },
+    '品名 × 客戶（加總金額）': {
+      rows: ['品名(客戶料號)'],
+      cols: ['客戶簡稱'],
+      aggregatorName: 'Sum',
+      vals: ['金額'],              // 你的欄位名自行對應
+      rendererName: 'Table'
+    }
+  };
+
+  // 依報表（或 DictTableName）做 localStorage Key
+  function pivotStorageKey() {
+    const name = window._dictTableName || 'default-report';
+    return `pivotCfg:${name}`;
+  }
+
+  // 產生/重建 pivotUI，支援套用預設或還原使用者上次設定
+  function buildPivotUI(presetKey) {
+    const raw = window._lastReportData?.rows || [];
+    const dictFields = (window._tableFields || []).filter(f => f.Visible)
+                                                  .sort((a,b) => (a.SerialNum ?? 0) - (b.SerialNum ?? 0));
+    const nameMap = {};
+    dictFields.forEach(f => {
+      const en = f.FieldName?.trim();
+      const zh = f.DisplayLabel?.trim() || en;
+      nameMap[en] = zh;
+    });
+
+    // 將資料英文鍵換中文鍵（維持你原本的作法）
+    const localizedData = raw.map(row => {
+      const o = {};
+      Object.keys(row).forEach(k => { if (nameMap[k]) o[nameMap[k]] = row[k]; });
+      return o;
+    });
+
+    // 先清空容器
+    const container = document.getElementById('pivotContainer');
+    container.innerHTML = '';
+
+    // 準備 options：先看是否有上次使用者配置（localStorage），否則套 preset，最後才退回預設 rows/cols
+    let opts = { rendererName: 'Table' };
+    const saved = localStorage.getItem(pivotStorageKey());
+    if (saved && !presetKey) {
+      // 還原使用者上次配置
+      try { opts = JSON.parse(saved); } catch {}
+    } else if (presetKey && PIVOT_PRESETS[presetKey]) {
+      opts = { ...PIVOT_PRESETS[presetKey] };
+    } else {
+      // 你原本的初始值
+      const visibleCols = dictFields.map(f => f.DisplayLabel?.trim() || f.FieldName);
+      opts.rows = [visibleCols[0] || ""];
+      opts.cols = [visibleCols[1] || ""];
+      opts.rendererName = 'Table';
+    }
+
+    // 建立 pivotUI
+    $("#pivotContainer").pivotUI(localizedData, opts, true);
+
+    // 監聽 onRefresh：每次使用者改動就存起來
+    const $pvt = $("#pivotContainer");
+    const onRefresh = $pvt.data("pivotUIOptions")?.onRefresh;
+    // 替換 onRefresh 以存儲（保留舊的行為）
+    const saveOnRefresh = function(cfg) {
+      // cfg 會帶很多函式/DOM，留乾淨的就好
+      const safe = (({ rows, cols, vals, aggregatorName, rendererName, sorters, derivedAttributes, inclusions, exclusions, unusedAttrsVertical }) =>
+        ({ rows, cols, vals, aggregatorName, rendererName, sorters, derivedAttributes, inclusions, exclusions, unusedAttrsVertical }))(cfg);
+      localStorage.setItem(pivotStorageKey(), JSON.stringify(safe));
+      if (typeof onRefresh === 'function') onRefresh(cfg);
+    };
+    // 寫回 options
+    const options = $pvt.data("pivotUIOptions");
+    options.onRefresh = saveOnRefresh;
+    $pvt.data("pivotUIOptions", options);
+
+    // 建立/更新「預設選單」內容與事件
+    const sel = document.getElementById('pivotPresets');
+    if (sel && sel.options.length === 0) {
+      Object.keys(PIVOT_PRESETS).forEach(name => sel.add(new Option(name, name)));
+      sel.addEventListener('change', () => buildPivotUI(sel.value));
+      document.getElementById('pivotSavePreset')?.addEventListener('click', () => {
+        const cfg = $("#pivotContainer").data("pivotUIOptions");
+        const safe = (({ rows, cols, vals, aggregatorName, rendererName, sorters, derivedAttributes, inclusions, exclusions, unusedAttrsVertical }) =>
+          ({ rows, cols, vals, aggregatorName, rendererName, sorters, derivedAttributes, inclusions, exclusions, unusedAttrsVertical }))(cfg);
+        localStorage.setItem(pivotStorageKey(), JSON.stringify(safe));
+        Swal.fire({ icon:'success', title:'已儲存目前配置' });
+      });
+    }
+
+    // 若是帶入 preset，就把下拉選單也選到那個
+    if (sel && presetKey) sel.value = presetKey;
+  }
+
 
 })();
 
