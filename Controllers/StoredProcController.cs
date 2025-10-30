@@ -34,6 +34,11 @@ public class StoredProcController : ControllerBase
             ProcName: "dbo.FMEdIssueClearLayer",
             // 依你的 SP 參數調整 ↓↓↓
             RequiredParams: new[] { "PaperNum" }
+        ),
+            // 3.傳票取號
+            ["AJNdOCXGetJourId"] = new StoredProcDef(
+            ProcName: "dbo.AJNdOCXGetJourId_Plus",           // 你的 SP 名
+            RequiredParams: new[] { "PaperId","PaperNum", "HeadParam", "UseId","GetEmpty" }
         )
 
         };
