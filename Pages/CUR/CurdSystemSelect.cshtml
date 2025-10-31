@@ -1,0 +1,146 @@
+@page
+@using Microsoft.AspNetCore.Html
+@model PcbErpApi.Pages.CUR.CURdSystemSelectModel
+@{
+    Layout = "_Layout";
+    ViewData["CustomButtons"] = new HtmlString(@"
+        <button type='button' class='btn btn-primary btn-sm' onclick='uploadImage()'>上傳圖檔</button>
+        <button type='button' class='btn btn-outline-secondary btn-sm' onclick='viewImage()'>檢視圖檔</button>
+        <button type='button' class='btn btn-outline-danger btn-sm' onclick='deleteImage()'>刪除圖檔</button>
+        <button type='button' class='btn btn-success btn-sm' onclick='uploadManual()'>上傳手冊</button>
+        <button type='button' class='btn btn-outline-info btn-sm' onclick='downloadManual()'>檢視手冊</button>
+        <button type='button' class='btn btn-outline-danger btn-sm' onclick='deleteManual()'>刪除手冊</button>
+    ");
+}
+
+<h3>系統模組設定</h3>
+
+<partial name="~/Pages/Shared/_TableSingleGrid.cshtml" model="Model" />
+
+<!-- 🔹 預覽圖檔 Modal -->
+<div class="modal fade" id="imagePreviewModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">圖檔預覽</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body text-center">
+        <img id="previewImage" src="" alt="預覽圖檔" style="max-width:100%; max-height:75vh; border:1px solid #ccc;">
+      </div>
+    </div>
+  </div>
+</div>
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", ViewData["FieldDictList"], ViewData)
+<script>window._dictTableName = 'CURdSystemSelect';</script>
+<script src="~/js/fieldDictModal.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const table = document.querySelector('table');
+  if (table) {
+    table.addEventListener('click', e => {
+      const tr = e.target.closest('tr');
+      if (!tr) return;
+      table.querySelectorAll('tr.table-active').forEach(x => x.classList.remove('table-active'));
+      tr.classList.add('table-active');
+    });
+  }
+});
+
+function getSelectedSystemCode() {
+  const tr = document.querySelector('tr.table-active');
+  if (!tr) return null;
+  return tr.children[0].innerText.trim();
+}
+
+// ========== 圖檔 ==========
+async function uploadImage() {
+  const systemCode = getSelectedSystemCode();
+  if (!systemCode) return alert('請先選取系統代碼');
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.bmp';
+  input.onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('SystemCode', systemCode);
+    formData.append('File', file);
+    const res = await fetch('/api/SystemGraph/Upload', { method: 'POST', body: formData });
+    if (res.ok) { alert('上傳成功'); location.reload(); }
+    else alert(await res.text());
+  };
+  input.click();
+}
+
+async function viewImage() {
+  const tr = document.querySelector('tr.table-active');
+  if (!tr) return alert('請先選取系統代碼');
+
+  // ✅ 改成正確欄位索引（圖檔名稱在第8欄 → index 7）
+  const fileName = tr.children[7]?.innerText.trim();
+  if (!fileName) return alert('沒有圖檔名稱');
+
+  document.getElementById('previewImage').src =
+    `/api/SystemGraph/GetImage/${encodeURIComponent(fileName)}`;
+
+  new bootstrap.Modal(document.getElementById('imagePreviewModal')).show();
+}
+
+
+
+async function deleteImage() {
+  const systemCode = getSelectedSystemCode();
+  if (!systemCode) return alert('請先選取系統代碼');
+  if (!confirm('確定刪除此圖檔？')) return;
+  const res = await fetch(`/api/SystemGraph/Delete?systemCode=${systemCode}`, { method: 'DELETE' });
+  if (res.ok) { alert('刪除成功'); location.reload(); }
+  else alert(await res.text());
+}
+
+// ========== 手冊 ==========
+async function uploadManual() {
+  const systemCode = getSelectedSystemCode();
+  if (!systemCode) return alert('請先選取系統代碼');
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.doc,.docx';
+  input.onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('SystemCode', systemCode);
+    formData.append('File', file);
+    const res = await fetch('/api/SystemGraph/UploadManual', { method: 'POST', body: formData });
+    if (res.ok) { alert('上傳成功'); location.reload(); }
+    else alert(await res.text());
+  };
+  input.click();
+}
+
+async function downloadManual() {
+  const tr = document.querySelector('tr.table-active');
+  if (!tr) return alert('請先選取系統代碼');
+
+  // ✅ 手冊名稱在第9欄 → index 8
+  const fileName = tr.children[8]?.innerText.trim();
+  if (!fileName) return alert('沒有手冊名稱');
+
+  window.open(`/api/SystemGraph/GetManual/${encodeURIComponent(fileName)}`, '_blank');
+}
+
+async function deleteManual() {
+  const systemCode = getSelectedSystemCode();
+  if (!systemCode) return alert('請先選取系統代碼');
+  if (!confirm('確定刪除此手冊？')) return;
+  const res = await fetch(`/api/SystemGraph/DeleteManual?systemCode=${systemCode}`, { method: 'DELETE' });
+  if (res.ok) { alert('刪除成功'); location.reload(); }
+  else alert(await res.text());
+}
+</script>
+
+<style>
+tr.table-active { background-color: #d6e4ff !important; }
+</style>

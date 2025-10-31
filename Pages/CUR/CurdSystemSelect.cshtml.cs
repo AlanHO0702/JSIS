@@ -5,18 +5,18 @@ using PcbErpApi.Models;
 
 namespace PcbErpApi.Pages.CUR
 {
-    public class CURdBuModel : PageModel
+    public class CURdSystemSelectModel : PageModel
     {
         private readonly PcbErpContext _db;
         private readonly ITableDictionaryService _dictService;
 
-        public CURdBuModel(PcbErpContext db, ITableDictionaryService dictService)
+        public CURdSystemSelectModel(PcbErpContext db, ITableDictionaryService dictService)
         {
             _db = db;
             _dictService = dictService;
         }
 
-        public string TableName => "CURdBu";
+        public string TableName => "CURdSystemSelect";
 
         // ✅ 共用樣板需要的三個屬性
         public int PageNumber { get; set; } = 1;
@@ -24,7 +24,7 @@ namespace PcbErpApi.Pages.CUR
         public int TotalCount { get; set; }
 
         // ✅ 主資料
-        public List<CurdBu> Items { get; set; } = new();
+        public List<CurdSystemSelect> Items { get; set; } = new();
 
         // ✅ 辭典欄位
         public List<CURdTableField> FieldDictList { get; set; } = new();
@@ -36,7 +36,7 @@ namespace PcbErpApi.Pages.CUR
             PageSize = pageSize;
 
             // 撈主資料
-            var query = _db.CurdBus.AsNoTracking().OrderBy(x => x.Buid);
+            var query = _db.CurdSystemSelects.AsNoTracking().OrderBy(x => x.SystemId);
             TotalCount = await query.CountAsync();
 
             Items = await query
@@ -45,7 +45,7 @@ namespace PcbErpApi.Pages.CUR
                 .ToListAsync();
 
             // 撈辭典
-            FieldDictList = _dictService.GetFieldDict("CurdBu", typeof(CurdBu));
+            FieldDictList = _dictService.GetFieldDict("CURdSystemSelect", typeof(CurdSystemSelect));
             TableFields = FieldDictList
                 .Where(f => f.Visible == 1)
                 .OrderBy(f => f.SerialNum ?? 0)
