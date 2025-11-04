@@ -1,102 +1,154 @@
+@using System.Reflection
+@using Microsoft.AspNetCore.Html
 @model dynamic
-@using System.Data
 @{
-    string currentSortColumn = Model.SortColumn;
-    string currentSortDirection = Model.SortDirection;
-    var fieldLabels = Model.FieldLabels ?? new Dictionary<string, string>();
+    var tableName  = (string)(Model.TableName ?? "");
+    var items      = (IEnumerable<object>)(Model.Items ?? new List<object>());
+    var fields     = (IEnumerable<dynamic>)(Model.TableFields ?? new List<object>());
+    int totalCount = (int)(Model.TotalCount ?? 0);
+    int pageNumber = (int)(Model.PageNumber ?? 1);
+    int pageSize   = (int)(Model.PageSize   ?? 50);
+    var totalPages = Math.Ceiling(totalCount / (double)Math.Max(1, pageSize));
+    var hasData    = items.Any();
 
-    var fields = Model.TableFields;
-    var items = Model.Items;
-    var totalCount = Model.TotalCount;
-    var pageNumber = Model.PageNumber;
-    var pageSize = Model.PageSize;
-    var paginationVm = ViewData["PaginationVm"] as PaginationModel;
-
-    // 新增API路徑與單身頁路徑，從 ViewData 傳（預設值也可寫死）
-    var addApiUrl = ViewData["AddApiUrl"] as string ?? "/api/SPOdOrderMain";
+    // 🔸 從頁面傳入的自訂按鈕區
+    var customButtons = ViewData["CustomButtons"] as HtmlString;
 }
 
-<h2>資料表內容顯示</h2>
+<div class="card shadow-sm border-0">
+  <div class="card-body">
 
-<form method="get" class="mb-4 d-flex align-items-center gap-2">
-    <label for="tableNameInput" class="form-label mb-0">Table Name:</label>
-    <input type="text" id="tableNameInput" name="TableName" value="@Model.TableName" class="form-control" style="max-width: 300px;" />
-    <button type="submit" class="btn btn-primary">載入</button>
-    @if (Model.TableData != null && Model.TableData.Rows.Count > 0)
-    {
-        <span class="ms-3 text-muted">筆數：<strong>@Model.TableData.Rows.Count</strong></span>
-    }
-</form>
+    <!-- 🔸 資料筆數與分頁資訊 -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div class="text-muted small">
+        共 <strong>@totalCount</strong> 筆，每頁 <strong>@pageSize</strong>，
+        目前第 <strong>@pageNumber</strong> / <strong>@(totalPages == 0 ? 1 : totalPages)</strong> 頁
+      </div>
+    </div>
 
-@if (!string.IsNullOrWhiteSpace(Model.TableName))
-{
-    if (Model.TableData == null || Model.TableData.Rows.Count == 0)
+    <!-- 🔸 表格 -->
+    @if (!hasData)
     {
-        <div class="alert alert-warning">找不到任何資料。</div>
+      <div class="alert alert-warning mb-0">找不到任何資料。</div>
     }
     else
     {
-        <div class="table-responsive" style="overflow-x:auto; max-height:500px; overflow-y:auto;">
-            <table class="table table-bordered table-hover table-sm" style="min-width:1200px; table-layout:auto;">
-                <thead>
-                    <tr>
-                        @foreach (var col in Model.Columns)
-                        {
-                            var nextDirection = (currentSortColumn == col && currentSortDirection == "ASC") ? "DESC" : "ASC";
-                            var arrow = "";
-                            if (currentSortColumn == col)
-                            {
-                                arrow = currentSortDirection == "ASC" ? "▲" : "▼";
-                            }
-                            <th style="white-space:nowrap; min-width:120px;">
-                                <a href="?TableName=@Model.TableName&SortColumn=@col&SortDirection=@nextDirection">
-                                    @(fieldLabels.ContainsKey(col) ? fieldLabels[col] : col) @arrow
-                                </a>
-                            </th>
-                        }
-                    </tr>
-                </thead>
+      <div class="table-responsive" style="max-height:65vh; overflow-y:auto;">
+        <table class="table table-bordered table-hover table-sm align-middle">
+          <thead class="table-light sticky-top">
+            <tr>
+              @foreach (var f in fields)
+              {
+                  <th class="text-nowrap">@((string)f.DisplayLabel)</th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @foreach (var item in items)
+            {
+              <tr>
+                @foreach (var f in fields)
+                {
+                    // 取得欄位名稱
+                    string? fieldName = null;
+                    try { fieldName = Convert.ToString(f.FieldName) ?? ""; } catch {}
 
-                <tbody>
-                    <tr><td colspan="@Model.Columns.Count">共 @Model.TableData.Rows.Count 筆資料</td></tr>
-                    @foreach (DataRow row in Model.TableData.Rows)
+                    // 反射找屬性（忽略大小寫）
+                    PropertyInfo? prop = null;
+                    if (!string.IsNullOrWhiteSpace(fieldName))
                     {
-                        <tr>
-                            @foreach (var col in Model.Columns)
-                            {
-                                <td style="white-space:nowrap;">@row[col]</td>
-                            }
-                        </tr>
+                        prop = item.GetType().GetProperty(
+                            fieldName!,
+                            BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase
+                        );
                     }
-                </tbody>
-            </table>
-        </div>
-        <form method="post" action="/Pivot" target="_blank" id="pivotForm">
-            <input type="hidden" name="jsonDataRaw" id="jsonData" />
-            <input type="hidden" name="tableName" value="@Model.TableName" />
-            <button type="button" class="btn btn-success mt-3" id="btnPivot">樞紐分析</button>
-        </form>
-    }
-}
 
-@section Scripts {
-    <script>
-        document.getElementById("btnPivot").addEventListener("click", function () {
-            const headers = [];
-            const rows = [];
-            document.querySelectorAll("table thead th a").forEach(a => {
-                headers.push(a.textContent.replace(/[▲▼]/g, '').trim());
-            });
-            document.querySelectorAll("table tbody tr").forEach(tr => {
-                if (tr.querySelectorAll("td").length !== headers.length) return;
-                const row = {};
-                tr.querySelectorAll("td").forEach((td, i) => {
-                    row[headers[i]] = td.textContent.trim();
-                });
-                rows.push(row);
-            });
-            document.getElementById("jsonData").value = JSON.stringify(rows);
-            document.getElementById("pivotForm").submit();
-        });
-    </script>
-}
+                    var value = prop?.GetValue(item);
+                    string displayValue =
+                        value switch
+                        {
+                            DateTime dt  => dt.ToString("yyyy/MM/dd HH:mm"),
+                            decimal dec  => dec.ToString("#,##0.##"),
+                            double d     => d.ToString("#,##0.##"),
+                            float  fl    => fl.ToString("#,##0.##"),
+                            IFormattable fmt => fmt.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+                            _ => value?.ToString() ?? ""
+                        };
+
+                    <td class="text-nowrap">@displayValue</td>
+                }
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+              <!-- 🔸 按鈕區塊（共用樣板預留位置） -->
+    <div class="d-flex justify-content-end gap-2 mb-3">
+      @if (customButtons != null)
+      {
+          @customButtons
+      }
+      else
+      {
+          <!-- 預設留空但佔位 -->
+          <button type="button" class="btn btn-outline-secondary btn-sm" disabled style="width:100px; opacity:0.3;">
+            （按鈕區）
+          </button>
+      }
+    </div>
+      <!-- 🔸 分頁區 -->
+      <div class="d-flex justify-content-end mt-2">
+        <nav aria-label="Page navigation">
+          <ul class="pagination pagination-sm mb-0">
+            <li class="page-item @(pageNumber <= 1 ? "disabled" : "")">
+              <a class="page-link" href="?page=@(pageNumber - 1)">«</a>
+            </li>
+            <li class="page-item active"><span class="page-link">@pageNumber</span></li>
+            <li class="page-item @(pageNumber >= totalPages ? "disabled" : "")">
+              <a class="page-link" href="?page=@(pageNumber + 1)">»</a>
+            </li>
+          </ul>
+        </nav>
+      </div>
+    }
+
+  </div>
+</div>
+
+<style>
+  table.table th, table.table td {
+    vertical-align: middle !important;
+    border: 1px solid #dee2e6 !important;
+    padding: .4rem .6rem !important;
+  }
+  thead.table-light th {
+    background:#f8f9fa!important;
+    font-weight:600;
+    border-bottom:2px solid #dee2e6!important;
+  }
+  .table-hover tbody tr:hover { background:#f1f5ff!important; }
+  .card { border-radius:.75rem; }
+</style>
+
+<script>
+  // 🔸 支援 F3 開啟欄位辭典設定
+  (function () {
+    window._dictTableName = "@tableName" || "CurdBu";
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'F3') {
+        e.preventDefault();
+        if (window.showDictModal) {
+          showDictModal('dictModal', window._dictTableName);
+        } else {
+          console.warn('找不到 showDictModal，請確認 fieldDictModal.js 已載入');
+        }
+      }
+    });
+
+    // 🔸 儲存後自動重整
+    window.addEventListener('dict:saved', function () {
+      location.reload();
+    });
+  })();
+</script>
