@@ -5,6 +5,7 @@ public class UpdateDictFieldInput
     public int? SerialNum { get; set; }
     public string DisplayLabel { get; set; }
     public int? Visible { get; set; }
+    public int? ReadOnly { get; set; }
     public string DataType { get; set; }
     public string FormatStr { get; set; }
     public string FieldNote { get; set; }
