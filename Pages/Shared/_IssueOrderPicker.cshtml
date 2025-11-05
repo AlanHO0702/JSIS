@@ -1,0 +1,556 @@
+@model PcbErpApi.Models.DetailPickerConfig
+@using System.Text.Json
+
+@{
+    var cfg = Model ?? new PcbErpApi.Models.DetailPickerConfig();
+
+    // UI 語系 -> LanguageId
+    string langId;
+    var ui = System.Globalization.CultureInfo.CurrentUICulture.Name; // zh-TW, en-US...
+    if (ui.StartsWith("zh", StringComparison.OrdinalIgnoreCase)) langId = "TW";
+    else if (ui.StartsWith("en", StringComparison.OrdinalIgnoreCase)) langId = "EN";
+    else langId = "TW";
+
+    var clientCfg = new {
+        cfg.ModalId,
+        cfg.PaperNum,
+        cfg.FetchApi,
+        cfg.InsertApi,
+        ShowReplace = cfg.ShowReplace,
+        Lang = langId
+    };
+    var cfgJson = JsonSerializer.Serialize(clientCfg);
+    var ckId = $"{cfg.ModalId}_ckReplace";
+}
+
+<!-- Modal -->
+<div class="modal fade" id="@cfg.ModalId" tabindex="-1">
+  <div class="modal-dialog iop-dialog">
+    <div class="modal-content issue-order-picker">
+      <div class="modal-header">
+        <h5 class="modal-title">匯入訂單明細</h5>
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <!-- 查詢條件 -->
+        <form class="row g-2 mb-3 iop-fetch-form align-items-end">
+          <div class="col-auto">
+            <label class="form-label mb-1">訂單單號</label>
+            <input id="iop_q_ponum" class="form-control form-control-sm" name="PONum">
+          </div>
+          <div class="col-auto">
+            <label class="form-label mb-1">料號</label>
+            <input id="iop_q_part" class="form-control form-control-sm" name="PartNum">
+          </div>
+          <div class="col-auto">
+            <label class="form-label mb-1">版序</label>
+            <input id="iop_q_rev" class="form-control form-control-sm" name="Revision" style="width:100px;">
+          </div>
+          <div class="col-auto">
+            <label class="form-label mb-1">客戶</label>
+            <input id="iop_q_cust" class="form-control form-control-sm" name="CustomerId" style="width:120px;">
+          </div>
+          <div class="col-auto">
+            <label class="form-label mb-1">考慮缺料計算</label>
+            <select id="iop_q_lessinq" class="form-select form-select-sm" name="LessInqSelect" style="width:100px;">
+              <option value="255">(不限定)</option>
+              <option value="1">是</option>
+              <option value="0" selected>否</option>
+            </select>
+          </div>
+          <div class="col-auto">
+            <label class="form-label mb-1">資料狀態</label>
+            <select id="iop_q_hasissue" class="form-select form-select-sm" name="HasIssueSelect" style="width:100px;">
+              <option value="255" selected>(不限定)</option>
+              <option value="0">未發料</option>
+              <option value="1">已發料</option>
+            </select>
+          </div>
+          <div class="col-auto">
+            <label class="form-label mb-1">訂單種類</label>
+            <select id="iop_q_potype" class="form-select form-select-sm" name="POTypeSelect" style="width:100px;">
+              <option value="255" selected>(不限定)</option>
+              <option value="0">一般</option>
+              <option value="1">樣品</option>
+              <option value="2">工程</option>
+            </select>
+          </div>
+
+          <div class="col d-flex align-items-end gap-3 flex-wrap">
+            <button type="button" class="btn btn-primary iop-btn-fetch ms-auto">資料重取</button>
+          </div>
+        </form>
+
+        <!-- 挑選區 -->
+        <div class="row iop-picker-row">
+          <!-- 左：可選（表頭由 SP 輸出欄位產生） -->
+          <div class="col-5 iop-col">
+            <div class="iop-scroll">
+              <table class="table table-sm table-striped mb-0 iop-available">
+                <thead>
+                  <tr>
+                    <th style="width:36px;"></th>
+                    <!-- 其餘由 JS 依 SP 輸出動態產生 -->
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 中：移動 -->
+          <div class="col-2 iop-transfer">
+            <button class="btn btn-outline-primary iop-right" type="button">&rarr;</button>
+            <button class="btn btn-outline-secondary iop-left" type="button">&larr;</button>
+            @if (cfg.ShowReplace)
+            {
+              <div class="form-check mt-4 iop-replace">
+                <input id="@ckId" class="form-check-input" type="checkbox">
+                <label class="form-check-label" for="@ckId">取代已存在</label>
+              </div>
+            }
+          </div>
+
+          <!-- 右：已選（表頭由 SP 輸出欄位產生） -->
+          <div class="col-5 iop-col">
+            <div class="iop-scroll">
+              <table class="table table-sm table-striped mb-0 iop-selected">
+                <thead>
+                  <tr>
+                    <th style="width:36px;"></th>
+                    <!-- 其餘由 JS 依 SP 輸出動態產生 -->
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-success iop-confirm">確定</button>
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const CFG = @Html.Raw(cfgJson);
+
+  const $modal = $('#'+CFG.ModalId);
+  const $avail = $modal.find('.iop-available');
+  const $availHead = $avail.find('thead tr');
+  const $availBody = $avail.find('tbody');
+
+  const $sel   = $modal.find('.iop-selected');
+  const $selHead = $sel.find('thead tr');
+  const $selBody = $sel.find('tbody');
+
+  const STATE = { paperNum: CFG.PaperNum || '', columns: [], rows: [] };
+
+  const API = {
+    open(opts){
+      STATE.paperNum = (opts?.paperNum || STATE.paperNum || '').trim();
+      $modal.modal('show');
+    }
+  };
+  window['OrderDetailPicker_'+CFG.ModalId] = API;
+
+  $modal.find('.iop-btn-fetch').on('click', onFetch);
+  $modal.find('.iop-right').on('click', moveRight);
+  $modal.find('.iop-left').on('click', moveLeft);
+  $modal.find('.iop-confirm').on('click', onConfirm);
+
+  // 工具：格式化儲存格
+  function fmtCell(val, fieldName){
+    if (val == null) return '';
+    let s = String(val);
+
+    // 日期欄位
+    if (fieldName && (fieldName.toLowerCase().includes('date') || fieldName.toLowerCase().includes('time'))){
+      const d = new Date(s);
+      if (!isNaN(d)) return d.toISOString().slice(0,10);
+    }
+
+    // 數值欄位 (Price, Qnty, Amount 等)
+    if (fieldName && (fieldName.toLowerCase().includes('price') ||
+                      fieldName.toLowerCase().includes('qnty') ||
+                      fieldName.toLowerCase().includes('amount') ||
+                      fieldName.toLowerCase().includes('stock') ||
+                      fieldName.toLowerCase().includes('wip'))){
+      const n = Number(s.toString().replace(/,/g,''));
+      if (!Number.isNaN(n)) return n.toLocaleString();
+    }
+
+    return s;
+  }
+
+  // 依 SP 輸出欄位建立表頭
+  function buildHeads(sampleRow){
+    if (!sampleRow) return;
+
+    // 從第一筆資料取得所有欄位名稱
+    const fields = Object.keys(sampleRow);
+    STATE.columns = fields;
+
+    // 產生表頭（給予適當的中文顯示名稱）
+    const fieldNameMap = {
+      'PONum': '訂單單號',
+      'SerialNum': '項次',
+      'PartNum': '料號',
+      'Revision': '版序',
+      'CustomerPartNum': '客戶料號',
+      'UnitPrice': '單價',
+      'CurrSCQnty': '目前數量',
+      'NOFinish': '未完成數',
+      'DelDate': '交期',
+      'ExpStkDate': '預計入庫日',
+      'PODate': '訂單日期',
+      'CustomerId': '客戶代號',
+      'POType': '訂單類型',
+      'ShortName': '客戶簡稱',
+      'POTypeName': '訂單類型名稱',
+      'POQnty': '訂單數量',
+      'UnFinish': '未完成',
+      'IssQnty': '已發量',
+      'UnIssQnty': '未發量',
+      'MasPartNum': '主料號',
+      'MasRevision': '主版序',
+      'Status': '狀態',
+      'MatchQnty': '配對數量',
+      'Notes': '備註',
+      'StockQnty': '庫存量',
+      'WIP': '在製品',
+      'AllOutQnty': '總需求量',
+      'OriNeedQnty': '原始缺料量',
+      'NeedQnty': '缺料量',
+      'UnFinQnty': '未完成量',
+      'POKind': '訂單種類',
+      'PoKindName': '訂單種類名稱',
+      'LessInq': '缺料查詢'
+    };
+
+    const ths = fields.map(f => {
+      const displayName = fieldNameMap[f] || f;
+      return `<th data-field="${f}" style="min-width:100px;">${displayName}</th>`;
+    }).join('');
+
+    $availHead.find('th:not(:first)').remove();
+    $selHead.find('th:not(:first)').remove();
+    $availHead.append(ths);
+    $selHead.append(ths);
+  }
+
+  // 左側可選列渲染
+  function renderRows(rows){
+    if (!rows || rows.length === 0) {
+      $availBody.html('<tr><td colspan="100" class="text-center text-muted">無資料</td></tr>');
+      return;
+    }
+
+    // 用第一筆資料建立表頭
+    if (STATE.columns.length === 0) {
+      buildHeads(rows[0]);
+    }
+
+    const html = rows.map((r, i) => {
+      const tds = STATE.columns.map(field => {
+        const v = r[field];
+        const isNumber = field.toLowerCase().includes('price') ||
+                        field.toLowerCase().includes('qnty') ||
+                        field.toLowerCase().includes('amount') ||
+                        field.toLowerCase().includes('stock') ||
+                        field.toLowerCase().includes('wip');
+        const cls = isNumber ? 'text-end' : '';
+        return `<td class="${cls}">${fmtCell(v, field)}</td>`;
+      }).join('');
+
+      return `<tr data-idx="${i}">${'<td><input type="checkbox" class="form-check-input iop-chk"></td>'}${tds}</tr>`;
+    }).join('');
+
+    $availBody.html(html);
+  }
+
+  async function onFetch(){
+    const formEl = $modal.find('.iop-fetch-form')[0];
+    const form = Object.fromEntries(new FormData(formEl).entries());
+
+    // 讀取下拉選單的值（要轉數字）
+    const lessInq = parseInt(form.LessInqSelect ?? '255');
+    const hasIssue = parseInt(form.HasIssueSelect ?? '0');
+    const poType = parseInt(form.POTypeSelect ?? '255');
+
+    const payload = {
+      PONum:      (form.PONum      ?? '').trim(),
+      PartNum:    (form.PartNum    ?? '').trim(),
+      Revision:   (form.Revision   ?? '').trim(),
+      CustomerId: (form.CustomerId ?? '').trim(),
+      PaperNum:   (STATE.paperNum  ?? '').trim(),
+      LessInq:    lessInq,        // 0/1/255
+      HasIssue:   hasIssue,       // 0/1/255
+      POType:     poType          // 0/1/2/255
+    };
+
+    try {
+      const resp = await fetch(CFG.FetchApi, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const res = await resp.json();
+
+      if (!res.ok) {
+        Swal.fire({icon:'error', title:'查詢失敗', text: res.error || ''});
+        return;
+      }
+
+      STATE.rows = Array.isArray(res.data) ? res.data : [];
+      renderRows(STATE.rows);
+    } catch (err) {
+      console.error('[fetch error]', err);
+      Swal.fire({icon:'error', title:'網路錯誤', text: String(err)});
+    }
+  }
+
+  // 右側列：建立選中的資料列
+  function buildSelectedRow(rowObj, idx){
+    const tds = STATE.columns.map(field => {
+      const v = rowObj[field];
+      const isNumber = field.toLowerCase().includes('price') ||
+                      field.toLowerCase().includes('qnty') ||
+                      field.toLowerCase().includes('amount') ||
+                      field.toLowerCase().includes('stock') ||
+                      field.toLowerCase().includes('wip');
+      const cls = isNumber ? 'text-end' : '';
+      return `<td class="${cls}">${fmtCell(v, field)}</td>`;
+    }).join('');
+
+    return `<tr data-idx="${idx}"><td><input type="checkbox" class="form-check-input iop-sel"></td>${tds}</tr>`;
+  }
+
+  // 移到右邊
+  function moveRight(){
+    $availBody.find('tr').has('.iop-chk:checked').each(function(){
+      const $tr = $(this);
+      const idx = Number($tr.data('idx'));
+      const rowObj = STATE.rows[idx] || {};
+      $selBody.append(buildSelectedRow(rowObj, idx));
+      $tr.remove();
+    });
+  }
+
+  // 移回左邊
+  function moveLeft(){
+    $selBody.find('tr').has('.iop-sel:checked').each(function(){
+      const $tr = $(this);
+      const idx = Number($tr.data('idx'));
+      const rowObj = STATE.rows[idx] || {};
+
+      const tds = STATE.columns.map(field => {
+        const v = rowObj[field];
+        const isNumber = field.toLowerCase().includes('price') ||
+                        field.toLowerCase().includes('qnty') ||
+                        field.toLowerCase().includes('amount') ||
+                        field.toLowerCase().includes('stock') ||
+                        field.toLowerCase().includes('wip');
+        const cls = isNumber ? 'text-end' : '';
+        return `<td class="${cls}">${fmtCell(v, field)}</td>`;
+      }).join('');
+
+      $availBody.append(`<tr data-idx="${idx}"><td><input type="checkbox" class="form-check-input iop-chk"></td>${tds}</tr>`);
+      $tr.remove();
+    });
+  }
+
+  // 送出
+  async function onConfirm(e){
+    e.preventDefault();
+    const rows = [];
+
+    $selBody.find('tr').each(function(){
+      const $tr = $(this);
+      const idx = Number($tr.data('idx'));
+      const rowObj = STATE.rows[idx];
+      if (!rowObj) return;
+
+      // 依照 InsertRow 結構組裝資料
+      rows.push({
+        PONum:       rowObj.PONum,
+        SerialNum:   rowObj.SerialNum,
+        POType:      rowObj.POType,
+        MasPartNum:  rowObj.MasPartNum,
+        MasRevision: rowObj.MasRevision,
+        StockQnty:   rowObj.StockQnty,
+        WIP:         rowObj.WIP,
+        AllOutQnty:  rowObj.AllOutQnty,
+        NeedQnty:    rowObj.NeedQnty,
+        IssQnty:     rowObj.IssQnty,
+        UnIssQnty:   rowObj.UnIssQnty,
+        POKind:      rowObj.POKind
+      });
+    });
+
+    if (!rows.length) {
+      return Swal.fire({icon:'info', title:'尚未選擇任何項目'});
+    }
+
+    const payload = {
+      DllPaperNum: (STATE.paperNum || '').trim(),
+      Replace: !!document.getElementById('@ckId')?.checked,
+      LessInq: false,
+      Rows: rows
+    };
+
+    try {
+      const resp = await fetch(CFG.InsertApi, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const res = await resp.json();
+
+      if (res.ok){
+        $modal.trigger('iop:confirmed', [res]);
+        await Swal.fire({
+          icon:'success',
+          title:`匯入完成（${res.rows} 筆）`,
+          timer:1000,
+          showConfirmButton:false
+        });
+        location.reload();
+      } else {
+        Swal.fire({icon:'error', title:'匯入失敗', text: res.error || ''});
+      }
+    } catch (err) {
+      console.error('[insert error]', err);
+      Swal.fire({icon:'error', title:'網路錯誤', text: String(err)});
+    }
+  }
+})();
+</script>
+
+<style>
+/* --- Dialog 尺寸：用 BS5 變數控制 --- */
+#@cfg.ModalId .iop-dialog{
+  --bs-modal-width: 98vw;
+  --bs-modal-margin: 1vh;
+}
+
+#@cfg.ModalId .iop-dialog .modal-content{
+  height: calc(92vh);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+#@cfg.ModalId .modal-body{
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#@cfg.ModalId .modal-footer{
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  z-index: 3;
+  pointer-events: auto;
+}
+
+#@cfg.ModalId .iop-picker-row,
+#@cfg.ModalId .iop-col,
+#@cfg.ModalId .iop-scroll{
+  position: static;
+  z-index: auto;
+  overflow: auto;
+}
+
+#@cfg.ModalId .iop-picker-row{
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 1rem;
+}
+
+#@cfg.ModalId .iop-col{
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#@cfg.ModalId .iop-scroll{
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+#@cfg.ModalId .iop-transfer{
+  flex: 0 0 96px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: .75rem;
+}
+
+#@cfg.ModalId .iop-transfer .btn{
+  width:48px;
+  height:40px;
+  padding:0;
+  font-size:20px;
+}
+
+/* 表格外觀 */
+#@cfg.ModalId thead th{
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+#@cfg.ModalId table{
+  border-collapse: collapse;
+}
+
+#@cfg.ModalId th, #@cfg.ModalId td{
+  border:1px solid #dee2e6;
+  vertical-align: middle;
+}
+
+/* 查詢區 */
+#@cfg.ModalId .iop-fetch-form .form-label{
+  white-space:nowrap;
+}
+
+#iop_q_ponum { width: 160px; }
+#iop_q_part  { width: 160px; }
+
+#@cfg.ModalId .iop-fetch-form .col-auto{
+  margin-right:8px;
+}
+
+#@cfg.ModalId .iop-btn-fetch{
+  margin-left:auto;
+}
+
+/* 手機/平板：全螢幕 */
+@@media (max-width: 991.98px){
+  #@cfg.ModalId .iop-dialog{
+    --bs-modal-width: 100vw;
+    --bs-modal-margin: 0;
+  }
+  #@cfg.ModalId .iop-dialog .modal-content{
+    border-radius: 0;
+  }
+}
+</style>
