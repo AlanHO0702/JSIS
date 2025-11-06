@@ -1,0 +1,604 @@
+@model dynamic
+@using PcbErpApi.Helpers
+@using System.Text.Json
+@{
+    // 單頭欄位
+    var headerFields = Model.HeaderTableFields; // 可視欄位
+    var headerData = Model.HeaderData; // 單頭資料 (Dictionary<string, object> 或你的單頭Model)
+    var headerFieldsList = ((IEnumerable<TableFieldViewModel>)Model.HeaderTableFields).ToList();
+    var addApiUrl = ViewData["AddApiUrl"]?.ToString() ?? "";
+    var detailRouteTemplate = ViewData["SubRouteTemplate"]?.ToString() ?? "";
+    var tableName = ViewData["DictTableName"]?.ToString() ?? "";
+    var keyFieldName = ViewData["KeyFieldName"]?.ToString() ?? "PaperNum";
+    var queryRedirectUrl = ViewData["QueryRedirectUrl"]?.ToString() ?? "";
+    var DeleteApiUrl = ViewData["DeleteApiUrl"]?.ToString() ?? "";
+
+    var groupedTabs = headerFieldsList
+        .Where(f => (f.iShowWhere ?? 1) > 0) // ➜ 過濾掉 iShowWhere 為 0 的欄位
+        .GroupBy(f => f.iShowWhere ?? 1)
+        .OrderBy(g => g.Key)
+        .ToDictionary(g => g.Key, g => g.ToList());
+
+    var lookupMap = ViewData["LookupDisplayMap"] as Dictionary<string, Dictionary<string, string>>;
+
+    var PaperNum = headerData.ContainsKey("PaperNum") ? headerData["PaperNum"]?.ToString() ?? "" : "";
+
+    var headerLookupMap = ViewData["HeaderLookupMap"] as Dictionary<string, string>;
+
+    string actionPartial = (ViewData["ActionRailPartial"] as string)
+                           ?? "~/Pages/Shared/_ActionRail.Empty.cshtml";
+}
+
+<div id="topToolbar" class="d-flex align-items-center mb-4" style="gap:12px;">
+    <div class="btn-group" role="group" aria-label="row-nav" style="gap:6px;">
+        <button type="button" class="btn btn-outline-primary" id="btnPrev">上一筆</button>
+        <button type="button" class="btn btn-outline-primary" id="btnNext">下一筆</button>
+    </div>
+    <button type="submit" class="btn toolbar-btn" form="orderHeaderForm">
+        儲存
+    </button>
+    <div class="ms-2">
+        @await Html.PartialAsync("_TableToolbar", new TableToolbarModel {
+            SearchBtnId = "btnSubSearch",
+            AddBtnId = "btnSubAddNew",
+            DeleteBtnId = "btnSubBatchDelete",
+            QueryFields = ViewData["QueryFields"] as List<QueryFieldViewModel>,
+            ModalId = "searchModal",
+            ReportSpName = ViewData["ReportSpName"]?.ToString() ?? ""   // 👈 從外層再傳進來
+        })
+    </div>
+</div>
+
+<div class="action-rail">
+    @await Html.PartialAsync(actionPartial, (object)Model)
+</div>
+
+<!-- 單頭可編輯表單 -->
+<form id="orderHeaderForm" class="erp-header-form">
+    <div class="row">
+        <!-- ✅ Tabs 切換列 -->
+        <ul class="nav nav-tabs" id="headerTabs" role="tablist">
+            @foreach (var tab in groupedTabs.Keys)
+            {
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link @(tab == 1 ? "active" : "")"
+                            id="tab-@tab-tab"
+                            data-bs-toggle="tab"
+                            data-bs-target="#tab-@tab"
+                            type="button" role="tab">
+                        分頁 @tab
+                    </button>
+                </li>
+            }
+        </ul>
+
+        <!-- ✅ Tabs 對應內容 -->
+        <div class="tab-content" id="headerTabContent">
+            @foreach (var tab in groupedTabs)
+            {
+                <div class="tab-pane fade @(tab.Key == 1 ? "show active" : "")"
+                    id="tab-@tab.Key" role="tabpanel">
+                    <ul class="list-unstyled header-fields-tab"
+                        data-tab-index="@tab.Key"
+                        style="position: relative">
+                        @foreach (var field in tab.Value)
+                        {
+                            object rawValue = null;
+                            headerData?.TryGetValue(field.FieldName, out rawValue);
+                            string displayText = "";
+
+                            // 1. lookup 優先顯示
+                            if (headerLookupMap != null && headerLookupMap.TryGetValue(field.FieldName, out var lookupVal))
+                            {
+                                displayText = lookupVal;
+                            }
+                            else if (rawValue != null)
+                            {
+                                //輸出格式用Helper轉型
+                                displayText = FormatHelper.FormatValue(rawValue, field.DataType, field.FormatStr);
+
+                                // ✅ 這裡補：數值型若為空，顯示 0
+                                if (string.IsNullOrWhiteSpace(displayText) && field.DataType?.ToLower() == "number")
+                                {
+                                    displayText = "0";
+                                }
+                            }
+
+                            var top = field.iFieldTop ?? 0;
+                            var left = field.iFieldLeft ?? 0;
+                            var width = field.iFieldWidth ?? 160;
+                            var height = field.iFieldHeight ?? 44;
+
+                            var liClass = "draggable-field inline"; // 永遠橫排
+
+
+                            // 判斷有 lookup table 設定
+                            if (!string.IsNullOrWhiteSpace(field.LookupTable) &&
+                                !string.IsNullOrWhiteSpace(field.LookupKeyField) &&
+                                !string.IsNullOrWhiteSpace(field.LookupResultField))
+                            {
+                                // 下拉選單元件（用 select）
+                                <li class="@liClass"
+                                    data-field="@field.FieldName"
+                                    data-tab="@tab.Key"
+                                    style="top:@(field.iFieldTop ?? 0)px; left:@(field.iFieldLeft ?? 0)px; width:@(field.iFieldWidth ?? 160)px; height:@(field.iFieldHeight ?? 44)px;">
+                                    <label>@field.DisplayLabel</label>
+                                    <select class="form-select lookup-dropdown"
+                                            name="@field.FieldName"
+                                            data-table="@field.LookupTable"
+                                            data-key="@field.LookupKeyField"
+                                            data-result="@field.LookupResultField.Replace(" ", "")"
+                                            data-selected="@rawValue">
+                                        <option value="">--請選擇--</option>
+                                    </select>
+                                </li>
+                            }
+                            else
+                            {
+                                <li class="@liClass"
+                                    data-field="@field.FieldName"
+                                    data-tab="@tab.Key"
+                                    style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
+                                    <label>@field.DisplayLabel</label>
+                                    <textarea class="form-control resizable-input"
+                                            name="@field.FieldName">@displayText</textarea>
+                                </li>
+                            }
+                        }
+                    </ul>
+                </div>
+            }
+        </div>
+    </div>
+</form>
+
+<script>window._dictTableName = "@(ViewData["DictTableName"] ?? Model.TableName)";</script>
+
+<!-- SweetAlert2 for提示 -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+<script src="~/js/toolbarHandler.js"></script>
+<link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css" />
+
+<script>
+// ============================
+// 0) 頁面常數／Razor 注入
+// ============================
+const PAGE = {
+  paperNum: "@PaperNum",
+  keyField: "PaperNum",
+  headerTable: ("@(Model.HeaderTableName ?? "")".trim() || "").toLowerCase(),
+  detailTable: "@(tableName ?? "")".trim(),
+  queryRedirectUrl: "@(ViewData["QueryRedirectUrl"])",
+  addApiUrl: "@addApiUrl",
+  deleteApiUrl: "@DeleteApiUrl",
+  detailRouteTemplate: "@detailRouteTemplate",
+  headerFields: @Html.Raw(JsonSerializer.Serialize(headerFieldsList)),
+};
+
+// 放在最前面（辭典開關）
+window.__DICT_OPEN__ = false;
+
+// 讓其它工具可以取到目前單號
+window.selectedPaperNum = '@(Model.HeaderData["PaperNum"] ?? "")';
+
+const PAGE_PAPER_NUM = ("@PaperNum" || "").trim();
+const KEY_FIELD = ("@(keyFieldName ?? "PaperNum")" || "PaperNum").trim();
+
+const backToMainTpl = (PAGE.queryRedirectUrl || '').trim()
+  ? PAGE.queryRedirectUrl.replace(/\/$/, '') + '/{0}'
+  : '';
+const subTpl = (PAGE.detailRouteTemplate || '').replace(/\{PaperNum\}/gi, '{0}');
+const finalSwitchTpl = backToMainTpl || subTpl;
+
+console.debug('[Switch template]', finalSwitchTpl);
+
+new ToolbarHandler({
+  searchBtnId: "btnSubSearch",
+  addBtnId: "btnSubAddNew",
+  deleteBtnId: "btnSubBatchDelete",
+  getSelectedId: () => (PAGE.paperNum || window.selectedPaperNum || ''),
+  modalId: "searchModal",
+  formId: "searchForm",
+  addApiUrl: PAGE.addApiUrl,
+  deleteApiUrlFn: id => `/api/${PAGE.deleteApiUrl}/${id || PAGE.paperNum}`,
+  detailRouteTemplate: finalSwitchTpl,
+  tableName: "@tableName",
+  renderTable: null,
+  renderPagination: null,
+  renderOrderCount: null,
+  restoreSearchForm: null,
+  queryRedirectUrl: PAGE.queryRedirectUrl
+});
+
+// 單身頁 → 主頁 切換
+(function hookToggleBackToMain() {
+  const rawBtn = document.getElementById('btnToggle') ||
+    Array.from(document.querySelectorAll('button, a'))
+      .find(el => (el.textContent || '').trim() === '切換');
+  if (!rawBtn) return;
+  const btn = rawBtn.cloneNode(true);
+  rawBtn.replaceWith(btn);
+  btn.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+    const base = ("@queryRedirectUrl" || '').trim().replace(/\/$/, '');
+    if (!base) { Swal.fire({ icon: 'error', title: '未提供返回主頁路徑' }); return; }
+    const id = (PAGE_PAPER_NUM || window.selectedPaperNum || '').trim();
+    const sep = base.includes('?') ? '&' : '?';
+    const url = id ? `${base}${sep}${encodeURIComponent(KEY_FIELD)}=${encodeURIComponent(id)}` : base;
+    location.href = url;
+  }, { capture: true });
+})();
+
+// ============================
+// 共用小工具（數值處理、字串化）
+// ============================
+function normalizeNumberFields(obj, fieldDefs) {
+  (fieldDefs || []).forEach(f => {
+    if ((f.DataType || '').toLowerCase() === 'number') {
+      const k = f.FieldName;
+      if (obj[k] != null) obj[k] = obj[k].toString().replace(/,/g, '');
+    }
+  });
+}
+
+function withTemporarilyEnabled(formEl, callback) {
+  const disabledEls = Array.from(formEl.querySelectorAll('input:disabled, select:disabled, textarea:disabled'));
+  disabledEls.forEach(el => el.disabled = false);
+  try { return callback(); } finally { disabledEls.forEach(el => el.disabled = true); }
+}
+
+function collectHeaderFormData() {
+  const form = document.getElementById('orderHeaderForm');
+  return withTemporarilyEnabled(form, () => Object.fromEntries(new FormData(form)));
+}
+
+function getPaperNum() {
+  const p1 = (PAGE.paperNum || window.selectedPaperNum || '').trim();
+  if (p1) return p1;
+  const header = collectHeaderFormData();
+  return (header.PaperNum || header.papernum || '').toString().trim();
+}
+
+// ============================
+// 儲存單頭
+// ============================
+document.getElementById('orderHeaderForm').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  const header = collectHeaderFormData();
+  normalizeNumberFields(header, PAGE.headerFields);
+
+  const payload = { ...header, __headerTable: PAGE.headerTable };
+
+  try {
+    const resp = await fetch('/api/OrderHeaderApi/SaveOrderHeader', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    if (resp.ok) {
+      const result = await resp.json();
+      if (result.updated) {
+        await Swal.fire({ icon: 'success', title: '儲存成功！', timer: 1000, showConfirmButton: false });
+        localStorage.setItem("afterSave", "1"); location.reload();
+      } else {
+        Swal.fire({ icon: 'info', title: '沒有資料異動' });
+      }
+    } else {
+      let msg = '儲存失敗'; try { const txt = await resp.text(); msg = txt || msg; } catch {}
+      Swal.fire({ icon: 'error', title: msg });
+    }
+  } catch (err) { Swal.fire({ icon: 'error', title: '網路或伺服器錯誤' }); }
+});
+
+// ============================
+// 檢視/編輯模式切換
+// ============================
+const editBtn = document.getElementById('btnViewEditToggle');
+if (editBtn) {
+  let isEdit = false;
+  const getHeaderValueByLabel = (labelText) => {
+    const $li = $('.draggable-field').filter(function () {
+      return $(this).children('label').first().text().trim() === labelText;
+    }).first();
+    if (!$li.length) return null;
+    const $ctrl = $li.find('select, input, textarea').first();
+    if (!$ctrl.length) return null;
+    if ($ctrl.is('select')) return $ctrl.find('option:selected').text().trim();
+    return ($ctrl.val() || '').toString().trim();
+  };
+
+  editBtn.addEventListener('click', function () {
+    const status = getHeaderValueByLabel('單據狀態') || '';
+    if (window.BLOCK_STATUSES && window.BLOCK_STATUSES.includes(status)) {
+      Swal.fire({ icon: 'warning', title: '無法修改', text: `此單據狀態為「${status}」，不可進行修改。`}); return;
+    }
+    isEdit = !isEdit; editBtn.textContent = isEdit ? '保留' : '修改';
+    document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
+      .forEach(el => { if (!el.closest('.modal')) el.disabled = !isEdit; });
+  });
+
+  window.addEventListener('load', () => {
+    document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
+      .forEach(el => { if (!el.closest('.modal')) el.disabled = true; });
+    if (localStorage.getItem("afterSave") === "1") {
+      localStorage.removeItem("afterSave");
+      document.getElementById("btnViewEditToggle")?.click();
+    }
+  });
+}
+
+// ============================
+// Header 版面拖拉儲存 / Lookup 下拉初始化（jQuery）
+// ============================
+$(function () {
+  let debounceTimer;
+  const debounceSave = () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(saveLayoutChanges, 400); };
+
+  function saveLayoutChanges() {
+    const layout = [];
+    const hiddenTabs = $(".tab-pane").not(".show");
+    hiddenTabs.addClass("temporary-show").addClass("show").css("display", "block");
+    $(".draggable-field").each(function () {
+      const $li = $(this);
+      layout.push({
+        fieldName: $li.data("field"),
+        top: Math.round($li.position().top),
+        left: Math.round($li.position().left),
+        width: Math.round($li.outerWidth()),
+        height: Math.round($li.outerHeight()),
+        ishowWhere: parseInt($li.attr("data-tab")) || 1
+      });
+    });
+    hiddenTabs.removeClass("show").removeClass("temporary-show").css("display", "");
+    if (!layout.length) return;
+
+    fetch("/api/TableFieldLayout/SaveHeaderLayout", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tableName: "@Model.HeaderTableName".toLowerCase(), layoutUpdates: layout })
+    }).catch(()=>{});
+  }
+
+  $(".draggable-field").each(function () {
+    const $li = $(this);
+    $li.draggable({
+      handle: "label",
+      helper: function () {
+        return $("<div>").text($(this).find("label").text()).css({
+          width: "80px", height: $li.outerHeight() + "px",
+          background: "#eef", border: "1px dashed #999", padding: "4px", "font-size": "0.9em"
+        });
+      },
+      appendTo: "body", zIndex: 10000,
+      start: function () { $(this).hide(); },
+      stop:  function () { $(this).show(); }
+    });
+    $li.resizable({ handles: "se", minWidth: 50, minHeight: 30, stop: debounceSave });
+  });
+
+  $(".header-fields-tab").droppable({
+    accept: ".draggable-field", tolerance: "pointer",
+    over: function () { $(this).addClass("drop-hover"); },
+    out:  function () { $(this).removeClass("drop-hover"); },
+    drop: function (event, ui) {
+      $(this).removeClass("drop-hover");
+      const $zone = $(this), $item = $(ui.draggable);
+      const newTabIndex = parseInt($zone.data("tab-index")) || 1;
+      $item.appendTo($zone).attr("data-tab", newTabIndex).css({
+        top: ui.offset.top - $zone.offset().top,
+        left: ui.offset.left - $zone.offset().left,
+        position: "absolute"
+      });
+      debounceSave();
+    }
+  });
+
+  let dragTabSwitchTimer = null;
+  $("#headerTabs button").droppable({
+    accept: ".draggable-field",
+    over: function () { const $tabBtn = $(this); dragTabSwitchTimer = setTimeout(() => { $tabBtn.trigger("click"); }, 600); },
+    out:  function () { clearTimeout(dragTabSwitchTimer); }
+  });
+
+  $('.lookup-dropdown').each(function() {
+    const $select = $(this);
+    const table = $select.data('table'), key = $select.data('key'),
+          result = $select.data('result'), selected = $select.data('selected');
+    $.getJSON(`/api/TableFieldLayout/LookupData?table=${table}&key=${key}&result=${result}`, function(data) {
+      $select.empty().append('<option value="">--請選擇--</option>');
+      (data || []).forEach(row => {
+        const val = row.key;
+        const label = Object.keys(row).filter(p => p.startsWith('result')).map(p => row[p]).join(' - ');
+        const $opt = $('<option>').val(val).text(label);
+        if (val == selected) $opt.attr('selected', true);
+        $select.append($opt);
+      });
+      $select.next('.lookup-label').text($select.find('option:selected').text());
+    });
+    $select.on('change', function() {
+      $(this).next('.lookup-label').text($(this).find('option:selected').text());
+    });
+  });
+
+  function setInitialTabHeights(offsetPx = 10) {
+    const hiddenTabs = $(".tab-pane").not(".show");
+    hiddenTabs.addClass("tmp-show").addClass("show").css("display", "block");
+    $(".header-fields-tab").each(function () {
+      let maxBottom = 0;
+      $(this).children(".draggable-field").each(function () {
+        const $el = $(this);
+        maxBottom = Math.max(maxBottom, $el.position().top + $el.outerHeight());
+      });
+      $(this).height(Math.max(0, Math.ceil(maxBottom + offsetPx)));
+    });
+    hiddenTabs.removeClass("show tmp-show").css("display", "");
+  }
+  requestAnimationFrame(() => setInitialTabHeights(10));
+});
+
+// ============================
+// 上一筆 / 下一筆
+// ============================
+const NAV_BTN_PREV = document.getElementById('btnPrev');
+const NAV_BTN_NEXT = document.getElementById('btnNext');
+let navIds = [], navIndex = -1;
+
+function loadLastFilters() {
+  try { const s = localStorage.getItem("orderListQueryFilters"); return s ? JSON.parse(s) : []; }
+  catch { return []; }
+}
+function getDetailBasePath() { return location.pathname.replace(/\/[^\/]+$/, "/"); }
+function gotoPaper(pn) { if (!pn) return; localStorage.setItem("lastViewedPaperNum", pn); location.href = getDetailBasePath() + pn; }
+function updateNavButtons() {
+  const hasPrev = navIndex > 0;
+  const hasNext = navIndex >= 0 && navIndex < navIds.length - 1;
+  NAV_BTN_PREV.disabled = !hasPrev;
+  NAV_BTN_NEXT.disabled = !hasNext;
+  NAV_BTN_PREV.onclick = () => hasPrev && gotoPaper(navIds[navIndex - 1]);
+  NAV_BTN_NEXT.onclick = () => hasNext && gotoPaper(navIds[navIndex + 1]);
+}
+async function fetchIdListByApi(filters) {
+  const res = await fetch('/api/PagedQuery/IdList', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table: PAGE.headerTable, keyField: PAGE.keyField, filters: filters || [] })
+  });
+  const json = await res.json();
+  return Array.isArray(json.ids) ? json.ids : [];
+}
+async function fetchIdListByPagedQuery(filters) {
+  const fs = [...(filters || []), {Field:"page",Op:"",Value:"1"}, {Field:"pageSize",Op:"",Value:"999999"}];
+  const res = await fetch('/api/PagedQuery/PagedQuery', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table: PAGE.headerTable, filters: fs })
+  });
+  const json = await res.json();
+  const rows = Array.isArray(json.data) ? json.data : [];
+  return rows.map(r => r[PAGE.keyField]).filter(Boolean);
+}
+async function initRowNavigation() {
+  try {
+    const filters = loadLastFilters();
+    try { navIds = await fetchIdListByApi(filters); }
+    catch { navIds = await fetchIdListByPagedQuery(filters); }
+    navIndex = navIds.indexOf(PAGE.paperNum);
+    updateNavButtons();
+  } catch {
+    NAV_BTN_PREV.disabled = true; NAV_BTN_NEXT.disabled = true;
+  }
+}
+initRowNavigation();
+
+// ============================
+// 其他：把最後檢視的單號存在 localStorage
+// ============================
+localStorage.setItem("lastViewedPaperNum", window.selectedPaperNum);
+function getHeaderValueByLabel(labelText) {
+  const li = Array.from(document.querySelectorAll('.draggable-field'))
+    .find(el => (el.querySelector('label')?.textContent || '').trim() === labelText);
+  if (!li) return '';
+  const ctrl = li.querySelector('select, input, textarea');
+  if (!ctrl) return '';
+  if (ctrl.tagName.toLowerCase() === 'select') {
+    const opt = ctrl.options[ctrl.selectedIndex];
+    return (opt?.text || opt?.value || '').trim();
+  }
+  return (ctrl.value || '').trim();
+}
+
+// 未儲存旗標
+window.__unsavedChanges = false;
+document.addEventListener('input', (e) => {
+  if (e.target.closest('.erp-header-form')) window.__unsavedChanges = true;
+});
+window.addEventListener('pageshow', () => { window.__unsavedChanges = false; });
+</script>
+
+<style>
+/* =========================================
+   A) 全局/版面
+   ========================================= */
+body { background: #f7f9fb !important; }
+.erp-detail-container { min-height: 100vh; padding: 32px 0; margin-left: 3vw; margin-right: 3vw; }
+
+/* =========================================
+   B) Header 表單 & Tabs
+   ========================================= */
+.erp-header-form,
+.erp-header-form select,
+.erp-header-form textarea,
+.erp-header-form input { font-size: 0.95em; }
+
+.erp-header-form select.form-select{
+  font-size: 1em !important; height: 32px !important; min-height: 32px !important; line-height: 1.15 !important;
+  padding: 2px 30px 2px 6px !important; appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  background-image: url('data:image/svg+xml;utf8,<svg width="11" height="11" fill="gray" xmlns="http://www.w3.org/2000/svg"><path d="M2 4.5l3.5 3.5L9 4.5" stroke="gray" stroke-width="2" fill="none" stroke-linecap="round"/></svg>');
+  background-repeat: no-repeat; background-position: right 10px center; background-size: 14px 14px; box-shadow: none !important; border-radius: 5px !important;
+}
+.header-fields-tab{
+  position: relative; min-height: 120px; padding-bottom: 8px;
+  background: #eef2f9 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+}
+.drop-hover{ background-color:#cce5ff !important; border-radius:4px; }
+
+.erp-header-form .nav-tabs .nav-link{ border-radius:8px 8px 0 0 !important; padding:7px 18px; font-size:1.05em; font-weight:500; color:#235eb8; }
+.erp-header-form .nav-tabs .nav-link.active{
+  background:#fff; color:#124d8b; border-color:#bdd2f7 #bdd2f7 #fff #bdd2f7 !important; box-shadow:0 2px 6px 0 #e4ecf7; font-weight:bold;
+}
+
+/* draggable 欄位（橫排 label + 控件） */
+.draggable-field{ position:absolute; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; background:transparent; }
+.draggable-field.inline{ display:flex; flex-direction:row; align-items: center; gap:4px; flex:0 0 auto; min-width:100px; max-width:100%; }
+.draggable-field label{ cursor:move; font-size:0.85em; margin:0 6px 0 0; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
+.draggable-field.inline .field-control{ flex:1 1 auto; height:100%; display:flex; }
+.draggable-field.inline textarea,
+.draggable-field.inline input,
+.draggable-field.inline .form-select{
+  flex:1 1 auto; width:100%; height:100%; min-height:32px; line-height:1.2; resize:none; padding:4px 6px; font-size:0.95em;
+}
+.draggable-field.inline label{
+  white-space: nowrap !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  max-width: none !important;
+}
+
+/* =========================================
+   D) 其它
+   ========================================= */
+.highlight-red { color:#e53b2d; font-weight:700; }
+.highlight-blue{ color:#2564b3; font-weight:700; }
+
+/* --- Action Rail 基礎版位 & 內容右移（固定在樣板）--- */
+:root{
+  --fab-left: 12px;
+  --fab-width: 100px;
+  --fab-gap: 20px;
+  --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap));
+}
+
+.action-rail{
+  position: fixed;
+  left: var(--fab-left);
+  top: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 900;
+}
+
+/* 按鈕的共同外觀（保持在樣板，讓所有頁面一致） */
+.fab{
+  position: relative;
+  min-width: var(--fab-width);
+  padding: 8px 12px;
+  background:#ffc107;
+  color:#090101;
+  font-weight:700;
+  border-radius:10px;
+  cursor:pointer;
+  box-shadow:0 6px 16px rgba(0,0,0,.2);
+  border:0;
+}
+.fab:hover{ filter:brightness(0.95); }
+.fab-red{ background:#dc3545; color:#fff; }
+.fab-blue{ background:#3583dc; color:#fff; }
+</style>

@@ -79,7 +79,7 @@ namespace PcbErpApi.Controllers
         [HttpPost]
         public async Task<ActionResult<FmedIssueMain>> PostFMEdIssueMain()
         {
-            var prefix = "FA" + DateTime.Now.ToString("yyMM");
+            var prefix = "P" + DateTime.Now.ToString("yyMM");
             var lastToday = await _context.FmedIssueMain
                 .Where(x => x.PaperNum.StartsWith(prefix))
                 .OrderByDescending(x => x.PaperNum)
@@ -105,15 +105,15 @@ namespace PcbErpApi.Controllers
         }
 
 
-        // 實作一個產生新單號的方法（例：FA2507xxxx）
+        // 實作一個產生新單號的方法（例：P2511xxxx）
         private string GenerateNextPaperNum(string? lastPaperNum)
         {
-            var prefix = "FA" + DateTime.Now.ToString("yyMM");
+            var prefix = "P" + DateTime.Now.ToString("yyMM");
             int nextSeq = 1;
 
             if (!string.IsNullOrEmpty(lastPaperNum) && lastPaperNum.StartsWith(prefix))
             {
-                var lastSeq = int.Parse(lastPaperNum.Substring(6, 4));
+                var lastSeq = int.Parse(lastPaperNum.Substring(5, 4));
                 nextSeq = lastSeq + 1;
             }
 

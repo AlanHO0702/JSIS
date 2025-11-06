@@ -71,6 +71,8 @@ public class IssueSubButtonController : ControllerBase
     [HttpPost("insert")]
     public async Task<IActionResult> Insert([FromBody] InsertReq req)
     {
+        Console.WriteLine($"[INSERT] 開始匯入，目的單號: {req.DllPaperNum}, 資料筆數: {req.Rows?.Count ?? 0}");
+
         if (string.IsNullOrWhiteSpace(req.DllPaperNum))
             return BadRequest("缺少目的單號 DllPaperNum。");
         if (req.Rows is null || req.Rows.Count == 0)
@@ -80,8 +82,12 @@ public class IssueSubButtonController : ControllerBase
         await conn.OpenAsync();
 
         int qCnt = req.Rows.Count;
+        int successCount = 0;
+
         foreach (var r in req.Rows)
         {
+            Console.WriteLine($"[INSERT] 處理第 {successCount + 1} 筆: PONum={r.PONum}, SerialNum={r.SerialNum}, MasPartNum={r.MasPartNum}, MasRevision={r.MasRevision}");
+
             using var cmd = new SqlCommand("dbo.FMEdIssuePOInsertPCB", conn)
             { CommandType = CommandType.StoredProcedure };
 
@@ -104,10 +110,21 @@ public class IssueSubButtonController : ControllerBase
             cmd.Parameters.Add(new SqlParameter("@UnIssQnty", SqlDbType.NVarChar, 24) { Value = r.UnIssQnty?.ToString() ?? "" });
             cmd.Parameters.Add(new SqlParameter("@POKind", SqlDbType.Int) { Value = r.POKind });
 
-            await cmd.ExecuteNonQueryAsync();
+            try
+            {
+                var affectedRows = await cmd.ExecuteNonQueryAsync();
+                Console.WriteLine($"[INSERT] 第 {successCount + 1} 筆 SP 執行完成，影響列數: {affectedRows}");
+                successCount++;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[INSERT ERROR] 第 {successCount + 1} 筆執行失敗: {ex.Message}");
+                throw; // 重新拋出例外讓上層處理
+            }
         }
 
-        return Ok(new { ok = true, rows = qCnt });
+        Console.WriteLine($"[INSERT] 完成匯入，成功: {successCount}/{qCnt} 筆");
+        return Ok(new { ok = true, rows = successCount });
     }
 
     // --- DTO ---
