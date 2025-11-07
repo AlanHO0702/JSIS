@@ -39,6 +39,24 @@ public class StoredProcController : ControllerBase
             ["AJNdOCXGetJourId"] = new StoredProcDef(
             ProcName: "dbo.AJNdOCXGetJourId_Plus",           // 你的 SP 名
             RequiredParams: new[] { "PaperId","PaperNum", "HeadParam", "UseId","GetEmpty" }
+        ),
+
+            // 製令單重算
+            ["FMEdIssueTotalPcsDLL"] = new StoredProcDef(
+            ProcName: "dbo.FMEdIssueTotalPcsDLL",
+            RequiredParams: new[] { "DLLPaperNum", "iNoReComputeBackQnty" }
+        ),
+
+            // 製令單 Lock
+            ["FMEdIssueLock"] = new StoredProcDef(
+            ProcName: "dbo.FMEdIssueLock",
+            RequiredParams: new[] { "PaperNum" }
+        ),
+
+            // 製令單解除 Lock
+            ["FMEdIssueUnLock"] = new StoredProcDef(
+            ProcName: "dbo.FMEdIssueUnLock",
+            RequiredParams: new[] { "PaperNum" }
         )
 
         };

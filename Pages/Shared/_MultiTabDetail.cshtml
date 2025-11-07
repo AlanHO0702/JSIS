@@ -1,15 +1,18 @@
 @model dynamic
 @{
     var paperNum = ViewData["PaperNum"]?.ToString() ?? "";
-    var tabs = ViewData["Tabs"] as List<(string Id, string Title, string ApiUrl)> ?? new();
+    var tabs = ViewData["Tabs"] as dynamic[] ?? Array.Empty<dynamic>();
     var tabFieldDicts = ViewData["TabFieldDicts"] as Dictionary<string, Dictionary<string, string>> ?? new();
 }
+
+<!-- SweetAlert2 引入 -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
 <!-- 多分頁容器 -->
 <div class="multi-tab-detail">
     <!-- Tab 標籤列 -->
     <ul class="nav nav-tabs" role="tablist">
-        @for (int i = 0; i < tabs.Count; i++)
+        @for (int i = 0; i < tabs.Length; i++)
         {
             var tab = tabs[i];
             var isActive = i == 0 ? "active" : "";
@@ -30,7 +33,7 @@
 
     <!-- Tab 內容區 -->
     <div class="tab-content mt-3">
-        @for (int i = 0; i < tabs.Count; i++)
+        @for (int i = 0; i < tabs.Length; i++)
         {
             var tab = tabs[i];
             var isActive = i == 0 ? "show active" : "";
@@ -38,11 +41,21 @@
                  id="content-@tab.Id"
                  role="tabpanel">
                 <!-- 載入中提示 -->
-                <div class="loading-indicator text-center py-5" style="display:none;">
-                    <div class="spinner-border" role="status">
+                <div class="loading-indicator text-center py-5" style="display:@(i == 0 ? "block" : "none");">
+                    <div class="spinner-border text-primary" role="status">
                         <span class="visually-hidden">Loading...</span>
                     </div>
-                    <p class="mt-2">載入中...</p>
+                    <p class="mt-2 text-muted">載入中...</p>
+                </div>
+
+                <!-- +- 按鈕 -->
+                <div class="d-flex justify-content-start mb-2 tab-action-buttons" style="display:none !important;">
+                    <button type="button" class="btn btn-outline-secondary btn-sm btn-add-row" data-tab-id="@tab.Id">
+                        ＋
+                    </button>
+                    <button type="button" class="btn btn-outline-danger btn-sm ms-1 btn-delete-row" data-tab-id="@tab.Id" title="刪除當前列">
+                        －
+                    </button>
                 </div>
 
                 <!-- 表格容器 -->
@@ -59,6 +72,11 @@
     const paperNum = '@paperNum';
     const loadedTabs = new Set();
     const fieldDicts = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(tabFieldDicts));
+    const tabsData = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(tabs));
+
+    // 暴露為全域變數方便除錯
+    window._debugFieldDicts = fieldDicts;
+    window._debugTabsData = tabsData;
 
     // Tab 切換事件
     document.querySelectorAll('[data-bs-toggle="tab"]').forEach(tab => {
@@ -120,39 +138,325 @@
             return;
         }
 
-        // 取得欄位名稱
-        const fields = Object.keys(data[0]);
         const dict = fieldDicts[tabId] || {};
 
-        // 建立表格
-        let html = '<table class="table table-striped table-hover table-sm"><thead><tr>';
+        // Debug 輸出
+        console.log(`🔍 [renderTable] tabId: ${tabId}`);
+        console.log(`🔍 [renderTable] 字典欄位數量: ${Object.keys(dict).length}`);
+        console.log(`🔍 [renderTable] 字典欄位:`, Object.keys(dict));
+
+        // 只顯示字典中有的欄位（Visible == 1 的欄位）
+        // 如果字典為空，則顯示所有欄位（向後兼容）
+        const allFields = Object.keys(data[0]);
+        console.log(`🔍 [renderTable] API 回傳欄位數量: ${allFields.length}`);
+        console.log(`🔍 [renderTable] API 回傳欄位:`, allFields);
+
+        const fields = Object.keys(dict).length > 0
+            ? Object.keys(dict).filter(f => allFields.includes(f))  // 只顯示字典中且資料有的欄位
+            : allFields;  // 如果沒有字典，顯示所有欄位
+
+        console.log(`🔍 [renderTable] 過濾後要顯示的欄位數量: ${fields.length}`);
+        console.log(`🔍 [renderTable] 過濾後要顯示的欄位:`, fields);
+
+        if (fields.length === 0) {
+            container.innerHTML = '<div class="alert alert-warning">沒有可顯示的欄位</div>';
+            return;
+        }
+
+        // 建立表格 - 使用 erp-table 樣式
+        let html = '<div class="erp-table-wrapper"><table class="erp-table"><thead><tr>';
 
         // 表頭 - 使用字典取得中文名稱
         fields.forEach(field => {
             const displayName = dict[field] || field;
-            html += `<th>${displayName}</th>`;
+            html += `<th><span class="th-text">${displayName}</span></th>`;
         });
         html += '</tr></thead><tbody>';
 
         // 表身
-        data.forEach(row => {
-            html += '<tr>';
+        data.forEach((row, index) => {
+            const paperNum = row.PaperNum || row.paperNum || '';
+            const item = row.Item || row.item || index + 1;
+            html += `<tr data-paper-num="${paperNum}" data-item="${item}" data-state="unchanged">`;
             fields.forEach(field => {
                 const value = row[field] ?? '';
-                html += `<td>${value}</td>`;
+                html += `<td><span class="cell-view">${value}</span></td>`;
             });
             html += '</tr>';
         });
 
-        html += '</tbody></table>';
+        html += '</tbody></table></div>';
         container.innerHTML = html;
+
+        // 顯示 +- 按鈕
+        const actionButtons = container.closest('.tab-pane').querySelector('.tab-action-buttons');
+        if (actionButtons) {
+            actionButtons.style.display = 'flex';
+        }
+
+        // 綁定列選取事件
+        container.querySelectorAll('tr').forEach(tr => {
+            tr.addEventListener('click', function() {
+                // 移除其他列的選取狀態
+                container.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+                // 選取當前列
+                this.classList.add('row-selected');
+            });
+        });
     }
 
-    // 頁面載入時,觸發第一個 Tab 的載入
-    const firstTab = document.querySelector('[data-bs-toggle="tab"]');
-    if (firstTab) {
-        firstTab.dispatchEvent(new Event('shown.bs.tab'));
+    // 頁面載入時,立即載入第一個 Tab（訂單明細檔）
+    console.log('📋 [MultiTab] 初始化多分頁載入...');
+    console.log('📋 [MultiTab] tabsData:', tabsData);
+
+    // 統一使用 async 函式載入第一個頁籤
+    async function loadFirstTab() {
+        console.log('🚀 [MultiTab] loadFirstTab() 函式已執行');
+
+        // 直接從 tabsData 取得第一個頁籤資訊（避免 DOM 屬性讀取問題）
+        if (!tabsData || tabsData.length === 0) {
+            console.error(`❌ [MultiTab] tabsData 為空`);
+            return;
+        }
+
+        const firstTabData = tabsData[0];
+        console.log('📦 [MultiTab] firstTabData:', firstTabData);
+
+        // 使用匿名型別的屬性名稱（首字母大寫）
+        const tabId = firstTabData.Id;
+        const apiUrl = firstTabData.ApiUrl;
+
+        console.log(`🔄 [MultiTab] 開始載入第一個頁籤: ${tabId}`);
+        console.log(`📍 [MultiTab] API URL: ${apiUrl}?PaperNum=${paperNum}`);
+
+        const contentPane = document.getElementById(`content-${tabId}`);
+        console.log('📦 [MultiTab] contentPane:', contentPane);
+
+        if (!contentPane) {
+            console.error(`❌ [MultiTab] 找不到 contentPane: content-${tabId}`);
+            return;
+        }
+
+        if (loadedTabs.has(tabId)) {
+            console.log(`ℹ️ [MultiTab] 頁籤 ${tabId} 已載入，跳過`);
+            return;
+        }
+
+        const loading = contentPane.querySelector('.loading-indicator');
+        const container = contentPane.querySelector('.table-container');
+        loading.style.display = 'block';
+        container.innerHTML = '';
+
+        const startTime = Date.now();
+
+        try {
+            // AJAX 載入資料
+            const response = await fetch(`${apiUrl}?PaperNum=${paperNum}`);
+            console.log(`📡 [MultiTab] 收到回應 (${Date.now() - startTime}ms):`, response.status, response.statusText);
+
+            // 檢查 HTTP 狀態
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`❌ [MultiTab] API 錯誤 (${response.status}):`, errorText);
+                throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
+            }
+
+            // 檢查 Content-Type 是否為 JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await response.text();
+                console.error('❌ [MultiTab] 回應不是 JSON:', text.substring(0, 200));
+                throw new Error('API 回應格式錯誤，請檢查 API 是否正常運作');
+            }
+
+            const data = await response.json();
+            console.log(`✅ [MultiTab] 資料載入成功 (${Date.now() - startTime}ms):`, data.length, '筆資料');
+
+            // 渲染表格
+            renderTable(container, data, tabId);
+
+            // 標記為已載入
+            loadedTabs.add(tabId);
+        } catch (error) {
+            console.error(`❌ [MultiTab] 載入分頁 ${tabId} 失敗:`, error);
+            container.innerHTML = `
+                <div class="alert alert-danger m-3">
+                    <h5 class="alert-heading">⚠️ 載入失敗</h5>
+                    <p class="mb-0">${error.message}</p>
+                    <hr>
+                    <small class="text-muted">請檢查 Console 以查看詳細錯誤訊息</small>
+                </div>`;
+        } finally {
+            loading.style.display = 'none';
+            console.log(`🏁 [MultiTab] 載入完成 (${Date.now() - startTime}ms)`);
+        }
     }
+
+    // 使用 setTimeout 確保 DOM 完全就緒後執行
+    setTimeout(() => loadFirstTab(), 100);
+
+    // ========== 新增/刪除列功能 ==========
+
+    // 綁定所有新增按鈕
+    document.querySelectorAll('.btn-add-row').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const tabId = this.dataset.tabId;
+            const tabPane = document.getElementById(`content-${tabId}`);
+            const container = tabPane.querySelector('.table-container');
+            const tbody = container.querySelector('tbody');
+
+            if (!tbody) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '錯誤',
+                    text: '找不到表格內容'
+                });
+                return;
+            }
+
+            // 取得該分頁的 API URL
+            const tabButton = document.querySelector(`[data-tab-id="${tabId}"]`);
+            const apiUrl = tabButton.dataset.apiUrl;
+
+            // 建立新列（暫時在前端新增，還沒儲存到資料庫）
+            const dict = fieldDicts[tabId] || {};
+            const fields = Object.keys(dict).length > 0 ? Object.keys(dict) : [];
+
+            if (fields.length === 0) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: '無法取得欄位資訊',
+                    text: '請確認資料字典設定是否正確'
+                });
+                return;
+            }
+
+            // 計算新的 Item 編號
+            const rows = tbody.querySelectorAll('tr');
+            let maxItem = 0;
+            rows.forEach(row => {
+                const item = parseInt(row.dataset.item) || 0;
+                if (item > maxItem) maxItem = item;
+            });
+            const newItem = maxItem + 1;
+
+            // 建立新列 HTML
+            let html = `<tr data-paper-num="${paperNum}" data-item="${newItem}" data-state="added" class="row-selected">`;
+            fields.forEach(field => {
+                html += `<td><span class="cell-view"></span></td>`;
+            });
+            html += '</tr>';
+
+            // 移除其他列的選取狀態
+            tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+
+            // 插入新列
+            tbody.insertAdjacentHTML('beforeend', html);
+
+            // 綁定新列的點擊事件
+            const newRow = tbody.querySelector('tr:last-child');
+            newRow.addEventListener('click', function() {
+                tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+                this.classList.add('row-selected');
+            });
+
+            console.log(`✅ 新增列: ${tabId}, Item: ${newItem}`);
+        });
+    });
+
+    // 綁定所有刪除按鈕
+    document.querySelectorAll('.btn-delete-row').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const tabId = this.dataset.tabId;
+            const tabPane = document.getElementById(`content-${tabId}`);
+            const container = tabPane.querySelector('.table-container');
+            const tbody = container.querySelector('tbody');
+
+            if (!tbody) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '錯誤',
+                    text: '找不到表格內容'
+                });
+                return;
+            }
+
+            const selectedRow = tbody.querySelector('tr.row-selected');
+            if (!selectedRow) {
+                Swal.fire({
+                    icon: 'info',
+                    title: '請先選取要刪除的列'
+                });
+                return;
+            }
+
+            const paperNum = selectedRow.dataset.paperNum;
+            const item = selectedRow.dataset.item;
+            const state = selectedRow.dataset.state;
+
+            // 使用 SweetAlert2 確認對話框
+            const { isConfirmed } = await Swal.fire({
+                icon: 'question',
+                title: '確定要刪除這一筆明細？',
+                text: `項次：${item}`,
+                showCancelButton: true,
+                confirmButtonText: '刪除',
+                cancelButtonText: '取消',
+                confirmButtonColor: '#dc3545'
+            });
+
+            if (!isConfirmed) {
+                return;
+            }
+
+            // 如果是新增但未儲存的列，直接移除
+            if (state === 'added') {
+                const next = selectedRow.nextElementSibling || selectedRow.previousElementSibling;
+                selectedRow.remove();
+                if (next) next.classList.add('row-selected');
+                console.log(`✅ 刪除未儲存的列: Item ${item}`);
+                return;
+            }
+
+            // 已儲存的列，呼叫 API 刪除
+            try {
+                const tabButton = document.querySelector(`[data-tab-id="${tabId}"]`);
+                const apiUrl = tabButton.dataset.apiUrl;
+
+                // 從 apiUrl 取得資料表名稱，例如 /api/FmedIssueMat -> FmedIssueMat
+                const tableName = apiUrl.split('/').pop();
+
+                const deleteUrl = `/api/${tableName}/${encodeURIComponent(paperNum)}/${encodeURIComponent(item)}`;
+
+                console.log(`🗑️ 刪除 API: ${deleteUrl}`);
+
+                const response = await fetch(deleteUrl, { method: 'DELETE' });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const next = selectedRow.nextElementSibling || selectedRow.previousElementSibling;
+                selectedRow.remove();
+                if (next) next.classList.add('row-selected');
+
+                console.log(`✅ 刪除成功: Item ${item}`);
+                Swal.fire({
+                    icon: 'success',
+                    title: '刪除完成',
+                    timer: 1500,
+                    showConfirmButton: false
+                });
+            } catch (error) {
+                console.error('刪除失敗:', error);
+                Swal.fire({
+                    icon: 'error',
+                    title: '刪除失敗',
+                    text: error.message
+                });
+            }
+        });
+    });
 })();
 </script>
 
@@ -186,19 +490,101 @@
 }
 
 .multi-tab-detail .table-container {
+    margin-top: 1rem;
+}
+
+/* erp-table 完整樣式 */
+.multi-tab-detail .erp-table-wrapper {
+    background: #fff;
+    box-shadow: 0 4px 18px 0 #c3d4e6;
+    max-width: 1400px;
     overflow-x: auto;
+    padding: 8px !important;
+    border-radius: 0 0 13px 13px;
+    border: 1px solid #d6dbe5;
     max-height: 600px;
 }
 
-.multi-tab-detail table {
+.multi-tab-detail .erp-table {
     width: 100%;
-    font-size: 0.9rem;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 1.06em;
+    background: #fff;
 }
 
-.multi-tab-detail th {
+.multi-tab-detail .erp-table thead tr {
+    background: #e7ecf3;
+}
+
+.multi-tab-detail .erp-table th,
+.multi-tab-detail .erp-table td {
+    background: #f1f5fb;
+    padding: 7px 12px;
+    border-bottom: 1px solid #c5d1e4;
+    white-space: nowrap;
+    text-align: center;
+    font-weight: 500;
+    border-right: 1px solid #dde4ed;
+    height: 34px;
+}
+
+.multi-tab-detail .erp-table th:last-child,
+.multi-tab-detail .erp-table td:last-child {
+    border-right: none;
+}
+
+.multi-tab-detail .erp-table th {
+    color: #124d8b;
+    font-weight: 700;
+    font-size: 1.05em;
+    letter-spacing: 1px;
+    background: #e7ecf3;
     position: sticky;
     top: 0;
-    background-color: #f8f9fa;
     z-index: 10;
+}
+
+.multi-tab-detail .erp-table tbody tr:nth-child(even) {
+    background: #f6f9fd;
+}
+
+.multi-tab-detail .erp-table tbody tr:hover {
+    background: #eef7ff;
+}
+
+.multi-tab-detail .erp-table td {
+    position: relative;
+    padding: 0;
+}
+
+.multi-tab-detail .erp-table td .cell-view {
+    display: inline-block;
+    width: 100%;
+    text-align: inherit;
+    padding: 7px 12px;
+}
+
+/* 選取列的樣式 */
+.multi-tab-detail .erp-table tbody tr {
+    cursor: pointer;
+}
+
+.multi-tab-detail .erp-table tbody tr.row-selected {
+    background-color: #d1e7ff !important;
+    border-left: 3px solid #0d6efd;
+}
+
+.multi-tab-detail .erp-table tbody tr.row-selected td {
+    background-color: #d1e7ff !important;
+}
+
+/* 新增但未儲存的列 */
+.multi-tab-detail .erp-table tbody tr[data-state="added"] {
+    background-color: #fff3cd !important;
+}
+
+.multi-tab-detail .erp-table tbody tr[data-state="added"] td {
+    background-color: #fff3cd !important;
 }
 </style>

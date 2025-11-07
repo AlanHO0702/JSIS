@@ -8,10 +8,12 @@ using PcbErpApi.Models;
 public class FMEdIssueMatController : ControllerBase
 {
     private readonly PcbErpContext _context;
+    private readonly ITableDictionaryService _dictService;
 
-    public FMEdIssueMatController(PcbErpContext context)
+    public FMEdIssueMatController(PcbErpContext context, ITableDictionaryService dictService)
     {
         _context = context;
+        _dictService = dictService;
     }
 
     // GET api/FMEdIssueMat?PaperNum=P25110001

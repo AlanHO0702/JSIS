@@ -155,21 +155,37 @@ public class FMEdIssueSubModel : TableDetailModel<FmedIssuePo>
 
         // Step 5：設定多分頁配置
         ViewData["PaperNum"] = PaperNum;
-        ViewData["Tabs"] = new List<(string Id, string Title, string ApiUrl)>
+        // 改用匿名型別以便正確序列化成 JSON
+        ViewData["Tabs"] = new[]
         {
-            ("po", "訂單明細檔", "/api/FmedIssuePo"),
-            ("mat", "用料明細檔", "/api/FmedIssueMat"),
-            ("layer", "階段途程明細檔", "/api/FmedIssueLayer")
+            new { Id = "po", Title = "訂單明細檔", ApiUrl = "/api/FmedIssuePo" },
+            new { Id = "mat", Title = "用料明細檔", ApiUrl = "/api/FmedIssueMat" },
+            new { Id = "layer", Title = "階段途程明細檔", ApiUrl = "/api/FmedIssueLayer" }
         };
 
         // Step 6：為每個分頁建立欄位字典（中文名稱對照）
+        // 只包含 Visible == 1 的欄位
+
+        // 取得各分頁的欄位設定
+        var poFields = _dictService.GetFieldDict("FMEdIssuePO", typeof(FmedIssuePo));
+        var matFields = _dictService.GetFieldDict("FMEdIssueMat", typeof(FmedIssueMat));
+        var layerFields = _dictService.GetFieldDict("FMEdIssueLayer", typeof(FmedIssueLayer));
+
+        // 除錯：輸出欄位數量
+        Console.WriteLine($"[FmedIssueSub] PO fields: {poFields.Count}, Visible=1: {poFields.Count(f => f.Visible == 1)}");
+        Console.WriteLine($"[FmedIssueSub] Mat fields: {matFields.Count}, Visible=1: {matFields.Count(f => f.Visible == 1)}");
+        Console.WriteLine($"[FmedIssueSub] Layer fields: {layerFields.Count}, Visible=1: {layerFields.Count(f => f.Visible == 1)}");
+
         var tabFieldDicts = new Dictionary<string, Dictionary<string, string>>
         {
-            ["po"] = _dictService.GetFieldDict("FMEdIssuePO", typeof(FmedIssuePo))
+            ["po"] = poFields
+                .Where(f => f.Visible == 1)
                 .ToDictionary(f => f.FieldName, f => f.DisplayLabel ?? f.FieldName),
-            ["mat"] = _dictService.GetFieldDict("FMEdIssueMat", typeof(FmedIssueMat))
+            ["mat"] = matFields
+                .Where(f => f.Visible == 1)
                 .ToDictionary(f => f.FieldName, f => f.DisplayLabel ?? f.FieldName),
-            ["layer"] = _dictService.GetFieldDict("FMEdIssueLayer", typeof(FmedIssueLayer))
+            ["layer"] = layerFields
+                .Where(f => f.Visible == 1)
                 .ToDictionary(f => f.FieldName, f => f.DisplayLabel ?? f.FieldName)
         };
         ViewData["TabFieldDicts"] = tabFieldDicts;

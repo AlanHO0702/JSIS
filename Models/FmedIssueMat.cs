@@ -68,7 +68,8 @@ public partial class FmedIssueMat
     public int? SourItem { get; set; }
 
     [Column("IssueSeq")]
-    public int? IssueSeq { get; set; }
+    [StringLength(16)]
+    public string? IssueSeq { get; set; }
 
     [Column("CompanyId")]
     [StringLength(10)]
