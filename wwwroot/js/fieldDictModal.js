@@ -56,6 +56,9 @@
               <td class="text-center" style="width:60px">
                 <input type="checkbox" data-field="Visible" ${(+x.Visible === 1 ? 'checked' : '')} />
               </td>
+              <td class="text-center" style="width:60px">
+                <input type="checkbox" data-field="ReadOnly" ${(+x.ReadOnly === 1 ? 'checked' : '')} />
+              </td>
               <td style="width:140px">
                 <input data-field="DataType" value="${x.DataType ?? ''}" class="form-control form-control-sm" />
               </td>
@@ -120,6 +123,7 @@ function saveAllDictFields(tableSelector = '#fieldDictTable tbody', apiUrl = SAV
       SerialNum: getInt('SerialNum'),
       DisplayLabel: getVal('DisplayLabel'),
       Visible: getChk('Visible'),
+      ReadOnly: getChk('ReadOnly'),
       DataType: getVal('DataType'),
       FormatStr: getVal('FormatStr'),
       FieldNote: getVal('FieldNote'),
@@ -193,36 +197,55 @@ function saveAllDictFields(tableSelector = '#fieldDictTable tbody', apiUrl = SAV
   });
 
   // ===== 全域 F3 快捷鍵（自動找 modalId） =====
-  (function bindGlobalF3Once() {
-    if (window.__fieldDictF3Bound) return;
-    window.__fieldDictF3Bound = true;
+    (function bindGlobalF3Once() {
+      if (window.__fieldDictF3Bound) return;
+      window.__fieldDictF3Bound = true;
 
-    function resolveModalId() {
-      if (document.getElementById('fieldDictModal')) return 'fieldDictModal';
-      const el =
-        document.querySelector('[data-role="field-dict-modal"]') ||
-        document.querySelector('#fieldDictTable')?.closest('.modal') ||
-        document.querySelector('.modal[id*="FieldDictModal"]') ||
-        document.querySelector('.modal[id*="dictModal"]');
-      return el?.id || null;
-    }
+      function resolveModalId() {
+        if (document.getElementById('fieldDictModal')) return 'fieldDictModal';
+        const el =
+          document.querySelector('[data-role="field-dict-modal"]') ||
+          document.querySelector('#fieldDictTable')?.closest('.modal') ||
+          document.querySelector('.modal[id*="FieldDictModal"]') ||
+          document.querySelector('.modal[id*="dictModal"]');
+        return el?.id || null;
+      }
 
-    document.addEventListener('keydown', (e) => {
-      if (e.key !== 'F3' || e.repeat) return;
-      e.preventDefault();
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'F3' || e.repeat) return;
+        e.preventDefault();
 
-      const modalId = resolveModalId();
-      if (!modalId) { console.warn('找不到辭典 Modal 元件 (自動偵測失敗)'); return; }
+        const modalId = resolveModalId();
+        if (!modalId) { console.warn('找不到辭典 Modal 元件 (自動偵測失敗)'); return; }
 
-      const tname =
-        (window._dictTableName && String(window._dictTableName).trim()) ||
-        document.body?.dataset?.dictTable ||
-        document.querySelector('meta[name="dict-table"]')?.content || '';
+        const tname =
+          (window._dictTableName && String(window._dictTableName).trim()) ||
+          document.body?.dataset?.dictTable ||
+          document.querySelector('meta[name="dict-table"]')?.content || '';
 
-      if (!tname) { alert('沒有指定辭典表名 (window._dictTableName)'); return; }
-      window.showDictModal(modalId, tname);
+        if (!tname) { alert('沒有指定辭典表名 (window._dictTableName)'); return; }
+        window.showDictModal(modalId, tname);
+      });
+    })();
+
+    document.addEventListener('hidden.bs.modal', e => {
+      if (e.target.id === 'fieldDictModal') {
+        // 移除 backdrop
+        document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.overflow = '';
+
+        // ✅ 強制隱藏 overlay，不論 busy 狀態
+        const overlay = document.getElementById('loadingOverlay');
+        if (overlay) {
+          overlay.classList.remove('show');
+          overlay.style.display = 'none';
+        }
+        // 移除 body 鎖定
+        document.body.removeAttribute('aria-busy');
+      }
     });
-  })();
+
 })();
 
 

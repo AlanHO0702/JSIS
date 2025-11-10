@@ -101,6 +101,7 @@ public class DictApiController : ControllerBase
                 AddInt("iFieldLeft", input.iFieldLeft);
                 AddInt("iFieldWidth", input.iFieldWidth);
                 AddInt("iShowWhere", input.iShowWhere);
+                AddInt("ReadOnly", input.ReadOnly);
 
                 AddStr("LookupTable", input.LookupTable);
                 AddStr("LookupKeyField", input.LookupKeyField);

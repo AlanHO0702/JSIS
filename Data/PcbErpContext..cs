@@ -1925,12 +1925,124 @@ namespace PcbErpApi.Data
             });
 
             modelBuilder.Entity<CurdSysItem>(entity =>
-            {
-                foreach (var prop in typeof(CurdSysItem).GetProperties().Where(x => x.PropertyType == typeof(decimal) || x.PropertyType == typeof(decimal?)))
-                {
-                    entity.Property(prop.Name).HasPrecision(18, 6);
-                }
-            });
+                    {
+                        entity.HasKey(e => e.ItemId);
+
+                        entity.ToTable("CURdSysItems", tb =>
+                            {
+                                tb.HasTrigger("CURdSysItems_tD");
+                                tb.HasTrigger("CURdSysItems_tI");
+                                tb.HasTrigger("CURdSysItems_tU");
+                            });
+
+                        entity.Property(e => e.ItemId)
+                            .HasMaxLength(8)
+                            .IsUnicode(false)
+                            .IsFixedLength();
+                        entity.Property(e => e.BtnAdd).HasColumnName("btnAdd");
+                        entity.Property(e => e.BtnClose).HasColumnName("btnClose");
+                        entity.Property(e => e.BtnDelete).HasColumnName("btnDelete");
+                        entity.Property(e => e.BtnExam).HasColumnName("btnExam");
+                        entity.Property(e => e.BtnInq).HasColumnName("btnInq");
+                        entity.Property(e => e.BtnPrintList).HasColumnName("btnPrintList");
+                        entity.Property(e => e.BtnPrintPaper).HasColumnName("btnPrintPaper");
+                        entity.Property(e => e.BtnRejExam).HasColumnName("btnRejExam");
+                        entity.Property(e => e.BtnSendExam).HasColumnName("btnSendExam");
+                        entity.Property(e => e.BtnToExcel).HasColumnName("btnToExcel");
+                        entity.Property(e => e.BtnUpdate).HasColumnName("btnUpdate");
+                        entity.Property(e => e.BtnUpdateMoney).HasColumnName("btnUpdateMoney");
+                        entity.Property(e => e.BtnUpdateNotes).HasColumnName("btnUpdateNotes");
+                        entity.Property(e => e.BtnVoid).HasColumnName("btnVoid");
+                        entity.Property(e => e.ClassName)
+                            .HasMaxLength(50)
+                            .IsUnicode(false);
+                        entity.Property(e => e.ClassNameCn)
+                            .HasMaxLength(50)
+                            .IsUnicode(false)
+                            .HasColumnName("ClassNameCN");
+                        entity.Property(e => e.ClassNameEn)
+                            .HasMaxLength(50)
+                            .IsUnicode(false)
+                            .HasColumnName("ClassNameEN");
+                        entity.Property(e => e.ClassNameJp)
+                            .HasMaxLength(50)
+                            .IsUnicode(false)
+                            .HasColumnName("ClassNameJP");
+                        entity.Property(e => e.ClassNameTh)
+                            .HasMaxLength(50)
+                            .IsUnicode(false)
+                            .HasColumnName("ClassNameTH");
+                        entity.Property(e => e.FlowCondField)
+                            .HasMaxLength(50)
+                            .IsUnicode(false);
+                        entity.Property(e => e.FlowCondField2)
+                            .HasMaxLength(50)
+                            .IsUnicode(false);
+                        entity.Property(e => e.FlowCondField3)
+                            .HasMaxLength(50)
+                            .IsUnicode(false);
+                        entity.Property(e => e.FlowPrcId)
+                            .HasMaxLength(30)
+                            .IsUnicode(false);
+                        entity.Property(e => e.FlowTotalField)
+                            .HasMaxLength(60)
+                            .IsUnicode(false);
+                        entity.Property(e => e.IAttachment)
+                            .HasDefaultValue(0)
+                            .HasColumnName("iAttachment");
+                        entity.Property(e => e.IFlowBefExamCheck).HasColumnName("iFlowBefExamCheck");
+                        entity.Property(e => e.IFlowStopSend).HasColumnName("iFlowStopSend");
+                        entity.Property(e => e.IFullHeightDel).HasColumnName("iFullHeightDel");
+                        entity.Property(e => e.IReportGridType)
+                            .HasDefaultValue(1)
+                            .HasColumnName("iReportGridType");
+                        entity.Property(e => e.IShowTracePaperBtn)
+                            .HasDefaultValue(0)
+                            .HasColumnName("iShowTracePaperBtn");
+                        entity.Property(e => e.InsideCode)
+                            .HasMaxLength(50)
+                            .IsUnicode(false);
+                        entity.Property(e => e.ItemName).HasMaxLength(50);
+                        entity.Property(e => e.ItemNameCn)
+                            .HasMaxLength(50)
+                            .HasColumnName("ItemNameCN");
+                        entity.Property(e => e.ItemNameEn)
+                            .HasMaxLength(50)
+                            .HasColumnName("ItemNameEN");
+                        entity.Property(e => e.ItemNameJp)
+                            .HasMaxLength(50)
+                            .HasColumnName("ItemNameJP");
+                        entity.Property(e => e.ItemNameTh)
+                            .HasMaxLength(50)
+                            .HasColumnName("ItemNameTH");
+                        entity.Property(e => e.LinkType).HasDefaultValue(1);
+                        entity.Property(e => e.Notes).HasMaxLength(4000);
+                        entity.Property(e => e.ObjectName)
+                            .HasMaxLength(50)
+                            .IsUnicode(false);
+                        entity.Property(e => e.Ocxtemplete)
+                            .HasMaxLength(64)
+                            .IsUnicode(false)
+                            .HasColumnName("OCXTemplete");
+                        entity.Property(e => e.PaperId)
+                            .HasMaxLength(32)
+                            .IsUnicode(false);
+                        entity.Property(e => e.PaperType).HasDefaultValue(255);
+                        entity.Property(e => e.PowerType).HasDefaultValue(0);
+                        entity.Property(e => e.SBiexcelPath)
+                            .HasMaxLength(100)
+                            .HasColumnName("sBIExcelPath");
+                        entity.Property(e => e.ShowTitle).HasDefaultValue(1);
+                        entity.Property(e => e.SuperId)
+                            .HasMaxLength(8)
+                            .IsUnicode(false);
+                        entity.Property(e => e.SystemId)
+                            .HasMaxLength(8)
+                            .IsUnicode(false);
+                        entity.Property(e => e.TableIndex)
+                            .HasMaxLength(50)
+                            .IsUnicode(false);
+                    });
 
             modelBuilder.Entity<CurdSystemSelect>(entity =>
             {
