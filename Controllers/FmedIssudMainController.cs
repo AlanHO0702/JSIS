@@ -95,6 +95,7 @@ namespace PcbErpApi.Controllers
                 PartNum = "",
                 Revision = "",
                 UseId = "",
+                MotherIssueNum = nextNum,  // 母製令單號設為自己的單號
                 // 可根據實際欄位預設值再補
             };
 

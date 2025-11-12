@@ -116,10 +116,26 @@ public class IssueSubButtonController : ControllerBase
                 Console.WriteLine($"[INSERT] 第 {successCount + 1} 筆 SP 執行完成，影響列數: {affectedRows}");
                 successCount++;
             }
+            catch (SqlException sqlEx)
+            {
+                Console.WriteLine($"[INSERT ERROR] SQL 錯誤 - 第 {successCount + 1} 筆執行失敗: {sqlEx.Message}");
+                Console.WriteLine($"[INSERT ERROR] SQL Error Number: {sqlEx.Number}");
+
+                // 返回友善的錯誤訊息
+                string errorMsg = sqlEx.Number switch
+                {
+                    2627 => "違反唯一性條件約束：此訂單明細可能已經匯入過了",
+                    2601 => "重複的索引鍵：此訂單明細可能已經匯入過了",
+                    547 => "違反外鍵約束：參考的資料不存在",
+                    _ => $"資料庫錯誤：{sqlEx.Message}"
+                };
+
+                return BadRequest(new { ok = false, error = errorMsg, detail = sqlEx.Message });
+            }
             catch (Exception ex)
             {
                 Console.WriteLine($"[INSERT ERROR] 第 {successCount + 1} 筆執行失敗: {ex.Message}");
-                throw; // 重新拋出例外讓上層處理
+                return BadRequest(new { ok = false, error = $"執行失敗：{ex.Message}" });
             }
         }
 
