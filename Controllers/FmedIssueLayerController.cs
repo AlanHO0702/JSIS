@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
+using PcbErpApi.Helpers;
 
 [Route("api/[controller]")]
 [ApiController]
@@ -80,13 +81,12 @@ public class FMEdIssueLayerController : ControllerBase
     [HttpDelete("{paperNum}/{item}")]
     public async Task<IActionResult> Delete(string paperNum, int item)
     {
-        var target = await _context.FmedIssueLayer
-                                   .FirstOrDefaultAsync(x => x.PaperNum == paperNum && x.Item == item);
-        if (target == null)
-            return NotFound();
-
-        _context.FmedIssueLayer.Remove(target);
-        await _context.SaveChangesAsync();
-        return NoContent();
+        // 使用 Helper 統一處理刪除邏輯和錯誤訊息
+        return await DetailApiHelper.ExecuteDeleteWithErrorHandling(
+            _context,
+            paperNum,
+            item,
+            _context.FmedIssueLayer
+        );
     }
 }

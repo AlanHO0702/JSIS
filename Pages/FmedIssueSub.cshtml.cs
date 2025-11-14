@@ -171,11 +171,6 @@ public class FMEdIssueSubModel : TableDetailModel<FmedIssuePo>
         var matFields = _dictService.GetFieldDict("FMEdIssueMat", typeof(FmedIssueMat));
         var layerFields = _dictService.GetFieldDict("FMEdIssueLayer", typeof(FmedIssueLayer));
 
-        // 除錯：輸出欄位數量
-        Console.WriteLine($"[FmedIssueSub] PO fields: {poFields.Count}, Visible=1: {poFields.Count(f => f.Visible == 1)}");
-        Console.WriteLine($"[FmedIssueSub] Mat fields: {matFields.Count}, Visible=1: {matFields.Count(f => f.Visible == 1)}");
-        Console.WriteLine($"[FmedIssueSub] Layer fields: {layerFields.Count}, Visible=1: {layerFields.Count(f => f.Visible == 1)}");
-
         var tabFieldDicts = new Dictionary<string, Dictionary<string, string>>
         {
             ["po"] = poFields
