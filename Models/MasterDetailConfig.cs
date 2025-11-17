@@ -22,6 +22,8 @@ namespace WebRazor.Models
         /// </summary>
         public KeyMap[] KeyMap { get; set; } = Array.Empty<KeyMap>();
 
+        public string[] DetailKeyFields { get; set; } = Array.Empty<string>();
+
         /// <summary>主檔預設抓取筆數（使用 CommonTable/TopRows 時用）</summary>
         public int MasterTop { get; set; } = 200;
 
@@ -35,6 +37,8 @@ namespace WebRazor.Models
         /// <summary>可選：主檔排序欄與方向（CommonTable 若支援）</summary>
         public string? MasterOrderBy { get; set; }
         public string? MasterOrderDir { get; set; } = "ASC";
+
+        
     }
 
     public sealed class KeyMap
