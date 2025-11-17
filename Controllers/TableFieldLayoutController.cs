@@ -299,4 +299,105 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         public int? SerialNum { get; set; }
         public bool Visible { get; set; }
     }
+
+    [HttpGet("GetTableFields")]
+    public Task<IActionResult> GetTableFields([FromQuery] string? tableName, [FromQuery] string? table, [FromQuery] string lang = "TW")
+    {
+        var t = (tableName ?? table ?? "").Trim();
+    return GetTableFieldsFull(t, lang);
+    }
+
+    // 取辭典（完整欄位版本：含版面、查詢設定等）
+    [HttpGet("GetTableFieldsFull")]
+    public async Task<IActionResult> GetTableFieldsFull(
+        [FromQuery] string? table,
+        [FromQuery] string? tableName,
+        [FromQuery] string lang = "TW")
+    {
+         var t = (table ?? tableName ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(t))
+            return BadRequest("table is required.");
+        
+        static string Clean(string s) => (s ?? "")
+            .Trim().Trim('[', ']')
+            .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase)
+            .ToLowerInvariant();
+
+        var tname = Clean(table);
+        var lname = string.IsNullOrWhiteSpace(lang) ? "TW" : lang.Trim();
+
+        const string SQL = @"
+    SELECT
+        f.TableName,
+        f.FieldName,
+        COALESCE(l.DisplayLabel, f.DisplayLabel, f.FieldName) AS DisplayLabel,
+        COALESCE(l.DisplaySize, f.DisplaySize) AS DisplaySize,
+        f.DataType,
+        f.FormatStr,
+        f.SerialNum,
+        Visible   = CASE WHEN ISNULL(f.Visible,1)=1 THEN 1 ELSE 0 END,
+        ReadOnly  = CASE WHEN ISNULL(f.ReadOnly,0)=1 THEN 1 ELSE 0 END,
+        f.FieldNote,
+
+        -- 標籤/欄位座標與尺寸
+        f.iLabHeight,  f.iLabTop,   f.iLabLeft,   f.iLabWidth,
+        f.iFieldHeight,f.iFieldTop, f.iFieldLeft, f.iFieldWidth,
+        f.iShowWhere,
+
+        -- 查詢/Lookup
+        f.LookupTable, f.LookupKeyField, f.LookupResultField,
+
+        -- 其他（若你的表裡有）
+        f.IsNotesField
+    FROM CURdTableField f WITH (NOLOCK)
+    LEFT JOIN CURdTableFieldLang l WITH (NOLOCK)
+        ON l.TableName = f.TableName
+        AND l.FieldName = f.FieldName
+        AND l.LanguageId = @Lang
+    WHERE (LOWER(f.TableName)=@TN OR LOWER(REPLACE(f.TableName,'dbo.',''))=@TN)
+    ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldName;";
+
+        var list = new List<object>();
+        await using var cn = new SqlConnection(_connStr);
+        await cn.OpenAsync();
+        await using var cmd = new SqlCommand(SQL, cn);
+        cmd.Parameters.Add(new SqlParameter("@TN", tname));
+        cmd.Parameters.Add(new SqlParameter("@Lang", lname));
+
+        using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            list.Add(new {
+                TableName       = rd["TableName"]?.ToString() ?? "",
+                FieldName       = rd["FieldName"]?.ToString() ?? "",
+                DisplayLabel    = rd["DisplayLabel"]?.ToString() ?? "",
+                DisplaySize     = rd["DisplaySize"] as int?,
+                DataType        = rd["DataType"]?.ToString() ?? "",
+                FormatStr       = rd["FormatStr"]?.ToString() ?? "",
+                SerialNum       = rd["SerialNum"] as int?,
+                Visible         = (rd["Visible"]?.ToString() ?? "1") == "1" ? 1 : 0,
+                ReadOnly        = (rd["ReadOnly"]?.ToString() ?? "0") == "1" ? 1 : 0,
+                FieldNote       = rd["FieldNote"]?.ToString() ?? "",
+
+                iLabHeight      = rd["iLabHeight"]  as int?,
+                iLabTop         = rd["iLabTop"]     as int?,
+                iLabLeft        = rd["iLabLeft"]    as int?,
+                iLabWidth       = rd["iLabWidth"]   as int?,
+
+                iFieldHeight    = rd["iFieldHeight"] as int?,
+                iFieldTop       = rd["iFieldTop"]    as int?,
+                iFieldLeft      = rd["iFieldLeft"]   as int?,
+                iFieldWidth     = rd["iFieldWidth"]  as int?,
+                iShowWhere      = rd["iShowWhere"]   as int?,
+
+                LookupTable     = rd["LookupTable"]?.ToString() ?? "",
+                LookupKeyField  = rd["LookupKeyField"]?.ToString() ?? "",
+                LookupResultField = rd["LookupResultField"]?.ToString() ?? "",
+                IsNotesField    = rd["IsNotesField"]?.ToString() ?? ""
+            });
+        }
+
+        return Ok(list);
+    }
+
 }

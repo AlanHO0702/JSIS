@@ -15,11 +15,16 @@ namespace PcbErpApi.Controllers
     {
         private readonly PcbErpContext _context;
         private readonly ILogger<CommonTableController> _logger;
+        private readonly string _connStr; // ★ 新增
 
-        public CommonTableController(PcbErpContext context, ILogger<CommonTableController> logger)
+        public CommonTableController(PcbErpContext context, ILogger<CommonTableController> logger,IConfiguration config)
         {
             _context = context;
-            _logger  = logger;
+            _logger = logger;
+                    // 優先用 appsettings 內的 DefaultConnection；沒有就向 EF 要
+            _connStr = config.GetConnectionString("DefaultConnection")
+                   ?? _context.Database.GetConnectionString()
+                   ?? throw new InvalidOperationException("Missing connection string.");
         }
 
         public class SaveTableChangesRequest
@@ -373,5 +378,106 @@ ORDER BY idx.index_id, ic.key_ordinal";
             var t = dbType.ToLowerInvariant();
             return t is "text" or "ntext";
         }
+
+       // 既有：TopRows(table, top, orderBy?, orderDir?)
+    [HttpGet]
+    public async Task<IActionResult> TopRows([FromQuery] string table, [FromQuery] int top = 100, [FromQuery] string? orderBy = null, [FromQuery] string? orderDir = "ASC")
+    {
+        if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required");
+
+        var tblOk = await _context.Database
+            .SqlQuery<string>($"SELECT name FROM sys.tables WHERE name = {table}")
+            .AnyAsync();
+
+        if (!tblOk) return NotFound($"Table '{table}' not found.");
+
+        string orderSql = "";
+        if (!string.IsNullOrWhiteSpace(orderBy))
+        {
+            var colOk = await _context.Database
+                .SqlQuery<string>($@"SELECT c.name 
+                                     FROM sys.columns c 
+                                     JOIN sys.tables t ON t.object_id=c.object_id
+                                     WHERE t.name={table} AND c.name={orderBy}").AnyAsync();
+            if (colOk)
+                orderSql = $" ORDER BY [{orderBy}] {(string.Equals(orderDir, "DESC", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC")}";
+        }
+
+        var sql = $"SELECT TOP (@top) * FROM [{table}]{orderSql}";
+        var pTop = new SqlParameter("@top", top);
+
+        var dt = new DataTable();
+        await using var conn = (SqlConnection)_context.Database.GetDbConnection();
+        await conn.OpenAsync();
+        await using (var cmd = new SqlCommand(sql, conn))
+        {
+            cmd.Parameters.Add(pTop);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            dt.Load(rd);
+        }
+        return Ok(ToDictList(dt));
+    }
+
+    // 新增：ByKeys(table, keyNames[], keyValues[]) → 多個 = 條件 (AND)
+    [HttpGet]
+    public async Task<IActionResult> ByKeys([FromQuery] string table, [FromQuery] string[] keyNames, [FromQuery] string[] keyValues)
+    {
+        if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required");
+        if (keyNames == null || keyValues == null || keyNames.Length == 0 || keyNames.Length != keyValues.Length)
+            return BadRequest("keyNames and keyValues must be same length and not empty.");
+
+        // 驗 table
+        var tblOk = await _context.Database
+            .SqlQuery<string>($"SELECT name FROM sys.tables WHERE name = {table}")
+            .AnyAsync();
+        if (!tblOk) return NotFound($"Table '{table}' not found.");
+
+        // 驗 column & 組條件
+        var whereParts = new List<string>();
+        var parameters = new List<SqlParameter>();
+        for (int i = 0; i < keyNames.Length; i++)
+        {
+            var col = keyNames[i];
+            var val = keyValues[i];
+
+            var colOk = await _context.Database
+                .SqlQuery<string>($@"SELECT c.name 
+                                     FROM sys.columns c 
+                                     JOIN sys.tables t ON t.object_id=c.object_id
+                                     WHERE t.name={table} AND c.name={col}").AnyAsync();
+            if (!colOk) return BadRequest($"Column '{col}' not found in '{table}'.");
+
+            var p = new SqlParameter($"@p{i}", (object?)val ?? DBNull.Value);
+            parameters.Add(p);
+            whereParts.Add($"[{col}] = @p{i}");
+        }
+
+        var whereSql = string.Join(" AND ", whereParts);
+        var sql = $"SELECT * FROM [{table}] WHERE {whereSql}";
+
+        var dt = new DataTable();
+        await using var conn = (SqlConnection)_context.Database.GetDbConnection();
+        await conn.OpenAsync();
+        await using (var cmd = new SqlCommand(sql, conn))
+        {
+            parameters.ForEach(p => cmd.Parameters.Add(p));
+            await using var rd = await cmd.ExecuteReaderAsync();
+            dt.Load(rd);
+        }
+        return Ok(ToDictList(dt));
+    }
+
+    private static List<Dictionary<string, object?>> ToDictList(DataTable dt)
+    {
+        var list = new List<Dictionary<string, object?>>(dt.Rows.Count);
+        foreach (DataRow r in dt.Rows)
+        {
+            var d = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (DataColumn c in dt.Columns)
+                d[c.ColumnName] = r.IsNull(c) ? null : r[c];
+            list.Add(d);
+        }
+        return list;
+    }
     }
 }
