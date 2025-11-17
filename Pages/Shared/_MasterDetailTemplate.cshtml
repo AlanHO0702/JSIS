@@ -1,0 +1,286 @@
+@using System.Text.Json
+@model WebRazor.Models.MasterDetailConfig
+@{
+    var domId = Model.DomId;
+    var masterTitle = Model.MasterTitle ?? Model.MasterTable;
+    var detailTitle = Model.DetailTitle ?? Model.DetailTable;
+    var masterDictName = Model.MasterDict ?? Model.MasterTable;
+    var detailDictName = Model.DetailDict ?? Model.DetailTable;
+    var json = JsonSerializer.Serialize(Model, new JsonSerializerOptions { PropertyNamingPolicy = null });
+}
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
+
+<div id="@domId" class="md-wrapper md-page container-fluid px-2 px-md-4">
+
+  <!-- 功能列（左：修改；右：留白避免壓到主選單浮動鈕） -->
+  <div class="d-flex align-items-center justify-content-between my-3">
+    <div class="btn-toolbar gap-2">
+      <button id="@domId-btnEdit" type="button" class="btn btn-warning shadow-sm px-4">
+        修改
+      </button>
+      <button id="@domId-btnSave" type="button" class="btn btn-success shadow-sm px-4 d-none">
+        儲存
+      </button>
+    </div>
+    <div class="fab-placeholder"></div>
+  </div>
+
+  <!-- 單頭 Master -->
+  <div class="card shadow-sm border-0 rounded-4 mb-3 md-master-card">
+    <div class="card-header bg-light fw-bold">@masterTitle</div>
+    <div class="card-body p-0">
+      <!-- 卷軸交給這層 -->
+      <div id="@domId-masterWrapper" class="table-responsive md-master-scroll fab-safe">
+        <table id="@domId-masterGrid" class="table table-sm table-hover align-middle mb-0 md-master-table"
+               tabindex="0" data-dict-table="@masterDictName">
+          <thead class="table-primary sticky-top">
+            <tr id="@domId-m-head"><th class="text-center" style="width:60px;display:none;">#</th></tr>
+          </thead>
+          <tbody id="@domId-m-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 單身 Detail（會吃滿剩餘高度） -->
+  <div class="card shadow-sm border-0 rounded-4 md-detail-card">
+    <div class="card-header bg-light fw-bold">@detailTitle</div>
+    <div class="card-body p-0">
+      <!-- 卷軸交給這層 -->
+      <div id="@domId-detailWrapper" class="table-responsive md-detail-scroll fab-safe">
+        <table  id="@domId-detailGrid" class="table table-sm table-striped align-middle mb-0 md-detail-table"
+               tabindex="0" data-dict-table="@detailDictName">
+          <thead class="table-secondary sticky-top">
+            <tr id="@domId-d-head"><th class="text-center" style="width:60px;display:none;">#</th></tr>
+          </thead>
+          <tbody id="@domId-d-body">
+            <tr><td class="text-center text-muted p-3">請點選上方一筆資料</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // 把設定丟給 masterDetailTemplate.js 用（你原本就有）
+  window._mdConfigs = window._mdConfigs || {};
+  window._mdConfigs["@domId"] = @Html.Raw(json);
+</script>
+
+<script src="/js/editableGrid.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="/js/masterDetailTemplate.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const domId   = '@domId';
+  const cfg     = window._mdConfigs[domId] || {};
+
+  const editBtn   = document.getElementById(domId + '-btnEdit');
+  const saveBtn   = document.getElementById(domId + '-btnSave');
+  const mWrapper  = document.getElementById(domId + '-masterWrapper');
+  const mTable    = document.getElementById(domId + '-masterGrid');
+  const dWrapper  = document.getElementById(domId + '-detailWrapper');
+  const dTable    = document.getElementById(domId + '-detailGrid');
+
+  // 建立 Master / Detail 兩個 editor
+  const masterEditor = window.makeEditableGrid({
+    wrapper: mWrapper,
+    table:   mTable,
+    tableName: cfg.MasterTable || cfg.Master || ''
+  });
+
+  const detailEditor = window.makeEditableGrid({
+    wrapper:  dWrapper,
+    table:    dTable,
+    tableName: cfg.DetailTable || cfg.Detail || '',
+    keyFields: ['PaperType']
+  });
+
+  // ⭐ 正確：宣告後才能存成全域
+  window._detailEditor = detailEditor;
+
+  editBtn.addEventListener('click', () => {
+    const toEdit = !masterEditor.isEdit();
+    window._mdEditing = toEdit;
+
+    masterEditor.toggleEdit(toEdit);
+    detailEditor.toggleEdit(toEdit);
+
+    editBtn.textContent = toEdit ? '保留' : '修改';
+    saveBtn.classList.toggle('d-none', !toEdit);
+
+    const evt = new CustomEvent('md-edit-click', { detail: { domId, isEdit: toEdit } });
+    window.dispatchEvent(evt);
+  });
+
+  saveBtn.addEventListener('click', async () => {
+    const r1 = await masterEditor.saveChanges();
+    const r2 = await detailEditor.saveChanges();
+
+    const hasChanges = !(r1.skipped && r2.skipped);
+    if (!hasChanges) {
+      Swal.fire({ icon: 'info', title: '沒有任何變更', timer: 1000, showConfirmButton: false });
+      return;
+    }
+
+    if (!r1.ok || !r2.ok) {
+      const err = !r1.ok ? r1 : r2;
+      Swal.fire({
+        icon: 'error',
+        title: '儲存失敗',
+        text: err.text || '其中一個表格儲存失敗'
+      });
+      return;
+    }
+
+    Swal.fire({ icon: 'success', title: '儲存完成', timer: 1000, showConfirmButton: false });
+  });
+});
+</script>
+
+
+<script src="/js/masterDetailTemplate.js"></script>
+
+<style>
+  /* ====== 右上角主選單浮動鈕安全邊界 ====== */
+:root {
+  --fab-space: max(140px, env(safe-area-inset-right));
+  --md-master-max: 40vh;   /* 單頭區塊的最大高度 */
+  /* 單身的最小高度交給捲動層，不要卡在 card 上 */
+  --md-detail-min: 0;
+}
+
+/* ...前面都一樣... */
+
+.md-page{
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 單頭保留原本設定 */
+.md-master-card { flex: 0 0 auto; }
+.md-master-scroll{
+  max-height: var(--md-master-max);
+  overflow: auto;
+}
+
+/* ===== 單身卡片改成真正「吃滿剩下高度 + 內部捲動」 ===== */
+.md-detail-card{
+  flex: 1 1 0;          /* 吃掉剩下的空間 */
+  min-height: 0;        /* ★關鍵：允許比內容矮，才有空間給捲軸 */
+  display: flex;
+  flex-direction: column;
+}
+
+/* card-body 也要能被壓縮，讓下一層捲動 */
+.md-detail-card .card-body{
+  flex: 1 1 0;
+  min-height: 0;        /* ★關鍵 */
+  display: flex;
+  flex-direction: column;
+}
+
+/* 真正有捲軸的那一層 */
+.md-detail-scroll{
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;       /* 垂直 + 水平捲軸都交給這裡 */
+}
+
+/* ===== 表格樣式維持原本 ===== */
+.md-wrapper .md-master-table,
+.md-wrapper .md-detail-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;      /* ⭐ 固定欄寬，跟著 th 的 width 走 */
+
+}
+  .md-wrapper .md-master-table th,
+  .md-wrapper .md-master-table td,
+  .md-wrapper .md-detail-table th,
+  .md-wrapper .md-detail-table td {
+    border-right: 1px solid #e9ecef;
+    white-space: nowrap;
+  }
+  .md-wrapper .md-master-table thead th:first-child,
+  .md-wrapper .md-master-table tbody td:first-child,
+  .md-wrapper .md-detail-table thead th:first-child,
+  .md-wrapper .md-detail-table tbody td:first-child {
+    border-left: 1px solid #e9ecef;
+  }
+  .md-wrapper .md-master-table thead th,
+  .md-wrapper .md-detail-table thead th {
+    border-bottom: 1px solid #dee2e6;
+  }
+  .md-wrapper .md-master-table tbody tr + tr,
+  .md-wrapper .md-detail-table tbody tr + tr {
+    border-top: 1px solid #f1f3f5;
+  }
+
+  /* Sticky 表頭陰影＋避免中文直排 */
+  .md-wrapper .md-master-table thead.sticky-top,
+  .md-wrapper .md-detail-table thead.sticky-top {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    box-shadow: 0 2px 2px rgba(0,0,0,.04);
+  }
+  .md-wrapper .md-master-table thead th,
+  .md-wrapper .md-detail-table thead th {
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    vertical-align: middle;
+    line-height: 1.2;
+    min-width: 64px;
+  }
+
+  /* 選取列高亮 */
+  .md-wrapper .selected { background: #e3f2fd !important; font-weight: 600; }
+
+   /* 讓 Master/Detail 的 cell 樣式跟單一 GRID 一致 */
+  .cell-view,
+  .cell-edit {
+    display:inline-block;
+    width:100%;
+    font-size:.9rem;
+    line-height:1.4;
+    box-sizing:border-box;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    padding:.4rem .6rem!important;
+    vertical-align:middle;
+  }
+  .cell-edit.form-control{
+    height:calc(1.6em + .5rem + 2px)!important;
+    padding:.4rem .6rem!important;
+    font-size:.9rem!important;
+    line-height:1.4!important;
+    border-radius:0!important;
+    box-sizing:border-box!important;
+  }
+  .edit-mode .cell-edit:not(.readonly-cell){
+    border:1px solid #ccc!important;
+    background:#fff!important;
+  }
+  .readonly-cell{
+      background:#f3f3f3!important;
+      color:#555!important;
+      border:1px solid #ddd!important;
+      cursor:not-allowed!important;
+  }
+
+  .cell-edit {
+      user-select: auto !important;   /* ⭐ 保證可選取 */
+      pointer-events: auto !important;/* ⭐ 保證可點 */
+  }
+
+</style>
