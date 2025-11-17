@@ -112,7 +112,7 @@
   // ────────────────────────────────────────
   // 🔧 畫表身 — cell-view + cell-edit
   // ────────────────────────────────────────
-  const buildBody = (tbody, fields, rows, showRowNo, onRowClick) => {
+  const buildBody = (tbody, fields, rows, showRowNo, onRowClick, cfg) => {
     tbody.innerHTML = "";
 
     const visibleFields = fields
@@ -122,6 +122,19 @@
     rows.forEach((row, idx) => {
       const tr = document.createElement("tr");
       tr.style.cursor = "pointer";
+
+      // ⭐ 在這裡插入 hidden PK 欄位
+      (cfg?.DetailKeyFields ?? []).forEach(k => {
+        if (row[k] !== undefined) {
+          const hid = document.createElement("input");
+          hid.type = "hidden";
+          hid.name = k;
+          hid.value = row[k];
+          hid.className = "cell-edit";
+          hid.dataset.readonly = "1";
+          tr.appendChild(hid);
+        }
+      });
 
       if (showRowNo) {
         const tdNo = document.createElement("td");
@@ -262,7 +275,7 @@
       const detailRows = await fetch(detailUrl).then(r => r.json());
 
       // Build body
-      buildBody(dBody, dDict, detailRows, cfg.ShowRowNumber, () => {});
+      buildBody(dBody, dDict, detailRows, cfg.ShowRowNumber, () => {}, cfg);
 
       // ⭐⭐⭐ 重點：如果現在是編輯模式 → 明細重新進入編輯 ⭐⭐⭐
       if (window._mdEditing && window._detailEditor) {
@@ -271,7 +284,7 @@
     };
 
     // 畫主檔 body
-    buildBody(mBody, mDict, masterRows, cfg.ShowRowNumber, onMasterClick);
+    buildBody(mBody, mDict, masterRows, cfg.ShowRowNumber, onMasterClick, cfg);
   };
 
   // ────────────────────────────────────────
