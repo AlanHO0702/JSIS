@@ -35,6 +35,8 @@ namespace PcbErpApi.Data
         public virtual DbSet<FmedIssueLayer> FmedIssueLayer { get; set; }
         public virtual DbSet<AJNdClassMoney> AJNdClassMoney { get; set; }
         public virtual DbSet<AJNdClassMoneyHis> AJNdClassMoneyHis { get; set; }
+        public IEnumerable<object> TabConfigs { get; internal set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             // FMEdIssuePO 複合主鍵配置

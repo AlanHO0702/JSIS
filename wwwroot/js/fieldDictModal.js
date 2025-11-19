@@ -26,7 +26,20 @@
   const SAVE_API  = window.FIELD_DICT_SAVE_API || '/api/DictApi/UpdateDictFields';
   const QUIET     = !!window.SUPPRESS_DICT_FETCH_ALERT;
 
+  // ===== 顯示（會先 init 再 show） =====
+  window.showDictModal = async function (modalId = 'fieldDictModal', tableName = window._dictTableName) {
+    const el = document.getElementById(modalId);
+    if (!el) { console.warn('找不到辭典 Modal 元件:', modalId); return; }
+    await window.initFieldDictModal(tableName, modalId);
 
+    // 更新標題顯示當前表名
+    const displayEl = document.getElementById('dictTableNameDisplay');
+    if (displayEl && tableName) {
+      displayEl.textContent = `- ${tableName}`;
+    }
+
+    new bootstrap.Modal(el).show();
+  };
 
   // ===== 初始化：撈資料（若 tbody 已有資料就不覆蓋）、排序、綁定 =====
   window.initFieldDictModal = async function (tableName, modalId = 'fieldDictModal') {
