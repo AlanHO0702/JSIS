@@ -1,6 +1,6 @@
 @model List<PcbErpApi.Models.CURdTableField>
 @{
-    var modalId = ViewData["DictModalId"] as string ?? "dictModal";
+    var modalId = ViewData["DictModalId"] as string ?? "fieldDictModal";  // 建議直接用這個 id
     var tableName = ViewData["DictTableName"] as string ?? "UnknownTable";
 }
 
@@ -31,7 +31,7 @@
 .table-fix-cols td {
   white-space: nowrap;
   border: 1px solid #dee2e6;
-  padding: 4px 8px;
+  padding: 4px 4px;
   position: relative;
   background: #fff;
   z-index: 1;
@@ -132,18 +132,21 @@
 }
 </style>
 
-<div class="modal fade" id="@modalId" tabindex="-1" aria-labelledby="dictModalLabel" aria-hidden="true">
+<div class="modal fade" id="@modalId" tabindex="-1" aria-labelledby="dictModalLabel" aria-hidden="true" data-role="field-dict-modal">
   <div class="modal-dialog modal-xl modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="dictModalLabel">欄位說明</h5>
-        <button type="button" class="btn btn-success ms-2" onclick="saveAllDictFields('#@modalId .dictTableBody')">全部儲存</button>
+        <button type="button" class="btn btn-success ms-2"
+                onclick="saveAllDictFields('#@modalId .dictTableBody')">
+          全部儲存
+        </button>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
 
       <div class="modal-body">
         <div class="table-fix-wrapper">
-          <table class="table-fix-cols">
+          <table class="table-fix-cols" id="fieldDictTable">
             <thead>
               <tr>
                 <th>序號</th>
@@ -155,49 +158,12 @@
                 <th>型別</th>
                 <th>輸出格式</th>
                 <th>說明</th>
-                <th>欄寬</th>
-                <th>標籤高</th>
-                <th>標籤Y</th>
-                <th>標籤X</th>
-                <th>標籤寬</th>
-                <th>欄位高</th>
-                <th>欄位Y</th>
-                <th>欄位X</th>
-                <th>欄位寬</th>
-                <th>搜尋表格</th>
-                <th>搜尋鍵</th>
-                <th>搜尋欄位</th>
-                <th style="display:none;">備註</th>
+                <th>詳細設定</th>
               </tr>
             </thead>
-            <tbody class="dictTableBody">
-              @foreach (var d in Model)
-              {
-                  <tr data-tablename="@tableName" data-fieldname="@d.FieldName">
-                    <td><input data-field="SerialNum" type="number" value="@d.SerialNum" style="width:60px;" /></td>
-                    <td>@d.FieldName</td>
-                    <td><input data-field="DisplayLabel" value="@d.DisplayLabel" /></td>
-                    <td><input data-field="Visible" type="checkbox" @(d.Visible == 1 ? "checked" : "") /></td>
-                    <td><input data-field="ReadOnly" type="checkbox" @(d.ReadOnly == 1 ? "checked" : "") /></td>
-                    <td><input data-field="iShowWhere" value="@d.iShowWhere" style="width:50px;" /></td>
-                    <td><input data-field="DataType" value="@d.DataType" readonly style="background:#f2f2f2; color:#8a9399; border:1px solid #dee2e6;" tabindex="-1" /></td>
-                    <td><input data-field="FormatStr" value="@d.FormatStr" /></td>
-                    <td><input data-field="FieldNote" value="@d.FieldNote" /></td>
-                    <td><input data-field="DisplaySize" value="@d.DisplaySize" style="width:50px;" /></td>
-                    <td><input data-field="iLabHeight" value="@d.iLabHeight" style="width:50px;" /></td>
-                    <td><input data-field="iLabTop" value="@d.iLabTop" style="width:50px;" /></td>
-                    <td><input data-field="iLabLeft" value="@d.iLabLeft" style="width:50px;" /></td>
-                    <td><input data-field="iLabWidth" value="@d.iLabWidth" style="width:50px;" /></td>
-                    <td><input data-field="iFieldHeight" value="@d.iFieldHeight" style="width:50px;" /></td>
-                    <td><input data-field="iFieldTop" value="@d.iFieldTop" style="width:50px;" /></td>
-                    <td><input data-field="iFieldLeft" value="@d.iFieldLeft" style="width:50px;" /></td>
-                    <td><input data-field="iFieldWidth" value="@d.iFieldWidth" style="width:50px;" /></td>
-                    <td><input data-field="LookupTable" value="@d.LookupTable" /></td>
-                    <td><input data-field="LookupKeyField" value="@d.LookupKeyField" /></td>
-                    <td><input data-field="LookupResultField" value="@d.LookupResultField" /></td>
-                    <td style="display:none;"><input data-field="IsNotesField" value="@d.IsNotesField" style="width:50px;" /></td>
-                  </tr>
-              }
+
+            <!-- ❗ 列完全由 JS 產生，不再用 Razor foreach -->
+            <tbody class="dictTableBody" data-role="dict">
             </tbody>
           </table>
         </div>
@@ -205,3 +171,118 @@
     </div>
   </div>
 </div>
+
+<!-- 單一欄位詳細設定 Modal -->
+<div class="modal fade" id="fieldDetailModal" tabindex="-1" aria-labelledby="fieldDetailLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="fieldDetailLabel">
+          欄位詳細設定 - <span id="fieldDetailTitle" class="text-primary"></span>
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+      </div>
+
+      <div class="modal-body">
+
+        <div class="mb-2 small text-muted">
+          可調整原本隱藏的「版面位置」與「Lookup」相關欄位，套用後會回寫到辭典表列，最後仍由「全部儲存」一次送出。
+        </div>
+
+        <!-- 版面設定 -->
+        <h6 class="mt-2 mb-2">版面設定</h6>
+        <div class="table-responsive mb-3">
+          <table class="table table-sm table-bordered text-center align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>欄寬<br/></th>
+                <th>標籤Y<br/></th>
+                <th>標籤X<br/></th>
+                <th>標籤寬<br/></th>
+                <th>標籤高<br/></th>
+                <th>欄位Y<br/></th>
+                <th>欄位X<br/></th>
+                <th>欄位寬<br/></th>
+                <th>欄位高<br/></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><input type="number" class="form-control form-control-sm" data-detail-field="DisplaySize" /></td>
+                <td><input type="number" class="form-control form-control-sm" data-detail-field="iLabTop" /></td>
+                <td><input type="number" class="form-control form-control-sm" data-detail-field="iLabLeft" /></td>
+                <td><input type="number" class="form-control form-control-sm" data-detail-field="iLabWidth" /></td>
+                <td><input type="number" class="form-control form-control-sm" data-detail-field="iLabHeight" /></td>
+                <td><input type="number" class="form-control form-control-sm" data-detail-field="iFieldTop" /></td>
+                <td><input type="number" class="form-control form-control-sm" data-detail-field="iFieldLeft" /></td>
+                <td><input type="number" class="form-control form-control-sm" data-detail-field="iFieldWidth" /></td>
+                <td><input type="number" class="form-control form-control-sm" data-detail-field="iFieldHeight" /></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Lookup 設定 -->
+        <h6 class="mt-3 mb-2">Lookup 下拉選單</h6>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th style="width:30%">查詢資料表<br/></th>
+                <th style="width:30%">鍵值欄位<br/></th>
+                <th style="width:30%">顯示欄位<br/></th>
+                <th style="width:10%" class="text-center">備註欄位<br/></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><input class="form-control form-control-sm" data-detail-field="LookupTable" /></td>
+                <td><input class="form-control form-control-sm" data-detail-field="LookupKeyField" /></td>
+                <td><input class="form-control form-control-sm" data-detail-field="LookupResultField" /></td>
+                <td class="text-center">
+                  <input type="checkbox" class="form-check-input" data-detail-field="IsNotesField" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h6 class="mt-4">非實體欄位 Lookup 設定</h6>
+        <div class="row g-2">
+            <div class="col-3">
+                <label class="form-label mb-1">OCX 表名</label>
+                <input id="fdm_ocxTable"
+                      class="form-control form-control-sm"
+                      data-detail-field="OCXLKTableName" />
+            </div>
+            <div class="col-3">
+                <label class="form-label mb-1">OCX 顯示欄位</label>
+                <input id="fdm_ocxResult"
+                      class="form-control form-control-sm"
+                      data-detail-field="OCXLKResultName" />
+            </div>
+                <div class="col-3">
+                <label class="form-label mb-1">Table Key 欄位</label>
+                <input id="fdm_KeyField"
+                      class="form-control form-control-sm"
+                      data-detail-field="KeyFieldName" />
+            </div>
+                <div class="col-3">
+                <label class="form-label mb-1">被Look up 的 Key 欄位</label>
+                <input id="fdm_KeySelf"
+                      class="form-control form-control-sm"
+                      data-detail-field="KeySelfName" />
+            </div>
+        </div>
+
+
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary btn-sm" id="btnFieldDetailApply">套用</button>
+      </div>
+    </div>
+  </div>
+</div>
+

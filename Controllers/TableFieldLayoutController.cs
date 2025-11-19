@@ -323,7 +323,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
             .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase)
             .ToLowerInvariant();
 
-        var tname = Clean(table);
+        var tname = Clean(t);
         var lname = string.IsNullOrWhiteSpace(lang) ? "TW" : lang.Trim();
 
         const string SQL = @"
@@ -348,12 +348,24 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         f.LookupTable, f.LookupKeyField, f.LookupResultField,
 
         -- 其他（若你的表裡有）
-        f.IsNotesField
+        f.IsNotesField,
+
+        -- ★ 第二層 OCX Lookup（新增）
+        f.OCXLKTableName,
+        f.OCXLKResultName, 
+        lk.KeyFieldName,
+        lk.KeySelfName
+
     FROM CURdTableField f WITH (NOLOCK)
     LEFT JOIN CURdTableFieldLang l WITH (NOLOCK)
         ON l.TableName = f.TableName
         AND l.FieldName = f.FieldName
         AND l.LanguageId = @Lang
+
+    LEFT JOIN CURdOCXTableFieldLK lk WITH (NOLOCK)
+       ON lk.TableName = f.TableName
+       AND lk.FieldName = f.FieldName
+
     WHERE (LOWER(f.TableName)=@TN OR LOWER(REPLACE(f.TableName,'dbo.',''))=@TN)
     ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldName;";
 
@@ -393,7 +405,12 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
                 LookupTable     = rd["LookupTable"]?.ToString() ?? "",
                 LookupKeyField  = rd["LookupKeyField"]?.ToString() ?? "",
                 LookupResultField = rd["LookupResultField"]?.ToString() ?? "",
-                IsNotesField    = rd["IsNotesField"]?.ToString() ?? ""
+                IsNotesField    = rd["IsNotesField"]?.ToString() ?? "",
+
+                OCXLKTableName  = rd["OCXLKTableName"]?.ToString() ?? "",
+                OCXLKResultName = rd["OCXLKResultName"]?.ToString() ?? "",
+                KeyFieldName    = rd["KeyFieldName"]?.ToString() ?? "",
+                KeySelfName     = rd["KeySelfName"]?.ToString() ?? ""
             });
         }
 
