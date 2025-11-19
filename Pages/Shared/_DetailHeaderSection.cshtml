@@ -27,7 +27,30 @@
 
     string actionPartial = (ViewData["ActionRailPartial"] as string)
                            ?? "~/Pages/Shared/_ActionRail.Empty.cshtml";
+
+    // ✅ 取得單頭表名稱和 Finished 狀態（針對 FmedIssueMain）
+    string headerTableName = Model.HeaderTableName ?? "";
+    int? finishedValue = null;
+    if (headerTableName == "FMEdIssueMain" && headerData != null && headerData.ContainsKey("Finished"))
+    {
+        var finishedObj = headerData["Finished"];
+        if (finishedObj != null)
+        {
+            int finishedTemp;
+            if (int.TryParse(finishedObj.ToString(), out finishedTemp))
+            {
+                finishedValue = finishedTemp;
+            }
+        }
+    }
 }
+
+<script>
+    // ✅ 將 Finished 狀態暴露給前端 JavaScript
+    window._headerTableName = '@headerTableName';
+    window._finishedStatus = @(finishedValue?.ToString() ?? "null");
+    window._paperNum = '@PaperNum';
+</script>
 
 <div id="topToolbar" class="d-flex align-items-center mb-4" style="gap:12px;">
     <div class="btn-group" role="group" aria-label="row-nav" style="gap:6px;">
@@ -308,11 +331,40 @@ if (editBtn) {
     return ($ctrl.val() || '').toString().trim();
   };
 
-  editBtn.addEventListener('click', function () {
-    const status = getHeaderValueByLabel('單據狀態') || '';
-    if (window.BLOCK_STATUSES && window.BLOCK_STATUSES.includes(status)) {
-      Swal.fire({ icon: 'warning', title: '無法修改', text: `此單據狀態為「${status}」，不可進行修改。`}); return;
+  editBtn.addEventListener('click', async function () {
+    // ✅ 針對 FMEdIssueMain 使用 Finished 欄位檢查（數字）
+    const headerTableName = window._headerTableName;
+    console.log('🔍 [修改按鈕] headerTableName:', headerTableName);
+    console.log('🔍 [修改按鈕] finishedStatus:', window._finishedStatus);
+
+    if (headerTableName === 'FMEdIssueMain') {
+      // 使用後端傳遞的 Finished 狀態
+      const finished = window._finishedStatus;
+
+      // 狀態對照表
+      const statusMap = {0:'作業中', 1:'已確認', 2:'作廢中', 4:'已結案'};
+      const statusName = statusMap[finished] || `代碼:${finished}`;
+
+      // 如果不是作業中 (Finished != 0)，阻止修改
+      if (finished !== 0 && finished !== null) {
+        console.log('🚫 [修改按鈕] 狀態不是作業中，阻止修改');
+        Swal.fire({
+          icon: 'warning',
+          title: '無法修改',
+          html: `單據狀態：<b>${statusName}</b><br>只有「作業中」的單據才能進行修改。`
+        });
+        return;
+      }
+      console.log('✅ [修改按鈕] 狀態是作業中，允許修改');
+    } else {
+      // 一般單據使用原本的「單據狀態」文字檢查
+      const status = getHeaderValueByLabel('單據狀態') || '';
+      if (window.BLOCK_STATUSES && window.BLOCK_STATUSES.includes(status)) {
+        Swal.fire({ icon: 'warning', title: '無法修改', text: `此單據狀態為「${status}」，不可進行修改。`});
+        return;
+      }
     }
+
     isEdit = !isEdit; editBtn.textContent = isEdit ? '保留' : '修改';
     document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
       .forEach(el => { if (!el.closest('.modal')) el.disabled = !isEdit; });

@@ -600,15 +600,47 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   // 切換（檢查是否允許修改）
-  document.getElementById('btnViewEditToggle')?.addEventListener('click', () => {
+  document.getElementById('btnViewEditToggle')?.addEventListener('click', async () => {
     const id = window.selectedPaperNum;
     if (!id) return Swal.fire({ icon: 'warning', title: '請先選擇一筆單據' });
 
     const row = document.querySelector(`tr[data-paper-num="${id}"]`);
-    const status = row?.querySelector("td:nth-child(6)")?.textContent.trim() || '';
-    if (window.BLOCK_STATUSES?.includes(status)) {
-      return Swal.fire({ icon: 'warning', title: '無法修改', text: `此單據狀態為「${status}」，不可進行修改。` });
+
+    // ✅ 針對 FMEdIssueMain 使用 Finished 欄位（數字）檢查
+    const tableName = window._tableName || '@tableName';
+    if (tableName === 'FMEdIssueMain') {
+      try {
+        // 從 API 取得單頭資料
+        const response = await fetch(`/api/FMEdIssueMain/${encodeURIComponent(id)}`);
+        if (response.ok) {
+          const mainData = await response.json();
+          const finished = mainData.Finished;
+
+          // 狀態對照表
+          const statusMap = {0:'作業中', 1:'已確認', 2:'作廢中', 4:'已結案'};
+          const statusName = statusMap[finished] || `代碼:${finished}`;
+
+          // 如果不是作業中 (Finished != 0)，阻止跳轉
+          if (finished !== 0) {
+            return Swal.fire({
+              icon: 'warning',
+              title: '無法修改',
+              html: `單據狀態：<b>${statusName}</b><br>只有「作業中」的單據才能進行修改。`
+            });
+          }
+        }
+      } catch (error) {
+        console.error('檢查單據狀態時發生錯誤:', error);
+      }
+    } else {
+      // 一般單據使用原本的「單據狀態」文字檢查
+      const status = row?.querySelector("td:nth-child(6)")?.textContent.trim() || '';
+      if (window.BLOCK_STATUSES?.includes(status)) {
+        return Swal.fire({ icon: 'warning', title: '無法修改', text: `此單據狀態為「${status}」，不可進行修改。` });
+      }
     }
+
+    // 狀態檢查通過，跳轉到明細頁
     const url = detailRouteTemplate.replace("{PaperNum}", id);
     window.location.href = url;
   });
