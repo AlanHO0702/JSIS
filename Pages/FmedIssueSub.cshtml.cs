@@ -158,9 +158,9 @@ public class FMEdIssueSubModel : TableDetailModel<FmedIssuePo>
         // 改用匿名型別以便正確序列化成 JSON
         ViewData["Tabs"] = new[]
         {
-            new { Id = "po", Title = "訂單明細檔", ApiUrl = "/api/FmedIssuePo" },
-            new { Id = "mat", Title = "用料明細檔", ApiUrl = "/api/FmedIssueMat" },
-            new { Id = "layer", Title = "階段途程明細檔", ApiUrl = "/api/FmedIssueLayer" }
+            new { Id = "po", Title = "訂單明細檔", ApiUrl = "/api/FmedIssuePo", DictTable = "FMEdIssuePO" },
+            new { Id = "mat", Title = "用料明細檔", ApiUrl = "/api/FmedIssueMat", DictTable = "FMEdIssueMat" },
+            new { Id = "layer", Title = "階段途程明細檔", ApiUrl = "/api/FmedIssueLayer", DictTable = "FMEdIssueLayer" }
         };
 
         // Step 6：為每個分頁建立欄位字典（中文名稱對照）

@@ -21,6 +21,13 @@
     const el = document.getElementById(modalId);
     if (!el) { console.warn('找不到辭典 Modal 元件:', modalId); return; }
     await window.initFieldDictModal(tableName, modalId);
+
+    // 更新標題顯示當前表名
+    const displayEl = document.getElementById('dictTableNameDisplay');
+    if (displayEl && tableName) {
+      displayEl.textContent = `- ${tableName}`;
+    }
+
     new bootstrap.Modal(el).show();
   };
 
