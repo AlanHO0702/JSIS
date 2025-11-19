@@ -1,89 +1,113 @@
+// wwwroot/js/masterDetailTemplate.js
 (() => {
 
-  // ────────────────────────────────────────
-  // 🔧 辭典欄位映射
-  // ────────────────────────────────────────
-  const DICT_MAP = {
-    fieldName: f => f.FieldName || f.ColumnName || f.Field || f.Name,
-    headerText: f =>
-      f.DisplayLabel ||
-      f.DisplayName ||
-      f.HeaderText ||
-      f.FieldNameCN ||
-      f.Alias ||
-      f.Label ||
-      f.FieldName,
-    width: f => {
-      const raw =
-        f.DisplaySize ??
-        f.Width ??
-        f.iFieldWidth ??
-        f.ColumnWidth ??
-        null;
-      if (raw == null) return null;
+  // -----------------------------
+  // 🧩 全域 Lookup 快取（一般 Lookup）
+  // -----------------------------
+  const LOOKUP_CACHE = {};
 
-      let n = Number(raw);
-      if (isNaN(n) || n <= 0) return null;
+  async function loadLookup(f) {
+    const key = `${f.LookupTable}|${f.LookupKeyField}|${f.LookupResultField}`;
 
-      return n * 10; // ⭐ 每字寬 10px
-    },
-    visible: f => (f.Visible !== false && f.Visible !== 0 && f.iShow !== 0),
-    order: f => f.SerialNum ?? f.OrderNo ?? f.Order ?? f.iShowOrder ?? 99999,
-    fmt: f => f.FormatStr || f.Format || null,
-    dataType: f => f.DataType || null,
-    readOnly: f => f.ReadOnly ?? f.iReadOnly ?? f.IsReadOnly ?? 0
-  };
+    if (LOOKUP_CACHE[key]) return LOOKUP_CACHE[key];
 
-  // ────────────────────────────────────────
-  // 🔧 辭典 API
-  // ────────────────────────────────────────
-  const GET_DICT_API = (tbl) => {
-    const base = window.FIELD_DICT_GET_API || '/api/TableFieldLayout/GetTableFieldsFull';
-    const key  = window.FIELD_DICT_QUERY_KEY || 'table';
-    const u = new URL(base, window.location.origin);
-    u.searchParams.set(key, tbl);
-    if (key !== 'table')     u.searchParams.set('table', tbl);
-    if (key !== 'tableName') u.searchParams.set('tableName', tbl);
-    return u.toString();
-  };
-
-  // 主檔資料
-  const GET_MASTER_DEFAULT = (table, top, orderBy, dir) => {
-    const p = new URLSearchParams({ table, top: String(top || 200) });
-    if (orderBy) {
-      p.set("orderBy", orderBy);
-      p.set("orderDir", dir || "ASC");
+    if (!f.LookupTable || !f.LookupKeyField || !f.LookupResultField) {
+      return (LOOKUP_CACHE[key] = null);
     }
-    return `/api/CommonTable/TopRows?${p.toString()}`;
+
+    const url = `/api/TableFieldLayout/LookupData`
+      + `?table=${encodeURIComponent(f.LookupTable)}`
+      + `&key=${encodeURIComponent(f.LookupKeyField)}`
+      + `&result=${encodeURIComponent(f.LookupResultField)}`;
+
+    const rows = await fetch(url).then(r => r.json());
+    const map = {};
+
+    rows.forEach(r => {
+      // /LookupData 會回傳 { key, result0, result1, ... }
+      map[r.key] = r.result0;
+    });
+
+    LOOKUP_CACHE[key] = map;
+    return map;
+  }
+
+  // -----------------------------
+  // 🧩 OCX Lookup（第二層，非實體欄位用）
+  // -----------------------------
+  const OCX_CACHE = {};
+
+  async function loadOCXLookup(f) {
+    const key = `${f.OCXLKTableName}|${f.KeyFieldName}|${f.OCXLKResultName}`;
+
+    if (OCX_CACHE[key]) return OCX_CACHE[key];
+
+    // 只要這三個沒齊，就視為沒設定 OCX
+    if (!f.OCXLKTableName || !f.KeyFieldName || !f.OCXLKResultName) {
+      return (OCX_CACHE[key] = null);
+    }
+
+    // 這裡的 key：用「Table Key 欄位」(KeyFieldName)
+    // 這個欄位會對應到主表的某個欄位（通常是 KeySelfName）
+    const url = `/api/TableFieldLayout/LookupData`
+      + `?table=${encodeURIComponent(f.OCXLKTableName)}`
+      + `&key=${encodeURIComponent(f.KeyFieldName)}`
+      + `&result=${encodeURIComponent(f.OCXLKResultName)}`;
+
+    const rows = await fetch(url).then(r => r.json());
+    const map = {};
+
+    rows.forEach(r => {
+      // 一樣用 { key, result0 }
+      map[r.key] = r.result0;
+    });
+
+    OCX_CACHE[key] = map;
+    return map;
+  }
+
+  // -----------------------------
+  // 🧩 Dictionary Helper
+  // -----------------------------
+  const DICT_MAP = {
+    fieldName: f => f.FieldName,
+    headerText: f => f.DisplayLabel || f.FieldName,
+    order: f => f.SerialNum ?? 99999,
+    width: f => {
+      const n = Number(f.DisplaySize || f.iFieldWidth || 0);
+      return n > 0 ? n * 10 : null;   // 一字寬 10px
+    },
+    visible: f => (f.Visible ?? 1) == 1,
+    fmt: f => f.FormatStr || null,
+    dataType: f => f.DataType || null,
+    readonly: f => (f.ReadOnly ?? 0) == 1
   };
 
-  // 明細資料
-  const GET_DETAIL_BY_KEYS = (table, keyNames = [], keyValues = []) => {
-    const p = new URLSearchParams({ table });
-    keyNames.forEach(n => p.append("keyNames", n));
-    keyValues.forEach(v => p.append("keyValues", v ?? ""));
-    return `/api/CommonTable/ByKeys?${p.toString()}`;
-  };
-
-  // 格式化儲存格
+  // -----------------------------
+  // 🧩 日期 / 數字格式化
+  // -----------------------------
   const fmtCell = (val, fmt, dataType) => {
-    if (val == null) return "";
+    if (val == null || val === "") return "";
+
     if (dataType && String(dataType).toLowerCase().includes("date")) {
       const d = new Date(val);
       if (!isNaN(d)) return d.toISOString().slice(0, 10).replace(/-/g, "/");
     }
+
     if (typeof val === "number") {
-      if (fmt && fmt.includes(".000")) return val.toFixed(3);
-      if (fmt && fmt.includes(".00")) return val.toFixed(2);
+      if (fmt) {
+        if (fmt.includes(".000")) return val.toFixed(3);
+        if (fmt.includes(".00")) return val.toFixed(2);
+      }
       return val.toLocaleString();
     }
     return String(val);
   };
 
-  // ────────────────────────────────────────
-  // 🔧 畫表頭
-  // ────────────────────────────────────────
-  const buildHead = (theadTr, fields, showRowNo) => {
+  // -----------------------------
+  // 🧩 建立表頭
+  // -----------------------------
+  const buildHead = (theadTr, dict, showRowNo) => {
     theadTr.innerHTML = "";
 
     if (showRowNo) {
@@ -93,7 +117,7 @@
       theadTr.appendChild(th);
     }
 
-    fields
+    dict
       .filter(DICT_MAP.visible)
       .sort((a, b) => DICT_MAP.order(a) - DICT_MAP.order(b))
       .forEach(f => {
@@ -107,68 +131,79 @@
       });
   };
 
-
-
-  // ────────────────────────────────────────
-  // 🔧 畫表身 — cell-view + cell-edit
-  // ────────────────────────────────────────
-  const buildBody = (tbody, fields, rows, showRowNo, onRowClick, cfg) => {
+  // -----------------------------
+  // 🧩 建立表身 (含 Lookup + OCX)
+  // -----------------------------
+  const buildBody = async (tbody, dict, rows, showRowNo, onRowClick, cfg) => {
     tbody.innerHTML = "";
 
-    const visibleFields = fields
+    const fields = dict
       .filter(DICT_MAP.visible)
       .sort((a, b) => DICT_MAP.order(a) - DICT_MAP.order(b));
+
+    // 先把所有欄位的 Lookup / OCX map 都載完（各欄位只打一次 API）
+    const lookupMaps = {};
+    const ocxMaps = {};
+
+    for (const f of fields) {
+      lookupMaps[f.FieldName] = await loadLookup(f);
+      ocxMaps[f.FieldName]    = await loadOCXLookup(f);
+    }
 
     rows.forEach((row, idx) => {
       const tr = document.createElement("tr");
       tr.style.cursor = "pointer";
 
-      // ⭐ 在這裡插入 hidden PK 欄位
-      (cfg?.DetailKeyFields ?? []).forEach(k => {
-        if (row[k] !== undefined) {
-          const hid = document.createElement("input");
-          hid.type = "hidden";
-          hid.name = k;
-          hid.value = row[k];
-          hid.className = "cell-edit";
-          hid.dataset.readonly = "1";
-          tr.appendChild(hid);
-        }
-      });
-
       if (showRowNo) {
         const tdNo = document.createElement("td");
-        tdNo.textContent = idx + 1;
         tdNo.className = "text-center";
+        tdNo.textContent = idx + 1;
         tr.appendChild(tdNo);
       }
 
-      visibleFields.forEach(f => {
-        const col = DICT_MAP.fieldName(f);
-        const raw = row[col];
-        const text = fmtCell(raw, DICT_MAP.fmt(f), DICT_MAP.dataType(f));
+      fields.forEach(f => {
+        const col = f.FieldName;
+
+        // 1️⃣ 先拿原始值（實體欄位）
+        let code = row[col];
+
+        // 2️⃣ 若是「非實體欄位」，欄位本身沒有值，就改抓 KeySelfName 指向的欄位
+        if ((code == null || code === "") && f.KeySelfName) {
+          code = row[f.KeySelfName];
+        }
+
+        let display = code;
+
+        // 3️⃣ 先吃 OCX Lookup（如果有設定非實體欄位）
+        const ocxMap = ocxMaps[col];
+        if (ocxMap && code != null && ocxMap[code] != null) {
+          display = ocxMap[code];
+        }
+        else {
+          // 4️⃣ 沒 OCX 或找不到，再吃一般 Lookup
+          const lkMap = lookupMaps[col];
+          if (lkMap && code != null && lkMap[code] != null) {
+            display = lkMap[code];
+          }
+        }
 
         const td = document.createElement("td");
         td.dataset.field = col;
 
-        // 顯示
+        // 顯示文字
         const span = document.createElement("span");
         span.className = "cell-view";
-        span.textContent = text ?? "";
+        span.textContent = fmtCell(display, DICT_MAP.fmt(f), DICT_MAP.dataType(f));
 
-        // 編輯
+        // 編輯值：維持原始值（code 或 row[col]），不要用顯示文字
         const inp = document.createElement("input");
         inp.className = "form-control form-control-sm cell-edit d-none";
         inp.name = col;
-        inp.value = raw ?? "";
+        inp.value = row[col] ?? "";   // 原始欄位值
 
-        const ro = DICT_MAP.readOnly(f);
-        const isRO = ro === 1 || ro === "1" || ro === true;
-
-        inp.dataset.readonly = isRO ? "1" : "0";
-        if (isRO) {
-          inp.classList.add("readonly-cell");
+        if (DICT_MAP.readonly(f)) {
           inp.readOnly = true;
+          inp.classList.add("readonly-cell");
         }
 
         td.append(span, inp);
@@ -176,30 +211,28 @@
       });
 
       if (onRowClick) tr.addEventListener("click", () => onRowClick(tr, row));
-
       tbody.appendChild(tr);
     });
   };
 
-
-  // ────────────────────────────────────────
-  // 🔧 主→明細 Key 映射
-  // ────────────────────────────────────────
+  // ------------------------------
+  // 🧩 取得明細 Key
+  // ------------------------------
   const pickKeys = (row, keyMap) => {
     const names = [];
     const values = [];
     keyMap.forEach(k => {
-      names.push(k.detail);
-      values.push(row[k.master]);
+      // cfg.KeyMap 內的屬性命名：{ Master: "...", Detail: "..." }
+      names.push(k.Detail);
+      values.push(row[k.Master]);
     });
     return { names, values };
   };
 
-  // ────────────────────────────────────────
-  // 🔧 初始化單一 Master/Detail 區塊
-  // ────────────────────────────────────────
+  // ------------------------------
+  // 🧩 初始化單一 MasterDetail
+  // ------------------------------
   const initOne = async (cfg) => {
-
     const root = document.getElementById(cfg.DomId);
     if (!root) return;
 
@@ -207,89 +240,91 @@
     const mBody = root.querySelector(`#${cfg.DomId}-m-body`);
     const dHead = root.querySelector(`#${cfg.DomId}-d-head`);
     const dBody = root.querySelector(`#${cfg.DomId}-d-body`);
-    const mTbl  = root.querySelector('.md-master-table');
-    const dTbl  = root.querySelector('.md-detail-table');
 
-    // 啟動 F3 辭典定位（可省略）
+    const masterTbl = root.querySelector(".md-master-table");
+    const detailTbl = root.querySelector(".md-detail-table");
+
+    // F3 辭典情境綁定
     const markCtx = (el, tbl) => {
-      ['click','pointerdown','mouseenter','focusin'].forEach(ev =>
+      ["click", "pointerdown", "mouseenter"].forEach(ev =>
         el?.addEventListener(ev, () => {
-          document.querySelectorAll('.ctx-current')
-            .forEach(x => x.classList.remove('ctx-current'));
-          el.classList.add('ctx-current');
+          document.querySelectorAll(".ctx-current")
+            .forEach(x => x.classList.remove("ctx-current"));
+          el.classList.add("ctx-current");
           window._dictTableName = tbl;
         })
       );
     };
-    markCtx(mTbl, cfg.MasterDict || cfg.MasterTable);
-    markCtx(dTbl, cfg.DetailDict || cfg.DetailTable);
 
-    // ────────────────────────────────────────
-    // 1) 讀辭典
-    // ────────────────────────────────────────
-    const [mDict, dDict] = await Promise.all([
-      fetch(GET_DICT_API(cfg.MasterDict || cfg.MasterTable)).then(r => r.json()),
-      fetch(GET_DICT_API(cfg.DetailDict || cfg.DetailTable)).then(r => r.json())
-    ]);
+    markCtx(masterTbl, cfg.MasterDict || cfg.MasterTable);
+    markCtx(detailTbl, cfg.DetailDict || cfg.DetailTable);
 
-    // ────────────────────────────────────────
-    // 2) 畫 Master/Detail 表頭
-    // ────────────────────────────────────────
+    // 讀辭典（完整欄位版）
+    const mDict = await fetch(
+      `/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(cfg.MasterDict || cfg.MasterTable)}`
+    ).then(r => r.json());
+
+    const dDict = await fetch(
+      `/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(cfg.DetailDict || cfg.DetailTable)}`
+    ).then(r => r.json());
+
     buildHead(mHead, mDict, cfg.ShowRowNumber);
     buildHead(dHead, dDict, cfg.ShowRowNumber);
 
-    // ────────────────────────────────────────
-    // 3) 取得主檔資料
-    // ────────────────────────────────────────
-    const masterUrl = cfg.MasterApi?.trim()
-      ? cfg.MasterApi
-      : GET_MASTER_DEFAULT(cfg.MasterTable, cfg.MasterTop, cfg.MasterOrderBy, cfg.MasterOrderDir);
+    // 主檔資料
+    const masterUrl =
+      cfg.MasterApi?.trim()
+        ? cfg.MasterApi
+        : `/api/CommonTable/TopRows?table=${encodeURIComponent(cfg.MasterTable)}&top=${cfg.MasterTop || 200}`;
 
     const masterRows = await fetch(masterUrl).then(r => r.json());
 
-    // ────────────────────────────────────────
-    // 4) 點主檔 → 載入明細
-    // ⭐⭐⭐⭐⭐ 這裡加入自動恢復 Detail 編輯模式 ⭐⭐⭐⭐⭐
-    // ────────────────────────────────────────
+    // 主檔點選 → 載入明細
     const onMasterClick = async (tr, row) => {
-
       Array.from(mBody.children).forEach(x => x.classList.remove("selected"));
       tr.classList.add("selected");
 
-      const keyMap = (cfg.KeyMap || []).map(k => ({
-        master: k.Master,
-        detail: k.Detail
-      }));
+      const keyMap = cfg.KeyMap || [];
       const { names, values } = pickKeys(row, keyMap);
 
       const detailUrl =
-        (cfg.DetailApi && cfg.DetailApi.includes("{"))
-          ? cfg.KeyMap.reduce(
-              (u, k) => u.replaceAll(`{${k.Detail}}`, encodeURIComponent(row[k.Master] ?? "")),
-              cfg.DetailApi
-            )
-          : (cfg.DetailApi?.trim()
-             ? cfg.DetailApi
-             : GET_DETAIL_BY_KEYS(cfg.DetailTable, names, values));
+        cfg.DetailApi?.trim()
+          ? cfg.DetailApi
+          : `/api/CommonTable/ByKeys?table=${encodeURIComponent(cfg.DetailTable)}`
+              + names.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
+              + values.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("");
 
       const detailRows = await fetch(detailUrl).then(r => r.json());
 
-      // Build body
-      buildBody(dBody, dDict, detailRows, cfg.ShowRowNumber, () => {}, cfg);
+      await buildBody(
+        dBody,
+        dDict,
+        detailRows,
+        cfg.ShowRowNumber,
+        () => {},
+        cfg
+      );
 
-      // ⭐⭐⭐ 重點：如果現在是編輯模式 → 明細重新進入編輯 ⭐⭐⭐
+      // 若畫面目前在「修改中」，點主檔時要讓明細維持編輯狀態
       if (window._mdEditing && window._detailEditor) {
         window._detailEditor.toggleEdit(true);
       }
     };
 
-    // 畫主檔 body
-    buildBody(mBody, mDict, masterRows, cfg.ShowRowNumber, onMasterClick, cfg);
+    // 畫主檔
+    await buildBody(
+      mBody,
+      mDict,
+      masterRows,
+      cfg.ShowRowNumber,
+      onMasterClick,
+      cfg
+    );
   };
 
-  // ────────────────────────────────────────
-  // 5) DOM Ready → init
-  // ────────────────────────────────────────
+  // -------------------------------------------------
+  // 🧩 DOM Ready → 初始化全部 MasterDetail 區塊
+  // -------------------------------------------------
   document.addEventListener("DOMContentLoaded", () => {
     if (!window._mdConfigs) return;
     Object.values(window._mdConfigs).forEach(cfg => initOne(cfg));
