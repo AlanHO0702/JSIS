@@ -30,10 +30,30 @@ namespace PcbErpApi.Data
         public virtual DbSet<FmedVProcNisToStd> FmedVProcNisToStd { get; set; }
         public virtual DbSet<FmedIssueMain> FmedIssueMain { get; set; }
         public virtual DbSet<FmedIssueSub> FmedIssueSub { get; set; }
+        public virtual DbSet<FmedIssuePo> FmedIssuePo { get; set; }
+        public virtual DbSet<FmedIssueMat> FmedIssueMat { get; set; }
+        public virtual DbSet<FmedIssueLayer> FmedIssueLayer { get; set; }
         public virtual DbSet<AJNdClassMoney> AJNdClassMoney { get; set; }
         public virtual DbSet<AJNdClassMoneyHis> AJNdClassMoneyHis { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            // FMEdIssuePO 複合主鍵配置
+            modelBuilder.Entity<FmedIssuePo>(entity =>
+            {
+                entity.HasKey(e => new { e.PaperNum, e.Item });
+            });
+
+            // FMEdIssueMat 複合主鍵配置
+            modelBuilder.Entity<FmedIssueMat>(entity =>
+            {
+                entity.HasKey(e => new { e.PaperNum, e.Item });
+            });
+
+            // FMEdIssueLayer 複合主鍵配置
+            modelBuilder.Entity<FmedIssueLayer>(entity =>
+            {
+                entity.HasKey(e => new { e.PaperNum, e.Item });
+            });
 
         modelBuilder.Entity<SPOdMPSOutSub>(entity =>
         {
