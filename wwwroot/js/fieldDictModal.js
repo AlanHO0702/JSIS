@@ -3,6 +3,16 @@
 
 (function () {
 
+    window.showDictModal = async function (modalId = 'fieldDictModal', tableName = window._dictTableName) {
+      const el = document.getElementById(modalId);
+      if (!el) { console.warn('找不到辭典 Modal 元件:', modalId); return; }
+
+      await window.initFieldDictModal(tableName, modalId);
+
+      const md = bootstrap.Modal.getOrCreateInstance(el);
+      md.show();
+  };
+
   // 記錄滑鼠位置，F3 時可用來判斷就近的卡片
   window.__lastMouse = window.__lastMouse || { x: 0, y: 0 };
   document.addEventListener('mousemove', (e) => {
@@ -72,37 +82,90 @@
           rows.sort((a, b) => (Number(a.SerialNum ?? 9999)) - (Number(b.SerialNum ?? 9999)));
 
           tbody.innerHTML = rows.map(x => `
-            <tr data-tablename="${x.TableName || tname}" data-fieldname="${x.FieldName}">
-              <td style="width:60px"><input data-field="SerialNum" type="number" value="${x.SerialNum ?? ''}" class="form-control form-control-sm" /></td>
-              <td style="min-width:180px">${x.FieldName ?? ''}</td>
-              <td style="min-width:180px"><input data-field="DisplayLabel" value="${x.DisplayLabel ?? ''}" class="form-control form-control-sm" /></td>
+          <tr data-tablename="${x.TableName || tname}"
+              data-fieldname="${x.FieldName}"
+              ondblclick="window.editFieldDetail && window.editFieldDetail('${x.FieldName}')">
 
-              <td class="text-center" style="width:60px"><input type="checkbox" data-field="Visible"  ${(+x.Visible  === 1 ? 'checked' : '')} /></td>
-              <td class="text-center" style="width:60px"><input type="checkbox" data-field="ReadOnly" ${(+x.ReadOnly === 1 ? 'checked' : '')} /></td>
-              <td style="width:50px"><input data-field="iShowWhere" value="${x.iShowWhere ?? ''}" class="form-control form-control-sm" /></td>
+            <!-- 第 1 欄：序號 + 隱藏欄位 -->
+            <td style="width:60px">
+              <input data-field="SerialNum" type="number"
+                    value="${x.SerialNum ?? ''}" class="form-control form-control-sm" />
 
-              <td style="width:140px"><input data-field="DataType" value="${x.DataType ?? ''}" class="form-control form-control-sm"
-                    readonly style="background:#f2f2f2; color:#8a9399; border:1px solid #dee2e6;" tabindex="-1" /></td>
-              <td style="width:160px"><input data-field="FormatStr" value="${x.FormatStr ?? ''}" class="form-control form-control-sm" /></td>
-              <td><input data-field="FieldNote" value="${x.FieldNote ?? ''}" class="form-control form-control-sm" /></td>
+              <span class="d-none extra-fields">
+                <input data-field="DisplaySize"  value="${x.DisplaySize  ?? ''}" />
+                <input data-field="iLabHeight"   value="${x.iLabHeight   ?? ''}" />
+                <input data-field="iLabTop"      value="${x.iLabTop      ?? ''}" />
+                <input data-field="iLabLeft"     value="${x.iLabLeft     ?? ''}" />
+                <input data-field="iLabWidth"    value="${x.iLabWidth    ?? ''}" />
+                <input data-field="iFieldHeight" value="${x.iFieldHeight ?? ''}" />
+                <input data-field="iFieldTop"    value="${x.iFieldTop    ?? ''}" />
+                <input data-field="iFieldLeft"   value="${x.iFieldLeft   ?? ''}" />
+                <input data-field="iFieldWidth"  value="${x.iFieldWidth  ?? ''}" />
 
-              <td style="width:50px"><input data-field="DisplaySize"  value="${x.DisplaySize  ?? ''}" class="form-control form-control-sm" /></td>
-              <td style="width:50px"><input data-field="iLabHeight"   value="${x.iLabHeight   ?? ''}" class="form-control form-control-sm" /></td>
-              <td style="width:50px"><input data-field="iLabTop"      value="${x.iLabTop      ?? ''}" class="form-control form-control-sm" /></td>
-              <td style="width:50px"><input data-field="iLabLeft"     value="${x.iLabLeft     ?? ''}" class="form-control form-control-sm" /></td>
-              <td style="width:50px"><input data-field="iLabWidth"    value="${x.iLabWidth    ?? ''}" class="form-control form-control-sm" /></td>
-              <td style="width:50px"><input data-field="iFieldHeight" value="${x.iFieldHeight ?? ''}" class="form-control form-control-sm" /></td>
-              <td style="width:50px"><input data-field="iFieldTop"    value="${x.iFieldTop    ?? ''}" class="form-control form-control-sm" /></td>
-              <td style="width:50px"><input data-field="iFieldLeft"   value="${x.iFieldLeft   ?? ''}" class="form-control form-control-sm" /></td>
-              <td style="width:50px"><input data-field="iFieldWidth"  value="${x.iFieldWidth  ?? ''}" class="form-control form-control-sm" /></td>
+                <input data-field="LookupTable"       value="${x.LookupTable       ?? ''}" />
+                <input data-field="LookupKeyField"    value="${x.LookupKeyField    ?? ''}" />
+                <input data-field="LookupResultField" value="${x.LookupResultField ?? ''}" />
 
-              <td style="min-width:160px"><input data-field="LookupTable"       value="${x.LookupTable       ?? ''}" class="form-control form-control-sm" /></td>
-              <td style="min-width:140px"><input data-field="LookupKeyField"    value="${x.LookupKeyField    ?? ''}" class="form-control form-control-sm" /></td>
-              <td style="min-width:200px"><input data-field="LookupResultField" value="${x.LookupResultField ?? ''}" class="form-control form-control-sm" /></td>
+                <input data-field="IsNotesField" value="${x.IsNotesField ?? ''}" />
 
-              <td style="display:none;"><input data-field="IsNotesField" value="${x.IsNotesField ?? ''}" class="form-control form-control-sm" /></td>
-            </tr>
-          `).join('');
+                <input data-field="OCXLKTableName" value="${x.OCXLKTableName ?? ''}" />
+                <input data-field="OCXLKResultName" value="${x.OCXLKResultName?? ''}" />
+                <input data-field="KeyFieldName" value="${x.KeyFieldName ?? ''}" />
+                <input data-field="KeySelfName" value="${x.KeySelfName ?? ''}" />
+
+              </span>
+            </td>
+
+            <!-- 第 2 ~ 9 欄 -->
+            <td style="min-width:180px">${x.FieldName ?? ''}</td>
+
+            <td style="min-width:180px">
+              <input data-field="DisplayLabel" value="${x.DisplayLabel ?? ''}"
+                    class="form-control form-control-sm" />
+            </td>
+
+            <td class="text-center" style="width:40px">
+              <input type="checkbox" data-field="Visible"
+                    ${(+x.Visible === 1 ? 'checked' : '')} />
+            </td>
+
+            <td class="text-center" style="width:40px">
+              <input type="checkbox" data-field="ReadOnly"
+                    ${(+x.ReadOnly === 1 ? 'checked' : '')} />
+            </td>
+
+            <td style="width:50px">
+              <input data-field="iShowWhere" value="${x.iShowWhere ?? ''}"
+                    class="form-control form-control-sm" />
+            </td>
+
+            <td style="width:140px">
+              <input data-field="DataType" value="${x.DataType ?? ''}"
+                    class="form-control form-control-sm"
+                    readonly
+                    style="background:#f2f2f2; color:#8a9399; border:1px solid #dee2e6;"
+                    tabindex="-1" />
+            </td>
+
+            <td style="width:160px">
+              <input data-field="FormatStr" value="${x.FormatStr ?? ''}"
+                    class="form-control form-control-sm" />
+            </td>
+
+            <td>
+              <input data-field="FieldNote" value="${x.FieldNote ?? ''}"
+                    class="form-control form-control-sm" />
+            </td>
+
+            <!-- 第 10 欄：⚙ 設定按鈕 -->
+            <td style="width:60px" class="text-center">
+              <button type="button" class="btn btn-sm btn-outline-secondary"
+                      onclick="window.editFieldDetail && window.editFieldDetail('${x.FieldName}')">
+                ⚙
+              </button>
+            </td>
+          </tr>
+        `).join('');
 
           // 標記目前已載入哪一張辭典表
           tbody.setAttribute('data-loaded-for', tname);
@@ -338,5 +401,98 @@
       document.body.removeAttribute('aria-busy');
     }
   });
+
+    // ===== 欄位詳細設定：打開 modal 編輯隱藏欄位 =====
+  (function setupFieldDetailModal() {
+
+      const modalEl = document.getElementById('fieldDetailModal');
+      if (!modalEl) return;
+
+      const titleSpan = modalEl.querySelector('#fieldDetailTitle');
+      const applyBtn = modalEl.querySelector('#btnFieldDetailApply');
+
+      // 需同步的欄位（含 OCX）
+      const DETAIL_FIELDS = [
+          'DisplaySize',
+          'iLabTop', 'iLabLeft', 'iLabWidth', 'iLabHeight',
+          'iFieldTop', 'iFieldLeft', 'iFieldWidth', 'iFieldHeight',
+          'LookupTable', 'LookupKeyField', 'LookupResultField',
+          'IsNotesField',
+
+          // ★ 第二層 OCX 設定
+          'OCXLKTableName',
+          'OCXLKResultName',
+          'KeyFieldName',
+          'KeySelfName'
+      ];
+
+      let currentTr = null;
+
+      // ==================== 打開欄位設定 ====================
+      window.editFieldDetail = function (fieldName) {
+
+          const safeName = (window.CSS && CSS.escape)
+              ? CSS.escape(fieldName)
+              : fieldName.replace(/(["\\])/g, "\\$1");
+
+          // 找 TR
+          const tr = document.querySelector(`.dictTableBody tr[data-fieldname="${safeName}"]`);
+          if (!tr) {
+              alert("找不到欄位列：" + fieldName);
+              return;
+          }
+
+          currentTr = tr;
+
+          // 標題：欄位名稱 (顯示名稱)
+          const displayLabel = tr.querySelector('input[data-field="DisplayLabel"]')?.value ?? '';
+          titleSpan.textContent = fieldName + (displayLabel ? `（${displayLabel}）` : '');
+
+          // TR → Modal
+          DETAIL_FIELDS.forEach(name => {
+
+              const rowInput = tr.querySelector(`input[data-field="${name}"]`);
+              const dlgInput = modalEl.querySelector(`[data-detail-field="${name}"]`);
+
+              if (!dlgInput) return;
+
+              if (name === "IsNotesField") {
+                  dlgInput.checked = (rowInput?.value === "1");
+              }
+              else {
+                  dlgInput.value = rowInput?.value ?? "";
+              }
+          });
+
+          bootstrap.Modal.getOrCreateInstance(modalEl).show();
+      };
+
+      // ==================== 套用 ====================
+      if (applyBtn) {
+          applyBtn.addEventListener("click", () => {
+
+              if (!currentTr) return;
+
+              // Modal → TR
+              DETAIL_FIELDS.forEach(name => {
+
+                  const rowInput = currentTr.querySelector(`input[data-field="${name}"]`);
+                  const dlgInput = modalEl.querySelector(`[data-detail-field="${name}"]`);
+
+                  if (!rowInput || !dlgInput) return;
+
+                  if (name === 'IsNotesField') {
+                      rowInput.value = dlgInput.checked ? "1" : "0";
+                  } else {
+                      rowInput.value = dlgInput.value;
+                  }
+              });
+
+              bootstrap.Modal.getInstance(modalEl)?.hide();
+          });
+      }
+
+  })();
+
 
 })();
