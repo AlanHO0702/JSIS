@@ -196,13 +196,48 @@
             html += `<tr data-paper-num="${paperNum}" data-item="${item}" data-state="unchanged">`;
             fields.forEach(field => {
                 const value = row[field] ?? '';
-                html += `<td><span class="cell-view">${value}</span></td>`;
+                // ✅ 雙元素：顯示模式 + 編輯模式
+                html += `<td>
+                    <span class="cell-view">${value}</span>
+                    <input type="text"
+                           class="cell-edit d-none"
+                           data-field="${field}"
+                           value="${value}">
+                </td>`;
             });
             html += '</tr>';
         });
 
         html += '</tbody></table></div>';
         container.insertAdjacentHTML('beforeend', html);
+
+        // ✅ 固定每個欄位的寬度（防止切換編輯模式時欄位寬度改變）
+        // 使用 requestAnimationFrame 確保瀏覽器完成佈局後再測量寬度
+        requestAnimationFrame(() => {
+            const table = container.querySelector('.erp-table');
+            if (table && table.rows.length > 0) {
+                const headerCells = table.rows[0].cells;
+                for (let i = 0; i < headerCells.length; i++) {
+                    const width = headerCells[i].offsetWidth;
+                    // 設定表頭寬度
+                    headerCells[i].style.width = width + 'px';
+                    headerCells[i].style.minWidth = width + 'px';
+                    headerCells[i].style.maxWidth = width + 'px';
+
+                    // 同時設定所有列的對應欄位寬度
+                    for (let j = 1; j < table.rows.length; j++) {
+                        if (table.rows[j].cells[i]) {
+                            table.rows[j].cells[i].style.width = width + 'px';
+                            table.rows[j].cells[i].style.minWidth = width + 'px';
+                            table.rows[j].cells[i].style.maxWidth = width + 'px';
+                        }
+                    }
+                }
+                // 鎖定寬度後，改用 fixed layout 防止內容改變影響寬度
+                table.style.tableLayout = 'fixed';
+                console.log('🔒 欄位寬度已鎖定:', Array.from(headerCells).map(c => c.offsetWidth));
+            }
+        });
 
         // 綁定列選取事件
         const tableWrapper = container.querySelector('.erp-table-wrapper');
@@ -368,7 +403,14 @@
         // 建立新列 HTML
         let html = `<tr data-paper-num="${paperNum}" data-item="${newItem}" data-state="added" class="row-selected">`;
         fields.forEach(field => {
-            html += `<td><span class="cell-view"></span></td>`;
+            // ✅ 雙元素：顯示模式 + 編輯模式
+            html += `<td>
+                <span class="cell-view"></span>
+                <input type="text"
+                       class="cell-edit d-none"
+                       data-field="${field}"
+                       value="">
+            </td>`;
         });
         html += '</tr>';
 
@@ -553,6 +595,7 @@
     border-spacing: 0;
     font-size: 1.06em;
     background: #fff;
+    table-layout: auto;  /* ← 改回自動，讓欄位根據內容調整寬度 */
 }
 
 .multi-tab-detail .erp-table thead tr {
@@ -562,7 +605,7 @@
 .multi-tab-detail .erp-table th,
 .multi-tab-detail .erp-table td {
     background: #f1f5fb;
-    padding: 7px 12px;
+    padding: 0;  /* ← 改為 0，由內部元素控制 padding */
     border-bottom: 1px solid #c5d1e4;
     white-space: nowrap;
     text-align: center;
@@ -600,11 +643,45 @@
     padding: 0;
 }
 
+/* ✅ 檢視模式的 span 樣式 */
 .multi-tab-detail .erp-table td .cell-view {
-    display: inline-block;
+    display: block;  /* ← 改用 block，讓它填滿整個 td */
     width: 100%;
+    min-height: 34px;  /* ← 最小高度確保一致 */
     text-align: inherit;
     padding: 7px 12px;
+    box-sizing: border-box;
+    white-space: nowrap;
+    line-height: 20px;  /* ← 固定行高 */
+}
+
+/* ✅ 編輯模式的 input 樣式（融入表格，與 SpodOrderSub 一致） */
+.multi-tab-detail .erp-table td {
+    position: relative;
+}
+
+.multi-tab-detail .erp-table .cell-edit {
+    display: block;  /* ← 改用 block，與 .cell-view 一致 */
+    width: 100% !important;
+    min-height: 34px;  /* ← 與 .cell-view 相同的最小高度 */
+    box-sizing: border-box;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    background: #fff !important;
+    font-size: inherit !important;
+    font-weight: inherit !important;
+    font-family: inherit !important;
+    line-height: 20px !important;  /* ← 與 .cell-view 相同的行高 */
+    text-align: inherit !important;
+    padding: 7px 12px;  /* ← 與 .cell-view 完全相同的 padding */
+    white-space: nowrap;
+}
+
+.multi-tab-detail .erp-table .cell-edit:focus {
+    outline: 2px solid #0d6efd;
+    outline-offset: -2px;
+    background: #fffef0 !important;  /* ← focus 時淡黃色背景 */
 }
 
 /* 選取列的樣式 */
@@ -628,5 +705,14 @@
 
 .multi-tab-detail .erp-table tbody tr[data-state="added"] td {
     background-color: #fff3cd !important;
+}
+
+/* ✅ 已修改但未儲存的列 */
+.multi-tab-detail .erp-table tbody tr[data-state="modified"] {
+    background-color: #e7f3ff !important;
+}
+
+.multi-tab-detail .erp-table tbody tr[data-state="modified"] td {
+    background-color: #e7f3ff !important;
 }
 </style>
