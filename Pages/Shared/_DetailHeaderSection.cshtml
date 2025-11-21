@@ -350,8 +350,10 @@ if (editBtn) {
             const mainData = await resp.json();
             const currentFinished = mainData.Finished;
 
-            if (currentFinished !== 0 && currentFinished !== null) {
-              const statusMap = {0:'作業中', 1:'已確認', 2:'作廢中', 4:'已結案'};
+            // 允許儲存的狀態：作業中(0) 和 審核中(3)
+            const allowedStatuses = [0, 3];
+            if (currentFinished !== null && !allowedStatuses.includes(currentFinished)) {
+              const statusMap = {0:'作業中', 1:'已確認', 2:'作廢中', 3:'審核中', 4:'已結案'};
               const statusName = statusMap[currentFinished] || `代碼:${currentFinished}`;
 
               console.log('🚫 [保留] 資料庫狀態已變更，無法儲存');
@@ -578,20 +580,21 @@ if (editBtn) {
         const finished = window._finishedStatus;
 
         // 狀態對照表
-        const statusMap = {0:'作業中', 1:'已確認', 2:'作廢中', 4:'已結案'};
+        const statusMap = {0:'作業中', 1:'已確認', 2:'作廢中', 3:'審核中', 4:'已結案'};
         const statusName = statusMap[finished] || `代碼:${finished}`;
 
-        // 如果不是作業中 (Finished != 0)，阻止修改
-        if (finished !== 0 && finished !== null) {
-          console.log('🚫 [修改按鈕] 狀態不是作業中，阻止修改');
+        // 允許修改的狀態：作業中(0) 和 審核中(3)
+        const allowedStatuses = [0, 3];
+        if (finished !== null && !allowedStatuses.includes(finished)) {
+          console.log('🚫 [修改按鈕] 狀態不允許修改，阻止修改');
           Swal.fire({
             icon: 'warning',
             title: '無法修改',
-            html: `單據狀態：<b>${statusName}</b><br>只有「作業中」的單據才能進行修改。`
+            html: `單據狀態：<b>${statusName}</b><br>只有「作業中」或「審核中」的單據才能進行修改。`
           });
           return;
         }
-        console.log('✅ [修改按鈕] 狀態是作業中，允許修改');
+        console.log('✅ [修改按鈕] 狀態允許修改');
       } else {
         // 一般單據使用原本的「單據狀態」文字檢查
         const status = getHeaderValueByLabel('單據狀態') || '';
@@ -878,6 +881,7 @@ body { background: #f7f9fb !important; }
 .highlight-blue{ color:#2564b3; font-weight:700; }
 
 /* --- Action Rail 基礎版位 & 內容右移（固定在樣板）--- */
+/* 更新時間: 2025-03-20 13:45 */
 :root{
   --fab-left: 12px;
   --fab-width: 100px;
@@ -889,17 +893,41 @@ body { background: #f7f9fb !important; }
   position: fixed;
   left: var(--fab-left);
   top: 80px;
+  max-height: calc(100vh - 100px); /* 限制最大高度，避免超出視窗 */
   display: flex;
   flex-direction: column;
   gap: 10px;
   z-index: 900;
+  overflow-y: scroll; /* 永遠顯示捲軸，避免寬度變化 */
+  overflow-x: visible; /* 允許按鈕超出容器，避免被捲軸遮住 */
+}
+
+/* action-rail 的捲軸樣式 - 使用 overlay 模式不佔空間 */
+.action-rail::-webkit-scrollbar {
+  width: 8px;
+}
+
+.action-rail::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.action-rail::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.action-rail::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.4);
+  background-clip: padding-box;
 }
 
 /* 按鈕的共同外觀（保持在樣板，讓所有頁面一致） */
 .fab{
   position: relative;
   min-width: var(--fab-width);
-  padding: 8px 12px;
+  padding: 8px 10px;
   background:#ffc107;
   color:#090101;
   font-weight:700;
