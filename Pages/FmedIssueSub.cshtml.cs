@@ -5,8 +5,9 @@ using PcbErpApi.Models;
 
 /// <summary>
 /// FMEdIssueSub（製令單明細）頁面的 PageModel，繼承共用樣板 TableDetailModel
+/// 目前顯示 FMEdIssuePO (訂單關聯資料)
 /// </summary>
-public class FMEdIssueSubModel : TableDetailModel<FmedIssueSub>
+public class FMEdIssueSubModel : TableDetailModel<FmedIssuePo>
 {
     #region 單頭/單身資料屬性
 
@@ -34,10 +35,10 @@ public class FMEdIssueSubModel : TableDetailModel<FmedIssueSub>
     #region 覆寫樣板所需屬性
 
     // 單身資料表名稱
-    public override string TableName => "FMEdIssueSub";
+    public override string TableName => "FMEdIssuePO";
 
     // 單身 API 相對路徑
-    public override string ApiDetailUrl => "/api/FMEdIssueSub";
+    public override string ApiDetailUrl => "/api/FMEdIssuePO";
 
     // 單頭資料表名稱
     public override string HeaderTableName => "FMEdIssueMain";
@@ -151,6 +152,38 @@ public class FMEdIssueSubModel : TableDetailModel<FmedIssueSub>
         ViewData["HeaderLookupMap"] = HeaderLookupDisplayMap.ContainsKey(headerKey)
             ? HeaderLookupDisplayMap[headerKey]
             : new Dictionary<string, string>();
+
+        // Step 5：設定多分頁配置
+        ViewData["PaperNum"] = PaperNum;
+        // 改用匿名型別以便正確序列化成 JSON
+        ViewData["Tabs"] = new[]
+        {
+            new { Id = "po", Title = "訂單明細檔", ApiUrl = "/api/FmedIssuePo", DictTable = "FMEdIssuePO" },
+            new { Id = "mat", Title = "用料明細檔", ApiUrl = "/api/FmedIssueMat", DictTable = "FMEdIssueMat" },
+            new { Id = "layer", Title = "階段途程明細檔", ApiUrl = "/api/FmedIssueLayer", DictTable = "FMEdIssueLayer" }
+        };
+
+        // Step 6：為每個分頁建立欄位字典（中文名稱對照）
+        // 只包含 Visible == 1 的欄位
+
+        // 取得各分頁的欄位設定
+        var poFields = _dictService.GetFieldDict("FMEdIssuePO", typeof(FmedIssuePo));
+        var matFields = _dictService.GetFieldDict("FMEdIssueMat", typeof(FmedIssueMat));
+        var layerFields = _dictService.GetFieldDict("FMEdIssueLayer", typeof(FmedIssueLayer));
+
+        var tabFieldDicts = new Dictionary<string, Dictionary<string, string>>
+        {
+            ["po"] = poFields
+                .Where(f => f.Visible == 1)
+                .ToDictionary(f => f.FieldName, f => f.DisplayLabel ?? f.FieldName),
+            ["mat"] = matFields
+                .Where(f => f.Visible == 1)
+                .ToDictionary(f => f.FieldName, f => f.DisplayLabel ?? f.FieldName),
+            ["layer"] = layerFields
+                .Where(f => f.Visible == 1)
+                .ToDictionary(f => f.FieldName, f => f.DisplayLabel ?? f.FieldName)
+        };
+        ViewData["TabFieldDicts"] = tabFieldDicts;
     }
 
     #endregion

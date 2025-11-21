@@ -19,7 +19,9 @@ public class DictApiController : ControllerBase
         _connStr = config.GetConnectionString("DefaultConnection") ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
     }
 
-    // ✅ 更新辭典欄位（含所有版面欄位）
+    // ⭐ 語系更新語系表的語言代碼
+    const string DefaultLang = "TW";
+
     [HttpPost]
     public async Task<IActionResult> UpdateDictFields([FromBody] List<UpdateDictFieldInput> list)
     {
@@ -62,6 +64,11 @@ public class DictApiController : ControllerBase
                     setList.Add("Visible = @Visible");
                     cmd.Parameters.AddWithValue("@Visible", input.Visible);
                 }
+                if (input.ReadOnly != null)
+                {
+                    setList.Add("ReadOnly = @ReadOnly");
+                    cmd.Parameters.AddWithValue("@ReadOnly", input.ReadOnly);
+                }
                 if (input.FormatStr != null)
                 {
                     setList.Add("FormatStr = @FormatStr");
@@ -73,7 +80,7 @@ public class DictApiController : ControllerBase
                     cmd.Parameters.AddWithValue("@LookupResultField", input.LookupResultField);
                 }
 
-                // ===== 新增欄位：版面設定 =====
+                // ===== Layout / Size 欄位 =====
                 void AddInt(string name, int? value)
                 {
                     if (value.HasValue)
@@ -101,26 +108,84 @@ public class DictApiController : ControllerBase
                 AddInt("iFieldLeft", input.iFieldLeft);
                 AddInt("iFieldWidth", input.iFieldWidth);
                 AddInt("iShowWhere", input.iShowWhere);
-                AddInt("ReadOnly", input.ReadOnly);
 
                 AddStr("LookupTable", input.LookupTable);
                 AddStr("LookupKeyField", input.LookupKeyField);
                 AddStr("IsNotesField", input.IsNotesField);
-                
 
-                if (setList.Count == 0) continue; // 沒有要更新的欄位就跳過
+                if (setList.Count == 0) continue;
 
+                // === 寫入主表 CURdTableField ===
                 sql += string.Join(", ", setList);
                 sql += " WHERE TableName = @TableName AND FieldName = @FieldName";
                 cmd.CommandText = sql;
                 cmd.Connection = conn;
-
                 await cmd.ExecuteNonQueryAsync();
+
+                // === ⭐ 同步：寫入語系表 CURdTableFieldLang (只有 TW) ===
+                var langCmd = new SqlCommand(@"
+    IF EXISTS (
+        SELECT 1 FROM CURdTableFieldLang 
+        WHERE TableName=@TableName AND FieldName=@FieldName AND LanguageId=@Lang
+    )
+    BEGIN
+        UPDATE CURdTableFieldLang
+        SET 
+            DisplayLabel = COALESCE(@DisplayLabel, DisplayLabel),
+            DisplaySize  = COALESCE(@DisplaySize, DisplaySize),
+            iLabHeight   = COALESCE(@iLabHeight, iLabHeight),
+            iLabTop      = COALESCE(@iLabTop, iLabTop),
+            iLabLeft     = COALESCE(@iLabLeft, iLabLeft),
+            iLabWidth    = COALESCE(@iLabWidth, iLabWidth),
+            iFieldHeight = COALESCE(@iFieldHeight, iFieldHeight),
+            iFieldTop    = COALESCE(@iFieldTop, iFieldTop),
+            iFieldLeft   = COALESCE(@iFieldLeft, iFieldLeft),
+            iFieldWidth  = COALESCE(@iFieldWidth, iFieldWidth),
+            iShowWhere   = COALESCE(@iShowWhere, iShowWhere)
+        WHERE TableName=@TableName AND FieldName=@FieldName AND LanguageId=@Lang
+    END
+    ELSE
+    BEGIN
+        INSERT INTO CURdTableFieldLang
+        (LanguageId, TableName, FieldName, DisplayLabel, DisplaySize,
+        iLabHeight, iLabTop, iLabLeft, iLabWidth,
+        iFieldHeight, iFieldTop, iFieldLeft, iFieldWidth, iShowWhere)
+        VALUES (
+            @Lang, @TableName, @FieldName,
+            @DisplayLabel, @DisplaySize,
+            @iLabHeight, @iLabTop, @iLabLeft, @iLabWidth,
+            @iFieldHeight, @iFieldTop, @iFieldLeft, @iFieldWidth, @iShowWhere
+        )
+    END
+    ", conn);
+
+                langCmd.Parameters.AddWithValue("@Lang", DefaultLang);
+                langCmd.Parameters.AddWithValue("@TableName", input.TableName ?? "");
+                langCmd.Parameters.AddWithValue("@FieldName", input.FieldName ?? "");
+
+                langCmd.Parameters.AddWithValue("@DisplayLabel", (object?)input.DisplayLabel ?? DBNull.Value);
+                langCmd.Parameters.AddWithValue("@DisplaySize", (object?)input.DisplaySize ?? DBNull.Value);
+
+                langCmd.Parameters.AddWithValue("@iLabHeight", (object?)input.iLabHeight ?? DBNull.Value);
+                langCmd.Parameters.AddWithValue("@iLabTop", (object?)input.iLabTop ?? DBNull.Value);
+                langCmd.Parameters.AddWithValue("@iLabLeft", (object?)input.iLabLeft ?? DBNull.Value);
+                langCmd.Parameters.AddWithValue("@iLabWidth", (object?)input.iLabWidth ?? DBNull.Value);
+
+                langCmd.Parameters.AddWithValue("@iFieldHeight", (object?)input.iFieldHeight ?? DBNull.Value);
+                langCmd.Parameters.AddWithValue("@iFieldTop", (object?)input.iFieldTop ?? DBNull.Value);
+                langCmd.Parameters.AddWithValue("@iFieldLeft", (object?)input.iFieldLeft ?? DBNull.Value);
+                langCmd.Parameters.AddWithValue("@iFieldWidth", (object?)input.iFieldWidth ?? DBNull.Value);
+
+                langCmd.Parameters.AddWithValue("@iShowWhere", (object?)input.iShowWhere ?? DBNull.Value);
+
+                await langCmd.ExecuteNonQueryAsync();
             }
         }
 
         return Ok(new { success = true });
     }
+
+
 
     public class DictLayoutInput
     {

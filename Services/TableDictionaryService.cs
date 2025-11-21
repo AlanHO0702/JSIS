@@ -62,11 +62,11 @@ public class TableDictionaryService : ITableDictionaryService
             if (lkSetting == null) continue;
 
             var ocxTableName = field.OCXLKTableName;
-            var resultField = field.OCXLKResultName;
+            var ocxResultName = field.OCXLKResultName;
             var keyField = lkSetting.KeyFieldName;
 
             // 用 raw SQL 動態查表
-            var sql = $"SELECT [{keyField}], [{resultField}] FROM [{ocxTableName}]";
+            var sql = $"SELECT [{keyField}], [{ocxResultName}] FROM [{ocxTableName}]";
             var conn = _context.Database.GetDbConnection();
             var lookupDict = new Dictionary<string, string>();
 
@@ -79,7 +79,7 @@ public class TableDictionaryService : ITableDictionaryService
                     while (reader.Read())
                     {
                         var key = reader[keyField]?.ToString();
-                        var value = reader[resultField]?.ToString();
+                        var value = reader[ocxResultName]?.ToString();
                         if (key != null && value != null)
                         {
                             lookupDict[key] = value;

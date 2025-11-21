@@ -80,7 +80,13 @@ class ToolbarHandler {
       const data = await resp.json();
       const paperNum = data.paperNum || data.PaperNum || '';
       if (paperNum) {
-        window.location = this.detailRouteTemplate.replace("{PaperNum}", paperNum);
+        // 支援兩種格式的佔位符：{PaperNum} 和 {0}
+        console.log('[ToolbarHandler] detailRouteTemplate:', this.detailRouteTemplate);
+        console.log('[ToolbarHandler] paperNum:', paperNum);
+        let url = this.detailRouteTemplate.replace(/\{PaperNum\}/gi, paperNum);
+        url = url.replace(/\{0\}/g, paperNum);
+        console.log('[ToolbarHandler] final URL:', url);
+        window.location = url;
       } else {
         await Swal.fire({ icon: 'success', title: '新增成功，但未取得單號！' });
         location.reload();

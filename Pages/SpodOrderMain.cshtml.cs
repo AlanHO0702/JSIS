@@ -12,7 +12,6 @@ public class SpodOrdersModel : TableListModel<SpodOrderMain>
         : base(httpClientFactory, dictService, context, logger) {  _logger = logger;}
 
     public override string TableName => "SpodOrderMain";
-
-
+    public override string ApiPagedUrl => "/api/SPOdOrderMain/paged";  // 修正大小寫不一致問題
 
 }

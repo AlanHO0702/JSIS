@@ -1,0 +1,426 @@
+@page
+@{
+    ViewData["Title"] = "頁籤配置管理 (智能版)";
+}
+
+<!-- 新增/編輯 Modal - 智能版 -->
+<div class="modal fade" id="tabEditModalSmart" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">新增頁籤 (智能輔助)</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="tabEditFormSmart">
+
+                    <!-- 步驟指示器 -->
+                    <div class="mb-4">
+                        <div class="progress" style="height: 3px;">
+                            <div class="progress-bar" id="stepProgress" style="width: 33%"></div>
+                        </div>
+                        <div class="d-flex justify-content-between mt-2">
+                            <small class="text-muted step-indicator active" data-step="1">
+                                <i class="bi bi-1-circle-fill"></i> 選擇表格
+                            </small>
+                            <small class="text-muted step-indicator" data-step="2">
+                                <i class="bi bi-2-circle"></i> 確認資訊
+                            </small>
+                            <small class="text-muted step-indicator" data-step="3">
+                                <i class="bi bi-3-circle"></i> 完成
+                            </small>
+                        </div>
+                    </div>
+
+                    <!-- Step 1: 選擇明細表 -->
+                    <div class="step-content" data-step="1">
+                        <div class="mb-3">
+                            <label class="form-label">
+                                <i class="bi bi-table"></i> 選擇明細表 *
+                            </label>
+                            <select class="form-select form-select-lg" id="smartDetailTable" required>
+                                <option value="">-- 請選擇明細表 --</option>
+                            </select>
+                            <div class="form-text">
+                                <i class="bi bi-lightbulb"></i>
+                                系統會自動從資料庫讀取可用的表格清單
+                            </div>
+                        </div>
+
+                        <!-- 載入中提示 -->
+                        <div id="loadingTables" class="text-center py-4 d-none">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">載入中...</span>
+                            </div>
+                            <p class="mt-2 text-muted">正在讀取資料庫表格...</p>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: 確認推導結果 -->
+                    <div class="step-content d-none" data-step="2">
+                        <div class="alert alert-info">
+                            <i class="bi bi-magic"></i>
+                            <strong>智能推導完成!</strong> 請確認以下資訊是否正確
+                        </div>
+
+                        <div class="row g-3">
+                            <!-- 頁籤標題 -->
+                            <div class="col-md-6">
+                                <label class="form-label">
+                                    <i class="bi bi-tag"></i> 頁籤標題 *
+                                </label>
+                                <input type="text" class="form-control" id="smartTabTitle" required>
+                                <div class="confidence-badge" data-field="tabTitle"></div>
+                            </div>
+
+                            <!-- 頁籤ID -->
+                            <div class="col-md-6">
+                                <label class="form-label">
+                                    <i class="bi bi-hash"></i> 頁籤ID *
+                                </label>
+                                <input type="text" class="form-control" id="smartTabId" required
+                                       pattern="[a-z0-9_]+" title="只能使用小寫英文、數字、底線">
+                                <div class="confidence-badge" data-field="tabId"></div>
+                            </div>
+
+                            <!-- API路徑 -->
+                            <div class="col-md-12">
+                                <label class="form-label">
+                                    <i class="bi bi-link-45deg"></i> API路徑 *
+                                </label>
+                                <input type="text" class="form-control" id="smartApiUrl" required>
+                                <div class="confidence-badge" data-field="apiUrl"></div>
+                            </div>
+
+                            <!-- 辭典表 -->
+                            <div class="col-md-6">
+                                <label class="form-label">
+                                    <i class="bi bi-book"></i> 辭典表名稱
+                                </label>
+                                <input type="text" class="form-control" id="smartDictTable">
+                                <div class="form-text">留空則使用明細表名稱</div>
+                            </div>
+
+                            <!-- 排序 -->
+                            <div class="col-md-6">
+                                <label class="form-label">
+                                    <i class="bi bi-sort-numeric-down"></i> 排序順序
+                                </label>
+                                <input type="number" class="form-control" id="smartTabOrder" min="1">
+                            </div>
+                        </div>
+
+                        <!-- 摺疊進階設定 -->
+                        <div class="mt-3">
+                            <a class="text-decoration-none" data-bs-toggle="collapse" href="#advancedSettings">
+                                <i class="bi bi-gear"></i> 進階設定 (選填)
+                            </a>
+                            <div class="collapse" id="advancedSettings">
+                                <div class="card card-body mt-2">
+                                    <div class="mb-3">
+                                        <label class="form-label">權限角色</label>
+                                        <input type="text" class="form-control" id="smartRequiredRole"
+                                               placeholder="例如: Admin, Manager">
+                                        <div class="form-text">留空表示所有人可見</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 驗證結果 -->
+                        <div class="mt-4" id="validationResult"></div>
+                    </div>
+
+                    <!-- Step 3: 完成 -->
+                    <div class="step-content d-none" data-step="3">
+                        <div class="text-center py-4">
+                            <i class="bi bi-check-circle text-success" style="font-size: 4rem;"></i>
+                            <h4 class="mt-3">頁籤配置已建立!</h4>
+                            <p class="text-muted">你可以在主檔頁面看到新的頁籤</p>
+                            <button type="button" class="btn btn-primary mt-3" data-bs-dismiss="modal">
+                                完成
+                            </button>
+                        </div>
+                    </div>
+
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="btnPrevStep">
+                    <i class="bi bi-arrow-left"></i> 上一步
+                </button>
+                <button type="button" class="btn btn-primary" id="btnNextStep">
+                    下一步 <i class="bi bi-arrow-right"></i>
+                </button>
+                <button type="button" class="btn btn-success d-none" id="btnSaveTabSmart">
+                    <i class="bi bi-check-lg"></i> 確定新增
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.step-indicator.active {
+    color: #0d6efd !important;
+    font-weight: bold;
+}
+
+.step-indicator i {
+    font-size: 1.2rem;
+}
+
+.confidence-badge {
+    font-size: 0.75rem;
+    margin-top: 0.25rem;
+}
+
+.confidence-high::before {
+    content: "✓ 推導準確度: 高";
+    color: #28a745;
+}
+
+.confidence-medium::before {
+    content: "⚠ 推導準確度: 中 (建議檢查)";
+    color: #ffc107;
+}
+
+.confidence-low::before {
+    content: "⚠ 推導準確度: 低 (請修改)";
+    color: #dc3545;
+}
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+let currentStep = 1;
+let suggestedConfig = null;
+let availableTables = [];
+
+// 開啟智能新增 Modal
+function openSmartAddModal() {
+    currentStep = 1;
+    document.getElementById('tabEditFormSmart').reset();
+    showStep(1);
+    loadAvailableTables();
+    new bootstrap.Modal(document.getElementById('tabEditModalSmart')).show();
+}
+
+// 載入可用的表格清單
+async function loadAvailableTables() {
+    const selectEl = document.getElementById('smartDetailTable');
+    const loadingEl = document.getElementById('loadingTables');
+
+    loadingEl.classList.remove('d-none');
+    selectEl.disabled = true;
+
+    try {
+        const response = await fetch('/api/TabConfigHelper/available-tables');
+        if (!response.ok) throw new Error('載入失敗');
+
+        availableTables = await response.json();
+
+        selectEl.innerHTML = '<option value="">-- 請選擇明細表 --</option>';
+        availableTables.forEach(table => {
+            const option = document.createElement('option');
+            option.value = table.tableName;
+            option.textContent = table.displayText;
+            selectEl.appendChild(option);
+        });
+
+        selectEl.disabled = false;
+        loadingEl.classList.add('d-none');
+    } catch (error) {
+        Swal.fire({ icon: 'error', title: '載入表格清單失敗', text: error.message });
+        selectEl.disabled = false;
+        loadingEl.classList.add('d-none');
+    }
+}
+
+// 當選擇表格時,自動推導配置
+document.getElementById('smartDetailTable')?.addEventListener('change', async (e) => {
+    const detailTable = e.target.value;
+    if (!detailTable) return;
+
+    try {
+        // 顯示載入中
+        Swal.fire({
+            title: '智能推導中...',
+            html: '正在分析表格結構和資料辭典',
+            allowOutsideClick: false,
+            didOpen: () => { Swal.showLoading(); }
+        });
+
+        // 呼叫推導 API
+        const response = await fetch('/api/TabConfigHelper/suggest-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                masterTable: currentMasterTable,
+                detailTable: detailTable
+            })
+        });
+
+        if (!response.ok) throw new Error('推導失敗');
+
+        suggestedConfig = await response.json();
+
+        // 填入推導結果
+        document.getElementById('smartTabId').value = suggestedConfig.tabId;
+        document.getElementById('smartTabTitle').value = suggestedConfig.tabTitle;
+        document.getElementById('smartApiUrl').value = suggestedConfig.apiUrl;
+        document.getElementById('smartDictTable').value = suggestedConfig.dictTable;
+        document.getElementById('smartTabOrder').value = suggestedConfig.tabOrder;
+
+        // 顯示推導準確度
+        updateConfidenceBadges(suggestedConfig.confidence);
+
+        Swal.close();
+
+        // 自動進入下一步
+        setTimeout(() => nextStep(), 500);
+
+    } catch (error) {
+        Swal.fire({ icon: 'error', title: '推導失敗', text: error.message });
+    }
+});
+
+// 更新推導準確度標籤
+function updateConfidenceBadges(confidence) {
+    Object.keys(confidence).forEach(field => {
+        const level = confidence[field];
+        const badge = document.querySelector(`[data-field="${field}"]`);
+        if (badge) {
+            badge.className = `confidence-badge confidence-${level}`;
+        }
+    });
+}
+
+// 步驟導航
+function showStep(step) {
+    currentStep = step;
+
+    // 更新進度條
+    document.getElementById('stepProgress').style.width = `${(step / 3) * 100}%`;
+
+    // 更新步驟指示器
+    document.querySelectorAll('.step-indicator').forEach(el => {
+        const stepNum = parseInt(el.dataset.step);
+        el.classList.toggle('active', stepNum === step);
+    });
+
+    // 顯示對應內容
+    document.querySelectorAll('.step-content').forEach(el => {
+        const stepNum = parseInt(el.dataset.step);
+        el.classList.toggle('d-none', stepNum !== step);
+    });
+
+    // 更新按鈕狀態
+    document.getElementById('btnPrevStep').classList.toggle('d-none', step === 1);
+    document.getElementById('btnNextStep').classList.toggle('d-none', step === 3);
+    document.getElementById('btnSaveTabSmart').classList.toggle('d-none', step !== 2);
+}
+
+function nextStep() {
+    if (currentStep === 1) {
+        // 檢查是否已選擇表格
+        if (!document.getElementById('smartDetailTable').value) {
+            Swal.fire({ icon: 'warning', title: '請先選擇明細表' });
+            return;
+        }
+    } else if (currentStep === 2) {
+        // 進行驗證
+        validateAndSave();
+        return;
+    }
+
+    showStep(currentStep + 1);
+}
+
+function prevStep() {
+    showStep(currentStep - 1);
+}
+
+// 驗證並儲存
+async function validateAndSave() {
+    const data = {
+        masterTable: currentMasterTable,
+        tabId: document.getElementById('smartTabId').value,
+        detailTable: document.getElementById('smartDetailTable').value,
+        apiUrl: document.getElementById('smartApiUrl').value,
+        dictTable: document.getElementById('smartDictTable').value || null
+    };
+
+    try {
+        // 先驗證
+        Swal.fire({
+            title: '驗證中...',
+            html: '正在檢查配置是否正確',
+            allowOutsideClick: false,
+            didOpen: () => { Swal.showLoading(); }
+        });
+
+        const validateResponse = await fetch('/api/TabConfigHelper/validate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        const validation = await validateResponse.json();
+
+        // 顯示驗證結果
+        const resultEl = document.getElementById('validationResult');
+        if (validation.errors && validation.errors.length > 0) {
+            resultEl.innerHTML = `
+                <div class="alert alert-danger">
+                    <strong>發現錯誤:</strong>
+                    <ul class="mb-0">${validation.errors.map(e => `<li>${e}</li>`).join('')}</ul>
+                </div>
+            `;
+            Swal.close();
+            return;
+        }
+
+        if (validation.warnings && validation.warnings.length > 0) {
+            resultEl.innerHTML = `
+                <div class="alert alert-warning">
+                    <strong>提醒:</strong>
+                    <ul class="mb-0">${validation.warnings.map(w => `<li>${w}</li>`).join('')}</ul>
+                </div>
+            `;
+        }
+
+        // 驗證通過,儲存
+        const saveData = {
+            ...data,
+            tabTitle: document.getElementById('smartTabTitle').value,
+            tabOrder: parseInt(document.getElementById('smartTabOrder').value),
+            requiredRole: document.getElementById('smartRequiredRole').value || null,
+            masterField: 'PaperNum'
+        };
+
+        const saveResponse = await fetch('/api/TabConfig', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(saveData)
+        });
+
+        if (!saveResponse.ok) {
+            const error = await saveResponse.json();
+            throw new Error(error.error || '儲存失敗');
+        }
+
+        Swal.close();
+        showStep(3);
+        loadTabs(); // 重新載入列表
+
+    } catch (error) {
+        Swal.fire({ icon: 'error', title: '儲存失敗', text: error.message });
+    }
+}
+
+// 按鈕事件綁定
+document.getElementById('btnNextStep')?.addEventListener('click', nextStep);
+document.getElementById('btnPrevStep')?.addEventListener('click', prevStep);
+document.getElementById('btnSaveTabSmart')?.addEventListener('click', validateAndSave);
+</script>
