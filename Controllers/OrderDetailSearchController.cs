@@ -21,7 +21,7 @@ public class OrderDetailSearchController : ControllerBase
     // ① 查詢：SPodOCXOrderPOChice
 // ① 查詢：SPodOCXOrderPOChice
 [HttpPost("fetch")]
-public async Task<IActionResult> Fetch([FromBody] FetchReq req)
+public async Task<IActionResult> Fetch([FromBody] SPOFetchReq req)
 {
     using var conn = new SqlConnection(_cs);
     using var cmd  = new SqlCommand("dbo.SPodOCXOrderPOChice", conn)
@@ -60,7 +60,7 @@ public async Task<IActionResult> Fetch([FromBody] FetchReq req)
 
     // ② 匯入：SPodOCXOrderDtAdd（逐筆）
     [HttpPost("insert")]
-    public async Task<IActionResult> Insert([FromBody] InsertReq req)
+    public async Task<IActionResult> Insert([FromBody] SPOInsertReq req)
     {
         if (string.IsNullOrWhiteSpace(req.DllPaperNum))
             return BadRequest("缺少目的單號 DllPaperNum。");
@@ -105,7 +105,7 @@ public async Task<IActionResult> Fetch([FromBody] FetchReq req)
     }
 
     // --- DTO ---
-    public class FetchReq
+    public class SPOFetchReq
     {
         public string? PartNum { get; set; }
         public string? MatName { get; set; }
@@ -117,13 +117,13 @@ public async Task<IActionResult> Fetch([FromBody] FetchReq req)
         [JsonExtensionData] public Dictionary<string, object>? Extra { get; set; }
     }
 
-    public class InsertReq
+    public class SPOInsertReq
     {
         public string DllPaperNum { get; set; }   // 目的單號 = 當前單號
         public bool Replace { get; set; }         // 取代已存在
-        public List<InsertRow> Rows { get; set; } = new();
+        public List<SPOInsertRow> Rows { get; set; } = new();
     }
-    public class InsertRow
+    public class SPOInsertRow
     {
         public string PartNum { get; set; }
         public decimal StockQnty { get; set; }   // 你要傳入的庫存量

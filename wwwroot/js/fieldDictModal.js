@@ -152,7 +152,7 @@
                     class="form-control form-control-sm" />
             </td>
 
-            <td>
+            <td style="width:160px">
               <input data-field="FieldNote" value="${x.FieldNote ?? ''}"
                     class="form-control form-control-sm" />
             </td>
