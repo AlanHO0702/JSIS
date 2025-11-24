@@ -76,11 +76,13 @@ app.UseStaticFiles();
 // 啟用路由中介軟體，讓路由功能生效
 app.UseRouting();
 
+app.UseMiddleware<UserOnlineMiddleware>();
 // 啟用授權中介軟體（若使用授權/認證機制）
 app.UseAuthorization();
 
 // 將 API Controller 路由映射 (例如 /api/YourController)
 app.MapControllers();
+
 
 
 app.MapControllerRoute(
