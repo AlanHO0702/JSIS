@@ -11,6 +11,9 @@ namespace PcbErpApi.Data
         public DbSet<CurdUser> CurdUser => Set<CurdUser>();
         public DbSet<MindStockCostPn> MindStockCostPn => Set<MindStockCostPn>();
         public DbSet<CurdSysItem> CurdSysItems { get; set; }
+        public DbSet<CURdUserOnline> CURdUserOnline { get; set; }
+        public DbSet<CURdV_SysProcess_WEB> CURdV_SysProcess_WEB { get; set; }
+
         public DbSet<SpodOrderSub> SpodOrderSub { get; set; }
         public DbSet<SPOdMPSOutSub> SPOdMPSOutSub { get; set; }
         public DbSet<CurdSystemSelect> CurdSystemSelects { get; set; }
@@ -44,6 +47,11 @@ namespace PcbErpApi.Data
             {
                 entity.HasKey(e => new { e.PaperNum, e.Item });
             });
+
+            modelBuilder.Entity<CURdV_SysProcess_WEB>()
+            .HasNoKey()
+            .ToView("CURdV_SysProcess_WEB");
+
 
             // FMEdIssueMat 複合主鍵配置
             modelBuilder.Entity<FmedIssueMat>(entity =>

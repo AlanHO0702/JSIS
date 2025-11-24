@@ -121,17 +121,40 @@
 
       window.showBusy = (msg) => { if (++counter === 1) openOverlay(msg); };
       window.hideBusy = ()     => { if (counter > 0 && --counter === 0) closeOverlay(); };
-      window.busyFetch = async (input, init, msg = '處理中…') => {
-        showBusy(msg);
-        try { return await fetch(input, init); }
-        finally { hideBusy(); }
+      window.busyFetch = async (input, init = {}, msg = '處理中…') => {
+          showBusy(msg);
+
+          init.headers = init.headers || {};
+          const jwtId = localStorage.getItem("jwtId");
+          if (jwtId) init.headers["X-JWTID"] = jwtId;
+
+          try {
+              return await fetch(input, init);
+          }
+          finally { hideBusy(); }
       };
     })();
   </script>
 
-  <!-- ✅ 登入流程改用 busyFetch（移除舊的 style.display 切換） -->
+  <!-- ⭐⭐⭐ 新增：取得 HostName + IP + 登入 API ⭐⭐⭐ -->
   <script>
-    document.addEventListener("DOMContentLoaded", function() {
+    // 取得內網 IP（WebRTC）
+    function getLocalIP() {
+      return new Promise(resolve => {
+        const pc = new RTCPeerConnection({ iceServers: [] });
+        pc.createDataChannel('');
+        pc.createOffer().then(o => pc.setLocalDescription(o));
+
+        pc.onicecandidate = e => {
+          if (!e.candidate) return;
+          const ip = e.candidate.candidate.split(' ')[4];
+          resolve(ip);
+          pc.close();
+        };
+      });
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
       const uidEl = document.getElementById("userid");
       const pwdEl = document.getElementById("password");
       const errDiv = document.getElementById("login-error");
@@ -142,31 +165,47 @@
       pwdEl.value = "";
 
       document.getElementById("login-form").addEventListener("submit", async function (e) {
-        e.preventDefault();
-        const userid = uidEl.value.trim();
-        const password = pwdEl.value;
+          e.preventDefault();
+          const userid = uidEl.value.trim();
+          const password = pwdEl.value;
 
-        localStorage.setItem("erpLoginUserId", userid);
-        errDiv.classList.add("d-none");
+          // 取得 hostname（使用 UA 模擬，因為瀏覽器不能抓電腦名稱）
+          const hostName = navigator.userAgent || "";
 
-        try {
-          const resp = await busyFetch('/api/Login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: userid, password: password })
-          }, '登入中…');
+          // 取得 Client IP（用 Cloudflare 或 STUN）
+          const clientIp = await fetch("https://api.ipify.org?format=json")
+              .then(r => r.json())
+              .then(j => j.ip)
+              .catch(() => null);
 
-          if (resp.ok) {
-            window.location.href = "/FontIndex";
-          } else {
-            const result = await resp.json().catch(() => ({}));
-            errDiv.textContent = result.error || "登入失敗";
-            errDiv.classList.remove("d-none");
+          localStorage.setItem("erpLoginUserId", userid);
+          errDiv.classList.add("d-none");
+
+          try {
+              const resp = await busyFetch('/api/Login', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                      userId: userid,
+                      password: password,
+                      hostName: hostName,
+                      clientIp: clientIp
+                  })
+              }, '登入中…');
+
+              if (resp.ok) {
+                  const result = await resp.json();
+                  localStorage.setItem("jwtId", result.jwtId);
+                  window.location.href = "/FontIndex";
+              } else {
+                  const result = await resp.json().catch(() => ({}));
+                  errDiv.textContent = result.error || "登入失敗";
+                  errDiv.classList.remove("d-none");
+              }
+          } catch {
+              errDiv.textContent = "網路或伺服器錯誤，請稍後再試";
+              errDiv.classList.remove("d-none");
           }
-        } catch {
-          errDiv.textContent = "網路或伺服器錯誤，請稍後再試";
-          errDiv.classList.remove("d-none");
-        }
       });
     });
   </script>
