@@ -74,7 +74,7 @@ namespace PcbErpApi.Data
                 .HasDefaultValue(0.0m)
                 .HasColumnType("decimal(24, 8)");
             entity.Property(e => e.AmountFinish).HasColumnType("decimal(24, 8)");
-            entity.Property(e => e.CustPonum)
+            entity.Property(e => e.CustPONum)
                 .HasMaxLength(50)
                 .HasColumnName("CustPONum");
             entity.Property(e => e.Discount)
@@ -141,7 +141,7 @@ namespace PcbErpApi.Data
                 .HasDefaultValue(0m)
                 .HasColumnType("decimal(24, 8)")
                 .HasColumnName("UOMPrice");
-            entity.Property(e => e.Uomqnty)
+            entity.Property(e => e.UOMQnty)
                 .HasColumnType("decimal(24, 8)")
                 .HasColumnName("UOMQnty");
         });
