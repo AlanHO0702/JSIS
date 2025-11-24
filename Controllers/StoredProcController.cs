@@ -19,7 +19,11 @@ public class StoredProcController : ControllerBase
             ProcName: "dbo.SPOdOrderTotal",            // 有 schema 比較保險
             RequiredParams: new[] { "PaperNum" }
         ),
-
+            // 銷貨單的計算 2025.11.12 james
+            ["CalcMPSOutAmount"] = new StoredProcDef(
+                ProcName: "dbo.SPOdMPSOutTotal",   // 你的銷貨單總計 SP
+                RequiredParams: new[] { "PaperNum" }
+            ),
             // ★ 清除單身（三參數版）
             ["ClearOrderDetails"] = new StoredProcDef(
             ProcName: "dbo.SPodClearAllSub",           // 你的 SP 名
