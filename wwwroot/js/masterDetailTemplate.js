@@ -110,13 +110,6 @@
   const buildHead = (theadTr, dict, showRowNo) => {
     theadTr.innerHTML = "";
 
-    if (showRowNo) {
-      const th = document.createElement("th");
-      th.textContent = "項次";
-      th.style.width = "60px";
-      theadTr.appendChild(th);
-    }
-
     dict
       .filter(DICT_MAP.visible)
       .sort((a, b) => DICT_MAP.order(a) - DICT_MAP.order(b))
@@ -154,61 +147,67 @@
       const tr = document.createElement("tr");
       tr.style.cursor = "pointer";
 
-      if (showRowNo) {
-        const tdNo = document.createElement("td");
-        tdNo.className = "text-center";
-        tdNo.textContent = idx + 1;
-        tr.appendChild(tdNo);
-      }
+        fields.forEach(f => {
 
-      fields.forEach(f => {
-        const col = f.FieldName;
+          const col = f.FieldName;
 
-        // 1️⃣ 先拿原始值（實體欄位）
-        let code = row[col];
+          // 取得原始資料
+          let raw = row[col];
 
-        // 2️⃣ 若是「非實體欄位」，欄位本身沒有值，就改抓 KeySelfName 指向的欄位
-        if ((code == null || code === "") && f.KeySelfName) {
-          code = row[f.KeySelfName];
-        }
-
-        let display = code;
-
-        // 3️⃣ 先吃 OCX Lookup（如果有設定非實體欄位）
-        const ocxMap = ocxMaps[col];
-        if (ocxMap && code != null && ocxMap[code] != null) {
-          display = ocxMap[code];
-        }
-        else {
-          // 4️⃣ 沒 OCX 或找不到，再吃一般 Lookup
-          const lkMap = lookupMaps[col];
-          if (lkMap && code != null && lkMap[code] != null) {
-            display = lkMap[code];
+          // 非實體欄位 → 改抓 KeySelfName
+          if ((raw == null || raw === "") && f.KeySelfName) {
+              raw = row[f.KeySelfName];
           }
-        }
 
-        const td = document.createElement("td");
-        td.dataset.field = col;
+          let display = raw;
 
-        // 顯示文字
-        const span = document.createElement("span");
-        span.className = "cell-view";
-        span.textContent = fmtCell(display, DICT_MAP.fmt(f), DICT_MAP.dataType(f));
+          // OCX Lookup（優先）
+          if (ocxMaps[col] && ocxMaps[col][raw] != null) {
+              display = ocxMaps[col][raw];
+          }
+          // 一般 Lookup（次之）
+          else if (lookupMaps[col] && lookupMaps[col][raw] != null) {
+              display = lookupMaps[col][raw];
+          }
 
-        // 編輯值：維持原始值（code 或 row[col]），不要用顯示文字
-        const inp = document.createElement("input");
-        inp.className = "form-control form-control-sm cell-edit d-none";
-        inp.name = col;
-        inp.value = row[col] ?? "";   // 原始欄位值
+          // 建立 TD
+          const td = document.createElement("td");
+          td.dataset.field = col;
 
-        if (DICT_MAP.readonly(f)) {
-          inp.readOnly = true;
-          inp.classList.add("readonly-cell");
-        }
+          // 顯示模式
+          const span = document.createElement("span");
+          span.className = "cell-view";
+          span.textContent = fmtCell(display, DICT_MAP.fmt(f), DICT_MAP.dataType(f));
 
-        td.append(span, inp);
-        tr.appendChild(td);
+          // 編輯模式 input
+          const inp = document.createElement("input");
+          inp.className = "form-control form-control-sm cell-edit d-none";
+          inp.name = col;
+
+          // 編輯時顯示中文，但存 raw
+          inp.value = display;
+          inp.dataset.raw = raw;
+
+          // Lookup 或 Readonly → 灰底且不可編輯
+         // ---- 是否唯讀（非實體 lookup + 辭典唯讀）----
+          const isVirtualLookup = !!f.KeySelfName;
+          const ro = DICT_MAP.readonly(f) || isVirtualLookup;
+
+          // 記錄 readonly 屬性給 editableGrid 用
+          inp.dataset.readonly = ro ? "1" : "0";
+
+          if (ro) {
+              inp.readOnly = true;
+              inp.classList.add("readonly-cell");   // 灰底
+          } else {
+              inp.readOnly = false;
+              inp.classList.remove("readonly-cell");
+          }
+
+          td.append(span, inp);
+          tr.appendChild(td);
       });
+
 
       if (onRowClick) tr.addEventListener("click", () => onRowClick(tr, row));
       tbody.appendChild(tr);
@@ -268,8 +267,8 @@
       `/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(cfg.DetailDict || cfg.DetailTable)}`
     ).then(r => r.json());
 
-    buildHead(mHead, mDict, cfg.ShowRowNumber);
-    buildHead(dHead, dDict, cfg.ShowRowNumber);
+    buildHead(mHead, mDict, false);
+    buildHead(dHead, dDict, false);
 
     // 主檔資料
     const masterUrl =
@@ -300,7 +299,7 @@
         dBody,
         dDict,
         detailRows,
-        cfg.ShowRowNumber,
+        false,
         () => {},
         cfg
       );
