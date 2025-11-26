@@ -13,43 +13,55 @@ namespace PcbErpApi.Controllers
         private readonly IConfiguration _config;
         public ReportController(IConfiguration config) => _config = config;
 
-        // ====== Crystal 報表外掛：若你有用就保留，沒有可以刪掉 ======
         [HttpPost("generate-url")]
-        public IActionResult GenerateUrl([FromBody] BuildRequest req)
+        public async Task<IActionResult> GenerateUrl([FromBody] BuildRequest req)
         {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(req.SpName))
-                    return BadRequest(new { error = "缺少 SpName 參數" });
+            if (string.IsNullOrWhiteSpace(req.SpName))
+                return BadRequest(new { error = "缺少 SpName" });
 
-                var connStr = _config.GetConnectionString("DefaultConnection");
-                using var conn = new SqlConnection(connStr);
-                using var cmd = conn.CreateCommand();
+            // 1) 如需先跑 SP
+            using (var conn = new SqlConnection(_config.GetConnectionString("DefaultConnection")))
+            using (var cmd = conn.CreateCommand())
+            {
                 cmd.CommandType = CommandType.StoredProcedure;
                 cmd.CommandText = req.SpName;
-                cmd.Parameters.Add(new SqlParameter("@PaperNum", ToDbValue(req.PaperNum)));
+                if (req.Params != null)
+                    foreach (var kv in req.Params) cmd.Parameters.Add(new SqlParameter("@" + kv.Key, ToDbValue(kv.Value)));
+                else if (!string.IsNullOrWhiteSpace(req.PaperNum))
+                    cmd.Parameters.Add(new SqlParameter("@PaperNum", ToDbValue(req.PaperNum)));
 
-                conn.Open();
-                cmd.ExecuteNonQuery();
-
-                var reportUrl =
-                    $"{_config["ReportApi:CrystalUrl"]}/api/report/render?reportName={Uri.EscapeDataString(req.ReportName)}&paperNum={Uri.EscapeDataString(req.PaperNum)}&format=pdf";
-
-                return Ok(new { reportUrl });
+                await conn.OpenAsync();
+                await cmd.ExecuteNonQueryAsync();
             }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { error = ex.Message });
-            }
+
+            // 2) POST 到 CrystalReportsAPI，拿 PDF blob 回來
+            var renderPayload = new {
+                reportName = req.ReportName,
+                format = "pdf",
+                @params = req.Params ?? new Dictionary<string, object>()
+            };
+            if (!renderPayload.@params.ContainsKey("PaperNum") && !string.IsNullOrWhiteSpace(req.PaperNum))
+                renderPayload.@params["PaperNum"] = req.PaperNum;
+
+            using var http = new HttpClient { BaseAddress = new Uri(_config["ReportApi:CrystalUrl"]) };
+            var resp = await http.PostAsJsonAsync("/api/report/render", renderPayload);
+            if (!resp.IsSuccessStatusCode)
+                return StatusCode((int)resp.StatusCode, await resp.Content.ReadAsStringAsync());
+
+            var pdfBytes = await resp.Content.ReadAsByteArrayAsync();
+            return File(pdfBytes, "application/pdf"); // 前端拿到就是 PDF 流
         }
+
 
         public class BuildRequest
         {
-            public string PaperNum { get; set; } = string.Empty;
-            public string SessionId { get; set; } = string.Empty;
-            public string SpName { get; set; } = string.Empty;
-            public string ReportName { get; set; } = string.Empty;
+            public string PaperNum { get; set; } = "";
+            public string SessionId { get; set; } = "";
+            public string SpName { get; set; } = "";
+            public string ReportName { get; set; } = "";
+            public Dictionary<string, object>? Params { get; set; }   // 新增
         }
+
 
         public class ReportExecRequest
         {
@@ -112,6 +124,9 @@ namespace PcbErpApi.Controllers
                 "bu" => "select rtrim(ltrim(BUId)) as value, BUName as text from CURdBU(nolock)",
                 "shipterm" => "select ShipTerm as value, ShipTermName as text from SPOdShipTerm(nolock) union select 255,'不限'",
                 "finished" => "select finished as value, finishedname as text from CURdPaperFinished(nolock) union select 5,'已完成及已結案' union select 255,'不設限'",
+                "user" => "select rtrim(ltrim(UserId)) as value, UserName as text from CURdUsers (nolock) order by UserId",
+                "group" => "select rtrim(ltrim(GroupId)) as value, GroupName as text from CurdGroups (nolock) order by GroupId",
+
                 _ => throw new ArgumentException("lookup key not allowed")
             };
 

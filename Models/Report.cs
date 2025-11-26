@@ -23,8 +23,10 @@ namespace PcbErpApi.Models
     {
         public string Title { get; set; } = "";
         public string SpName { get; set; } = "";
+        public string ReportName { get; set; } = ""; // Crystal RPT 檔名（不含副檔名）
         public string DictTableName { get; set; } = "";
         public List<ParamDef> ParamDefs { get; set; } = new();
+        public Dictionary<string, string>? ExtraParams { get; set; } = new(); // �L UI ����L�h�K�Ѽ� 
     }
 
 }

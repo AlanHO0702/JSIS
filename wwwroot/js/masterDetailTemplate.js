@@ -131,7 +131,7 @@
     tbody.innerHTML = "";
 
     const fields = dict
-      .filter(DICT_MAP.visible)
+      .filter(f => DICT_MAP.visible(f) || (f.IsKey ?? 0) === 1) // include keys even if not visible
       .sort((a, b) => DICT_MAP.order(a) - DICT_MAP.order(b));
 
     // 先把所有欄位的 Lookup / OCX map 都載完（各欄位只打一次 API）
