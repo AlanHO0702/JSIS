@@ -23,5 +23,7 @@ namespace PcbErpApi.Models
 
         public DateTime LoginTime { get; set; }
         public DateTime LastActive { get; set; }
+
+
     }
 }
