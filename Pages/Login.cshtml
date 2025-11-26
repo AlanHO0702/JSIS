@@ -139,70 +139,88 @@
 
   <!-- ⭐⭐⭐ 新增：取得 HostName + IP + 登入 API ⭐⭐⭐ -->
   <script>
-// 🔥 建立固定 HostName（裝置識別碼）
-function getHostName() {
-    let id = localStorage.getItem("erpHostName");
-    if (!id) {
-        id = "HOST-" + crypto.randomUUID();
-        localStorage.setItem("erpHostName", id);
+    // 🔥 建立固定 HostName（裝置識別碼）
+    function getHostName() {
+
+        const randomUUID = (window.crypto && window.crypto.randomUUID)
+        ? () => window.crypto.randomUUID()
+        : (window.crypto && window.crypto.getRandomValues)
+        ? () => {
+            const bytes = new Uint8Array(16);
+            window.crypto.getRandomValues(bytes);
+            bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+            bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant
+            const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+            return `${hex.substr(0,8)}-${hex.substr(8,4)}-${hex.substr(12,4)}-${hex.substr(16,4)}-${hex.substr(20)}`;
+          }
+        : () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+          });
+
+        let id = localStorage.getItem("erpHostName");
+        if (!id) {
+            id = "HOST-" + randomUUID();
+            localStorage.setItem("erpHostName", id);
+        }
+        return id;
     }
-    return id;
-}
 
-document.addEventListener("DOMContentLoaded", function () {
-    const uidEl = document.getElementById("userid");
-    const pwdEl = document.getElementById("password");
-    const errDiv = document.getElementById("login-error");
+    document.addEventListener("DOMContentLoaded", function () {
+        const uidEl = document.getElementById("userid");
+        const pwdEl = document.getElementById("password");
+        const errDiv = document.getElementById("login-error");
 
-    const lastUser = localStorage.getItem("erpLoginUserId");
-    if (lastUser) uidEl.value = lastUser;
+        const lastUser = localStorage.getItem("erpLoginUserId");
+        if (lastUser) uidEl.value = lastUser;
 
-    document.getElementById("login-form").addEventListener("submit", async function (e) {
-        e.preventDefault();
+        document.getElementById("login-form").addEventListener("submit", async function (e) {
+            e.preventDefault();
 
-        const userid = uidEl.value.trim();
-        const password = pwdEl.value;
+            const userid = uidEl.value.trim();
+            const password = pwdEl.value;
 
-        // 🔥 使用固定 HostName（裝置識別碼）
-        const hostName = getHostName();
+            // 🔥 使用固定 HostName（裝置識別碼）
+            const hostName = getHostName();
 
-        // Public IP
-        const clientIp = await fetch("https://api.ipify.org?format=json")
-            .then(r => r.json())
-            .then(j => j.ip)
-            .catch(() => null);
+            // Public IP
+            const clientIp = await fetch("https://api.ipify.org?format=json")
+                .then(r => r.json())
+                .then(j => j.ip)
+                .catch(() => null);
 
-        localStorage.setItem("erpLoginUserId", userid);
-        errDiv.classList.add("d-none");
+            localStorage.setItem("erpLoginUserId", userid);
+            errDiv.classList.add("d-none");
 
-        try {
-            const resp = await busyFetch('/api/Login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    userId: userid,
-                    password: password,
-                    hostName: hostName,   // ★ 固定裝置識別碼
-                    clientIp: clientIp
-                   
-                })
-            }, '登入中…');
+            try {
+                const resp = await busyFetch('/api/Login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        userId: userid,
+                        password: password,
+                        hostName: hostName,   // ★ 固定裝置識別碼
+                        clientIp: clientIp
+                      
+                    })
+                }, '登入中…');
 
-            if (resp.ok) {
-                const result = await resp.json();
-                localStorage.setItem("jwtId", result.jwtId);
-                window.location.href = "/FontIndex";
-            } else {
-                const result = await resp.json().catch(() => ({}));
-                errDiv.textContent = result.error || "登入失敗";
+                if (resp.ok) {
+                    const result = await resp.json();
+                    localStorage.setItem("jwtId", result.jwtId);
+                    window.location.href = "/FontIndex";
+                } else {
+                    const result = await resp.json().catch(() => ({}));
+                    errDiv.textContent = result.error || "登入失敗";
+                    errDiv.classList.remove("d-none");
+                }
+            } catch {
+                errDiv.textContent = "網路或伺服器錯誤，請稍後再試";
                 errDiv.classList.remove("d-none");
             }
-        } catch {
-            errDiv.textContent = "網路或伺服器錯誤，請稍後再試";
-            errDiv.classList.remove("d-none");
-        }
+        });
     });
-});
 
 
 </script>
