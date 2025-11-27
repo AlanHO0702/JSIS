@@ -12,7 +12,6 @@
         { "AA000015", "/AJN/AJNdJourMain" },    // 總帳傳票
         { "SP000011", "/AJN/AJNdClassMoney" },   // 幣別匯率主檔
         { "FME00020", "/FmedIssueMain"},
-        {"SA000048", "/Report/SPO/SA000048"},
         {"CUR00017","/CUR/CurdBu"},
         {"CUR00018","/CUR/CURdSystemSelect"},
         {"CUR00015","/CUR/CURdSysItems"},
@@ -22,7 +21,6 @@
         {"CURH0002", "/CUR/CURdReportOrderBasPage"},
         {"CUR00007", "/CUR/CURdGroups"},
         {"CURH0003", "/CUR/CURdV_SysProcess"},
-        {"CU001022", "/Report/CUR/CU001022"},
 
         // 其它功能請自行加入...
     };
@@ -187,7 +185,7 @@ body {
                             @if (!string.IsNullOrEmpty(link)) {
                                 <a href="@link" style="flex:1">@item.ItemId - @item.ItemName</a>
                             } else {
-                                <span style="flex:1">@item.ItemId - @item.ItemName</span>
+                                <a href="javascript:void(0)" class="dyn-link" data-itemid="@item.ItemId" data-itemname="@item.ItemName" data-superid="@item.SuperId" style="flex:1" onclick="resolveAndGo('@item.ItemId','@item.ItemName','@item.SuperId')">@item.ItemId - @item.ItemName</a>
                             }
                                 <button class="btn btn-outline-warning btn-sm" onclick="addToFavorite('@item.ItemId', '@item.ItemName', '@item.SuperId')">★</button>
                             </li>
@@ -225,7 +223,6 @@ body {
     "SPO00010": "/SPOdMPSOutMain",
     "SP000011": "/AJN/AJNdClassMoney",
     "FME00020": "/FmedIssueMain",
-    "SA000048": "/Report/SPO/SA000048",
     "CUR00017": "/CUR/CurdBu",
     "CUR00018": "/CUR/CURdSystemSelect",
     "CUR00015": "/CUR/CURdSysItems",
@@ -235,11 +232,31 @@ body {
     "CURH0002": "/CUR/CURdReportOrderBasPage",
     "CUR00007": "/CUR/CURdGroups",
     "CURH0003": "/CUR/CURdV_SysProcess",
-    "CU001022": "/Report/CUR/CU001022",
     // 其它功能自行補上
     };
 
     const selectedLevel1Id = "@Model.SelectedLevel1Id";
+
+
+    async function resolveAndGo(itemId, itemName, superId) {
+        const hard = pageMap[itemId];
+        if (hard) { location.href = hard; return; }
+        try {
+            const res = await fetch(`/api/report/item-meta/${itemId}`);
+            if (!res.ok) throw new Error('not found');
+            const meta = await res.json();
+            const itemType = Number(meta.itemType ?? meta.ItemType);
+            const outputType = Number(meta.outputType ?? meta.OutputType);
+            let url = '';
+            if (itemType === 2 && outputType === 0) url = `/Report/Direct/${itemId}`;
+            else if (itemType === 2 && outputType === 6) url = `/Report/Generic/${itemId}`;
+
+            if (url) { location.href = url; return; }
+            if (superId) { location.href = `?level1Id=${superId}`; return; }
+        } catch { /* ignore */ }
+        if (superId) location.href = `?level1Id=${superId}`; else alert(`找不到對應頁面: ${itemId}`);
+    }
+
 
     window.toggleChildren = function (id) {
         const el = document.getElementById(id);

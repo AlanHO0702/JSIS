@@ -12,6 +12,7 @@ public class ParamSpec
     public string Name { get; set; } = "";   // 不要加 @，後端會自己補
     public string Label { get; set; } = "";
     public string Ui { get; set; } = "text"; // text | select | date | number
+    public string? SuperId { get; set; } // parent label (if any)
     public string? DefaultValue { get; set; }
     public string? LookupKey { get; set; }   // 若用 lookup API，填 key 即可
     public List<(string value, string text)> Options { get; set; } = new(); // select 用（非 lookup）

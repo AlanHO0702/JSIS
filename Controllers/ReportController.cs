@@ -122,10 +122,28 @@ namespace PcbErpApi.Controllers
         }
 
         // ====== 通用：下拉查詢（白名單） ======
+        // ====== 查詢項目 Meta (含 ItemType/OutputType) ======
+        [HttpGet("item-meta/{itemId}")]
+        public async Task<IActionResult> GetItemMeta(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+                return BadRequest("itemId required");
+
+            var item = await _context.CurdSysItems
+                .AsNoTracking()
+                .Where(x => x.ItemId == itemId)
+                .Select(x => new { x.ItemId, x.ItemName, x.ItemType, x.OutputType })
+                .SingleOrDefaultAsync();
+
+            if (item is null) return NotFound();
+            return Ok(item);
+        }
+
         [HttpGet("lookup/{key}")]
         public async Task<IActionResult> Lookup(string key)
         {
             key = key ?? string.Empty;
+            var parentVal = HttpContext.Request.Query["parent"].FirstOrDefault();
             if (key.StartsWith("db:", StringComparison.OrdinalIgnoreCase))
             {
                 var parts = key.Split(':', 3);
@@ -144,7 +162,7 @@ namespace PcbErpApi.Controllers
                 if (!dbSql.StartsWith("select", StringComparison.OrdinalIgnoreCase))
                     return BadRequest("only SELECT is allowed");
 
-                var dbList = await RunLookupQuery(dbSql);
+                var dbList = await RunLookupQuery(dbSql, parentVal);
                 return Ok(dbList);
             }
 
@@ -158,15 +176,24 @@ namespace PcbErpApi.Controllers
                         _ => throw new ArgumentException("lookup key not allowed")
                     };
 
-            var list = await RunLookupQuery(sql);
+            var list = await RunLookupQuery(sql, parentVal);
             return Ok(list);
         }
 
-        private async Task<List<object>> RunLookupQuery(string sql)
+        private async Task<List<object>> RunLookupQuery(string sql, string? parentVal = null)
         {
             await using var conn = _context.Database.GetDbConnection();
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
+            if (sql.Contains("@@@@@"))
+            {
+                sql = sql.Replace("@@@@@", "@p0");
+                var p = cmd.CreateParameter();
+                p.ParameterName = "@p0";
+                p.Value = parentVal ?? string.Empty;
+                cmd.Parameters.Add(p);
+            }
+
             cmd.CommandText = sql;
             var list = new List<object>();
             await using var reader = await cmd.ExecuteReaderAsync();
