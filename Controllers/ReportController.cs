@@ -1,6 +1,8 @@
 // Controllers/ReportController.cs
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+using PcbErpApi.Data;
 using System.Data;
 using System.Text.Json;
 
@@ -11,7 +13,12 @@ namespace PcbErpApi.Controllers
     public class ReportController : ControllerBase
     {
         private readonly IConfiguration _config;
-        public ReportController(IConfiguration config) => _config = config;
+        private readonly PcbErpContext _context;
+        public ReportController(IConfiguration config,PcbErpContext context)
+        { 
+            _config = config;
+            _context = context;
+        } 
 
         [HttpPost("generate-url")]
         public async Task<IActionResult> GenerateUrl([FromBody] BuildRequest req)
@@ -118,84 +125,123 @@ namespace PcbErpApi.Controllers
         [HttpGet("lookup/{key}")]
         public async Task<IActionResult> Lookup(string key)
         {
-            var sql = (key ?? string.Empty).ToLowerInvariant() switch
+            key = key ?? string.Empty;
+            if (key.StartsWith("db:", StringComparison.OrdinalIgnoreCase))
             {
-                "customer" => "select CompanyID as value, ShortName as text from AJNdCustomer(nolock) order by CompanyID",
-                "bu" => "select rtrim(ltrim(BUId)) as value, BUName as text from CURdBU(nolock)",
-                "shipterm" => "select ShipTerm as value, ShipTermName as text from SPOdShipTerm(nolock) union select 255,'不限'",
-                "finished" => "select finished as value, finishedname as text from CURdPaperFinished(nolock) union select 5,'已完成及已結案' union select 255,'不設限'",
-                "user" => "select rtrim(ltrim(UserId)) as value, UserName as text from CURdUsers (nolock) order by UserId",
-                "group" => "select rtrim(ltrim(GroupId)) as value, GroupName as text from CurdGroups (nolock) order by GroupId",
+                var parts = key.Split(':', 3);
+                if (parts.Length < 3) return BadRequest("invalid lookup key");
+                var itemId = parts[1];
+                var param = parts[2];
 
-                _ => throw new ArgumentException("lookup key not allowed")
-            };
+                var p = await _context.CurdAddonParams
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(x => x.ItemId == itemId && x.ParamName == "@" + param);
 
-            var connStr = _config.GetConnectionString("DefaultConnection");
-            using var conn = new SqlConnection(connStr);
-            await conn.OpenAsync();
+                if (p == null || string.IsNullOrWhiteSpace(p.CommandText))
+                    return NotFound();
 
-            using var cmd = new SqlCommand(sql, conn);
-            using var rd = await cmd.ExecuteReaderAsync();
+                var dbSql = p.CommandText.Trim();
+                if (!dbSql.StartsWith("select", StringComparison.OrdinalIgnoreCase))
+                    return BadRequest("only SELECT is allowed");
 
-            var list = new List<object>();
-            while (await rd.ReadAsync())
-            {
-                var value = rd["value"] is DBNull ? null : rd["value"];
-                var text  = rd["text"]  is DBNull ? null : rd["text"];
-                list.Add(new { value, text });
+                var dbList = await RunLookupQuery(dbSql);
+                return Ok(dbList);
             }
 
+            var sql = (key ?? string.Empty).ToLowerInvariant() switch
+                    {
+                        "customer" => "select CompanyID as value, ShortName as text from AJNdCustomer(nolock) order by CompanyID",
+                        "bu" => "select rtrim(ltrim(BUId)) as value, BUName as text from CURdBU(nolock)",
+                        "shipterm" => "select ShipTerm as value, ShipTermName as text from SPOdShipTerm(nolock) union select 255,'不限'",
+                        "finished" => "select finished as value, finishedname as text from CURdPaperFinished(nolock) union select 5,'已完成及已結案' union select 255,'不設限'",
+                       
+                        _ => throw new ArgumentException("lookup key not allowed")
+                    };
+
+            var list = await RunLookupQuery(sql);
             return Ok(list);
         }
 
-        // ====== 參數轉型 Helper（重點！） ======
-        // ====== 參數轉型 Helper（修正版） ======
-private static object? ToDbValue(object? v)
-{
-    if (v is null) return DBNull.Value;
-
-    // 1) 字串：保留原值（包含空字串），不要轉 DBNull
-    if (v is string s)
-        return s;
-
-    // 2) 前端 JSON 來的值通常是 JsonElement：交給 FromJson
-    if (v is System.Text.Json.JsonElement je) 
-        return FromJson(je);
-
-    return v;
-}
-
-private static object? FromJson(System.Text.Json.JsonElement je)
-{
-    switch (je.ValueKind)
-    {
-        case System.Text.Json.JsonValueKind.Null:
-        case System.Text.Json.JsonValueKind.Undefined:
-            return DBNull.Value;
-
-        case System.Text.Json.JsonValueKind.String:
+        private async Task<List<object>> RunLookupQuery(string sql)
         {
-            var s = je.GetString() ?? string.Empty;        // ← 保留空字串
-            // 日期欄位前端已經送 null（不是空字串），所以這裡只要能 parse 再轉 DateTime
-            if (!string.IsNullOrEmpty(s) && DateTime.TryParse(s, out var dt))
-                return dt;
-            return s; // 其餘當成 nvarchar 傳入（包括空字串）
+            await using var conn = _context.Database.GetDbConnection();
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            var list = new List<object>();
+            await using var reader = await cmd.ExecuteReaderAsync();
+
+            // 找出 value / text 欄位，若沒別名則退而求其次取前兩欄
+            var ordValue = -1;
+            var ordText = -1;
+            for (int i = 0; i < reader.FieldCount; i++)
+            {
+                var name = reader.GetName(i);
+                if (ordValue == -1 && string.Equals(name, "value", StringComparison.OrdinalIgnoreCase))
+                    ordValue = i;
+                if (ordText == -1 && string.Equals(name, "text", StringComparison.OrdinalIgnoreCase))
+                    ordText = i;
+            }
+            if (ordValue == -1 && reader.FieldCount > 0) ordValue = 0;
+            if (ordText == -1 && reader.FieldCount > 1) ordText = 1;
+            if (ordText == -1) ordText = ordValue; // 只有一欄時，text 跟 value 同欄
+            if (ordValue == -1) return list;       // 沒有任何欄位就回傳空
+
+            while (await reader.ReadAsync())
+            {
+                var value = reader.IsDBNull(ordValue) ? "" : reader.GetValue(ordValue)?.ToString() ?? "";
+                var text = reader.IsDBNull(ordText) ? "" : reader.GetValue(ordText)?.ToString() ?? "";
+                list.Add(new { value, text });
+            }
+            return list;
         }
 
-        case System.Text.Json.JsonValueKind.Number:
-            if (je.TryGetInt32(out var i32)) return i32;
-            if (je.TryGetInt64(out var i64)) return i64;
-            if (je.TryGetDecimal(out var dec)) return dec;
-            return je.GetDouble();
+        private static object? ToDbValue(object? v)
+        {
+            if (v is null) return DBNull.Value;
 
-        case System.Text.Json.JsonValueKind.True:  return true;
-        case System.Text.Json.JsonValueKind.False: return false;
+            // 1) 字串：保留原值（包含空字串），不要轉 DBNull
+            if (v is string s)
+                return s;
 
-        // 物件/陣列等不支援型別，一律轉字串
-        default:
-            return je.ToString();
-    }
-}
+            // 2) 前端 JSON 來的值通常是 JsonElement：交給 FromJson
+            if (v is System.Text.Json.JsonElement je) 
+                return FromJson(je);
+
+            return v;
+        }
+
+        private static object? FromJson(System.Text.Json.JsonElement je)
+        {
+            switch (je.ValueKind)
+            {
+                case System.Text.Json.JsonValueKind.Null:
+                case System.Text.Json.JsonValueKind.Undefined:
+                    return DBNull.Value;
+
+                case System.Text.Json.JsonValueKind.String:
+                {
+                    var s = je.GetString() ?? string.Empty;        // ← 保留空字串
+                    // 日期欄位前端已經送 null（不是空字串），所以這裡只要能 parse 再轉 DateTime
+                    if (!string.IsNullOrEmpty(s) && DateTime.TryParse(s, out var dt))
+                        return dt;
+                    return s; // 其餘當成 nvarchar 傳入（包括空字串）
+                }
+
+                case System.Text.Json.JsonValueKind.Number:
+                    if (je.TryGetInt32(out var i32)) return i32;
+                    if (je.TryGetInt64(out var i64)) return i64;
+                    if (je.TryGetDecimal(out var dec)) return dec;
+                    return je.GetDouble();
+
+                case System.Text.Json.JsonValueKind.True:  return true;
+                case System.Text.Json.JsonValueKind.False: return false;
+
+                // 物件/陣列等不支援型別，一律轉字串
+                default:
+                    return je.ToString();
+            }
+        }
 
     }
 }

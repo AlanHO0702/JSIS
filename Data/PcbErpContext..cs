@@ -7,6 +7,7 @@ namespace PcbErpApi.Data
     {
         public PcbErpContext(DbContextOptions<PcbErpContext> options) : base(options) { }
         public DbSet<SpodOrderMain> SpodOrderMain => Set<SpodOrderMain>();
+        
         public DbSet<SPOdMPSOutMain> SPOdMPSOutMain => Set<SPOdMPSOutMain>();
         public DbSet<CurdUser> CurdUser => Set<CurdUser>();
         public DbSet<MindStockCostPn> MindStockCostPn => Set<MindStockCostPn>();
@@ -22,6 +23,7 @@ namespace PcbErpApi.Data
         public DbSet<CURdOCXTableFieldLK> CURdOCXTableFieldLK { get; set; }
         public DbSet<CURdSysParams> CURdSysParams { get; set; } = default!;
         public DbSet<MindMatInfo> MindMatInfo { get; set; }
+        public virtual DbSet<CurdAddonParam> CurdAddonParams { get; set; }
         public virtual DbSet<AjndJourMain> AjndJourMain { get; set; }
         public virtual DbSet<AjndJourSub> AjndJourSub { get; set; }
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
@@ -42,6 +44,46 @@ namespace PcbErpApi.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+
+            modelBuilder.Entity<CurdAddonParam>(entity =>
+            {
+                entity.HasKey(e => new { e.ItemId, e.ParamName });
+
+                entity.ToTable("CURdAddonParams");
+
+                entity.Property(e => e.ItemId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .IsFixedLength();
+                entity.Property(e => e.ParamName)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.CommandText)
+                    .HasMaxLength(255)
+                    .IsUnicode(false);
+                entity.Property(e => e.DefaultValue).HasMaxLength(255);
+                entity.Property(e => e.DisplayName).HasMaxLength(255);
+                entity.Property(e => e.DisplayNameCn)
+                    .HasMaxLength(255)
+                    .HasColumnName("DisplayNameCN");
+                entity.Property(e => e.DisplayNameEn)
+                    .HasMaxLength(255)
+                    .HasColumnName("DisplayNameEN");
+                entity.Property(e => e.DisplayNameJp)
+                    .HasMaxLength(255)
+                    .HasColumnName("DisplayNameJP");
+                entity.Property(e => e.DisplayNameTh)
+                    .HasMaxLength(255)
+                    .HasColumnName("DisplayNameTH");
+                entity.Property(e => e.EditMask)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.ParamSn).HasColumnName("ParamSN");
+                entity.Property(e => e.SuperId)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+            });
+
             // FMEdIssuePO 複合主鍵配置
             modelBuilder.Entity<FmedIssuePo>(entity =>
             {
@@ -65,7 +107,7 @@ namespace PcbErpApi.Data
                 entity.HasKey(e => new { e.PaperNum, e.Item });
             });
 
-        modelBuilder.Entity<SPOdMPSOutSub>(entity =>
+            modelBuilder.Entity<SPOdMPSOutSub>(entity =>
         {
             entity.HasKey(e => new { e.PaperNum, e.Item });
 
@@ -155,7 +197,7 @@ namespace PcbErpApi.Data
         });
         
         
-        modelBuilder.Entity<SPOdMPSOutMain>(entity =>
+            modelBuilder.Entity<SPOdMPSOutMain>(entity =>
         {
             entity.HasKey(e => e.PaperNum);
 
@@ -326,7 +368,7 @@ namespace PcbErpApi.Data
         });
 
         
-        modelBuilder.Entity<FmedIssueSub>(entity =>
+            modelBuilder.Entity<FmedIssueSub>(entity =>
         {
             entity.HasKey(e => new { e.PaperNum, e.Item });
 
@@ -380,7 +422,7 @@ namespace PcbErpApi.Data
                 .IsFixedLength();
         });
         
-        modelBuilder.Entity<FmedIssueMain>(entity =>
+            modelBuilder.Entity<FmedIssueMain>(entity =>
         {
             entity.HasKey(e => e.PaperNum);
 
