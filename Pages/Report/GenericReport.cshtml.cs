@@ -1,7 +1,11 @@
 // /Pages/Report/GenericReport.cshtml.cs
+using System;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore; // 確認頂部有引入
 using PcbErpApi.Data;
+using Microsoft.Data.SqlClient;
+using System.Data.Common;
+using System.IO;
 using PcbErpApi.Models;   // 這裡放上面的 ReportConfig/ParamDef 類別
 
 public class GenericReportPageModel : PageModel
@@ -79,13 +83,18 @@ public class GenericReportPageModel : PageModel
     }
     
 
-    public ReportDirectConfig BuildDirectConfigFromDb(string itemId)
+    public ReportDirectConfig BuildDirectConfigFromDb(string itemId, int? expectedItemType = null, int? expectedOutputType = null)
     {
         var item = _ctx.CurdSysItems
             .AsNoTracking()
             .Where(x => x.ItemId == itemId)
-            .Select(x => new { x.ItemId, x.ItemName, x.ClassName, x.ObjectName })
+            .Select(x => new { x.ItemId, x.ItemName, x.ClassName, x.ObjectName, x.ItemType, x.OutputType })
             .SingleOrDefault() ?? throw new InvalidOperationException($"Item {itemId} not found.");
+
+        if (expectedItemType.HasValue && item.ItemType != expectedItemType.Value)
+            throw new InvalidOperationException($"Item {itemId} not allowed (ItemType mismatch).");
+        if (expectedOutputType.HasValue && item.OutputType != expectedOutputType.Value)
+            throw new InvalidOperationException($"Item {itemId} not allowed (OutputType mismatch).");
 
         var cfg = new ReportDirectConfig {
             Title      = $"{item.ItemId}{item.ItemName}",
@@ -96,6 +105,7 @@ public class GenericReportPageModel : PageModel
         var addonParams = _ctx.CurdAddonParams
             .AsNoTracking()
             .Where(p => p.ItemId == itemId)
+            .OrderBy(p => p.ParamSn)
             .ToList();
 
         var paramSpecs = new List<ParamSpec>();
@@ -105,7 +115,7 @@ public class GenericReportPageModel : PageModel
         {
             var name = (p.ParamName ?? "").TrimStart('@');
             var label = p.DisplayName?.Trim() ?? "";
-            var defaultVal = p.DefaultValue ?? "";
+            var defaultVal = ResolveDefaultValue(p);
 
             if (string.IsNullOrWhiteSpace(label))
             {
@@ -118,7 +128,10 @@ public class GenericReportPageModel : PageModel
                 Name = name,
                 Label = label,
                 DefaultValue = defaultVal,
-                Ui = string.IsNullOrWhiteSpace(p.CommandText) ? "text" : "select",
+                SuperId = p.SuperId,
+                Ui = string.IsNullOrWhiteSpace(p.CommandText)
+                    ? (LooksLikeDate(name, label, defaultVal) ? "date" : "text")
+                    : "select",
                 // 若有 CommandText，給 lookup key，下面的 API 負責執行 CommandText 取 value/text
                 LookupKey = string.IsNullOrWhiteSpace(p.CommandText) ? null : $"db:{itemId}:{name}"
             });
@@ -130,13 +143,18 @@ public class GenericReportPageModel : PageModel
     }
 
 
-    public ReportConfig BuildReportConfigFromDb(string itemId)
+    public ReportConfig BuildReportConfigFromDb(string itemId, int? expectedItemType = null, int? expectedOutputType = null)
     {
         var item = _ctx.CurdSysItems
             .AsNoTracking()
             .Where(x => x.ItemId == itemId)
-            .Select(x => new { x.ItemId, x.ItemName, x.ClassName, x.ObjectName })
+            .Select(x => new { x.ItemId, x.ItemName, x.ClassName, x.ObjectName, x.ItemType, x.OutputType })
             .SingleOrDefault() ?? throw new InvalidOperationException($"Item {itemId} not found.");
+
+        if (expectedItemType.HasValue && item.ItemType != expectedItemType.Value)
+            throw new InvalidOperationException($"Item {itemId} not allowed (ItemType mismatch).");
+        if (expectedOutputType.HasValue && item.OutputType != expectedOutputType.Value)
+            throw new InvalidOperationException($"Item {itemId} not allowed (OutputType mismatch).");
 
         var cfg = new ReportConfig {
             Title         = $"{item.ItemId}{item.ItemName}",
@@ -148,6 +166,7 @@ public class GenericReportPageModel : PageModel
         var addonParams = _ctx.CurdAddonParams
             .AsNoTracking()
             .Where(p => p.ItemId == itemId)
+            .OrderBy(p => p.ParamSn)
             .ToList();
 
         var paramDefs = new List<ParamDef>();
@@ -157,7 +176,7 @@ public class GenericReportPageModel : PageModel
         {
             var name = (p.ParamName ?? "").TrimStart('@');
             var label = p.DisplayName?.Trim() ?? "";
-            var defaultVal = p.DefaultValue ?? "";
+            var defaultVal = ResolveDefaultValue(p);
 
             if (string.IsNullOrWhiteSpace(label))
             {
@@ -169,7 +188,9 @@ public class GenericReportPageModel : PageModel
                 Name = name,
                 Label = label,
                 DefaultValue = defaultVal,
-                Ui = string.IsNullOrWhiteSpace(p.CommandText) ? ParamUiType.Text : ParamUiType.Select,
+                Ui = string.IsNullOrWhiteSpace(p.CommandText)
+                    ? (LooksLikeDate(name, label, defaultVal) ? ParamUiType.Date : ParamUiType.Text)
+                    : ParamUiType.Select,
                 LookupKey = string.IsNullOrWhiteSpace(p.CommandText) ? null : $"db:{itemId}:{name}"
             });
         }
@@ -179,6 +200,42 @@ public class GenericReportPageModel : PageModel
         return cfg;
     }
 
+    private static bool LooksLikeDate(string name, string label, string defaultVal)
+    {
+        bool hasDateKeyword = name.Contains("date", StringComparison.OrdinalIgnoreCase)
+                              || label.Contains("日")
+                              || label.Contains("日期")
+                              || label.Contains("Date", StringComparison.OrdinalIgnoreCase);
+        if (hasDateKeyword) return true;
+        return DateTime.TryParse(defaultVal, out _);
+    }
+    private string ResolveDefaultValue(CurdAddonParam p)
+    {
+        if (p.DefaultType == 1 && !string.IsNullOrWhiteSpace(p.DefaultValue))
+        {
+            try
+            {
+                var cs = _ctx.Database.GetConnectionString();
+                if (string.IsNullOrWhiteSpace(cs))
+                    return p.DefaultValue ?? "";
+
+                using var conn = new SqlConnection(cs);
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = p.DefaultValue;
+                conn.Open();
+                var result = cmd.ExecuteScalar();
+                return result?.ToString() ?? "";
+            }
+            catch
+            {
+                return p.DefaultValue ?? "";
+            }
+        }
+
+        return p.DefaultValue ?? "";
+    }
 
 
 }
+    
+
