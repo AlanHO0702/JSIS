@@ -93,6 +93,7 @@ public class TableDictionaryService : ITableDictionaryService
             {
                 FieldName = field.FieldName,
                 KeySelfName = lkSetting.KeySelfName,
+                KeyFieldName = keyField,
                 LookupValues = lookupDict
             });
         }
@@ -117,6 +118,7 @@ public class TableDictionaryService : ITableDictionaryService
     {
         public string FieldName { get; set; } = null!;
         public string KeySelfName { get; set; } = null!;
+        public string KeyFieldName { get; set; } = null!;
         public Dictionary<string, string> LookupValues { get; set; } = new();
     }
 }
