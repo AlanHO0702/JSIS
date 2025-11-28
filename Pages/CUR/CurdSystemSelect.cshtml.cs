@@ -18,15 +18,12 @@ namespace PcbErpApi.Pages.CUR
 
         public string TableName => "CURdSystemSelect";
 
-        // ✅ 共用樣板需要的三個屬性
         public int PageNumber { get; set; } = 1;
         public int PageSize { get; set; } = 50;
         public int TotalCount { get; set; }
 
-        // ✅ 主資料
         public List<CurdSystemSelect> Items { get; set; } = new();
 
-        // ✅ 辭典欄位
         public List<CURdTableField> FieldDictList { get; set; } = new();
         public List<CURdTableField> TableFields { get; set; } = new();
 
@@ -35,7 +32,6 @@ namespace PcbErpApi.Pages.CUR
             PageNumber = page;
             PageSize = pageSize;
 
-            // 撈主資料
             var query = _db.CurdSystemSelects.AsNoTracking().OrderBy(x => x.SystemId);
             TotalCount = await query.CountAsync();
 
@@ -44,14 +40,13 @@ namespace PcbErpApi.Pages.CUR
                 .Take(PageSize)
                 .ToListAsync();
 
-            // 撈辭典
             FieldDictList = _dictService.GetFieldDict("CURdSystemSelect", typeof(CurdSystemSelect));
             TableFields = FieldDictList
                 .Where(f => f.Visible == 1)
                 .OrderBy(f => f.SerialNum ?? 0)
                 .ToList();
+            ViewData["OCXLookups"] = _dictService.GetOCXLookups("CURdSystemSelect");
 
-            // 給 ViewData（給共用樣板跟 F3 用）
             ViewData["DictTableName"] = TableName;
             ViewData["FieldDictList"] = FieldDictList;
             ViewData["Fields"] = TableFields;
