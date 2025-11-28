@@ -1,0 +1,627 @@
+@page
+@{
+    ViewData["Title"] = "按鈕設定管理";
+    Layout = null;
+}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"] - RD 後台</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet" />
+    <style>
+        body { background: #f5f7fa; }
+        .admin-header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 1rem 2rem;
+            margin-bottom: 1.5rem;
+        }
+        .admin-header h1 { margin: 0; font-size: 1.5rem; }
+        .card { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .table-container { max-height: 400px; overflow-y: auto; }
+        .table th { position: sticky; top: 0; background: #f8f9fa; z-index: 1; }
+        .btn-group-action { white-space: nowrap; }
+        .param-table { font-size: 0.85rem; }
+        .param-table th, .param-table td { padding: 0.4rem; }
+        .nav-tabs .nav-link.active { font-weight: 600; }
+        .form-label { font-weight: 500; font-size: 0.9rem; }
+        .required::after { content: '*'; color: red; margin-left: 2px; }
+        .search-box { max-width: 300px; }
+        tr.selected { background-color: #cfe2ff !important; }
+        tr:hover { background-color: #f0f4f8; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="admin-header">
+        <div class="d-flex justify-content-between align-items-center">
+            <h1>RD 後台 - 按鈕設定管理</h1>
+            <div>
+                <a href="/Admin/TableSetup" class="btn btn-outline-light btn-sm me-2">表格設定</a>
+                <a href="/Admin/ParamSetup" class="btn btn-outline-light btn-sm">參數設定</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container-fluid px-4">
+        <!-- 搜尋區 -->
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="row g-3 align-items-end">
+                    <div class="col-auto">
+                        <label class="form-label">功能代碼 (ItemId)</label>
+                        <input type="text" class="form-control search-box" id="txtItemId"
+                               placeholder="例如: FME00020" value="FME00020" />
+                    </div>
+                    <div class="col-auto">
+                        <button class="btn btn-primary" onclick="loadButtons()">
+                            <i class="bi bi-search"></i> 查詢
+                        </button>
+                        <button class="btn btn-success ms-2" onclick="addNewButton()">
+                            <i class="bi bi-plus"></i> 新增按鈕
+                        </button>
+                    </div>
+                    <div class="col-auto ms-auto">
+                        <button class="btn btn-outline-secondary" onclick="saveAllChanges()">
+                            <i class="bi bi-save"></i> 儲存所有變更
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- 左側：按鈕清單 -->
+            <div class="col-md-5">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>按鈕清單</span>
+                        <span class="badge bg-secondary" id="btnCount">0</span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-container">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th style="width:40px">#</th>
+                                        <th>按鈕名稱</th>
+                                        <th>顯示名稱</th>
+                                        <th>SP 名稱</th>
+                                        <th style="width:50px">顯示</th>
+                                        <th style="width:80px">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="buttonList">
+                                    <tr><td colspan="6" class="text-center text-muted py-4">請輸入 ItemId 後查詢</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右側：編輯區 -->
+            <div class="col-md-7">
+                <div class="card">
+                    <div class="card-header">
+                        <ul class="nav nav-tabs card-header-tabs" role="tablist">
+                            <li class="nav-item">
+                                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabBasic">基本設定</button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabParams">參數設定</button>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="card-body">
+                        <div class="tab-content">
+                            <!-- 基本設定 -->
+                            <div class="tab-pane fade show active" id="tabBasic">
+                                <form id="formBasic">
+                                    <div class="row g-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label required">按鈕名稱 (ButtonName)</label>
+                                            <input type="text" class="form-control" id="editButtonName" required />
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label required">顯示名稱 (CustCaption)</label>
+                                            <input type="text" class="form-control" id="editCustCaption" required />
+                                        </div>
+                                        <div class="col-md-12">
+                                            <label class="form-label">提示文字 (CustHint)</label>
+                                            <input type="text" class="form-control" id="editCustHint" />
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">SP 名稱</label>
+                                            <input type="text" class="form-control" id="editSpName" placeholder="例如: dbo.MyStoredProc" />
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">排序</label>
+                                            <input type="number" class="form-control" id="editSerialNum" value="0" />
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">設計類型</label>
+                                            <select class="form-select" id="editDesignType">
+                                                <option value="0">0 - 一般</option>
+                                                <option value="1">1 - 查詢</option>
+                                                <option value="2">2 - 報表</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="form-check mt-4">
+                                                <input type="checkbox" class="form-check-input" id="editVisible" checked />
+                                                <label class="form-check-label">顯示 (bVisible)</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="form-check mt-4">
+                                                <input type="checkbox" class="form-check-input" id="editNeedNum" />
+                                                <label class="form-check-label">需要選取列 (bNeedNum)</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="form-check mt-4">
+                                                <input type="checkbox" class="form-check-input" id="editChkCanUpdate" />
+                                                <label class="form-check-label">編輯中可用 (ChkCanUpdate)</label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="mt-4">
+                                        <button type="button" class="btn btn-primary" onclick="saveCurrentButton()">
+                                            儲存此按鈕
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger ms-2" onclick="deleteCurrentButton()">
+                                            刪除
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+
+                            <!-- 參數設定 -->
+                            <div class="tab-pane fade" id="tabParams">
+                                <div class="d-flex justify-content-between mb-3">
+                                    <h6 class="mb-0">SP 參數清單</h6>
+                                    <button class="btn btn-sm btn-success" onclick="addNewParam()">+ 新增參數</button>
+                                </div>
+                                <div class="table-container" style="max-height: 300px;">
+                                    <table class="table table-sm param-table">
+                                        <thead>
+                                            <tr>
+                                                <th>參數名稱</th>
+                                                <th>顯示名稱</th>
+                                                <th>預設值</th>
+                                                <th>控制類型</th>
+                                                <th>唯讀</th>
+                                                <th>可見</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="paramList">
+                                            <tr><td colspan="7" class="text-center text-muted">請先選擇一個按鈕</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 參數編輯 Modal -->
+    <div class="modal fade" id="paramModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">編輯參數</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label required">參數名稱 (ParamName)</label>
+                        <input type="text" class="form-control" id="paramName" required />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">顯示名稱 (DisplayName)</label>
+                        <input type="text" class="form-control" id="paramDisplayName" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">預設值 (DefaultValue)</label>
+                        <input type="text" class="form-control" id="paramDefaultValue" />
+                    </div>
+                    <div class="row">
+                        <div class="col-6">
+                            <label class="form-label">控制類型</label>
+                            <select class="form-select" id="paramControlType">
+                                <option value="0">文字框</option>
+                                <option value="1">下拉選單</option>
+                                <option value="2">日期</option>
+                                <option value="3">勾選框</option>
+                            </select>
+                        </div>
+                        <div class="col-3">
+                            <label class="form-label">排序</label>
+                            <input type="number" class="form-control" id="paramSN" value="0" />
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-6">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="paramReadOnly" />
+                                <label class="form-check-label">唯讀</label>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="paramVisible" checked />
+                                <label class="form-check-label">可見</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3 mt-3">
+                        <label class="form-label">CommandText (下拉選單用)</label>
+                        <textarea class="form-control" id="paramCommandText" rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="saveParam()">儲存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script>
+        // 全域變數
+        let currentItemId = '';
+        let currentButtonName = '';
+        let buttonsData = [];
+        let paramsData = [];
+        let editingParamIndex = -1;
+
+        // 載入按鈕清單
+        async function loadButtons() {
+            currentItemId = document.getElementById('txtItemId').value.trim();
+            if (!currentItemId) {
+                Swal.fire('請輸入 ItemId', '', 'warning');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/CustomButtonApi/ByItem/${encodeURIComponent(currentItemId)}`);
+                buttonsData = await response.json();
+
+                renderButtonList();
+                clearEditForm();
+                document.getElementById('btnCount').textContent = buttonsData.length;
+
+            } catch (error) {
+                console.error('載入失敗:', error);
+                Swal.fire('載入失敗', error.message, 'error');
+            }
+        }
+
+        // 渲染按鈕清單
+        function renderButtonList() {
+            const tbody = document.getElementById('buttonList');
+
+            if (buttonsData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">無資料</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = buttonsData.map((btn, idx) => `
+                <tr data-index="${idx}" onclick="selectButton(${idx})" class="${btn.buttonName === currentButtonName ? 'selected' : ''}">
+                    <td>${btn.serialNum || idx + 1}</td>
+                    <td><code>${btn.buttonName || ''}</code></td>
+                    <td>${btn.custCaption || ''}</td>
+                    <td><small>${btn.spName || '-'}</small></td>
+                    <td class="text-center">${btn.bVisible === 1 ? '✓' : ''}</td>
+                    <td class="btn-group-action">
+                        <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); selectButton(${idx})">編輯</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // 選擇按鈕
+        async function selectButton(index) {
+            const btn = buttonsData[index];
+            currentButtonName = btn.buttonName;
+
+            // 更新選中狀態
+            document.querySelectorAll('#buttonList tr').forEach(tr => tr.classList.remove('selected'));
+            document.querySelector(`#buttonList tr[data-index="${index}"]`)?.classList.add('selected');
+
+            // 填入表單
+            document.getElementById('editButtonName').value = btn.buttonName || '';
+            document.getElementById('editCustCaption').value = btn.custCaption || '';
+            document.getElementById('editCustHint').value = btn.custHint || '';
+            document.getElementById('editSpName').value = btn.spName || '';
+            document.getElementById('editSerialNum').value = btn.serialNum || 0;
+            document.getElementById('editDesignType').value = btn.designType || 0;
+            document.getElementById('editVisible').checked = btn.bVisible === 1;
+            document.getElementById('editNeedNum').checked = btn.bNeedNum === 1;
+            document.getElementById('editChkCanUpdate').checked = btn.chkCanUpdate === 1;
+
+            // 載入參數
+            await loadParams(btn.buttonName);
+        }
+
+        // 載入參數
+        async function loadParams(buttonName) {
+            try {
+                const response = await fetch(`/api/CustomButtonApi/Detail/${encodeURIComponent(currentItemId)}/${encodeURIComponent(buttonName)}`);
+                const data = await response.json();
+                paramsData = data.searchParams || [];
+
+                renderParamList();
+            } catch (error) {
+                console.error('載入參數失敗:', error);
+                paramsData = [];
+                renderParamList();
+            }
+        }
+
+        // 渲染參數清單
+        function renderParamList() {
+            const tbody = document.getElementById('paramList');
+
+            if (paramsData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">無參數設定</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = paramsData.map((p, idx) => `
+                <tr>
+                    <td><code>${p.paramName}</code></td>
+                    <td>${p.displayName || '-'}</td>
+                    <td>${p.defaultValue || '-'}</td>
+                    <td>${getControlTypeName(p.controlType)}</td>
+                    <td class="text-center">${p.iReadOnly === 1 ? '✓' : ''}</td>
+                    <td class="text-center">${p.iVisible !== 0 ? '✓' : ''}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" onclick="editParam(${idx})">編輯</button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteParam(${idx})">刪除</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function getControlTypeName(type) {
+            const names = { 0: '文字框', 1: '下拉', 2: '日期', 3: '勾選' };
+            return names[type] || type;
+        }
+
+        // 清空編輯表單
+        function clearEditForm() {
+            currentButtonName = '';
+            document.getElementById('editButtonName').value = '';
+            document.getElementById('editCustCaption').value = '';
+            document.getElementById('editCustHint').value = '';
+            document.getElementById('editSpName').value = '';
+            document.getElementById('editSerialNum').value = 0;
+            document.getElementById('editDesignType').value = 0;
+            document.getElementById('editVisible').checked = true;
+            document.getElementById('editNeedNum').checked = false;
+            document.getElementById('editChkCanUpdate').checked = false;
+            paramsData = [];
+            renderParamList();
+        }
+
+        // 新增按鈕
+        function addNewButton() {
+            if (!currentItemId) {
+                Swal.fire('請先輸入 ItemId', '', 'warning');
+                return;
+            }
+
+            clearEditForm();
+            document.getElementById('editButtonName').focus();
+
+            // 設定預設排序
+            const maxSerial = Math.max(0, ...buttonsData.map(b => b.serialNum || 0));
+            document.getElementById('editSerialNum').value = maxSerial + 1;
+        }
+
+        // 儲存當前按鈕
+        async function saveCurrentButton() {
+            const buttonName = document.getElementById('editButtonName').value.trim();
+            const custCaption = document.getElementById('editCustCaption').value.trim();
+
+            if (!buttonName || !custCaption) {
+                Swal.fire('請填寫必填欄位', '按鈕名稱和顯示名稱為必填', 'warning');
+                return;
+            }
+
+            const buttonData = {
+                itemId: currentItemId,
+                buttonName: buttonName,
+                custCaption: custCaption,
+                custHint: document.getElementById('editCustHint').value,
+                spName: document.getElementById('editSpName').value,
+                serialNum: parseInt(document.getElementById('editSerialNum').value) || 0,
+                designType: parseInt(document.getElementById('editDesignType').value) || 0,
+                bVisible: document.getElementById('editVisible').checked ? 1 : 0,
+                bNeedNum: document.getElementById('editNeedNum').checked ? 1 : 0,
+                chkCanUpdate: document.getElementById('editChkCanUpdate').checked ? 1 : 0
+            };
+
+            // 更新或新增到陣列
+            const existingIndex = buttonsData.findIndex(b => b.buttonName === buttonName);
+            if (existingIndex >= 0) {
+                buttonsData[existingIndex] = { ...buttonsData[existingIndex], ...buttonData };
+            } else {
+                buttonsData.push(buttonData);
+            }
+
+            // 儲存到後端
+            try {
+                const response = await fetch('/api/CustomButtonApi/Save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(buttonsData)
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    Swal.fire({ icon: 'success', title: '儲存成功', timer: 1500, showConfirmButton: false });
+                    await loadButtons();
+                } else {
+                    throw new Error(result.message || '儲存失敗');
+                }
+            } catch (error) {
+                Swal.fire('儲存失敗', error.message, 'error');
+            }
+        }
+
+        // 刪除當前按鈕
+        async function deleteCurrentButton() {
+            if (!currentButtonName) {
+                Swal.fire('請先選擇一個按鈕', '', 'warning');
+                return;
+            }
+
+            const result = await Swal.fire({
+                title: '確定要刪除？',
+                text: `將刪除按鈕: ${currentButtonName}`,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                confirmButtonText: '確定刪除',
+                cancelButtonText: '取消'
+            });
+
+            if (result.isConfirmed) {
+                buttonsData = buttonsData.filter(b => b.buttonName !== currentButtonName);
+
+                try {
+                    await fetch('/api/CustomButtonApi/Save', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(buttonsData)
+                    });
+
+                    Swal.fire({ icon: 'success', title: '已刪除', timer: 1500, showConfirmButton: false });
+                    clearEditForm();
+                    renderButtonList();
+                } catch (error) {
+                    Swal.fire('刪除失敗', error.message, 'error');
+                }
+            }
+        }
+
+        // 儲存所有變更
+        async function saveAllChanges() {
+            if (buttonsData.length === 0) {
+                Swal.fire('沒有資料需要儲存', '', 'info');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/CustomButtonApi/Save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(buttonsData)
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    Swal.fire({ icon: 'success', title: '全部儲存成功', timer: 1500, showConfirmButton: false });
+                } else {
+                    throw new Error(result.message);
+                }
+            } catch (error) {
+                Swal.fire('儲存失敗', error.message, 'error');
+            }
+        }
+
+        // ===== 參數相關 =====
+        function addNewParam() {
+            if (!currentButtonName) {
+                Swal.fire('請先選擇一個按鈕', '', 'warning');
+                return;
+            }
+
+            editingParamIndex = -1;
+            document.getElementById('paramName').value = '';
+            document.getElementById('paramDisplayName').value = '';
+            document.getElementById('paramDefaultValue').value = '';
+            document.getElementById('paramControlType').value = '0';
+            document.getElementById('paramSN').value = paramsData.length + 1;
+            document.getElementById('paramReadOnly').checked = false;
+            document.getElementById('paramVisible').checked = true;
+            document.getElementById('paramCommandText').value = '';
+
+            new bootstrap.Modal(document.getElementById('paramModal')).show();
+        }
+
+        function editParam(index) {
+            editingParamIndex = index;
+            const p = paramsData[index];
+
+            document.getElementById('paramName').value = p.paramName || '';
+            document.getElementById('paramDisplayName').value = p.displayName || '';
+            document.getElementById('paramDefaultValue').value = p.defaultValue || '';
+            document.getElementById('paramControlType').value = p.controlType || 0;
+            document.getElementById('paramSN').value = p.paramSN || 0;
+            document.getElementById('paramReadOnly').checked = p.iReadOnly === 1;
+            document.getElementById('paramVisible').checked = p.iVisible !== 0;
+            document.getElementById('paramCommandText').value = p.commandText || '';
+
+            new bootstrap.Modal(document.getElementById('paramModal')).show();
+        }
+
+        async function saveParam() {
+            const paramName = document.getElementById('paramName').value.trim();
+            if (!paramName) {
+                Swal.fire('請輸入參數名稱', '', 'warning');
+                return;
+            }
+
+            const paramData = {
+                itemId: currentItemId,
+                buttonName: currentButtonName,
+                paramName: paramName,
+                displayName: document.getElementById('paramDisplayName').value,
+                defaultValue: document.getElementById('paramDefaultValue').value,
+                controlType: parseInt(document.getElementById('paramControlType').value) || 0,
+                paramSN: parseInt(document.getElementById('paramSN').value) || 0,
+                iReadOnly: document.getElementById('paramReadOnly').checked ? 1 : 0,
+                iVisible: document.getElementById('paramVisible').checked ? 1 : 0,
+                commandText: document.getElementById('paramCommandText').value
+            };
+
+            if (editingParamIndex >= 0) {
+                paramsData[editingParamIndex] = { ...paramsData[editingParamIndex], ...paramData };
+            } else {
+                paramsData.push(paramData);
+            }
+
+            renderParamList();
+            bootstrap.Modal.getInstance(document.getElementById('paramModal')).hide();
+
+            // TODO: 儲存參數到後端（需要新增 API）
+            Swal.fire({ icon: 'info', title: '參數已更新（記憶體）', text: '請點擊「儲存此按鈕」以保存', timer: 2000, showConfirmButton: false });
+        }
+
+        function deleteParam(index) {
+            paramsData.splice(index, 1);
+            renderParamList();
+        }
+
+        // 頁面載入
+        document.addEventListener('DOMContentLoaded', () => {
+            // 按 Enter 觸發查詢
+            document.getElementById('txtItemId').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') loadButtons();
+            });
+        });
+    </script>
+</body>
+</html>

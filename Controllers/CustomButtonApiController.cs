@@ -25,7 +25,7 @@ public class CustomButtonApiController : ControllerBase
     }
     private static object DbNull(object? v) => v ?? DBNull.Value;
 
-    private async Task<(bool hasCaptionE, bool hasHintE, string chkCanUpdateCol)> DetectSchema(SqlConnection conn, SqlTransaction? tx = null)
+    private async Task<(bool hasCaptionE, bool hasHintE, string chkCanUpdateCol, bool hasButtonColor)> DetectSchema(SqlConnection conn, SqlTransaction? tx = null)
     {
         var sql = @"
 SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CURdOCXItemCustButton')";
@@ -40,11 +40,12 @@ SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CURdOCXItemCustBut
 
         var hasCaptionE = cols.Contains("CustCaptionE");
         var hasHintE = cols.Contains("CustHintE");
+        var hasButtonColor = cols.Contains("ButtonColor");
         // 兩個擇一：ChkCanUpdate / ChkCanbUpdate
         var chkCol = cols.Contains("ChkCanUpdate") ? "ChkCanUpdate"
                   : cols.Contains("ChkCanbUpdate") ? "ChkCanbUpdate"
                   : "ChkCanUpdate"; // fallback（幾乎用不到）
-        return (hasCaptionE, hasHintE, chkCol);
+        return (hasCaptionE, hasHintE, chkCol, hasButtonColor);
     }
 
     // ===== DTO =====
@@ -67,6 +68,16 @@ SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CURdOCXItemCustBut
         public int? ChkCanUpdate { get; set; }   // 會對應到實際欄位（ChkCanUpdate 或 ChkCanbUpdate）
         public int? bNeedNum { get; set; }
         public int? DesignType { get; set; }
+
+        // 彈窗選單相關欄位
+        public string SearchTemplate { get; set; }
+        public string MultiSelectDD { get; set; }
+        public string ExecSpName { get; set; }
+        public int? AllowSelCount { get; set; }
+        public int? ReplaceExists { get; set; }
+
+        // 自訂按鈕顏色（CSS 色碼，如 #17a2b8）
+        public string ButtonColor { get; set; }
     }
 
     // ===== GET =====
@@ -78,7 +89,7 @@ SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CURdOCXItemCustBut
         await using var conn = new SqlConnection(_connStr);
         await conn.OpenAsync();
 
-        var (hasCapE, hasHintE, chkCol) = await DetectSchema(conn);
+        var (hasCapE, hasHintE, chkCol, hasButtonColor) = await DetectSchema(conn);
 
         var select = $@"
 SELECT ItemId, SerialNum, ButtonName,
@@ -87,7 +98,9 @@ SELECT ItemId, SerialNum, ButtonName,
        CustHint,
        {(hasHintE ? "CustHintE" : "CAST('' AS nvarchar(1)) AS CustHintE")},
        OCXName, CoClassName, SpName,
-       bVisible, {chkCol} AS ChkCanUpdate, bNeedNum, DesignType
+       bVisible, {chkCol} AS ChkCanUpdate, bNeedNum, DesignType,
+       SearchTemplate, MultiSelectDD, ExecSpName, AllowSelCount, ReplaceExists,
+       {(hasButtonColor ? "ButtonColor" : "CAST('' AS nvarchar(1)) AS ButtonColor")}
 FROM CURdOCXItemCustButton WITH (NOLOCK)
 WHERE ItemId = @itemId
 ORDER BY SerialNum, ButtonName;";
@@ -113,7 +126,13 @@ ORDER BY SerialNum, ButtonName;";
                 bVisible = TryToInt(rd["bVisible"]),
                 ChkCanUpdate = TryToInt(rd["ChkCanUpdate"]),
                 bNeedNum = TryToInt(rd["bNeedNum"]),
-                DesignType = TryToInt(rd["DesignType"])
+                DesignType = TryToInt(rd["DesignType"]),
+                SearchTemplate = rd["SearchTemplate"]?.ToString() ?? string.Empty,
+                MultiSelectDD = rd["MultiSelectDD"]?.ToString() ?? string.Empty,
+                ExecSpName = rd["ExecSpName"]?.ToString() ?? string.Empty,
+                AllowSelCount = TryToInt(rd["AllowSelCount"]),
+                ReplaceExists = TryToInt(rd["ReplaceExists"]),
+                ButtonColor = rd["ButtonColor"]?.ToString() ?? string.Empty
             });
         }
 
@@ -254,42 +273,114 @@ public class ButtonDetailDto {
 [HttpGet("Detail/{itemId}/{buttonName}")]
 public async Task<IActionResult> GetDetail(string itemId, string buttonName)
 {
-    await using var conn = new SqlConnection(_connStr);
-    await conn.OpenAsync();
+    try
+    {
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
 
-    var dto = new ButtonDetailDto { ItemId = itemId, ButtonName = buttonName };
+        var dto = new ButtonDetailDto { ItemId = itemId, ButtonName = buttonName };
 
-    // CURdOCXSearchParams
-    var cmd1 = new SqlCommand(@"
-SELECT ItemId, ButtonName, ParamName, DisplayName, ControlType, CommandText,
-       DefaultValue, DefaultType, EditMask, SuperId, ParamSN, ParamValue,
-       ParamType, iReadOnly, iVisible
+    // 1. 先查詢 CURdOCXItmCusBtnParam 看是否有資料（只查關鍵欄位）
+    var hasItmCusBtnParam = false;
+    var cmd1a = new SqlCommand(@"
+SELECT COUNT(*)
+FROM CURdOCXItmCusBtnParam WITH (NOLOCK)
+WHERE ItemId=@itemId AND ButtonName=@btn;", conn);
+    cmd1a.Parameters.AddWithValue("@itemId", itemId ?? "");
+    cmd1a.Parameters.AddWithValue("@btn", buttonName ?? "");
+    var count = (int)await cmd1a.ExecuteScalarAsync();
+    hasItmCusBtnParam = count > 0;
+
+    // 2. 從 CURdOCXSearchParams 查詢（因為 CURdOCXItmCusBtnParam 欄位不完整，統一用舊表）
+    // 先檢查表中有哪些欄位
+    var availableColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var schemaCmd = new SqlCommand(@"
+SELECT COLUMN_NAME
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'CURdOCXSearchParams'", conn);
+    using (var schemaRd = await schemaCmd.ExecuteReaderAsync())
+    {
+        while (await schemaRd.ReadAsync())
+        {
+            availableColumns.Add(schemaRd.GetString(0));
+        }
+    }
+
+    // 動態建立 SELECT 語句，只選擇存在的欄位
+    var selectColumns = new List<string> {
+        "ItemId", "ButtonName", "ParamName", "DisplayName", "ControlType", "CommandText",
+        "DefaultValue", "DefaultType", "EditMask", "SuperId", "ParamSN", "ParamValue",
+        "ParamType", "iReadOnly", "iVisible"
+    };
+    var existingColumns = selectColumns.Where(c => availableColumns.Contains(c)).ToList();
+
+    // 動態建立 ORDER BY 語句
+    var orderByParts = new List<string>();
+    if (availableColumns.Contains("ParamSN")) orderByParts.Add("ParamSN");
+    if (availableColumns.Contains("ParamName")) orderByParts.Add("ParamName");
+    var orderByClause = orderByParts.Count > 0 ? $"ORDER BY {string.Join(", ", orderByParts)}" : "";
+
+    var cmd1b = new SqlCommand($@"
+SELECT {string.Join(", ", existingColumns)}
 FROM CURdOCXSearchParams WITH (NOLOCK)
 WHERE ItemId=@itemId AND ButtonName=@btn
-ORDER BY ParamSN, ParamName;", conn);
-    cmd1.Parameters.AddWithValue("@itemId", itemId ?? "");
-    cmd1.Parameters.AddWithValue("@btn", buttonName ?? "");
-    using (var rd = await cmd1.ExecuteReaderAsync())
+{orderByClause};", conn);
+    cmd1b.Parameters.AddWithValue("@itemId", itemId ?? "");
+    cmd1b.Parameters.AddWithValue("@btn", buttonName ?? "");
+    using (var rd = await cmd1b.ExecuteReaderAsync())
     {
         while (await rd.ReadAsync())
         {
             dto.SearchParams.Add(new SearchParamRow{
-                ItemId = rd["ItemId"]?.ToString(),
-                ButtonName = rd["ButtonName"]?.ToString(),
-                ParamName = rd["ParamName"]?.ToString(),
-                DisplayName = rd["DisplayName"]?.ToString(),
-                ControlType = TryToInt(rd["ControlType"]),
-                CommandText = rd["CommandText"]?.ToString(),
-                DefaultValue = rd["DefaultValue"]?.ToString(),
-                DefaultType = TryToInt(rd["DefaultType"]),
-                EditMask = rd["EditMask"]?.ToString(),
-                SuperId = rd["SuperId"]?.ToString(),
-                ParamSN = TryToInt(rd["ParamSN"]),
-                ParamValue = rd["ParamValue"]?.ToString(),
-                ParamType = TryToInt(rd["ParamType"]),
-                iReadOnly = TryToInt(rd["iReadOnly"]),
-                iVisible = TryToInt(rd["iVisible"]),
+                ItemId = SafeGetString(rd, "ItemId"),
+                ButtonName = SafeGetString(rd, "ButtonName"),
+                ParamName = SafeGetString(rd, "ParamName"),
+                DisplayName = SafeGetString(rd, "DisplayName"),
+                ControlType = SafeGetInt(rd, "ControlType"),
+                CommandText = SafeGetString(rd, "CommandText"),
+                DefaultValue = SafeGetString(rd, "DefaultValue"),
+                DefaultType = SafeGetInt(rd, "DefaultType"),
+                EditMask = SafeGetString(rd, "EditMask"),
+                SuperId = SafeGetString(rd, "SuperId"),
+                ParamSN = SafeGetInt(rd, "ParamSN"),
+                ParamValue = SafeGetString(rd, "ParamValue"),
+                ParamType = SafeGetInt(rd, "ParamType"),
+                iReadOnly = SafeGetInt(rd, "iReadOnly"),
+                iVisible = SafeGetInt(rd, "iVisible"),
             });
+        }
+    }
+
+    // 3. 如果 CURdOCXItmCusBtnParam 有資料，補充 ParamType（覆蓋舊表的值）
+    if (hasItmCusBtnParam && dto.SearchParams.Count > 0)
+    {
+        var cmd1c = new SqlCommand(@"
+SELECT ParamName, ParamType
+FROM CURdOCXItmCusBtnParam WITH (NOLOCK)
+WHERE ItemId=@itemId AND ButtonName=@btn;", conn);
+        cmd1c.Parameters.AddWithValue("@itemId", itemId ?? "");
+        cmd1c.Parameters.AddWithValue("@btn", buttonName ?? "");
+
+        var paramTypeMap = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
+        using (var rd = await cmd1c.ExecuteReaderAsync())
+        {
+            while (await rd.ReadAsync())
+            {
+                var pName = rd["ParamName"]?.ToString();
+                if (!string.IsNullOrEmpty(pName))
+                {
+                    paramTypeMap[pName] = TryToInt(rd["ParamType"]);
+                }
+            }
+        }
+
+        // 更新 SearchParams 中的 ParamType
+        foreach (var p in dto.SearchParams)
+        {
+            if (paramTypeMap.TryGetValue(p.ParamName, out var paramType))
+            {
+                p.ParamType = paramType;
+            }
         }
     }
 
@@ -315,9 +406,48 @@ ORDER BY SeqNum, KeyFieldName;", conn);
         }
     }
 
-    return Ok(dto);
+        return Ok(dto);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[GetDetail] Error: {ex.Message}");
+        Console.WriteLine($"[GetDetail] StackTrace: {ex.StackTrace}");
+        return StatusCode(500, new {
+            success = false,
+            error = ex.Message,
+            detail = ex.ToString()
+        });
+    }
 }
 
+// 安全取得字串值的輔助函數
+private static string? SafeGetString(SqlDataReader reader, string columnName)
+{
+    try
+    {
+        var ordinal = reader.GetOrdinal(columnName);
+        return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+    }
+    catch
+    {
+        return null;
+    }
+}
 
+// 安全取得整數值的輔助函數
+private static int? SafeGetInt(SqlDataReader reader, string columnName)
+{
+    try
+    {
+        var ordinal = reader.GetOrdinal(columnName);
+        if (reader.IsDBNull(ordinal)) return null;
+        var value = reader.GetValue(ordinal);
+        return value is int i ? i : int.TryParse(value?.ToString(), out var result) ? result : null;
+    }
+    catch
+    {
+        return null;
+    }
+}
 
 }

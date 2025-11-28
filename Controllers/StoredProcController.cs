@@ -41,10 +41,10 @@ public class StoredProcController : ControllerBase
             RequiredParams: new[] { "PaperId","PaperNum", "HeadParam", "UseId","GetEmpty" }
         ),
 
-            // 製令單重算
+            // 製令單重算（iNoReComputeBackQnty 為選填，預設不傳）
             ["FMEdIssueTotalPcsDLL"] = new StoredProcDef(
             ProcName: "dbo.FMEdIssueTotalPcsDLL",
-            RequiredParams: new[] { "DLLPaperNum", "iNoReComputeBackQnty" }
+            RequiredParams: new[] { "DLLPaperNum" }
         ),
 
             // 製令單 Lock

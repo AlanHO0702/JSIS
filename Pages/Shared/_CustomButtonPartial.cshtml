@@ -1,0 +1,174 @@
+                   @*
+ * 通用按鈕模板 - 適用於所有單據
+ * 使用方式：在頁面中設定 ViewData["ItemId"] 即可
+ *@
+@{
+    // 從 ViewData 取得 ItemId，如果沒有則嘗試從 Model 取得
+    var itemId = ViewData["ItemId"]?.ToString()
+                 ?? ViewData["DictTableName"]?.ToString()
+                 ?? Model?.TableName
+                 ?? "";
+
+    // 如果還是沒有 ItemId，嘗試從頁面路徑推斷
+    if (string.IsNullOrEmpty(itemId))
+    {
+        var path = Context.Request.Path.Value ?? "";
+        // 例如：/FmedIssueSub/xxx -> FME (製令單)
+        // 例如：/SpodOrderSub/xxx -> SPO (銷售訂單)
+        if (path.Contains("FmedIssueSub", StringComparison.OrdinalIgnoreCase))
+        {
+            itemId = "FME00020";
+        }
+        else if (path.Contains("SpodOrderSub", StringComparison.OrdinalIgnoreCase))
+        {
+            itemId = "SPO00010";
+        }
+    }
+}
+
+@if (!string.IsNullOrEmpty(itemId))
+{
+    <div class="action-rail">
+        <!-- 動態按鈕區域（從後台設定載入） -->
+        <div id="customButtonArea" class="custom-button-area"></div>
+    </div>
+
+    <!-- 引入動態按鈕模組 -->
+    <script src="~/js/customButton.js?v=@DateTime.Now.Ticks"></script>
+    <script>
+    // 頁面載入時初始化動態按鈕
+    document.addEventListener('DOMContentLoaded', async function() {
+        const itemId = '@itemId';
+
+        try {
+            // 檢查 CustomButton 是否已載入
+            if (typeof CustomButton === 'undefined') {
+                console.error('[CustomButton] CustomButton 模組未載入');
+                return;
+            }
+
+            // 自訂按鈕樣式（符合現有 fab 風格）
+            const buttons = await CustomButton.init(itemId, {
+                containerId: 'customButtonArea',
+                buttonClass: 'fab fab-dynamic'
+            });
+        } catch (error) {
+            console.error('[CustomButton] 動態按鈕載入失敗:', error);
+        }
+    });
+    </script>
+
+    <style>
+    /* 動態按鈕區域樣式 */
+    .custom-button-area {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* 動態按鈕樣式（子選單按鈕風格） */
+    .fab-dynamic {
+      position: relative;
+      width: 100px;
+      height: 40px;
+      padding: 0 10px;
+      font-size: 1em;
+      font-weight: 600;
+      background: #17a2b8;
+      color: #fff;
+      border-radius: 8px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,.15);
+      border: 0;
+      text-align: center;
+      transition: all 0.18s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .fab-dynamic:hover {
+      filter: brightness(1.05);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 14px rgba(0,0,0,.2);
+    }
+
+    /* 功能選單樣式 */
+    .fab-menu-toggle {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100px;
+      height: 40px;
+      padding: 0 10px;
+      font-size: 1em;
+      font-weight: 600;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.15);
+    }
+
+    .fab-menu-toggle .menu-text {
+      flex: 0 1 auto;
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    .fab-menu-toggle .arrow {
+      display: inline-block;
+      transition: transform 0.3s ease;
+      font-size: 0.85em;
+      margin-left: auto;
+      padding-left: 6px;
+      flex-shrink: 0;
+    }
+
+    .fab-menu-toggle.open .arrow {
+      transform: rotate(180deg);
+    }
+
+    .fab-submenu {
+      flex-direction: column;
+      gap: 8px;
+      padding-left: 0;
+      margin-left: 0;
+      margin-top: 8px;
+      margin-bottom: 0;
+    }
+
+    .fab-sub {
+      position: relative;
+      width: 100px;
+      height: 40px;
+      padding: 0 10px;
+      font-size: 1em;
+      font-weight: 600;
+      background: #5a9bd5;
+      color: #fff;
+      border-radius: 8px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,.15);
+      border: 0;
+      transition: all 0.18s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .fab-sub:hover {
+      filter: brightness(1.05);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 14px rgba(0,0,0,.2);
+    }
+    </style>
+}
+else
+{
+    @* ItemId 未設定時的提示（僅在開發環境顯示） *@
+    @if (Context.RequestServices.GetService(typeof(Microsoft.AspNetCore.Hosting.IWebHostEnvironment)) is Microsoft.AspNetCore.Hosting.IWebHostEnvironment env && env.IsDevelopment())
+    {
+        <div class="alert alert-warning" role="alert">
+            <strong>警告：</strong>無法取得 ItemId，請在頁面中設定 ViewData["ItemId"]
+        </div>
+    }
+}
