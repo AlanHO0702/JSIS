@@ -40,6 +40,8 @@ namespace PcbErpApi.Data
         public virtual DbSet<FmedIssueLayer> FmedIssueLayer { get; set; }
         public virtual DbSet<AJNdClassMoney> AJNdClassMoney { get; set; }
         public virtual DbSet<AJNdClassMoneyHis> AJNdClassMoneyHis { get; set; }
+        public virtual DbSet<CurdNoticeBoard> CurdNoticeBoards { get; set; }
+        public virtual DbSet<CurdNoticeBoardUser> CurdNoticeBoardUsers { get; set; }
         public IEnumerable<object> TabConfigs { get; internal set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -90,9 +92,40 @@ namespace PcbErpApi.Data
                 entity.HasKey(e => new { e.PaperNum, e.Item });
             });
 
+            modelBuilder.Entity<CurdNoticeBoardUser>(entity =>
+            {
+                entity.HasKey(e => new { e.SerialNum, e.ToUserId });
+
+                entity.ToTable("CURdNoticeBoardUser");
+
+                entity.Property(e => e.ToUserId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+            });
+
             modelBuilder.Entity<CURdV_SysProcess_WEB>()
             .HasNoKey()
             .ToView("CURdV_SysProcess_WEB");
+
+            modelBuilder.Entity<CurdNoticeBoard>(entity =>
+            {
+                entity.HasKey(e => e.SerialNum);
+
+                entity.ToTable("CURdNoticeBoard");
+
+                entity.Property(e => e.SerialNum).ValueGeneratedNever();
+                entity.Property(e => e.BeginDate).HasColumnType("datetime");
+                entity.Property(e => e.BoardText).HasMaxLength(4000);
+                entity.Property(e => e.BuildDate)
+                    .HasDefaultValueSql("(getdate())")
+                    .HasColumnType("datetime");
+                entity.Property(e => e.EndDate).HasColumnType("datetime");
+                entity.Property(e => e.PostUserId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.Subjects).HasMaxLength(128);
+                entity.Property(e => e.ToAlluser).HasColumnName("ToALLUser");
+            });
 
 
             // FMEdIssueMat 複合主鍵配置

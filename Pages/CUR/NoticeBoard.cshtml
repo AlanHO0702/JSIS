@@ -1,0 +1,451 @@
+@page "/CUR/NoticeBoard"
+@model PcbErpApi.Pages.CUR.NoticeBoardModel
+@using System.Text.Json
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "布告欄維護";
+}
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<div class="container-fluid my-3">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <button class="btn btn-warning px-4" id="btn-edit">修改</button>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-light fw-bold py-2">公告維護</div>
+    <div class="card-body p-0" style="max-height: 360px; overflow:auto;">
+      <table class="table table-sm table-hover table-bordered align-middle mb-0" id="tbl-master" data-dict-table="CURdNoticeBoard">
+        <thead class="table-primary sticky-top">
+          <tr></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-5">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-light fw-bold py-2 d-flex justify-content-between align-items-center">
+          <span>公告對象</span>
+          <button class="btn btn-sm btn-outline-primary" id="btn-add-detail">＋ 公告對象</button>
+        </div>
+        <div class="card-body p-0" style="max-height: 260px; overflow:auto;">
+          <table class="table table-sm table-striped table-bordered align-middle mb-0" id="tbl-detail" data-dict-table="CURdNoticeBoardUser">
+            <thead class="table-secondary sticky-top"><tr></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-7">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-light fw-bold py-2">主旨全文</div>
+        <div class="card-body" id="subject-full" style="min-height: 260px; white-space: pre-line;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", null, ViewData)
+
+<!-- 編輯公告 Modal -->
+<div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">編輯公告</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label">公告者代號</label>
+            <input type="text" class="form-control" id="editPostUser">
+          </div>
+          <div class="col-md-8">
+            <label class="form-label">主旨</label>
+            <input type="text" class="form-control" id="editSubjects">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">公告開始日</label>
+            <input type="datetime-local" class="form-control" id="editBeginDate">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">公告結束日</label>
+            <input type="datetime-local" class="form-control" id="editEndDate">
+          </div>
+          <div class="col-12">
+            <label class="form-label">主旨全文</label>
+            <textarea class="form-control" rows="6" id="editBoardText"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" id="btn-save-edit">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 新增公告對象 Modal -->
+<div class="modal fade" id="detailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">新增公告對象</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">公告對象代號</label>
+          <input type="text" class="form-control" id="detailUserId" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" id="btn-save-detail">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const masterTable = "CURdNoticeBoard";
+  const detailTable = "CURdNoticeBoardUser";
+  const masterTop = 500;
+  window._dictTableName = masterTable;
+  document.body.dataset.dictTable = masterTable;
+
+  const masterHead = document.querySelector("#tbl-master thead tr");
+  const masterBody = document.querySelector("#tbl-master tbody");
+  const detailHead = document.querySelector("#tbl-detail thead tr");
+  const detailBody = document.querySelector("#tbl-detail tbody");
+  const fullText = document.getElementById("subject-full");
+
+  const lookupCache = {};
+  let masterDict = [];
+  let detailDict = [];
+  let masterRows = [];
+  let currentMasterRow = null;
+  let editModal;
+  let detailModal;
+  async function loadLookupMap(f){
+    if (f.FieldName === "ToUserId") return null; // keep detail code as-is
+    const userLookupDefaults = {
+      ToUserId:     { table: "CURdUsers", key: "UserId", result: "UserId,UserName" },
+      Lk_UserName:  { table: "CURdUsers", key: "UserId", result: "UserId,UserName" },
+    };
+
+    const table = f.LookupTable || userLookupDefaults[f.FieldName]?.table;
+    const keyField = f.LookupKeyField || userLookupDefaults[f.FieldName]?.key;
+    const resultField = f.LookupResultField || userLookupDefaults[f.FieldName]?.result;
+    const cacheKey = `${table}|${keyField}|${resultField}|${f.FieldName}`;
+
+    if (lookupCache[cacheKey]) return lookupCache[cacheKey];
+    if (!table || !keyField || !resultField) return (lookupCache[cacheKey] = null);
+    const url = `/api/TableFieldLayout/LookupData`
+      + `?table=${encodeURIComponent(table)}`
+      + `&key=${encodeURIComponent(keyField)}`
+      + `&result=${encodeURIComponent(resultField)}`;
+    const rows = await fetch(url).then(r=>r.json());
+    const map = {};
+    const resultCols = rows.length ? Object.keys(rows[0]).filter(k=>k.startsWith("result")) : [];
+    rows.forEach(r => {
+      let best = null;
+      for (let i = resultCols.length - 1; i >= 0; i--) { // prefer last non-empty (e.g., result1 = UserName)
+        const val = r[resultCols[i]];
+        if (val !== null && val !== undefined && String(val).trim() !== "") { best = val; break; }
+      }
+      if (best === null && r.result0 !== undefined) best = r.result0;
+      map[String(r.key).trim()] = best ?? "";
+    });
+    lookupCache[cacheKey] = map;
+    return map;
+  }
+
+  const fmtCell = (val, fmt, dataType) => {
+    if (val == null || val === "") return "";
+    const lowerType = (dataType || "").toLowerCase();
+    if (lowerType.includes("date") || lowerType.includes("datetime") || fmt?.toLowerCase().includes("yyyy")) {
+      const d = new Date(val);
+      if (!isNaN(d)) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth()+1).padStart(2,'0');
+        const day = String(d.getDate()).padStart(2,'0');
+        const hh = String(d.getHours()).padStart(2,'0');
+        const mm = String(d.getMinutes()).padStart(2,'0');
+        const ss = String(d.getSeconds()).padStart(2,'0');
+        // show time only when not exactly 00:00:00
+        const hasTime = hh+mm+ss !== "000000";
+        return hasTime ? `${y}/${m}/${day} ${hh}:${mm}:${ss}` : `${y}/${m}/${day}`;
+      }
+    }
+    return String(val);
+  };
+
+  async function loadDict(table){
+    const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(table)}`);
+    return res.json();
+  }
+
+  function buildHead(rowEl, dict){
+    rowEl.innerHTML = "";
+    dict.filter(f => (f.Visible ?? 1)==1)
+        .sort((a,b)=>(a.SerialNum ?? 99999)-(b.SerialNum ?? 99999))
+        .forEach(f=>{
+          const th = document.createElement("th");
+          th.textContent = f.DisplayLabel || f.FieldName;
+          const w = Number(f.DisplaySize||0);
+          if(w>0) {
+            const px = (w*10);
+            th.style.width = px + "px";
+            th.style.minWidth = px + "px";
+          }
+          rowEl.appendChild(th);
+        });
+  }
+
+  async function buildBody(tbody, dict, rows, onClick){
+    tbody.innerHTML = "";
+    const fields = dict.filter(f => (f.Visible ?? 1)==1)
+                       .sort((a,b)=>(a.SerialNum ?? 99999)-(b.SerialNum ?? 99999));
+
+    const lookupMaps = {};
+    for (const f of fields) {
+      lookupMaps[f.FieldName] = await loadLookupMap(f);
+    }
+
+    rows.forEach(r=>{
+      const tr = document.createElement("tr");
+      fields.forEach(f=>{
+        const td = document.createElement("td");
+        let raw = r[f.FieldName];
+        const map = lookupMaps[f.FieldName];
+
+        let lookupKeyVal = raw;
+        if ((raw == null || raw === "") && map) {
+          if (f.FieldName === "Lk_UserName") {
+            lookupKeyVal = r.PostUserId ?? r.ToUserId ?? raw;
+          } else if (f.LookupKeyField) {
+            lookupKeyVal = r[f.LookupKeyField];
+          }
+        }
+        const key = lookupKeyVal == null ? "" : String(lookupKeyVal).trim();
+        const mapped = map && key !== "" ? map[key] : null;
+        let display = mapped != null ? mapped : (raw ?? key);
+
+        // fallback: resolve Name fields via corresponding Id lookup
+        if ((display === "" || display == null) && f.FieldName) {
+          const lower = f.FieldName.toLowerCase();
+          if (lower.endsWith("name")) {
+            const idField = f.FieldName.substring(0, f.FieldName.length - 4) + "Id"; // PostUserName -> PostUserId
+            const idVal = r[idField];
+            const idKey = idVal == null ? "" : String(idVal).trim();
+            const idMap = lookupMaps[idField];
+            const idMapped = idMap && idKey !== "" ? idMap[idKey] : null;
+            display = idMapped ?? idVal ?? display;
+          }
+        }
+
+        td.textContent = fmtCell(display, f.FormatStr, f.DataType);
+        const w = Number(f.DisplaySize||0);
+        if(w>0){
+          const px = (w*10);
+          td.style.width = px + "px";
+          td.style.minWidth = px + "px";
+        }
+        tr.appendChild(td);
+      });
+      if(onClick) tr.addEventListener("click", ()=>onClick(tr,r));
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function init(){
+    masterDict = await loadDict(masterTable);
+    detailDict = await loadDict(detailTable);
+    buildHead(masterHead,masterDict);
+    buildHead(detailHead,detailDict);
+
+    await reloadMaster();
+
+    editModal = new bootstrap.Modal(document.getElementById("editModal"));
+    detailModal = new bootstrap.Modal(document.getElementById("detailModal"));
+    document.getElementById("btn-edit").addEventListener("click", onEditClick);
+    document.getElementById("btn-save-edit").addEventListener("click", onSaveEdit);
+    document.getElementById("btn-add-detail").addEventListener("click", onAddDetailClick);
+    document.getElementById("btn-save-detail").addEventListener("click", onSaveDetail);
+  }
+
+  async function reloadMaster(selectSerial){
+    masterRows = await fetch(`/api/CommonTable/TopRows?table=${encodeURIComponent(masterTable)}&top=${masterTop}`).then(r=>r.json());
+    await buildBody(masterBody,masterDict,masterRows,(tr,row)=>onMasterSelect(tr,row,detailDict));
+
+    let targetTr = null;
+    if (selectSerial != null) {
+      const idx = masterRows.findIndex(r => r.SerialNum == selectSerial);
+      if (idx >= 0) targetTr = masterBody.children[idx];
+    }
+    if(!targetTr) targetTr = masterBody.querySelector("tr");
+    if(targetTr) targetTr.click();
+  }
+
+  async function loadDetail(serialNum){
+    const detailUrl = `/api/CommonTable/ByKeys?table=${encodeURIComponent(detailTable)}&keyNames=SerialNum&keyValues=${encodeURIComponent(serialNum ?? "")}`;
+    const detailRows = await fetch(detailUrl).then(r=>r.json());
+    await buildBody(detailBody,detailDict,detailRows,null);
+  }
+
+  async function onMasterSelect(tr,row,dDict){
+    masterBody.querySelectorAll("tr").forEach(x=>x.classList.remove("table-primary"));
+    tr.classList.add("table-primary");
+    currentMasterRow = row;
+
+    await loadDetail(row.SerialNum);
+
+    fullText.textContent = row.BoardText || row.Subjects || "";
+  }
+
+  function toInputDateTime(val){
+    if(!val) return "";
+    const d = new Date(val);
+    if(isNaN(d)) return "";
+    const pad = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function onEditClick(){
+    if(!currentMasterRow){
+      alert("請先選取一筆公告");
+      return;
+    }
+    document.getElementById("editPostUser").value = currentMasterRow.PostUserId ?? "";
+    document.getElementById("editSubjects").value = currentMasterRow.Subjects ?? "";
+    document.getElementById("editBeginDate").value = toInputDateTime(currentMasterRow.BeginDate);
+    document.getElementById("editEndDate").value = toInputDateTime(currentMasterRow.EndDate);
+    document.getElementById("editBoardText").value = currentMasterRow.BoardText ?? "";
+    editModal.show();
+  }
+
+  async function onSaveEdit(){
+    if(!currentMasterRow) return;
+    const payload = {
+      TableName: masterTable,
+      KeyFields: ["SerialNum"],
+      Data: [{
+        SerialNum: currentMasterRow.SerialNum,
+        PostUserId: document.getElementById("editPostUser").value?.trim(),
+        Subjects: document.getElementById("editSubjects").value ?? "",
+        BeginDate: document.getElementById("editBeginDate").value || null,
+        EndDate: document.getElementById("editEndDate").value || null,
+        BoardText: document.getElementById("editBoardText").value ?? ""
+      }]
+    };
+
+    const res = await fetch("/api/CommonTable/SaveTableChanges", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if(!res.ok){
+      alert("儲存失敗：" + res.status);
+      return;
+    }
+    const data = await res.json();
+    if(data.success){
+      editModal.hide();
+      await reloadMaster(currentMasterRow.SerialNum);
+    }else{
+      alert("儲存失敗：" + JSON.stringify(data));
+    }
+  }
+
+  function onAddDetailClick(){
+    if(!currentMasterRow){
+      alert("請先選取一筆公告");
+      return;
+    }
+    document.getElementById("detailUserId").value = "";
+    detailModal.show();
+  }
+
+  async function onSaveDetail(){
+    if(!currentMasterRow) return;
+    const toUserId = document.getElementById("detailUserId").value?.trim();
+    if(!toUserId){
+      alert("請輸入公告對象代號");
+      return;
+    }
+    const payload = {
+      TableName: detailTable,
+      KeyFields: ["SerialNum","ToUserId"],
+      Data: [{
+        SerialNum: currentMasterRow.SerialNum,
+        ToUserId: toUserId
+      }]
+    };
+
+    const res = await fetch("/api/CommonTable/SaveTableChanges", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if(!res.ok){
+      alert("儲存失敗：" + res.status);
+      return;
+    }
+    const data = await res.json();
+    if(data.success){
+      detailModal.hide();
+      await loadDetail(currentMasterRow.SerialNum);
+    }else{
+      alert("儲存失敗：" + JSON.stringify(data));
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", init);
+})();
+</script>
+
+<script src="~/js/fieldDictModal.js"></script>
+
+<style>
+#tbl-master th, #tbl-master td,
+#tbl-detail th, #tbl-detail td {
+  white-space: nowrap;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.9rem;
+}
+
+.card-header {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.95rem;
+}
+
+.card-body {
+  padding: 0.5rem;
+}
+
+body, .container-fluid {
+  font-size: 0.95rem;
+}
+
+.btn, .form-control, .form-select {
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+  font-size: 0.95rem;
+}
+</style>
+
+
+
+
+
+
