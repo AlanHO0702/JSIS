@@ -308,6 +308,9 @@
       if (window._mdEditing && window._detailEditor) {
         window._detailEditor.toggleEdit(true);
       }
+
+      const evt = new CustomEvent("md-master-selected", { detail: { domId: cfg.DomId, rowData: row } });
+      document.dispatchEvent(evt);
     };
 
     // 畫主檔
@@ -319,6 +322,9 @@
       onMasterClick,
       cfg
     );
+
+    const first = mBody.querySelector("tr");
+    if (first) first.click();
   };
 
   // -------------------------------------------------
