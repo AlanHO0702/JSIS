@@ -199,6 +199,49 @@ UPDATE CURdOCXTableSetUp
         return Ok(list);
     }
 
+    // ===== D. �欰�p�ɿ�ܿ��j�p (CURdTableField.DisplaySize) =====
+    public class FieldWidthInput
+    {
+        public string TableName { get; set; } = "";
+        public string FieldName { get; set; } = "";
+        public int WidthPx { get; set; }
+        public string LanguageId { get; set; } = "TW";
+    }
+
+    // POST /api/DictSetupApi/FieldWidth/Save
+    [HttpPost("FieldWidth/Save")]
+    public async Task<IActionResult> SaveFieldWidth([FromBody] FieldWidthInput input)
+    {
+        if (string.IsNullOrWhiteSpace(input.TableName) || string.IsNullOrWhiteSpace(input.FieldName))
+            return BadRequest("TableName and FieldName are required.");
+
+        var displaySize = Math.Max(1, (int)Math.Round(input.WidthPx / 10.0, MidpointRounding.AwayFromZero));
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        var cmd = new SqlCommand(@"
+UPDATE CURdTableField
+   SET DisplaySize = @DisplaySize
+ WHERE TableName = @TableName AND FieldName = @FieldName;", conn);
+        cmd.Parameters.AddWithValue("@DisplaySize", displaySize);
+        cmd.Parameters.AddWithValue("@TableName", input.TableName);
+        cmd.Parameters.AddWithValue("@FieldName", input.FieldName);
+
+        var affected = await cmd.ExecuteNonQueryAsync();
+        // �t�ⶰ�y�ШѼ�: �w�] TW, �|�Ϊ̥�J
+        var langCmd = new SqlCommand(@"
+UPDATE CURdTableFieldLang
+   SET DisplaySize = @DisplaySize
+ WHERE TableName = @TableName AND FieldName = @FieldName AND LanguageId = @LangId;", conn);
+        langCmd.Parameters.AddWithValue("@DisplaySize", displaySize);
+        langCmd.Parameters.AddWithValue("@TableName", input.TableName);
+        langCmd.Parameters.AddWithValue("@FieldName", input.FieldName);
+        langCmd.Parameters.AddWithValue("@LangId", string.IsNullOrWhiteSpace(input.LanguageId) ? "TW" : input.LanguageId);
+        var langAffected = await langCmd.ExecuteNonQueryAsync();
+
+        return Ok(new { success = affected > 0 || langAffected > 0, affected, langAffected, displaySize });
+    }
+
     // ===== C. 報表設定（CURdPaperPaper）=====
     public class PaperRow
     {
@@ -314,5 +357,52 @@ UPDATE CURdPaperPaper
         }
 
         return Ok(new { success = true, count = list.Count });
+    }
+
+    // ===== E. ���d�ߪ��줸�]�w (CURdOCXPaperSelOtherGet) =====
+    public class QueryFieldRow
+    {
+        public string ColumnName { get; set; } = "";
+        public string ColumnCaption { get; set; } = "";
+        public int? DataType { get; set; }
+        public int? ControlType { get; set; }
+        public string? DefaultValue { get; set; }
+        public string? DefaultEqual { get; set; }
+        public string? CommandText { get; set; }
+    }
+
+    // GET /api/DictSetupApi/QueryFields?itemId=...&table=...&lang=TW
+    [HttpGet("QueryFields")]
+    public async Task<IActionResult> GetQueryFields([FromQuery] string itemId, [FromQuery] string table, [FromQuery] string lang = "TW")
+    {
+        if (string.IsNullOrWhiteSpace(itemId) || string.IsNullOrWhiteSpace(table))
+            return BadRequest("itemId and table are required.");
+
+        var list = new List<QueryFieldRow>();
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        using var cmd = new SqlCommand("exec CURdOCXPaperSelOtherGet @p0,@p1,@p2", conn);
+        cmd.CommandType = System.Data.CommandType.Text;
+        cmd.Parameters.AddWithValue("@p0", itemId);
+        cmd.Parameters.AddWithValue("@p1", table);
+        cmd.Parameters.AddWithValue("@p2", string.IsNullOrWhiteSpace(lang) ? "TW" : lang);
+
+        using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            list.Add(new QueryFieldRow
+            {
+                ColumnName = rd["ColumnName"]?.ToString() ?? "",
+                ColumnCaption = rd["ColumnCaption"]?.ToString() ?? rd["old_ColumnCaption"]?.ToString() ?? "",
+                DataType = TryToInt(rd["DataType"]),
+                ControlType = TryToInt(rd["ControlType"]),
+                DefaultValue = rd["DefaultValue"]?.ToString(),
+                DefaultEqual = rd["DefaultEqual"]?.ToString(),
+                CommandText = rd["CommandText"]?.ToString()
+            });
+        }
+
+        return Ok(list);
     }
 }

@@ -1,0 +1,40 @@
+    "CUR00019": "/CUR/CURdPaperInfo",
+    "CUR00003": "/CUR/CURdMsgPaper",
+    "CURH0002": "/CUR/CURdReportOrderBasPage",
+    "CUR00007": "/CUR/CURdGroups",
+    "CURH0003": "/CUR/CURdV_SysProcess",
+    "CUR00004": "/CUR/NoticeBoard",
+    // 其它功能自行補上
+    };
+
+    const selectedLevel1Id = "@Model.SelectedLevel1Id";
+
+
+    async function resolveAndGo(itemId, itemName, superId) {
+        const hard = pageMap[itemId];
+        if (hard) { location.href = hard; return; }
+        try {
+            const res = await fetch(`/api/report/item-meta/${itemId}`);
+            if (!res.ok) throw new Error('not found');
+            const meta = await res.json();
+            const itemType = Number(meta.itemType ?? meta.ItemType);
+            const outputType = Number(meta.outputType ?? meta.OutputType);
+            const ocx = String(meta.ocxtemplete ?? meta.OCXTemplete ?? '').toLowerCase();
+            let url = '';
+            if (itemType === 2 && outputType === 0) url = `/Report/Direct/${itemId}`;
+            else if (itemType === 2 && outputType === 6) url = `/Report/Generic/${itemId}`;
+            else if (itemType === 6 && ocx === 'jsdsinglegriddll.dll') url = `/CUR/SingleGrid/${itemId}`;
+
+            if (url) { location.href = url; return; }
+            if (superId) { location.href = `?level1Id=${superId}`; return; }
+        } catch { /* ignore */ }
+        if (superId) location.href = `?level1Id=${superId}`; else alert(`找不到對應頁面: ${itemId}`);
+    }
+
+
+    window.toggleChildren = function (id) {
+        const el = document.getElementById(id);
+        if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
