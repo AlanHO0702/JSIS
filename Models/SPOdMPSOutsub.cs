@@ -47,7 +47,7 @@ public partial class SPOdMPSOutSub
 
     public string? SourPaperId { get; set; }
 
-    public decimal? Uomqnty { get; set; }
+    public decimal? UOMQnty { get; set; }
 
     public string? Uom { get; set; }
 
@@ -75,7 +75,7 @@ public partial class SPOdMPSOutSub
 
     public int InStrike { get; set; }
 
-    public string? CustPonum { get; set; }
+    public string? CustPONum { get; set; }
 
     public int? IsNoInv { get; set; }
 

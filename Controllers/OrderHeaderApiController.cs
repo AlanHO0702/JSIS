@@ -135,6 +135,8 @@ public class OrderHeaderApiController : ControllerBase
             detailMeta = EnsureMeta(detailTable);
             GuardIdentifier(detailFk, detailMeta);
             GuardIdentifier(detailPk, detailMeta);
+            Console.WriteLine($"DetailTable = {detailTable}");
+            Console.WriteLine("Columns = " + string.Join(",", detailMeta.Columns));
         }
 
         using var conn = new SqlConnection(_connStr);

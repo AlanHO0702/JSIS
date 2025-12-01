@@ -131,7 +131,7 @@
     tbody.innerHTML = "";
 
     const fields = dict
-      .filter(DICT_MAP.visible)
+      .filter(f => DICT_MAP.visible(f) || (f.IsKey ?? 0) === 1) // include keys even if not visible
       .sort((a, b) => DICT_MAP.order(a) - DICT_MAP.order(b));
 
     // 先把所有欄位的 Lookup / OCX map 都載完（各欄位只打一次 API）
@@ -308,6 +308,9 @@
       if (window._mdEditing && window._detailEditor) {
         window._detailEditor.toggleEdit(true);
       }
+
+      const evt = new CustomEvent("md-master-selected", { detail: { domId: cfg.DomId, rowData: row } });
+      document.dispatchEvent(evt);
     };
 
     // 畫主檔
@@ -319,6 +322,9 @@
       onMasterClick,
       cfg
     );
+
+    const first = mBody.querySelector("tr");
+    if (first) first.click();
   };
 
   // -------------------------------------------------

@@ -7,10 +7,14 @@ namespace PcbErpApi.Data
     {
         public PcbErpContext(DbContextOptions<PcbErpContext> options) : base(options) { }
         public DbSet<SpodOrderMain> SpodOrderMain => Set<SpodOrderMain>();
+        
         public DbSet<SPOdMPSOutMain> SPOdMPSOutMain => Set<SPOdMPSOutMain>();
         public DbSet<CurdUser> CurdUser => Set<CurdUser>();
         public DbSet<MindStockCostPn> MindStockCostPn => Set<MindStockCostPn>();
         public DbSet<CurdSysItem> CurdSysItems { get; set; }
+        public DbSet<CURdUserOnline> CURdUserOnline { get; set; }
+        public DbSet<CURdV_SysProcess_WEB> CURdV_SysProcess_WEB { get; set; }
+
         public DbSet<SpodOrderSub> SpodOrderSub { get; set; }
         public DbSet<SPOdMPSOutSub> SPOdMPSOutSub { get; set; }
         public DbSet<CurdSystemSelect> CurdSystemSelects { get; set; }
@@ -19,6 +23,7 @@ namespace PcbErpApi.Data
         public DbSet<CURdOCXTableFieldLK> CURdOCXTableFieldLK { get; set; }
         public DbSet<CURdSysParams> CURdSysParams { get; set; } = default!;
         public DbSet<MindMatInfo> MindMatInfo { get; set; }
+        public virtual DbSet<CurdAddonParam> CurdAddonParams { get; set; }
         public virtual DbSet<AjndJourMain> AjndJourMain { get; set; }
         public virtual DbSet<AjndJourSub> AjndJourSub { get; set; }
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
@@ -35,15 +40,93 @@ namespace PcbErpApi.Data
         public virtual DbSet<FmedIssueLayer> FmedIssueLayer { get; set; }
         public virtual DbSet<AJNdClassMoney> AJNdClassMoney { get; set; }
         public virtual DbSet<AJNdClassMoneyHis> AJNdClassMoneyHis { get; set; }
+        public virtual DbSet<CurdNoticeBoard> CurdNoticeBoards { get; set; }
+        public virtual DbSet<CurdNoticeBoardUser> CurdNoticeBoardUsers { get; set; }
         public IEnumerable<object> TabConfigs { get; internal set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+
+            modelBuilder.Entity<CurdAddonParam>(entity =>
+            {
+                entity.HasKey(e => new { e.ItemId, e.ParamName });
+
+                entity.ToTable("CURdAddonParams");
+
+                entity.Property(e => e.ItemId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .IsFixedLength();
+                entity.Property(e => e.ParamName)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.CommandText)
+                    .HasMaxLength(255)
+                    .IsUnicode(false);
+                entity.Property(e => e.DefaultValue).HasMaxLength(255);
+                entity.Property(e => e.DisplayName).HasMaxLength(255);
+                entity.Property(e => e.DisplayNameCn)
+                    .HasMaxLength(255)
+                    .HasColumnName("DisplayNameCN");
+                entity.Property(e => e.DisplayNameEn)
+                    .HasMaxLength(255)
+                    .HasColumnName("DisplayNameEN");
+                entity.Property(e => e.DisplayNameJp)
+                    .HasMaxLength(255)
+                    .HasColumnName("DisplayNameJP");
+                entity.Property(e => e.DisplayNameTh)
+                    .HasMaxLength(255)
+                    .HasColumnName("DisplayNameTH");
+                entity.Property(e => e.EditMask)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.ParamSn).HasColumnName("ParamSN");
+                entity.Property(e => e.SuperId)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+            });
+
             // FMEdIssuePO 複合主鍵配置
             modelBuilder.Entity<FmedIssuePo>(entity =>
             {
                 entity.HasKey(e => new { e.PaperNum, e.Item });
             });
+
+            modelBuilder.Entity<CurdNoticeBoardUser>(entity =>
+            {
+                entity.HasKey(e => new { e.SerialNum, e.ToUserId });
+
+                entity.ToTable("CURdNoticeBoardUser");
+
+                entity.Property(e => e.ToUserId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+            });
+
+            modelBuilder.Entity<CURdV_SysProcess_WEB>()
+            .HasNoKey()
+            .ToView("CURdV_SysProcess_WEB");
+
+            modelBuilder.Entity<CurdNoticeBoard>(entity =>
+            {
+                entity.HasKey(e => e.SerialNum);
+
+                entity.ToTable("CURdNoticeBoard");
+
+                entity.Property(e => e.SerialNum).ValueGeneratedNever();
+                entity.Property(e => e.BeginDate).HasColumnType("datetime");
+                entity.Property(e => e.BoardText).HasMaxLength(4000);
+                entity.Property(e => e.BuildDate)
+                    .HasDefaultValueSql("(getdate())")
+                    .HasColumnType("datetime");
+                entity.Property(e => e.EndDate).HasColumnType("datetime");
+                entity.Property(e => e.PostUserId)
+                    .HasMaxLength(16)
+                    .IsUnicode(false);
+                entity.Property(e => e.Subjects).HasMaxLength(128);
+                entity.Property(e => e.ToAlluser).HasColumnName("ToALLUser");
+            });
+
 
             // FMEdIssueMat 複合主鍵配置
             modelBuilder.Entity<FmedIssueMat>(entity =>
@@ -57,7 +140,7 @@ namespace PcbErpApi.Data
                 entity.HasKey(e => new { e.PaperNum, e.Item });
             });
 
-        modelBuilder.Entity<SPOdMPSOutSub>(entity =>
+            modelBuilder.Entity<SPOdMPSOutSub>(entity =>
         {
             entity.HasKey(e => new { e.PaperNum, e.Item });
 
@@ -74,7 +157,7 @@ namespace PcbErpApi.Data
                 .HasDefaultValue(0.0m)
                 .HasColumnType("decimal(24, 8)");
             entity.Property(e => e.AmountFinish).HasColumnType("decimal(24, 8)");
-            entity.Property(e => e.CustPonum)
+            entity.Property(e => e.CustPONum)
                 .HasMaxLength(50)
                 .HasColumnName("CustPONum");
             entity.Property(e => e.Discount)
@@ -141,13 +224,13 @@ namespace PcbErpApi.Data
                 .HasDefaultValue(0m)
                 .HasColumnType("decimal(24, 8)")
                 .HasColumnName("UOMPrice");
-            entity.Property(e => e.Uomqnty)
+            entity.Property(e => e.UOMQnty)
                 .HasColumnType("decimal(24, 8)")
                 .HasColumnName("UOMQnty");
         });
         
         
-        modelBuilder.Entity<SPOdMPSOutMain>(entity =>
+            modelBuilder.Entity<SPOdMPSOutMain>(entity =>
         {
             entity.HasKey(e => e.PaperNum);
 
@@ -318,7 +401,7 @@ namespace PcbErpApi.Data
         });
 
         
-        modelBuilder.Entity<FmedIssueSub>(entity =>
+            modelBuilder.Entity<FmedIssueSub>(entity =>
         {
             entity.HasKey(e => new { e.PaperNum, e.Item });
 
@@ -372,7 +455,7 @@ namespace PcbErpApi.Data
                 .IsFixedLength();
         });
         
-        modelBuilder.Entity<FmedIssueMain>(entity =>
+            modelBuilder.Entity<FmedIssueMain>(entity =>
         {
             entity.HasKey(e => e.PaperNum);
 

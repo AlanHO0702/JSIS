@@ -96,7 +96,8 @@
             </div>
           }
 
-          <div class="col-12 text-end">
+          <div class="col-12 text-end d-flex justify-content-end gap-2">
+            <button id="btnPrintReport" class="btn btn-success px-4">列印報表</button>
             <button id="btnSearch" class="btn btn-primary px-4">查詢</button>
           </div>
         </div>
@@ -296,15 +297,19 @@
 
 
   // ====== 呼叫 SP ======
-  async function doSearch() {
-    const payload = { spName: cfg.SpName, params: {} };
-
+  function collectParams() {
+    const p = {};
     (cfg.ParamDefs || []).forEach(def => {
       const el = document.getElementById(def.Name);
       let v = el ? (el.value ?? "") : "";
       if (def.Name === "UseId" && !v) v = "A001";
-      payload.params[def.Name] = v;
+      p[def.Name] = v;
     });
+    return p;
+  }
+
+  async function doSearch() {
+    const payload = { spName: cfg.SpName, params: collectParams() };
 
     const btn = document.getElementById('btnSearch');
     const originalText = btn.innerHTML;
@@ -351,6 +356,43 @@
   }
 
   // ====== 繪表 ======
+  // ====== 列印報表 ======
+  async function printReport() {
+    const payload = {
+      spName: cfg.SpName,
+      reportName: cfg.ReportName || cfg.DictTableName || cfg.SpName || cfg.Title || "report",
+      params: collectParams()
+    };
+
+    const btn = document.getElementById('btnPrintReport');
+    const originalText = btn?.innerHTML;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 列印中...';
+    }
+
+    try {
+      const res = await fetch('/api/report/generate-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error(await res.text());
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      Swal.fire({ icon: 'error', title: '列印失敗', text: err.message || '請稍後再試' });
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+      }
+    }
+  }
+
 window.renderTable = function(apiColumns, rows) {
   const thead = document.getElementById('tableHead');
   const tbody = document.getElementById('tableBody');
@@ -453,6 +495,10 @@ window.renderTable = function(apiColumns, rows) {
     document.getElementById('btnSearch')?.addEventListener('click', e=>{
       e.preventDefault();
       doSearch();
+    });
+    document.getElementById('btnPrintReport')?.addEventListener('click', e=>{
+      e.preventDefault();
+      printReport();
     });
   });
 

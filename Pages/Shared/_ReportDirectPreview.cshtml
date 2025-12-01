@@ -1,0 +1,166 @@
+@model ReportDirectConfig
+@using System.Text.Json
+@{
+    var cfg = Model;
+    var json = JsonSerializer.Serialize(cfg, new JsonSerializerOptions { PropertyNamingPolicy = null });
+}
+
+<div class="container my-4" style="max-width: 780px;">
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <h4 class="mb-0 text-primary">@cfg.Title</h4>
+    <div class="d-flex gap-2">
+      <button id="btnPrint" class="btn btn-success">確定</button>
+      <button id="btnHelp" class="btn btn-outline-secondary">說明</button>
+    </div>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-body row g-3 align-items-end">
+      @foreach (var p in cfg.Params)
+      {
+          var name = p.Name;
+          <div class="col-md-4">
+            <label class="form-label">@p.Label</label>
+            @if (p.Ui == "select")
+            {
+              <select id="@name" class="form-select" data-lookup="@p.LookupKey" data-default="@p.DefaultValue" data-super="@p.SuperId">
+                <option value=""></option>
+                @foreach (var (value,text) in p.Options)
+                { <option value="@value">@text</option> }
+              </select>
+            }
+            else if (p.Ui == "date")
+            { <input id="@name" type="date" class="form-control" value="@p.DefaultValue" /> }
+            else if (p.Ui == "number")
+            { <input id="@name" type="number" class="form-control" value="@p.DefaultValue" /> }
+            else
+            { <input id="@name" type="text" class="form-control" value="@p.DefaultValue" /> }
+          </div>
+      }
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+(() => {
+  const cfg = @Html.Raw(json);
+
+  // 取值並送 /api/report/generate-url，回來 PDF blob
+  async function doPrint() {
+    const params = {};
+    for (const p of cfg.Params || []) {
+      const el = document.getElementById(p.Name);
+      if (!el) continue;
+      params[p.Name] = el.value ?? "";
+    }
+
+    // �K�[�S�w�Ѽơ]���ܩ� UI�^
+    if (cfg.ExtraParams) {
+      Object.entries(cfg.ExtraParams).forEach(([k,v]) => {
+        if (k) params[k] = v ?? "";
+      });
+    }
+
+    // 基本驗證：第一個欄位必填
+    if (cfg.Params?.length && !params[cfg.Params[0].Name]) {
+      Swal.fire({ icon:'warning', title:`請輸入 ${cfg.Params[0].Label}` });
+      return;
+    }
+
+    const payload = {
+      spName: cfg.SpName,
+      reportName: cfg.ReportName,
+      params
+    };
+
+    const res = await fetch("/api/report/generate-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      Swal.fire({ icon:'error', title:'報表產生失敗', text: await res.text() });
+      return;
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    Swal.fire({
+      html: `<iframe src="${url}" width="100%" height="600px" frameborder="0"></iframe>`,
+      width: '80%',
+      heightAuto: false,
+      showCloseButton: true,
+      showConfirmButton: false,
+      willClose: () => URL.revokeObjectURL(url)
+    });
+  }
+
+  async function loadLookup(key, el, superVal) {
+    try {
+      const qs = superVal ? `?parent=${encodeURIComponent(superVal)}` : "";
+      const res = await fetch(`/api/Report/lookup/${key}${qs}`);
+      if (!res.ok) throw 0;
+      const data = await res.json();
+      el.innerHTML = '<option value=""></option>';
+      data.forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = o.value ?? "";
+        opt.textContent = o.value && o.text ? `${o.value} ${o.text}` : (o.text ?? o.value ?? "");
+        el.appendChild(opt);
+      });
+    } catch {
+      el.innerHTML = '<option value="">(載入失敗)</option>';
+    }
+  }
+
+  // init
+  document.addEventListener("DOMContentLoaded", async () => {
+    const params = Array.isArray(cfg.Params) ? cfg.Params : [];
+
+    // load lookups with parent value if any
+    for (const p of params) {
+      const el = document.getElementById(p.Name);
+      let superVal = "";
+      if (p.SuperId) {
+        const parent = params.find(x => (x.Label || "").trim() === p.SuperId.trim());
+        if (parent) {
+          const parentEl = document.getElementById(parent.Name);
+          superVal = (parentEl?.value ?? parent.DefaultValue ?? "").toString();
+        }
+      }
+      if (p.LookupKey && el) await loadLookup(p.LookupKey, el, superVal);
+      if (el && p.DefaultValue) el.value = p.DefaultValue;
+    }
+
+    // parent change -> refresh children
+    for (const p of params) {
+      const el = document.getElementById(p.Name);
+      if (!el) continue;
+      el.addEventListener("change", async () => {
+        const children = params.filter(c => c.SuperId && (c.SuperId.trim() === (p.Label || "").trim()));
+        for (const child of children) {
+          const childEl = document.getElementById(child.Name);
+          if (!childEl || !child.LookupKey) continue;
+          await loadLookup(child.LookupKey, childEl, el.value ?? "");
+          if (child.DefaultValue) childEl.value = child.DefaultValue;
+        }
+      });
+    }
+
+    // trigger once so children get data on initial defaults
+    for (const p of params) {
+      const hasChild = params.some(c => c.SuperId && (c.SuperId.trim() === (p.Label || "").trim()));
+      if (!hasChild) continue;
+      const el = document.getElementById(p.Name);
+      if (el) el.dispatchEvent(new Event("change"));
+    }
+
+    document.getElementById("btnPrint")?.addEventListener("click", e => { e.preventDefault(); doPrint(); });
+    document.getElementById("btnHelp")?.addEventListener("click", () => {
+      Swal.fire({ icon:'info', title:'說明', html:'輸入參數後點「確定」即產生報表。' });
+    });
+  });
+})();
+</script>

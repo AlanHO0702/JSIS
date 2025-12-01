@@ -1,5 +1,7 @@
 @using System.Reflection
 @using Microsoft.AspNetCore.Html
+@using System.Text.Json
+@using System.Linq
 @model dynamic
 
 @{
@@ -9,6 +11,14 @@
     var customButtons = ViewData["CustomButtons"] as HtmlString;
     var hasData       = items.Any();
     var keyFieldsFromViewData = (IEnumerable<string>)(ViewData["KeyFields"] as IEnumerable<string> ?? Array.Empty<string>());
+    var dictFields    = (IEnumerable<dynamic>)(ViewData["FieldDictList"] as IEnumerable<dynamic> ?? fields);
+    var dictTableName = (string?)(ViewData["DictTableName"] as string) ?? tableName;
+    var ocxLookupsRaw = ViewData["OCXLookups"] as IEnumerable<dynamic>;
+    var ocxLookupPayload = ocxLookupsRaw?.ToDictionary(
+        k => ((string)k.FieldName).ToLowerInvariant(),
+        v => (object)new { keySelf = v.KeySelfName as string ?? "", keyField = v.KeyFieldName as string ?? "", map = v.LookupValues }
+    ) ?? new Dictionary<string, object>();
+
 }
 
 @functions{
@@ -64,16 +74,16 @@
         }
       </div>
 
-      <div class="table-fix-wrapper">
-        <table class="table table-bordered table-hover table-sm align-middle mb-0" id="mainGrid">
+      <div class="table-fix-wrapper" data-dict-table="@dictTableName" style="max-height:70vh;overflow:auto;background:#fff;border:1px solid #dee2e6;border-radius:.5rem;white-space:nowrap">
+        <table class="table table-bordered table-hover table-sm align-middle mb-0" id="mainGrid" data-dict-table="@dictTableName" style="table-layout:fixed;width:100%">
           <colgroup>
             @foreach (var f in fields)
             {
-                var w = ToColWidthPx(f, 10);
-                if (w > 0)
-                { <col style="width:@($"{w}px");min-width:@($"{w}px");max-width:@($"{w}px")" /> }
-                else
-                { <col /> }
+              var w = ToColWidthPx(f, 10);
+              if (w > 0)
+              { <col style="width:@($"{w}px");min-width:@($"{w}px");max-width:@($"{w}px")" /> }
+              else
+              { <col /> }
             }
           </colgroup>
 
@@ -100,26 +110,46 @@
                   {
                       string? name = Convert.ToString(f.FieldName);
                       PropertyInfo? prop = string.IsNullOrWhiteSpace(name) ? null :
-                          item.GetType().GetProperty(name!, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                      item.GetType().GetProperty(name!, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
                       var value = prop?.GetValue(item);
+                      var rawVal = value?.ToString() ?? "";
+                      var displayValue = value;
+                      var lookupKey = rawVal;
+                      var keyFieldVal = "";
+                      var keySelfVal = "";
 
-                      bool isReadOnly = false;
-                      try
+                      bool isReadOnly = f.ReadOnly != null && (int)f.ReadOnly != 0;
+
+                      // 依 OCX 設定帶出 key 欄位，讓 lookup 有依據
+                      if (!string.IsNullOrWhiteSpace(name) && ocxLookupsRaw is not null)
                       {
-                          var ro = f.ReadOnly;
-                          if (ro is bool b) isReadOnly = b;
-                          else if (ro is int i) isReadOnly = (i != 0);
-                          else if (ro is short s) isReadOnly = (s != 0);
-                          else if (ro?.ToString() == "1") isReadOnly = true;
-                      }
-                      catch {}
+                          var lk = ocxLookupsRaw.FirstOrDefault(x =>
+                              string.Equals((string?)x.FieldName, name, StringComparison.OrdinalIgnoreCase));
+                          var keyFieldName = lk?.KeyFieldName as string;
+                          var keySelfName = lk?.KeySelfName as string;
 
-                      // 這裡不用強迫把 SystemId/ParamId 設唯讀，給使用者自行編輯與否由辭典控制
+                          if (!string.IsNullOrWhiteSpace(keyFieldName))
+                          {
+                              var keyProp = item.GetType().GetProperty(keyFieldName!, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                              keyFieldVal = keyProp?.GetValue(item)?.ToString() ?? "";
+                          }
+                          if (!string.IsNullOrWhiteSpace(keySelfName))
+                          {
+                              var keyProp = item.GetType().GetProperty(keySelfName!, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                              keySelfVal = keyProp?.GetValue(item)?.ToString() ?? "";
+                          }
+
+                          if (string.IsNullOrWhiteSpace(lookupKey))
+                              lookupKey = !string.IsNullOrWhiteSpace(keyFieldVal) ? keyFieldVal : keySelfVal;
+                      }
+
                       <td class="text-nowrap" data-field="@name">
-                        <span class="cell-view">@Fmt(value)</span>
+                        <span class="cell-view" data-raw="@rawVal" data-lookupkey="@lookupKey">@Fmt(displayValue)</span>
                         <input class="form-control form-control-sm cell-edit d-none @(isReadOnly ? "readonly-cell" : "")"
                                name="@name"
-                               value="@Fmt(value)"
+                               value="@rawVal"
+                               data-raw="@rawVal"
+                               data-lookupkey="@lookupKey"
                                data-readonly="@(isReadOnly ? "1" : "0")"
                                @(isReadOnly ? "readonly" : "") />
                       </td>
@@ -130,23 +160,24 @@
           </tbody>
         </table>
       </div>
-
     </div>
   </div>
 </div>
 
 <style>
-.table-fix-wrapper{max-height:70vh;overflow:auto;background:#fff;border:1px solid #dee2e6;border-radius:.5rem;white-space:nowrap}
-table.table{table-layout:fixed!important;border-collapse:separate!important;border-spacing:0;font-size:.9rem;width:100%}
-table th,table td{vertical-align:middle!important;border:1px solid #dee2e6!important;padding:.4rem .6rem!important;white-space:nowrap}
-.table-hover tbody tr:hover{background:#f1f5ff!important}
-.cell-view,.cell-edit{display:inline-block;width:100%;font-size:.9rem;line-height:1.4;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:.4rem .6rem!important;vertical-align:middle}
-.cell-edit.form-control{height:calc(1.6em + .5rem + 2px)!important;padding:.4rem .6rem!important;font-size:.9rem!important;line-height:1.4!important;border-radius:0!important;box-sizing:border-box!important}
+ .table-fix-wrapper{max-height:70vh;overflow:auto;background:#fff;border:1px solid #dee2e6;border-radius:.5rem;white-space:nowrap}
+ table.table{table-layout:fixed!important;border-collapse:separate!important;border-spacing:0;font-size:.85rem;width:100%}
+ table th,table td{vertical-align:middle!important;border:1px solid #dee2e6!important;padding:.28rem .4rem!important;white-space:nowrap}
+ .table-hover tbody tr:hover{background:#f1f5ff!important}
+ .cell-view,.cell-edit{display:inline-block;width:100%;font-size:.85rem;line-height:1.35;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:.28rem .4rem!important;vertical-align:middle}
+ .cell-edit.form-control{height:calc(1.45em + .45rem + 2px)!important;padding:.28rem .4rem!important;font-size:.85rem!important;line-height:1.35!important;border-radius:0!important;box-sizing:border-box!important}
 .edit-mode .cell-edit:not(.readonly-cell){border:1px solid #ccc!important;background:#fff!important}
 .readonly-cell{background:#f3f3f3!important;color:#555!important;border:1px solid #ddd!important;cursor:not-allowed!important;pointer-events:none!important;user-select:none!important}
 .table-fix-wrapper::-webkit-scrollbar{height:10px;width:10px}
 .table-fix-wrapper::-webkit-scrollbar-thumb{background:#c1c1c1;border-radius:6px}
 .table-fix-wrapper::-webkit-scrollbar-thumb:hover{background:#9ca3af}
+#mainGrid tbody tr:hover {background-color: #f9f2d7 !important; cursor: pointer;}
+#mainGrid tbody tr.selected-row {background-color: #fff3cd !important; transition: background-color .15s;}
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -156,27 +187,51 @@ document.addEventListener("DOMContentLoaded", () => {
   const saveBtn = document.getElementById("btnSaveTable");
   const wrapper = document.querySelector(".table-wrapper");
   const table   = document.getElementById("mainGrid");
+  const ocxLookupMaps = @Html.Raw(JsonSerializer.Serialize(ocxLookupPayload));
+  let lookupMaps = ocxLookupMaps || {};
   let isEdit = false;
 
-  // ===== 取得本頁的鍵欄位（支援 window.KEY_FIELDS / ViewData["KeyFields"] / 預設） =====
+  // 取得鍵欄位（支援 window.KEY_FIELDS / ViewData["KeyFields"] / 預設）
   const KEY_FIELDS = (() => {
     if (Array.isArray(window.KEY_FIELDS) && window.KEY_FIELDS.length)
       return window.KEY_FIELDS.map(s => String(s).toLowerCase());
 
-    // Razor 轉入的 ViewData["KeyFields"]
     const fromView = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(keyFieldsFromViewData));
     if (Array.isArray(fromView) && fromView.length)
       return fromView.map(s => String(s).toLowerCase());
 
-    // 預設（共用樣板常見鍵）
     return ["buid","itemid","id","papernum","systemcode"];
   })();
 
-  // ===== 修改/保留切換 =====
+  const lookupDisplay = (fieldName, rawVal, fallback, lookupKey) => {
+    const key = String(lookupKey ?? rawVal ?? "");
+    if (!fieldName || key === "") return rawVal ?? fallback ?? "";
+    const map = lookupMaps[fieldName.toLowerCase()]?.map;
+    if (map && Object.prototype.hasOwnProperty.call(map, key)) {
+      return map[key] ?? fallback ?? key;
+    }
+    return rawVal ?? fallback ?? "";
+  };
+
+  const applyLookupToTable = () => {
+    table.querySelectorAll("tbody tr").forEach(tr => {
+      tr.querySelectorAll("td").forEach(td => {
+        const field = td.dataset.field || "";
+        const span = td.querySelector(".cell-view");
+        const inp  = td.querySelector(".cell-edit");
+        if (!span || !inp) return;
+        const rawVal = inp.dataset.raw ?? inp.value;
+        const lkVal  = inp.dataset.lookupkey ?? rawVal;
+        span.textContent = lookupDisplay(field, rawVal, span.textContent, lkVal);
+      });
+    });
+  };
+
+  // 修改/檢視切換
   editBtn.addEventListener("click", () => {
     isEdit = !isEdit;
     editBtn.innerHTML = isEdit
-      ? '<i class="bi bi-eye me-1"></i> 保留'
+      ? '<i class="bi bi-eye me-1"></i> 檢視'
       : '<i class="bi bi-pencil-square me-1"></i> 修改';
 
     wrapper.classList.toggle("edit-mode", isEdit);
@@ -207,7 +262,8 @@ document.addEventListener("DOMContentLoaded", () => {
             inp.removeAttribute("tabindex");
           }
         } else {
-          span.textContent = inp.value;
+          inp.dataset.raw = inp.value;
+          span.textContent = lookupDisplay(td.dataset.field, inp.value, span.textContent, inp.dataset.lookupkey);
           span.classList.remove("d-none");
           inp.classList.add("d-none");
         }
@@ -215,10 +271,10 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // ===== 儲存 =====
+  // 儲存
   saveBtn.addEventListener("click", async () => {
     const changes = collectChanges();
-    if (changes.length === 0) { /* ... */ return; }
+    if (changes.length === 0) { return; }
 
     const resp = await fetch('/api/CommonTable/SaveTableChanges', {
       method: 'POST',
@@ -230,21 +286,19 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     if (resp.ok) {
-      Swal.fire({ icon: 'success', title: '儲存完成', timer: 1000, showConfirmButton: false });
+      Swal.fire({ icon: 'success', title: '儲存成功', timer: 1000, showConfirmButton: false });
 
-      // 依複合鍵更新畫面該列
       changes.forEach(change => {
         const targetRow = findRowByKeys(change);
         if (!targetRow) return;
 
         for (const [field, newVal] of Object.entries(change)) {
-          // 不處理鍵欄位的畫面刷新？→ 鍵欄位也一併刷新（避免視覺不一致）
           const cell = targetRow.querySelector(`td[data-field="${field}"]`);
           if (!cell) continue;
           const inp  = cell.querySelector(".cell-edit");
           const span = cell.querySelector(".cell-view");
           if (inp)  inp.defaultValue = newVal;
-          if (span) span.textContent  = newVal;
+          if (span) span.textContent  = lookupDisplay(field, newVal, span.textContent, inp?.dataset.lookupkey ?? newVal);
         }
       });
     } else {
@@ -252,7 +306,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // ===== 依複合鍵找列 =====
+  // 依複合鍵找列
   function findRowByKeys(change) {
     const rows = Array.from(table.querySelectorAll("tbody tr"));
     return rows.find(tr => {
@@ -260,20 +314,18 @@ document.addEventListener("DOMContentLoaded", () => {
         const inp = Array.from(tr.querySelectorAll('.cell-edit')).find(i => i.name.toLowerCase() === k);
         if (!inp) return false;
         const changeVal = change[k];
-        // 從 change 取值（可能來自 new 或 old），若沒有就用現值
         if (changeVal == null) return false;
         return String(inp.value) === String(changeVal) || String(inp.defaultValue) === String(changeVal);
       });
     });
   }
 
-  // ===== 收集變更（複合鍵一定帶上） =====
+  // 收集變更（複合鍵一定帶上）
   function collectChanges() {
     const list = [];
     document.querySelectorAll("#mainGrid tbody tr").forEach(tr => {
       let hasDiff = false;
 
-      // 先偵測有沒有變更
       tr.querySelectorAll(".cell-edit").forEach(inp => {
         const oldVal = inp.defaultValue ?? "";
         const newVal = inp.value ?? "";
@@ -281,14 +333,12 @@ document.addEventListener("DOMContentLoaded", () => {
         if (newVal !== oldVal) hasDiff = true;
       });
 
-      if (!hasDiff) return; // 沒有變更就不送
+      if (!hasDiff) return;
 
-      // 有變更 → 整列打包（確保包含鍵欄位）
       const rowAll = {};
       tr.querySelectorAll(".cell-edit").forEach(inp => {
         const name = inp.name;
         if (!name) return;
-        // 送目前值；空字串照樣送，後端會依型別轉 DBNull 或字串
         rowAll[name] = inp.value ?? "";
       });
       list.push(rowAll);
@@ -296,6 +346,14 @@ document.addEventListener("DOMContentLoaded", () => {
     return list;
   }
 
+  table.addEventListener("click", (ev) => {
+    const tr = ev.target.closest("tbody tr");
+    if (!tr) return;
+    table.querySelectorAll("tbody tr").forEach(r => r.classList.remove("selected-row"));
+    tr.classList.add("selected-row");
+    window.SELECTED_ROW = tr;
+  });
 
+  applyLookupToTable();
 });
 </script>

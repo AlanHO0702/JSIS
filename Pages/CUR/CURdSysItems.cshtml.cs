@@ -24,15 +24,15 @@ namespace PcbErpApi.Pages.CUR
 
         public string TableName => "CURdSysItems";
 
-        // ✅ 共用樣板需要的三個屬性
+        // ? �@�μ˪O�ݭn���T���ݩ�
         public int PageNumber { get; set; } = 1;
         public int PageSize { get; set; } = 99999;
         public int TotalCount { get; set; }
 
-        // ✅ 主資料
+        // ? �D���
         public List<CurdSysItem> Items { get; set; } = new();
 
-        // ✅ 辭典欄位
+        // ? ������
         public List<CURdTableField> FieldDictList { get; set; } = new();
         public List<CURdTableField> TableFields { get; set; } = new();
 
@@ -41,7 +41,7 @@ namespace PcbErpApi.Pages.CUR
             PageNumber = page;
             PageSize = pageSize;
 
-            // 撈主資料
+            // ���D���
             var query = _db.CurdSysItems.AsNoTracking().OrderBy(x => x.SystemId);
             TotalCount = await query.CountAsync();
 
@@ -50,17 +50,21 @@ namespace PcbErpApi.Pages.CUR
                 .Take(PageSize)
                 .ToListAsync();
 
-            // 撈辭典
+            // 辭典
             FieldDictList = _dictService.GetFieldDict("CURdSysItemsLang", typeof(CurdSysItem));
             TableFields = FieldDictList
                 .Where(f => f.Visible == 1)
                 .OrderBy(f => f.SerialNum ?? 0)
                 .ToList();
 
-            // 給 ViewData（給共用樣板跟 F3 用）
-            ViewData["DictTableName"] = TableName;
+            // OCX lookup 來源（以 CURdSysItemsLang 為主，對應後台設定）
+            ViewData["OCXLookups"] = _dictService.GetOCXLookups("CURdSysItemsLang");
+
+            // 設定 ViewData，供 F3 對應
+            ViewData["DictTableName"] = "CURdSysItemsLang";
             ViewData["FieldDictList"] = FieldDictList;
             ViewData["Fields"] = TableFields;
         }
     }
 }
+
