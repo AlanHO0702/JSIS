@@ -19,8 +19,8 @@ public class LoginController : ControllerBase
     {
         public string UserId { get; set; } = "";
         public string Password { get; set; } = "";
-        public string HostName { get; set; }     // 前端傳
-        public string ClientIp { get; set; }     // 前端傳
+        public string? HostName { get; set; } = "";   // 🔥 裝置識別碼
+        public string? ClientIp { get; set; } = "";
     }
 
     [HttpPost]
@@ -29,86 +29,61 @@ public class LoginController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.UserId))
             return BadRequest(new { error = "帳號不能為空" });
 
-        // === 登入驗證 ===
         var user = await _context.CurdUsers
-            .FirstOrDefaultAsync(u => u.UserId == req.UserId && 
+            .FirstOrDefaultAsync(u => u.UserId == req.UserId &&
                                       (req.UserId == "admin"
-                                       ? (string.IsNullOrEmpty(req.Password) || u.UserPassword == req.Password)
-                                       : u.UserPassword == req.Password));
+                                          ? (string.IsNullOrEmpty(req.Password) || u.UserPassword == req.Password)
+                                          : u.UserPassword == req.Password));
 
         if (user == null)
             return Unauthorized(new { error = "帳號或密碼錯誤" });
 
-        // ================
-        //   ★ 新增線上紀錄
-        // ================
+        // 🔥🔥 不允許同裝置重複登入（判斷 hostName）
+        bool exists = await _context.CURdUserOnline
+            .AnyAsync(x =>
+                x.HostName == req.HostName &&
+                x.LastActive >= DateTime.Now.AddMinutes(-30));
+
+        //if (exists)
+            //return BadRequest(new { error = "此電腦已登入，不可重複登入。" });
+            // 目前有效在線人數
+        var onlineCount = _context.CURdUserOnline
+            .Count(x => x.LastActive >= DateTime.Now.AddMinutes(-5));
+
+        if (onlineCount >= 30)
+        {
+            return BadRequest(new { error = "超過授權人數 30 人，請稍後再試。" });
+        }
+
+
         var jwtId = Guid.NewGuid();
-        var userAgent = HttpContext.Request.Headers["User-Agent"].ToString();
-        var shortUA = ShortenUserAgent(userAgent);
+
         var online = new CURdUserOnline
         {
             JwtId = jwtId,
             UserId = user.UserId,
-            HostName = shortUA,
+            HostName = req.HostName,                  // 🔥 使用前端傳入固定 HostName
             ClientIp = req.ClientIp ?? HttpContext.Connection.RemoteIpAddress?.ToString(),
             LoginTime = DateTime.Now,
             LastActive = DateTime.Now
         };
 
+        // 清除同使用者、同 HostName 的舊紀錄
+        var oldRecords = _context.CURdUserOnline
+            .Where(x => x.UserId == user.UserId && x.HostName == req.HostName);
+
+        _context.CURdUserOnline.RemoveRange(oldRecords);
+        await _context.SaveChangesAsync();
+
         _context.CURdUserOnline.Add(online);
         await _context.SaveChangesAsync();
 
-        // 前端目前不使用 JWT，因此只回傳 jwtId（之後 middleware 用）
         return Ok(new { success = true, jwtId });
     }
-    private string ShortenUserAgent(string ua)
-    {
-        if (string.IsNullOrEmpty(ua)) return "";
 
-        string browser = "Browser";
-        string os = "OS";
-
-        // 瀏覽器判斷
-        if (ua.Contains("Edg/"))
-            browser = "Edge " + GetVersion(ua, "Edg/");
-        else if (ua.Contains("Chrome/"))
-            browser = "Chrome " + GetVersion(ua, "Chrome/");
-        else if (ua.Contains("Firefox/"))
-            browser = "Firefox " + GetVersion(ua, "Firefox/");
-        else if (ua.Contains("Safari/") && ua.Contains("Version/"))
-            browser = "Safari " + GetVersion(ua, "Version/");
-
-        // OS 判斷
-        if (ua.Contains("Windows NT 10"))
-            os = "Windows 10";
-        else if (ua.Contains("Windows NT 11"))
-            os = "Windows 11";
-        else if (ua.Contains("Windows NT"))
-            os = "Windows";
-        else if (ua.Contains("Android"))
-            os = "Android";
-        else if (ua.Contains("iPhone"))
-            os = "iOS";
-
-        return $"{browser} ({os})";
-    }
-
-    private string GetVersion(string ua, string key)
-    {
-        try
-        {
-            int i = ua.IndexOf(key);
-            if (i == -1) return "";
-            i += key.Length;
-            int j = ua.IndexOf(".", i);
-            if (j == -1) j = ua.Length;
-            return ua.Substring(i, j - i);
-        }
-        catch { return ""; }
-    }
-
+    // Ping 更新緩存時間
     [HttpPost("Ping")]
-    public async Task<IActionResult> Ping([FromHeader(Name="X-JWTID")] string jwt)
+    public async Task<IActionResult> Ping([FromHeader(Name = "X-JWTID")] string jwt)
     {
         if (Guid.TryParse(jwt, out Guid jwtId))
         {
@@ -121,6 +96,4 @@ public class LoginController : ControllerBase
         }
         return Ok(new { success = true });
     }
-
-
 }

@@ -148,56 +148,36 @@
 
         const btnPrint = document.getElementById('btnPrint');
         if (btnPrint) {
-            btnPrint.addEventListener('click', async function () {
-                // 取得單號（可依你專案的取法）
-                const paperNum = window.selectedPaperNum 
-                            || document.querySelector('[name="PaperNum"]')?.value;
+            btnPrint.addEventListener('click', async () => {
+            const paperNum = window.selectedPaperNum || document.querySelector('[name="PaperNum"]')?.value;
+            if (!paperNum) { Swal.fire({ icon:'warning', title:'查無單號！' }); return; }
 
-                if (!paperNum) {
-                    Swal.fire({ icon: 'warning', title: '查無單號！' });
-                    return;
-                }
-                
-                if (!_reportSpName) {
-                    Swal.fire({ icon: 'warning', title: '缺少報表對應的 SP 名稱！' });
-                    return;
-                }
+            const payload = {
+                spName: _reportSpName,      // 你原本設定的 SP 名稱
+                reportName: _reportSpName,  // rpt 檔名(不含 .rpt)
+                params: { PaperNum: paperNum } // 其他參數照報表需求加，key 不要加 
+            };
 
-                // 呼叫後端 API
-                const res = await fetch("/api/report/generate-url", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ 
-                        paperNum: paperNum, 
-                        spName: _reportSpName,// 👈 這裡指定要跑哪個 SP
-                        reportName: _reportSpName
-                    })
-                });
-
-                if (res.ok) {
-                    const data = await res.json();
-                    const reportUrl = data.reportUrl;
-
-                    // ✅ 這裡有兩種做法：
-                    // 1. 直接開新視窗
-                    /*
-                    window.open(reportUrl, "_blank");
-                    */
-                    // 2. 或者用 SweetAlert2 顯示 iframe 預覽
-                    
-                    Swal.fire({
-                        //title: '報表預覽',
-                        html: `<iframe src="${reportUrl}" width="100%" height="600px" frameborder="0"></iframe>`,
-                        width: '80%',
-                        heightAuto: false,
-                        showCloseButton: true,
-                        showConfirmButton: false
-                    });
-                    
-                } else {
-                    Swal.fire({ icon: 'error', title: '❌ 報表產生失敗！' });
-                }
+            const res = await fetch('/api/report/generate-url', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
+
+            if (!res.ok) {
+                Swal.fire({ icon:'error', title:'報表產生失敗', text: await res.text() });
+                return;
+            }
+
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            Swal.fire({
+                html: `<iframe src="${url}" width="100%" height="600px" frameborder="0"></iframe>`,
+                width: '80%', heightAuto: false, showCloseButton: true, showConfirmButton: false,
+                willClose: () => URL.revokeObjectURL(url)
+            });
+            });
+
         }
 
         const btnSwitch = document.getElementById("btnSwitch");

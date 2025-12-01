@@ -7,12 +7,11 @@
     Layout = "_Layout";
 
     var pageMap = new Dictionary<string, string> {
-        { "SA000002", "/SPOdOrderMain" },   // 銷售訂單
-        { "SPO00010", "/SPOdMPSOutMain" },       // 銷貨單
-        { "AA000015", "/AJN/AJNdJourMain" },    // 總帳傳票
-        { "SP000011", "/AJN/AJNdClassMoney" },   // 幣別匯率主檔
-        { "FME00020", "/FmedIssueMain"},
-        {"SA000048", "/Report/SPO/SA000048"},
+        {"SA000002","/SPOdOrderMain" },   // 銷售訂單
+        {"SPO00010","/SPOdMPSOutMain" },       // 銷貨單
+        {"AA000015","/AJN/AJNdJourMain" },    // 總帳傳票
+        {"SP000011","/AJN/AJNdClassMoney" },   // 幣別匯率主檔
+        {"FME00020","/FmedIssueMain"},
         {"CUR00017","/CUR/CurdBu"},
         {"CUR00018","/CUR/CURdSystemSelect"},
         {"CUR00015","/CUR/CURdSysItems"},
@@ -22,9 +21,12 @@
         {"CURH0002", "/CUR/CURdReportOrderBasPage"},
         {"CUR00007", "/CUR/CURdGroups"},
         {"CURH0003", "/CUR/CURdV_SysProcess"},
-        {"SA000019", "/SPO/SPOdSetup"}
+        {"SA000019", "/SPO/SPOdSetup"},
+        {"CUR00004", "/CUR/NoticeBoard"}
+   
         // 其它功能請自行加入...
     };
+    
 }
 
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
@@ -176,15 +178,17 @@ body {
                         }
                         else
                         {
+                            var link = pageMap.ContainsKey(item.ItemId)
+                            ? pageMap[item.ItemId]
+                            : (item.ItemType == 2 && item.OutputType == 0 ? $"/Report/Direct/{item.ItemId}" : null);
+
                             <li class="list-group-item d-flex justify-content-between align-items-center" id="li-@item.ItemId">
-                                @if (pageMap.ContainsKey(item.ItemId))
-                                {
-                                    <a href="@pageMap[item.ItemId]" style="flex:1">@item.ItemId - @item.ItemName</a>
-                                }
-                                else
-                                {
-                                    <span style="flex:1">@item.ItemId - @item.ItemName</span>
-                                }
+
+                            @if (!string.IsNullOrEmpty(link)) {
+                                <a href="@link" style="flex:1">@item.ItemId - @item.ItemName</a>
+                            } else {
+                                <a href="javascript:void(0)" class="dyn-link" data-itemid="@item.ItemId" data-itemname="@item.ItemName" data-superid="@item.SuperId" style="flex:1" onclick="resolveAndGo('@item.ItemId','@item.ItemName','@item.SuperId')">@item.ItemId - @item.ItemName</a>
+                            }
                                 <button class="btn btn-outline-warning btn-sm" onclick="addToFavorite('@item.ItemId', '@item.ItemName', '@item.SuperId')">★</button>
                             </li>
                         }
@@ -221,7 +225,6 @@ body {
     "SPO00010": "/SPOdMPSOutMain",
     "SP000011": "/AJN/AJNdClassMoney",
     "FME00020": "/FmedIssueMain",
-    "SA000048": "/Report/SPO/SA000048",
     "CUR00017": "/CUR/CurdBu",
     "CUR00018": "/CUR/CURdSystemSelect",
     "CUR00015": "/CUR/CURdSysItems",
@@ -232,10 +235,32 @@ body {
     "CUR00007": "/CUR/CURdGroups",
     "CURH0003": "/CUR/CURdV_SysProcess",
     "SA000019": "/SPO/SPOdSetup"
+    "CUR00004": "/CUR/NoticeBoard",
     // 其它功能自行補上
     };
 
     const selectedLevel1Id = "@Model.SelectedLevel1Id";
+
+
+    async function resolveAndGo(itemId, itemName, superId) {
+        const hard = pageMap[itemId];
+        if (hard) { location.href = hard; return; }
+        try {
+            const res = await fetch(`/api/report/item-meta/${itemId}`);
+            if (!res.ok) throw new Error('not found');
+            const meta = await res.json();
+            const itemType = Number(meta.itemType ?? meta.ItemType);
+            const outputType = Number(meta.outputType ?? meta.OutputType);
+            let url = '';
+            if (itemType === 2 && outputType === 0) url = `/Report/Direct/${itemId}`;
+            else if (itemType === 2 && outputType === 6) url = `/Report/Generic/${itemId}`;
+
+            if (url) { location.href = url; return; }
+            if (superId) { location.href = `?level1Id=${superId}`; return; }
+        } catch { /* ignore */ }
+        if (superId) location.href = `?level1Id=${superId}`; else alert(`找不到對應頁面: ${itemId}`);
+    }
+
 
     window.toggleChildren = function (id) {
         const el = document.getElementById(id);

@@ -117,6 +117,30 @@ namespace PcbErpApi.Controllers
                     }
                     if (setPairs.Count == 0)
                     {
+                        var insertSeen0 = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        var insertPairs0 = new List<(ColumnInfo Col, object? Value)>();
+                        foreach (var kp in keyPairs)
+                        {
+                            if (columns.TryGetValue(kp.Name, out var col) && insertSeen0.Add(col.Name))
+                                insertPairs0.Add((col, kp.Value));
+                        }
+                        if (insertPairs0.Count > 0)
+                        {
+                            var colsSql0 = string.Join(", ", insertPairs0.Select(p => $"[{p.Col.Name}]"));
+                            var valsSql0 = string.Join(", ", insertPairs0.Select(p => $"@I_{p.Col.Name}"));
+                            var insertSql0 = $"INSERT INTO [{req.TableName}] ({colsSql0}) VALUES ({valsSql0})";
+                            using var insertCmd0 = conn.CreateCommand();
+                            insertCmd0.Transaction = (System.Data.Common.DbTransaction)tx;
+                            insertCmd0.CommandText = insertSql0;
+                            foreach (var p in insertPairs0)
+                                AddTypedParameter(insertCmd0, $"@I_{p.Col.Name}", p.Value, p.Col);
+                            var insAffected = await insertCmd0.ExecuteNonQueryAsync();
+                            results.Add(new { ok = insAffected > 0, affected = insAffected, sql = insertSql0, inserted = true, skipped });
+                            continue;
+                        }
+                    }
+                    if (setPairs.Count == 0)
+                    {
                         results.Add(new { ok = true, affected = 0, skip = (skipped.Count > 0 ? $"略過欄位: {string.Join(",", skipped)}" : "無可更新欄位") });
                         continue;
                     }
@@ -138,6 +162,39 @@ namespace PcbErpApi.Controllers
                         AddTypedParameter(cmd, $"@K_{p.Name}", p.Value, null);
 
                     var affected = await cmd.ExecuteNonQueryAsync();
+                    // 若找不到資料，嘗試 INSERT 新增
+                    if (affected == 0)
+                    {
+                        var insertSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        var insertPairs = new List<(ColumnInfo Col, object? Value)>();
+                        foreach (var kp in keyPairs)
+                        {
+                            if (columns.TryGetValue(kp.Name, out var col) && insertSeen.Add(col.Name))
+                                insertPairs.Add((col, kp.Value));
+                        }
+                        foreach (var sp in setPairs)
+                        {
+                            if (insertSeen.Add(sp.Col.Name))
+                                insertPairs.Add(sp);
+                        }
+
+                        if (insertPairs.Count > 0)
+                        {
+                            var colsSql = string.Join(", ", insertPairs.Select(p => $"[{p.Col.Name}]"));
+                            var valsSql = string.Join(", ", insertPairs.Select(p => $"@I_{p.Col.Name}"));
+                            var insertSql = $"INSERT INTO [{req.TableName}] ({colsSql}) VALUES ({valsSql})";
+                            using var insertCmd = conn.CreateCommand();
+                            insertCmd.Transaction = (System.Data.Common.DbTransaction)tx;
+                            insertCmd.CommandText = insertSql;
+                            foreach (var p in insertPairs)
+                                AddTypedParameter(insertCmd, $"@I_{p.Col.Name}", p.Value, p.Col);
+
+                            affected = await insertCmd.ExecuteNonQueryAsync();
+                            results.Add(new { ok = affected > 0, affected, sql = insertSql, inserted = true, skipped });
+                            continue;
+                        }
+                    }
+
                     results.Add(new { ok = affected > 0, affected, sql, skipped });
                 }
 
