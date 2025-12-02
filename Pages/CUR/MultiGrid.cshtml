@@ -1,0 +1,270 @@
+@page "/CUR/MultiGrid/{itemId}"
+@model PcbErpApi.Pages.CUR.MultiGridModel
+@{
+    Layout = "_Layout";
+    var tabs = Model.Tabs ?? new List<PcbErpApi.Pages.CUR.MultiGridModel.GridTabViewModel>();
+    var activeKey = Model.ActiveTabKey;
+}
+
+<div class="container py-4">
+    @if (!string.IsNullOrWhiteSpace(ViewData["LoadError"] as string))
+    {
+        <div class="alert alert-warning">@ViewData["LoadError"]</div>
+    }
+
+    @if (tabs.Count == 0)
+    {
+        <div class="alert alert-info">找不到對應的表格設定。</div>
+    }
+    else
+    {
+        <div class="mb-2 d-flex align-items-center gap-2 flex-wrap">
+            <button type="button" class="btn btn-warning btn-sm fw-bold" id="btnMgEdit">編輯</button>
+            <button type="button" class="btn btn-success btn-sm fw-bold d-none" id="btnMgSave">儲存</button>
+            <button type="button" class="btn btn-outline-primary btn-sm" id="btnMgAdd">新增</button>
+            <button type="button" class="btn btn-outline-success btn-sm d-none" id="btnMgConfirm">✔</button>
+            <button type="button" class="btn btn-outline-danger btn-sm d-none" id="btnMgCancel">✖</button>
+        </div>
+
+        <ul class="nav nav-tabs flex-wrap mb-2" role="tablist">
+            @foreach (var tab in tabs)
+            {
+                var isActive = string.Equals(tab.TabKey, activeKey, StringComparison.OrdinalIgnoreCase);
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link @(isActive ? "active" : "")"
+                            id="tab-@tab.TabKey-tab"
+                            data-mg-tab="@tab.TabKey"
+                            data-dict-table="@tab.DictTableName"
+                            data-bs-toggle="tab"
+                            data-bs-target="#tab-@tab.TabKey"
+                            type="button" role="tab"
+                            aria-controls="tab-@tab.TabKey"
+                            aria-selected="@(isActive ? "true" : "false")">
+                        @tab.DisplayName
+                    </button>
+                </li>
+            }
+        </ul>
+
+        <div class="tab-content pt-1">
+            @foreach (var tab in tabs)
+            {
+                var isActive = string.Equals(tab.TabKey, activeKey, StringComparison.OrdinalIgnoreCase);
+                <div class="tab-pane fade @(isActive ? "show active" : "")" id="tab-@tab.TabKey" role="tabpanel" aria-labelledby="tab-@tab.TabKey-tab">
+                    <partial name="~/Pages/Shared/_MultiGridTab.cshtml" model="tab" />
+                </div>
+            }
+        </div>
+    }
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const btnEdit = document.getElementById('btnMgEdit');
+    const btnSave = document.getElementById('btnMgSave');
+    const btnAdd = document.getElementById('btnMgAdd');
+    const btnConfirm = document.getElementById('btnMgConfirm');
+    const btnCancel = document.getElementById('btnMgCancel');
+    let isEdit = false;
+
+    const getActiveGrid = () => document.querySelector('.tab-pane.show.active table[id^="grid-"]');
+
+    const setAddMode = (on) => {
+        btnConfirm?.classList.toggle('d-none', !on);
+        btnCancel?.classList.toggle('d-none', !on);
+    };
+
+    const toggleEdit = () => {
+        const grid = getActiveGrid();
+        if (!grid) return;
+        isEdit = !isEdit;
+        if (btnEdit) btnEdit.textContent = isEdit ? '檢視' : '編輯';
+        btnSave?.classList.toggle('d-none', !isEdit);
+
+        grid.querySelectorAll('tbody tr').forEach(tr => {
+            tr.querySelectorAll('td').forEach(td => {
+                const span = td.querySelector('.cell-view');
+                const inp = td.querySelector('.cell-edit');
+                if (!span || !inp) return;
+                if (isEdit) {
+                    span.classList.add('d-none');
+                    inp.classList.remove('d-none');
+                    inp.defaultValue = inp.value;
+                    if (inp.dataset.readonly === '1') {
+                        inp.classList.add('readonly-cell');
+                        inp.setAttribute('readonly', 'readonly');
+                        inp.setAttribute('tabindex', '-1');
+                    } else {
+                        inp.classList.remove('readonly-cell');
+                        inp.removeAttribute('readonly');
+                        inp.removeAttribute('tabindex');
+                    }
+                } else {
+                    inp.dataset.raw = inp.value;
+                    span.textContent = inp.value;
+                    span.classList.remove('d-none');
+                    inp.classList.add('d-none');
+                }
+            });
+        });
+    };
+
+    const addRow = () => {
+        const grid = getActiveGrid();
+        if (!grid) return;
+        if (btnSave?.classList.contains('d-none')) btnEdit?.click();
+        const tbody = grid.querySelector('tbody');
+        if (!tbody) return;
+        const template = tbody.querySelector('tr');
+        if (!template) { alert('沒有範本列，無法新增'); return; }
+
+        const keyFieldsRaw = (grid.dataset.keyFields || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+        const keyDefaults = {};
+        keyFieldsRaw.forEach(k => {
+            const match = Array.from(template.querySelectorAll('.cell-edit')).find(i => (i.name || '').toLowerCase() === k);
+            if (match) keyDefaults[k] = match.value || match.dataset.raw || '';
+        });
+
+        const clone = template.cloneNode(true);
+        clone.dataset.state = 'added';
+        clone.classList.add('table-warning');
+
+        clone.querySelectorAll('.cell-edit').forEach(inp => {
+            const name = inp.name || '';
+            const nameLower = name.toLowerCase();
+            const isKey = keyFieldsRaw.includes(nameLower);
+            const isReadOnly = inp.dataset.readonly === '1';
+            // 對可編輯的鍵欄位預設空值，讓使用者自行輸入；唯讀鍵保留原值
+            const val = (isKey && !isReadOnly) ? '' : (keyFieldsRaw.includes(nameLower) ? (keyDefaults[nameLower] || '') : '');
+            inp.value = val;
+            inp.defaultValue = val;
+            inp.dataset.raw = val;
+            if (isEdit) {
+                inp.classList.remove('d-none');
+                if (isReadOnly || (isKey && val !== '')) {
+                    inp.classList.add('readonly-cell');
+                    inp.setAttribute('readonly', 'readonly');
+                    inp.setAttribute('tabindex', '-1');
+                } else {
+                    inp.classList.remove('readonly-cell');
+                    inp.removeAttribute('readonly');
+                    inp.removeAttribute('tabindex');
+                }
+            }
+        });
+        clone.querySelectorAll('.cell-view').forEach(span => {
+            span.textContent = '';
+            if (isEdit) span.classList.add('d-none');
+        });
+
+        // 隱藏鍵欄位可能不存在可見欄位
+        keyFieldsRaw.forEach(k => {
+            const exists = Array.from(clone.querySelectorAll('.cell-edit')).some(i => (i.name || '').toLowerCase() === k);
+            if (!exists) {
+                const hidden = document.createElement('input');
+                hidden.type = 'hidden';
+                hidden.className = 'cell-edit d-none readonly-cell key-field-hidden';
+                hidden.name = k;
+                hidden.value = keyDefaults[k] || '';
+                hidden.dataset.raw = keyDefaults[k] || '';
+                hidden.dataset.readonly = '1';
+                clone.appendChild(hidden);
+            }
+        });
+
+        tbody.appendChild(clone);
+        setAddMode(true);
+    };
+
+    const cancelAdd = () => {
+        const grid = getActiveGrid();
+        if (!grid) return;
+        grid.querySelectorAll('tbody tr[data-state="added"]').forEach(tr => tr.remove());
+        setAddMode(false);
+    };
+
+    const collectChanges = (grid, onlyAdded = false) => {
+        const changes = [];
+        const keyFieldsRaw = (grid?.dataset.keyFields || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+        grid?.querySelectorAll('tbody tr').forEach(tr => {
+            const isAdded = tr.dataset.state === 'added';
+            let hasDiff = isAdded;
+            const row = {};
+            tr.querySelectorAll('.cell-edit').forEach(inp => {
+                const name = inp.name;
+                if (!name) return;
+                const oldVal = inp.defaultValue ?? '';
+                const newVal = inp.value ?? '';
+                if (inp.dataset.readonly !== '1' && newVal !== oldVal) hasDiff = true;
+                row[name] = newVal;
+            });
+            keyFieldsRaw.forEach(kf => {
+                const match = Array.from(tr.querySelectorAll('.cell-edit')).find(i => (i.name || '').toLowerCase() === kf);
+                if (match) row[match.name] = match.value ?? '';
+            });
+            if (onlyAdded) {
+                if (isAdded) changes.push(row);
+            } else {
+                if (hasDiff) changes.push(row);
+            }
+        });
+        return changes;
+    };
+
+    const saveChanges = async (onlyAdded = false) => {
+        const grid = getActiveGrid();
+        if (!grid) return;
+        const changes = collectChanges(grid, onlyAdded);
+        if (changes.length === 0) { if (!onlyAdded) toggleEdit(); setAddMode(false); return; }
+        const tableName = grid.dataset.tableName || grid.dataset.dictTable;
+        if (!tableName) { alert('缺少 TableName'); return; }
+        const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ TableName: tableName, Data: changes })
+        });
+        if (resp.ok) {
+            alert('儲存成功');
+            if (onlyAdded) {
+                setAddMode(false);
+                // 將新增列轉為已存在狀態
+                grid.querySelectorAll('tbody tr[data-state="added"]').forEach(tr => {
+                    tr.dataset.state = '';
+                    tr.classList.remove('table-warning');
+                    tr.querySelectorAll('.cell-edit').forEach(inp => {
+                        inp.defaultValue = inp.value ?? '';
+                    });
+                    tr.querySelectorAll('.cell-view').forEach(span => {
+                        span.textContent = span.dataset?.raw || '';
+                    });
+                });
+            }
+            toggleEdit();
+        } else {
+            alert('儲存失敗: ' + await resp.text());
+        }
+    };
+
+    document.querySelectorAll('[data-mg-tab]').forEach(btn => {
+        btn.addEventListener('shown.bs.tab', (ev) => {
+            const key = ev.target?.dataset?.mgTab;
+            if (!key) return;
+            const url = new URL(window.location.href);
+            url.searchParams.set('tab', key);
+            history.replaceState({}, '', url);
+            const dict = ev.target?.dataset?.dictTable;
+            if (dict) window._dictTableName = dict;
+        });
+        if (btn.classList.contains('active')) {
+            const dict = btn.dataset?.dictTable;
+            if (dict) window._dictTableName = dict;
+        }
+    });
+
+    btnEdit?.addEventListener('click', toggleEdit);
+    btnSave?.addEventListener('click', () => saveChanges(false));
+    btnAdd?.addEventListener('click', addRow);
+    btnConfirm?.addEventListener('click', () => saveChanges(true));
+    btnCancel?.addEventListener('click', cancelAdd);
+});
+</script>

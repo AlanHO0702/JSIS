@@ -1,0 +1,330 @@
+@model PcbErpApi.Pages.CUR.MultiGridModel.GridTabViewModel
+@using Microsoft.AspNetCore.WebUtilities
+@using System.Text.Json
+
+@{
+    var fields = Model.TableFields ?? new List<CURdTableField>();
+    var items = Model.Items ?? new List<Dictionary<string, object?>>();
+    var lookups = Model.OcxLookups ?? new Dictionary<string, TableDictionaryService.OCXLookupMap>(StringComparer.OrdinalIgnoreCase);
+    var pageNumber = Model.PageNumber <= 0 ? 1 : Model.PageNumber;
+    var pageSize = Model.PageSize <= 0 ? Math.Max(1, items.Count) : Model.PageSize;
+    var totalPages = Model.TotalPages;
+    var totalCount = Model.TotalCount;
+    var tabKey = Model.TabKey;
+    var basePath = Context.Request.Path.ToString();
+    var baseQuery = Context.Request.Query.ToDictionary(k => k.Key, v => v.Value.ToString());
+    baseQuery["tab"] = tabKey;
+    string pageParam = $"pageIndex_{tabKey}";
+    string sizeParam = $"pageSize_{tabKey}";
+    var sizeOptions = new[] { 20, 50, 100, 200, 500 };
+
+    var keyFields = Model.KeyFields ?? new List<string>();
+    var lowerFields = new HashSet<string>(fields.Select(ff => (ff.FieldName ?? "").ToLowerInvariant()));
+    var extraKeys = new List<string>(keyFields);
+    if (!extraKeys.Any() && fields.Any() && !string.IsNullOrWhiteSpace(fields.First().FieldName))
+    {
+        extraKeys.Add(fields.First().FieldName!);
+    }
+    if (items.Count > 0)
+    {
+        var useIdExists = items[0].Keys.Any(k => string.Equals(k, "UseId", StringComparison.OrdinalIgnoreCase));
+        if (useIdExists && !extraKeys.Any(k => string.Equals(k, "UseId", StringComparison.OrdinalIgnoreCase)))
+        {
+            extraKeys.Add("UseId");
+        }
+    }
+}
+
+@functions {
+    private static object? GetValue(IDictionary<string, object?> row, string? name)
+    {
+        if (row == null || string.IsNullOrWhiteSpace(name)) return null;
+        foreach (var kv in row)
+        {
+            if (string.Equals(kv.Key, name, StringComparison.OrdinalIgnoreCase))
+                return kv.Value;
+        }
+        return null;
+    }
+
+    private string DisplayVal(IDictionary<string, object?> row, CURdTableField field, IDictionary<string, TableDictionaryService.OCXLookupMap> lookupMap)
+    {
+        var raw = GetValue(row, field.FieldName);
+        var rawStr = raw?.ToString() ?? "";
+
+        if (field.FieldName != null && lookupMap.TryGetValue(field.FieldName, out var lk))
+        {
+            var key = rawStr;
+            if (!string.IsNullOrWhiteSpace(lk.KeyFieldName))
+            {
+                var other = GetValue(row, lk.KeyFieldName);
+                if (other != null) key = other.ToString() ?? key;
+            }
+            if (!string.IsNullOrWhiteSpace(lk.KeySelfName))
+            {
+                var other = GetValue(row, lk.KeySelfName);
+                if (other != null) key = other.ToString() ?? key;
+            }
+
+            if (!string.IsNullOrWhiteSpace(key) && lk.LookupValues != null && lk.LookupValues.TryGetValue(key, out var mapped))
+                return mapped ?? rawStr;
+        }
+
+        return FormatValue(raw);
+    }
+
+    private static string FormatValue(object? v) => v switch
+    {
+        DateTime dt => dt.ToString("yyyy/MM/dd HH:mm"),
+        decimal dec => dec.ToString("#,##0.##"),
+        double d => d.ToString("#,##0.##"),
+        float f => f.ToString("#,##0.##"),
+        IFormattable fm => fm.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+        _ => v?.ToString() ?? ""
+    };
+
+    private string BuildPageUrl(string path, IDictionary<string, string> baseQuery, string pageParam, string sizeParam, int page, int pageSize)
+    {
+        var qs = new Dictionary<string, string>(baseQuery, StringComparer.OrdinalIgnoreCase)
+        {
+            [pageParam] = page.ToString(),
+            [sizeParam] = pageSize.ToString()
+        };
+        return QueryHelpers.AddQueryString(path, qs);
+    }
+}
+
+<div class="card shadow-sm border-0 rounded-4 mb-3">
+    <div class="card-body">
+        <div class="table-responsive" style="max-height:70vh;">
+            <table class="table table-hover table-sm align-middle text-nowrap mb-0 grid-table"
+                   id="grid-@tabKey"
+                   data-dict-table="@Model.DictTableName"
+                   data-table-name="@Model.TableName"
+                   data-tabkey="@tabKey"
+                   data-key-fields="@string.Join(",", extraKeys)">
+                <colgroup>
+                    @foreach (var f in fields)
+                    {
+                        var widthPx = f.DisplaySize.HasValue && f.DisplaySize.Value > 0 ? f.DisplaySize.Value * 10 : (int?)null;
+                        if (widthPx.HasValue)
+                        {
+                            <col data-field="@f.FieldName" style="width:@($"{widthPx}px");min-width:@($"{widthPx}px");max-width:@($"{widthPx}px")" />
+                        }
+                        else
+                        {
+                            <col data-field="@f.FieldName" />
+                        }
+                    }
+                </colgroup>
+                <thead class="table-light">
+                    <tr>
+                        @foreach (var f in fields)
+                        {
+                            var widthPx = f.DisplaySize.HasValue && f.DisplaySize.Value > 0 ? f.DisplaySize.Value * 10 : (int?)null;
+                            <th style="@(widthPx.HasValue ? $"width:{widthPx}px;min-width:{widthPx}px;" : null)">
+                                @(string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel)
+                            </th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (items.Count == 0)
+                    {
+                        <tr>
+                            <td colspan="@Math.Max(1, fields.Count)" class="text-center text-muted py-4">沒有資料</td>
+                        </tr>
+                    }
+                    else
+                    {
+                        foreach (var row in items)
+                        {
+                            <tr>
+                                @foreach (var f in fields)
+                                {
+                                    var raw = GetValue(row, f.FieldName)?.ToString() ?? "";
+                                    bool isReadOnly = f.ReadOnly != null && (int)f.ReadOnly != 0;
+                                    <td>
+                                        <span class="cell-view" data-raw="@raw">@DisplayVal(row, f, lookups)</span>
+                                        <input class="form-control form-control-sm cell-edit d-none @(isReadOnly ? "readonly-cell" : "")"
+                                               name="@f.FieldName"
+                                               value="@raw"
+                                               data-raw="@raw"
+                                               data-readonly="@(isReadOnly ? "1" : "0")"
+                                               @(isReadOnly ? "readonly" : "") />
+                                    </td>
+                                }
+                                @{
+                                    var lowerSet = new HashSet<string>(fields.Select(ff => (ff.FieldName ?? "").ToLowerInvariant()));
+                                }
+                                @foreach (var kf in extraKeys)
+                                {
+                                    var kfname = kf ?? "";
+                                    if (string.IsNullOrWhiteSpace(kfname)) { continue; }
+                                    var keyLower = kfname.ToLowerInvariant();
+                                    if (lowerSet.Contains(keyLower)) { continue; }
+                                    var kval = GetValue(row, kfname)?.ToString() ?? "";
+                                    <input type="hidden" class="cell-edit d-none readonly-cell key-field-hidden"
+                                           name="@kfname"
+                                           value="@kval"
+                                           data-raw="@kval"
+                                           data-readonly="1"
+                                           readonly />
+                                }
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-3">
+            <div class="d-flex align-items-center gap-3 text-muted small flex-wrap">
+                <span>共 @totalCount 筆</span>
+                <span>頁 @pageNumber / @totalPages</span>
+                <span class="d-flex align-items-center gap-1">
+                    每頁筆數
+                    <select class="form-select form-select-sm" style="width:auto"
+                            onchange="(function(el){const url=new URL(window.location.href);url.searchParams.set('tab','@tabKey');url.searchParams.set('@pageParam','1');url.searchParams.set('@sizeParam',el.value);window.location.href=url.toString();})(this);">
+                        @foreach (var s in sizeOptions)
+                        {
+                            <option value="@s" selected="@(s == pageSize ? "selected" : null)">@s</option>
+                        }
+                    </select>
+                </span>
+            </div>
+            @if (totalPages > 1)
+            {
+                <nav>
+                    <ul class="pagination pagination-sm mb-0">
+                        <li class="page-item @(pageNumber <= 1 ? "disabled" : "")">
+                            <a class="page-link" href="@BuildPageUrl(basePath, baseQuery, pageParam, sizeParam, 1, pageSize)">«</a>
+                        </li>
+                        <li class="page-item @(pageNumber <= 1 ? "disabled" : "")">
+                            <a class="page-link" href="@BuildPageUrl(basePath, baseQuery, pageParam, sizeParam, Math.Max(1, pageNumber - 1), pageSize)">‹</a>
+                        </li>
+                        <li class="page-item disabled">
+                            <span class="page-link">@pageNumber / @totalPages</span>
+                        </li>
+                        <li class="page-item @(pageNumber >= totalPages ? "disabled" : "")">
+                            <a class="page-link" href="@BuildPageUrl(basePath, baseQuery, pageParam, sizeParam, Math.Min(totalPages, pageNumber + 1), pageSize)">›</a>
+                        </li>
+                        <li class="page-item @(pageNumber >= totalPages ? "disabled" : "")">
+                            <a class="page-link" href="@BuildPageUrl(basePath, baseQuery, pageParam, sizeParam, totalPages, pageSize)">»</a>
+                        </li>
+                    </ul>
+                </nav>
+            }
+        </div>
+    </div>
+</div>
+
+<style>
+    .table.grid-table { table-layout: auto; width: auto !important; min-width: 0; }
+    .table thead th { position: sticky; top: 0; z-index: 5; background: #f8fafc; }
+    .table-hover tbody tr:hover { background-color: #f4f8ff !important; }
+    .table > :not(caption) > * > * { border-color: #d9dde4; }
+    .table td, .table th { border: 1px solid #d9dde4; position: relative; }
+    .cell-edit.form-control{height:calc(1.45em + .45rem + 2px)!important;padding:.28rem .4rem!important;font-size:.85rem!important;line-height:1.35!important;border-radius:0!important;box-sizing:border-box!important}
+    .readonly-cell{background:#f3f3f3!important;color:#555!important;border:1px solid #ddd!important;cursor:not-allowed!important;pointer-events:none!important;user-select:none!important}
+    .col-resizer{position:absolute;top:0;right:-3px;width:6px;cursor:col-resize;user-select:none;height:100%;}
+</style>
+
+<script>
+(() => {
+    const grid = document.getElementById("grid-@tabKey");
+    if (!grid) return;
+
+    // add resizers
+    grid.querySelectorAll('thead th').forEach(th => {
+        const handle = document.createElement('span');
+        handle.className = 'col-resizer';
+        th.appendChild(handle);
+    });
+
+    const ths = Array.from(grid.querySelectorAll('thead th'));
+    const colMap = {};
+    const cols = Array.from(grid.querySelectorAll('colgroup col'));
+    cols.forEach(c => {
+        const f = (c.getAttribute('data-field') || '').toLowerCase();
+        if (f) colMap[f] = c;
+    });
+    const tableName = grid.dataset.dictTable || grid.dataset.tableName || "";
+    let drag = null;
+
+    const findFieldName = (th) => {
+        const idx = ths.indexOf(th);
+        if (idx < 0) return { field: '', idx: -1 };
+        const firstRow = grid.querySelector('tbody tr');
+        if (firstRow) {
+            const cell = firstRow.children[idx];
+            const input = cell?.querySelector('.cell-edit');
+            if (input?.name) return { field: input.name, idx };
+        }
+        return { field: th.textContent?.trim() || '', idx };
+    };
+
+    const applyWidth = (idx, width, field) => {
+        if (idx < 0) return;
+        const px = `${width}px`;
+        const th = ths[idx];
+        th.style.width = px;
+        th.style.minWidth = px;
+        th.style.maxWidth = px;
+        if (field) {
+            const col = colMap[field.toLowerCase()];
+            if (col) {
+                col.style.width = px;
+                col.style.minWidth = px;
+                col.style.maxWidth = px;
+            }
+        }
+    };
+
+    grid.addEventListener('mousedown', (e) => {
+        const handle = e.target.closest('.col-resizer');
+        if (!handle) return;
+        const th = handle.parentElement;
+        if (!th) return;
+        e.preventDefault();
+        const { field, idx } = findFieldName(th);
+        drag = {
+            th,
+            field,
+            idx,
+            startX: e.clientX,
+            startW: th.getBoundingClientRect().width
+        };
+        document.body.style.cursor = 'col-resize';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!drag) return;
+        const delta = e.clientX - drag.startX;
+        const newW = Math.max(60, drag.startW + delta);
+        applyWidth(drag.idx, newW, drag.field);
+    });
+
+    document.addEventListener('mouseup', async () => {
+        if (!drag) return;
+        document.body.style.cursor = '';
+        const width = drag.th.getBoundingClientRect().width;
+        const field = drag.field;
+        drag = null;
+        if (!tableName || !field) return;
+        try {
+            await fetch("/api/DictSetupApi/FieldWidth/Save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    tableName: tableName,
+                    fieldName: field,
+                    widthPx: Math.round(width)
+                })
+            });
+        } catch (err) {
+            console.warn("save width failed", err);
+        }
+    });
+})();
+</script>

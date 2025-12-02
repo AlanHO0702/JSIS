@@ -43,6 +43,7 @@ namespace PcbErpApi.Data
         public virtual DbSet<AJNdClassMoney> AJNdClassMoney { get; set; }
         public virtual DbSet<AJNdClassMoneyHis> AJNdClassMoneyHis { get; set; }
         public virtual DbSet<CurdNoticeBoard> CurdNoticeBoards { get; set; }
+         public virtual DbSet<SpodClassArea> SpodClassAreas { get; set; }
         public virtual DbSet<CurdNoticeBoardUser> CurdNoticeBoardUsers { get; set; }
         public IEnumerable<object> TabConfigs { get; internal set; }
 
@@ -92,6 +93,27 @@ namespace PcbErpApi.Data
             modelBuilder.Entity<FmedIssuePo>(entity =>
             {
                 entity.HasKey(e => new { e.PaperNum, e.Item });
+            });
+
+            modelBuilder.Entity<SpodClassArea>(entity =>
+            {
+                entity.HasKey(e => new { e.AreaCode, e.UseId });
+
+                entity.ToTable("SPOdClassArea", tb =>
+                    {
+                        tb.HasTrigger("SPOdClassArea_tD");
+                        tb.HasTrigger("SPOdClassArea_tIU");
+                    });
+
+                entity.Property(e => e.AreaCode)
+                    .HasMaxLength(10)
+                    .IsUnicode(false);
+                entity.Property(e => e.UseId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .HasDefaultValue("A001");
+                entity.Property(e => e.AreaName).HasMaxLength(50);
+                entity.Property(e => e.Continent).HasMaxLength(50);
             });
 
             modelBuilder.Entity<CurdNoticeBoardUser>(entity =>

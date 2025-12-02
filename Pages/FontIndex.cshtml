@@ -177,9 +177,13 @@ body {
                         }
                         else
                         {
+                            var ocx = item.Ocxtemplete?.Trim().ToLowerInvariant() ?? "";
                             var link = pageMap.ContainsKey(item.ItemId)
                             ? pageMap[item.ItemId]
-                            : (item.ItemType == 2 && item.OutputType == 0 ? $"/Report/Direct/{item.ItemId}" : null);
+                            : (item.ItemType == 2 && item.OutputType == 0 ? $"/Report/Direct/{item.ItemId}"
+                               : item.ItemType == 6 && ocx.Contains("jsdsinglegriddll") ? $"/CUR/SingleGrid/{item.ItemId}"
+                               : item.ItemType == 6 && ocx.Contains("jsdgriddll") ? $"/CUR/MultiGrid/{item.ItemId}"
+                               : null);
 
                             <li class="list-group-item d-flex justify-content-between align-items-center" id="li-@item.ItemId">
 
@@ -241,19 +245,34 @@ body {
 
 
     async function resolveAndGo(itemId, itemName, superId) {
+        console.debug('resolveAndGo click', { itemId, itemName, superId });
         const hard = pageMap[itemId];
         if (hard) { location.href = hard; return; }
         try {
-            const res = await fetch(`/api/report/item-meta/${itemId}`);
+            const metaUrl = `/api/report/item-meta/${itemId}`;
+            console.debug('fetch meta', metaUrl);
+            const res = await fetch(metaUrl);
             if (!res.ok) throw new Error('not found');
             const meta = await res.json();
             const itemType = Number(meta.itemType ?? meta.ItemType);
             const outputType = Number(meta.outputType ?? meta.OutputType);
-            const ocx = String(meta.ocxtemplete ?? meta.OCXTemplete ?? '').toLowerCase();
+            const pickStr = (obj, keys) => {
+                for (const k of keys) {
+                    if (obj && obj[k] !== undefined && obj[k] !== null) return obj[k];
+                }
+                return '';
+            };
+            const ocxRaw = pickStr(meta, [
+                'ocxtemplete','OCXTemplete','ocxTemplete','OCXTemplete',
+                'ocxTemplate','OCXTemplate','ocxtemplate','OCXTEMPLATE',
+                'OCX','ocx'
+            ]);
+            const ocx = String(ocxRaw).trim().toLowerCase();
             let url = '';
             if (itemType === 2 && outputType === 0) url = `/Report/Direct/${itemId}`;
             else if (itemType === 2 && outputType === 6) url = `/Report/Generic/${itemId}`;
-            else if (itemType === 6 && (ocx === 'jsdsinglegriddll.dll' || !ocx)) url = `/CUR/SingleGrid/${itemId}`;
+            else if (itemType === 6 && (ocx === 'jsdsinglegriddll.dll' || ocx.includes('jsdsinglegriddll'))) url = `/CUR/SingleGrid/${itemId}`;
+            else if (itemType === 6 && (ocx === 'jsdgriddll.dll' || ocx.includes('jsdgriddll'))) url = `/CUR/MultiGrid/${itemId}`;
 
             if (url) { location.href = url; return; }
             if (superId) { location.href = `?level1Id=${superId}`; return; }
@@ -263,13 +282,26 @@ body {
         if (superId) {
             location.href = `?level1Id=${superId}`;
         } else {
-            alert(`�䤣���������: ${itemId}`);
+            alert(`找不到對應的頁面: ${itemId}`);
         }
     }
     window.toggleChildren = function (id) {
         const el = document.getElementById(id);
         if (el) el.style.display = el.style.display === "none" ? "block" : "none";
     };
+
+    // 確保動態連結有事件（若 inline onclick 被瀏覽器阻擋或失效）
+    document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('click', (ev) => {
+            const link = ev.target.closest('.dyn-link');
+            if (!link) return;
+            ev.preventDefault();
+            const itemId = link.dataset.itemid || link.getAttribute('data-itemid');
+            const itemName = link.dataset.itemname || link.getAttribute('data-itemname');
+            const superId = link.dataset.superid || link.getAttribute('data-superid');
+            resolveAndGo(itemId, itemName, superId);
+        });
+    });
 
     document.addEventListener('DOMContentLoaded', () => {
         const addItemEl = document.getElementById('addItemModal');
@@ -352,8 +384,21 @@ body {
             renderFavorites();
         });
 
+    // fallback: ensure dyn-link click is always handled (capture phase), even if earlier listeners failed
+    (function ensureDynLinkHandler() {
+        if (window.__dynLinkHandlerBound) return;
+        window.__dynLinkHandlerBound = true;
+        const handler = (ev) => {
+            const link = ev.target.closest('.dyn-link');
+            if (!link) return;
+            ev.preventDefault();
+            const itemId = link.dataset.itemid || link.getAttribute('data-itemid');
+            const itemName = link.dataset.itemname || link.getAttribute('data-itemname');
+            const superId = link.dataset.superid || link.getAttribute('data-superid');
+            console.debug('dyn-link click (fallback)', { itemId, itemName, superId });
+            resolveAndGo(itemId, itemName, superId);
+        };
+        document.addEventListener('click', handler, true);
+    })();
+
 </script>
-
-
-
-
