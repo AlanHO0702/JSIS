@@ -56,46 +56,63 @@ public class TableDictionaryService : ITableDictionaryService
 
         foreach (var field in fieldDefs)
         {
-            var lkSetting = _context.CURdOCXTableFieldLK
-                .FirstOrDefault(x => x.TableName == tableName && x.FieldName == field.FieldName);
-
-            if (lkSetting == null) continue;
-
-            var ocxTableName = field.OCXLKTableName;
-            var ocxResultName = field.OCXLKResultName;
-            var keyField = lkSetting.KeyFieldName;
-
-            // 用 raw SQL 動態查表
-            var sql = $"SELECT [{keyField}], [{ocxResultName}] FROM [{ocxTableName}]";
-            var conn = _context.Database.GetDbConnection();
-            var lookupDict = new Dictionary<string, string>();
-
-            conn.Open();
-            using (var cmd = conn.CreateCommand())
+            try
             {
-                cmd.CommandText = sql;
-                using (var reader = cmd.ExecuteReader())
+                var lkSetting = _context.CURdOCXTableFieldLK
+                    .FirstOrDefault(x => x.TableName == tableName && x.FieldName == field.FieldName);
+
+                if (lkSetting == null) continue;
+
+                var ocxTableName = field.OCXLKTableName;
+                var ocxResultName = field.OCXLKResultName;
+                var keyField = lkSetting.KeyFieldName;
+
+                // 驗證欄位名稱不為空
+                if (string.IsNullOrWhiteSpace(ocxTableName) ||
+                    string.IsNullOrWhiteSpace(ocxResultName) ||
+                    string.IsNullOrWhiteSpace(keyField))
                 {
-                    while (reader.Read())
+                    continue;
+                }
+
+                // 用 raw SQL 動態查表
+                var sql = $"SELECT [{keyField}], [{ocxResultName}] FROM [{ocxTableName}]";
+                var conn = _context.Database.GetDbConnection();
+                var lookupDict = new Dictionary<string, string>();
+
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = sql;
+                    using (var reader = cmd.ExecuteReader())
                     {
-                        var key = reader[keyField]?.ToString();
-                        var value = reader[ocxResultName]?.ToString();
-                        if (key != null && value != null)
+                        while (reader.Read())
                         {
-                            lookupDict[key] = value;
+                            var key = reader[keyField]?.ToString();
+                            var value = reader[ocxResultName]?.ToString();
+                            if (key != null && value != null)
+                            {
+                                lookupDict[key] = value;
+                            }
                         }
                     }
                 }
-            }
-            conn.Close();
+                conn.Close();
 
-            result.Add(new OCXLookupMap
+                result.Add(new OCXLookupMap
+                {
+                    FieldName = field.FieldName,
+                    KeySelfName = lkSetting.KeySelfName,
+                    KeyFieldName = keyField,
+                    LookupValues = lookupDict
+                });
+            }
+            catch (Exception ex)
             {
-                FieldName = field.FieldName,
-                KeySelfName = lkSetting.KeySelfName,
-                KeyFieldName = keyField,
-                LookupValues = lookupDict
-            });
+                // 記錄錯誤但繼續處理其他欄位
+                Console.WriteLine($"Error loading OCX lookup for field {field.FieldName}: {ex.Message}");
+                continue;
+            }
         }
 
         return result;

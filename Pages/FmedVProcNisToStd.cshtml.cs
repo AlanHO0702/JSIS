@@ -6,27 +6,25 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.AspNetCore.Mvc;
 using PcbErpApi.Models;
+using PcbErpApi.Data;
 
 namespace PcbErpApi.Pages
 {
-    public class FmedVProcNisToStdModel : PageModel
-{
-    private readonly IHttpClientFactory _httpClientFactory;
-
-    public FmedVProcNisToStdModel(IHttpClientFactory httpClientFactory)
+    public class FmedVProcNisToStdModel : TableListModel<FmedVProcNisToStd>
     {
-        _httpClientFactory = httpClientFactory;
+        private readonly ILogger<TableListModel<FmedVProcNisToStd>> _logger;
+
+        public FmedVProcNisToStdModel(
+            IHttpClientFactory httpClientFactory,
+            ITableDictionaryService dictService,
+            PcbErpContext context,
+            ILogger<TableListModel<FmedVProcNisToStd>> logger)
+            : base(httpClientFactory, dictService, context, logger)
+        {
+            _logger = logger;
+        }
+
+        public override string TableName => "FMEdV_ProcNIS_ToStd";
+        public override string ApiPagedUrl => "/api/FmedVProcNisToStd/paged";
     }
-
-    public List<FmedVProcNisToStd> Items { get; set; } = new();
-
-    public async Task OnGetAsync()
-    {
-        var client = _httpClientFactory.CreateClient("MyApiClient");
-        var response = await client.GetFromJsonAsync<List<FmedVProcNisToStd>>("/api/FmedVProcNisToStd");
-        if (response != null)
-            Items = response;
-    }
-}
-
 }

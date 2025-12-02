@@ -736,7 +736,7 @@ namespace PcbErpApi.Data
                 .HasColumnType("decimal(24, 8)")
                 .HasColumnName("PIValueNIS");
             entity.Property(e => e.Pop).HasColumnName("POP");
-            entity.Property(e => e.Popname)
+            entity.Property(e => e.PopName)
                 .HasMaxLength(24)
                 .HasColumnName("POPName");
             entity.Property(e => e.ProcCode)
