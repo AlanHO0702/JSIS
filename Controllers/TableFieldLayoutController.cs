@@ -337,6 +337,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         f.SerialNum,
         Visible   = CASE WHEN ISNULL(f.Visible,1)=1 THEN 1 ELSE 0 END,
         ReadOnly  = CASE WHEN ISNULL(f.ReadOnly,0)=1 THEN 1 ELSE 0 END,
+        f.ComboStyle,
         f.FieldNote,
 
         -- 標籤/欄位座標與尺寸
@@ -390,6 +391,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
                 Visible         = (rd["Visible"]?.ToString() ?? "1") == "1" ? 1 : 0,
                 ReadOnly        = (rd["ReadOnly"]?.ToString() ?? "0") == "1" ? 1 : 0,
                 FieldNote       = rd["FieldNote"]?.ToString() ?? "",
+                ComboStyle      = rd["ComboStyle"] as int?,
 
                 iLabHeight      = rd["iLabHeight"]  as int?,
                 iLabTop         = rd["iLabTop"]     as int?,

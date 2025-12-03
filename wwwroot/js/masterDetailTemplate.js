@@ -174,19 +174,44 @@
           const td = document.createElement("td");
           td.dataset.field = col;
 
-          // 顯示模式
+          // 是否顯示為勾選框 (ComboStyle==1)
+          const isCheckbox = String(f.ComboStyle ?? "").trim() === "1";
+          if (isCheckbox) td.classList.add("text-center", "align-middle");
+
+          // 顯示欄位
           const span = document.createElement("span");
           span.className = "cell-view";
-          span.textContent = fmtCell(display, DICT_MAP.fmt(f), DICT_MAP.dataType(f));
+          if (isCheckbox) span.classList.add("d-inline-flex", "justify-content-center", "w-100");
 
-          // 編輯模式 input
+          // 編輯欄位 input
           const inp = document.createElement("input");
-          inp.className = "form-control form-control-sm cell-edit d-none";
+          inp.className = isCheckbox ? "form-check-input checkbox-dark cell-edit d-none mx-auto" : "form-control form-control-sm cell-edit d-none";
           inp.name = col;
 
-          // 編輯時顯示中文，但存 raw
-          inp.value = display;
-          inp.dataset.raw = raw;
+          if (isCheckbox) {
+              const checked = raw === true || raw === 1 || raw === "1";
+              const viewChk = document.createElement("input");
+              viewChk.type = "checkbox";
+              viewChk.disabled = true;
+              viewChk.tabIndex = -1;
+              viewChk.className = "form-check-input checkbox-dark";
+              viewChk.checked = checked;
+              span.appendChild(viewChk);
+
+              inp.type = "checkbox";
+              inp.checked = checked;
+              inp.value = checked ? "1" : "0";
+              inp.dataset.raw = inp.value;
+              inp.addEventListener("change", () => {
+                  inp.value = inp.checked ? "1" : "0";
+                  inp.dataset.raw = inp.value;
+                  viewChk.checked = inp.checked;
+              });
+          } else {
+              span.textContent = fmtCell(display, DICT_MAP.fmt(f), DICT_MAP.dataType(f));
+              inp.value = display;
+              inp.dataset.raw = raw;
+          }
 
           // Lookup 或 Readonly → 灰底且不可編輯
          // ---- 是否唯讀（非實體 lookup + 辭典唯讀）----
@@ -331,6 +356,19 @@
   // 🧩 DOM Ready → 初始化全部 MasterDetail 區塊
   // -------------------------------------------------
   document.addEventListener("DOMContentLoaded", () => {
+    // checkbox 外觀加深
+    if (!document.getElementById("md-checkbox-dark-style")) {
+      const style = document.createElement("style");
+      style.id = "md-checkbox-dark-style";
+      style.textContent = `
+        .checkbox-dark {
+          accent-color: #2c3e50;
+          border: 1px solid #2c3e50 !important;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
     if (!window._mdConfigs) return;
     Object.values(window._mdConfigs).forEach(cfg => initOne(cfg));
   });
