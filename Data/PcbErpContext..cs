@@ -28,6 +28,7 @@ namespace PcbErpApi.Data
         public virtual DbSet<AjndJourSub> AjndJourSub { get; set; }
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
         public virtual DbSet<EmodProdInfo> EmodProdInfos { get; set; }
+        public virtual DbSet<EmodProcInfo> EmodProcInfos { get; set; }
         public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
         public virtual DbSet<CurdOcxtableSetUp> CurdOcxtableSetUp { get; set; }
         public virtual DbSet<CurdPaperPaper> CurdPaperPaper { get; set; }
@@ -1417,6 +1418,52 @@ namespace PcbErpApi.Data
                    .HasMaxLength(12)
                    .IsUnicode(false);
            });
+
+            modelBuilder.Entity<EmodProcInfo>(entity =>
+            {
+                entity.HasKey(e => e.ProcCode);
+
+                entity.ToTable("EMOdProcInfo");
+
+                entity.Property(e => e.ProcCode)
+                    .HasMaxLength(8)
+                    .IsUnicode(false);
+                entity.Property(e => e.ProcName).HasMaxLength(40);
+                entity.Property(e => e.CostCenter)
+                    .HasMaxLength(8)
+                    .IsUnicode(false);
+                entity.Property(e => e.DepartId)
+                    .HasMaxLength(12)
+                    .IsUnicode(false);
+                entity.Property(e => e.CapId)
+                    .HasMaxLength(12)
+                    .IsUnicode(false);
+                entity.Property(e => e.FromTime)
+                    .HasMaxLength(5)
+                    .IsUnicode(false);
+                entity.Property(e => e.DueTime)
+                    .HasMaxLength(5)
+                    .IsUnicode(false);
+                entity.Property(e => e.HaltTime).HasColumnType("datetime");
+                entity.Property(e => e.Memo).HasMaxLength(100);
+                entity.Property(e => e.RuleItem).HasMaxLength(16);
+                entity.Property(e => e.ProcGroup)
+                    .HasMaxLength(4)
+                    .IsUnicode(false);
+                entity.Property(e => e.Other1).HasMaxLength(50);
+                entity.Property(e => e.Other2).HasMaxLength(50);
+                entity.Property(e => e.Other3).HasMaxLength(50);
+                entity.Property(e => e.Other4).HasMaxLength(50);
+                entity.Property(e => e.Other5).HasMaxLength(50);
+                entity.Property(e => e.Qctype)
+                    .HasMaxLength(1)
+                    .IsUnicode(false)
+                    .HasColumnName("QCType");
+                entity.Property(e => e.ProcNameEng).HasMaxLength(40);
+                entity.Property(e => e.ComputeId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false);
+            });
 
             modelBuilder.Entity<EmodProdInfo>(entity =>
             {
