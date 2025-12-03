@@ -29,6 +29,8 @@ namespace PcbErpApi.Data
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
         public virtual DbSet<EmodProdInfo> EmodProdInfos { get; set; }
         public virtual DbSet<EmodProcInfo> EmodProcInfos { get; set; }
+        public virtual DbSet<FqcdProcInfo> FqcdProcInfos { get; set; }
+        public virtual DbSet<FmedBigProcParam> FmedBigProcParams { get; set; }
         public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
         public virtual DbSet<CurdOcxtableSetUp> CurdOcxtableSetUp { get; set; }
         public virtual DbSet<CurdPaperPaper> CurdPaperPaper { get; set; }
@@ -1463,6 +1465,58 @@ namespace PcbErpApi.Data
                 entity.Property(e => e.ComputeId)
                     .HasMaxLength(8)
                     .IsUnicode(false);
+            });
+
+            modelBuilder.Entity<FqcdProcInfo>(entity =>
+            {
+                entity.HasKey(e => e.BProcCode);
+
+                entity.ToTable("FQCdProcInfo");
+
+                entity.Property(e => e.BProcCode)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.BProcName).HasMaxLength(200);
+                entity.Property(e => e.SQU4ValueNum)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.ProfitCenter)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.BProcNameEng).HasMaxLength(200);
+
+                // Ignore 用於 lookup 的欄位（不在資料表中）
+                entity.Ignore(e => e.BPTypeNameM);
+            });
+
+            modelBuilder.Entity<FmedBigProcParam>(entity =>
+            {
+                entity.HasKey(e => new { e.ProcCode, e.ParamId });
+
+                entity.ToTable("FMEdBigProcParam");
+
+                entity.Property(e => e.ProcCode)
+                    .HasMaxLength(8)
+                    .IsUnicode(false);
+                entity.Property(e => e.ProcGroup)
+                    .HasMaxLength(4)
+                    .IsUnicode(false);
+                entity.Property(e => e.ParamId)
+                    .HasMaxLength(20)
+                    .IsUnicode(false);
+                entity.Property(e => e.ParamName).HasMaxLength(100);
+                entity.Property(e => e.ParamValue).HasMaxLength(100);
+                entity.Property(e => e.StdValue).HasMaxLength(100);
+                entity.Property(e => e.Unit).HasMaxLength(20);
+                entity.Property(e => e.ParamType)
+                    .HasMaxLength(20)
+                    .IsUnicode(false);
+                entity.Property(e => e.Memo).HasMaxLength(200);
+                entity.Property(e => e.CreateDate).HasColumnType("datetime");
+                entity.Property(e => e.ModifyDate).HasColumnType("datetime");
+                entity.Property(e => e.Other1).HasMaxLength(50);
+                entity.Property(e => e.Other2).HasMaxLength(50);
+                entity.Property(e => e.Other3).HasMaxLength(50);
             });
 
             modelBuilder.Entity<EmodProdInfo>(entity =>
