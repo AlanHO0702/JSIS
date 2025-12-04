@@ -320,28 +320,43 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // 收集變更（複合鍵一定帶上）
+  // 收集變更（只傳送鍵欄位 + 真正有變更的欄位）
   function collectChanges() {
     const list = [];
     document.querySelectorAll("#mainGrid tbody tr").forEach(tr => {
+      const changed = {};
+      const keys = {};
       let hasDiff = false;
 
       tr.querySelectorAll(".cell-edit").forEach(inp => {
+        const name = inp.name;
+        if (!name) return;
+
         const oldVal = inp.defaultValue ?? "";
         const newVal = inp.value ?? "";
-        if (inp.dataset.readonly === "1") return;
-        if (newVal !== oldVal) hasDiff = true;
+        const isReadonly = inp.dataset.readonly === "1";
+        const isKey = KEY_FIELDS.includes(name.toLowerCase());
+
+        // 鍵欄位一定要帶
+        if (isKey) {
+          keys[name] = newVal;
+          return;
+        }
+
+        // 唯讀欄位跳過
+        if (isReadonly) return;
+
+        // 只收集有變更的欄位
+        if (newVal !== oldVal) {
+          hasDiff = true;
+          changed[name] = newVal;
+        }
       });
 
       if (!hasDiff) return;
 
-      const rowAll = {};
-      tr.querySelectorAll(".cell-edit").forEach(inp => {
-        const name = inp.name;
-        if (!name) return;
-        rowAll[name] = inp.value ?? "";
-      });
-      list.push(rowAll);
+      // 合併鍵欄位 + 變更欄位
+      list.push({ ...keys, ...changed });
     });
     return list;
   }

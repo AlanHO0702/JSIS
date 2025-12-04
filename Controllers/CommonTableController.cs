@@ -102,7 +102,7 @@ namespace PcbErpApi.Controllers
                         }
 
                         // 其他型別
-                        var val = ConvertJsonToDbValue(jv, col.DbType);
+                        var val = ConvertJsonToDbValue(jv, col.DbType, col.IsNullable);
 
                         if (keyNames.Any(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase)))
                             keyPairs.Add((col.Name, val));
@@ -210,7 +210,7 @@ namespace PcbErpApi.Controllers
         }
 
         // ===== Schema =====
-        private sealed record ColumnInfo(string Name, string DbType, bool IsIdentity, bool IsComputed, bool IsRowVersion, bool IsBinary);
+        private sealed record ColumnInfo(string Name, string DbType, bool IsIdentity, bool IsComputed, bool IsRowVersion, bool IsBinary, bool IsNullable);
 
         private async Task<(Dictionary<string, ColumnInfo> columns, List<string> updatable, List<string> pkCols)>
         LoadTableSchemaAsync(DbConnection conn, IDbTransaction tx, string table)
@@ -227,7 +227,8 @@ SELECT c.name AS ColName,
        t.name AS DbType,
        c.is_identity,
        c.is_computed,
-       c.is_rowguidcol AS is_rowversion
+       c.is_rowguidcol AS is_rowversion,
+       c.is_nullable
 FROM sys.columns c
 JOIN sys.types t ON c.user_type_id = t.user_type_id
 WHERE c.[object_id] = OBJECT_ID(@tbl)";
@@ -244,9 +245,10 @@ WHERE c.[object_id] = OBJECT_ID(@tbl)";
                     var isId = r.GetBoolean(2);
                     var isCmp= r.GetBoolean(3);
                     var isRv = r.GetBoolean(4);
+                    var isNullable = r.GetBoolean(5);
                     var isBin = IsBinaryType(dbt);
 
-                    var info = new ColumnInfo(name, dbt, isId, isCmp, isRv, isBin);
+                    var info = new ColumnInfo(name, dbt, isId, isCmp, isRv, isBin, isNullable);
                     columns[name] = info;
 
                     // 白名單：排除 identity / computed / rowversion / binary / text(ntext)
@@ -321,16 +323,21 @@ ORDER BY idx.index_id, ic.key_ordinal";
 
         // ===== 參數與轉型 =====
 
-        // ★ 依欄位型別建立參數（binary 指定 SqlDbType）
+        // ★ 依欄位型別建立參數（明確指定 SqlDbType）
         private static void AddTypedParameter(DbCommand cmd, string name, object? value, ColumnInfo? col)
         {
             if (cmd is SqlCommand sc)
             {
-                if (col != null && col.IsBinary)
+                // 如果有欄位資訊，根據資料庫類型明確指定參數類型
+                if (col != null)
                 {
-                    var p = sc.Parameters.Add(name, MapSqlDbType(col.DbType));
-                    p.Value = value ?? DBNull.Value;
-                    return;
+                    var sqlType = MapToSqlDbType(col.DbType);
+                    if (sqlType.HasValue)
+                    {
+                        var p = sc.Parameters.Add(name, sqlType.Value);
+                        p.Value = value ?? DBNull.Value;
+                        return;
+                    }
                 }
                 // 其他型別走預設
                 var sp = sc.Parameters.AddWithValue(name, value ?? DBNull.Value);
@@ -344,34 +351,76 @@ ORDER BY idx.index_id, ic.key_ordinal";
             cmd.Parameters.Add(prm);
         }
 
-        private static SqlDbType MapSqlDbType(string dbType)
+        private static SqlDbType? MapToSqlDbType(string dbType)
         {
             var t = dbType.ToLowerInvariant();
             return t switch
             {
-                "image"     => SqlDbType.Image,
-                "varbinary" => SqlDbType.VarBinary,
-                "binary"    => SqlDbType.Binary,
-                _           => SqlDbType.VarBinary // fallback
+                // 數值類型
+                "int"           => SqlDbType.Int,
+                "bigint"        => SqlDbType.BigInt,
+                "smallint"      => SqlDbType.SmallInt,
+                "tinyint"       => SqlDbType.TinyInt,
+                "decimal"       => SqlDbType.Decimal,
+                "numeric"       => SqlDbType.Decimal,
+                "money"         => SqlDbType.Money,
+                "smallmoney"    => SqlDbType.SmallMoney,
+                "float"         => SqlDbType.Float,
+                "real"          => SqlDbType.Real,
+
+                // 布林
+                "bit"           => SqlDbType.Bit,
+
+                // 日期時間
+                "datetime"      => SqlDbType.DateTime,
+                "datetime2"     => SqlDbType.DateTime2,
+                "date"          => SqlDbType.Date,
+                "time"          => SqlDbType.Time,
+                "smalldatetime" => SqlDbType.SmallDateTime,
+
+                // 二進位
+                "image"         => SqlDbType.Image,
+                "varbinary"     => SqlDbType.VarBinary,
+                "binary"        => SqlDbType.Binary,
+                "rowversion"    => SqlDbType.Timestamp,
+                "timestamp"     => SqlDbType.Timestamp,
+
+                // 字串類型不指定，讓 AddWithValue 自動推斷
+                _ => null
             };
         }
 
-        private static object? ConvertJsonToDbValue(JsonNode? node, string dbType)
+        private static object? ConvertJsonToDbValue(JsonNode? node, string dbType, bool isNullable)
         {
             if (node is null) return DBNull.Value;
             if (node.GetValueKind() == JsonValueKind.Null) return DBNull.Value;
 
-            var s = node.ToString();
+            var s = node.ToString().Trim();
             string t = dbType.ToLowerInvariant();
 
+            // 空字串處理：nullable 欄位 → NULL，NOT NULL 欄位 → 預設值
+            if (string.IsNullOrWhiteSpace(s))
+            {
+                if (isNullable) return DBNull.Value;
+
+                // NOT NULL 欄位的預設值
+                if (t is "int" or "bigint" or "smallint" or "tinyint") return 0L;
+                if (t.Contains("decimal") || t.Contains("numeric") || t.Contains("money")) return 0m;
+                if (t is "float" or "real") return 0.0;
+                if (t is "bit") return false;
+                if (t.Contains("date") || t.Contains("time")) return DBNull.Value; // 日期無法預設，還是回傳 NULL
+                return s; // 字串型別保留空字串
+            }
+
+            // 有值時的轉換
             if (t is "int" or "bigint" or "smallint" or "tinyint")
-                return long.TryParse(s, out var l) ? l : (object?)DBNull.Value;
+                return long.TryParse(s, out var l) ? l : (isNullable ? DBNull.Value : 0L);
             if (t.Contains("decimal") || t.Contains("numeric") || t.Contains("money"))
-                return decimal.TryParse(s, out var d) ? d : (object?)DBNull.Value;
+                return decimal.TryParse(s, out var d) ? d : (isNullable ? DBNull.Value : 0m);
             if (t is "float" or "real")
-                return double.TryParse(s, out var f) ? f : (object?)DBNull.Value;
+                return double.TryParse(s, out var f) ? f : (isNullable ? DBNull.Value : 0.0);
             if (t is "bit")
-                return bool.TryParse(s, out var b) ? b : (object?)DBNull.Value;
+                return bool.TryParse(s, out var b) ? b : (isNullable ? DBNull.Value : false);
             if (t.Contains("date") || t.Contains("time"))
                 return DateTime.TryParse(s, out var dt) ? dt : (object?)DBNull.Value;
 
