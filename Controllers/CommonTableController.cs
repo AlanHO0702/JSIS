@@ -492,19 +492,19 @@ ORDER BY idx.index_id, ic.key_ordinal";
         if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required");
 
         var tblOk = await _context.Database
-            .SqlQuery<string>($"SELECT name FROM sys.tables WHERE name = {table}")
+            .SqlQuery<string>($"SELECT name FROM sys.objects WHERE name = {table} AND type IN ('U','V')")
             .AnyAsync();
 
-        if (!tblOk) return NotFound($"Table '{table}' not found.");
+        if (!tblOk) return NotFound($"Table or View '{table}' not found.");
 
         string orderSql = "";
         if (!string.IsNullOrWhiteSpace(orderBy))
         {
             var colOk = await _context.Database
-                .SqlQuery<string>($@"SELECT c.name 
-                                     FROM sys.columns c 
-                                     JOIN sys.tables t ON t.object_id=c.object_id
-                                     WHERE t.name={table} AND c.name={orderBy}").AnyAsync();
+                .SqlQuery<string>($@"SELECT c.name
+                                     FROM sys.columns c
+                                     JOIN sys.objects o ON o.object_id=c.object_id
+                                     WHERE o.name={table} AND o.type IN ('U','V') AND c.name={orderBy}").AnyAsync();
             if (colOk)
                 orderSql = $" ORDER BY [{orderBy}] {(string.Equals(orderDir, "DESC", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC")}";
         }
@@ -532,11 +532,11 @@ ORDER BY idx.index_id, ic.key_ordinal";
         if (keyNames == null || keyValues == null || keyNames.Length == 0 || keyNames.Length != keyValues.Length)
             return BadRequest("keyNames and keyValues must be same length and not empty.");
 
-        // 驗 table
+        // 驗 table or view
         var tblOk = await _context.Database
-            .SqlQuery<string>($"SELECT name FROM sys.tables WHERE name = {table}")
+            .SqlQuery<string>($"SELECT name FROM sys.objects WHERE name = {table} AND type IN ('U','V')")
             .AnyAsync();
-        if (!tblOk) return NotFound($"Table '{table}' not found.");
+        if (!tblOk) return NotFound($"Table or View '{table}' not found.");
 
         // 驗 column & 組條件
         var whereParts = new List<string>();
@@ -547,11 +547,11 @@ ORDER BY idx.index_id, ic.key_ordinal";
             var val = keyValues[i];
 
             var colOk = await _context.Database
-                .SqlQuery<string>($@"SELECT c.name 
-                                     FROM sys.columns c 
-                                     JOIN sys.tables t ON t.object_id=c.object_id
-                                     WHERE t.name={table} AND c.name={col}").AnyAsync();
-            if (!colOk) return BadRequest($"Column '{col}' not found in '{table}'.");
+                .SqlQuery<string>($@"SELECT c.name
+                                     FROM sys.columns c
+                                     JOIN sys.objects o ON o.object_id=c.object_id
+                                     WHERE o.name={table} AND o.type IN ('U','V') AND c.name={col}").AnyAsync();
+            if (!colOk) return BadRequest($"Column '{col}' not found in table/view '{table}'.");
 
             var p = new SqlParameter($"@p{i}", (object?)val ?? DBNull.Value);
             parameters.Add(p);
