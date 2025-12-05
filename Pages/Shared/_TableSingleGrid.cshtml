@@ -2,6 +2,8 @@
 @using Microsoft.AspNetCore.Html
 @using System.Text.Json
 @using System.Linq
+@using System.Collections
+@using System.Collections.Generic
 @model dynamic
 
 @{
@@ -9,6 +11,10 @@
     var items         = (IEnumerable<object>)(Model.Items ?? new List<object>());
     var fields        = (IEnumerable<dynamic>)(Model.TableFields ?? new List<object>());
     var customButtons = ViewData["CustomButtons"] as HtmlString;
+    var customButtonMeta = ViewData["CustomButtonMeta"] as IEnumerable<dynamic>;
+    var hasServerButtons = customButtons != null && !string.IsNullOrWhiteSpace(customButtons.ToString());
+    var hasCustomMeta = customButtonMeta != null && customButtonMeta.Cast<object>().Any();
+    var autoBuildCustomButtons = !hasServerButtons && hasCustomMeta;
     var hasData       = items.Any();
     var keyFieldsFromViewData = (IEnumerable<string>)(ViewData["KeyFields"] as IEnumerable<string> ?? Array.Empty<string>());
     var dictFields    = (IEnumerable<dynamic>)(ViewData["FieldDictList"] as IEnumerable<dynamic> ?? fields);
@@ -19,6 +25,15 @@
         v => (object)new { keySelf = v.KeySelfName as string ?? "", keyField = v.KeyFieldName as string ?? "", map = v.LookupValues }
     ) ?? new Dictionary<string, object>();
 
+    int pageNumber = 1;
+    int pageSize = 0;
+    int totalCount = 0;
+    try { pageNumber = (int)(Model.PageNumber ?? 1); } catch { }
+    try { pageSize = (int)(Model.PageSize ?? 0); } catch { }
+    try { totalCount = (int)(Model.TotalCount ?? 0); } catch { }
+    if (pageSize <= 0) pageSize = Math.Max(1, items.Count());
+    if (totalCount <= 0) totalCount = items.Count();
+    var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
 }
 
 @functions{
@@ -50,6 +65,24 @@
         }
         catch { return 0; }
     }
+
+    // �s�� dictionary/dynamic object �W�٬�����
+    private static object? GetValue(object item, string? name)
+    {
+        if (item == null || string.IsNullOrWhiteSpace(name)) return null;
+
+        if (item is IDictionary dict)
+        {
+            foreach (var k in dict.Keys)
+            {
+                if (k is string ks && string.Equals(ks, name, StringComparison.OrdinalIgnoreCase))
+                    return dict[k];
+            }
+        }
+
+        var prop = item.GetType().GetProperty(name!, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+        return prop?.GetValue(item);
+    }
 }
 
 <div class="table-wrapper my-4 px-4">
@@ -64,14 +97,36 @@
           <button id="btnSaveTable" type="button" class="btn btn-success btn-sm fw-bold d-none">
             <i class="bi bi-save me-1"></i> 儲存
           </button>
+          <button id="btnOpenQuery" type="button" class="btn btn-outline-primary btn-sm fw-bold">
+            <i class="bi bi-search me-1"></i> 查詢
+          </button>
         </div>
 
-        @if (customButtons != null && !string.IsNullOrWhiteSpace(customButtons.ToString()))
-        {
-          <div class="d-flex justify-content-end gap-2">
-            @customButtons
-          </div>
-        }
+        <div class="d-flex justify-content-end gap-2" id="customButtonBar" data-auto-build="@(autoBuildCustomButtons ? "1" : "0")">
+          @if (hasServerButtons)
+          {
+              @customButtons
+          }
+          else if (hasCustomMeta)
+          {
+              foreach (var b in customButtonMeta)
+              {
+                  var btnName = (GetValue(b, "ButtonName") ?? GetValue(b, "buttonName") ?? "").ToString();
+                  if (string.IsNullOrWhiteSpace(btnName)) continue;
+                  var caption = (GetValue(b, "CustCaption") ?? GetValue(b, "custCaption") ?? btnName).ToString();
+                  var hint = (GetValue(b, "CustHint") ?? GetValue(b, "custHint") ?? "").ToString();
+                  var itemId = (GetValue(b, "ItemId") ?? GetValue(b, "itemId") ?? "").ToString();
+                  <button type="button"
+                          class="btn btn-outline-secondary btn-sm"
+                          data-custom-btn="1"
+                          data-button-name="@btnName"
+                          data-item-id="@itemId"
+                          title="@hint">
+                    @caption
+                  </button>
+              }
+          }
+        </div>
       </div>
 
       <div class="table-fix-wrapper" data-dict-table="@dictTableName" style="max-height:70vh;overflow:auto;background:#fff;border:1px solid #dee2e6;border-radius:.5rem;white-space:nowrap">
@@ -81,9 +136,9 @@
             {
               var w = ToColWidthPx(f, 10);
               if (w > 0)
-              { <col style="width:@($"{w}px");min-width:@($"{w}px");max-width:@($"{w}px")" /> }
+              { <col data-field="@f.FieldName" style="width:@($"{w}px");min-width:@($"{w}px");max-width:@($"{w}px")" /> }
               else
-              { <col /> }
+              { <col data-field="@f.FieldName" /> }
             }
           </colgroup>
 
@@ -91,7 +146,10 @@
             <tr>
               @foreach (var f in fields)
               {
-                <th class="text-nowrap">@((string)f.DisplayLabel)</th>
+                <th class="text-nowrap" data-field="@f.FieldName">
+                  @((string)f.DisplayLabel)
+                  <span class="col-resizer" data-field="@f.FieldName"></span>
+                </th>
               }
             </tr>
           </thead>
@@ -109,9 +167,7 @@
                   @foreach (var f in fields)
                   {
                       string? name = Convert.ToString(f.FieldName);
-                      PropertyInfo? prop = string.IsNullOrWhiteSpace(name) ? null :
-                      item.GetType().GetProperty(name!, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                      var value = prop?.GetValue(item);
+                      var value = GetValue(item, name);
                       var rawVal = value?.ToString() ?? "";
                       var displayValue = value;
                       var lookupKey = rawVal;
@@ -130,13 +186,13 @@
 
                           if (!string.IsNullOrWhiteSpace(keyFieldName))
                           {
-                              var keyProp = item.GetType().GetProperty(keyFieldName!, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                              keyFieldVal = keyProp?.GetValue(item)?.ToString() ?? "";
+                              var keyVal = GetValue(item, keyFieldName);
+                              keyFieldVal = keyVal?.ToString() ?? "";
                           }
                           if (!string.IsNullOrWhiteSpace(keySelfName))
                           {
-                              var keyProp = item.GetType().GetProperty(keySelfName!, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                              keySelfVal = keyProp?.GetValue(item)?.ToString() ?? "";
+                              var keyVal = GetValue(item, keySelfName);
+                              keySelfVal = keyVal?.ToString() ?? "";
                           }
 
                           if (string.IsNullOrWhiteSpace(lookupKey))
@@ -160,6 +216,56 @@
           </tbody>
         </table>
       </div>
+
+      @if (totalPages > 1)
+      {
+        <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+          <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-outline-secondary btn-sm" id="pagerFirst" @(pageNumber <= 1 ? "disabled" : "")>|&laquo;</button>
+            <button class="btn btn-outline-secondary btn-sm" id="pagerPrev" @(pageNumber <= 1 ? "disabled" : "")>&laquo;</button>
+            <span>Page: <strong id="pagerCurrent">@pageNumber</strong> / <span id="pagerTotal">@totalPages</span></span>
+            <button class="btn btn-outline-secondary btn-sm" id="pagerNext" @(pageNumber >= totalPages ? "disabled" : "")>&raquo;</button>
+            <button class="btn btn-outline-secondary btn-sm" id="pagerLast" @(pageNumber >= totalPages ? "disabled" : "")>&raquo;|</button>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="mb-0 text-muted">Go to:</label>
+            <input id="pagerGoInput" type="number" min="1" max="@totalPages" class="form-control form-control-sm" style="width:80px" value="@pageNumber" />
+            <button class="btn btn-outline-primary btn-sm" id="pagerGoBtn">Go</button>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="mb-0 text-muted">Page size:</label>
+            <select id="pagerPageSize" class="form-select form-select-sm" style="width:auto">
+              @{
+                  var sizes = new[] { 20, 50, 100, 200, 500 };
+                  foreach (var s in sizes)
+                  {
+                      <option value="@s" selected="@(s == pageSize ? "selected" : null)">@s</option>
+                  }
+              }
+            </select>
+            <span class="text-muted">Total: @totalCount</span>
+          </div>
+        </div>
+      }
+    </div>
+  </div>
+</div>
+
+<!-- Query Modal -->
+<div class="modal fade" id="singleGridQueryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-search me-2"></i>查詢條件</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="singleGridQueryForm" class="row g-3 mb-3"></form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" id="btnQuerySubmit">確定</button>
+      </div>
     </div>
   </div>
 </div>
@@ -169,8 +275,8 @@
  table.table{table-layout:fixed!important;border-collapse:separate!important;border-spacing:0;font-size:.85rem;width:100%}
  table th,table td{vertical-align:middle!important;border:1px solid #dee2e6!important;padding:.28rem .4rem!important;white-space:nowrap}
  .table-hover tbody tr:hover{background:#f1f5ff!important}
- .cell-view,.cell-edit{display:inline-block;width:100%;font-size:.85rem;line-height:1.35;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:.28rem .4rem!important;vertical-align:middle}
- .cell-edit.form-control{height:calc(1.45em + .45rem + 2px)!important;padding:.28rem .4rem!important;font-size:.85rem!important;line-height:1.35!important;border-radius:0!important;box-sizing:border-box!important}
+.cell-view,.cell-edit{display:inline-block;width:100%;font-size:.85rem;line-height:1.35;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:.28rem .4rem!important;vertical-align:middle}
+.cell-edit.form-control{height:calc(1.45em + .45rem + 2px)!important;padding:.28rem .4rem!important;font-size:.85rem!important;line-height:1.35!important;border-radius:0!important;box-sizing:border-box!important}
 .edit-mode .cell-edit:not(.readonly-cell){border:1px solid #ccc!important;background:#fff!important}
 .readonly-cell{background:#f3f3f3!important;color:#555!important;border:1px solid #ddd!important;cursor:not-allowed!important;pointer-events:none!important;user-select:none!important}
 .table-fix-wrapper::-webkit-scrollbar{height:10px;width:10px}
@@ -178,6 +284,13 @@
 .table-fix-wrapper::-webkit-scrollbar-thumb:hover{background:#9ca3af}
 #mainGrid tbody tr:hover {background-color: #f9f2d7 !important; cursor: pointer;}
 #mainGrid tbody tr.selected-row {background-color: #fff3cd !important; transition: background-color .15s;}
+table th{position:relative;}
+.col-resizer{position:absolute;top:0;right:-3px;width:6px;cursor:col-resize;user-select:none;height:100%;}
+#singleGridQueryModal .modal-dialog{max-width:900px;}
+#singleGridQueryModal .modal-content{max-height:90vh;}
+#singleGridQueryModal .modal-body{max-height:70vh; overflow-y:auto; padding-bottom:1rem;}
+#singleGridQueryModal .form-label{font-size:.9rem;}
+#singleGridQueryModal .form-control{font-size:.9rem;}
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -188,6 +301,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const wrapper = document.querySelector(".table-wrapper");
   const table   = document.getElementById("mainGrid");
   const ocxLookupMaps = @Html.Raw(JsonSerializer.Serialize(ocxLookupPayload));
+  const customButtonsMeta = @Html.Raw(JsonSerializer.Serialize(customButtonMeta ?? new List<object>()));
+  const customButtonBar = document.getElementById("customButtonBar");
   let lookupMaps = ocxLookupMaps || {};
   let isEdit = false;
 
@@ -202,6 +317,87 @@ document.addEventListener("DOMContentLoaded", () => {
 
     return ["buid","itemid","id","papernum","systemcode"];
   })();
+
+  const findButtonMeta = (btnName) => {
+    if (!btnName || !Array.isArray(customButtonsMeta)) return null;
+    const target = btnName.toLowerCase();
+    return customButtonsMeta.find(b => ((b.buttonName || b.ButtonName || "")?.toLowerCase() === target)) || null;
+  };
+
+  const readRowData = (tr) => {
+    const obj = {};
+    if (!tr) return obj;
+    tr.querySelectorAll("td[data-field]").forEach(td => {
+      const field = td.dataset.field || "";
+      if (!field) return;
+      const inp = td.querySelector(".cell-edit");
+      const span = td.querySelector(".cell-view");
+      obj[field] = inp?.value ?? span?.textContent ?? "";
+    });
+    return obj;
+  };
+
+  const resolveCustomHandler = (btnName) => {
+    if (!btnName) return null;
+    const map = window.SingleGridCustomHandlers || {};
+    const itemId = window._singleItemId || "";
+    if (map[itemId] && typeof map[itemId][btnName] === "function") return map[itemId][btnName];
+    if (typeof map[btnName] === "function") return map[btnName];
+    return null;
+  };
+
+  const buildCustomButtonsFromMeta = () => {
+    if (!customButtonBar || customButtonBar.childElementCount > 0) return;
+    const autoBuild = customButtonBar.dataset.autoBuild === "1";
+    if (!autoBuild || !Array.isArray(customButtonsMeta) || customButtonsMeta.length === 0) return;
+    customButtonsMeta.forEach(b => {
+      if (b.bVisible === 0 || b.bVisible === "0") return;
+      const btnName = b.buttonName || b.ButtonName || "";
+      if (!btnName) return;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-outline-secondary btn-sm";
+      btn.dataset.customBtn = "1";
+      btn.dataset.buttonName = btnName;
+      btn.dataset.itemId = b.itemId || b.ItemId || "";
+      const caption = (b.custCaption || b.CustCaption || btnName || "").toString();
+      const hint = (b.custHint || b.CustHint || "").toString();
+      btn.textContent = caption;
+      if (hint) btn.title = hint;
+      customButtonBar.appendChild(btn);
+    });
+  };
+
+  const wireCustomButtons = () => {
+    if (!customButtonBar) return;
+    customButtonBar.querySelectorAll("[data-custom-btn]").forEach(btn => {
+      if (btn.dataset.cbBound === "1") return;
+      btn.dataset.cbBound = "1";
+      btn.addEventListener("click", () => {
+        const name = btn.dataset.buttonName || btn.dataset.customBtn || "";
+        if (!name) return;
+        const handler = resolveCustomHandler(name);
+        const meta = findButtonMeta(name);
+        const ctx = {
+          buttonName: name,
+          itemId: window._singleItemId || "",
+          tableName: window._singleRealTable || window._dictTableName || table?.dataset?.dictTable || "",
+          meta,
+          selectedRow: readRowData(window.SELECTED_ROW)
+        };
+        if (!handler) {
+          alert(`尚未實作: ${name}`);
+          return;
+        }
+        try {
+          handler(ctx);
+        } catch (err) {
+          console.error("custom button handler error", err);
+          alert(`執行失敗: ${err?.message || err}`);
+        }
+      });
+    });
+  };
 
   const lookupDisplay = (fieldName, rawVal, fallback, lookupKey) => {
     const key = String(lookupKey ?? rawVal ?? "");
@@ -364,11 +560,190 @@ document.addEventListener("DOMContentLoaded", () => {
   table.addEventListener("click", (ev) => {
     const tr = ev.target.closest("tbody tr");
     if (!tr) return;
-    table.querySelectorAll("tbody tr").forEach(r => r.classList.remove("selected-row"));
-    tr.classList.add("selected-row");
+    table.querySelectorAll("tbody tr").forEach(r => r.classList.remove("selected-row", "table-active"));
+    tr.classList.add("selected-row", "table-active");
     window.SELECTED_ROW = tr;
   });
 
   applyLookupToTable();
+  buildCustomButtonsFromMeta();
+  wireCustomButtons();
+
+  // 分頁控制：直接以 query string 切換頁碼
+  const pagerPrev = document.getElementById("pagerPrev");
+  const pagerNext = document.getElementById("pagerNext");
+  const pagerLast = document.getElementById("pagerLast");
+  const pagerFirst = document.getElementById("pagerFirst");
+  const pagerPageSize = document.getElementById("pagerPageSize");
+  const currentPage = parseInt(document.getElementById("pagerCurrent")?.textContent || "1", 10);
+  const totalPages = parseInt(document.getElementById("pagerTotal")?.textContent || "1", 10);
+  const pagerGoInput = document.getElementById("pagerGoInput");
+  const pagerGoBtn = document.getElementById("pagerGoBtn");
+  const btnOpenQuery = document.getElementById("btnOpenQuery");
+  const queryModalEl = document.getElementById("singleGridQueryModal");
+  const queryForm = document.getElementById("singleGridQueryForm");
+  const btnQuerySubmit = document.getElementById("btnQuerySubmit");
+
+  function goPage(p) {
+    if (!Number.isFinite(p) || p < 1) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("pageIndex", p);
+    // 兼容舊的 page 參數：移除以免覆蓋
+    url.searchParams.delete("page");
+    if (pagerPageSize) url.searchParams.set("pageSize", pagerPageSize.value);
+    window.location.href = url.toString();
+  }
+
+  pagerFirst?.addEventListener("click", () => goPage(1));
+  pagerPrev?.addEventListener("click", () => goPage(currentPage - 1));
+  pagerNext?.addEventListener("click", () => goPage(currentPage + 1));
+  pagerLast?.addEventListener("click", () => goPage(totalPages));
+  pagerPageSize?.addEventListener("change", () => goPage(1));
+  pagerGoBtn?.addEventListener("click", () => {
+    const v = parseInt(pagerGoInput?.value || "1", 10);
+    if (Number.isFinite(v)) goPage(Math.min(Math.max(1, v), totalPages));
+  });
+  pagerGoInput?.addEventListener("keyup", (e) => {
+    if (e.key === "Enter") pagerGoBtn?.click();
+  });
+
+  // 查詢 modal
+  let queryFieldsLoaded = false;
+  async function loadQueryFields() {
+    if (queryFieldsLoaded) return;
+    const itemId = window._singleItemId || "";
+    const table = window._singleRealTable || tableName;
+    if (!itemId || !table) return;
+    try {
+      const res = await fetch(`/api/DictSetupApi/QueryFields?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(table)}&lang=TW`);
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      buildQueryForm(Array.isArray(data) ? data : []);
+      queryFieldsLoaded = true;
+    } catch (err) {
+      console.warn("load query fields failed", err);
+    }
+  }
+
+  function buildQueryForm(fields) {
+    if (!queryForm) return;
+    queryForm.innerHTML = "";
+    fields.forEach(f => {
+      const colName = f.columnName || f.ColumnName || "";
+      if (!colName) return;
+      const caption = f.columnCaption || f.ColumnCaption || colName;
+      const defVal = f.defaultValue || f.DefaultValue || "";
+      const defEq = (f.defaultEqual || f.DefaultEqual || "").toString().toLowerCase();
+      const dtRaw = f.dataType ?? f.DataType;
+      const dt = Number(dtRaw);
+
+      const wrap = document.createElement("div");
+      wrap.className = "col-md-3 col-sm-6";
+      const label = document.createElement("label");
+      label.className = "form-label text-muted";
+      label.textContent = caption;
+      const input = document.createElement("input");
+      input.className = "form-control form-control-sm";
+      input.name = colName;
+      if (dt === 1) input.type = "date";
+      else if (dt === 2) input.type = "number";
+      else input.type = "text";
+      if (defVal) input.value = defVal;
+      if (defEq === "like") input.placeholder = "模糊查詢";
+
+      wrap.appendChild(label);
+      wrap.appendChild(input);
+      queryForm.appendChild(wrap);
+    });
+  }
+
+  btnOpenQuery?.addEventListener("click", async () => {
+    await loadQueryFields();
+    if (queryModalEl && window.bootstrap) {
+      const modal = bootstrap.Modal.getOrCreateInstance(queryModalEl);
+      modal.show();
+    }
+  });
+
+  btnQuerySubmit?.addEventListener("click", () => {
+    if (!queryForm) return;
+    const url = new URL(window.location.href);
+    // 保留 pageSize，其餘重新以 pageIndex=1
+    url.searchParams.delete("pageIndex");
+    url.searchParams.set("pageIndex", "1");
+    Array.from(queryForm.elements).forEach(el => {
+      if (!el.name) return;
+      const val = el.value?.toString() ?? "";
+      if (val) url.searchParams.set(el.name, val);
+      else url.searchParams.delete(el.name);
+    });
+    window.location.href = url.toString();
+  });
+
+  // 欄寬拖拉
+  const colGroupCols = Array.from(table.querySelectorAll("colgroup col"));
+  const ths = Array.from(table.querySelectorAll("thead th"));
+  const dictName = window._dictTableName || table.dataset.dictTable || dictTableName || table.dataset.table || table.dataset.dict || "";
+  const tableName = dictName;
+  const colMap = {};
+  colGroupCols.forEach(col => {
+    const field = col.getAttribute("data-field");
+    if (field) colMap[field.toLowerCase()] = col;
+  });
+
+  let dragState = null;
+  ths.forEach(th => {
+    const field = th.getAttribute("data-field");
+    const resizer = th.querySelector(".col-resizer");
+    if (!field || !resizer) return;
+    resizer.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const col = colMap[field.toLowerCase()];
+      const startX = e.clientX;
+      const startWidth = (col?.getBoundingClientRect().width) || th.getBoundingClientRect().width;
+      dragState = { field, startX, startWidth };
+      document.body.style.cursor = "col-resize";
+    });
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!dragState) return;
+    const delta = e.clientX - dragState.startX;
+    const newW = Math.max(40, dragState.startWidth + delta);
+    const col = colMap[dragState.field.toLowerCase()];
+    if (col) {
+      col.style.width = `${newW}px`;
+      col.style.minWidth = `${newW}px`;
+      col.style.maxWidth = `${newW}px`;
+    }
+    // apply to header cell for visual feedback
+    const th = ths.find(t => (t.getAttribute("data-field") || "").toLowerCase() === dragState.field.toLowerCase());
+    if (th) th.style.width = `${newW}px`;
+  });
+
+  document.addEventListener("mouseup", async () => {
+    if (!dragState) return;
+    const col = colMap[dragState.field.toLowerCase()];
+    const th = ths.find(t => (t.getAttribute("data-field") || "").toLowerCase() === dragState.field.toLowerCase());
+    const width = col?.getBoundingClientRect().width || th?.getBoundingClientRect().width || dragState.startWidth;
+    dragState = null;
+    document.body.style.cursor = "";
+    if (!tableName) return;
+    try {
+      await fetch("/api/DictSetupApi/FieldWidth/Save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tableName: tableName,
+          fieldName: th?.getAttribute("data-field") || "",
+          widthPx: Math.round(width)
+        })
+      });
+    } catch (err) {
+      console.warn("save width failed", err);
+    }
+  });
 });
 </script>
+
+

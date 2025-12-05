@@ -9,6 +9,8 @@ namespace PcbErpApi.Data
         public DbSet<SpodOrderMain> SpodOrderMain => Set<SpodOrderMain>();
         
         public DbSet<SPOdMPSOutMain> SPOdMPSOutMain => Set<SPOdMPSOutMain>();
+        public DbSet<SpodPoKind> SpodPoKind => Set<SpodPoKind>();
+
         public DbSet<CurdUser> CurdUser => Set<CurdUser>();
         public DbSet<MindStockCostPn> MindStockCostPn => Set<MindStockCostPn>();
         public DbSet<CurdSysItem> CurdSysItems { get; set; }
@@ -44,6 +46,7 @@ namespace PcbErpApi.Data
         public virtual DbSet<AJNdClassMoney> AJNdClassMoney { get; set; }
         public virtual DbSet<AJNdClassMoneyHis> AJNdClassMoneyHis { get; set; }
         public virtual DbSet<CurdNoticeBoard> CurdNoticeBoards { get; set; }
+         public virtual DbSet<SpodClassArea> SpodClassAreas { get; set; }
         public virtual DbSet<CurdNoticeBoardUser> CurdNoticeBoardUsers { get; set; }
         public IEnumerable<object> TabConfigs { get; internal set; }
 
@@ -93,6 +96,27 @@ namespace PcbErpApi.Data
             modelBuilder.Entity<FmedIssuePo>(entity =>
             {
                 entity.HasKey(e => new { e.PaperNum, e.Item });
+            });
+
+            modelBuilder.Entity<SpodClassArea>(entity =>
+            {
+                entity.HasKey(e => new { e.AreaCode, e.UseId });
+
+                entity.ToTable("SPOdClassArea", tb =>
+                    {
+                        tb.HasTrigger("SPOdClassArea_tD");
+                        tb.HasTrigger("SPOdClassArea_tIU");
+                    });
+
+                entity.Property(e => e.AreaCode)
+                    .HasMaxLength(10)
+                    .IsUnicode(false);
+                entity.Property(e => e.UseId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .HasDefaultValue("A001");
+                entity.Property(e => e.AreaName).HasMaxLength(50);
+                entity.Property(e => e.Continent).HasMaxLength(50);
             });
 
             modelBuilder.Entity<CurdNoticeBoardUser>(entity =>
@@ -1177,6 +1201,29 @@ namespace PcbErpApi.Data
                     .HasMaxLength(50)
                     .IsUnicode(false)
                     .HasColumnName("WEBReportShare");
+            });
+                modelBuilder.Entity<SpodPoKind>(entity =>
+            {
+                // 資料庫的實際表名：SPODPoKind  （照你 SQL 的名字）
+                entity.ToTable("SPODPoKind");
+
+                // PK_SPOdPoKind clustered, unique, primary key located on PRIMARY PoKind, UseId
+                entity.HasKey(e => new { e.PoKind, e.UseId });
+
+                // PoKind int not null（預設就可以，不一定要再設定）
+
+                entity.Property(e => e.PoKindName)
+                    .HasMaxLength(100);          // nvarchar(100)
+
+                entity.Property(e => e.UseId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)            // char(8)，不是 nvarchar
+                    .IsFixedLength()
+                    .HasDefaultValue("A001");    // 如果資料庫有預設值就一起寫
+
+                entity.Property(e => e.LotNotes)
+                    .HasMaxLength(12)
+                    .IsUnicode(false);           // varchar(12)
             });
             modelBuilder.Entity<SpodOrderMain>(entity =>
             {

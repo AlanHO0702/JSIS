@@ -1,0 +1,74 @@
+@page "/CUR/MasterDetail/{itemId}"
+@using WebRazor.Models
+@using PcbErpApi.Models
+@model PcbErpApi.Pages.CUR.MasterDetailModel
+@{
+    Layout = "_Layout";
+    var cfg = Model.Config;
+}
+
+@if (cfg == null)
+{
+    <div class="alert alert-warning mt-3">找不到 MASTER/DETAIL 設定資料。</div>
+}
+else
+{
+    <div id="mdCustomButtonBar" class="d-flex gap-2 flex-wrap">@Model.CustomButtonsHtml</div>
+    @await Html.PartialAsync("_MasterDetailTemplate", cfg)
+}
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", Model.FieldDictList, ViewData)
+<script src="~/js/fieldDictModal.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const bar = document.getElementById('mdCustomButtonBar');
+  const domId = '@(cfg?.DomId ?? string.Empty)';
+  const itemId = '@Model.ItemId';
+  let lastMasterRow = null;
+
+  // move bar into template header area (to the right of Edit/Save)
+  const moveBar = () => {
+    if (!bar) return;
+    const editBtn = document.getElementById(`${domId}-btnEdit`);
+    const slot = document.getElementById(`${domId}-custom-slot`);
+    const toolbar = slot?.nextElementSibling || document.querySelector(`#${domId} .btn-toolbar`);
+    if (!editBtn || !slot) { return; }
+    bar.classList.add('d-flex','align-items-center','gap-2','flex-wrap');
+    if (slot) {
+      slot.style.order = '2';
+      slot.classList.add('ms-3');
+    }
+    if (toolbar) {
+      toolbar.style.order = '1';
+    }
+    slot.appendChild(bar);
+  };
+  moveBar();
+  setTimeout(moveBar, 0);
+
+  document.addEventListener('md-master-selected', (ev) => {
+    if (ev?.detail?.rowData) lastMasterRow = ev.detail.rowData;
+  });
+
+  if (bar) {
+    bar.querySelectorAll('[data-custom-btn]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const name = btn.dataset.buttonName || btn.dataset.customBtn || '';
+        if (!name) return;
+        const handlers = window.MasterDetailCustomHandlers || {};
+        const handler = handlers[name];
+        const ctx = { buttonName: name, itemId, domId, masterRow: lastMasterRow };
+        if (typeof handler === 'function') {
+          try {
+            handler(ctx);
+          } catch (err) {
+            alert('按鈕執行錯誤: ' + (err?.message || err));
+          }
+        } else {
+          alert(`尚未實作按鈕: ${name}`);
+        }
+      });
+    });
+  }
+});
+</script>
