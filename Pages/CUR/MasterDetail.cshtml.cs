@@ -147,11 +147,11 @@ SELECT ItemId, SerialNum, ButtonName,
                 var caption = string.IsNullOrWhiteSpace(b.CustCaption) ? b.ButtonName : b.CustCaption;
                 var hint = b.CustHint ?? string.Empty;
 
-                sb.Append("<button type='button' class='btn btn-outline-secondary btn-sm' data-custom-btn='1'");
+                sb.Append("<button type='button' class='btn btn-outline-secondary btn-sm me-1' data-custom-btn='1'");
                 sb.Append(" data-button-name='").Append(System.Net.WebUtility.HtmlEncode(b.ButtonName)).Append('\'');
                 sb.Append(" data-item-id='").Append(System.Net.WebUtility.HtmlEncode(b.ItemId ?? string.Empty)).Append('\'');
                 sb.Append(" title='").Append(System.Net.WebUtility.HtmlEncode(hint)).Append("'>");
-                sb.Append(System.Net.WebUtility.HtmlEncode(caption));
+                sb.Append("<i class='bi bi-gear me-1'></i>").Append(System.Net.WebUtility.HtmlEncode(caption));
                 sb.Append("</button>");
             }
 
