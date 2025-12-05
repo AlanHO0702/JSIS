@@ -45,19 +45,19 @@ namespace PcbErpApi.Pages.CUR
 
             if (item is null)
                 return NotFound($"Item {itemId} not found.");
-
+            //確認這個 Item 是 JSdGridDLL.dll 且 ItemType = 6
             if (item.ItemType != 6 || !string.Equals(item.Ocxtemplete, "JSdGridDLL.dll", StringComparison.OrdinalIgnoreCase))
                 return NotFound($"Item {itemId} is not a JSdGridDLL multi-grid item.");
 
             ItemId = item.ItemId;
             ItemName = item.ItemName;
             ViewData["Title"] = PageTitle;
-
+            //查這個 Item 底下要顯示哪些表
             var setups = await _ctx.CurdOcxtableSetUp.AsNoTracking()
                 .Where(x => x.ItemId == itemId)
                 .OrderBy(x => x.TableKind)
                 .ThenBy(x => x.TableName)
-                .ToListAsync();
+                .ToListAsync();//把上面這個查詢「真正送去資料庫執行」，然後把結果裝成 List<CurdOcxtableSetUp>。Async 代表是「非同步」版本，所以前面要 await。
 
             if (setups.Count == 0)
                 return NotFound($"CURdOCXTableSetUp not found for item {itemId}.");
@@ -67,7 +67,7 @@ namespace PcbErpApi.Pages.CUR
             foreach (var setup in setups)
             {
                 var tableMeta = await GetTableMetaAsync(setup.TableName);
-                var tabKey = BuildTabKey(setup.TableKind, setup.TableName, idx, seenKeys);
+                var tabKey = BuildTabKey(setup.TableKind, setup.TableName, idx, seenKeys);  // 產生 Tab 的 key（供 URL/前端用）
                 var tabLabel = tableMeta?.DisplayLabel ?? (string.IsNullOrWhiteSpace(setup.TableKind) ? setup.TableName : setup.TableKind);
                 var pageNumber = ResolvePageIndex(tabKey);
                 var pageSize = ResolvePageSize(tabKey);
@@ -82,18 +82,18 @@ namespace PcbErpApi.Pages.CUR
                 };
 
                 try
-                {
+                {   // 1) 讀欄位字典（顯示哪些欄位、順序…）
                     tabVm.FieldDictList = await LoadFieldDictAsync(dictTableName);
                     await ApplyLangDisplaySizeAsync(dictTableName, tabVm.FieldDictList);
                     tabVm.TableFields = tabVm.FieldDictList
                         .Where(f => f.Visible == 1)
                         .OrderBy(f => f.SerialNum ?? 0)
                         .ToList();
-
+                     // 2) 排序欄位
                     tabVm.OrderBy = string.IsNullOrWhiteSpace(setup.OrderByField)
                         ? await GetDefaultOrderByAsync(tabVm.TableName)
                         : setup.OrderByField;
-
+                    // 3) 查詢欄位設定（CURdOCXPaperSelOtherGet）
                     tabVm.QueryFields = await LoadQueryFieldsAsync(itemId, tabVm.TableName, "TW");
                     var filterParams = new List<SqlParameter>();
                     var filterSql = BuildFilterSql(tabVm.QueryFields, Request.Query, filterParams);
