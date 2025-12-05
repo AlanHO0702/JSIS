@@ -1,0 +1,652 @@
+@page "/CCS/CC000054/Detail"
+@model PcbErpApi.Pages.CCS.CC000054DetailModel
+@using System.Text.Json
+@{
+    Layout = "_Layout";
+    var cfg = Model.Config;
+    var firstKey = Model.MasterKeyValues.FirstOrDefault(kv => string.Equals(kv.Key, "CompanyId", StringComparison.OrdinalIgnoreCase));
+    var masterKeyVal = firstKey.Value ?? Model.MasterKeyValues.FirstOrDefault().Value ?? "";
+}
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", null, ViewData)
+<script src="~/js/editableGrid.js"></script>
+
+@if (cfg == null)
+{
+    <div class="alert alert-warning mt-3">初始化客戶主檔畫面失敗，請稍後再試。</div>
+}
+else
+{
+    <div class="d-flex align-items-center gap-2 mb-2 mt-1">
+        <a class="btn btn-link btn-sm" href="@Url.Page("CC000054")">回列表</a>
+        <button type="button" class="btn btn-warning btn-sm" id="btnTopEdit">編輯</button>
+        <button type="button" class="btn btn-success btn-sm d-none" id="btnTopSave">儲存</button>
+        <button type="button" class="btn btn-outline-primary btn-sm" id="btnTopAdd">新增</button>
+    </div>
+
+    <div id="cc000054-master-form"
+         class="position-relative mf-container"
+         data-dict="@cfg?.MasterDict"
+         data-dict-table="@cfg?.MasterDict"
+         style="min-height:260px;"></div>
+
+    <div class="card shadow-sm border-0 rounded-4" style="margin-top:2px;">
+        <div class="card-header bg-light fw-bold py-0 px-0" style="display:none;"></div>
+        <div class="card-body p-2">
+            <ul class="nav nav-tabs flex-wrap" role="tablist">
+                @for (int i = 0; i < Model.ExtraTabs.Count; i++)
+                {
+                    var tab = Model.ExtraTabs[i];
+                    var active = i == 0 ? "active" : "";
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link @active"
+                                id="tab-@tab.Key-tab"
+                                data-bs-toggle="tab"
+                                data-bs-target="#tab-@tab.Key"
+                                type="button"
+                                role="tab"
+                                aria-controls="tab-@tab.Key"
+                                aria-selected="@(i == 0 ? "true" : "false")"
+                                data-table="@tab.TableName"
+                                data-dict="@tab.DictName"
+                                data-keyfields="@string.Join(",", tab.KeyFields ?? Enumerable.Empty<string>())"
+                                data-extra-keys="@string.Join(";", tab.ExtraKeys?.Select(k => $"{k.Key}={k.Value}") ?? Array.Empty<string>())">
+                            @tab.Title
+                        </button>
+                    </li>
+                }
+            </ul>
+            <div class="tab-content">
+                @for (int i = 0; i < Model.ExtraTabs.Count; i++)
+                {
+                    var tab = Model.ExtraTabs[i];
+                    var active = i == 0 ? "show active" : "";
+                    <div class="tab-pane fade @active" id="tab-@tab.Key" role="tabpanel" aria-labelledby="tab-@tab.Key-tab" data-form="@((tab.IsForm ? "1" : "0"))">
+                        @if (tab.IsForm)
+                        {
+                            
+                          <div id="form-@tab.Key"
+                                class="position-relative mf-container"
+                                data-dict="@tab.DictName"
+                                data-dict-table="@tab.DictName"
+                                style="min-height:260px;"></div>
+                           
+                        }
+                        else
+                        {
+                            <div class="table-responsive" data-tab-key="@tab.Key">
+                                <table class="table table-sm table-hover align-middle mb-0"
+                                       id="grid-@tab.Key"
+                                       data-table-name="@tab.TableName"
+                                       data-dict-name="@tab.DictName"
+                                       data-dict-table="@tab.DictName"
+                                       data-key-fields="@string.Join(",", tab.KeyFields ?? Enumerable.Empty<string>())">
+                                    <thead class="table-light">
+                                        <tr><th class="text-center text-muted">載入中...</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr><td class="text-center text-muted py-3">請點選上方主檔資料</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="mt-2 d-flex gap-2 tab-local-controls d-none">
+                                <button type="button" class="btn btn-outline-primary btn-sm" data-btn="edit" data-tab="@tab.Key">編輯</button>
+                                <button type="button" class="btn btn-success btn-sm d-none" data-btn="save" data-tab="@tab.Key">儲存</button>
+                                <button type="button" class="btn btn-outline-primary btn-sm" data-btn="add" data-tab="@tab.Key">新增</button>
+                                <button type="button" class="btn btn-outline-success btn-sm d-none" data-btn="confirm" data-tab="@tab.Key">?</button>
+                                <button type="button" class="btn btn-outline-danger btn-sm d-none" data-btn="cancel" data-tab="@tab.Key">?</button>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+<script>
+// 讓表單欄位可拖曳/縮放並自動儲存到辭典座標/寬高
+function enableFormLayoutEditing(container, dictName) {
+  if (!container || !dictName) return;
+  const tableName = (dictName || '').trim().toLowerCase();
+  const fields = Array.from(container.querySelectorAll('.mf-field'));
+  const saveUrl = "/api/TableFieldLayout/SaveHeaderLayout";
+  let dragTarget = null, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+  let resizeTarget = null, startW = 0, startH = 0;
+  let dragGroup = [];
+  let groupStart = new Map();
+  let saveTimer = null;
+
+  const debounceSave = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      const layout = fields.map(f => ({
+        fieldName: f.dataset.field || '',
+        top: Math.round(f.offsetTop),
+        left: Math.round(f.offsetLeft),
+        width: Math.round(f.offsetWidth),
+        height: Math.round(f.offsetHeight),
+        ishowWhere: 1
+      })).filter(x => x.fieldName);
+      if (!layout.length || !tableName) return;
+      fetch(saveUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableName, layoutUpdates: layout })
+      }).catch(()=>{});
+    }, 300);
+  };
+
+  // multi-select
+  const selected = new Set();
+  const clearSelection = () => {
+    selected.forEach(el => el.classList.remove('mf-selected'));
+    selected.clear();
+  };
+  const selectField = (el, additive) => {
+    if (!additive) clearSelection();
+    if (selected.has(el)) {
+      if (additive) {
+        selected.delete(el);
+        el.classList.remove('mf-selected');
+      }
+    } else {
+      selected.add(el);
+      el.classList.add('mf-selected');
+    }
+  };
+
+  container.addEventListener('pointerdown', (e) => {
+    if (e.target === container) clearSelection();
+  });
+
+  fields.forEach(f => {
+    const label = f.querySelector('label');
+    const resizer = f.querySelector('.mf-resizer');
+    f.style.cursor = 'move';
+    f.style.userSelect = 'none';
+
+    f.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectField(f, e.ctrlKey || e.metaKey);
+    });
+
+    if (label) {
+      label.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        dragTarget = f;
+        startX = e.clientX;
+        startY = e.clientY;
+        const isMulti = selected.size > 0 && selected.has(f);
+        dragGroup = isMulti ? Array.from(selected) : [f];
+        groupStart = new Map(dragGroup.map(el => [el, { l: el.offsetLeft, t: el.offsetTop }]));
+        startLeft = f.offsetLeft;
+        startTop = f.offsetTop;
+        document.body.classList.add('resizing');
+      });
+    }
+
+    if (resizer) {
+      resizer.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        resizeTarget = f;
+        startX = e.clientX;
+        startY = e.clientY;
+        startW = f.offsetWidth;
+        startH = f.offsetHeight;
+        document.body.classList.add('resizing');
+      });
+    }
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (dragTarget) {
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      dragGroup.forEach(el => {
+        const pos = groupStart.get(el) || { l: el.offsetLeft, t: el.offsetTop };
+        el.style.left = `${Math.max(0, pos.l + dx)}px`;
+        el.style.top = `${Math.max(0, pos.t + dy)}px`;
+      });
+    }
+    if (resizeTarget) {
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      resizeTarget.style.width = `${Math.max(50, startW + dx)}px`;
+      resizeTarget.style.height = `${Math.max(30, startH + dy)}px`;
+    }
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (dragTarget || resizeTarget) {
+      document.body.classList.remove('resizing');
+      debounceSave();
+    }
+    dragTarget = null;
+    resizeTarget = null;
+  });
+}
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const tabs = Array.from(document.querySelectorAll('[data-table][data-dict]'));
+  let currentCompany = '@masterKeyVal' || null;
+  const tabState = {};
+
+  function getDict(dictName) {
+    return fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictName)}`)
+      .then(r => r.json());
+  }
+
+  function buildTable(tabKey, dict, rows) {
+    const table = document.getElementById(`grid-${tabKey}`);
+    if (!table) return;
+    const thead = table.querySelector('thead');
+    const tbody = table.querySelector('tbody');
+    if (!thead || !tbody) return;
+
+    // build head
+    thead.innerHTML = '';
+    const trHead = document.createElement('tr');
+    dict
+      .filter(f => (f.Visible ?? 1) == 1)
+      .sort((a,b) => (a.SerialNum ?? 9999) - (b.SerialNum ?? 9999))
+      .forEach(f => {
+        const th = document.createElement('th');
+        th.textContent = f.DisplayLabel || f.FieldName;
+        th.dataset.field = f.FieldName;
+        th.style.minWidth = (Number(f.DisplaySize || 0) * 10 || 80) + 'px';
+        trHead.appendChild(th);
+      });
+    thead.appendChild(trHead);
+
+    // build body
+    tbody.innerHTML = '';
+    if (!Array.isArray(rows) || rows.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = trHead.children.length || 1;
+      td.className = 'text-center text-muted py-3';
+      td.textContent = '無資料';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    } else {
+      rows.forEach(row => {
+        const tr = document.createElement('tr');
+        dict
+          .filter(f => (f.Visible ?? 1) == 1)
+          .sort((a,b) => (a.SerialNum ?? 9999) - (b.SerialNum ?? 9999))
+          .forEach(f => {
+            const td = document.createElement('td');
+            td.dataset.field = f.FieldName;
+            const raw = row[f.FieldName];
+            const span = makeValueElement(f, raw);
+            span.classList.add('cell-view');
+            const inp = document.createElement('input');
+            inp.className = 'form-control form-control-sm cell-edit d-none';
+            inp.name = f.FieldName;
+            inp.value = raw == null ? '' : raw;
+            inp.dataset.raw = raw == null ? '' : raw;
+            inp.dataset.readonly = (f.ReadOnly ?? 0) != 0 ? '1' : '0';
+            if ((f.ReadOnly ?? 0) != 0) {
+              inp.classList.add('readonly-cell');
+              inp.setAttribute('readonly','readonly');
+            }
+            td.append(span, inp);
+            tr.appendChild(td);
+          });
+        tbody.appendChild(tr);
+      });
+    }
+
+    const wrapper = table.closest('.table-responsive');
+    const keyFields = (table.dataset.keyFields || '').split(',').map(s => s.trim()).filter(Boolean);
+    tabState[tabKey] = window.makeEditableGrid({
+      wrapper,
+      table,
+      tableName: table.dataset.tableName || table.dataset.dictName || '',
+      keyFields
+    });
+  }
+
+  function parseExtraKeys(raw) {
+    const list = [];
+    (raw || '').split(';').forEach(pair => {
+      const [k,v] = pair.split('=');
+      if (k && v !== undefined) list.push({ key: k.trim(), value: v.trim() });
+    });
+    return list;
+  }
+
+  async function renderForm(tabKey, dictName, tableName, companyId, extras = []) {
+    const host = document.getElementById(`form-${tabKey}`);
+    if (!host || !dictName || !tableName || !companyId) return;
+    try {
+      const extraParams = extras.map(kv => `&keyNames=${encodeURIComponent(kv.key)}&keyValues=${encodeURIComponent(kv.value)}`).join("");
+      const [dict, rows] = await Promise.all([
+        fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictName)}`).then(r => r.json()),
+        fetch(`/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&keyNames=CompanyId&keyValues=${encodeURIComponent(companyId)}${extraParams}`).then(r => r.json())
+      ]);
+      const data = Array.isArray(rows) ? rows[0] || {} : {};
+      const fields = Array.isArray(dict) ? dict.filter(f => (f.Visible ?? 1) == 1) : [];
+      host.innerHTML = '';
+      host.dataset.dictName = dictName;
+      const container = document.createElement('div');
+      container.className = 'position-relative mf-container mf-form';
+      container.dataset.dictTable = dictName;
+
+      fields
+        .sort((a,b)=>(a.SerialNum ?? 0)-(b.SerialNum ?? 0))
+        .forEach(f => {
+          const top = f.iFieldTop ?? 0;
+          const left = f.iFieldLeft ?? 0;
+          const width = f.iFieldWidth ?? 180;
+          const height = f.iFieldHeight ?? 40;
+          const val = data[f.FieldName] ?? '';
+
+          const wrapper = document.createElement('div');
+          wrapper.className = 'mf-field';
+          wrapper.dataset.field = f.FieldName;
+          wrapper.style.position = 'absolute';
+          wrapper.style.top = `${top}px`;
+          wrapper.style.left = `${left}px`;
+          wrapper.style.width = `${width}px`;
+          wrapper.style.minHeight = `${Math.max(height,14)}px`;
+          wrapper.style.display = 'flex';
+          wrapper.style.alignItems = 'flex-start';
+          wrapper.style.gap = '6px';
+
+          const label = document.createElement('label');
+          label.textContent = f.DisplayLabel || f.FieldName;
+          label.style.whiteSpace = 'nowrap';
+          label.style.margin = '0';
+          label.style.fontSize = '0.9rem';
+
+          const span = makeValueElement(f, val);
+          span.style.flex = '1 1 auto';
+          span.style.width = '100%';
+          span.style.minHeight = `${Math.max(height,14)}px`;
+
+          const resizer = document.createElement('span');
+          resizer.className = 'mf-resizer';
+
+          wrapper.append(label, span, resizer);
+          container.appendChild(wrapper);
+        });
+
+      host.append(container);
+      enableFormLayoutEditing(container, dictName);
+    } catch (err) {
+      console.error('render form tab failed', err);
+    }
+  }
+
+  async function loadTabData(tabKey, companyId) {
+    const btn = document.getElementById(`tab-${tabKey}-tab`);
+    if (!btn) return;
+    const tableName = btn.dataset.table;
+    const dictName = btn.dataset.dict || tableName;
+    const pane = document.getElementById(`tab-${tabKey}`);
+    const isForm = pane?.getAttribute('data-form') === '1';
+    const extras = parseExtraKeys(btn.dataset.extraKeys || "");
+    if (!tableName || !companyId) return;
+
+    if (isForm) {
+      await renderForm(tabKey, dictName, tableName, companyId, extras);
+      return;
+    }
+
+    const extraParams = extras.map(kv => `&keyNames=${encodeURIComponent(kv.key)}&keyValues=${encodeURIComponent(kv.value)}`).join("");
+    const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&keyNames=CompanyId&keyValues=${encodeURIComponent(companyId)}${extraParams}`;
+    const [dict, rows] = await Promise.all([
+      getDict(dictName),
+      fetch(url).then(r => r.json())
+    ]);
+    buildTable(tabKey, dict || [], Array.isArray(rows) ? rows : []);
+  }
+
+  document.addEventListener('md-master-selected', (ev) => {
+    const row = ev?.detail?.rowData;
+    if (!row) return;
+    currentCompany = row.CompanyId || row.companyid || row.COMPANYID;
+    if (!currentCompany) return;
+    tabs.forEach(btn => {
+      const isActive = btn.classList.contains('active');
+      if (isActive) loadTabData(btn.dataset.tabKey || btn.dataset.target || btn.id.replace('tab-','').replace('-tab',''), currentCompany);
+    });
+  });
+
+  tabs.forEach(btn => {
+    const tabKey = btn.id.replace('tab-','').replace('-tab','');
+    btn.dataset.tabKey = tabKey;
+    btn.addEventListener('shown.bs.tab', () => {
+      // 更新 F3 目標為當前分頁的辭典
+      if (btn.dataset.dict) window._dictTableName = btn.dataset.dict;
+      if (currentCompany) loadTabData(tabKey, currentCompany);
+    });
+  });
+
+  // per-tab buttons
+  document.querySelectorAll('[data-btn]').forEach(b => {
+    b.addEventListener('click', async () => {
+      const tabKey = b.dataset.tab;
+      const editor = tabState[tabKey];
+      if (!editor) return;
+      const btnType = b.dataset.btn;
+      const group = b.closest('.tab-pane')?.querySelectorAll('[data-btn]');
+      const btnSave = Array.from(group || []).find(x => x.dataset.btn === 'save');
+      const btnEdit = Array.from(group || []).find(x => x.dataset.btn === 'edit');
+
+      if (btnType === 'edit') {
+        editor.toggleEdit(!editor.isEdit());
+        if (btnSave) btnSave.classList.toggle('d-none', !editor.isEdit());
+      } else if (btnType === 'save') {
+        const res = await editor.saveChanges();
+        if (res.ok) {
+          alert('儲存成功');
+          editor.toggleEdit(false);
+          if (btnSave) btnSave.classList.add('d-none');
+          if (btnEdit) btnEdit.textContent = '編輯';
+          if (currentCompany) loadTabData(tabKey, currentCompany);
+        } else {
+          alert('儲存失敗: ' + (res.text || ''));
+        }
+      }
+    });
+  });
+
+  // 頂部共用按鈕：作用於目前 active 的非表單 tab
+  const topEdit = document.getElementById('btnTopEdit');
+  const topSave = document.getElementById('btnTopSave');
+  const topAdd  = document.getElementById('btnTopAdd');
+
+  const triggerTabAction = (action) => {
+    const activeTabBtn = document.querySelector('[data-bs-toggle="tab"].active');
+    if (!activeTabBtn) return;
+    const tabKey = activeTabBtn.dataset.tab || activeTabBtn.dataset.tabKey || activeTabBtn.id?.replace('tab-','').replace('-tab','');
+    if (!tabKey) return;
+    const pane = document.getElementById(`tab-${tabKey}`);
+    const isForm = pane?.getAttribute('data-form') === '1';
+    if (isForm) return;
+    const btn = pane?.querySelector(`[data-btn="${action}"]`);
+    btn?.click();
+    if (action === 'edit') {
+      const editor = tabState[tabKey];
+      const editing = editor?.isEdit?.();
+      if (topSave) topSave.classList.toggle('d-none', !editing);
+      if (topEdit) topEdit.textContent = editing ? '檢視' : '編輯';
+    }
+  };
+
+  topEdit?.addEventListener('click', () => triggerTabAction('edit'));
+  topSave?.addEventListener('click', () => triggerTabAction('save'));
+  topAdd?.addEventListener('click', () => triggerTabAction('add'));
+
+  // 初始直接載入（若 URL 已有 CompanyId）
+  const loadAllTabs = () => {
+    tabs.forEach(btn => {
+      const key = btn.dataset.tabKey || btn.dataset.tab || btn.id?.replace('tab-','').replace('-tab','');
+      if (key && currentCompany) loadTabData(key, currentCompany);
+    });
+  };
+  if (currentCompany) loadAllTabs();
+
+  // 更新 F3 辭典目標：依最近點擊的區塊決定
+  const setDictTarget = (dictName) => {
+    if (!dictName) return;
+    window._dictTableName = dictName;
+  };
+
+  // 預設先設主檔辭典
+  setDictTarget('@(cfg?.MasterDict ?? cfg?.MasterTable ?? string.Empty)');
+
+  document.addEventListener('click', (ev) => {
+    const formArea = ev.target.closest('.mf-container[data-dict-table]');
+    if (formArea?.dataset?.dictTable) {
+      setDictTarget(formArea.dataset.dictTable);
+      return;
+    }
+    const tabBtn = ev.target.closest('button[data-bs-toggle="tab"][data-dict]');
+    if (tabBtn?.dataset?.dict) {
+      setDictTarget(tabBtn.dataset.dict);
+      return;
+    }
+    const grid = ev.target.closest('table[data-dict-name], table[data-table-name]');
+    if (grid) {
+      setDictTarget(grid.dataset.dictName || grid.dataset.tableName);
+    }
+  });
+});
+
+// 產生欄位值元素：若辭典 ComboStyle=1 則顯示為勾選框
+function makeValueElement(field, rawVal) {
+  const isCheckbox = Number(field?.ComboStyle ?? 0) === 1;
+  if (isCheckbox) {
+    const wrap = document.createElement('div');
+    wrap.className = 'form-check m-0 d-inline-flex align-items-center';
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.className = 'form-check-input';
+    chk.disabled = true;
+    const val = rawVal == null ? '' : String(rawVal).toLowerCase();
+    chk.checked = val === '1' || val === 'true' || val === 'y';
+    wrap.appendChild(chk);
+    return wrap;
+  }
+  const span = document.createElement('span');
+  span.textContent = rawVal == null ? '' : rawVal;
+  span.style.display = 'block';
+  span.style.border = '1px solid #e5e7eb';
+  span.style.background = '#f8fafc';
+  span.style.padding = '1px 5px';
+  span.style.borderRadius = '4px';
+  span.style.minHeight = '14px';
+  return span;
+}
+</script>
+
+<script>
+// 依辭典座標呈現主檔欄位（僅顯示單筆）
+document.addEventListener('DOMContentLoaded', async () => {
+  const dictName = '@(cfg?.MasterDict ?? cfg?.MasterTable ?? string.Empty)';
+  const tableName = '@(cfg?.MasterTable ?? string.Empty)';
+  const companyId = '@masterKeyVal';
+  const host = document.getElementById('cc000054-master-form');
+  if (!host || !dictName || !tableName || !companyId) return;
+
+  try {
+    const [dict, rows] = await Promise.all([
+      fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictName)}`).then(r => r.json()),
+      fetch(`/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&keyNames=CompanyId&keyValues=${encodeURIComponent(companyId)}`).then(r => r.json())
+    ]);
+    const data = Array.isArray(rows) ? rows[0] || {} : {};
+    const fields = Array.isArray(dict) ? dict.filter(f => (f.Visible ?? 1) == 1) : [];
+    host.innerHTML = '';
+    const container = document.createElement('div');
+    container.className = 'position-relative mf-container';
+    container.dataset.dictTable = dictName;
+
+    fields
+      .sort((a,b)=>(a.SerialNum ?? 0)-(b.SerialNum ?? 0))
+      .forEach(f => {
+        const top = f.iFieldTop ?? 0;
+        const left = f.iFieldLeft ?? 0;
+        const width = f.iFieldWidth ?? 180;
+        const height = f.iFieldHeight ?? 40;
+        const val = data[f.FieldName] ?? '';
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'mf-field';
+        wrapper.dataset.field = f.FieldName;
+        wrapper.style.position = 'absolute';
+        wrapper.style.top = `${top}px`;
+        wrapper.style.left = `${left}px`;
+        wrapper.style.width = `${width}px`;
+        wrapper.style.minHeight = `${Math.max(height,14)}px`;
+          wrapper.style.display = 'flex';
+          wrapper.style.alignItems = 'flex-start';
+          wrapper.style.gap = '6px';
+
+        const label = document.createElement('label');
+        label.textContent = f.DisplayLabel || f.FieldName;
+        label.style.whiteSpace = 'nowrap';
+        label.style.margin = '0';
+        label.style.fontSize = '0.9rem';
+
+        const span = makeValueElement(f, val);
+        span.style.flex = '1 1 auto';
+        span.style.width = '100%';
+        span.style.minHeight = `${Math.max(height,14)}px`;
+
+        const resizer = document.createElement('span');
+        resizer.className = 'mf-resizer';
+
+        wrapper.append(label, span, resizer);
+        container.appendChild(wrapper);
+      });
+
+    host.append(container);
+    enableFormLayoutEditing(container, dictName);
+  } catch (err) {
+    console.error('render master form failed', err);
+  }
+});
+</script>
+
+<style>
+.mf-container{
+  min-height:260px;
+  padding:8px;
+  border:1px solid #d8dfe8;
+  border-radius:12px;
+  background:#f8fafc;
+}
+.mf-container.mf-form{
+  border:none;
+  background:transparent;
+  padding:0;
+}
+.mf-field{
+  border:1px dashed transparent;
+}
+.mf-field:hover{
+  border-color:#c7d3e1;
+}
+.mf-field.mf-selected{
+  border-color:#5b8def;
+  background:rgba(91,141,239,0.08);
+}
+.mf-resizer{
+  position:absolute;
+  right:-6px;
+  bottom:-6px;
+  width:12px;
+  height:12px;
+  cursor:se-resize;
+  opacity:0;
+}
+</style>
+
+<script src="~/js/fieldDictModal.js"></script>
