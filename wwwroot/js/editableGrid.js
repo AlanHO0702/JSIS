@@ -1,5 +1,5 @@
 // /wwwroot/js/editableGrid.js
-// 讓任何 table 都能套用 修改 / 保留 / 儲存 功能
+// 讓 table 支援簡易的 編輯 / 檢視 / 儲存 功能
 (function () {
 
   window.makeEditableGrid = function (options) {
@@ -10,6 +10,7 @@
     const keyFields = Array.isArray(options.keyFields)
       ? options.keyFields.map(x => String(x))
       : [];
+    const keyFieldSet = new Set(keyFields.map(k => k.toLowerCase()));
     const saveUrl   = options.saveUrl || "/api/CommonTable/SaveTableChanges";
 
     if (!wrapper || !table) {
@@ -21,11 +22,11 @@
       };
     }
 
-    // ===== 編輯模式狀態 =====
+    // ===== 狀態 =====
     let editing = false;
     function isEdit() { return editing; }
 
-    // ===== 編輯 / 保留 模式切換 =====
+    // ===== 編輯 / 檢視 切換 =====
     function toggleEdit(toEdit) {
       editing = !!toEdit;
       wrapper.classList.toggle("edit-mode", editing);
@@ -39,8 +40,10 @@
 
           if (editing) {
 
-            // 進入編輯模式，紀錄 defaultValue
-            inp.defaultValue = inp.value;
+            // 進入編輯欄位，記錄 defaultValue
+            inp.defaultValue = inp.type === "checkbox"
+              ? (inp.checked ? "1" : "0")
+              : inp.value;
 
             span.classList.add("d-none");
             inp.classList.remove("d-none");
@@ -57,8 +60,23 @@
 
           } else {
 
-            // 回到顯示模式
-            span.textContent = inp.value;
+            // 回到顯示欄位
+            if (inp.type === "checkbox") {
+              let viewChk = span.querySelector('input[type="checkbox"]');
+              if (!viewChk) {
+                viewChk = document.createElement("input");
+                viewChk.type = "checkbox";
+                viewChk.disabled = true;
+                viewChk.tabIndex = -1;
+                viewChk.className = "form-check-input";
+                span.innerHTML = "";
+                span.appendChild(viewChk);
+              }
+              viewChk.checked = !!inp.checked;
+              inp.value = inp.checked ? "1" : "0";
+            } else {
+              span.textContent = inp.value;
+            }
             span.classList.remove("d-none");
             inp.classList.add("d-none");
 
@@ -67,20 +85,24 @@
       });
     }
 
-    // ===== 收集變更 =====
+    // ===== 收集差異 =====
     function collectChanges() {
 
       const list = [];
 
       table.querySelectorAll("tbody tr").forEach(tr => {
 
-        let hasDiff = false;
+        let hasDiff = tr.dataset.state === "added";
 
         tr.querySelectorAll(".cell-edit").forEach(inp => {
           const oldVal = inp.defaultValue ?? "";
-          const newVal = inp.value ?? "";
-          if (inp.dataset.readonly === "1") return;
-          if (oldVal !== newVal) hasDiff = true;
+          const newVal = inp.type === "checkbox"
+            ? (inp.checked ? "1" : "0")
+            : (inp.value ?? "");
+          const isReadonly = inp.dataset.readonly === "1";
+          const isKey = keyFieldSet.has((inp.name || "").toLowerCase());
+          if (!isReadonly && oldVal !== newVal) hasDiff = true;
+          if (!isKey && isReadonly) return;
         });
 
         if (!hasDiff) return;
@@ -89,20 +111,36 @@
 
         // 編輯欄位
         tr.querySelectorAll(".cell-edit").forEach(inp => {
-          if (!inp.name) return;
-          rowAll[inp.name] = inp.value ?? "";
+            if (!inp.name) return;
+            rowAll[inp.name] = inp.type === "checkbox"
+              ? (inp.checked ? "1" : "0")
+              : (inp.value ?? "");
         });
 
-        // PK 欄位
+        // 確保鍵欄位一定帶值：若輸入框空，嘗試從同格 span 或 data-raw 取值
+        keyFieldSet.forEach(k => {
+          const inp = Array.from(tr.querySelectorAll('.cell-edit')).find(i => (i.name || '').toLowerCase() === k);
+          const span = inp?.previousElementSibling;
+          if (inp && (rowAll[inp.name] === "" || rowAll[inp.name] == null)) {
+            const val = span?.textContent?.trim() || inp.dataset.raw || "";
+            rowAll[inp.name] = val;
+          }
+        });
+
+        // PK 隱藏欄位
         tr.querySelectorAll(".mmd-pk-hidden").forEach(inp => {
           if (!inp.name) return;
-          rowAll[inp.name] = inp.value ?? "";
+          if (rowAll[inp.name] === undefined || rowAll[inp.name] === "") {
+            rowAll[inp.name] = inp.value ?? "";
+          }
         });
 
-        // FK 欄位（KeyMap）
+        // FK 隱藏欄位 (KeyMap)
         tr.querySelectorAll(".mmd-fk-hidden").forEach(inp => {
           if (!inp.name) return;
-          rowAll[inp.name] = inp.value ?? "";
+          if (rowAll[inp.name] === undefined || rowAll[inp.name] === "") {
+            rowAll[inp.name] = inp.value ?? "";
+          }
         });
 
         list.push(rowAll);
@@ -120,7 +158,7 @@
 
       const changes = collectChanges();
       if (changes.length === 0) {
-        return { ok:true, skipped:true, text:"沒有變更" };
+        return { ok:true, skipped:true, text:"無異動" };
       }
 
       const payload = { TableName: tableName, Data: changes };
@@ -151,15 +189,17 @@
         return { ok:false, skipped:false, text:msg, raw:json };
       }
 
-      // 成功 → 更新 defaultValue
+      // 成功後，同步 defaultValue
       table.querySelectorAll(".cell-edit").forEach(inp => {
-        inp.defaultValue = inp.value;
+        inp.defaultValue = inp.type === "checkbox"
+          ? (inp.checked ? "1" : "0")
+          : (inp.value ?? "");
       });
 
       return { ok:true, skipped:false, text:"OK", raw:json };
     }
 
-    // ===== 對外提供 =====
+    // ===== 對外 API =====
     return {
       isEdit,
       toggleEdit,

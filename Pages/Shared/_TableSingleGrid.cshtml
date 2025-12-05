@@ -3,6 +3,7 @@
 @using System.Text.Json
 @using System.Linq
 @using System.Collections
+@using System.Collections.Generic
 @model dynamic
 
 @{
@@ -10,6 +11,10 @@
     var items         = (IEnumerable<object>)(Model.Items ?? new List<object>());
     var fields        = (IEnumerable<dynamic>)(Model.TableFields ?? new List<object>());
     var customButtons = ViewData["CustomButtons"] as HtmlString;
+    var customButtonMeta = ViewData["CustomButtonMeta"] as IEnumerable<dynamic>;
+    var hasServerButtons = customButtons != null && !string.IsNullOrWhiteSpace(customButtons.ToString());
+    var hasCustomMeta = customButtonMeta != null && customButtonMeta.Cast<object>().Any();
+    var autoBuildCustomButtons = !hasServerButtons && hasCustomMeta;
     var hasData       = items.Any();
     var keyFieldsFromViewData = (IEnumerable<string>)(ViewData["KeyFields"] as IEnumerable<string> ?? Array.Empty<string>());
     var dictFields    = (IEnumerable<dynamic>)(ViewData["FieldDictList"] as IEnumerable<dynamic> ?? fields);
@@ -97,12 +102,31 @@
           </button>
         </div>
 
-        @if (customButtons != null && !string.IsNullOrWhiteSpace(customButtons.ToString()))
-        {
-          <div class="d-flex justify-content-end gap-2">
-            @customButtons
-          </div>
-        }
+        <div class="d-flex justify-content-end gap-2" id="customButtonBar" data-auto-build="@(autoBuildCustomButtons ? "1" : "0")">
+          @if (hasServerButtons)
+          {
+              @customButtons
+          }
+          else if (hasCustomMeta)
+          {
+              foreach (var b in customButtonMeta)
+              {
+                  var btnName = (GetValue(b, "ButtonName") ?? GetValue(b, "buttonName") ?? "").ToString();
+                  if (string.IsNullOrWhiteSpace(btnName)) continue;
+                  var caption = (GetValue(b, "CustCaption") ?? GetValue(b, "custCaption") ?? btnName).ToString();
+                  var hint = (GetValue(b, "CustHint") ?? GetValue(b, "custHint") ?? "").ToString();
+                  var itemId = (GetValue(b, "ItemId") ?? GetValue(b, "itemId") ?? "").ToString();
+                  <button type="button"
+                          class="btn btn-outline-secondary btn-sm"
+                          data-custom-btn="1"
+                          data-button-name="@btnName"
+                          data-item-id="@itemId"
+                          title="@hint">
+                    @caption
+                  </button>
+              }
+          }
+        </div>
       </div>
 
       <div class="table-fix-wrapper" data-dict-table="@dictTableName" style="max-height:70vh;overflow:auto;background:#fff;border:1px solid #dee2e6;border-radius:.5rem;white-space:nowrap">
@@ -277,6 +301,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const wrapper = document.querySelector(".table-wrapper");
   const table   = document.getElementById("mainGrid");
   const ocxLookupMaps = @Html.Raw(JsonSerializer.Serialize(ocxLookupPayload));
+  const customButtonsMeta = @Html.Raw(JsonSerializer.Serialize(customButtonMeta ?? new List<object>()));
+  const customButtonBar = document.getElementById("customButtonBar");
   let lookupMaps = ocxLookupMaps || {};
   let isEdit = false;
 
@@ -291,6 +317,87 @@ document.addEventListener("DOMContentLoaded", () => {
 
     return ["buid","itemid","id","papernum","systemcode"];
   })();
+
+  const findButtonMeta = (btnName) => {
+    if (!btnName || !Array.isArray(customButtonsMeta)) return null;
+    const target = btnName.toLowerCase();
+    return customButtonsMeta.find(b => ((b.buttonName || b.ButtonName || "")?.toLowerCase() === target)) || null;
+  };
+
+  const readRowData = (tr) => {
+    const obj = {};
+    if (!tr) return obj;
+    tr.querySelectorAll("td[data-field]").forEach(td => {
+      const field = td.dataset.field || "";
+      if (!field) return;
+      const inp = td.querySelector(".cell-edit");
+      const span = td.querySelector(".cell-view");
+      obj[field] = inp?.value ?? span?.textContent ?? "";
+    });
+    return obj;
+  };
+
+  const resolveCustomHandler = (btnName) => {
+    if (!btnName) return null;
+    const map = window.SingleGridCustomHandlers || {};
+    const itemId = window._singleItemId || "";
+    if (map[itemId] && typeof map[itemId][btnName] === "function") return map[itemId][btnName];
+    if (typeof map[btnName] === "function") return map[btnName];
+    return null;
+  };
+
+  const buildCustomButtonsFromMeta = () => {
+    if (!customButtonBar || customButtonBar.childElementCount > 0) return;
+    const autoBuild = customButtonBar.dataset.autoBuild === "1";
+    if (!autoBuild || !Array.isArray(customButtonsMeta) || customButtonsMeta.length === 0) return;
+    customButtonsMeta.forEach(b => {
+      if (b.bVisible === 0 || b.bVisible === "0") return;
+      const btnName = b.buttonName || b.ButtonName || "";
+      if (!btnName) return;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-outline-secondary btn-sm";
+      btn.dataset.customBtn = "1";
+      btn.dataset.buttonName = btnName;
+      btn.dataset.itemId = b.itemId || b.ItemId || "";
+      const caption = (b.custCaption || b.CustCaption || btnName || "").toString();
+      const hint = (b.custHint || b.CustHint || "").toString();
+      btn.textContent = caption;
+      if (hint) btn.title = hint;
+      customButtonBar.appendChild(btn);
+    });
+  };
+
+  const wireCustomButtons = () => {
+    if (!customButtonBar) return;
+    customButtonBar.querySelectorAll("[data-custom-btn]").forEach(btn => {
+      if (btn.dataset.cbBound === "1") return;
+      btn.dataset.cbBound = "1";
+      btn.addEventListener("click", () => {
+        const name = btn.dataset.buttonName || btn.dataset.customBtn || "";
+        if (!name) return;
+        const handler = resolveCustomHandler(name);
+        const meta = findButtonMeta(name);
+        const ctx = {
+          buttonName: name,
+          itemId: window._singleItemId || "",
+          tableName: window._singleRealTable || window._dictTableName || table?.dataset?.dictTable || "",
+          meta,
+          selectedRow: readRowData(window.SELECTED_ROW)
+        };
+        if (!handler) {
+          alert(`尚未實作: ${name}`);
+          return;
+        }
+        try {
+          handler(ctx);
+        } catch (err) {
+          console.error("custom button handler error", err);
+          alert(`執行失敗: ${err?.message || err}`);
+        }
+      });
+    });
+  };
 
   const lookupDisplay = (fieldName, rawVal, fallback, lookupKey) => {
     const key = String(lookupKey ?? rawVal ?? "");
@@ -438,12 +545,14 @@ document.addEventListener("DOMContentLoaded", () => {
   table.addEventListener("click", (ev) => {
     const tr = ev.target.closest("tbody tr");
     if (!tr) return;
-    table.querySelectorAll("tbody tr").forEach(r => r.classList.remove("selected-row"));
-    tr.classList.add("selected-row");
+    table.querySelectorAll("tbody tr").forEach(r => r.classList.remove("selected-row", "table-active"));
+    tr.classList.add("selected-row", "table-active");
     window.SELECTED_ROW = tr;
   });
 
   applyLookupToTable();
+  buildCustomButtonsFromMeta();
+  wireCustomButtons();
 
   // 分頁控制：直接以 query string 切換頁碼
   const pagerPrev = document.getElementById("pagerPrev");

@@ -49,6 +49,7 @@ namespace PcbErpApi.Pages.CUR
             if (item.ItemType != 6 || !string.Equals(item.Ocxtemplete, "JSdGridDLL.dll", StringComparison.OrdinalIgnoreCase))
                 return NotFound($"Item {itemId} is not a JSdGridDLL multi-grid item.");
 
+
             ItemId = item.ItemId;
             ItemName = item.ItemName;
             ViewData["Title"] = PageTitle;

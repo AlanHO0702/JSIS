@@ -49,6 +49,11 @@ public class DictApiController : ControllerBase
                     setList.Add("DataType = @DataType");
                     cmd.Parameters.AddWithValue("@DataType", input.DataType);
                 }
+                if (input.ComboStyle != null)
+                {
+                    setList.Add("ComboStyle = @ComboStyle");
+                    cmd.Parameters.AddWithValue("@ComboStyle", input.ComboStyle);
+                }
                 if (input.FieldNote != null)
                 {
                     setList.Add("FieldNote = @FieldNote");
