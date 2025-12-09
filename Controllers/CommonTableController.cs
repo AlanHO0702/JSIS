@@ -5,7 +5,8 @@ using System.Data;
 using System.Data.Common;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Microsoft.Data.SqlClient; // ★ 指定 SQL Server 參數型別用
+using Microsoft.Data.SqlClient;
+using System.Collections.Concurrent; // ★ 指定 SQL Server 參數型別用
 
 namespace PcbErpApi.Controllers
 {
@@ -120,11 +121,11 @@ namespace PcbErpApi.Controllers
                         results.Add(new { ok = true, affected = 0, skip = (skipped.Count > 0 ? $"略過欄位: {string.Join(",", skipped)}" : "無可更新欄位") });
                         continue;
                     }
-
+                    
                     var setSql   = string.Join(", ", setPairs.Select(p => $"[{p.Col.Name}] = @{p.Col.Name}"));
                     var whereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Name}] = @K_{p.Name}"));
                     var sql      = $"UPDATE [{req.TableName}] SET {setSql} WHERE {whereSql}";
-
+                    
                     using var cmd = conn.CreateCommand();
                     cmd.Transaction = (System.Data.Common.DbTransaction)tx;
                     cmd.CommandText = sql;
@@ -152,6 +153,172 @@ namespace PcbErpApi.Controllers
             }
         }
 
+        [HttpPost]
+        public async Task<IActionResult> InsertTableRows([FromBody] SaveTableChangesRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.TableName))
+                return BadRequest("TableName 不可為空");
+            if (req.Data is null || req.Data.Count == 0)
+                return BadRequest("沒有任何資料要新增");
+
+            var conn = _context.Database.GetDbConnection();
+            if (conn.State != ConnectionState.Open) await conn.OpenAsync();
+            using var tx = await conn.BeginTransactionAsync();
+
+            try
+            {
+                var (columns, updatable, pkCols) = await LoadTableSchemaAsync(conn, tx, req.TableName);
+
+                var results = new List<object>();
+                foreach (var node in req.Data)
+                {
+                    if (node is not JsonObject row) continue;
+
+                    var cols = new List<string>();
+                    var vals = new List<string>();
+                    var parameters = new List<(ColumnInfo Col, object? Value)>();
+
+                    foreach (var kv in row)
+                    {
+                        if (!columns.ContainsKey(kv.Key)) continue;
+                        var col = columns[kv.Key];
+
+                        // 不插入 identity / computed / rowversion
+                        if (col.IsIdentity || col.IsComputed || col.IsRowVersion) continue;
+
+                        if (col.IsBinary)
+                        {
+                            var (shouldSet, isNull, bytes) = ConvertBinaryForUpdate(kv.Value);
+                            if (!shouldSet) continue;
+                            parameters.Add((col, isNull ? DBNull.Value : bytes));
+                        }
+                        else
+                        {
+                            var v = ConvertJsonToDbValue(kv.Value, col.DbType);
+                            parameters.Add((col, v));
+                        }
+                        cols.Add(col.Name);
+                        vals.Add($"@{col.Name}");
+                    }
+
+                    if (cols.Count == 0)
+                    {
+                        results.Add(new { ok = false, reason = "沒有可新增的欄位", row });
+                        continue;
+                    }
+
+                    var sql = $"INSERT INTO [{req.TableName}] ({string.Join(", ", cols.Select(c => $"[{c}]"))}) VALUES ({string.Join(", ", vals)})";
+
+                    using var cmd = conn.CreateCommand();
+                    cmd.Transaction = (System.Data.Common.DbTransaction)tx;
+                    cmd.CommandText = sql;
+
+                    // 加參數
+                    foreach (var p in parameters)
+                        AddTypedParameter(cmd, $"@{p.Col.Name}", p.Value, p.Col);
+
+                    var affected = await cmd.ExecuteNonQueryAsync();
+                    results.Add(new { ok = affected > 0, affected, sql });
+                }
+
+                await tx.CommitAsync();
+                return Ok(new { success = true, results });
+            }
+            catch (Exception ex)
+            {
+                await tx.RollbackAsync();
+                _logger.LogError(ex, "InsertTableRows 失敗");
+                return StatusCode(500, $"新增失敗：{ex.Message}");
+            }
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> DeleteTableRows([FromBody] SaveTableChangesRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.TableName))
+                return BadRequest("TableName 不可為空");
+            if (req.Data is null || req.Data.Count == 0)
+                return BadRequest("沒有任何資料要刪除");
+
+            var conn = _context.Database.GetDbConnection();
+            if (conn.State != ConnectionState.Open) await conn.OpenAsync();
+            using var tx = await conn.BeginTransactionAsync();
+
+            try
+            {
+                var (columns, updatable, pkCols) = await LoadTableSchemaAsync(conn, tx, req.TableName);
+                var uniqueIndexSets = await LoadUniqueIndexSetsAsync(conn, tx, req.TableName);
+
+                var hintedKeys = new HashSet<string>(
+                    (req.KeyFields ?? Enumerable.Empty<string>())
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Where(s => columns.ContainsKey(s)),
+                    StringComparer.OrdinalIgnoreCase
+                );
+
+                var results = new List<object>();
+
+                foreach (var node in req.Data)
+                {
+                    if (node is not JsonObject row) continue;
+
+                    var rowColNames = new HashSet<string>(row.Select(kv => kv.Key), StringComparer.OrdinalIgnoreCase);
+                    List<string>? keyNames = null;
+
+                    if (hintedKeys.Count > 0 && hintedKeys.All(k => rowColNames.Contains(k)))
+                        keyNames = hintedKeys.ToList();
+                    if (keyNames is null && pkCols.Count > 0 && pkCols.All(k => rowColNames.Contains(k)))
+                        keyNames = pkCols.ToList();
+                    if (keyNames is null && uniqueIndexSets.Count > 0)
+                    {
+                        var hit = uniqueIndexSets.FirstOrDefault(set => set.All(k => rowColNames.Contains(k)));
+                        if (hit != null) keyNames = hit.ToList();
+                    }
+                    if (keyNames is null || keyNames.Count == 0)
+                    {
+                        results.Add(new { ok = false, reason = "找不到可用的鍵欄位（請帶齊主鍵或唯一索引欄位）", row });
+                        continue;
+                    }
+
+                    var keyPairs = new List<(string Name, object? Value)>();
+                    foreach (var k in keyNames)
+                    {
+                        var col = columns[k];
+                        var val = ConvertJsonToDbValue(row[k], col.DbType);
+                        keyPairs.Add((col.Name, val));
+                    }
+
+                    if (keyPairs.Count != keyNames.Count || keyPairs.Any(k => IsNullOrEmptyDbValue(k.Value)))
+                    {
+                        results.Add(new { ok = false, reason = "鍵欄位不完整或為空", row, keys = keyNames });
+                        continue;
+                    }
+
+                    var whereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Name}] = @K_{p.Name}"));
+                    var sql = $"DELETE FROM [{req.TableName}] WHERE {whereSql}";
+
+                    using var cmd = conn.CreateCommand();
+                    cmd.Transaction = (System.Data.Common.DbTransaction)tx;
+                    cmd.CommandText = sql;
+
+                    foreach (var p in keyPairs)
+                        AddTypedParameter(cmd, $"@K_{p.Name}", p.Value, null);
+
+                    var affected = await cmd.ExecuteNonQueryAsync();
+                    results.Add(new { ok = affected > 0, affected, sql });
+                }
+
+                await tx.CommitAsync();
+                return Ok(new { success = true, results });
+            }
+            catch (Exception ex)
+            {
+                await tx.RollbackAsync();
+                _logger.LogError(ex, "DeleteTableRows 失敗");
+                return StatusCode(500, $"刪除失敗：{ex.Message}");
+            }
+        }
+
         // ===== Schema =====
         private sealed record ColumnInfo(string Name, string DbType, bool IsIdentity, bool IsComputed, bool IsRowVersion, bool IsBinary);
 
@@ -166,14 +333,14 @@ namespace PcbErpApi.Controllers
             {
                 cmd.Transaction = (System.Data.Common.DbTransaction)tx;
                 cmd.CommandText = @"
-SELECT c.name AS ColName,
-       t.name AS DbType,
-       c.is_identity,
-       c.is_computed,
-       c.is_rowguidcol AS is_rowversion
-FROM sys.columns c
-JOIN sys.types t ON c.user_type_id = t.user_type_id
-WHERE c.[object_id] = OBJECT_ID(@tbl)";
+                    SELECT c.name AS ColName,
+                        t.name AS DbType,
+                        c.is_identity,
+                        c.is_computed,
+                        c.is_rowguidcol AS is_rowversion
+                    FROM sys.columns c
+                    JOIN sys.types t ON c.user_type_id = t.user_type_id
+                    WHERE c.[object_id] = OBJECT_ID(@tbl)";
                 var p = cmd.CreateParameter();
                 p.ParameterName = "@tbl";
                 p.Value = table;
@@ -202,12 +369,12 @@ WHERE c.[object_id] = OBJECT_ID(@tbl)";
             {
                 cmd.Transaction = (System.Data.Common.DbTransaction)tx;
                 cmd.CommandText = @"
-SELECT col.name
-FROM sys.indexes i
-JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
-JOIN sys.columns col       ON col.object_id = ic.object_id AND col.column_id = ic.column_id
-WHERE i.object_id = OBJECT_ID(@tbl) AND i.is_primary_key = 1
-ORDER BY ic.key_ordinal";
+                    SELECT col.name
+                    FROM sys.indexes i
+                    JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+                    JOIN sys.columns col       ON col.object_id = ic.object_id AND col.column_id = ic.column_id
+                    WHERE i.object_id = OBJECT_ID(@tbl) AND i.is_primary_key = 1
+                    ORDER BY ic.key_ordinal";
                 var p = cmd.CreateParameter();
                 p.ParameterName = "@tbl";
                 p.Value = table;
@@ -226,17 +393,17 @@ ORDER BY ic.key_ordinal";
             using var cmd = conn.CreateCommand();
             cmd.Transaction = (System.Data.Common.DbTransaction)tx;
             cmd.CommandText = @"
-WITH idx AS (
-    SELECT i.index_id, i.name
-    FROM sys.indexes i
-    WHERE i.object_id = OBJECT_ID(@tbl)
-      AND i.is_unique = 1
-)
-SELECT idx.index_id, ic.key_ordinal, c.name AS ColName
-FROM idx
-JOIN sys.index_columns ic ON ic.object_id = OBJECT_ID(@tbl) AND ic.index_id = idx.index_id
-JOIN sys.columns c        ON c.object_id  = ic.object_id     AND c.column_id = ic.column_id
-ORDER BY idx.index_id, ic.key_ordinal";
+                WITH idx AS (
+                    SELECT i.index_id, i.name
+                    FROM sys.indexes i
+                    WHERE i.object_id = OBJECT_ID(@tbl)
+                    AND i.is_unique = 1
+                )
+                SELECT idx.index_id, ic.key_ordinal, c.name AS ColName
+                FROM idx
+                JOIN sys.index_columns ic ON ic.object_id = OBJECT_ID(@tbl) AND ic.index_id = idx.index_id
+                JOIN sys.columns c        ON c.object_id  = ic.object_id     AND c.column_id = ic.column_id
+                ORDER BY idx.index_id, ic.key_ordinal";
             var p = cmd.CreateParameter();
             p.ParameterName = "@tbl";
             p.Value = table;
@@ -420,7 +587,8 @@ ORDER BY idx.index_id, ic.key_ordinal";
 
     // 新增：ByKeys(table, keyNames[], keyValues[]) → 多個 = 條件 (AND)
     [HttpGet]
-    public async Task<IActionResult> ByKeys([FromQuery] string table, [FromQuery] string[] keyNames, [FromQuery] string[] keyValues)
+    public async Task<IActionResult> ByKeys([FromQuery] string table, [FromQuery] string[] keyNames, [FromQuery] string[] keyValues,
+        [FromQuery] string? orderBy = null, [FromQuery] string? orderDir = "ASC")
     {
         if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required");
         if (keyNames == null || keyValues == null || keyNames.Length == 0 || keyNames.Length != keyValues.Length)
@@ -435,6 +603,7 @@ ORDER BY idx.index_id, ic.key_ordinal";
         // 驗 column & 組條件
         var whereParts = new List<string>();
         var parameters = new List<SqlParameter>();
+        string orderSql = "";
         for (int i = 0; i < keyNames.Length; i++)
         {
             var col = keyNames[i];
@@ -445,7 +614,8 @@ ORDER BY idx.index_id, ic.key_ordinal";
                                      FROM sys.columns c 
                                      JOIN sys.tables t ON t.object_id=c.object_id
                                      WHERE t.name={table} AND c.name={col}").AnyAsync();
-            if (!colOk) return BadRequest($"Column '{col}' not found in '{table}'.");
+            if (!colOk)
+                return BadRequest($"Column '{col}' not found in '{table}'.");
 
             var p = new SqlParameter($"@p{i}", (object?)val ?? DBNull.Value);
             parameters.Add(p);
@@ -453,7 +623,23 @@ ORDER BY idx.index_id, ic.key_ordinal";
         }
 
         var whereSql = string.Join(" AND ", whereParts);
-        var sql = $"SELECT * FROM [{table}] WHERE {whereSql}";
+        var sql = $"SELECT * FROM [{table}] WHERE {whereSql} {orderSql}";
+
+        // 處理排序 (ORDER BY 必須在迴圈外)
+        if (!string.IsNullOrWhiteSpace(orderBy))
+        {
+            // 驗證 orderBy 欄位存在
+            var orderColOk = await _context.Database
+                .SqlQuery<string>($@"SELECT c.name 
+                                    FROM sys.columns c 
+                                    JOIN sys.tables t ON t.object_id=c.object_id
+                                    WHERE t.name={table} AND c.name={orderBy}").AnyAsync();
+            if (!orderColOk)
+                return BadRequest($"Column '{orderBy}' not found in '{table}'.");
+
+            var dir = string.Equals(orderDir, "DESC", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC";
+            sql += $" ORDER BY [{orderBy}] {dir}";
+        }
 
         var dt = new DataTable();
         await using var conn = (SqlConnection)_context.Database.GetDbConnection();

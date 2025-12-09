@@ -22,6 +22,10 @@
       <button id="@domId-btnSave" type="button" class="btn btn-success shadow-sm px-4 d-none">
         儲存
       </button>
+
+      <!-- 新增：新增 / 刪除 按鈕（修改模式才顯示） -->
+      <button id="@domId-btnAdd" type="button" class="btn btn-primary shadow-sm px-3 d-none" title="新增一筆">+</button>
+      <button id="@domId-btnDelete" type="button" class="btn btn-danger shadow-sm px-3 d-none" title="刪除所選">-</button>
     </div>
     <div class="fab-placeholder"></div>
   </div>
@@ -85,12 +89,17 @@ document.addEventListener('DOMContentLoaded', () => {
   const mTable    = document.getElementById(domId + '-masterGrid');
   const dWrapper  = document.getElementById(domId + '-detailWrapper');
   const dTable    = document.getElementById(domId + '-detailGrid');
+  // 新增、刪除按鈕
+  const addBtn    = document.getElementById(domId + '-btnAdd');
+  const deleteBtn = document.getElementById(domId + '-btnDelete');
+
 
   // 建立 Master / Detail 兩個 editor
   const masterEditor = window.makeEditableGrid({
     wrapper: mWrapper,
     table:   mTable,
-    tableName: cfg.MasterTable || cfg.Master || ''
+    tableName: cfg.MasterTable || cfg.Master || '',
+    keyFields: cfg.KeyMap || []
   });
 
   const detailEditor = window.makeEditableGrid({
@@ -112,6 +121,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     editBtn.textContent = toEdit ? '保留' : '修改';
     saveBtn.classList.toggle('d-none', !toEdit);
+
+    // 顯示 / 隱藏 新增、刪除按鈕（只在修改模式顯示）
+    if (addBtn) addBtn.classList.toggle('d-none', !toEdit);
+    if (deleteBtn) deleteBtn.classList.toggle('d-none', !toEdit);
 
     const evt = new CustomEvent('md-edit-click', { detail: { domId, isEdit: toEdit } });
     window.dispatchEvent(evt);
@@ -138,6 +151,69 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     Swal.fire({ icon: 'success', title: '儲存完成', timer: 1000, showConfirmButton: false });
+  });
+
+  // 先判斷是 master 還是 detail
+  let target = null;
+  // 點擊 table 任一處就更新（可改成更精細的 row click）
+  mTable.addEventListener('click', () => { target = masterEditor; });
+  dTable.addEventListener('click', () => { target = detailEditor; });
+
+  // 新增按鈕
+  addBtn.addEventListener('click', async () => {
+    if (!window._mdEditing) {
+      Swal.fire({ icon: 'info', title: '請先點選修改進入編輯模式', timer: 1000, showConfirmButton: false });
+      return;
+    }
+
+    if (!target) {
+      Swal.fire({ icon: 'info', title: '請先選取要新增的位置', timer: 1000, showConfirmButton: false });
+      return;
+    }
+
+    try {
+      const r = await target.insertRows();
+      if (r && r.ok === false) {
+        Swal.fire({ icon: 'error', title: '新增失敗', text: r.text || '無法新增資料' });
+      }
+    } catch (err) {
+      console.error(err);
+      Swal.fire({ icon: 'error', title: '新增發生錯誤', text: err.message || err });
+    }
+  });
+
+  // 刪除按鈕
+  deleteBtn.addEventListener('click', async () => {
+    if (!window._mdEditing) {
+      Swal.fire({ icon: 'info', title: '請先點選修改進入編輯模式', timer: 1000, showConfirmButton: false });
+      return;
+    }
+
+    if (!target) {
+      Swal.fire({ icon: 'info', title: '請先選取要刪除的資料', timer: 1000, showConfirmButton: false });
+      return;
+    }
+
+    const confirm = await Swal.fire({
+      icon: 'warning',
+      title: '確認刪除',
+      text: '確定要刪除所選資料嗎？此動作無法還原。',
+      showCancelButton: true,
+      confirmButtonText: '刪除',
+      cancelButtonText: '取消'
+    });
+
+    if (!confirm.isConfirmed) return;
+
+    try {
+      const r = await target.deleteRows();
+      if (r && r.ok === false) {
+        Swal.fire({ icon: 'error', title: '刪除失敗', text: r.text || '刪除失敗' });
+      }
+    } catch (err) {
+      console.error(err);
+      Swal.fire({ icon: 'error', title: '刪除發生錯誤', text: err.message || err });
+    }
   });
 });
 </script>

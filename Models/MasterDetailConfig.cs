@@ -38,7 +38,8 @@ namespace WebRazor.Models
         public string? MasterOrderBy { get; set; }
         public string? MasterOrderDir { get; set; } = "ASC";
 
-        
+        public string? DetailOrderBy { get; set; }
+        public string? DetailOrderDir { get; set; } = "ASC";
     }
 
     public sealed class KeyMap

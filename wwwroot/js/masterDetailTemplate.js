@@ -131,7 +131,7 @@
     tbody.innerHTML = "";
 
     const fields = dict
-      .filter(DICT_MAP.visible)
+      .filter(DICT_MAP.visible)//
       .sort((a, b) => DICT_MAP.order(a) - DICT_MAP.order(b));
 
     // 先把所有欄位的 Lookup / OCX map 都載完（各欄位只打一次 API）
@@ -148,9 +148,7 @@
       tr.style.cursor = "pointer";
 
         fields.forEach(f => {
-
           const col = f.FieldName;
-
           // 取得原始資料
           let raw = row[col];
 
@@ -207,7 +205,19 @@
           td.append(span, inp);
           tr.appendChild(td);
       });
-
+      
+      // add hidden PK inputs so editableGrid can always pick them up
+      // cfg.PKFields 可由 server 傳入 config（Array of field names）
+      const pkFields = (Array.isArray(cfg?.KeyMap) ? cfg.KeyMap.map(k => k.Detail || k.Master).filter(Boolean) : []) || [];
+      pkFields.forEach(pk => {
+        const pkValue = row[pk] ?? "";
+        const inp = document.createElement("input");
+        inp.type = "hidden";
+        inp.className = "mmd-pk-hidden";
+        inp.name = pk;
+        inp.value = pkValue;
+        tr.appendChild(inp);
+      });
 
       if (onRowClick) tr.addEventListener("click", () => onRowClick(tr, row));
       tbody.appendChild(tr);
@@ -274,7 +284,9 @@
     const masterUrl =
       cfg.MasterApi?.trim()
         ? cfg.MasterApi
-        : `/api/CommonTable/TopRows?table=${encodeURIComponent(cfg.MasterTable)}&top=${cfg.MasterTop || 200}`;
+        : `/api/CommonTable/TopRows?table=${encodeURIComponent(cfg.MasterTable)}&top=${cfg.MasterTop || 200}`
+          + (cfg.MasterOrderBy ? `&orderBy=${encodeURIComponent(cfg.MasterOrderBy)}` : "")
+          + (cfg.MasterOrderDir ? `&orderDir=${encodeURIComponent(cfg.MasterOrderDir)}` : "");
 
     const masterRows = await fetch(masterUrl).then(r => r.json());
 
@@ -290,17 +302,24 @@
         cfg.DetailApi?.trim()
           ? cfg.DetailApi
           : `/api/CommonTable/ByKeys?table=${encodeURIComponent(cfg.DetailTable)}`
-              + names.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
-              + values.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("");
+            + names.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
+            + values.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("")
+            + (cfg.DetailOrderBy ? `&orderBy=${encodeURIComponent(cfg.DetailOrderBy)}` : "")
+            + (cfg.DetailOrderDir ? `&orderDir=${encodeURIComponent(cfg.DetailOrderDir)}` : "");
 
       const detailRows = await fetch(detailUrl).then(r => r.json());
+
+      const onDetailClick = async (tr, row) => {
+        Array.from(dBody.children).forEach(x => x.classList.remove("selected"));
+        tr.classList.add("selected");
+      };
 
       await buildBody(
         dBody,
         dDict,
         detailRows,
         false,
-        () => {},
+        onDetailClick,  // 原本() => {}
         cfg
       );
 
