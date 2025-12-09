@@ -9,6 +9,7 @@ public class UpdateDictFieldInput
     public string DataType { get; set; }
     public string FormatStr { get; set; }
     public string FieldNote { get; set; }
+    public int? ComboStyle { get; set; }
 
     public int? DisplaySize { get; set; }
     public int? iLabHeight { get; set; }

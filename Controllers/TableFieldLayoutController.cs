@@ -163,7 +163,16 @@ public class TableFieldLayoutController : ControllerBase
 
         const string sql = @"
 UPDATE CURdTableField
-SET iFieldWidth = @W
+SET iFieldWidth = @W, DisplaySize = @DS
+WHERE LOWER(FieldName) = @F
+  AND (
+        LOWER(TableName) = @TN
+     OR LOWER(REPLACE(TableName,'dbo.','')) = @TN
+     )";
+
+        const string sqlLang = @"
+UPDATE CURdTableFieldLang
+SET DisplaySize = @DS
 WHERE LOWER(FieldName) = @F
   AND (
         LOWER(TableName) = @TN
@@ -172,12 +181,24 @@ WHERE LOWER(FieldName) = @F
 
         foreach (var it in items)
         {
+            // 以 px 寬度換算 DisplaySize（字數）：目前 1 字 = 10px 的策略
+            var displaySize = Math.Max(1, (int)Math.Round(it.width / 10.0, MidpointRounding.AwayFromZero));
+
             var n = await _context.Database.ExecuteSqlRawAsync(
                 sql,
                 new SqlParameter("@W", it.width),
+                new SqlParameter("@DS", displaySize),
                 new SqlParameter("@F", it.field),
                 new SqlParameter("@TN", tname)
             );
+            // 同步更新語系表，確保 DisplaySize 也被帶入
+            await _context.Database.ExecuteSqlRawAsync(
+                sqlLang,
+                new SqlParameter("@DS", displaySize),
+                new SqlParameter("@F", it.field),
+                new SqlParameter("@TN", tname)
+            );
+
             updated += n;
         }
 
@@ -337,6 +358,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         f.SerialNum,
         Visible   = CASE WHEN ISNULL(f.Visible,1)=1 THEN 1 ELSE 0 END,
         ReadOnly  = CASE WHEN ISNULL(f.ReadOnly,0)=1 THEN 1 ELSE 0 END,
+        f.ComboStyle,
         f.FieldNote,
 
         -- 標籤/欄位座標與尺寸
@@ -390,6 +412,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
                 Visible         = (rd["Visible"]?.ToString() ?? "1") == "1" ? 1 : 0,
                 ReadOnly        = (rd["ReadOnly"]?.ToString() ?? "0") == "1" ? 1 : 0,
                 FieldNote       = rd["FieldNote"]?.ToString() ?? "",
+                ComboStyle      = rd["ComboStyle"] as int?,
 
                 iLabHeight      = rd["iLabHeight"]  as int?,
                 iLabTop         = rd["iLabTop"]     as int?,

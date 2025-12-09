@@ -14,20 +14,19 @@
 <div id="@domId" class="md-wrapper md-page container-fluid px-2 px-md-4">
 
   <!-- 功能列（左：修改；右：留白避免壓到主選單浮動鈕） -->
-  <div class="d-flex align-items-center justify-content-between my-3">
-    <div class="btn-toolbar gap-2">
-      <button id="@domId-btnEdit" type="button" class="btn btn-warning shadow-sm px-4">
-        修改
-      </button>
-      <button id="@domId-btnSave" type="button" class="btn btn-success shadow-sm px-4 d-none">
-        儲存
-      </button>
+  <div class="d-flex align-items-center gap-3 my-3 flex-wrap">
+    <div class="d-flex gap-2 flex-wrap" id="@domId-custom-slot"></div>
+    <div class="btn-toolbar gap-2 md-toolbar">
+      <button id="@domId-btnEdit" type="button" class="btn btn-warning btn-sm shadow-sm px-3 py-2">編輯</button>
+      <button id="@domId-btnSave" type="button" class="btn btn-success btn-sm shadow-sm px-3 py-2 d-none">儲存</button>
+      <button id="@domId-btnAdd" type="button" class="btn btn-outline-primary btn-sm shadow-sm px-3 py-2 d-none">新增</button>
+      <button id="@domId-btnConfirm" type="button" class="btn btn-outline-success btn-sm shadow-sm px-3 py-2 d-none">✓</button>
+      <button id="@domId-btnCancel" type="button" class="btn btn-outline-danger btn-sm shadow-sm px-3 py-2 d-none">☓</button>
 
       <!-- 新增：新增 / 刪除 按鈕（修改模式才顯示） -->
       <button id="@domId-btnAdd" type="button" class="btn btn-primary shadow-sm px-3 d-none" title="新增一筆">+</button>
       <button id="@domId-btnDelete" type="button" class="btn btn-danger shadow-sm px-3 d-none" title="刪除所選">-</button>
     </div>
-    <div class="fab-placeholder"></div>
   </div>
 
   <!-- 單頭 Master -->
@@ -38,7 +37,7 @@
       <div id="@domId-masterWrapper" class="table-responsive md-master-scroll fab-safe">
         <table id="@domId-masterGrid" class="table table-sm table-hover align-middle mb-0 md-master-table"
                tabindex="0" data-dict-table="@masterDictName">
-          <thead class="table-primary sticky-top">
+          <thead class="sticky-top md-head">
             <tr id="@domId-m-head"><th class="text-center" style="width:60px;display:none;">#</th></tr>
           </thead>
           <tbody id="@domId-m-body"></tbody>
@@ -55,7 +54,7 @@
       <div id="@domId-detailWrapper" class="table-responsive md-detail-scroll fab-safe">
         <table  id="@domId-detailGrid" class="table table-sm table-striped align-middle mb-0 md-detail-table"
                tabindex="0" data-dict-table="@detailDictName">
-          <thead class="table-secondary sticky-top">
+          <thead class="sticky-top md-head">
             <tr id="@domId-d-head"><th class="text-center" style="width:60px;display:none;">#</th></tr>
           </thead>
           <tbody id="@domId-d-body">
@@ -85,6 +84,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const editBtn   = document.getElementById(domId + '-btnEdit');
   const saveBtn   = document.getElementById(domId + '-btnSave');
+  const addBtn    = document.getElementById(domId + '-btnAdd');
+  const confirmBtn= document.getElementById(domId + '-btnConfirm');
+  const cancelBtn = document.getElementById(domId + '-btnCancel');
   const mWrapper  = document.getElementById(domId + '-masterWrapper');
   const mTable    = document.getElementById(domId + '-masterGrid');
   const dWrapper  = document.getElementById(domId + '-detailWrapper');
@@ -101,6 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
     tableName: cfg.MasterTable || cfg.Master || '',
     keyFields: cfg.KeyMap || []
   });
+  window._masterEditor = masterEditor;
 
   const detailEditor = window.makeEditableGrid({
     wrapper:  dWrapper,
@@ -119,12 +122,18 @@ document.addEventListener('DOMContentLoaded', () => {
     masterEditor.toggleEdit(toEdit);
     detailEditor.toggleEdit(toEdit);
 
-    editBtn.textContent = toEdit ? '保留' : '修改';
+    editBtn.textContent = toEdit ? '檢視' : '編輯';
     saveBtn.classList.toggle('d-none', !toEdit);
 
     // 顯示 / 隱藏 新增、刪除按鈕（只在修改模式顯示）
     if (addBtn) addBtn.classList.toggle('d-none', !toEdit);
     if (deleteBtn) deleteBtn.classList.toggle('d-none', !toEdit);
+    addBtn?.classList.toggle('d-none', !toEdit);
+    // 離開編輯時關閉新增模式
+    if (!toEdit) {
+      confirmBtn?.classList.add('d-none');
+      cancelBtn?.classList.add('d-none');
+    }
 
     const evt = new CustomEvent('md-edit-click', { detail: { domId, isEdit: toEdit } });
     window.dispatchEvent(evt);
@@ -228,6 +237,9 @@ document.addEventListener('DOMContentLoaded', () => {
   --md-master-max: 40vh;   /* 單頭區塊的最大高度 */
   /* 單身的最小高度交給捲動層，不要卡在 card 上 */
   --md-detail-min: 0;
+  --md-head-bg: #f8fafc;
+  --md-head-text: #334155;
+  --md-border: #e5e7eb;
 }
 
 /* ...前面都一樣... */
@@ -274,6 +286,8 @@ document.addEventListener('DOMContentLoaded', () => {
 .md-wrapper .md-detail-table {
   border-collapse: separate;
   border-spacing: 0;
+  width: auto;              /* 欄寬依辭典設定，不撐滿整個 GRID */
+  min-width: max-content;   /* 總寬度超過容器時出現水平捲軸 */
   table-layout: fixed;      /* ⭐ 固定欄寬，跟著 th 的 width 走 */
 
 }
@@ -281,18 +295,19 @@ document.addEventListener('DOMContentLoaded', () => {
   .md-wrapper .md-master-table td,
   .md-wrapper .md-detail-table th,
   .md-wrapper .md-detail-table td {
-    border-right: 1px solid #e9ecef;
+    border-right: 1px solid var(--md-border);
     white-space: nowrap;
+    position: relative;
   }
   .md-wrapper .md-master-table thead th:first-child,
   .md-wrapper .md-master-table tbody td:first-child,
   .md-wrapper .md-detail-table thead th:first-child,
   .md-wrapper .md-detail-table tbody td:first-child {
-    border-left: 1px solid #e9ecef;
+    border-left: 1px solid var(--md-border);
   }
   .md-wrapper .md-master-table thead th,
   .md-wrapper .md-detail-table thead th {
-    border-bottom: 1px solid #dee2e6;
+    border-bottom: 1px solid var(--md-border);
   }
   .md-wrapper .md-master-table tbody tr + tr,
   .md-wrapper .md-detail-table tbody tr + tr {
@@ -316,10 +331,13 @@ document.addEventListener('DOMContentLoaded', () => {
     vertical-align: middle;
     line-height: 1.2;
     min-width: 64px;
+    background: var(--md-head-bg);
+    color: var(--md-head-text);
   }
 
   /* 選取列高亮 */
-  .md-wrapper .selected { background: #e3f2fd !important; font-weight: 600; }
+  .md-wrapper .selected { background: #f1f5f9 !important; font-weight: 600; }
+  .md-wrapper tbody tr:hover td { background: #f8fafc; }
 
   /* ====== 高密度模式：字體縮小、padding 縮小 ====== */
 
@@ -361,15 +379,16 @@ document.addEventListener('DOMContentLoaded', () => {
   /* 表頭 */
   .md-wrapper th {
       font-size: 14px !important;
-      padding: 2px 4px !important;
-      height: 26px !important;
+      padding: 6px 8px !important;
+      height: 32px !important;
+      font-weight: 600;
   }
 
   /* 表格資料列 */
   .md-wrapper td {
       font-size: 14px !important;
-      padding: 2px 4px !important;
-      height: 26px !important;
+      padding: 6px 8px !important;
+      height: 30px !important;
   }
 
   /* 卡片標題 */
@@ -377,6 +396,32 @@ document.addEventListener('DOMContentLoaded', () => {
       font-size: 14px !important;
       padding: 4px 8px !important;
   }
+
+  /* 工具列按鈕統一樣式（對齊 MultiGrid） */
+  .md-toolbar .btn{
+      min-height: 32px;
+      font-size: 14px;
+      border-radius: 8px;
+      font-weight: 500;
+  }
+  .md-toolbar .btn-outline-success { color:#198754 !important; border-color:#198754 !important; box-shadow:none!important; background:#fff!important; }
+  .md-toolbar .btn-outline-success:hover,
+  .md-toolbar .btn-outline-success:focus { color:#198754 !important; background:#e9f7ef !important; box-shadow:none!important; }
+
+  /* 欄寬拖曳把手 */
+  .md-col-resizer{
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 10px;
+      cursor: col-resize;
+      user-select: none;
+      z-index: 2;
+  }
+  .md-wrapper th.resizing,
+  .md-wrapper td.resizing,
+  body.resizing { cursor: col-resize !important; }
 
 
 </style>

@@ -107,6 +107,7 @@
                 <input data-field="LookupResultField" value="${x.LookupResultField ?? ''}" />
 
                 <input data-field="IsNotesField" value="${x.IsNotesField ?? ''}" />
+                <input data-field="ComboStyle" value="${x.ComboStyle ?? ''}" />
 
                 <input data-field="OCXLKTableName" value="${x.OCXLKTableName ?? ''}" />
                 <input data-field="OCXLKResultName" value="${x.OCXLKResultName?? ''}" />
@@ -125,13 +126,18 @@
             </td>
 
             <td class="text-center" style="width:40px">
-              <input type="checkbox" data-field="Visible"
+              <input type="checkbox" class="checkbox-dark" data-field="Visible"
                     ${(+x.Visible === 1 ? 'checked' : '')} />
             </td>
 
             <td class="text-center" style="width:40px">
-              <input type="checkbox" data-field="ReadOnly"
+              <input type="checkbox" class="checkbox-dark" data-field="ReadOnly"
                     ${(+x.ReadOnly === 1 ? 'checked' : '')} />
+            </td>
+
+            <td class="text-center" style="width:40px">
+              <input type="checkbox" class="checkbox-dark" data-field="ComboStyle"
+                    ${(+x.ComboStyle === 1 ? 'checked' : '')} />
             </td>
 
             <td style="width:50px">
@@ -263,7 +269,8 @@
         LookupResultField: getVal('LookupResultField'),
 
         // === 其他欄位 ===
-        IsNotesField: getVal('IsNotesField')
+        IsNotesField: getVal('IsNotesField'),
+        ComboStyle: getChk('ComboStyle')
       };
     });
 

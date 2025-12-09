@@ -7,22 +7,21 @@
     Layout = "_Layout";
 
     var pageMap = new Dictionary<string, string> {
-        { "SA000002", "/SPOdOrderMain" },   // 銷售訂單
-        { "SPO00010", "/SPOdMPSOutMain" },       // 銷貨單
-        { "AA000015", "/AJN/AJNdJourMain" },    // 總帳傳票
-        { "SP000011", "/AJN/AJNdClassMoney" },   // 幣別匯率主檔
-        { "FME00020", "/FmedIssueMain"},
-        {"SA000048", "/Report/SPO/SA000048"},
-        {"CUR00017","/CUR/CurdBu"},
-        {"CUR00018","/CUR/CURdSystemSelect"},
-        {"CUR00015","/CUR/CURdSysItems"},
+        {"SA000002","/SPOdOrderMain" },   // 銷售訂單
+        {"SPO00010","/SPOdMPSOutMain" },       // 銷貨單
+        {"AA000015","/AJN/AJNdJourMain" },    // 總帳傳票
+        {"SP000011","/AJN/AJNdClassMoney" },   // 幣別匯率主檔
+        {"FME00020","/FmedIssueMain"},
         {"CUR00012", "/CUR/CURdSysParams"},
-        {"CUR00019","/CUR/CURdPaperInfo"},
-        {"CUR00003", "/CUR/CURdMsgPaper"},
         {"CURH0002", "/CUR/CURdReportOrderBasPage"},
-        {"CUR00007", "/CUR/CURdGroups"}
+        {"CUR00007", "/CUR/CURdGroups"},
+        {"CURH0003", "/CUR/CURdV_SysProcess"},
+        {"CUR00004", "/CUR/NoticeBoard"},
+        {"CC000054", "/CCS/CC000054"}
+   
         // 其它功能請自行加入...
     };
+    
 }
 
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
@@ -174,15 +173,22 @@ body {
                         }
                         else
                         {
+                            var ocx = item.Ocxtemplete?.Trim().ToLowerInvariant() ?? "";
+                            var link = pageMap.ContainsKey(item.ItemId)
+                            ? pageMap[item.ItemId]
+                            : (item.ItemType == 2 && item.OutputType == 0 ? $"/Report/Direct/{item.ItemId}"
+                               : item.ItemType == 6 && ocx.Contains("jsdsinglegriddll") ? $"/CUR/SingleGrid/{item.ItemId}"
+                               : item.ItemType == 6 && ocx.Contains("jsdgriddll") ? $"/CUR/MultiGrid/{item.ItemId}"
+                               : item.ItemType == 6 && ocx.Contains("jsdmasdtldll") ? $"/CUR/MasterDetail/{item.ItemId}"
+                               : null);
+
                             <li class="list-group-item d-flex justify-content-between align-items-center" id="li-@item.ItemId">
-                                @if (pageMap.ContainsKey(item.ItemId))
-                                {
-                                    <a href="@pageMap[item.ItemId]" style="flex:1">@item.ItemId - @item.ItemName</a>
-                                }
-                                else
-                                {
-                                    <span style="flex:1">@item.ItemId - @item.ItemName</span>
-                                }
+
+                            @if (!string.IsNullOrEmpty(link)) {
+                                <a href="@link" style="flex:1">@item.ItemId - @item.ItemName</a>
+                            } else {
+                                <a href="javascript:void(0)" class="dyn-link" data-itemid="@item.ItemId" data-itemname="@item.ItemName" data-superid="@item.SuperId" style="flex:1" onclick="resolveAndGo('@item.ItemId','@item.ItemName','@item.SuperId')">@item.ItemId - @item.ItemName</a>
+                            }
                                 <button class="btn btn-outline-warning btn-sm" onclick="addToFavorite('@item.ItemId', '@item.ItemName', '@item.SuperId')">★</button>
                             </li>
                         }
@@ -219,28 +225,82 @@ body {
     "SPO00010": "/SPOdMPSOutMain",
     "SP000011": "/AJN/AJNdClassMoney",
     "FME00020": "/FmedIssueMain",
-    "SA000048": "/Report/SPO/SA000048",
-    "CUR00017": "/CUR/CurdBu",
-    "CUR00018": "/CUR/CURdSystemSelect",
-    "CUR00015": "/CUR/CURdSysItems",
     "CUR00012": "/CUR/CURdSysParams",
-    "CUR00019": "/CUR/CURdPaperInfo",
-    "CUR00003": "/CUR/CURdMsgPaper",
     "CURH0002": "/CUR/CURdReportOrderBasPage",
-    "CUR00007": "/CUR/CURdGroups"
+    "CUR00007": "/CUR/CURdGroups",
+    "CURH0003": "/CUR/CURdV_SysProcess",
+    "CUR00004": "/CUR/NoticeBoard",
+    "CC000054": "/CCS/CC000054",
     // 其它功能自行補上
     };
 
     const selectedLevel1Id = "@Model.SelectedLevel1Id";
 
+    async function resolveAndGo(itemId, itemName, superId) {
+        console.debug('resolveAndGo click', { itemId, itemName, superId });
+        const hard = pageMap[itemId];
+        if (hard) { location.href = hard; return; }
+        try {
+            const metaUrl = `/api/report/item-meta/${itemId}`;
+            console.debug('fetch meta', metaUrl);
+            const res = await fetch(metaUrl);
+            if (!res.ok) throw new Error('not found');
+            const meta = await res.json();
+            const itemType = Number(meta.itemType ?? meta.ItemType);
+            const outputType = Number(meta.outputType ?? meta.OutputType);
+            const pickStr = (obj, keys) => {
+                for (const k of keys) {
+                    if (obj && obj[k] !== undefined && obj[k] !== null) return obj[k];
+                }
+                return '';
+            };
+            const ocxRaw = pickStr(meta, [
+                'ocxtemplete','OCXTemplete','ocxTemplete','OCXTemplete',
+                'ocxTemplate','OCXTemplate','ocxtemplate','OCXTEMPLATE',
+                'OCX','ocx'
+            ]);
+            const ocx = String(ocxRaw).trim().toLowerCase();
+            let url = '';
+            if (itemType === 2 && outputType === 0) url = `/Report/Direct/${itemId}`;
+            else if (itemType === 2 && outputType === 6) url = `/Report/Generic/${itemId}`;
+            else if (itemType === 6 && (ocx === 'jsdsinglegriddll.dll' || ocx.includes('jsdsinglegriddll'))) url = `/CUR/SingleGrid/${itemId}`;
+            else if (itemType === 6 && (ocx === 'jsdgriddll.dll' || ocx.includes('jsdgriddll'))) url = `/CUR/MultiGrid/${itemId}`;
+            else if (itemType === 6 && (ocx === 'jsdmasdtldll.dll' || ocx.includes('jsdmasdtldll'))) url = `/CUR/MasterDetail/${itemId}`;
+
+            if (url) { location.href = url; return; }
+            if (superId) { location.href = `?level1Id=${superId}`; return; }
+        } catch (err) {
+            console.warn('resolveAndGo meta error', err);
+        }
+        if (superId) {
+            location.href = `?level1Id=${superId}`;
+        } else {
+            alert(`找不到對應的頁面: ${itemId}`);
+        }
+    }
     window.toggleChildren = function (id) {
         const el = document.getElementById(id);
         if (el) el.style.display = el.style.display === "none" ? "block" : "none";
     };
 
+    // 確保動態連結有事件（若 inline onclick 被瀏覽器阻擋或失效）
     document.addEventListener('DOMContentLoaded', () => {
-        let addItemModal = new bootstrap.Modal(document.getElementById('addItemModal'));
-        let editItemModal = new bootstrap.Modal(document.getElementById('editItemModal'));
+        document.addEventListener('click', (ev) => {
+            const link = ev.target.closest('.dyn-link');
+            if (!link) return;
+            ev.preventDefault();
+            const itemId = link.dataset.itemid || link.getAttribute('data-itemid');
+            const itemName = link.dataset.itemname || link.getAttribute('data-itemname');
+            const superId = link.dataset.superid || link.getAttribute('data-superid');
+            resolveAndGo(itemId, itemName, superId);
+        });
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const addItemEl = document.getElementById('addItemModal');
+        const editItemEl = document.getElementById('editItemModal');
+        let addItemModal = addItemEl ? new bootstrap.Modal(addItemEl) : null;
+        let editItemModal = editItemEl ? new bootstrap.Modal(editItemEl) : null;
 
         window.openEditModal = function (itemId, itemName, superId, itemType) {
             document.getElementById('editItemId').value = itemId;
@@ -248,7 +308,7 @@ body {
             document.getElementById('editSuperId').value = superId;
             document.getElementById('editItemType').value = itemType;
             document.getElementById('editAlert').classList.add('d-none');
-            editItemModal.show();
+            if (editItemModal) editItemModal.show();
         };
 
     });
@@ -316,5 +376,22 @@ body {
         document.addEventListener('DOMContentLoaded', function() {
             renderFavorites();
         });
+
+    // fallback: ensure dyn-link click is always handled (capture phase), even if earlier listeners failed
+    (function ensureDynLinkHandler() {
+        if (window.__dynLinkHandlerBound) return;
+        window.__dynLinkHandlerBound = true;
+        const handler = (ev) => {
+            const link = ev.target.closest('.dyn-link');
+            if (!link) return;
+            ev.preventDefault();
+            const itemId = link.dataset.itemid || link.getAttribute('data-itemid');
+            const itemName = link.dataset.itemname || link.getAttribute('data-itemname');
+            const superId = link.dataset.superid || link.getAttribute('data-superid');
+            console.debug('dyn-link click (fallback)', { itemId, itemName, superId });
+            resolveAndGo(itemId, itemName, superId);
+        };
+        document.addEventListener('click', handler, true);
+    })();
 
 </script>

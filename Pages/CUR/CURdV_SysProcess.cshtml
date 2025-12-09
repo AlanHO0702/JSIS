@@ -1,0 +1,111 @@
+@page
+@model PcbErpApi.Pages.CUR.CURdV_SysProcess_WEBModel
+@{
+    Layout = "_Layout";
+}
+
+
+<div class="d-flex justify-content-start align-items-center mb-3 flex-wrap gap-2">
+  <div class="d-flex align-items-center gap-3 flex-wrap">
+    <h3 class="mb-0">登入現況表</h3>
+    <div class="badge bg-primary bg-opacity-10 text-primary border border-primary fw-semibold py-2 px-3">
+      總登入人數：<span id="loginCountValue">@((Model?.Items?.Count ?? 0))</span>
+    </div>
+  </div>
+  <button id="btnKick" type="button" class="btn btn-danger btn-sm">踢除使用者</button>
+</div>
+
+<partial name="~/Pages/Shared/_TableSingleGrid.cshtml" model="Model" />
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", ViewData["FieldDictList"], ViewData)
+<script>window._dictTableName = 'CURdV_SysProcess_WEB';</script>
+<script src="~/js/fieldDictModal.js"></script>
+
+<script>
+let loginCountEl = null;
+
+const calcLoginCount = () => document.querySelectorAll("#mainGrid tbody tr").length;
+const updateLoginCount = () => {
+  if (loginCountEl) loginCountEl.textContent = calcLoginCount();
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+    loginCountEl = document.getElementById("loginCountValue");
+    updateLoginCount();
+    const rows = document.querySelectorAll("#mainGrid tbody tr");
+    const items = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Items));
+
+    rows.forEach((tr, idx) => {
+        const item = items[idx];
+
+        if (item.JwtId) tr.dataset.jwtid = item.JwtId;
+
+        tr.classList.add("clickable-row");
+
+        const count = item.DeviceSessionCount;
+        if (count > 1) {
+            const td = tr.querySelector("td:last-child");
+            td.innerHTML += ` <span class="badge bg-warning">${count} 次</span>`;
+        }
+    });
+});
+
+// ===== 列點選 =====
+let selectedJwtId = null;
+let selectedRow = null;
+
+document.addEventListener("click", (ev) => {
+    const tr = ev.target.closest("#mainGrid tbody tr");
+    if (!tr || !tr.dataset || !tr.dataset.jwtid) return;
+
+    document.querySelectorAll("#mainGrid tbody tr")
+        .forEach(r => r.classList.remove("selected-row"));
+
+    tr.classList.add("selected-row");
+
+    selectedJwtId = tr.dataset.jwtid;
+    selectedRow = tr;
+});
+
+// ===== 剔除使用者（Bootstrap Modal） =====
+document.getElementById("btnKick").addEventListener("click", async () => {
+
+    if (!selectedJwtId) {
+        alert("請先點選要剔除的使用者！");
+        return;
+    }
+
+    if (!confirm("確定要剔除此使用者嗎？")) return;
+
+    const resp = await fetch("/api/UserOnline/KickUser", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(selectedJwtId)
+    });
+
+    if (resp.ok) {
+        alert("已剔除！");
+        selectedRow.remove(); // UI 立即更新
+        updateLoginCount();          // 重新統計目前畫面上的筆數
+    } else {
+        alert("剔除失敗：" + await resp.text());
+    }
+});
+
+</script>
+
+<style>
+.selected-row {
+    background-color: #fff3cd !important;
+    transition: background-color .15s;
+}
+
+.clickable-row:hover {
+    background-color: #f9f2d7 !important;
+    cursor: pointer;
+}
+
+</style>
+
+
+
