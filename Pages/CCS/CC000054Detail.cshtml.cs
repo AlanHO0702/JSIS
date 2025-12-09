@@ -32,10 +32,12 @@ namespace PcbErpApi.Pages.CCS
         public MasterDetailConfig? Config { get; private set; }
         public List<KeyValuePair<string, string>> MasterKeyValues { get; private set; } = new();
         public List<DetailTab> ExtraTabs { get; private set; } = new();
+        public int SystemId { get; private set; } = 1;
 
         public async Task<IActionResult> OnGetAsync()
         {
             ViewData["Title"] = "客戶主檔_業務 - 明細";
+            SystemId = ParseSystemId(Request.Query["systemId"]);
 
             try
             {
@@ -70,6 +72,12 @@ namespace PcbErpApi.Pages.CCS
                     var detailKeyValues = keyMap.Count > 0
                         ? MapToDetailKeys(MasterKeyValues, keyMap)
                         : MapBySameName(detailKeys, MasterKeyValues);
+
+                    if (detailKeys.Any(k => string.Equals(k, "SystemId", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        detailKeyValues.RemoveAll(kv => kv.Key.Equals("SystemId", StringComparison.OrdinalIgnoreCase));
+                        detailKeyValues.Add(new KeyValuePair<string, string>("SystemId", SystemId.ToString()));
+                    }
 
                     if (detailKeyValues.Count > 0)
                         Config.DetailApi = BuildByKeysApi(DetailTable, detailKeyValues);
@@ -201,7 +209,7 @@ namespace PcbErpApi.Pages.CCS
                     true,
                     new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
-                        ["SystemId"] = "1",
+                        ["SystemId"] = SystemId.ToString(),
                         ["SubSystemId"] = "0"
                     }),
                 new DetailTab("assistant", "聯絡人", "AJNdCompanyAssistant", "AJNdCompanyAssistant", new [] { "CompanyId", "SerialNum" }),
@@ -213,5 +221,14 @@ namespace PcbErpApi.Pages.CCS
         }
 
         public record DetailTab(string Key, string Title, string TableName, string DictName, IEnumerable<string> KeyFields, bool IsForm = false, Dictionary<string, string>? ExtraKeys = null);
+
+        private static int ParseSystemId(Microsoft.Extensions.Primitives.StringValues val)
+        {
+            foreach (var v in val)
+            {
+                if (int.TryParse(v, out var n) && n > 0) return n;
+            }
+            return 1;
+        }
     }
 }

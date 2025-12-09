@@ -18,7 +18,7 @@
 else
 {
     <div class="d-flex align-items-center gap-2 mb-2 mt-1">
-        <a class="btn btn-link btn-sm" href="@Url.Page("CC000054")">回列表</a>
+        <a class="btn btn-link btn-sm" href="@Url.Page("CC000054", new { systemId = Model.SystemId })">回列表</a>
         <button type="button" class="btn btn-warning btn-sm" id="btnTopEdit">編輯</button>
         <button type="button" class="btn btn-success btn-sm d-none" id="btnTopSave">儲存</button>
         <button type="button" class="btn btn-outline-primary btn-sm" id="btnTopAdd">新增</button>
@@ -93,8 +93,8 @@ else
                                 <button type="button" class="btn btn-outline-primary btn-sm" data-btn="edit" data-tab="@tab.Key">編輯</button>
                                 <button type="button" class="btn btn-success btn-sm d-none" data-btn="save" data-tab="@tab.Key">儲存</button>
                                 <button type="button" class="btn btn-outline-primary btn-sm" data-btn="add" data-tab="@tab.Key">新增</button>
-                                <button type="button" class="btn btn-outline-success btn-sm d-none" data-btn="confirm" data-tab="@tab.Key">?</button>
-                                <button type="button" class="btn btn-outline-danger btn-sm d-none" data-btn="cancel" data-tab="@tab.Key">?</button>
+                                <button type="button" class="btn btn-outline-success btn-sm d-none" data-btn="confirm" data-tab="@tab.Key">確定</button>
+                                <button type="button" class="btn btn-outline-danger btn-sm d-none" data-btn="cancel" data-tab="@tab.Key">取消</button>
                             </div>
                         }
                     </div>
@@ -103,6 +103,34 @@ else
         </div>
     </div>
 }
+
+<script>
+// 共用欄位顯示元件（給主檔 + 分頁）
+function makeValueElement(field, rawVal) {
+  const isCheckbox = Number(field?.ComboStyle ?? 0) === 1;
+  if (isCheckbox) {
+    const wrap = document.createElement('div');
+    wrap.className = 'form-check m-0 d-inline-flex align-items-center';
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.className = 'form-check-input';
+    chk.disabled = true;
+    const val = rawVal == null ? '' : String(rawVal).toLowerCase();
+    chk.checked = val === '1' || val === 'true' || val === 'y';
+    wrap.appendChild(chk);
+    return wrap;
+  }
+  const span = document.createElement('span');
+  span.textContent = rawVal == null ? '' : rawVal;
+  span.style.display = 'block';
+  span.style.border = '1px solid #e5e7eb';
+  span.style.background = '#f8fafc';
+  span.style.padding = '1px 5px';
+  span.style.borderRadius = '4px';
+  span.style.minHeight = '14px';
+  return span;
+}
+</script>
 
 <script>
 // 讓表單欄位可拖曳/縮放並自動儲存到辭典座標/寬高
@@ -158,6 +186,7 @@ function enableFormLayoutEditing(container, dictName) {
 
   container.addEventListener('pointerdown', (e) => {
     if (e.target === container) clearSelection();
+    if (container.dataset.formKey) currentFormKey = container.dataset.formKey;
   });
 
   fields.forEach(f => {
@@ -169,10 +198,12 @@ function enableFormLayoutEditing(container, dictName) {
     f.addEventListener('click', (e) => {
       e.stopPropagation();
       selectField(f, e.ctrlKey || e.metaKey);
+      if (container.dataset.formKey) currentFormKey = container.dataset.formKey;
     });
 
     if (label) {
       label.addEventListener('mousedown', (e) => {
+        if (container.dataset.editing === '1') return;
         e.preventDefault();
         dragTarget = f;
         startX = e.clientX;
@@ -188,6 +219,7 @@ function enableFormLayoutEditing(container, dictName) {
 
     if (resizer) {
       resizer.addEventListener('mousedown', (e) => {
+        if (container.dataset.editing === '1') return;
         e.preventDefault();
         e.stopPropagation();
         resizeTarget = f;
@@ -230,36 +262,62 @@ function enableFormLayoutEditing(container, dictName) {
 </script>
 
 <script>
-document.addEventListener('DOMContentLoaded', () => {
+  const formState = {}; // { [tabKey]: { tableName, dictName, extras, keyFields, editable } }
+  let currentFormKey = 'master';
+  let formEditMode = false;
+
+  document.addEventListener('DOMContentLoaded', () => {
   const tabs = Array.from(document.querySelectorAll('[data-table][data-dict]'));
   let currentCompany = '@masterKeyVal' || null;
   const tabState = {};
+  const tabMeta = {}; // grid metadata
+  let hasGridPendingAdd = false;
 
   function getDict(dictName) {
     return fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictName)}`)
       .then(r => r.json());
   }
 
-  function buildTable(tabKey, dict, rows) {
+  function buildTable(tabKey, dict, rows, extras = [], tableNameOverride = '') {
     const table = document.getElementById(`grid-${tabKey}`);
     if (!table) return;
     const thead = table.querySelector('thead');
     const tbody = table.querySelector('tbody');
     if (!thead || !tbody) return;
 
+    const dictArr = Array.isArray(dict) ? dict : [];
+    const visibleFields = dictArr
+      .filter(f => (f.Visible ?? 1) == 1)
+      .sort((a,b) => (a.SerialNum ?? 9999) - (b.SerialNum ?? 9999));
+    const pkFields = dictArr.filter(f => (f.PK ?? 0) === 1);
+    const attrKeys = (table.dataset.keyFields || '').split(',').map(s => s.trim()).filter(Boolean);
+    const pkKeyNames = pkFields.map(f => f.FieldName).filter(Boolean);
+    const keyFields = [...new Set([...attrKeys, ...pkKeyNames])];
+    const tableName = table.dataset.tableName || table.dataset.dictName || tableNameOverride || '';
+    const hasCompanyField = [...visibleFields, ...pkFields].some(f => (f.FieldName || '').toLowerCase() === 'companyid');
+    const serialField = [...visibleFields, ...pkFields].find(f => (f.FieldName || '').toLowerCase() === 'serialnum');
+
+    tabMeta[tabKey] = {
+      type: 'grid',
+      dict: visibleFields,
+      pkFields,
+      extras,
+      keyFields,
+      tableName,
+      hasCompanyField,
+      serialField
+    };
+
     // build head
     thead.innerHTML = '';
     const trHead = document.createElement('tr');
-    dict
-      .filter(f => (f.Visible ?? 1) == 1)
-      .sort((a,b) => (a.SerialNum ?? 9999) - (b.SerialNum ?? 9999))
-      .forEach(f => {
-        const th = document.createElement('th');
-        th.textContent = f.DisplayLabel || f.FieldName;
-        th.dataset.field = f.FieldName;
-        th.style.minWidth = (Number(f.DisplaySize || 0) * 10 || 80) + 'px';
-        trHead.appendChild(th);
-      });
+    visibleFields.forEach(f => {
+      const th = document.createElement('th');
+      th.textContent = f.DisplayLabel || f.FieldName;
+      th.dataset.field = f.FieldName;
+      th.style.minWidth = (Number(f.DisplaySize || 0) * 10 || 80) + 'px';
+      trHead.appendChild(th);
+    });
     thead.appendChild(trHead);
 
     // build body
@@ -275,40 +333,59 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       rows.forEach(row => {
         const tr = document.createElement('tr');
-        dict
-          .filter(f => (f.Visible ?? 1) == 1)
-          .sort((a,b) => (a.SerialNum ?? 9999) - (b.SerialNum ?? 9999))
+        visibleFields.forEach(f => {
+          const td = document.createElement('td');
+          td.dataset.field = f.FieldName;
+          const raw = row[f.FieldName];
+          const span = makeValueElement(f, raw);
+          span.classList.add('cell-view');
+          const inp = document.createElement('input');
+          inp.className = 'form-control form-control-sm cell-edit d-none';
+          inp.name = f.FieldName;
+          inp.value = raw == null ? '' : raw;
+          inp.dataset.raw = raw == null ? '' : raw;
+          inp.dataset.readonly = (f.ReadOnly ?? 0) != 0 ? '1' : '0';
+          if ((f.ReadOnly ?? 0) != 0) {
+            inp.classList.add('readonly-cell');
+            inp.setAttribute('readonly','readonly');
+          }
+          td.append(span, inp);
+          tr.appendChild(td);
+        });
+        // hidden PK 欄位（未顯示的）
+        pkFields
+          .filter(f => (f.Visible ?? 1) == 0)
           .forEach(f => {
-            const td = document.createElement('td');
-            td.dataset.field = f.FieldName;
-            const raw = row[f.FieldName];
-            const span = makeValueElement(f, raw);
-            span.classList.add('cell-view');
-            const inp = document.createElement('input');
-            inp.className = 'form-control form-control-sm cell-edit d-none';
-            inp.name = f.FieldName;
-            inp.value = raw == null ? '' : raw;
-            inp.dataset.raw = raw == null ? '' : raw;
-            inp.dataset.readonly = (f.ReadOnly ?? 0) != 0 ? '1' : '0';
-            if ((f.ReadOnly ?? 0) != 0) {
-              inp.classList.add('readonly-cell');
-              inp.setAttribute('readonly','readonly');
-            }
-            td.append(span, inp);
-            tr.appendChild(td);
+            const hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.className = 'mmd-pk-hidden';
+            hidden.name = f.FieldName;
+            const lower = (f.FieldName || '').toLowerCase();
+            const extraVal = extras.find(kv => (kv.key || '').toLowerCase() === lower)?.value;
+            hidden.value = row[f.FieldName] ?? extraVal ?? (lower === 'companyid' ? currentCompany || '' : '');
+            tr.appendChild(hidden);
           });
+        // 若 CompanyId 不在欄位也不在 PK，補 hidden
+        if (!hasCompanyField) {
+          const hidden = document.createElement('input');
+          hidden.type = 'hidden';
+          hidden.className = 'mmd-pk-hidden';
+          hidden.name = 'CompanyId';
+          hidden.value = currentCompany || '';
+          tr.appendChild(hidden);
+        }
         tbody.appendChild(tr);
       });
     }
 
     const wrapper = table.closest('.table-responsive');
-    const keyFields = (table.dataset.keyFields || '').split(',').map(s => s.trim()).filter(Boolean);
     tabState[tabKey] = window.makeEditableGrid({
       wrapper,
       table,
-      tableName: table.dataset.tableName || table.dataset.dictName || '',
+      tableName,
       keyFields
     });
+    syncGridButtons(tabKey);
   }
 
   function parseExtraKeys(raw) {
@@ -319,6 +396,165 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     return list;
   }
+
+  const syncGridButtons = (tabKey) => {
+    const pane = document.getElementById(`tab-${tabKey}`);
+    const ctrls = pane?.querySelector('.tab-local-controls');
+    if (!ctrls) return;
+    ctrls.classList.remove('d-none');
+    const editing = !!tabState[tabKey]?.isEdit?.();
+    const hasAdd = !!pane.querySelector('tr[data-state="added"]');
+    const btnEdit = ctrls.querySelector('[data-btn="edit"]');
+    const btnSave = ctrls.querySelector('[data-btn="save"]');
+    const btnAdd = ctrls.querySelector('[data-btn="add"]');
+    const btnConfirm = ctrls.querySelector('[data-btn="confirm"]');
+    const btnCancel = ctrls.querySelector('[data-btn="cancel"]');
+    if (btnEdit) btnEdit.textContent = editing ? '檢視' : '編輯';
+    btnSave?.classList.toggle('d-none', !editing);
+    btnAdd?.classList.remove('d-none');
+    btnConfirm?.classList.toggle('d-none', !hasAdd);
+    btnCancel?.classList.toggle('d-none', !hasAdd);
+  };
+
+  const addBlankGridRow = (tabKey) => {
+    const meta = tabMeta[tabKey];
+    const table = document.getElementById(`grid-${tabKey}`);
+    const tbody = table?.querySelector('tbody');
+    if (!meta || !table || !tbody) return;
+    if (!meta.dict || !meta.dict.length) return;
+
+    // 清掉「無資料」提示列
+    tbody.querySelectorAll('tr').forEach(tr => {
+      if (tr.querySelector('.text-muted') && !tr.dataset.state) tr.remove();
+    });
+
+    const extrasMap = {};
+    (meta.extras || []).forEach(kv => extrasMap[(kv.key || '').toLowerCase()] = kv.value);
+    const serialField = meta.serialField;
+    let nextSerial = '';
+    if (serialField) {
+      const existing = Array.from(tbody.querySelectorAll('tr')).map(r => {
+        const cell = r.querySelector(`input[name="${serialField.FieldName}"]`) || r.querySelector(`td[data-field="${serialField.FieldName}"] .cell-edit`);
+        const val = cell?.value || cell?.textContent || '';
+        return Number.parseInt(val, 10) || 0;
+      });
+      nextSerial = (Math.max(0, ...existing) + 1).toString();
+    }
+
+    const tr = document.createElement('tr');
+    tr.dataset.state = 'added';
+    meta.dict.forEach(f => {
+      const td = document.createElement('td');
+      td.dataset.field = f.FieldName;
+      const span = makeValueElement(f, '');
+      span.classList.add('cell-view');
+      const inp = document.createElement('input');
+      inp.className = 'form-control form-control-sm cell-edit d-none';
+      inp.name = f.FieldName;
+      let val = '';
+      const lower = (f.FieldName || '').toLowerCase();
+      if (lower === 'companyid') {
+        val = currentCompany || '';
+      } else if (lower === 'serialnum') {
+        val = nextSerial || '';
+      } else if (lower === 'useid') {
+        val = 'A001';
+      } else if (extrasMap[lower] !== undefined) {
+        val = extrasMap[lower];
+      }
+      if (!val && lower === 'asstype') val = '0';
+      if (!val && lower === 'language') val = '0';
+      inp.value = val;
+      inp.defaultValue = val;
+      inp.dataset.raw = val;
+      inp.dataset.readonly = (f.ReadOnly ?? 0) != 0 ? '1' : '0';
+      if ((f.ReadOnly ?? 0) != 0) {
+        inp.classList.add('readonly-cell');
+        inp.setAttribute('readonly','readonly');
+      }
+      td.append(span, inp);
+      tr.appendChild(td);
+    });
+    // 隱藏 PK 欄位（未顯示）
+    (meta.pkFields || []).filter(f => (f.Visible ?? 1) == 0).forEach(f => {
+      const hidden = document.createElement('input');
+      hidden.type = 'hidden';
+      hidden.className = 'mmd-pk-hidden';
+      hidden.name = f.FieldName;
+      const lower = (f.FieldName || '').toLowerCase();
+      if (lower === 'companyid') {
+        hidden.value = currentCompany || '';
+      } else {
+        let serialVal = '';
+        if (lower === 'serialnum') {
+          serialVal = nextSerial || '';
+        }
+        let val = serialVal || '';
+        if (!val && lower === 'useid') val = 'A001';
+        if (!val && lower === 'asstype') val = '0';
+        if (!val && lower === 'language') val = '0';
+        if (!val && extrasMap[lower] !== undefined) val = extrasMap[lower];
+        hidden.value = val;
+      }
+      tr.appendChild(hidden);
+    });
+    // 若 CompanyId 不在欄位也不在 PK，補 hidden
+    if (!meta.hasCompanyField) {
+      const hidden = document.createElement('input');
+      hidden.type = 'hidden';
+      hidden.className = 'mmd-pk-hidden';
+      hidden.name = 'CompanyId';
+      hidden.value = currentCompany || '';
+      tr.appendChild(hidden);
+    }
+    tbody.prepend(tr);
+    tabState[tabKey]?.toggleEdit?.(true);
+    hasGridPendingAdd = true;
+    setTopEditUI(true);
+    syncGridButtons(tabKey);
+  };
+
+  const toggleGridEdit = (tabKey, editable) => {
+    const editor = tabState[tabKey];
+    if (!editor) return;
+    editor.toggleEdit(editable);
+    setTopEditUI(editable);
+    if (!editable) cancelGridAdd(tabKey, { keepEditingFlag: true });
+    syncGridButtons(tabKey);
+  };
+
+  const saveGridChanges = async (tabKey) => {
+    const editor = tabState[tabKey];
+    if (!editor) return;
+    const res = await editor.saveChanges();
+    if (res.ok) {
+      alert('儲存成功');
+      toggleGridEdit(tabKey, false);
+      if (currentCompany) loadTabData(tabKey, currentCompany);
+    } else {
+      alert('儲存失敗: ' + (res.text || ''));
+    }
+  };
+
+  const cancelGridAdd = (tabKey, opts = {}) => {
+    const table = document.getElementById(`grid-${tabKey}`);
+    const tbody = table?.querySelector('tbody');
+    if (!tbody) return;
+    tbody.querySelectorAll('tr[data-state="added"]').forEach(tr => tr.remove());
+    hasGridPendingAdd = false;
+    if (!opts.keepEditingFlag) setTopEditUI(false);
+    syncGridButtons(tabKey);
+  };
+
+  const getActiveFormTabKey = () => {
+    const activeBtn = document.querySelector('[data-bs-toggle="tab"].active');
+    if (!activeBtn) return null;
+    const key = activeBtn.dataset.tabKey || activeBtn.dataset.tab || activeBtn.id?.replace('tab-','').replace('-tab','');
+    if (!key) return null;
+    const pane = document.getElementById(`tab-${key}`);
+    if (pane?.getAttribute('data-form') === '1') return key;
+    return null;
+  };
 
   async function renderForm(tabKey, dictName, tableName, companyId, extras = []) {
     const host = document.getElementById(`form-${tabKey}`);
@@ -331,11 +567,13 @@ document.addEventListener('DOMContentLoaded', () => {
       ]);
       const data = Array.isArray(rows) ? rows[0] || {} : {};
       const fields = Array.isArray(dict) ? dict.filter(f => (f.Visible ?? 1) == 1) : [];
+      const pkFields = Array.isArray(dict) ? dict.filter(f => (f.PK ?? 0) === 1).map(f => f.FieldName).filter(Boolean) : [];
       host.innerHTML = '';
       host.dataset.dictName = dictName;
       const container = document.createElement('div');
       container.className = 'position-relative mf-container mf-form';
       container.dataset.dictTable = dictName;
+      container.dataset.formKey = tabKey;
 
       fields
         .sort((a,b)=>(a.SerialNum ?? 0)-(b.SerialNum ?? 0))
@@ -365,19 +603,58 @@ document.addEventListener('DOMContentLoaded', () => {
           label.style.fontSize = '0.9rem';
 
           const span = makeValueElement(f, val);
+          span.classList.add('mf-view');
           span.style.flex = '1 1 auto';
           span.style.width = '100%';
           span.style.minHeight = `${Math.max(height,14)}px`;
 
+          let editor;
+          if (Number(f.ComboStyle ?? 0) === 1) {
+            editor = document.createElement('input');
+            editor.type = 'checkbox';
+            editor.className = 'form-check-input mf-edit d-none';
+            editor.name = f.FieldName;
+            editor.checked = String(val).toLowerCase() === '1' || String(val).toLowerCase() === 'true';
+          } else {
+            const useTextarea = (height >= 40);
+            if (useTextarea) {
+              editor = document.createElement('textarea');
+              editor.rows = Math.max(1, Math.round(height / 18));
+            } else {
+              editor = document.createElement('input');
+              editor.type = 'text';
+            }
+            editor.className = 'form-control form-control-sm mf-edit d-none';
+            editor.name = f.FieldName;
+            editor.value = val == null ? '' : val;
+            editor.style.width = '100%';
+            editor.style.minHeight = `${Math.max(height,14)}px`;
+          }
+          if (Number(f.ReadOnly ?? 0) === 1) {
+            editor.setAttribute('readonly', 'readonly');
+            editor.dataset.readonly = '1';
+          }
+
           const resizer = document.createElement('span');
           resizer.className = 'mf-resizer';
 
-          wrapper.append(label, span, resizer);
+          wrapper.append(label, span, editor, resizer);
           container.appendChild(wrapper);
         });
 
       host.append(container);
       enableFormLayoutEditing(container, dictName);
+      const tabBtn = document.getElementById(`tab-${tabKey}-tab`);
+      const btnKeys = (tabBtn?.dataset?.keyfields || "").split(',').map(s=>s.trim()).filter(Boolean);
+      const keyFields = pkFields.length ? pkFields : (btnKeys.length ? btnKeys : ['CompanyId']);
+      const extraKeysNames = extras.map(kv => kv.key);
+      formState[tabKey] = {
+        tableName,
+        dictName,
+        extras,
+        keyFields: [...new Set([...keyFields, ...extraKeysNames])],
+        editable: false
+      };
     } catch (err) {
       console.error('render form tab failed', err);
     }
@@ -404,7 +681,7 @@ document.addEventListener('DOMContentLoaded', () => {
       getDict(dictName),
       fetch(url).then(r => r.json())
     ]);
-    buildTable(tabKey, dict || [], Array.isArray(rows) ? rows : []);
+    buildTable(tabKey, dict || [], Array.isArray(rows) ? rows : [], extras, tableName);
   }
 
   document.addEventListener('md-master-selected', (ev) => {
@@ -425,6 +702,15 @@ document.addEventListener('DOMContentLoaded', () => {
       // 更新 F3 目標為當前分頁的辭典
       if (btn.dataset.dict) window._dictTableName = btn.dataset.dict;
       if (currentCompany) loadTabData(tabKey, currentCompany);
+      const pane = document.getElementById(`tab-${tabKey}`);
+      const isForm = pane?.getAttribute('data-form') === '1';
+      if (formEditMode && isForm) {
+        setFormMode(tabKey, true);
+      }
+      if (!isForm) {
+        syncGridButtons(tabKey);
+        setTopEditUI(!!tabState[tabKey]?.isEdit?.());
+      }
     });
   });
 
@@ -432,28 +718,36 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-btn]').forEach(b => {
     b.addEventListener('click', async () => {
       const tabKey = b.dataset.tab;
-      const editor = tabState[tabKey];
-      if (!editor) return;
       const btnType = b.dataset.btn;
-      const group = b.closest('.tab-pane')?.querySelectorAll('[data-btn]');
-      const btnSave = Array.from(group || []).find(x => x.dataset.btn === 'save');
-      const btnEdit = Array.from(group || []).find(x => x.dataset.btn === 'edit');
-
-      if (btnType === 'edit') {
-        editor.toggleEdit(!editor.isEdit());
-        if (btnSave) btnSave.classList.toggle('d-none', !editor.isEdit());
-      } else if (btnType === 'save') {
-        const res = await editor.saveChanges();
-        if (res.ok) {
-          alert('儲存成功');
-          editor.toggleEdit(false);
-          if (btnSave) btnSave.classList.add('d-none');
-          if (btnEdit) btnEdit.textContent = '編輯';
-          if (currentCompany) loadTabData(tabKey, currentCompany);
-        } else {
-          alert('儲存失敗: ' + (res.text || ''));
+      const pane = document.getElementById(`tab-${tabKey}`);
+      const isForm = pane?.getAttribute('data-form') === '1';
+      if (isForm) {
+        if (btnType === 'edit') {
+          applyFormEditMode(!formState[tabKey]?.editable);
+        } else if (btnType === 'save' || btnType === 'confirm') {
+          const res = await saveFormChanges(tabKey);
+          if (res?.ok) {
+            alert('儲存成功');
+            applyFormEditMode(false);
+            if (currentCompany) loadTabData(tabKey, currentCompany);
+          } else {
+            alert('儲存失敗: ' + (res?.text || ''));
+          }
         }
+        return;
       }
+      if (btnType === 'edit') {
+        toggleGridEdit(tabKey, !(tabState[tabKey]?.isEdit?.()));
+      } else if (btnType === 'save') {
+        await saveGridChanges(tabKey);
+      } else if (btnType === 'add') {
+        addBlankGridRow(tabKey);
+      } else if (btnType === 'confirm') {
+        await saveGridChanges(tabKey);
+      } else if (btnType === 'cancel') {
+        cancelGridAdd(tabKey);
+      }
+      syncGridButtons(tabKey);
     });
   });
 
@@ -461,28 +755,176 @@ document.addEventListener('DOMContentLoaded', () => {
   const topEdit = document.getElementById('btnTopEdit');
   const topSave = document.getElementById('btnTopSave');
   const topAdd  = document.getElementById('btnTopAdd');
+  const topConfirm = document.createElement('button');
+  topConfirm.type = 'button';
+  topConfirm.className = 'btn btn-success btn-sm ms-1 d-none';
+  topConfirm.id = 'btnTopConfirm';
+  topConfirm.textContent = '確定';
+  topSave?.insertAdjacentElement('afterend', topConfirm);
+  const topCancel = document.createElement('button');
+  topCancel.type = 'button';
+  topCancel.className = 'btn btn-outline-danger btn-sm ms-1 d-none';
+  topCancel.id = 'btnTopCancel';
+  topCancel.textContent = '取消';
+  topConfirm.insertAdjacentElement('afterend', topCancel);
+
+  const setTopEditUI = (editing) => {
+    topSave?.classList.toggle('d-none', !editing);
+    if (topEdit) topEdit.textContent = editing ? '檢視' : '編輯';
+    topAdd?.classList.toggle('d-none', editing);
+    topConfirm?.classList.toggle('d-none', !(editing && hasGridPendingAdd));
+    topCancel?.classList.toggle('d-none', !(editing && hasGridPendingAdd));
+  };
+
+  const applyFormEditMode = (editable) => {
+    formEditMode = editable;
+    setFormMode('master', editable);
+    const activeFormKey = getActiveFormTabKey();
+    if (activeFormKey) setFormMode(activeFormKey, editable);
+    setTopEditUI(editable);
+  };
+
+  const setFormMode = (tabKey, editable) => {
+    const host = tabKey === 'master'
+      ? document.getElementById('cc000054-master-form')
+      : document.getElementById(`form-${tabKey}`);
+    if (!host) return;
+    // 標記編輯狀態，禁止拖曳/縮放
+    host.dataset.editing = editable ? '1' : '0';
+    host.querySelectorAll('.mf-field').forEach(f => {
+      f.style.cursor = editable ? 'text' : 'move';
+      f.style.userSelect = editable ? 'auto' : 'none';
+    });
+    host.querySelectorAll('.mf-resizer').forEach(r => {
+      r.style.display = editable ? 'none' : 'block';
+    });
+    host.querySelectorAll('.mf-field').forEach(f => {
+      const view = f.querySelector('.mf-view');
+      const edit = f.querySelector('.mf-edit');
+      if (!view || !edit) return;
+      if (editable) {
+        view.classList.add('d-none');
+        edit.classList.remove('d-none');
+        if (edit.dataset.readonly !== '1') {
+          edit.removeAttribute('readonly');
+          edit.removeAttribute('disabled');
+        }
+      } else {
+        view.classList.remove('d-none');
+        edit.classList.add('d-none');
+        if (edit.tagName === 'INPUT' && edit.type === 'checkbox') {
+          view.querySelector('input[type="checkbox"]')?.remove();
+          const chk = document.createElement('input');
+          chk.type = 'checkbox';
+          chk.disabled = true;
+          chk.className = 'form-check-input';
+          chk.checked = edit.checked;
+          view.innerHTML = '';
+          view.appendChild(chk);
+        } else {
+          view.textContent = edit.value;
+        }
+      }
+    });
+    if (formState[tabKey]) formState[tabKey].editable = editable;
+  };
+
+  const saveFormChanges = async (tabKey) => {
+    const state = formState[tabKey];
+    if (!state || !currentCompany) return { ok:false, text:'no state' };
+    const host = tabKey === 'master' ? document.getElementById('cc000054-master-form') : document.getElementById(`form-${tabKey}`);
+    if (!host) return { ok:false, text:'no host' };
+    const data = {};
+    host.querySelectorAll('.mf-edit').forEach(el => {
+      const name = el.name || '';
+      if (!name) return;
+      if (el.type === 'checkbox') {
+        data[name] = el.checked ? '1' : '0';
+      } else {
+        data[name] = el.value ?? '';
+      }
+    });
+    const keys = state.keyFields?.length ? state.keyFields : ['CompanyId'];
+    keys.forEach(k => {
+      if (data[k] == null || data[k] === '') data[k] = currentCompany;
+    });
+    (state.extras || []).forEach(kv => {
+      data[kv.key] = kv.value;
+    });
+    const payload = {
+      TableName: state.tableName,
+      KeyFields: keys,
+      Data: [ data ]
+    };
+    let resp, txt;
+    try {
+      resp = await fetch("/api/CommonTable/SaveTableChanges", {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+      txt = await resp.text();
+      if (!resp.ok) return { ok:false, text:txt || resp.statusText };
+      return { ok:true, text:txt };
+    } catch (err) {
+      return { ok:false, text: String(err) };
+    }
+  };
 
   const triggerTabAction = (action) => {
     const activeTabBtn = document.querySelector('[data-bs-toggle="tab"].active');
-    if (!activeTabBtn) return;
-    const tabKey = activeTabBtn.dataset.tab || activeTabBtn.dataset.tabKey || activeTabBtn.id?.replace('tab-','').replace('-tab','');
-    if (!tabKey) return;
-    const pane = document.getElementById(`tab-${tabKey}`);
-    const isForm = pane?.getAttribute('data-form') === '1';
-    if (isForm) return;
-    const btn = pane?.querySelector(`[data-btn="${action}"]`);
-    btn?.click();
+    const activeTabKey = activeTabBtn ? (activeTabBtn.dataset.tab || activeTabBtn.dataset.tabKey || activeTabBtn.id?.replace('tab-','').replace('-tab','')) : '';
+    const pane = activeTabKey ? document.getElementById(`tab-${activeTabKey}`) : null;
+    const isForm = (!pane && !!formState['master']) || (pane?.getAttribute('data-form') === '1');
+    const activeFormKey = getActiveFormTabKey();
+    if (isForm) {
+      if (action === 'edit') {
+        applyFormEditMode(!formEditMode);
+      } else if (action === 'save') {
+        if (!formEditMode) return;
+        const toSave = ['master'];
+        if (activeFormKey && activeFormKey !== 'master') toSave.push(activeFormKey);
+        (async () => {
+          for (const key of toSave) {
+            const res = await saveFormChanges(key);
+            if (!res.ok) {
+              alert(`儲存失敗(${key}): ${res.text || ''}`);
+              return;
+            }
+          }
+          alert('儲存成功');
+          applyFormEditMode(false);
+          if (currentCompany && activeFormKey && activeFormKey !== 'master') loadTabData(activeFormKey, currentCompany);
+        })();
+      }
+      return;
+    }
+    if (!activeTabKey) return;
     if (action === 'edit') {
-      const editor = tabState[tabKey];
-      const editing = editor?.isEdit?.();
-      if (topSave) topSave.classList.toggle('d-none', !editing);
-      if (topEdit) topEdit.textContent = editing ? '檢視' : '編輯';
+      toggleGridEdit(activeTabKey, !(tabState[activeTabKey]?.isEdit?.()));
+    } else if (action === 'save') {
+      saveGridChanges(activeTabKey);
+    } else if (action === 'add') {
+      addBlankGridRow(activeTabKey);
+    } else if (action === 'cancel') {
+      cancelGridAdd(activeTabKey);
+      toggleGridEdit(activeTabKey, false);
     }
   };
 
   topEdit?.addEventListener('click', () => triggerTabAction('edit'));
-  topSave?.addEventListener('click', () => triggerTabAction('save'));
+  topSave?.addEventListener('click', () => {
+    if (hasGridPendingAdd) {
+      triggerTabAction('save');
+      hasGridPendingAdd = false;
+      setTopEditUI(false);
+    } else {
+      triggerTabAction('save');
+    }
+  });
   topAdd?.addEventListener('click', () => triggerTabAction('add'));
+  topCancel?.addEventListener('click', () => triggerTabAction('cancel'));
+  topConfirm?.addEventListener('click', () => triggerTabAction('save'));
 
   // 初始直接載入（若 URL 已有 CompanyId）
   const loadAllTabs = () => {
@@ -505,6 +947,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('click', (ev) => {
     const formArea = ev.target.closest('.mf-container[data-dict-table]');
     if (formArea?.dataset?.dictTable) {
+      if (formArea.dataset.formKey) currentFormKey = formArea.dataset.formKey;
       setDictTarget(formArea.dataset.dictTable);
       return;
     }
@@ -519,32 +962,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
-
-// 產生欄位值元素：若辭典 ComboStyle=1 則顯示為勾選框
-function makeValueElement(field, rawVal) {
-  const isCheckbox = Number(field?.ComboStyle ?? 0) === 1;
-  if (isCheckbox) {
-    const wrap = document.createElement('div');
-    wrap.className = 'form-check m-0 d-inline-flex align-items-center';
-    const chk = document.createElement('input');
-    chk.type = 'checkbox';
-    chk.className = 'form-check-input';
-    chk.disabled = true;
-    const val = rawVal == null ? '' : String(rawVal).toLowerCase();
-    chk.checked = val === '1' || val === 'true' || val === 'y';
-    wrap.appendChild(chk);
-    return wrap;
-  }
-  const span = document.createElement('span');
-  span.textContent = rawVal == null ? '' : rawVal;
-  span.style.display = 'block';
-  span.style.border = '1px solid #e5e7eb';
-  span.style.background = '#f8fafc';
-  span.style.padding = '1px 5px';
-  span.style.borderRadius = '4px';
-  span.style.minHeight = '14px';
-  return span;
-}
 </script>
 
 <script>
@@ -563,10 +980,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     ]);
     const data = Array.isArray(rows) ? rows[0] || {} : {};
     const fields = Array.isArray(dict) ? dict.filter(f => (f.Visible ?? 1) == 1) : [];
+    const pkFields = Array.isArray(dict) ? dict.filter(f => (f.PK ?? 0) === 1).map(f => f.FieldName).filter(Boolean) : [];
     host.innerHTML = '';
     const container = document.createElement('div');
     container.className = 'position-relative mf-container';
     container.dataset.dictTable = dictName;
+    container.dataset.formKey = 'master';
 
     fields
       .sort((a,b)=>(a.SerialNum ?? 0)-(b.SerialNum ?? 0))
@@ -585,9 +1004,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         wrapper.style.left = `${left}px`;
         wrapper.style.width = `${width}px`;
         wrapper.style.minHeight = `${Math.max(height,14)}px`;
-          wrapper.style.display = 'flex';
-          wrapper.style.alignItems = 'flex-start';
-          wrapper.style.gap = '6px';
+        wrapper.style.display = 'flex';
+        wrapper.style.alignItems = 'flex-start';
+        wrapper.style.gap = '6px';
 
         const label = document.createElement('label');
         label.textContent = f.DisplayLabel || f.FieldName;
@@ -596,19 +1015,54 @@ document.addEventListener('DOMContentLoaded', async () => {
         label.style.fontSize = '0.9rem';
 
         const span = makeValueElement(f, val);
+        span.classList.add('mf-view');
         span.style.flex = '1 1 auto';
         span.style.width = '100%';
         span.style.minHeight = `${Math.max(height,14)}px`;
 
+        let editor;
+        if (Number(f.ComboStyle ?? 0) === 1) {
+          editor = document.createElement('input');
+          editor.type = 'checkbox';
+          editor.className = 'form-check-input mf-edit d-none';
+          editor.name = f.FieldName;
+          editor.checked = String(val).toLowerCase() === '1' || String(val).toLowerCase() === 'true';
+        } else {
+          const useTextarea = (height >= 40);
+          if (useTextarea) {
+            editor = document.createElement('textarea');
+            editor.rows = Math.max(1, Math.round(height / 18));
+          } else {
+            editor = document.createElement('input');
+            editor.type = 'text';
+          }
+          editor.className = 'form-control form-control-sm mf-edit d-none';
+          editor.name = f.FieldName;
+          editor.value = val == null ? '' : val;
+          editor.style.width = '100%';
+          editor.style.minHeight = `${Math.max(height,14)}px`;
+        }
+        if (Number(f.ReadOnly ?? 0) === 1) {
+          editor.setAttribute('readonly', 'readonly');
+          editor.dataset.readonly = '1';
+        }
+
         const resizer = document.createElement('span');
         resizer.className = 'mf-resizer';
 
-        wrapper.append(label, span, resizer);
+        wrapper.append(label, span, editor, resizer);
         container.appendChild(wrapper);
       });
 
     host.append(container);
     enableFormLayoutEditing(container, dictName);
+    formState['master'] = {
+      tableName,
+      dictName,
+      extras: [],
+      keyFields: pkFields.length ? pkFields : ['CompanyId'],
+      editable: false
+    };
   } catch (err) {
     console.error('render master form failed', err);
   }
@@ -646,6 +1100,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   height:12px;
   cursor:se-resize;
   opacity:0;
+}
+.mf-container[data-editing="1"] .mf-resizer{display:none;}
+.mf-container[data-editing="1"] .mf-field{cursor:text;}
+.tab-local-controls{display:none !important;}
+.table tbody tr{
+  height:42px;
+}
+.table tbody td{
+  height:42px !important;
+  min-height:42px;
+  padding:6px 8px !important;
+  vertical-align:middle;
+}
+.table .cell-view,
+.table .cell-edit{
+  min-height:32px !important;
+  line-height:32px !important;
+}
+.table .cell-edit.form-control{
+  height:34px !important;
+  padding:6px 8px !important;
 }
 </style>
 
