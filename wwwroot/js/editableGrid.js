@@ -10,6 +10,7 @@
     const keyFields = Array.isArray(options.keyFields)
       ? options.keyFields.map(x => String(x))
       : [];
+    const keyFieldSet = new Set(keyFields.map(k => k.toLowerCase()));
     const saveUrl   = options.saveUrl || "/api/CommonTable/SaveTableChanges";
 
     if (!wrapper || !table) {
@@ -91,15 +92,17 @@
 
       table.querySelectorAll("tbody tr").forEach(tr => {
 
-        let hasDiff = false;
+        let hasDiff = tr.dataset.state === "added";
 
         tr.querySelectorAll(".cell-edit").forEach(inp => {
           const oldVal = inp.defaultValue ?? "";
           const newVal = inp.type === "checkbox"
             ? (inp.checked ? "1" : "0")
             : (inp.value ?? "");
-          if (inp.dataset.readonly === "1") return;
-          if (oldVal !== newVal) hasDiff = true;
+          const isReadonly = inp.dataset.readonly === "1";
+          const isKey = keyFieldSet.has((inp.name || "").toLowerCase());
+          if (!isReadonly && oldVal !== newVal) hasDiff = true;
+          if (!isKey && isReadonly) return;
         });
 
         if (!hasDiff) return;
@@ -114,16 +117,30 @@
               : (inp.value ?? "");
         });
 
+        // 確保鍵欄位一定帶值：若輸入框空，嘗試從同格 span 或 data-raw 取值
+        keyFieldSet.forEach(k => {
+          const inp = Array.from(tr.querySelectorAll('.cell-edit')).find(i => (i.name || '').toLowerCase() === k);
+          const span = inp?.previousElementSibling;
+          if (inp && (rowAll[inp.name] === "" || rowAll[inp.name] == null)) {
+            const val = span?.textContent?.trim() || inp.dataset.raw || "";
+            rowAll[inp.name] = val;
+          }
+        });
+
         // PK 隱藏欄位
         tr.querySelectorAll(".mmd-pk-hidden").forEach(inp => {
           if (!inp.name) return;
-          rowAll[inp.name] = inp.value ?? "";
+          if (rowAll[inp.name] === undefined || rowAll[inp.name] === "") {
+            rowAll[inp.name] = inp.value ?? "";
+          }
         });
 
         // FK 隱藏欄位 (KeyMap)
         tr.querySelectorAll(".mmd-fk-hidden").forEach(inp => {
           if (!inp.name) return;
-          rowAll[inp.name] = inp.value ?? "";
+          if (rowAll[inp.name] === undefined || rowAll[inp.name] === "") {
+            rowAll[inp.name] = inp.value ?? "";
+          }
         });
 
         list.push(rowAll);
