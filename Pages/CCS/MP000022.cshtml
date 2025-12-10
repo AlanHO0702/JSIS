@@ -1,0 +1,329 @@
+@page "/CCS/MP000022"
+@model PcbErpApi.Pages.CCS.MP000022Model
+@using System.Text.Json
+@using System.Text.Json.Serialization
+@{
+    Layout = "_Layout";
+    var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    var supJson = JsonSerializer.Serialize(Model.Suppliers ?? new(), jsonOptions);
+    var matJson = JsonSerializer.Serialize(Model.MatClasses ?? new(), jsonOptions);
+}
+
+<div class="card shadow-sm mt-2">
+  <div class="card-body">
+    @if (!string.IsNullOrWhiteSpace(Model.LoadError))
+    {
+        <div class="alert alert-danger">初始化資料失敗：@Model.LoadError</div>
+    }
+    <ul class="nav nav-tabs" id="mphd-tabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tab-supplier-tab" data-bs-toggle="tab" data-bs-target="#tab-supplier" type="button" role="tab" aria-controls="tab-supplier" aria-selected="true">廠商設定</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-mat-tab" data-bs-toggle="tab" data-bs-target="#tab-mat" type="button" role="tab" aria-controls="tab-mat" aria-selected="false">分類設定</button>
+      </li>
+    </ul>
+
+    <div class="tab-content pt-3">
+      <div class="tab-pane fade show active" id="tab-supplier" role="tabpanel" aria-labelledby="tab-supplier-tab">
+        <div class="row g-2 align-items-end mb-3">
+          <div class="col-12 col-md-6 col-lg-4">
+            <label for="supSelect" class="form-label mb-1">廠商代碼</label>
+            <select id="supSelect" class="form-select form-select-sm">
+              <option value="">請選擇廠商</option>
+              @foreach (var sup in Model.Suppliers)
+              {
+                  <option value="@sup.Id">@sup.Id - @sup.Name</option>
+              }
+            </select>
+          </div>
+        </div>
+
+        <div class="row g-2 align-items-stretch">
+          <div class="col-12 col-md-5">
+            <label class="form-label small mb-1">廠內分類</label>
+            <select multiple class="form-select dual-select" id="sup-available"></select>
+          </div>
+          <div class="col-12 col-md-2 d-flex flex-column gap-2 align-items-center justify-content-center move-stack">
+            <button type="button" class="btn btn-outline-primary btn-sm w-100" data-scope="sup" data-dir="to-right">搬到右側 ▶</button>
+            <button type="button" class="btn btn-outline-primary btn-sm w-100" data-scope="sup" data-dir="all-right">全部右移 ▶▶</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm w-100" data-scope="sup" data-dir="to-left">搬回左側 ◀</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm w-100" data-scope="sup" data-dir="all-left">全部左移 ◀◀</button>
+          </div>
+          <div class="col-12 col-md-5">
+            <label class="form-label small mb-1">選取之分類</label>
+            <select multiple class="form-select dual-select" id="sup-chosen"></select>
+          </div>
+        </div>
+        <div class="text-end mt-2">
+          <button id="btnSaveSup" class="btn btn-success btn-sm">儲存廠商設定</button>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="tab-mat" role="tabpanel" aria-labelledby="tab-mat-tab">
+        <div class="row g-2 align-items-end mb-3">
+          <div class="col-12 col-md-6 col-lg-4">
+            <label for="matSelect" class="form-label mb-1">分類代碼</label>
+            <select id="matSelect" class="form-select form-select-sm">
+              <option value="">請選擇分類</option>
+              @foreach (var mat in Model.MatClasses)
+              {
+                  <option value="@mat.Id">@mat.Id - @mat.Name</option>
+              }
+            </select>
+          </div>
+        </div>
+
+        <div class="row g-2 align-items-stretch">
+          <div class="col-12 col-md-5">
+            <label class="form-label small mb-1">可用廠商</label>
+            <select multiple class="form-select dual-select" id="mat-available"></select>
+          </div>
+          <div class="col-12 col-md-2 d-flex flex-column gap-2 align-items-center justify-content-center move-stack">
+            <button type="button" class="btn btn-outline-primary btn-sm w-100" data-scope="mat" data-dir="to-right">搬到右側 ▶</button>
+            <button type="button" class="btn btn-outline-primary btn-sm w-100" data-scope="mat" data-dir="all-right">全部右移 ▶▶</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm w-100" data-scope="mat" data-dir="to-left">搬回左側 ◀</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm w-100" data-scope="mat" data-dir="all-left">全部左移 ◀◀</button>
+          </div>
+          <div class="col-12 col-md-5">
+            <label class="form-label small mb-1">選取之廠商</label>
+            <select multiple class="form-select dual-select" id="mat-chosen"></select>
+          </div>
+        </div>
+        <div class="text-end mt-2">
+          <button id="btnSaveMat" class="btn btn-success btn-sm">儲存分類設定</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="mphd-alert" class="alert alert-info d-none mt-2"></div>
+
+<style>
+  .dual-select { min-height: 320px; }
+  .dual-select option { padding: 4px 8px; }
+  .move-stack button { white-space: nowrap; }
+</style>
+
+@section Scripts {
+<script>
+(() => {
+  const suppliers = @Html.Raw(supJson ?? "[]");
+  const matClasses = @Html.Raw(matJson ?? "[]");
+  let cachedSuppliers = Array.isArray(suppliers) ? suppliers : [];
+  let cachedMatClasses = Array.isArray(matClasses) ? matClasses : [];
+
+  const supSelect = document.getElementById('supSelect');
+  const matSelect = document.getElementById('matSelect');
+  const supAvailable = document.getElementById('sup-available');
+  const supChosen = document.getElementById('sup-chosen');
+  const matAvailable = document.getElementById('mat-available');
+  const matChosen = document.getElementById('mat-chosen');
+  const alertBox = document.getElementById('mphd-alert');
+
+  function showMsg(text, type = 'info') {
+    if (!alertBox) return;
+    const cls = type === 'error' ? 'alert-danger' :
+                type === 'success' ? 'alert-success' :
+                type === 'warning' ? 'alert-warning' : 'alert-info';
+    alertBox.className = `alert ${cls} mt-2`;
+    alertBox.textContent = text;
+  }
+
+  function clearMsg() {
+    if (!alertBox) return;
+    alertBox.classList.add('d-none');
+  }
+
+  function renderOptions(select, items, placeholder) {
+    if (!select) return;
+    const current = select.value;
+    select.innerHTML = '';
+    if (placeholder) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = placeholder;
+      select.appendChild(opt);
+    }
+    items.forEach(item => {
+      const opt = document.createElement('option');
+      opt.value = item?.id ?? item?.Id ?? '';
+      opt.textContent = `${item?.id ?? item?.Id ?? ''} - ${item?.name ?? item?.Name ?? ''}`;
+      select.appendChild(opt);
+    });
+    if (current && items.some(i => (i?.id ?? i?.Id) === current)) {
+      select.value = current;
+    }
+  }
+
+  function splitDualData(allItems, pickedIds) {
+    const pickedSet = new Set((pickedIds || []).map(x => (x || '').toLowerCase()));
+    const available = [];
+    const chosen = [];
+    allItems.forEach(item => {
+      const id = item?.id ?? item?.Id ?? '';
+      if (!id) return;
+      if (pickedSet.has(id.toLowerCase())) chosen.push(item);
+      else available.push(item);
+    });
+    return { available, chosen };
+  }
+
+  function renderDual(scope, allItems, pickedIds) {
+    const { available, chosen } = splitDualData(allItems, pickedIds);
+    const targetA = scope === 'sup' ? supAvailable : matAvailable;
+    const targetB = scope === 'sup' ? supChosen : matChosen;
+    if (!targetA || !targetB) return;
+    targetA.innerHTML = '';
+    targetB.innerHTML = '';
+
+    available.forEach(item => {
+      const opt = document.createElement('option');
+      opt.value = item?.id ?? item?.Id ?? '';
+      opt.textContent = `${item?.id ?? item?.Id ?? ''} - ${item?.name ?? item?.Name ?? ''}`;
+      targetA.appendChild(opt);
+    });
+    chosen.forEach(item => {
+      const opt = document.createElement('option');
+      opt.value = item?.id ?? item?.Id ?? '';
+      opt.textContent = `${item?.id ?? item?.Id ?? ''} - ${item?.name ?? item?.Name ?? ''}`;
+      targetB.appendChild(opt);
+    });
+  }
+
+  function moveSelected(scope, dir) {
+    const source = scope === 'sup' ? supAvailable : matAvailable;
+    const target = scope === 'sup' ? supChosen : matChosen;
+    if (!source || !target) return;
+
+    const moveAll = dir === 'all-right' || dir === 'all-left';
+    const toRight = dir === 'to-right' || dir === 'all-right';
+
+    const from = toRight ? source : target;
+    const to = toRight ? target : source;
+
+    const options = Array.from(from.options);
+    options.forEach(opt => {
+      if (moveAll || opt.selected) {
+        opt.selected = false;
+        to.appendChild(opt);
+      }
+    });
+  }
+
+  function getChosenIds(scope) {
+    const target = scope === 'sup' ? supChosen : matChosen;
+    if (!target) return [];
+    return Array.from(target.options).map(o => o.value).filter(Boolean);
+  }
+
+  async function fetchJson(url, options) {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || res.statusText);
+    }
+    return await res.json();
+  }
+
+  async function loadSupMapping(supId) {
+    if (!supId) {
+      renderDual('sup', cachedMatClasses, []);
+      showMsg('請先選擇廠商再調整分類', 'warning');
+      return;
+    }
+    clearMsg();
+    const data = await fetchJson(`/api/MPHdSupSet/supplier/${encodeURIComponent(supId)}/mat-classes`);
+    renderDual('sup', cachedMatClasses, data?.items || data?.Items || []);
+  }
+
+  async function loadMatMapping(matClass) {
+    if (!matClass) {
+      renderDual('mat', cachedSuppliers, []);
+      showMsg('請先選擇分類再調整廠商', 'warning');
+      return;
+    }
+    clearMsg();
+    const data = await fetchJson(`/api/MPHdSupSet/mat-class/${encodeURIComponent(matClass)}/suppliers`);
+    renderDual('mat', cachedSuppliers, data?.items || data?.Items || []);
+  }
+
+  async function saveSupplierMapping() {
+    const supId = supSelect?.value || '';
+    if (!supId) {
+      showMsg('請先選擇廠商', 'warning');
+      return;
+    }
+    const matList = getChosenIds('sup');
+    const payload = { supId, matClasses: matList };
+    const res = await fetchJson('/api/MPHdSupSet/supplier/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    showMsg(`廠商 ${supId} 已更新 (${res?.count ?? matList.length} 筆)`, 'success');
+  }
+
+  async function saveMatMapping() {
+    const matClass = matSelect?.value || '';
+    if (!matClass) {
+      showMsg('請先選擇分類', 'warning');
+      return;
+    }
+    const supList = getChosenIds('mat');
+    const payload = { matClass, supIds: supList };
+    const res = await fetchJson('/api/MPHdSupSet/mat-class/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    showMsg(`分類 ${matClass} 已更新 (${res?.count ?? supList.length} 筆)`, 'success');
+  }
+
+  function attachMoveButtons() {
+    document.querySelectorAll('button[data-scope][data-dir]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        moveSelected(btn.dataset.scope, btn.dataset.dir);
+      });
+    });
+  }
+
+  function attachDoubleClick() {
+    [[supAvailable, 'to-right'], [supChosen, 'to-left'], [matAvailable, 'to-right'], [matChosen, 'to-left']].forEach(([el, dir]) => {
+      if (!el) return;
+      el.addEventListener('dblclick', () => {
+        const scope = el.id.startsWith('sup') ? 'sup' : 'mat';
+        moveSelected(scope, dir);
+      });
+    });
+  }
+
+  function init() {
+    renderDual('sup', cachedMatClasses, []);
+    renderDual('mat', cachedSuppliers, []);
+    attachMoveButtons();
+    attachDoubleClick();
+
+    supSelect?.addEventListener('change', () => loadSupMapping(supSelect.value));
+    matSelect?.addEventListener('change', () => loadMatMapping(matSelect.value));
+    document.getElementById('btnSaveSup')?.addEventListener('click', () => {
+      saveSupplierMapping().catch(err => showMsg(err.message || '儲存失敗', 'error'));
+    });
+    document.getElementById('btnSaveMat')?.addEventListener('click', () => {
+      saveMatMapping().catch(err => showMsg(err.message || '儲存失敗', 'error'));
+    });
+
+    // 若初始已選擇值，自動載入對應清單（避免還要點一次）
+    if (supSelect && supSelect.value) {
+      loadSupMapping(supSelect.value).catch(err => showMsg(err.message || '載入失敗', 'error'));
+    }
+    if (matSelect && matSelect.value) {
+      loadMatMapping(matSelect.value).catch(err => showMsg(err.message || '載入失敗', 'error'));
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+})();
+</script>
+}
