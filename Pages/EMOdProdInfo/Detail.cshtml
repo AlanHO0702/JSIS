@@ -1,0 +1,380 @@
+@page "/EMOdProdInfo/Detail"
+@model PcbErpApi.Pages.EMOdProdInfo.DetailModel
+@using System.Text.Json
+@{
+    Layout = "_Layout";
+    var cfg = Model.Config;
+    var firstKey = Model.MasterKeyValues.FirstOrDefault(kv => string.Equals(kv.Key, "PartNum", StringComparison.OrdinalIgnoreCase));
+    var masterKeyVal = firstKey.Value ?? Model.MasterKeyValues.FirstOrDefault().Value ?? "";
+}
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", null, ViewData)
+<script src="~/js/editableGrid.js"></script>
+
+@if (cfg == null)
+{
+    <div class="alert alert-warning mt-3">初始化工程資料維護畫面失敗，請稍後再試。</div>
+}
+else
+{
+    <div class="d-flex align-items-center gap-2 mb-2 mt-1">
+        <a class="btn btn-link btn-sm" href="@Url.Page("Index")">回列表</a>
+        <button type="button" class="btn btn-warning btn-sm" id="btnTopEdit">編輯</button>
+        <button type="button" class="btn btn-success btn-sm d-none" id="btnTopSave">儲存</button>
+        <button type="button" class="btn btn-outline-primary btn-sm" id="btnTopAdd">新增</button>
+    </div>
+
+    <!-- 頂部基本資訊區 -->
+    <div id="emodprodinfo-header"
+         class="card shadow-sm border-0 rounded mb-2 p-3"
+         data-dict="@cfg?.MasterDict"
+         style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);">
+        <div class="row g-2" id="header-fields"></div>
+    </div>
+
+    <!-- 主單頁籤區 -->
+    <div class="card shadow-sm border-0 rounded-4 mb-2">
+        <div class="card-body p-2">
+            <ul class="nav nav-tabs flex-wrap" role="tablist" id="master-tabs">
+                @for (int i = 0; i < Model.MasterTabs.Count; i++)
+                {
+                    var tab = Model.MasterTabs[i];
+                    var active = i == 0 ? "active" : "";
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link @active"
+                                id="master-tab-@tab.Key"
+                                data-bs-toggle="tab"
+                                data-bs-target="#master-content-@tab.Key"
+                                type="button"
+                                role="tab"
+                                aria-selected="@(i == 0 ? "true" : "false")"
+                                data-tab-key="@tab.Key"
+                                data-tab-fields="@string.Join(",", tab.FieldNames)">
+                            @tab.Title
+                        </button>
+                    </li>
+                }
+            </ul>
+            <div class="tab-content p-3">
+                @for (int i = 0; i < Model.MasterTabs.Count; i++)
+                {
+                    var tab = Model.MasterTabs[i];
+                    var active = i == 0 ? "show active" : "";
+                    <div class="tab-pane fade @active"
+                         id="master-content-@tab.Key"
+                         role="tabpanel">
+                        <div class="row g-2" data-tab-key="@tab.Key"></div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- 單身頁籤區 -->
+    <div class="card shadow-sm border-0 rounded-4">
+        <div class="card-header bg-light fw-bold py-2 px-3">單身資料</div>
+        <div class="card-body p-2">
+            <ul class="nav nav-tabs flex-wrap" role="tablist">
+                @for (int i = 0; i < Model.ExtraTabs.Count; i++)
+                {
+                    var tab = Model.ExtraTabs[i];
+                    var active = i == 0 ? "active" : "";
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link @active"
+                                id="tab-@tab.Key-tab"
+                                data-bs-toggle="tab"
+                                data-bs-target="#tab-@tab.Key"
+                                type="button"
+                                role="tab"
+                                aria-controls="tab-@tab.Key"
+                                aria-selected="@(i == 0 ? "true" : "false")"
+                                data-table="@tab.TableName"
+                                data-dict="@tab.DictName"
+                                data-keyfields="@string.Join(",", tab.KeyFields ?? Enumerable.Empty<string>())"
+                                data-extra-keys="@string.Join(";", tab.ExtraKeys?.Select(k => $"{k.Key}={k.Value}") ?? Array.Empty<string>())">
+                            @tab.Title
+                        </button>
+                    </li>
+                }
+            </ul>
+            <div class="tab-content">
+                @for (int i = 0; i < Model.ExtraTabs.Count; i++)
+                {
+                    var tab = Model.ExtraTabs[i];
+                    var active = i == 0 ? "show active" : "";
+                    <div class="tab-pane fade @active" id="tab-@tab.Key" role="tabpanel" aria-labelledby="tab-@tab.Key-tab">
+                        <div class="table-responsive" data-tab-key="@tab.Key">
+                            <table class="table table-sm table-hover align-middle mb-0"
+                                   id="grid-@tab.Key"
+                                   data-table-name="@tab.TableName"
+                                   data-dict-name="@tab.DictName"
+                                   data-dict-table="@tab.DictName"
+                                   data-key-fields="@string.Join(",", tab.KeyFields ?? Enumerable.Empty<string>())">
+                                <thead class="table-light">
+                                    <tr><th class="text-center text-muted">載入中...</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td class="text-center text-muted py-3">請點選上方主檔資料</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="mt-2 d-flex gap-2 tab-local-controls d-none">
+                            <button type="button" class="btn btn-outline-primary btn-sm" data-btn="edit" data-tab="@tab.Key">編輯</button>
+                            <button type="button" class="btn btn-success btn-sm d-none" data-btn="save" data-tab="@tab.Key">儲存</button>
+                            <button type="button" class="btn btn-outline-primary btn-sm" data-btn="add" data-tab="@tab.Key">新增</button>
+                            <button type="button" class="btn btn-outline-success btn-sm d-none" data-btn="confirm" data-tab="@tab.Key">確認</button>
+                            <button type="button" class="btn btn-outline-danger btn-sm d-none" data-btn="cancel" data-tab="@tab.Key">取消</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const detailTabs = Array.from(document.querySelectorAll('[data-table][data-dict]'));
+  let currentMasterKeys = @Html.Raw(JsonSerializer.Serialize(Model.MasterKeyValues.ToDictionary(kv => kv.Key, kv => kv.Value)));
+  const tabState = {};
+  let masterData = null;
+  let masterDict = null;
+
+  // 頂部基本資訊區要顯示的欄位
+  const headerFields = ['PartNum', 'Revision', 'CustomerPartNum', 'CustomerSSName', 'Status', 'StatusName', 'Designer', 'UserName'];
+
+  function getDict(dictName) {
+    return fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictName)}`)
+      .then(r => r.json());
+  }
+
+  function renderHeaderFields(dict, row) {
+    const container = document.getElementById('header-fields');
+    if (!container) return;
+
+    const fields = headerFields.map(fn => dict.find(f => f.FieldName === fn)).filter(f => f);
+
+    container.innerHTML = fields.map(f => {
+      const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+      return `<div class="col-md-3">
+        <label class="form-label fw-bold text-primary">${f.DisplayLabel || f.FieldName}</label>
+        <input type="text" class="form-control form-control-sm bg-white" value="${val}" readonly>
+      </div>`;
+    }).join('');
+  }
+
+  function renderMasterTab(tabKey, dict, row) {
+    console.log('renderMasterTab called:', tabKey);
+    const tabBtn = document.querySelector(`[data-tab-key="${tabKey}"]`);
+    if (!tabBtn) {
+      console.error('Tab button not found:', tabKey);
+      return;
+    }
+
+    const fieldNames = (tabBtn.dataset.tabFields || '').split(',').filter(f => f.trim());
+    console.log('Field names for tab', tabKey, ':', fieldNames);
+
+    const container = document.querySelector(`#master-content-${tabKey} .row`);
+    if (!container) {
+      console.error('Container not found for:', tabKey);
+      return;
+    }
+
+    const fields = fieldNames.map(fn => dict.find(f => f.FieldName === fn)).filter(f => f);
+    console.log('Matched fields:', fields.length, 'out of', fieldNames.length);
+
+    if (fields.length === 0) {
+      container.innerHTML = '<div class="col-12"><p class="text-muted">此頁籤暫無欄位資料</p></div>';
+      return;
+    }
+
+    container.innerHTML = fields.map(f => {
+      const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+      return `<div class="col-md-3">
+        <label class="form-label">${f.DisplayLabel || f.FieldName}</label>
+        <input type="text" class="form-control form-control-sm" value="${val}" readonly>
+      </div>`;
+    }).join('');
+    console.log('Rendered', fields.length, 'fields for tab', tabKey);
+  }
+
+  function buildTable(tabKey, dict, rows) {
+    const table = document.getElementById(`grid-${tabKey}`);
+    if (!table) return;
+    const thead = table.querySelector('thead');
+    const tbody = table.querySelector('tbody');
+    if (!thead || !tbody) return;
+
+    // Build header
+    const visibleFields = dict.filter(f => f.Visible === 1).sort((a, b) => (a.SerialNum || 0) - (b.SerialNum || 0));
+    thead.innerHTML = '<tr>' + visibleFields.map(f => `<th>${f.DisplayLabel || f.FieldName}</th>`).join('') + '</tr>';
+
+    // Build body
+    if (!rows || rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="100" class="text-center text-muted py-3">無資料</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = rows.map(row => {
+      const cells = visibleFields.map(f => {
+        const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+        return `<td>${val}</td>`;
+      }).join('');
+      return `<tr>${cells}</tr>`;
+    }).join('');
+
+    // Make editable
+    const tableName = table.dataset.tableName;
+    const dictName = table.dataset.dictName;
+    const keyFields = (table.dataset.keyFields || '').split(',').filter(k => k.trim());
+
+    if (!tabState[tabKey]) {
+      tabState[tabKey] = { editor: null };
+    }
+
+    const wrapper = table.closest('.table-responsive');
+    const saveUrl = "/api/CommonTable/SaveTableChanges";
+
+    tabState[tabKey].editor = window.makeEditableGrid({
+      wrapper: wrapper,
+      table: table,
+      tableName: tableName,
+      keyFields: keyFields,
+      saveUrl: saveUrl
+    });
+
+    // Show controls
+    const controls = wrapper?.parentElement?.querySelector('.tab-local-controls');
+    if (controls) controls.classList.remove('d-none');
+  }
+
+  function loadDetailTab(tabBtn) {
+    const tabKey = tabBtn.getAttribute('aria-controls')?.replace('tab-', '');
+    if (!tabKey) return;
+
+    const tableName = tabBtn.dataset.table;
+    const dictName = tabBtn.dataset.dict;
+    const keyFields = (tabBtn.dataset.keyfields || '').split(',').filter(k => k.trim());
+    const extraKeys = tabBtn.dataset.extraKeys || '';
+
+    if (!tableName || !dictName) return;
+
+    // Build query
+    const qs = new URLSearchParams();
+    keyFields.forEach(k => {
+      const val = currentMasterKeys[k] ?? currentMasterKeys[k.toLowerCase()] ?? '';
+      if (val) {
+        qs.append('keyNames', k);
+        qs.append('keyValues', val);
+      }
+    });
+
+    // Add extra keys
+    if (extraKeys) {
+      extraKeys.split(';').forEach(pair => {
+        const [k, v] = pair.split('=');
+        if (k && v) {
+          qs.append('keyNames', k.trim());
+          qs.append('keyValues', v.trim());
+        }
+      });
+    }
+
+    const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&${qs.toString()}`;
+
+    Promise.all([
+      getDict(dictName),
+      fetch(url).then(r => r.json())
+    ]).then(([dict, rows]) => {
+      buildTable(tabKey, dict, rows);
+    }).catch(err => {
+      console.error('Load tab data error:', err);
+      const table = document.getElementById(`grid-${tabKey}`);
+      if (table) {
+        const tbody = table.querySelector('tbody');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="100" class="text-center text-danger py-3">載入失敗: ${err.message}</td></tr>`;
+      }
+    });
+  }
+
+  // Load master data
+  const masterApiUrl = '@Html.Raw(cfg?.MasterApi ?? "")';
+  const dictName = '@cfg?.MasterDict';
+
+  console.log('Master API URL:', masterApiUrl);
+  console.log('Dict Name:', dictName);
+
+  if (masterApiUrl && dictName) {
+    Promise.all([
+      getDict(dictName),
+      fetch(masterApiUrl).then(r => r.json())
+    ]).then(([dict, rows]) => {
+      console.log('Dict loaded:', dict.length, 'fields');
+      console.log('Data loaded:', rows);
+
+      masterDict = dict;
+      masterData = rows && rows.length > 0 ? rows[0] : {};
+      console.log('Master data:', masterData);
+
+      // Render header
+      renderHeaderFields(dict, masterData);
+
+      // Render all master tabs
+      const masterTabs = document.querySelectorAll('#master-tabs [data-tab-key]');
+      console.log('Found', masterTabs.length, 'master tabs');
+      masterTabs.forEach(tab => {
+        renderMasterTab(tab.dataset.tabKey, dict, masterData);
+      });
+    }).catch(err => {
+      console.error('Load master form error:', err);
+    });
+  } else {
+    console.error('Missing master API URL or dict name');
+  }
+
+  // Detail tab click handler
+  detailTabs.forEach(tabBtn => {
+    tabBtn.addEventListener('shown.bs.tab', () => {
+      loadDetailTab(tabBtn);
+    });
+  });
+
+  // Load first detail tab
+  if (detailTabs.length > 0) {
+    setTimeout(() => loadDetailTab(detailTabs[0]), 100);
+  }
+
+  // Tab local controls
+  document.querySelectorAll('[data-btn="edit"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tabKey = btn.dataset.tab;
+      const editor = tabState[tabKey]?.editor;
+      if (editor && editor.toggleEdit) {
+        editor.toggleEdit(true);
+        btn.classList.add('d-none');
+        btn.parentElement?.querySelector('[data-btn="save"]')?.classList.remove('d-none');
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-btn="save"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const tabKey = btn.dataset.tab;
+      const editor = tabState[tabKey]?.editor;
+      if (editor && editor.saveChanges) {
+        const result = await editor.saveChanges();
+        if (result.ok) {
+          alert('儲存成功');
+          editor.toggleEdit(false);
+          btn.classList.add('d-none');
+          btn.parentElement?.querySelector('[data-btn="edit"]')?.classList.remove('d-none');
+        } else {
+          alert('儲存失敗');
+        }
+      }
+    });
+  });
+});
+</script>
+
+<script src="~/js/fieldDictModal.js"></script>
