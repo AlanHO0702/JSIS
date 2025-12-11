@@ -133,104 +133,94 @@ namespace PcbErpApi.Pages.EMOdProdInfo
         {
             return new List<DetailTab>
             {
-                // 壓合明細/替代料 (已驗證存在於資料庫)
+                // 壓合明細/替代料
                 new DetailTab(
                     "layerpress",
                     "壓合明細/替代料",
                     "EMOdLayerPress",
                     "EMOdLayerPress",
-                    new [] { "PartNum", "Revision", "SerialNum" }
+                    new [] { "PartNum", "Revision" }
                 ),
-                // 內建運程 (已驗證存在於資料庫)
+                // 板材尺寸明細圖
+                new DetailTab(
+                    "boardsize",
+                    "板材尺寸明細圖",
+                    "EMOdProdPOP",
+                    "EMOdProdPOP",
+                    new [] { "PartNum", "Revision" }
+                ),
+                // 裁板/排版圖
+                new DetailTab(
+                    "cutlayout",
+                    "裁板/排版圖",
+                    "EMOdProdMills",
+                    "EMOdProdMills",
+                    new [] { "PartNum", "Revision" }
+                ),
+                // 混裝明細圖
+                new DetailTab(
+                    "mixdetail",
+                    "混裝明細檔",
+                    "EMOdProdMixedDtl",
+                    "EMOdProdMixedDtl",
+                    new [] { "PartNum", "Revision" }
+                ),
+                // 暫停記錄
+                new DetailTab(
+                    "haltlog",
+                    "暫停記錄",
+                    "EMOdProdLog",
+                    "EMOdProdLog",
+                    new [] { "PartNum", "Revision" }
+                ),
+                // 修改記錄
+                new DetailTab(
+                    "modifylog",
+                    "修改記錄",
+                    "EMOdNotesLog",
+                    "EMOdNotesLog",
+                    new [] { "PartNum", "Revision" }
+                ),
+                // EC記錄
+                new DetailTab(
+                    "ecnlog",
+                    "ECN記錄",
+                    "EMOdProdECNLog",
+                    "EMOdProdECNLog",
+                    new [] { "PartNum", "Revision" }
+                ),
+                // 併板明細圖
+                new DetailTab(
+                    "mergedetail",
+                    "併板明細檔",
+                    "EMOdPartMerge",
+                    "EMOdPartMerge",
+                    new [] { "PartNum", "Revision" }
+                ),
+                // 壓合方式
+                new DetailTab(
+                    "pressmethod",
+                    "壓合方式",
+                    "EMOdPressMatDtl",
+                    "EMOdPressMatDtl",
+                    new [] { "PartNum", "Revision" }
+                ),
+                // 途程內容
                 new DetailTab(
                     "layerroute",
-                    "內建運程",
+                    "途程內容",
                     "EMOdLayerRoute",
                     "EMOdLayerRoute",
-                    new [] { "PartNum", "Revision", "LayerId" }
+                    new [] { "PartNum", "Revision" }
                 ),
-
-                // TODO: 以下頁籤對應的資料表需要在資料庫中建立後才能使用
-                // 板材尺寸明細圖
-                // new DetailTab(
-                //     "boardsize",
-                //     "板材尺寸明細圖",
-                //     "EMOdBoardSize",
-                //     "EMOdBoardSize",
-                //     new [] { "PartNum", "Revision" }
-                // ),
-                // 裁板/排版圖
-                // new DetailTab(
-                //     "cutlayout",
-                //     "裁板/排版圖",
-                //     "EMOdCutLayout",
-                //     "EMOdCutLayout",
-                //     new [] { "PartNum", "Revision" }
-                // ),
-                // 混裝明細圖
-                // new DetailTab(
-                //     "mixdetail",
-                //     "混裝明細圖",
-                //     "EMOdMixDetail",
-                //     "EMOdMixDetail",
-                //     new [] { "PartNum", "Revision" }
-                // ),
-                // 暫停記錄
-                // new DetailTab(
-                //     "haltlog",
-                //     "暫停記錄",
-                //     "EMOdHaltLog",
-                //     "EMOdHaltLog",
-                //     new [] { "PartNum", "Revision" }
-                // ),
-                // 修改記錄
-                // new DetailTab(
-                //     "modifylog",
-                //     "修改記錄",
-                //     "EMOdModifyLog",
-                //     "EMOdModifyLog",
-                //     new [] { "PartNum", "Revision" }
-                // ),
-                // EC記錄
-                // new DetailTab(
-                //     "eclog",
-                //     "EC記錄",
-                //     "EMOdECLog",
-                //     "EMOdECLog",
-                //     new [] { "PartNum", "Revision" }
-                // ),
-                // 併板明細圖
-                // new DetailTab(
-                //     "mergedetail",
-                //     "併板明細圖",
-                //     "EMOdMergeDetail",
-                //     "EMOdMergeDetail",
-                //     new [] { "PartNum", "Revision" }
-                // ),
-                // 壓合方式
-                // new DetailTab(
-                //     "pressmethod",
-                //     "壓合方式",
-                //     "EMOdPressMethod",
-                //     "EMOdPressMethod",
-                //     new [] { "PartNum", "Revision" }
-                // ),
-                // 遮框內容
-                // new DetailTab(
-                //     "maskframe",
-                //     "遮框內容",
-                //     "EMOdMaskFrame",
-                //     "EMOdMaskFrame",
-                //     new [] { "PartNum", "Revision" }
-                // ),
                 // 產品工程圖
-                // new DetailTab(
-                //     "prodmap",
-                //     "產品工程圖",
-                //     "MGNdProdMap_EMO",
-                //     "MGNdProdMap_EMO",
-                //     new [] { "PartNum", "Revision" }
-                // )
+                new DetailTab(
+                    "prodmap",
+                    "產品工程圖",
+                    "EMOdProdMap",
+                    "EMOdProdMap",
+                    new [] { "PartNum", "Revision" }
+                )
             };
         }
 
