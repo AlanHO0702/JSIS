@@ -221,12 +221,126 @@ document.addEventListener('DOMContentLoaded', () => {
 
     container.innerHTML = fields.map(f => {
       const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+      const isReadOnly = (f.ReadOnly ?? 0) !== 0;
       return `<div class="col-md-3">
         <label class="form-label">${f.DisplayLabel || f.FieldName}</label>
-        <input type="text" class="form-control form-control-sm" value="${val}" readonly>
+        <input type="text"
+               class="form-control form-control-sm master-field ${isReadOnly ? 'readonly-field' : ''}"
+               name="${f.FieldName}"
+               value="${val}"
+               data-original="${val}"
+               ${isReadOnly ? 'readonly' : 'readonly'}>
       </div>`;
     }).join('');
     console.log('Rendered', fields.length, 'fields for tab', tabKey);
+
+    // 加入編輯/儲存按鈕
+    const btnContainer = container.parentElement;
+    if (btnContainer && !btnContainer.querySelector('.master-tab-controls')) {
+      const controlsDiv = document.createElement('div');
+      controlsDiv.className = 'mt-3 d-flex gap-2 master-tab-controls';
+      controlsDiv.innerHTML = `
+        <button type="button" class="btn btn-warning btn-sm" data-btn="master-edit" data-tab="${tabKey}">
+          <i class="bi bi-pencil-square me-1"></i> 編輯
+        </button>
+        <button type="button" class="btn btn-success btn-sm d-none" data-btn="master-save" data-tab="${tabKey}">
+          <i class="bi bi-save me-1"></i> 儲存
+        </button>
+      `;
+      btnContainer.appendChild(controlsDiv);
+    }
+
+    // 設定編輯功能
+    setupMasterTabEdit(tabKey, container);
+  }
+
+  function setupMasterTabEdit(tabKey, container) {
+    const editBtn = document.querySelector(`[data-btn="master-edit"][data-tab="${tabKey}"]`);
+    const saveBtn = document.querySelector(`[data-btn="master-save"][data-tab="${tabKey}"]`);
+
+    if (!editBtn || !saveBtn) return;
+
+    let isEdit = false;
+
+    // 編輯按鈕事件
+    editBtn.addEventListener('click', () => {
+      isEdit = !isEdit;
+      const inputs = container.querySelectorAll('.master-field');
+
+      if (isEdit) {
+        editBtn.innerHTML = '<i class="bi bi-eye me-1"></i> 檢視';
+        saveBtn.classList.remove('d-none');
+
+        // 解除 readonly（除了真正唯讀的欄位）
+        inputs.forEach(inp => {
+          if (!inp.classList.contains('readonly-field')) {
+            inp.removeAttribute('readonly');
+            inp.style.backgroundColor = '#fff';
+          }
+        });
+      } else {
+        editBtn.innerHTML = '<i class="bi bi-pencil-square me-1"></i> 編輯';
+        saveBtn.classList.add('d-none');
+
+        // 恢復 readonly
+        inputs.forEach(inp => {
+          inp.setAttribute('readonly', 'readonly');
+          inp.style.backgroundColor = '';
+        });
+      }
+    });
+
+    // 儲存按鈕事件
+    saveBtn.addEventListener('click', async () => {
+      const inputs = container.querySelectorAll('.master-field');
+      const changes = {};
+      let hasChanges = false;
+
+      // 收集有變更的欄位
+      inputs.forEach(inp => {
+        if (inp.value !== inp.dataset.original && !inp.readOnly) {
+          changes[inp.name] = inp.value;
+          hasChanges = true;
+        }
+      });
+
+      if (!hasChanges) {
+        alert('沒有變更');
+        return;
+      }
+
+      // 加入主鍵
+      Object.keys(currentMasterKeys).forEach(k => {
+        changes[k] = currentMasterKeys[k];
+      });
+
+      try {
+        const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            TableName: dictName,
+            Data: [changes]
+          })
+        });
+
+        const responseText = await resp.text();
+
+        if (resp.ok) {
+          alert('儲存成功');
+          // 更新 data-original
+          inputs.forEach(inp => {
+            inp.dataset.original = inp.value;
+          });
+          // 切回檢視模式
+          editBtn.click();
+        } else {
+          alert(`儲存失敗 (HTTP ${resp.status})\n\n${responseText}`);
+        }
+      } catch (err) {
+        alert('儲存失敗: ' + err.message);
+      }
+    });
   }
 
   function buildTable(tabKey, dict, rows) {
@@ -414,5 +528,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 </script>
+
+<style>
+/* 規格頁籤欄位樣式 */
+.readonly-field {
+  background-color: #e9ecef !important;
+  cursor: not-allowed !important;
+}
+</style>
 
 <script src="~/js/fieldDictModal.js"></script>
