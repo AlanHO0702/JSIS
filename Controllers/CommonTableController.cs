@@ -82,6 +82,18 @@ namespace PcbErpApi.Controllers
                         continue;
                     }
 
+                    // __delete 標記支援刪除
+                    bool isDelete = false;
+                    if (row.TryGetPropertyValue("__delete", out var delNode))
+                    {
+                        if (delNode is JsonValue jv)
+                        {
+                            if (jv.TryGetValue(out bool b)) isDelete = b;
+                            else if (jv.TryGetValue(out string? s))
+                                isDelete = string.Equals(s, "true", StringComparison.OrdinalIgnoreCase) || s == "1";
+                        }
+                    }
+
                     // ★ setPairs 改成攜帶欄位資訊，方便之後決定參數型別
                     var setPairs = new List<(ColumnInfo Col, object? Value)>();
                     var keyPairs = new List<(string Name, object? Value)>();
@@ -115,6 +127,26 @@ namespace PcbErpApi.Controllers
                         results.Add(new { ok = false, reason = "鍵欄位不完整或為空", row, keys = keyNames });
                         continue;
                     }
+
+                    if (isDelete)
+                    {
+                        var delWhereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Name}] = @K_{p.Name}"));
+                        var delSql = $"DELETE FROM [{req.TableName}] WHERE {delWhereSql}";
+                        using var delCmd = conn.CreateCommand();
+                        delCmd.Transaction = (System.Data.Common.DbTransaction)tx;
+                        delCmd.CommandText = delSql;
+                        foreach (var kp in keyPairs)
+                        {
+                            if (columns.TryGetValue(kp.Name, out var colInfo))
+                                AddTypedParameter(delCmd, $"@K_{kp.Name}", kp.Value, colInfo);
+                            else
+                                delCmd.Parameters.Add(new SqlParameter($"@K_{kp.Name}", kp.Value ?? DBNull.Value));
+                        }
+                        var delAffected = await delCmd.ExecuteNonQueryAsync();
+                        results.Add(new { ok = delAffected > 0, affected = delAffected, deleted = true, sql = delSql });
+                        continue;
+                    }
+
                     if (setPairs.Count == 0)
                     {
                         var insertSeen0 = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
