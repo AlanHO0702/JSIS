@@ -321,27 +321,42 @@ ORDER BY idx.index_id, ic.key_ordinal";
 
         // ===== 參數與轉型 =====
 
-        // ★ 依欄位型別建立參數（binary 指定 SqlDbType）
+        // ★ 依欄位型別建立參數（binary 指定 SqlDbType；空白字串轉 NULL；可轉數字就轉數字）
         private static void AddTypedParameter(DbCommand cmd, string name, object? value, ColumnInfo? col)
         {
+            var normVal = NormalizeValue(value);
+
             if (cmd is SqlCommand sc)
             {
                 if (col != null && col.IsBinary)
                 {
                     var p = sc.Parameters.Add(name, MapSqlDbType(col.DbType));
-                    p.Value = value ?? DBNull.Value;
+                    p.Value = normVal;
                     return;
                 }
                 // 其他型別走預設
-                var sp = sc.Parameters.AddWithValue(name, value ?? DBNull.Value);
+                var sp = sc.Parameters.AddWithValue(name, normVal);
                 return;
             }
 
             // 其他資料庫 provider：退回一般參數
             var prm = cmd.CreateParameter();
             prm.ParameterName = name;
-            prm.Value = value ?? DBNull.Value;
+            prm.Value = normVal;
             cmd.Parameters.Add(prm);
+        }
+
+        private static object NormalizeValue(object? value)
+        {
+            if (value == null || value == DBNull.Value) return DBNull.Value;
+            if (value is string s)
+            {
+                if (string.IsNullOrWhiteSpace(s)) return DBNull.Value;
+                // 嘗試數字
+                if (decimal.TryParse(s, out var dec)) return dec;
+                return s;
+            }
+            return value;
         }
 
         private static SqlDbType MapSqlDbType(string dbType)
@@ -442,20 +457,13 @@ ORDER BY idx.index_id, ic.key_ordinal";
     {
         if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required");
 
-        var tblOk = await _context.Database
-            .SqlQuery<string>($"SELECT name FROM sys.tables WHERE name = {table}")
-            .AnyAsync();
-
+        var tblOk = await TableExistsAsync(table);
         if (!tblOk) return NotFound($"Table '{table}' not found.");
 
         string orderSql = "";
         if (!string.IsNullOrWhiteSpace(orderBy))
         {
-            var colOk = await _context.Database
-                .SqlQuery<string>($@"SELECT c.name 
-                                     FROM sys.columns c 
-                                     JOIN sys.tables t ON t.object_id=c.object_id
-                                     WHERE t.name={table} AND c.name={orderBy}").AnyAsync();
+            var colOk = await ColumnExistsAsync(table, orderBy);
             if (colOk)
                 orderSql = $" ORDER BY [{orderBy}] {(string.Equals(orderDir, "DESC", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC")}";
         }
@@ -484,9 +492,7 @@ ORDER BY idx.index_id, ic.key_ordinal";
             return BadRequest("keyNames and keyValues must be same length and not empty.");
 
         // 驗 table
-        var tblOk = await _context.Database
-            .SqlQuery<string>($"SELECT name FROM sys.tables WHERE name = {table}")
-            .AnyAsync();
+        var tblOk = await TableExistsAsync(table);
         if (!tblOk) return NotFound($"Table '{table}' not found.");
 
         // 驗 column & 組條件
@@ -497,11 +503,7 @@ ORDER BY idx.index_id, ic.key_ordinal";
             var col = keyNames[i];
             var val = keyValues[i];
 
-            var colOk = await _context.Database
-                .SqlQuery<string>($@"SELECT c.name 
-                                     FROM sys.columns c 
-                                     JOIN sys.tables t ON t.object_id=c.object_id
-                                     WHERE t.name={table} AND c.name={col}").AnyAsync();
+            var colOk = await ColumnExistsAsync(table, col);
             if (!colOk) return BadRequest($"Column '{col}' not found in '{table}'.");
 
             var p = new SqlParameter($"@p{i}", (object?)val ?? DBNull.Value);
@@ -535,6 +537,34 @@ ORDER BY idx.index_id, ic.key_ordinal";
             list.Add(d);
         }
         return list;
+    }
+
+    private Task<bool> TableExistsAsync(string name)
+    {
+        const string sql = "SELECT 1 FROM sys.objects WHERE name = @n AND type IN ('U','V')";
+        return ExecExistsAsync(sql, new SqlParameter("@n", name ?? string.Empty));
+    }
+
+    private Task<bool> ColumnExistsAsync(string table, string column)
+    {
+        const string sql = @"
+SELECT 1
+  FROM sys.columns c
+  JOIN sys.objects o ON o.object_id = c.object_id AND o.type IN ('U','V')
+ WHERE o.name = @t AND c.name = @c";
+        return ExecExistsAsync(sql,
+            new SqlParameter("@t", table ?? string.Empty),
+            new SqlParameter("@c", column ?? string.Empty));
+    }
+
+    private async Task<bool> ExecExistsAsync(string sql, params SqlParameter[] ps)
+    {
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var cmd = new SqlCommand(sql, conn);
+        if (ps != null) cmd.Parameters.AddRange(ps);
+        var obj = await cmd.ExecuteScalarAsync();
+        return obj != null && obj != DBNull.Value;
     }
     }
 }
