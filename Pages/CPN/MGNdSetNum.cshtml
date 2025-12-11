@@ -1,0 +1,971 @@
+@page "/CPN/MGNdSetNum"
+@model PcbErpApi.Pages.CPN.MGNdSetNumModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = $"{Model.ItemId} {Model.PageTitle}";
+}
+
+<link rel="stylesheet" href="~/css/grid-toolbar.css" />
+<style>
+  .grid-scroll { overflow: auto; max-height: 70vh; }
+  .grid-table { min-width: max-content; }
+  .grid-table th,
+  .grid-table td { white-space: nowrap; }
+  .grid-table td .form-check-input { margin: 0 auto; display: block; }
+  .grid-table td .cell-view { display: flex; justify-content: center; align-items: center; }
+  .grid-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: #f8f9fa;
+    box-shadow: 0 2px 2px rgba(0,0,0,0.05);
+  }
+  .btn-tight-group { display: inline-flex; flex-wrap: nowrap; gap: 0; }
+  .btn-tight-group > .btn { border-radius: 0; margin-right: -1px; }
+  .btn-tight-group > .btn:first-child { border-top-left-radius: .25rem; border-bottom-left-radius: .25rem; margin-right: -1px; }
+  .btn-tight-group > .btn:last-child { border-top-right-radius: .25rem; border-bottom-right-radius: .25rem; margin-right: 0; }
+</style>
+
+<div class="card shadow-sm mt-2">
+  <div class="card-body">
+    <ul class="nav nav-tabs" id="mg-tabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tab-main-tab" data-bs-toggle="tab" data-bs-target="#tab-main" type="button" role="tab">主分類</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-encode-tab" data-bs-toggle="tab" data-bs-target="#tab-encode" type="button" role="tab">編碼設定</button>
+      </li>
+    </ul>
+
+    <div class="tab-content pt-3">
+      <div class="tab-pane fade show active" id="tab-main" role="tabpanel" aria-labelledby="tab-main-tab">
+        <div class="btn-tight-group mb-2" id="mainToolbar">
+          <button class="btn btn-primary btn-sm" id="mainToggleEdit">切換編輯</button>
+          <button class="btn btn-outline-secondary btn-sm" id="mainAddRow">新增</button>
+          <button class="btn btn-success btn-sm" id="mainSave">確認</button>
+        </div>
+        <div class="table-responsive grid-scroll" id="mainWrapper" data-table-name="MGN_MINdMatClass">
+          <table class="table table-sm table-bordered align-middle mb-0 grid-table" id="mainTable">
+            <thead class="table-light">
+              <tr id="mainHead"></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="tab-encode" role="tabpanel" aria-labelledby="tab-encode-tab">
+        <div class="row g-3">
+          <div class="col-12 col-lg-5">
+            <div class="card h-100 border-secondary-subtle">
+              <div class="card-header py-2 d-flex align-items-center justify-content-between">
+                <span>品號編碼原則 (SetNumMain)</span>
+                <div class="btn-group btn-group-sm btn-tight-group">
+                  <button class="btn btn-primary" id="setMainToggleEdit">切換編輯</button>
+                  <button class="btn btn-outline-secondary" id="setMainAddRow">新增</button>
+                  <button class="btn btn-success" id="setMainSave">儲存</button>
+                </div>
+              </div>
+              <div class="card-body p-2">
+                <div class="d-flex flex-wrap gap-2 mb-2">
+                  <button class="btn btn-outline-info btn-sm" id="btnTestEncode">測試編碼</button>
+                  <input type="text" class="form-control form-control-sm w-auto" id="txtTestResult" placeholder="測試結果" readonly>
+                </div>
+                <div class="table-responsive grid-scroll" id="setMainWrapper" data-table-name="MGNdSetNumMain">
+                  <table class="table table-sm table-bordered align-middle mb-0 grid-table" id="setMainTable">
+                    <thead class="table-light">
+                      <tr id="setMainHead"></tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-12 col-lg-7">
+            <div class="card border-secondary-subtle mb-3">
+              <div class="card-header py-2 d-flex align-items-center justify-content-between">
+                <div>
+                  <span>編碼方式屬性 (SetNumSub)</span>
+                  <span class="badge bg-light text-dark" id="badgeSetClass"></span>
+                </div>
+                <div class="btn-group btn-group-sm btn-tight-group">
+                  <button class="btn btn-primary" id="setSubToggleEdit">切換編輯</button>
+                  <button class="btn btn-outline-secondary" id="setSubAddRow">新增</button>
+                  <button class="btn btn-success" id="setSubSave">儲存</button>
+                  <button class="btn btn-danger" id="setSubDelete">刪除</button>
+                </div>
+              </div>
+              <div class="card-body p-2">
+                <div class="d-flex mb-2">
+                  <button class="btn btn-outline-primary btn-sm" id="btnCopyToMat">新增屬性到料號主檔</button>
+                </div>
+                <div class="table-responsive grid-scroll" id="setSubWrapper" data-table-name="MGNdSetNumSub">
+                  <table class="table table-sm table-bordered align-middle mb-0 grid-table" id="setSubTable">
+                    <thead class="table-light">
+                      <tr id="setSubHead"></tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="card border-secondary-subtle">
+              <div class="card-header py-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                <div class="d-flex flex-column">
+                  <div>
+                    <span>屬性種類明細 (SetNumSubDtl)</span>
+                    <span class="badge bg-light text-dark" id="badgeSubKey"></span>
+                  </div>
+                </div>
+                <div class="btn-group btn-group-sm btn-tight-group">
+                  <button class="btn btn-primary" id="setDtlToggleEdit">切換編輯</button>
+                  <button class="btn btn-outline-secondary" id="setDtlAddRow">新增</button>
+                  <button class="btn btn-success" id="setDtlSave">儲存</button>
+                </div>
+              </div>
+              <div class="card-body p-2">
+                <div class="d-flex flex-wrap gap-2 mb-2">
+                  <button class="btn btn-outline-secondary btn-sm" id="btnImportMapping">匯入對應的資料</button>
+                </div>
+                <div class="table-responsive grid-scroll" id="setDtlWrapper" data-table-name="MGNdSetNumSubDtl">
+                  <table class="table table-sm table-bordered align-middle mb-0 grid-table" id="setDtlTable">
+                    <thead class="table-light">
+                      <tr id="setDtlHead"></tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="alert mt-3 d-none" id="mgAlert"></div>
+  </div>
+</div>
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", null, ViewData)
+
+@section Scripts {
+<script src="/js/editableGrid.js"></script>
+<script src="/js/gridToolbarTemplate.js"></script>
+<script src="/js/fieldDictModal.js"></script>
+<script>
+(() => {
+  const fallbackMainCols = [
+    { key:'MatClass', label:'分類', width:'80px', required:true },
+    { key:'ClassName', label:'分類名稱', width:'160px', required:true },
+    { key:'NeedInStock', label:'庫存管理', type:'checkbox', width:'80px' },
+    { key:'MB', label:'驗收', type:'checkbox', width:'64px' },
+    { key:'iNeedBatchNum', label:'批號管理', type:'checkbox', width:'80px' },
+    { key:'iNeedDateCode', label:'DateCode', type:'checkbox', width:'80px' },
+    { key:'iNeedExpiredDate', label:'效期管理', type:'checkbox', width:'80px' },
+    { key:'ClassType', label:'物料分類', width:'90px', type:'number' },
+    { key:'Type', label:'成本分類', width:'90px', type:'number' },
+    { key:'Prepared', label:'備料方式', width:'90px', type:'number' },
+    { key:'SetMon', label:'用料月數', width:'90px', type:'number' },
+    { key:'Accept', label:'超收%', width:'90px', type:'number' },
+    { key:'IsManage', label:'件號管理', type:'checkbox', width:'90px' },
+    { key:'StockId', label:'倉別', width:'80px' },
+    { key:'PosId', label:'儲位', width:'90px' },
+    { key:'DistrAptToMatInfo', label:'發料超收%', width:'90px', type:'number' },
+    { key:'NeedQoute', label:'需詢價', type:'checkbox', width:'80px' },
+    { key:'DefaultUnit', label:'基礎單位', width:'90px' },
+    { key:'DefKeepDays', label:'安全天數', width:'90px', type:'number' },
+    { key:'SendMsgDayPre', label:'提醒天數', width:'90px', type:'number' },
+    { key:'FeedProc', label:'對應製程', width:'100px' },
+    { key:'IsMainMat', label:'主材', type:'checkbox', width:'70px' },
+    { key:'iUseBarCode', label:'條碼', type:'checkbox', width:'70px' },
+    { key:'SalesId', label:'業務', width:'90px' },
+    { key:'StockUser1', label:'庫管1', width:'90px' },
+    { key:'StockUser2', label:'庫管2', width:'90px' },
+    { key:'StockUser3', label:'庫管3', width:'90px' },
+    { key:'IsVoid', label:'是否作廢', type:'checkbox', width:'90px' },
+  ];
+
+  const fallbackSetMainCols = [
+    { key:'SetClass', label:'分類代碼', width:'100px', required:true },
+    { key:'EnCode', label:'品號編碼方式', width:'200px', required:true },
+    { key:'SeqByFront', label:'依前碼排序', width:'90px', type:'number' },
+    { key:'IsForEMO', label:'含工單', type:'checkbox', width:'80px' },
+    { key:'EMOdEncode', label:'工單編碼', width:'80px' },
+    { key:'IsStop', label:'停用', type:'checkbox', width:'70px' },
+    { key:'TableName', label:'關聯Table', width:'140px' },
+    { key:'PKName', label:'流水號欄位', width:'120px' },
+    { key:'iGetWaterMethod', label:'取流水方式', width:'100px', type:'number' },
+    { key:'iGetWaterBegin', label:'流水起', width:'80px', type:'number' },
+    { key:'iGetWaterEnd', label:'流水迄', width:'80px', type:'number' },
+  ];
+
+  const fallbackSetSubCols = [
+    { key:'NumId', label:'屬性代碼', width:'80px', required:true },
+    { key:'NumName', label:'屬性名稱', width:'160px', required:true },
+    { key:'IsMust', label:'需要有值', type:'checkbox', width:'90px' },
+    { key:'IsHand', label:'手動給值', type:'checkbox', width:'90px' },
+    { key:'iShowName', label:'顯示名稱', type:'checkbox', width:'90px' },
+    { key:'RealTableName', label:'對應TableName', width:'140px' },
+    { key:'FieldName_Id', label:'對應代號欄位', width:'140px' },
+    { key:'FieldName_Name', label:'對應名稱欄位', width:'140px' },
+  ];
+
+  const fallbackSetDtlCols = [
+    { key:'EnCode', label:'種類編碼', width:'140px', required:true },
+    { key:'DtlNumName', label:'種類名稱', width:'200px', required:true },
+    { key:'DtlNumId', label:'項目', width:'120px', readonly:true },
+  ];
+
+  const alertBox = document.getElementById('mgAlert');
+  const badgeSetClass = document.getElementById('badgeSetClass');
+  const badgeSubKey = document.getElementById('badgeSubKey');
+  const txtTestResult = document.getElementById('txtTestResult');
+  const txtUserId = document.getElementById('txtUserId');
+  const mainTable = document.getElementById('mainTable');
+  const setMainTable = document.getElementById('setMainTable');
+  const setSubTable = document.getElementById('setSubTable');
+  const setDtlTable = document.getElementById('setDtlTable');
+  const mainHead = document.getElementById('mainHead');
+  const setMainHead = document.getElementById('setMainHead');
+  const setSubHead = document.getElementById('setSubHead');
+  const setDtlHead = document.getElementById('setDtlHead');
+  const btnMainToggle = document.getElementById('mainToggleEdit');
+  const btnSetMainToggle = document.getElementById('setMainToggleEdit');
+  const btnSetSubToggle = document.getElementById('setSubToggleEdit');
+  const btnSetDtlToggle = document.getElementById('setDtlToggleEdit');
+  let dictWidths = {};
+  let lastTableName = '';
+  let dictCache = {};
+  let mainCols = [];
+  let setMainCols = [];
+  let setSubCols = [];
+  let setDtlCols = [];
+  let pendingMainRow = null;
+  let pendingLock = false;
+  let controllers = {};
+
+  let mainGrid, setMainGrid, setSubGrid, setDtlGrid;
+  let mainData = [], setMainData = [], setSubData = [], setDtlData = [];
+  let currentSetClass = '';
+  let currentNumId = '';
+  let mainDeleteBtn, setMainDeleteBtn, setSubDeleteBtn, setDtlDeleteBtn;
+
+  function resolveTableNameFrom(el) {
+    if (!el) return '';
+    const closest = el.closest?.('[data-table-name]');
+    if (closest && closest.dataset?.tableName) return closest.dataset.tableName;
+
+    let cur = el;
+    while (cur) {
+      if (cur.dataset && cur.dataset.tableName) return cur.dataset.tableName;
+      cur = cur.parentElement;
+    }
+    return '';
+  }
+
+  function resolveTableNameByMouse() {
+    const pt = window.__lastMouse || { x: 0, y: 0 };
+    if (typeof document.elementFromPoint !== 'function') return '';
+    const el = document.elementFromPoint(pt.x, pt.y);
+    return resolveTableNameFrom(el);
+  }
+
+  function rememberTableNameFrom(el) {
+    const t = resolveTableNameFrom(el);
+    if (t) lastTableName = t;
+    return t;
+  }
+
+  function toggleEdit(grid, btn, toEdit) {
+    if (!grid) return;
+    const next = toEdit !== undefined ? toEdit : !grid.isEdit();
+    grid.toggleEdit(next);
+    if (btn) btn.textContent = next ? '保留' : '編輯';
+  }
+
+  function resolveTableNameByActiveTab() {
+    const activeTab = document.querySelector('.tab-pane.active');
+    if (!activeTab) return '';
+    const target = activeTab.querySelector('[data-table-name]');
+    return target?.dataset?.tableName || '';
+  }
+
+  function showMsg(text, type = 'info') {
+    if (!alertBox) return;
+    const cls = type === 'error' ? 'alert-danger' :
+                type === 'success' ? 'alert-success' :
+                type === 'warning' ? 'alert-warning' : 'alert-info';
+    alertBox.className = `alert ${cls} mt-3`;
+    alertBox.textContent = text;
+    alertBox.classList.remove('d-none');
+  }
+
+  function clearMsg() {
+    if (!alertBox) return;
+    alertBox.classList.add('d-none');
+  }
+
+  function buildHead(headEl, cols, withActions = false) {
+    headEl.innerHTML = '';
+    cols.forEach(c => {
+      const th = document.createElement('th');
+      th.textContent = c.label || c.key;
+      if (c.width) th.style.width = c.width;
+      headEl.appendChild(th);
+    });
+  }
+
+  function createCell(col, value) {
+    const td = document.createElement('td');
+    const view = document.createElement('span');
+    view.className = 'cell-view';
+    const inp = document.createElement('input');
+    inp.name = col.key;
+    inp.dataset.raw = value ?? '';
+    inp.dataset.type = col.type || '';
+    inp.className = 'form-control form-control-sm cell-edit d-none';
+    if (col.readonly) inp.dataset.readonly = '1';
+
+    if (col.type === 'checkbox') {
+      inp.type = 'checkbox';
+      inp.classList.add('form-check-input');
+      inp.checked = value == 1 || value === true || value === '1';
+      view.innerHTML = `<input type="checkbox" disabled ${inp.checked ? 'checked' : ''} class="form-check-input">`;
+    } else if (col.type === 'number') {
+      inp.type = 'number';
+      inp.step = 'any';
+      inp.value = value ?? '';
+      inp.placeholder = col.required ? '必填' : '';
+      view.textContent = value ?? '';
+    } else {
+      inp.type = 'text';
+      inp.value = value ?? '';
+      inp.placeholder = col.required ? '必填' : '';
+      view.textContent = value ?? '';
+    }
+
+    td.appendChild(view);
+    td.appendChild(inp);
+    return td;
+  }
+
+  function applyDictWidths(tableName, cols) {
+    if (!tableName || !dictWidths[tableName.toLowerCase()]) return;
+    const map = dictWidths[tableName.toLowerCase()];
+    cols.forEach(c => {
+      const w = map[c.key.toLowerCase()];
+      if (w && w > 0) {
+        c.width = `${w}px`;
+      }
+    });
+  }
+
+  async function loadDictWidths() {
+    try {
+      const arr = await fetchJson('/api/MG000006/dict-widths');
+      dictWidths = {};
+      (Array.isArray(arr) ? arr : []).forEach(x => {
+        const tbl = (x?.tableName || x?.TableName || '').toLowerCase();
+        const field = (x?.fieldName || x?.FieldName || '').toLowerCase();
+        const w = Number(x?.width ?? x?.Width ?? 0);
+        if (!tbl || !field || !w) return;
+        if (!dictWidths[tbl]) dictWidths[tbl] = {};
+        dictWidths[tbl][field] = w;
+      });
+    } catch (err) {
+      showMsg(err.message || '載入欄寬辭典失敗', 'warning');
+    }
+  }
+
+  function guessType(dataType, fallbackType, key) {
+    if (fallbackType) return fallbackType;
+    const dt = (dataType || '').toLowerCase();
+    if (dt.includes('check') || dt === 'bit' || dt === 'boolean' || dt === 'bool') return 'checkbox';
+    if (dt.includes('int') || dt.includes('dec') || dt.includes('num') || dt.includes('float') || dt.includes('double')) return 'number';
+    const k = (key || '').toLowerCase();
+    if (k.startsWith('is') || k.startsWith('has') || k.startsWith('need') || k.startsWith('iuse') || k.includes('flag')) return 'checkbox';
+    if (k.endsWith('type') || k.endsWith('class') || k.endsWith('num') || k.endsWith('qty') || k.endsWith('count') || k.endsWith('seq') || k.endsWith('rate')) return 'number';
+    return 'text';
+  }
+
+  async function loadDict(tableName) {
+    if (dictCache[tableName]) return dictCache[tableName];
+    const res = await fetchJson(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(tableName)}`);
+    dictCache[tableName] = Array.isArray(res) ? res : [];
+    return dictCache[tableName];
+  }
+
+  async function buildColumns(tableName, fallbackCols) {
+    const dict = await loadDict(tableName);
+    if (!dict || dict.length === 0) return fallbackCols;
+    const fbMap = new Map(fallbackCols.map(c => [c.key.toLowerCase(), c]));
+    const numericOverride = new Set(['setmon','classType','type','prepared','accept','distraptomatinfo','defkeepdays','sendmsgdaypre','seqbyfront','igetwatermethod','igetwaterbegin','igetwaterend']);
+    const textOverride = new Set(['matclass']);
+    const cols = dict
+      .filter(d => (d.Visible ?? d.visible ?? 1) == 1)
+      .sort((a, b) => (a.SerialNum ?? a.serialNum ?? 9999) - (b.SerialNum ?? b.serialNum ?? 9999))
+      .map(d => {
+        const key = d.FieldName || d.fieldName;
+        const fb = fbMap.get((key || '').toLowerCase()) || {};
+        const ds = d.DisplaySize ?? d.displaySize;
+        const widthRaw = d.iFieldWidth ?? d.iLabWidth ?? ds;
+        const widthVal = d.iFieldWidth ? `${widthRaw}px`
+                         : ds ? `${ds}ch`
+                         : fb.width;
+        let t = guessType(d.DataType || d.dataType, fb.type, key);
+        const lk = (key || '').toLowerCase();
+        if (numericOverride.has(lk)) t = 'number';
+        if (textOverride.has(lk)) t = 'text';
+        return {
+          key,
+          label: d.DisplayLabel || d.displayLabel || fb.label || key,
+          width: widthVal,
+          required: fb.required,
+          readonly: fb.readonly || (d.ReadOnly ?? d.readOnly ?? 0) == 1,
+          type: t
+        };
+      });
+    return cols.length ? cols : fallbackCols;
+  }
+
+  function attachRowSelection(tbody, data, onSelect, isLocked) {
+    Array.from(tbody.querySelectorAll('tr')).forEach(tr => {
+      tr.addEventListener('click', () => {
+        if (isLocked && isLocked()) {
+          showMsg('請先確認或取消目前新增的資料', 'warning');
+          return;
+        }
+        rememberTableNameFrom(tr);
+        Array.from(tbody.querySelectorAll('tr')).forEach(r => r.classList.remove('table-primary'));
+        tr.classList.add('table-primary');
+        const idx = Number(tr.dataset.idx);
+        if (!Number.isNaN(idx) && data[idx]) onSelect(data[idx]);
+      });
+    });
+  }
+
+  function showEditRow(tr) {
+    if (!tr) return;
+    tr.querySelectorAll('.cell-view').forEach(v => v.classList.add('d-none'));
+    tr.querySelectorAll('.cell-edit').forEach(inp => inp.classList.remove('d-none'));
+  }
+
+  function addHiddenKeys(tr, data, keys) {
+    keys?.forEach(k => {
+      const hidden = document.createElement('input');
+      hidden.type = 'hidden';
+      hidden.className = 'mmd-pk-hidden';
+      hidden.name = k;
+      hidden.value = data?.[k] ?? '';
+      tr.appendChild(hidden);
+    });
+  }
+
+  function renderBody(tbody, cols, data, keyFields = [], withActions = false) {
+    tbody.innerHTML = '';
+    data.forEach((row, idx) => {
+      const tr = document.createElement('tr');
+      tr.dataset.idx = idx;
+      addHiddenKeys(tr, row, keyFields);
+      cols.forEach(col => {
+        const val = row?.[col.key];
+        const td = createCell(col, val);
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+  }
+
+  function ensureDtlKeySync() {
+    // EnCode 填入 DtlNumId
+    setDtlTable?.querySelectorAll('tbody tr').forEach(tr => {
+      const enInput = tr.querySelector('input[name="EnCode"]');
+      const idInput = tr.querySelector('input[name="DtlNumId"]');
+      if (enInput && idInput && !idInput.value) {
+        idInput.value = enInput.value;
+      }
+    });
+  }
+
+  async function fetchJson(url, options) {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || res.statusText);
+    }
+    return await res.json();
+  }
+
+  async function loadMain() {
+    try {
+      clearMsg();
+      const data = await fetchJson('/api/MG000006/mat-class');
+      mainData = Array.isArray(data) ? data : [];
+      renderBody(mainTable.tBodies[0], mainCols, mainData, ['MatClass'], true);
+      attachRowSelection(mainTable.tBodies[0], mainData, (row) => {
+        if (pendingLock) return;
+        currentSetClass = row?.MatClass || '';
+        badgeSetClass.textContent = currentSetClass ? `SetClass: ${currentSetClass}` : '';
+        loadSetSub(currentSetClass);
+      }, () => pendingLock);
+    } catch (err) {
+      showMsg(err.message || '載入主分類失敗', 'error');
+    }
+  }
+
+  async function loadSetMain() {
+    try {
+      clearMsg();
+      const data = await fetchJson('/api/MG000006/setnum-main');
+      setMainData = Array.isArray(data) ? data : [];
+      renderBody(setMainTable.tBodies[0], setMainCols, setMainData, ['SetClass']);
+      attachRowSelection(setMainTable.tBodies[0], setMainData, (row) => {
+        if (controllers.setMain?.lock) return;
+        currentSetClass = row?.SetClass || '';
+        badgeSetClass.textContent = currentSetClass ? `SetClass: ${currentSetClass}` : '';
+        loadSetSub(currentSetClass);
+      }, () => controllers.setMain?.lock);
+      if (setMainData.length) {
+        currentSetClass = setMainData[0]?.SetClass || '';
+        badgeSetClass.textContent = currentSetClass ? `SetClass: ${currentSetClass}` : '';
+        loadSetSub(currentSetClass);
+      }
+    } catch (err) {
+      showMsg(err.message || '載入編碼原則失敗', 'error');
+    }
+  }
+
+  async function loadSetSub(setClass) {
+    if (!setClass) {
+      setSubData = [];
+      renderBody(setSubTable.tBodies[0], setSubCols, setSubData, ['SetClass','NumId']);
+      renderBody(setDtlTable.tBodies[0], setDtlCols, [], ['SetClass','NumId','DtlNumId']);
+      return;
+    }
+    try {
+      const data = await fetchJson(`/api/MG000006/setnum-sub?setClass=${encodeURIComponent(setClass)}`);
+      setSubData = Array.isArray(data) ? data : [];
+      renderBody(setSubTable.tBodies[0], setSubCols, setSubData, ['SetClass','NumId']);
+      attachRowSelection(setSubTable.tBodies[0], setSubData, (row) => {
+        currentSetClass = row?.SetClass || currentSetClass;
+        currentNumId = row?.NumId || '';
+        badgeSubKey.textContent = currentNumId ? `SetClass: ${currentSetClass} / NumId: ${currentNumId}` : '';
+        loadSetDtl(currentSetClass, currentNumId);
+      }, () => controllers.setSub?.lock);
+      // 若已有選擇，直接取第一筆
+      if (setSubData.length) {
+        currentNumId = setSubData[0]?.NumId || '';
+        badgeSubKey.textContent = currentNumId ? `SetClass: ${currentSetClass} / NumId: ${currentNumId}` : '';
+        loadSetDtl(currentSetClass, currentNumId);
+      } else {
+        setDtlData = [];
+        renderBody(setDtlTable.tBodies[0], setDtlCols, setDtlData, ['SetClass','NumId','DtlNumId']);
+      }
+    } catch (err) {
+      showMsg(err.message || '載入編碼屬性失敗', 'error');
+    }
+  }
+
+  async function loadSetDtl(setClass, numId) {
+    if (!setClass || !numId) {
+      setDtlData = [];
+      renderBody(setDtlTable.tBodies[0], setDtlCols, setDtlData, ['SetClass','NumId','DtlNumId']);
+      return;
+    }
+    try {
+      const data = await fetchJson(`/api/MG000006/setnum-subdtl?setClass=${encodeURIComponent(setClass)}&numId=${encodeURIComponent(numId)}`);
+      setDtlData = Array.isArray(data) ? data : [];
+      renderBody(setDtlTable.tBodies[0], setDtlCols, setDtlData, ['SetClass','NumId','DtlNumId']);
+      attachRowSelection(setDtlTable.tBodies[0], setDtlData, () => {}, () => controllers.setDtl?.lock);
+      ensureDtlKeySync();
+    } catch (err) {
+      showMsg(err.message || '載入屬性明細失敗', 'error');
+    }
+  }
+
+  function addRow(tbody, cols, defaults = {}, keyFields = [], withActions = false, onConfirm, onCancel) {
+    const data = { ...defaults };
+    cols.forEach(c => {
+      if (c.key in data) return;
+      if (c.type === 'checkbox') data[c.key] = 0;
+      else if (c.type === 'number') data[c.key] = 0;
+      else data[c.key] = '';
+    });
+    keyFields.forEach(k => { if (!(k in data)) data[k] = defaults[k] ?? ''; });
+    const tr = document.createElement('tr');
+    tr.dataset.state = 'added';
+    tr.classList.add('table-warning');
+    addHiddenKeys(tr, data, keyFields);
+    cols.forEach(col => tr.appendChild(createCell(col, data[col.key])));
+    if (tbody.firstChild) tbody.insertBefore(tr, tbody.firstChild);
+    else tbody.appendChild(tr);
+    return tr;
+  }
+
+  const setupGridController = window.createGridController;
+
+  function setPendingMainRow(row) {
+    pendingMainRow = row;
+    pendingLock = !!row;
+    if (mainDeleteBtn) {
+      if (row) {
+        mainDeleteBtn.textContent = '取消';
+        mainDeleteBtn.classList.remove('btn-danger');
+        mainDeleteBtn.classList.add('btn-warning');
+      } else {
+        mainDeleteBtn.textContent = '刪除';
+        mainDeleteBtn.classList.remove('btn-warning');
+        mainDeleteBtn.classList.add('btn-danger');
+      }
+    }
+  }
+
+  async function saveGrid(grid, name) {
+    const res = await grid.saveChanges();
+    if (res.ok) {
+      showMsg(`${name} 已儲存`, 'success');
+    } else if (!res.skipped) {
+      showMsg(`${name} 儲存失敗：${res.text || 'unknown'}`, 'error');
+    } else {
+      showMsg(`${name} 無異動`, 'info');
+    }
+  }
+
+  async function testEncode() {
+    if (!currentSetClass) {
+      showMsg('請先選取分類(SetClass)', 'warning');
+      return;
+    }
+    try {
+      const data = await fetchJson('/api/MG000006/test-number', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ setClass: currentSetClass })
+      });
+      txtTestResult.value = data?.result || '';
+      showMsg('測試完成', 'success');
+    } catch (err) {
+      showMsg(err.message || '測試失敗', 'error');
+    }
+  }
+
+  async function importMapping() {
+    if (!currentSetClass || !currentNumId) {
+      showMsg('請先選取屬性(NumId)', 'warning');
+      return;
+    }
+    try {
+      await fetchJson('/api/MG000006/import-mapping', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ setClass: currentSetClass, numId: currentNumId })
+      });
+      showMsg('匯入完成', 'success');
+      loadSetDtl(currentSetClass, currentNumId);
+    } catch (err) {
+      showMsg(err.message || '匯入失敗', 'error');
+    }
+  }
+
+  async function copyToMat() {
+    if (!currentSetClass || !currentNumId) {
+      showMsg('請先選取屬性(NumId)', 'warning');
+      return;
+    }
+    const userId = txtUserId.value.trim();
+    // 取當前屬性列的 IsMust/IsHand
+    const row = setSubData.find(x => (x?.NumId || '').toLowerCase() === (currentNumId || '').toLowerCase());
+    const isMust = row?.IsMust ?? 0;
+    const isHand = row?.IsHand ?? 0;
+    try {
+      await fetchJson('/api/MG000006/copy-to-mat', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ setClass: currentSetClass, numId: currentNumId, userId, isMust, isHand })
+      });
+      showMsg('已新增到料號主檔', 'success');
+    } catch (err) {
+      showMsg(err.message || '新增失敗', 'error');
+    }
+  }
+
+  function wireButtons() {
+    document.getElementById('btnRefreshAll')?.addEventListener('click', () => {
+      Promise.all([loadMain(), loadSetMain()]);
+    });
+
+    btnMainToggle?.addEventListener('click', () => toggleEdit(mainGrid, btnMainToggle));
+    document.getElementById('mainAddRow')?.addEventListener('click', () => {
+      toggleEdit(mainGrid, btnMainToggle, true);
+      mainEditMode = true;
+      if (pendingMainRow) pendingMainRow.remove();
+      const newRow = addRow(
+        mainTable.tBodies[0],
+        mainCols,
+        {},
+        ['MatClass']
+      );
+      showEditRow(newRow);
+      mainTable.tBodies[0].querySelectorAll('tr').forEach(r => r.classList.remove('table-primary'));
+      newRow.classList.add('table-primary');
+      setPendingMainRow(newRow);
+    });
+    document.getElementById('mainSave')?.addEventListener('click', async () => {
+      await saveGrid(mainGrid, '主分類');
+      setPendingMainRow(null);
+      toggleEdit(mainGrid, btnMainToggle, false);
+    });
+    // 刪除目前選取列
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn btn-danger btn-sm';
+    delBtn.textContent = '刪除';
+    mainDeleteBtn = delBtn;
+    const mainToolbar = document.getElementById('mainToolbar') || document.getElementById('mainAddRow')?.parentElement;
+    if (mainToolbar) mainToolbar.appendChild(delBtn);
+    delBtn.addEventListener('click', async () => {
+      // 若有未儲存的新增列，先做取消動作，不觸發刪除
+      if (pendingMainRow) {
+        pendingMainRow.remove();
+        setPendingMainRow(null);
+        return;
+      }
+      const sel = mainTable.tBodies[0].querySelector('tr.table-primary');
+      if (!sel) { showMsg('請先選擇要刪除的分類', 'warning'); return; }
+      const idx = Number(sel.dataset.idx);
+      const row = mainData[idx];
+      const matClass = row?.MatClass || row?.matClass || '';
+      if (!matClass) { showMsg('找不到分類代碼', 'warning'); return; }
+      if (!confirm(`確定要刪除分類 ${matClass} ?`)) return;
+      try {
+        await fetchJson(`/api/MG000006/mat-class/${encodeURIComponent(matClass)}`, { method:'DELETE' });
+        showMsg(`已刪除分類 ${matClass}`, 'success');
+        await loadMain();
+      } catch (err) {
+        showMsg(err.message || '刪除失敗', 'error');
+      }
+    });
+
+    async function deleteSetMain() {
+      const sel = setMainTable.tBodies[0].querySelector('tr.table-primary');
+      if (!sel) { showMsg('請先選擇要刪除的編碼原則', 'warning'); return; }
+      const idx = Number(sel.dataset.idx);
+      const row = setMainData[idx];
+      const setClass = row?.SetClass || row?.setClass || '';
+      if (!setClass) { showMsg('找不到 SetClass', 'warning'); return; }
+      if (!confirm(`確定要刪除編碼原則 ${setClass} ?`)) return;
+      await fetchJson(`/api/MG000006/setnum-main/${encodeURIComponent(setClass)}`, { method:'DELETE' });
+      showMsg(`已刪除 ${setClass}`, 'success');
+      await loadSetMain();
+    }
+
+    async function deleteSetSub() {
+      const sel = setSubTable.tBodies[0].querySelector('tr.table-primary');
+      if (!sel) { showMsg('請先選擇要刪除的屬性', 'warning'); return; }
+      const idx = Number(sel.dataset.idx);
+      const row = setSubData[idx];
+      const setClass = row?.SetClass || row?.setClass || currentSetClass;
+      const numId = row?.NumId || row?.numId || '';
+      if (!setClass || !numId) { showMsg('缺少 SetClass 或 NumId', 'warning'); return; }
+      if (!confirm(`確定要刪除 SetClass=${setClass} / NumId=${numId} ?`)) return;
+      await fetchJson(`/api/MG000006/setnum-sub?setClass=${encodeURIComponent(setClass)}&numId=${encodeURIComponent(numId)}`, { method:'DELETE' });
+      showMsg('刪除完成', 'success');
+      await loadSetSub(setClass);
+    }
+
+    async function deleteSetDtl() {
+      const sel = setDtlTable.tBodies[0].querySelector('tr.table-primary');
+      if (!sel) { showMsg('請先選擇要刪除的屬性明細', 'warning'); return; }
+      const idx = Number(sel.dataset.idx);
+      const row = setDtlData[idx];
+      const setClass = row?.SetClass || row?.setClass || currentSetClass;
+      const numId = row?.NumId || row?.numId || currentNumId;
+      const encode = row?.EnCode || row?.encode || row?.DtlNumId || row?.dtlNumId || '';
+      if (!setClass || !numId || !encode) { showMsg('缺少必要鍵值', 'warning'); return; }
+      if (!confirm(`確定刪除 SetClass=${setClass} / NumId=${numId} / EnCode=${encode} ?`)) return;
+      await fetchJson(`/api/MG000006/setnum-subdtl?setClass=${encodeURIComponent(setClass)}&numId=${encodeURIComponent(numId)}&encode=${encodeURIComponent(encode)}`, { method:'DELETE' });
+      showMsg('刪除完成', 'success');
+      await loadSetDtl(setClass, numId);
+    }
+
+    // SetNumMain 刪除
+    setMainDeleteBtn = document.getElementById('setMainDelete') || document.createElement('button');
+    if (!setMainDeleteBtn.id) {
+      setMainDeleteBtn.type = 'button';
+      setMainDeleteBtn.className = 'btn btn-danger btn-sm';
+      setMainDeleteBtn.textContent = '刪除';
+      document.getElementById('setMainToggleEdit')?.parentElement?.appendChild(setMainDeleteBtn);
+    }
+
+    // SetNumSub 刪除（使用現有按鈕，避免重複）
+    setSubDeleteBtn = document.getElementById('setSubDelete');
+
+    // SetNumSubDtl 刪除
+    setDtlDeleteBtn = document.getElementById('setDtlDelete') || document.createElement('button');
+    if (!setDtlDeleteBtn.id) {
+      setDtlDeleteBtn.type = 'button';
+      setDtlDeleteBtn.className = 'btn btn-danger btn-sm';
+      setDtlDeleteBtn.textContent = '刪除';
+      document.getElementById('setDtlToggleEdit')?.parentElement?.appendChild(setDtlDeleteBtn);
+    }
+    // 共用樣板控制（新增＝取消、刪除＝取消 pending）
+    const ctrlSetMain = setupGridController({
+      name: 'setMain',
+      grid: setMainGrid,
+      btnToggle: btnSetMainToggle,
+      btnAdd: document.getElementById('setMainAddRow'),
+      btnSave: document.getElementById('setMainSave'),
+      btnDelete: setMainDeleteBtn,
+      tbody: setMainTable.tBodies[0],
+      cols: setMainCols,
+      keyFields: ['SetClass'],
+      newDefaults: { TableName: 'MINdMatInfo', PKName: 'PartNum' },
+      label: '品號編碼原則',
+      reload: loadSetMain,
+      onDelete: () => deleteSetMain().catch(err => showMsg(err.message || '刪除失敗', 'error'))
+    });
+    controllers.setMain = ctrlSetMain?.state;
+
+    const ctrlSetSub = setupGridController({
+      name: 'setSub',
+      grid: setSubGrid,
+      btnToggle: btnSetSubToggle,
+      btnAdd: document.getElementById('setSubAddRow'),
+      btnSave: document.getElementById('setSubSave'),
+      btnDelete: setSubDeleteBtn,
+      tbody: setSubTable.tBodies[0],
+      cols: setSubCols,
+      keyFields: ['SetClass','NumId'],
+      beforeAdd: () => {
+        if (!currentSetClass) { showMsg('請先選取 SetClass', 'warning'); return false; }
+      },
+      newDefaults: () => ({ SetClass: currentSetClass, IsMust:1, iShowName:1 }),
+      label: '編碼方式屬性',
+      reload: () => loadSetSub(currentSetClass),
+      onDelete: () => deleteSetSub().catch(err => showMsg(err.message || '刪除失敗', 'error'))
+    });
+    controllers.setSub = ctrlSetSub?.state;
+
+    const ctrlSetDtl = setupGridController({
+      name: 'setDtl',
+      grid: setDtlGrid,
+      btnToggle: btnSetDtlToggle,
+      btnAdd: document.getElementById('setDtlAddRow'),
+      btnSave: document.getElementById('setDtlSave'),
+      btnDelete: setDtlDeleteBtn,
+      tbody: setDtlTable.tBodies[0],
+      cols: setDtlCols,
+      keyFields: ['SetClass','NumId','DtlNumId'],
+      beforeAdd: () => {
+        if (!currentSetClass || !currentNumId) { showMsg('請先選取 SetClass / NumId', 'warning'); return false; }
+      },
+      newDefaults: () => ({ SetClass: currentSetClass, NumId: currentNumId }),
+      afterAdd: () => ensureDtlKeySync(),
+      beforeSave: () => { ensureDtlKeySync(); },
+      label: '屬性種類明細',
+      reload: () => loadSetDtl(currentSetClass, currentNumId),
+      onDelete: () => deleteSetDtl().catch(err => showMsg(err.message || '刪除失敗', 'error'))
+    });
+    controllers.setDtl = ctrlSetDtl?.state;
+
+    document.getElementById('btnTestEncode')?.addEventListener('click', () => testEncode());
+    document.getElementById('btnImportMapping')?.addEventListener('click', () => importMapping());
+    document.getElementById('btnCopyToMat')?.addEventListener('click', () => copyToMat());
+
+    const bindDictOpen = (wrapper) => {
+      if (!wrapper) return;
+      wrapper.addEventListener('click', (e) => rememberTableNameFrom(e.target));
+      wrapper.addEventListener('dblclick', (e) => {
+        const tname = wrapper.dataset.tableName || resolveTableNameFrom(e.target);
+        if (tname) lastTableName = tname;
+        const nameToOpen = tname || resolveTableNameByActiveTab() || lastTableName;
+        if (!nameToOpen) { showMsg('找不到可用的辭典表名', 'warning'); return; }
+        if (window.showDictModal) {
+          window.showDictModal('fieldDictModal', nameToOpen);
+        }
+      });
+    };
+
+    bindDictOpen(document.getElementById('setMainWrapper'));
+    bindDictOpen(document.getElementById('setSubWrapper'));
+    bindDictOpen(document.getElementById('setDtlWrapper'));
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'F3') {
+        e.preventDefault();
+        const tableName =
+          resolveTableNameFrom(document.activeElement) ||
+          resolveTableNameByMouse() ||
+          resolveTableNameByActiveTab() ||
+          lastTableName ||
+          'MGN_MINdMatClass';
+        if (tableName) lastTableName = tableName;
+        if (!tableName) {
+          showMsg('找不到可用的辭典表名', 'warning');
+          return;
+        }
+        if (window.showDictModal) {
+          window.showDictModal('fieldDictModal', tableName);
+        }
+      }
+    });
+  }
+
+  function initGrids() {
+    buildHead(mainHead, mainCols);
+    buildHead(setMainHead, setMainCols);
+    buildHead(setSubHead, setSubCols);
+    buildHead(setDtlHead, setDtlCols);
+
+    mainGrid = window.makeEditableGrid({
+      wrapper: document.getElementById('mainWrapper'),
+      table: document.getElementById('mainTable'),
+      tableName: 'MINdMatClass',
+      keyFields: ['MatClass']
+    });
+
+    setMainGrid = window.makeEditableGrid({
+      wrapper: document.getElementById('setMainWrapper'),
+      table: document.getElementById('setMainTable'),
+      tableName: 'MGNdSetNumMain',
+      keyFields: ['SetClass']
+    });
+
+    setSubGrid = window.makeEditableGrid({
+      wrapper: document.getElementById('setSubWrapper'),
+      table: document.getElementById('setSubTable'),
+      tableName: 'MGNdSetNumSub',
+      keyFields: ['SetClass','NumId']
+    });
+
+    setDtlGrid = window.makeEditableGrid({
+      wrapper: document.getElementById('setDtlWrapper'),
+      table: document.getElementById('setDtlTable'),
+      tableName: 'MGNdSetNumSubDtl',
+      keyFields: ['SetClass','NumId','DtlNumId']
+    });
+  }
+
+  async function init() {
+    await loadDictWidths();
+    mainCols    = await buildColumns('MGN_MINdMatClass', fallbackMainCols);
+    setMainCols = await buildColumns('MGNdSetNumMain', fallbackSetMainCols);
+    setSubCols  = await buildColumns('MGNdSetNumSub', fallbackSetSubCols);
+    setDtlCols  = await buildColumns('MGNdSetNumSubDtl', fallbackSetDtlCols);
+
+    initGrids();
+    if (btnMainToggle) btnMainToggle.textContent = '編輯';
+    if (btnSetMainToggle) btnSetMainToggle.textContent = '編輯';
+    if (btnSetSubToggle) btnSetSubToggle.textContent = '編輯';
+    if (btnSetDtlToggle) btnSetDtlToggle.textContent = '編輯';
+    wireButtons();
+    await Promise.all([loadMain(), loadSetMain()]);
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+})();
+</script>
+}

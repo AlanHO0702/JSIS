@@ -87,7 +87,7 @@
               ondblclick="window.editFieldDetail && window.editFieldDetail('${x.FieldName}')">
 
             <!-- 第 1 欄：序號 + 隱藏欄位 -->
-            <td style="width:60px">
+            <td style="width:40px">
               <input data-field="SerialNum" type="number"
                     value="${x.SerialNum ?? ''}" class="form-control form-control-sm" />
 
@@ -145,7 +145,7 @@
                     class="form-control form-control-sm" />
             </td>
 
-            <td style="width:140px">
+            <td style="width:120px">
               <input data-field="DataType" value="${x.DataType ?? ''}"
                     class="form-control form-control-sm"
                     readonly
@@ -153,7 +153,7 @@
                     tabindex="-1" />
             </td>
 
-            <td style="width:160px">
+            <td style="width:120px">
               <input data-field="FormatStr" value="${x.FormatStr ?? ''}"
                     class="form-control form-control-sm" />
             </td>

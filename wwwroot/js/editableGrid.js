@@ -95,13 +95,20 @@
         let hasDiff = tr.dataset.state === "added";
 
         tr.querySelectorAll(".cell-edit").forEach(inp => {
-          const oldVal = inp.defaultValue ?? "";
-          const newVal = inp.type === "checkbox"
-            ? (inp.checked ? "1" : "0")
-            : (inp.value ?? "");
+          const dataType = inp.dataset.type || "";
+          const oldValRaw = inp.defaultValue ?? "";
+          const newVal = (() => {
+            if (inp.type === "checkbox") return inp.checked ? "1" : "0";
+            if (dataType === "number") {
+              const raw = (inp.value ?? "").trim();
+              return raw === "" ? "0" : raw;
+            }
+            return inp.value ?? "";
+          })();
+          const oldVal = (dataType === "number" && (oldValRaw === "" || oldValRaw == null)) ? null : oldValRaw;
           const isReadonly = inp.dataset.readonly === "1";
           const isKey = keyFieldSet.has((inp.name || "").toLowerCase());
-          if (!isReadonly && oldVal !== newVal) hasDiff = true;
+          if (!isReadonly && String(oldVal) !== String(newVal)) hasDiff = true;
           if (!isKey && isReadonly) return;
         });
 
@@ -112,9 +119,15 @@
         // 編輯欄位
         tr.querySelectorAll(".cell-edit").forEach(inp => {
             if (!inp.name) return;
-            rowAll[inp.name] = inp.type === "checkbox"
-              ? (inp.checked ? "1" : "0")
-              : (inp.value ?? "");
+            const dataType = inp.dataset.type || "";
+            if (inp.type === "checkbox") {
+              rowAll[inp.name] = inp.checked ? "1" : "0";
+            } else if (dataType === "number") {
+              const raw = (inp.value ?? "").trim();
+              rowAll[inp.name] = raw === "" ? "0" : raw;
+            } else {
+              rowAll[inp.name] = inp.value ?? "";
+            }
         });
 
         // 確保鍵欄位一定帶值：若輸入框空，嘗試從同格 span 或 data-raw 取值
