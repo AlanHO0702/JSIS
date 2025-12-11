@@ -568,6 +568,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const queryModalEl = document.getElementById("singleGridQueryModal");
   const queryForm = document.getElementById("singleGridQueryForm");
   const btnQuerySubmit = document.getElementById("btnQuerySubmit");
+  const fallbackQueryFields = @Html.Raw(JsonSerializer.Serialize(
+    fields.Select(f => new {
+      ColumnName = f.FieldName,
+      ColumnCaption = f.DisplayLabel,
+      DataType = f.DataType,
+      DefaultEqual = "like"
+    })
+  ));
 
   function goPage(p) {
     if (!Number.isFinite(p) || p < 1) return;
@@ -603,10 +611,15 @@ document.addEventListener("DOMContentLoaded", () => {
       const res = await fetch(`/api/DictSetupApi/QueryFields?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(table)}&lang=TW`);
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-      buildQueryForm(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) && data.length ? data : (fallbackQueryFields || []);
+      buildQueryForm(list);
       queryFieldsLoaded = true;
     } catch (err) {
       console.warn("load query fields failed", err);
+      if (fallbackQueryFields && fallbackQueryFields.length) {
+        buildQueryForm(fallbackQueryFields);
+        queryFieldsLoaded = true;
+      }
     }
   }
 
@@ -650,7 +663,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  btnQuerySubmit?.addEventListener("click", () => {
+  const submitQueryForm = () => {
     if (!queryForm) return;
     const url = new URL(window.location.href);
     // 保留 pageSize，其餘重新以 pageIndex=1
@@ -663,6 +676,12 @@ document.addEventListener("DOMContentLoaded", () => {
       else url.searchParams.delete(el.name);
     });
     window.location.href = url.toString();
+  };
+
+  btnQuerySubmit?.addEventListener("click", () => submitQueryForm());
+  queryForm?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    submitQueryForm();
   });
 
   // 欄寬拖拉
