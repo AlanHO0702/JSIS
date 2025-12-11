@@ -252,7 +252,9 @@
       const isNewRow = (row && row.__state === "added");
 
         fields.forEach(f => {
+
           const col = f.FieldName;
+
           // 取得原始資料
           let raw = row[col];
           if (raw == null) raw = ""; // 避免 undefined/null 顯示
@@ -663,9 +665,7 @@
     const masterUrl =
       cfg.MasterApi?.trim()
         ? cfg.MasterApi
-        : `/api/CommonTable/TopRows?table=${encodeURIComponent(cfg.MasterTable)}&top=${cfg.MasterTop || 200}`
-          + (cfg.MasterOrderBy ? `&orderBy=${encodeURIComponent(cfg.MasterOrderBy)}` : "")
-          + (cfg.MasterOrderDir ? `&orderDir=${encodeURIComponent(cfg.MasterOrderDir)}` : "");
+        : `/api/CommonTable/TopRows?table=${encodeURIComponent(cfg.MasterTable)}&top=${cfg.MasterTop || 200}`;
 
     const masterRows = await fetch(masterUrl).then(r => r.json());
 
@@ -682,17 +682,10 @@
         cfg.DetailApi?.trim()
           ? cfg.DetailApi
           : `/api/CommonTable/ByKeys?table=${encodeURIComponent(cfg.DetailTable)}`
-            + names.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
-            + values.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("")
-            + (cfg.DetailOrderBy ? `&orderBy=${encodeURIComponent(cfg.DetailOrderBy)}` : "")
-            + (cfg.DetailOrderDir ? `&orderDir=${encodeURIComponent(cfg.DetailOrderDir)}` : "");
+              + names.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
+              + values.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("");
 
       const detailRows = await fetch(detailUrl).then(r => r.json());
-
-      const onDetailClick = async (tr, row) => {
-        Array.from(dBody.children).forEach(x => x.classList.remove("selected"));
-        tr.classList.add("selected");
-      };
 
       // 若 API 沒帶回鍵值，手動塞入（辭典欄位即使不可視也要有鍵）
       if (Array.isArray(detailRows) && names.length === values.length) {
