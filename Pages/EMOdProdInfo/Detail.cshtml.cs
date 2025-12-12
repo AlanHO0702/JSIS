@@ -31,6 +31,8 @@ namespace PcbErpApi.Pages.EMOdProdInfo
         public List<KeyValuePair<string, string>> MasterKeyValues { get; private set; } = new();
         public List<DetailTab> ExtraTabs { get; private set; } = new();
         public List<MasterTab> MasterTabs { get; private set; } = new();
+        public string? LayerPressApi { get; private set; }
+        public string? SubmitHistoryApi { get; private set; }
 
         public async Task<IActionResult> OnGetAsync()
         {
@@ -66,6 +68,16 @@ namespace PcbErpApi.Pages.EMOdProdInfo
 
                 ExtraTabs = BuildExtraTabs();
                 MasterTabs = BuildMasterTabs();
+
+                // 層別資料 API（EMOdProdLayer）
+                if (MasterKeyValues.Count > 0)
+                {
+                    LayerPressApi = BuildByKeysApi("EMOdProdLayer", MasterKeyValues);
+                }
+
+                // 送審歷史資料（使用 CURdTableField 的記錄）
+                // 暫時使用內部資料欄位：作業、使用者、時間
+                SubmitHistoryApi = null; // 將在前端從 masterData 取得
             }
             catch (Exception ex)
             {

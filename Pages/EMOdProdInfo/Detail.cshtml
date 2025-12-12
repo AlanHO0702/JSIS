@@ -4,8 +4,6 @@
 @{
     Layout = "_Layout";
     var cfg = Model.Config;
-    var firstKey = Model.MasterKeyValues.FirstOrDefault(kv => string.Equals(kv.Key, "PartNum", StringComparison.OrdinalIgnoreCase));
-    var masterKeyVal = firstKey.Value ?? Model.MasterKeyValues.FirstOrDefault().Value ?? "";
 }
 
 @await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", null, ViewData)
@@ -21,7 +19,7 @@ else
         <a class="btn btn-link btn-sm" href="@Url.Page("Index")">回列表</a>
     </div>
 
-    <!-- 頂部基本資訊區 -->
+    <!-- 頂部基本資訊區（全寬度）-->
     <div id="emodprodinfo-header"
          class="card shadow-sm border-0 rounded mb-2 p-3"
          data-dict="@cfg?.MasterDict"
@@ -29,6 +27,33 @@ else
         <div class="row g-2" id="header-fields"></div>
     </div>
 
+    <!-- 主要內容區：左側層別+內部資料 + 右側規格/表單 -->
+    <div class="d-flex gap-2" style="align-items: stretch;">
+        <!-- 左側：層別面板 + 內部資料 -->
+        <div style="width: 180px; flex-shrink: 0;">
+            <!-- 層別面板 -->
+            <div class="card shadow-sm border-0 rounded mb-2">
+                <div class="card-header bg-light fw-bold text-center py-2" style="border-bottom: 2px solid #dee2e6;">
+                    層別
+                </div>
+                <div class="card-body p-0" id="layer-list" style="max-height: 400px; overflow-y: auto;">
+                    <div class="text-center text-muted py-3">載入中...</div>
+                </div>
+            </div>
+
+            <!-- 內部資料 -->
+            <div class="card shadow-sm border-0 rounded">
+                <div class="card-header text-white fw-bold py-2" style="background-color: #17a2b8;">
+                    內部資料
+                </div>
+                <div class="card-body p-2" id="submit-history-container" style="max-height: 300px; overflow-y: auto; font-size: 12px;">
+                    <div class="text-center text-muted py-2">載入中...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右側：規格/表單頁籤 -->
+        <div style="flex: 1; min-width: 0;">
     <!-- 最外層頁籤：規格/表單 -->
     <div class="card shadow-sm border-0 rounded-4">
         <div class="card-body p-2">
@@ -158,6 +183,8 @@ else
             </div>
         </div>
     </div>
+        </div>
+    </div>
 }
 
 <script>
@@ -171,9 +198,126 @@ document.addEventListener('DOMContentLoaded', () => {
   // 頂部基本資訊區要顯示的欄位
   const headerFields = ['PartNum', 'Revision', 'CustomerPartNum', 'CustomerSSName', 'Status', 'StatusName', 'Designer', 'UserName'];
 
+  // 層別資料 API
+  const layerPressApiUrl = '@Html.Raw(Model.LayerPressApi ?? "")';
+
   function getDict(dictName) {
     return fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictName)}`)
       .then(r => r.json());
+  }
+
+  // 載入層別資料
+  function loadLayerPress() {
+    const layerListEl = document.getElementById('layer-list');
+    if (!layerListEl || !layerPressApiUrl) {
+      if (layerListEl) layerListEl.innerHTML = '<div class="text-center text-muted py-3">無層別資料</div>';
+      return;
+    }
+
+    fetch(layerPressApiUrl)
+      .then(r => r.json())
+      .then(rows => {
+        if (!rows || rows.length === 0) {
+          layerListEl.innerHTML = '<div class="text-center text-muted py-3">無層別資料</div>';
+          return;
+        }
+
+        // 顯示層別清單
+        // 優先使用 LayerSeq (層序號)，或從 FromLayer 和 ToLayer 組合顯示（如 L1-6）
+        const html = rows.map((row, idx) => {
+          let layerName = '';
+
+          // 嘗試不同的欄位組合
+          if (row.LayerSeq || row.layerseq) {
+            layerName = row.LayerSeq || row.layerseq;
+          } else if (row.LayerName || row.layername) {
+            layerName = row.LayerName || row.layername;
+          } else if ((row.FromLayer || row.fromlayer) && (row.ToLayer || row.tolayer)) {
+            const from = row.FromLayer || row.fromlayer;
+            const to = row.ToLayer || row.tolayer;
+            layerName = `L${from}-${to}`;
+          } else if (row.Layer || row.layer) {
+            layerName = row.Layer || row.layer;
+          } else {
+            layerName = `層${idx + 1}`;
+          }
+
+          const isActive = idx === 0 ? 'active' : '';
+          return `
+            <div class="layer-item ${isActive}" data-layer-idx="${idx}">
+              ${layerName}
+            </div>
+          `;
+        }).join('');
+
+        layerListEl.innerHTML = html;
+
+        // 點擊層別項目
+        layerListEl.querySelectorAll('.layer-item').forEach(item => {
+          item.addEventListener('click', () => {
+            layerListEl.querySelectorAll('.layer-item').forEach(el => el.classList.remove('active'));
+            item.classList.add('active');
+            // 可以在此處顯示該層別的詳細資料
+          });
+        });
+      })
+      .catch(err => {
+        console.error('Load layer press error:', err);
+        layerListEl.innerHTML = '<div class="text-center text-danger py-3">載入失敗</div>';
+      });
+  }
+
+  // 載入送審歷史資料
+  function loadSubmitHistory(row) {
+    const container = document.getElementById('submit-history-container');
+    if (!container) return;
+
+    // 從 masterData 中取得內部資料欄位
+    const historyData = [
+      { label: '作業', value: row.UseId || row.useid || '追審' },
+      { label: '使用者', value: row.UserId || row.userid || row.Designer || row.designer || 'Admin' },
+      { label: '異動日期', value: formatDateTime(row.EditTime || row.edittime) },
+      { label: '設計中', value: formatDateTime(row.DatetimeCol1 || row.datetimecol1) },
+      { label: '設計完成', value: formatDateTime(row.DatetimeCol2 || row.datetimecol2) },
+      { label: '已審核', value: formatDateTime(row.DatetimeCol3 || row.datetimecol3) },
+      { label: '已核准', value: formatDateTime(row.DatetimeCol4 || row.datetimecol4) }
+    ];
+
+    container.innerHTML = historyData.map(item => `
+      <div class="mb-1" style="border-bottom: 1px solid #eee; padding-bottom: 4px;">
+        <div style="font-weight: bold; color: #555; font-size: 11px;">${item.label}</div>
+        <div style="color: #333; font-size: 11px;">${item.value || '----'}</div>
+      </div>
+    `).join('');
+  }
+
+  function formatDateTime(val) {
+    if (!val) return '';
+    try {
+      const date = new Date(val);
+      if (isNaN(date.getTime())) return val;
+      return date.toLocaleString('zh-TW', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      }).replace(/\//g, '/');
+    } catch {
+      return val;
+    }
+  }
+
+  function checkEditPermission() {
+    const statusValue = (masterData?.Status ?? masterData?.status ?? '').toString();
+    if (statusValue !== '0') {
+      alert('只有「設計中」狀態才能修改！\n\n目前狀態：' +
+            (statusValue === '1' ? '設計完成' :
+             statusValue === '2' ? '已審核' :
+             statusValue === '3' ? '已核准' : statusValue));
+      return false;
+    }
+    return true;
   }
 
   function renderHeaderFields(dict, row) {
@@ -192,24 +336,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderMasterTab(tabKey, dict, row) {
-    console.log('renderMasterTab called:', tabKey);
     const tabBtn = document.querySelector(`[data-tab-key="${tabKey}"]`);
-    if (!tabBtn) {
-      console.error('Tab button not found:', tabKey);
-      return;
-    }
+    if (!tabBtn) return;
 
     const fieldNames = (tabBtn.dataset.tabFields || '').split(',').filter(f => f.trim());
-    console.log('Field names for tab', tabKey, ':', fieldNames);
-
     const container = document.querySelector(`#master-content-${tabKey} .row`);
-    if (!container) {
-      console.error('Container not found for:', tabKey);
-      return;
-    }
+    if (!container) return;
 
     const fields = fieldNames.map(fn => dict.find(f => f.FieldName === fn)).filter(f => f);
-    console.log('Matched fields:', fields.length, 'out of', fieldNames.length);
 
     if (fields.length === 0) {
       container.innerHTML = '<div class="col-12"><p class="text-muted">此頁籤暫無欄位資料</p></div>';
@@ -229,7 +363,6 @@ document.addEventListener('DOMContentLoaded', () => {
                ${isReadOnly ? 'readonly' : 'readonly'}>
       </div>`;
     }).join('');
-    console.log('Rendered', fields.length, 'fields for tab', tabKey);
 
     // 加入編輯/儲存按鈕
     const btnContainer = container.parentElement;
@@ -264,15 +397,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const inputs = container.querySelectorAll('.master-field');
 
       if (!isEdit) {
-        // 準備進入編輯模式 - 先檢查 Status (從 masterData 讀取)
-        const statusValue = (masterData?.Status ?? masterData?.status ?? '').toString();
-        if (statusValue !== '0') {
-          alert('只有「設計中」狀態才能修改！\n\n目前狀態：' +
-                (statusValue === '1' ? '設計完成' :
-                 statusValue === '2' ? '已審核' :
-                 statusValue === '3' ? '已核准' : statusValue));
-          return; // 阻止進入編輯模式
-        }
+        // 準備進入編輯模式 - 先檢查權限
+        if (!checkEditPermission()) return;
 
         // 檢查通過，進入編輯模式
         isEdit = true;
@@ -456,35 +582,31 @@ document.addEventListener('DOMContentLoaded', () => {
   const masterApiUrl = '@Html.Raw(cfg?.MasterApi ?? "")';
   const dictName = '@cfg?.MasterDict';
 
-  console.log('Master API URL:', masterApiUrl);
-  console.log('Dict Name:', dictName);
-
   if (masterApiUrl && dictName) {
     Promise.all([
       getDict(dictName),
       fetch(masterApiUrl).then(r => r.json())
     ]).then(([dict, rows]) => {
-      console.log('Dict loaded:', dict.length, 'fields');
-      console.log('Data loaded:', rows);
-
       masterDict = dict;
       masterData = rows && rows.length > 0 ? rows[0] : {};
-      console.log('Master data:', masterData);
 
       // Render header
       renderHeaderFields(dict, masterData);
 
+      // 載入層別資料
+      loadLayerPress();
+
+      // 載入送審歷史
+      loadSubmitHistory(masterData);
+
       // Render all master tabs
       const masterTabs = document.querySelectorAll('#master-tabs [data-tab-key]');
-      console.log('Found', masterTabs.length, 'master tabs');
       masterTabs.forEach(tab => {
         renderMasterTab(tab.dataset.tabKey, dict, masterData);
       });
     }).catch(err => {
       console.error('Load master form error:', err);
     });
-  } else {
-    console.error('Missing master API URL or dict name');
   }
 
   // Detail tab click handler
@@ -509,15 +631,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Tab local controls
   document.querySelectorAll('[data-btn="edit"]').forEach(btn => {
     btn.addEventListener('click', () => {
-      // 先檢查 Status (從 masterData 讀取)
-      const statusValue = (masterData?.Status ?? masterData?.status ?? '').toString();
-      if (statusValue !== '0') {
-        alert('只有「設計中」狀態才能修改！\n\n目前狀態：' +
-              (statusValue === '1' ? '設計完成' :
-               statusValue === '2' ? '已審核' :
-               statusValue === '3' ? '已核准' : statusValue));
-        return; // 阻止進入編輯模式
-      }
+      // 先檢查權限
+      if (!checkEditPermission()) return;
 
       const tabKey = btn.dataset.tab;
       const editor = tabState[tabKey]?.editor;
@@ -554,6 +669,32 @@ document.addEventListener('DOMContentLoaded', () => {
 .readonly-field {
   background-color: #e9ecef !important;
   cursor: not-allowed !important;
+}
+
+/* 層別項目樣式 */
+.layer-item {
+  cursor: pointer;
+  padding: 10px 12px;
+  border-bottom: 1px solid #dee2e6;
+  transition: all 0.15s ease;
+  text-align: center;
+  font-size: 14px;
+}
+
+.layer-item:hover {
+  background-color: #e9ecef;
+}
+
+.layer-item.active {
+  background-color: #007bff;
+  color: white;
+  font-weight: bold;
+  border-left: 4px solid #0056b3;
+}
+
+/* 確保層別面板不會太高 */
+#layer-list {
+  max-height: calc(100vh - 200px);
 }
 </style>
 
