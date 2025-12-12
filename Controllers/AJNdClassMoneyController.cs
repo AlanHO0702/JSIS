@@ -7,6 +7,7 @@ using PcbErpApi.Models;
 public class AJNdClassMoneyController : ControllerBase
 {
     private readonly PcbErpContext _context;
+    private const string DefaultUseId = "a001";
     public AJNdClassMoneyController(PcbErpContext context)
     {
         _context = context;
@@ -18,7 +19,9 @@ public class AJNdClassMoneyController : ControllerBase
     {
         try
         {
-            var data = _context.AJNdClassMoney.ToList();
+            var data = _context.AJNdClassMoney
+                .Where(x => x.UseId == DefaultUseId)
+                .ToList();
             return Ok(data);
         }
         catch (Exception ex)

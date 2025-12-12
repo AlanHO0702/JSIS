@@ -11,6 +11,7 @@ public class AJNdClassMoneyModel : PageModel
 {   // 開始類別定義
     private readonly IConfiguration _configuration; // 用於讀取配置
     private readonly PcbErpContext _context;
+    private const string DefaultUseId = "a001";
     public AJNdClassMoneyModel(IConfiguration configuration, PcbErpContext context)
     {
         _configuration = configuration;
@@ -40,6 +41,7 @@ public class AJNdClassMoneyModel : PageModel
     {
         // 取得所有幣別主檔
         ExchangeRates = await _context.AJNdClassMoney
+            .Where(m => m.UseId == DefaultUseId)
             .OrderBy(m => m.MoneyCode)
             .ToListAsync();
 
@@ -47,7 +49,7 @@ public class AJNdClassMoneyModel : PageModel
         if (SelectedMoneyCode.HasValue)
         {
             var query = _context.AJNdClassMoneyHis
-                .Where(h => h.MoneyCode == SelectedMoneyCode.Value)
+                .Where(h => h.MoneyCode == SelectedMoneyCode.Value && h.UseId == DefaultUseId)
                 .OrderByDescending(h => h.RateDate);
 
             RateHistories = await query.ToListAsync();
