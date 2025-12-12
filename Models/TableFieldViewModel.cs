@@ -16,4 +16,6 @@ public class TableFieldViewModel
     public string? LookupTable { get; set; }
     public string? LookupKeyField { get; set; }
     public string? LookupResultField { get; set; }
+    public int? ReadOnly { get; set; }
+    public int? DisplaySize { get; set; }
 }
