@@ -135,7 +135,7 @@
           const inp = Array.from(tr.querySelectorAll('.cell-edit')).find(i => (i.name || '').toLowerCase() === k);
           const span = inp?.previousElementSibling;
           if (inp && (rowAll[inp.name] === "" || rowAll[inp.name] == null)) {
-            const val = span?.textContent?.trim() || inp.dataset.raw || "";
+            const val = span?.textContent?.trim() || inp.value || inp.dataset.raw || inp.defaultValue || "";
             rowAll[inp.name] = val;
           }
         });

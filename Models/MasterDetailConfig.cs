@@ -38,8 +38,11 @@ namespace WebRazor.Models
         public string? MasterOrderBy { get; set; }
         public string? MasterOrderDir { get; set; } = "ASC";
 
+        /// <summary>可選：明細排序欄與方向</summary>
         public string? DetailOrderBy { get; set; }
         public string? DetailOrderDir { get; set; } = "ASC";
+
+        
     }
 
     public sealed class KeyMap
