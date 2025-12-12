@@ -28,6 +28,7 @@ namespace PcbErpApi.Data
         public virtual DbSet<CurdAddonParam> CurdAddonParams { get; set; }
         public virtual DbSet<AjndJourMain> AjndJourMain { get; set; }
         public virtual DbSet<AjndJourSub> AjndJourSub { get; set; }
+        public virtual DbSet<AjndDepart> AjndDepart { get; set; }
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
         public virtual DbSet<EmodProdInfo> EmodProdInfos { get; set; }
         public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
