@@ -1,0 +1,636 @@
+@page "/CPN/MGNdSpecDemand"
+@model PcbErpApi.Pages.CPN.MGNdSpecDemandModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = $"{Model.ItemId} {Model.PageTitle}";
+}
+
+<link rel="stylesheet" href="~/css/grid-toolbar.css" />
+<style>
+  .grid-scroll { overflow: auto; max-height: 65vh; }
+  .grid-table { min-width: max-content; }
+  .grid-table th,
+  .grid-table td { white-space: nowrap; }
+  .grid-table td .cell-view { display: inline-flex; align-items: center; gap: 4px; }
+  .grid-table td .form-check-input { margin: 0; }
+  .grid-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: #f8f9fa;
+  }
+  .btn-tight-group { display: inline-flex; flex-wrap: nowrap; gap: 0; }
+  .btn-tight-group > .btn { border-radius: 0; margin-right: -1px; }
+  .btn-tight-group > .btn:first-child { border-top-left-radius: .25rem; border-bottom-left-radius: .25rem; margin-right: -1px; }
+  .btn-tight-group > .btn:last-child { border-top-right-radius: .25rem; border-bottom-right-radius: .25rem; margin-right: 0; }
+</style>
+
+<div class="card shadow-sm mt-2">
+  <div class="card-header fw-bold">產品料號規格種類設定</div>
+
+  <div class="card-body">
+    <div class="mb-2 btn-tight-group">
+      <button class="btn btn-primary btn-sm" id="mainToggleEdit">編輯</button>
+      <button class="btn btn-outline-secondary btn-sm" id="mainAddRow">新增</button>
+      <button class="btn btn-success btn-sm" id="mainSave">儲存</button>
+      <button class="btn btn-warning btn-sm" id="mainCancel">取消</button>
+      <button class="btn btn-danger btn-sm" id="mainDelete">刪除</button>
+    </div>
+    <div class="table-responsive grid-scroll mb-3" id="mainWrapper" data-table-name="MGNdSpecMain">
+      <table class="table table-sm table-bordered align-middle mb-0 grid-table" id="mainTable" data-dict-table="MGNdSpecMain">
+        <thead class="table-light">
+          <tr id="mainHead"></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-12 col-lg-6">
+        <div class="card border-secondary-subtle h-100">
+          <div class="card-header d-flex align-items-center justify-content-between py-2">
+            <span>規格屬性 (MGNdSpecSub)</span>
+            <div class="btn-tight-group btn-group btn-group-sm">
+              <button class="btn btn-primary" id="subToggleEdit">編輯</button>
+              <button class="btn btn-outline-secondary" id="subAddRow">新增</button>
+              <button class="btn btn-success" id="subSave">儲存</button>
+              <button class="btn btn-warning" id="subCancel">取消</button>
+              <button class="btn btn-danger" id="subDelete">刪除</button>
+            </div>
+          </div>
+          <div class="card-body p-2">
+            <div class="table-responsive grid-scroll" id="subWrapper" data-table-name="MGNdSpecSub">
+              <table class="table table-sm table-bordered align-middle mb-0 grid-table" id="subTable" data-dict-table="MGNdSpecSub">
+                <thead class="table-light">
+                  <tr id="subHead"></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-lg-6">
+        <div class="card border-secondary-subtle h-100">
+          <div class="card-header d-flex align-items-center justify-content-between py-2">
+            <span>屬性明細 (MGNdSpecSubDtl)</span>
+            <div class="btn-tight-group btn-group btn-group-sm">
+              <button class="btn btn-primary" id="dtlToggleEdit">編輯</button>
+              <button class="btn btn-outline-secondary" id="dtlAddRow">新增</button>
+              <button class="btn btn-success" id="dtlSave">儲存</button>
+              <button class="btn btn-warning" id="dtlCancel">取消</button>
+              <button class="btn btn-danger" id="dtlDelete">刪除</button>
+            </div>
+          </div>
+          <div class="card-body p-2">
+            <div class="table-responsive grid-scroll" id="dtlWrapper" data-table-name="MGNdSpecSubDtl">
+              <table class="table table-sm table-bordered align-middle mb-0 grid-table" id="dtlTable" data-dict-table="MGNdSpecSubDtl">
+                <thead class="table-light">
+                  <tr id="dtlHead"></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="alert mt-3 d-none" id="mdAlert"></div>
+  </div>
+</div>
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", null, ViewData)
+
+@section Scripts {
+<script src="/js/editableGrid.js"></script>
+<script src="/js/gridToolbarTemplate.js"></script>
+<script src="/js/fieldDictModal.js"></script>
+<script>
+(() => {
+  const fallbackMainCols = [
+    { key:'SpecType', label:'規格種類', width:'120px', type:'number', required:true },
+    { key:'SpecTypeName', label:'名稱', width:'180px', required:true },
+    { key:'Notes', label:'備註', width:'260px' }
+  ];
+
+  const fallbackSubCols = [
+    { key:'DemandId', label:'屬性代碼', width:'100px', type:'number', required:true },
+    { key:'DemandName', label:'屬性名稱', width:'200px', required:true },
+    { key:'IsMust', label:'必要', width:'70px', type:'checkbox' },
+    { key:'IsHand', label:'手動', width:'70px', type:'checkbox' },
+    { key:'SpecType', label:'SpecType', width:'100px', type:'number' }
+  ];
+
+  const fallbackDtlCols = [
+    { key:'SerialNum', label:'序號', width:'90px', type:'number', required:true },
+    { key:'DemandContext', label:'需求內容', width:'260px' },
+    { key:'SpecType', label:'SpecType', width:'90px', type:'number' },
+    { key:'DemandId', label:'DemandId', width:'90px', type:'number' }
+  ];
+
+  const alertBox = document.getElementById('mdAlert');
+  const mainTable = document.getElementById('mainTable');
+  const subTable = document.getElementById('subTable');
+  const dtlTable = document.getElementById('dtlTable');
+  const mainHead = document.getElementById('mainHead');
+  const subHead = document.getElementById('subHead');
+  const dtlHead = document.getElementById('dtlHead');
+  const btnMainToggle = document.getElementById('mainToggleEdit');
+  const btnSubToggle = document.getElementById('subToggleEdit');
+  const btnDtlToggle = document.getElementById('dtlToggleEdit');
+  const btnMainCancel = document.getElementById('mainCancel');
+  const btnSubCancel = document.getElementById('subCancel');
+  const btnDtlCancel = document.getElementById('dtlCancel');
+  const badgeSpec = document.getElementById('badgeSpecType');
+  const badgeDemand = document.getElementById('badgeDemand');
+  const dictCache = {};
+  let lastTableName = '';
+
+  let mainCols = [];
+  let subCols = [];
+  let dtlCols = [];
+  let mainData = [];
+  let subData = [];
+  let dtlData = [];
+  let currentSpecType = '';
+  let currentDemandId = '';
+  let mainGrid, subGrid, dtlGrid;
+  const setupGridController = window.setupGridController || window.createGridController;
+
+  const setBadgeSpec = (text) => { if (badgeSpec) badgeSpec.textContent = text || ''; };
+  const setBadgeDemand = (text) => { if (badgeDemand) badgeDemand.textContent = text || ''; };
+
+  function rememberTableNameFrom(el) {
+    if (!el) return '';
+    const tbl = el.closest?.('[data-table-name]')?.dataset?.tableName;
+    if (tbl) lastTableName = tbl;
+    return tbl || '';
+  }
+
+  function showMsg(text, type = 'info') {
+    if (!alertBox) return;
+    const cls = type === 'error' ? 'alert-danger'
+              : type === 'success' ? 'alert-success'
+              : type === 'warning' ? 'alert-warning'
+              : 'alert-info';
+    alertBox.className = `alert ${cls}`;
+    alertBox.textContent = text;
+    alertBox.classList.remove('d-none');
+  }
+
+  function clearMsg() {
+    alertBox?.classList.add('d-none');
+  }
+
+  async function fetchJson(url, options) {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(txt || res.statusText);
+    }
+    return await res.json();
+  }
+
+  async function loadDict(tableName) {
+    if (dictCache[tableName]) return dictCache[tableName];
+    const res = await fetchJson(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(tableName)}`);
+    dictCache[tableName] = Array.isArray(res) ? res : [];
+    return dictCache[tableName];
+  }
+
+  function guessType(dataType, fallbackType, key) {
+    if (fallbackType) return fallbackType;
+    const dt = (dataType || '').toLowerCase();
+    const k = (key || '').toLowerCase();
+    if (dt.includes('int') || dt.includes('dec') || dt.includes('num')) return 'number';
+    if (dt.includes('bit') || dt.includes('bool') || k.startsWith('is') || k.startsWith('has') || k.startsWith('need')) return 'checkbox';
+    return 'text';
+  }
+
+  async function buildColumns(tableName, fallbackCols) {
+    const dict = await loadDict(tableName);
+    if (!dict || dict.length === 0) return fallbackCols;
+    const fbMap = new Map(fallbackCols.map(c => [c.key.toLowerCase(), c]));
+    const forceNumber = new Set(['demandid','serialnum','spectype']);
+    const cols = dict
+      .filter(d => (d.Visible ?? d.visible ?? 1) == 1)
+      .sort((a, b) => (a.SerialNum ?? a.serialNum ?? 9999) - (b.SerialNum ?? b.serialNum ?? 9999))
+      .map(d => {
+        const key = d.FieldName || d.fieldName;
+        const fb = fbMap.get((key || '').toLowerCase()) || {};
+        const ds = d.DisplaySize ?? d.displaySize;
+        const widthRaw = d.iFieldWidth ?? d.iLabWidth ?? ds;
+        const widthVal = d.iFieldWidth ? `${widthRaw}px`
+                         : ds ? `${ds}ch`
+                         : fb.width;
+        return {
+          key,
+          label: d.DisplayLabel || d.displayLabel || fb.label || key,
+          width: widthVal,
+          required: fb.required,
+          readonly: fb.readonly || (d.ReadOnly ?? d.readOnly ?? 0) == 1,
+          type: forceNumber.has((key || '').toLowerCase()) ? 'number' : guessType(d.DataType || d.dataType, fb.type, key)
+        };
+      });
+    return cols.length ? cols : fallbackCols;
+  }
+
+  function buildHead(headEl, cols) {
+    headEl.innerHTML = '';
+    cols.forEach(col => {
+      const th = document.createElement('th');
+      th.textContent = col.label || col.key;
+      if (col.width) th.style.width = col.width;
+      headEl.appendChild(th);
+    });
+  }
+
+  function createCell(col, value) {
+    const td = document.createElement('td');
+    const view = document.createElement('span');
+    view.className = 'cell-view';
+    const inp = document.createElement('input');
+    inp.name = col.key;
+    inp.dataset.raw = value ?? '';
+    inp.dataset.type = col.type || '';
+    inp.className = 'form-control form-control-sm cell-edit d-none';
+    if (col.readonly) inp.dataset.readonly = '1';
+
+    if (col.type === 'checkbox') {
+      inp.type = 'checkbox';
+      inp.classList.add('form-check-input');
+      inp.checked = value == 1 || value === true || value === '1';
+      view.innerHTML = `<input type="checkbox" disabled ${inp.checked ? 'checked' : ''} class="form-check-input">`;
+    } else if (col.type === 'number') {
+      inp.type = 'number';
+      inp.step = 'any';
+      inp.value = value ?? '';
+      inp.placeholder = col.required ? '必填' : '';
+      view.textContent = value ?? '';
+    } else {
+      inp.type = 'text';
+      inp.value = value ?? '';
+      inp.placeholder = col.required ? '必填' : '';
+      view.textContent = value ?? '';
+    }
+
+    td.appendChild(view);
+    td.appendChild(inp);
+    return td;
+  }
+
+  function addHiddenKeys(tr, data, keys) {
+    keys?.forEach(k => {
+      const hidden = document.createElement('input');
+      hidden.type = 'hidden';
+      hidden.className = 'mmd-pk-hidden';
+      hidden.name = k;
+      hidden.value = data?.[k] ?? '';
+      tr.appendChild(hidden);
+    });
+  }
+
+  function renderBody(tbody, cols, data, keyFields = []) {
+    tbody.innerHTML = '';
+    data.forEach((row, idx) => {
+      const tr = document.createElement('tr');
+      tr.dataset.idx = idx;
+      addHiddenKeys(tr, row, keyFields);
+      cols.forEach(col => {
+        const val = row?.[col.key];
+        tr.appendChild(createCell(col, val));
+      });
+      tbody.appendChild(tr);
+    });
+  }
+
+  function attachRowSelection(tbody, data, onSelect) {
+    Array.from(tbody.querySelectorAll('tr')).forEach(tr => {
+      tr.addEventListener('click', () => {
+        rememberTableNameFrom(tr);
+        Array.from(tbody.querySelectorAll('tr')).forEach(r => r.classList.remove('table-primary'));
+        tr.classList.add('table-primary');
+        const idx = Number(tr.dataset.idx);
+        if (!Number.isNaN(idx) && data[idx]) onSelect(data[idx], tr);
+      });
+    });
+  }
+
+  function toggleGrid(grid, btn, toEdit) {
+    if (!grid) return false;
+    const next = toEdit !== undefined ? toEdit : !grid.isEdit();
+    grid.toggleEdit(next);
+    if (btn) btn.textContent = next ? '保留' : '編輯';
+    return next;
+  }
+
+  async function saveGrid(grid, name) {
+    const res = await grid.saveChanges();
+    if (res.ok) {
+      showMsg(`${name} 已儲存`, 'success');
+    } else if (!res.skipped) {
+      showMsg(`${name} 儲存失敗：${res.text || 'unknown'}`, 'error');
+    } else {
+      showMsg(`${name} 無異動`, 'info');
+    }
+    return res;
+  }
+
+  function nextNumber(list, key) {
+    if (!Array.isArray(list) || list.length === 0) return 1;
+    const nums = list.map(x => Number(x?.[key] ?? 0)).filter(n => !Number.isNaN(n));
+    return nums.length ? Math.max(...nums) + 1 : 1;
+  }
+
+  async function deleteRow(tableName, keyFields, row, label) {
+    if (!row) { showMsg(`請先選擇要刪除的${label}`, 'warning'); return; }
+    const payload = {
+      TableName: tableName,
+      KeyFields: keyFields,
+      Data: [ { ...keyFields.reduce((m,k)=>{m[k]=row[k]; return m;}, {}), "__delete": true } ]
+    };
+    await fetchJson('/api/CommonTable/SaveTableChanges', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(payload)
+    });
+    showMsg(`${label} 已刪除`, 'success');
+  }
+
+  async function loadMain(selectSpec) {
+    const data = await fetchJson('/api/CommonTable/TopRows?table=MGNdSpecMain&top=500&orderBy=SpecType');
+    mainData = Array.isArray(data) ? data : [];
+    renderBody(mainTable.tBodies[0], mainCols, mainData, ['SpecType']);
+    if (mainData.length === 0) {
+      currentSpecType = '';
+      setBadgeSpec('');
+      await loadSub('');
+      return;
+    }
+    attachRowSelection(mainTable.tBodies[0], mainData, (row) => {
+      currentSpecType = row?.SpecType ?? '';
+      setBadgeSpec(currentSpecType ? `SpecType: ${currentSpecType}` : '');
+      loadSub(currentSpecType);
+    });
+    const target = mainTable.tBodies[0].querySelector(`tr[data-idx="${mainData.findIndex(r => String(r.SpecType) === String(selectSpec))}"]`);
+    if (target) target.click();
+    else mainTable.tBodies[0].querySelector('tr')?.click();
+  }
+
+  async function loadSub(specType, selectDemandId) {
+    if (!specType) {
+      subData = [];
+      dtlData = [];
+      renderBody(subTable.tBodies[0], subCols, subData, ['SpecType','DemandId']);
+      renderBody(dtlTable.tBodies[0], dtlCols, dtlData, ['SpecType','DemandId','SerialNum']);
+      currentDemandId = '';
+      setBadgeDemand('');
+      return;
+    }
+    const url = `/api/CommonTable/ByKeys?table=MGNdSpecSub&keyNames=SpecType&keyValues=${encodeURIComponent(specType)}&orderBy=DemandId`;
+    const data = await fetchJson(url);
+    subData = Array.isArray(data) ? data : [];
+    renderBody(subTable.tBodies[0], subCols, subData, ['SpecType','DemandId']);
+    if (subData.length === 0) {
+      currentDemandId = '';
+      setBadgeDemand('');
+      dtlData = [];
+      renderBody(dtlTable.tBodies[0], dtlCols, dtlData, ['SpecType','DemandId','SerialNum']);
+      return;
+    }
+    attachRowSelection(subTable.tBodies[0], subData, (row, tr) => {
+      currentDemandId = row?.DemandId ?? '';
+      setBadgeDemand(currentDemandId ? `DemandId: ${currentDemandId}` : '');
+      loadDtl(specType, currentDemandId);
+    });
+    const targetIdx = subData.findIndex(r => String(r.DemandId) === String(selectDemandId));
+    const target = targetIdx >= 0 ? subTable.tBodies[0].querySelector(`tr[data-idx="${targetIdx}"]`) : null;
+    if (target) target.click();
+    else subTable.tBodies[0].querySelector('tr')?.click();
+  }
+
+  async function loadDtl(specType, demandId) {
+    if (!specType || demandId === undefined || demandId === null || demandId === '') {
+      dtlData = [];
+      renderBody(dtlTable.tBodies[0], dtlCols, dtlData, ['SpecType','DemandId','SerialNum']);
+      return;
+    }
+    const url = `/api/CommonTable/ByKeys?table=MGNdSpecSubDtl`
+      + `&keyNames=SpecType&keyNames=DemandId`
+      + `&keyValues=${encodeURIComponent(specType)}&keyValues=${encodeURIComponent(demandId)}`
+      + `&orderBy=SerialNum`;
+    const data = await fetchJson(url);
+    dtlData = Array.isArray(data) ? data : [];
+    renderBody(dtlTable.tBodies[0], dtlCols, dtlData, ['SpecType','DemandId','SerialNum']);
+    if (dtlData.length === 0) return;
+    attachRowSelection(dtlTable.tBodies[0], dtlData, () => {});
+    dtlTable.tBodies[0].querySelector('tr')?.click();
+  }
+
+  function addMainRow() {
+    toggleGrid(mainGrid, btnMainToggle, true);
+    const defaults = { SpecType: nextNumber(mainData, 'SpecType'), SpecTypeName: '', Notes: '' };
+    const tr = document.createElement('tr');
+    tr.dataset.state = 'added';
+    tr.classList.add('table-warning');
+    addHiddenKeys(tr, defaults, ['SpecType']);
+    mainCols.forEach(col => tr.appendChild(createCell(col, defaults[col.key])));
+    mainTable.tBodies[0].prepend(tr);
+    tr.addEventListener('click', () => {
+      Array.from(mainTable.tBodies[0].querySelectorAll('tr')).forEach(r => r.classList.remove('table-primary'));
+    tr.classList.add('table-primary');
+    });
+    tr.click();
+    currentSpecType = defaults.SpecType;
+    setBadgeSpec(`SpecType: ${currentSpecType}`);
+    loadSub(currentSpecType);
+    mainGrid?.toggleEdit(true);
+    return tr;
+  }
+
+  function addSubRow() {
+    if (!currentSpecType) { showMsg('請先選擇規格種類', 'warning'); return; }
+    toggleGrid(subGrid, btnSubToggle, true);
+    const defaults = { SpecType: currentSpecType, DemandId: nextNumber(subData, 'DemandId'), IsMust:0, IsHand:0 };
+    const tr = document.createElement('tr');
+    tr.dataset.state = 'added';
+    tr.classList.add('table-warning');
+    addHiddenKeys(tr, defaults, ['SpecType','DemandId']);
+    subCols.forEach(col => tr.appendChild(createCell(col, defaults[col.key])));
+    subTable.tBodies[0].prepend(tr);
+    tr.addEventListener('click', () => {
+      Array.from(subTable.tBodies[0].querySelectorAll('tr')).forEach(r => r.classList.remove('table-primary'));
+      tr.classList.add('table-primary');
+      currentDemandId = defaults.DemandId;
+      setBadgeDemand(`DemandId: ${currentDemandId}`);
+      renderBody(dtlTable.tBodies[0], dtlCols, [], ['SpecType','DemandId','SerialNum']);
+    });
+    tr.click();
+    subGrid?.toggleEdit(true);
+    return tr;
+  }
+
+  function addDtlRow() {
+    if (!currentSpecType || currentDemandId === '' || currentDemandId === undefined) {
+      showMsg('請先選擇規格屬性', 'warning');
+      return;
+    }
+    toggleGrid(dtlGrid, btnDtlToggle, true);
+    const defaults = { SpecType: currentSpecType, DemandId: currentDemandId, SerialNum: nextNumber(dtlData, 'SerialNum') };
+    const tr = document.createElement('tr');
+    tr.dataset.state = 'added';
+    tr.classList.add('table-warning');
+    addHiddenKeys(tr, defaults, ['SpecType','DemandId','SerialNum']);
+    dtlCols.forEach(col => tr.appendChild(createCell(col, defaults[col.key])));
+    dtlTable.tBodies[0].prepend(tr);
+    tr.addEventListener('click', () => {
+      Array.from(dtlTable.tBodies[0].querySelectorAll('tr')).forEach(r => r.classList.remove('table-primary'));
+      tr.classList.add('table-primary');
+    });
+    tr.click();
+    dtlGrid?.toggleEdit(true);
+    return tr;
+  }
+
+  function getSelected(data, tbody) {
+    const tr = tbody.querySelector('tr.table-primary');
+    if (!tr) return null;
+    const idx = Number(tr.dataset.idx);
+    return Number.isNaN(idx) ? null : data[idx];
+  }
+
+  async function init() {
+    try {
+      mainCols = await buildColumns('MGNdSpecMain', fallbackMainCols);
+      subCols  = await buildColumns('MGNdSpecSub', fallbackSubCols);
+      dtlCols  = await buildColumns('MGNdSpecSubDtl', fallbackDtlCols);
+
+      buildHead(mainHead, mainCols);
+      buildHead(subHead, subCols);
+      buildHead(dtlHead, dtlCols);
+
+      mainGrid = window.makeEditableGrid({ wrapper: document.getElementById('mainWrapper'), table: mainTable, tableName: 'MGNdSpecMain', keyFields:['SpecType'] });
+      subGrid  = window.makeEditableGrid({ wrapper: document.getElementById('subWrapper'), table: subTable, tableName: 'MGNdSpecSub', keyFields:['SpecType','DemandId'] });
+      dtlGrid  = window.makeEditableGrid({ wrapper: document.getElementById('dtlWrapper'), table: dtlTable, tableName: 'MGNdSpecSubDtl', keyFields:['SpecType','DemandId','SerialNum'] });
+
+      if (btnMainToggle) btnMainToggle.textContent = '編輯';
+      if (btnSubToggle) btnSubToggle.textContent = '編輯';
+      if (btnDtlToggle) btnDtlToggle.textContent = '編輯';
+
+      if (setupGridController) {
+        setupGridController({
+          name: 'main',
+          grid: mainGrid,
+          btnToggle: btnMainToggle,
+          btnAdd: document.getElementById('mainAddRow'),
+          btnSave: document.getElementById('mainSave'),
+          btnCancel: btnMainCancel,
+          btnDelete: document.getElementById('mainDelete'),
+          customToggle: () => toggleGrid(mainGrid, btnMainToggle),
+          customAdd: () => addMainRow(),
+          customSave: async () => {
+            const res = await saveGrid(mainGrid, '規格種類');
+            if (res.ok) await loadMain(currentSpecType);
+          },
+          onCancelEdit: async () => {
+            if (mainGrid) toggleGrid(mainGrid, btnMainToggle, false);
+            await loadMain(currentSpecType);
+          },
+          onDelete: async () => {
+            const row = getSelected(mainData, mainTable.tBodies[0]);
+            if (!row) { showMsg('請先選擇規格種類', 'warning'); return; }
+            if (!confirm(`確定刪除 SpecType=${row.SpecType}?`)) return;
+            await deleteRow('MGNdSpecMain', ['SpecType'], row, '規格種類');
+            currentSpecType = '';
+            currentDemandId = '';
+            await loadMain();
+          }
+        });
+
+        setupGridController({
+          name: 'sub',
+          grid: subGrid,
+          btnToggle: btnSubToggle,
+          btnAdd: document.getElementById('subAddRow'),
+          btnSave: document.getElementById('subSave'),
+          btnCancel: btnSubCancel,
+          btnDelete: document.getElementById('subDelete'),
+          customToggle: () => toggleGrid(subGrid, btnSubToggle),
+          customAdd: () => addSubRow(),
+          beforeAdd: () => {
+            if (!currentSpecType) { showMsg('請先選擇規格種類', 'warning'); return false; }
+          },
+          customSave: async () => {
+            const res = await saveGrid(subGrid, '規格屬性');
+            if (res.ok) await loadSub(currentSpecType, currentDemandId);
+          },
+          onCancelEdit: async () => {
+            if (subGrid) toggleGrid(subGrid, btnSubToggle, false);
+            await loadSub(currentSpecType, currentDemandId);
+          },
+          onDelete: async () => {
+            const row = getSelected(subData, subTable.tBodies[0]);
+            if (!row) { showMsg('請先選擇規格屬性', 'warning'); return; }
+            if (!confirm(`確定刪除 DemandId=${row.DemandId}?`)) return;
+            await deleteRow('MGNdSpecSub', ['SpecType','DemandId'], row, '規格屬性');
+            await loadSub(currentSpecType);
+          }
+        });
+
+        setupGridController({
+          name: 'dtl',
+          grid: dtlGrid,
+          btnToggle: btnDtlToggle,
+          btnAdd: document.getElementById('dtlAddRow'),
+          btnSave: document.getElementById('dtlSave'),
+          btnCancel: btnDtlCancel,
+          btnDelete: document.getElementById('dtlDelete'),
+          customToggle: () => toggleGrid(dtlGrid, btnDtlToggle),
+          customAdd: () => addDtlRow(),
+          beforeAdd: () => {
+            if (!currentSpecType || currentDemandId === '' || currentDemandId === undefined) {
+              showMsg('請先選擇規格屬性', 'warning');
+              return false;
+            }
+          },
+          customSave: async () => {
+            const res = await saveGrid(dtlGrid, '屬性明細');
+            if (res.ok) await loadDtl(currentSpecType, currentDemandId);
+          },
+          onCancelEdit: async () => {
+            if (dtlGrid) toggleGrid(dtlGrid, btnDtlToggle, false);
+            await loadDtl(currentSpecType, currentDemandId);
+          },
+          onDelete: async () => {
+            const row = getSelected(dtlData, dtlTable.tBodies[0]);
+            if (!row) { showMsg('請先選擇屬性明細', 'warning'); return; }
+            if (!confirm(`確定刪除 SerialNum=${row.SerialNum}?`)) return;
+            await deleteRow('MGNdSpecSubDtl', ['SpecType','DemandId','SerialNum'], row, '屬性明細');
+            await loadDtl(currentSpecType, currentDemandId);
+          }
+        });
+      }
+
+      await loadMain();
+    } catch (err) {
+      showMsg(err.message || '初始化失敗', 'error');
+    }
+  }
+
+  document.addEventListener('click', (e) => rememberTableNameFrom(e.target));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'F3') {
+      e.preventDefault();
+      const tbl = rememberTableNameFrom(document.activeElement) || lastTableName || 'MGNdSpecMain';
+      if (tbl && window.showDictModal) {
+        window.showDictModal('fieldDictModal', tbl);
+      }
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', init);
+})();
+</script>
+}
