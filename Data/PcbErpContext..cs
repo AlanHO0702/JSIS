@@ -40,8 +40,6 @@ namespace PcbErpApi.Data
         public virtual DbSet<FmedIssuePo> FmedIssuePo { get; set; }
         public virtual DbSet<FmedIssueMat> FmedIssueMat { get; set; }
         public virtual DbSet<FmedIssueLayer> FmedIssueLayer { get; set; }
-        public virtual DbSet<AJNdClassMoney> AJNdClassMoney { get; set; }
-        public virtual DbSet<AJNdClassMoneyHis> AJNdClassMoneyHis { get; set; }
         public virtual DbSet<CurdNoticeBoard> CurdNoticeBoards { get; set; }
          public virtual DbSet<SpodClassArea> SpodClassAreas { get; set; }
         public virtual DbSet<CurdNoticeBoardUser> CurdNoticeBoardUsers { get; set; }
@@ -2268,28 +2266,8 @@ namespace PcbErpApi.Data
                 prop.SetScale(8);
             }
 
-            modelBuilder.Entity<AJNdClassMoney>(entity =>
-            {
-                entity.HasKey(e => new { e.MoneyCode, e.UseId });
-            });
-
-            // 設定 AJNdClassMoneyHis 的複合主鍵
-            modelBuilder.Entity<AJNdClassMoneyHis>()
-                .HasKey(his => new { his.MoneyCode, his.UseId, his.RateDate });
-
-            // 設定關聯關係：一個幣別對應多筆歷史記錄
-            modelBuilder.Entity<AJNdClassMoneyHis>()
-                .HasOne(his => his.Money)
-                .WithMany(m => m.Histories)
-                .HasForeignKey(his => new { his.MoneyCode, his.UseId })
-                .HasPrincipalKey(m => new { m.MoneyCode, m.UseId })
-                .OnDelete(DeleteBehavior.Cascade);
-
             OnModelCreatingPartial(modelBuilder);
         }
-
-
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
-
     }
 }
