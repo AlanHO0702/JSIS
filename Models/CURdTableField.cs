@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace PcbErpApi.Models
 {
@@ -78,5 +79,8 @@ namespace PcbErpApi.Models
         public string? HightLightRed { get; set; }
         public string? HightLightNavy { get; set; }
         public string? HightLightAft1 { get; set; }
+
+        [NotMapped]
+        public int? IsCommonQuery { get; set; }
     }
 }

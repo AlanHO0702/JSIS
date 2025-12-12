@@ -369,6 +369,8 @@ UPDATE CURdPaperPaper
         public string? DefaultValue { get; set; }
         public string? DefaultEqual { get; set; }
         public string? CommandText { get; set; }
+        public int? IsCommonQuery { get; set; }
+        public int? SortOrder { get; set; }
     }
 
     // GET /api/DictSetupApi/QueryFields?itemId=...&table=...&lang=TW
@@ -389,8 +391,39 @@ UPDATE CURdPaperPaper
         cmd.Parameters.AddWithValue("@p2", string.IsNullOrWhiteSpace(lang) ? "TW" : lang);
 
         using var rd = await cmd.ExecuteReaderAsync();
+
+        // 檢查欄位是否存在
+        var hasIsCommonQuery = false;
+        var hasSortOrder = false;
+        try
+        {
+            for (int i = 0; i < rd.FieldCount; i++)
+            {
+                var fieldName = rd.GetName(i);
+                if (fieldName.Equals("IsCommonQuery", StringComparison.OrdinalIgnoreCase))
+                    hasIsCommonQuery = true;
+                if (fieldName.Equals("SortOrder", StringComparison.OrdinalIgnoreCase))
+                    hasSortOrder = true;
+            }
+        }
+        catch { }
+
         while (await rd.ReadAsync())
         {
+            // 只在欄位存在時才讀取
+            int? isCommonQuery = null;
+            int? sortOrder = null;
+
+            if (hasIsCommonQuery)
+            {
+                try { isCommonQuery = TryToInt(rd["IsCommonQuery"]); } catch { }
+            }
+
+            if (hasSortOrder)
+            {
+                try { sortOrder = TryToInt(rd["SortOrder"]); } catch { }
+            }
+
             list.Add(new QueryFieldRow
             {
                 ColumnName = rd["ColumnName"]?.ToString() ?? "",
@@ -399,7 +432,9 @@ UPDATE CURdPaperPaper
                 ControlType = TryToInt(rd["ControlType"]),
                 DefaultValue = rd["DefaultValue"]?.ToString(),
                 DefaultEqual = rd["DefaultEqual"]?.ToString(),
-                CommandText = rd["CommandText"]?.ToString()
+                CommandText = rd["CommandText"]?.ToString(),
+                IsCommonQuery = isCommonQuery,
+                SortOrder = sortOrder
             });
         }
 

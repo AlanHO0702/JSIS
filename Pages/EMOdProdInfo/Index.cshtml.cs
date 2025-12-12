@@ -100,6 +100,19 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             }
 
             ViewData["CustomButtons"] = BuildCustomButtonsHtml();
+
+            // 設定常用查詢欄位
+            ViewData["CommonQueryFields"] = new List<string>
+            {
+                "PartNum",          // 料號
+                "Revision",         // 版序
+                "CustomerSname",    // 客戶代號
+                "CustomerPartNum",  // 客戶料號
+                "ProDstyle",        // 產品類別
+                "Designer",         // 設計者
+                "Status",           // 狀態
+                "StatusName"        // 狀態名稱
+            };
         }
 
         private HtmlString BuildCustomButtonsHtml()
