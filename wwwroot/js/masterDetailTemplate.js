@@ -665,7 +665,9 @@
     const masterUrl =
       cfg.MasterApi?.trim()
         ? cfg.MasterApi
-        : `/api/CommonTable/TopRows?table=${encodeURIComponent(cfg.MasterTable)}&top=${cfg.MasterTop || 200}`;
+        : `/api/CommonTable/TopRows?table=${encodeURIComponent(cfg.MasterTable)}&top=${cfg.MasterTop || 200}`
+          + (cfg.MasterOrderBy ? `&orderBy=${encodeURIComponent(cfg.MasterOrderBy)}` : "")
+          + (cfg.MasterOrderDir ? `&orderDir=${encodeURIComponent(cfg.MasterOrderDir)}` : "");
 
     const masterRows = await fetch(masterUrl).then(r => r.json());
 
@@ -678,12 +680,14 @@
       const keyMap = cfg.KeyMap || [];
       const { names, values } = pickKeys(row, keyMap);
 
-      const detailUrl =
-        cfg.DetailApi?.trim()
-          ? cfg.DetailApi
-          : `/api/CommonTable/ByKeys?table=${encodeURIComponent(cfg.DetailTable)}`
-              + names.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
-              + values.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("");
+        const detailUrl =
+          cfg.DetailApi?.trim()
+            ? cfg.DetailApi
+            : `/api/CommonTable/ByKeys?table=${encodeURIComponent(cfg.DetailTable)}`
+                + names.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
+                + values.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("")
+                + (cfg.DetailOrderBy ? `&orderBy=${encodeURIComponent(cfg.DetailOrderBy)}` : "")
+                + (cfg.DetailOrderDir ? `&orderDir=${encodeURIComponent(cfg.DetailOrderDir)}` : "");
 
       const detailRows = await fetch(detailUrl).then(r => r.json());
 
@@ -696,7 +700,10 @@
         });
       }
 
-      detailData = Array.isArray(detailRows) ? sortByKeys(detailRows, dDict, cfg.DetailKeyFields || []) : [];
+      detailData = Array.isArray(detailRows) ? detailRows : [];
+      if (!cfg.DetailOrderBy) {
+        detailData = sortByKeys(detailData, dDict, cfg.DetailKeyFields || []);
+      }
       renderDetail();
 
       // 若畫面目前在「修改中」，點主檔時要讓明細維持編輯狀態
@@ -709,7 +716,10 @@
     }
 
     // 畫主檔
-    masterData = Array.isArray(masterRows) ? sortByKeys(masterRows, mDict, cfg.MasterKeyFields || []) : [];
+    masterData = Array.isArray(masterRows) ? masterRows : [];
+    if (!cfg.MasterOrderBy) {
+      masterData = sortByKeys(masterData, mDict, cfg.MasterKeyFields || []);
+    }
     renderMaster();
     const first = mBody.querySelector("tr");
     if (first) first.click();

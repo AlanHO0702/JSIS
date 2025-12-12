@@ -114,9 +114,12 @@ namespace PcbErpApi.Pages.SPO
 
                 cfg.MasterOrderBy = string.IsNullOrWhiteSpace(masterOrderBy)
                     ? await GetDefaultOrderByAsync(connStr, cfg.MasterTable)
-                    : masterOrderBy;
+                    : NormalizeOrderBy(masterOrderBy);
 
-                // Detail 排序目前 CommonTable/ByKeys 沒有 orderBy 參數，保留在 cfg 以便後續擴充
+                cfg.DetailOrderBy = string.IsNullOrWhiteSpace(detailOrderBy)
+                    ? await GetDefaultOrderByAsync(connStr, cfg.DetailTable)
+                    : NormalizeOrderBy(detailOrderBy);
+
                 cfg.DetailApi = string.Empty; // 使用預設 ByKeys 並帶入 KeyMap
 
                 result.Config = cfg;
@@ -236,6 +239,18 @@ SELECT ItemId, SerialNum, ButtonName,
             if (string.IsNullOrWhiteSpace(cs))
                 throw new InvalidOperationException("Connection string is not configured.");
             return cs;
+        }
+
+        private static string? NormalizeOrderBy(string? raw)
+        {
+            var s = (raw ?? string.Empty)
+                .Replace('*', ' ')
+                .Replace('+', ' ')
+                .Trim();
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            while (s.Contains("  "))
+                s = s.Replace("  ", " ");
+            return s;
         }
 
         private static async Task<TableMeta?> GetTableMetaAsync(string connStr, string dictTableName)

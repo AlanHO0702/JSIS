@@ -44,7 +44,7 @@
   // ===== 初始化：撈資料（若 tbody 已有資料就不覆蓋）、排序、綁定 =====
   window.initFieldDictModal = async function (tableName, modalId = 'fieldDictModal') {
     const tname = (tableName || window._dictTableName || '').trim();
-    if (!tname) { alert('沒有指定辭典表名'); return; }
+    if (!tname) { return; }
 
     // ⭐ 記錄目前正在編輯的辭典表名，給儲存時統一使用
     window._dictTableName = tname;
@@ -357,7 +357,7 @@
         document.querySelector('meta[name="dict-table"]')?.content ||
         '';
 
-      if (!tname) { alert('沒有指定辭典表名'); return; }
+      if (!tname) { return; }
       window.showDictModal(modalId, tname);
     });
 
