@@ -1,0 +1,422 @@
+@page
+@using WebRazor.Models
+@model PcbErpApi.Pages.AJN.AJNdAccListEditModel
+
+@{
+    ViewData["Title"] = Model.PageTitle;
+    ViewData["DictTableName"] = Model.TableName;
+    var config = ViewData["Config"] as MasterMultiDetailConfig;
+    if (config == null)
+    {
+        <div class="alert alert-danger">配置錯誤：找不到 MasterMultiDetailConfig</div>
+        return;
+    }
+}
+
+<script>window._dictTableName = "@(ViewData["DictTableName"] ?? Model.TableName)";</script>
+<!-- 套用 MasterMultiDetail 模板 -->
+@await Html.PartialAsync("_MasterMultiDetailTemplate", config)
+@await Html.PartialAsync("_FieldDictModal", Model.FieldDictList, ViewData)
+<script src="~/js/fieldDictModal.js"></script>
+
+<!-- ========== 覆蓋模板樣式，實現三欄式佈局 ========== -->
+<style>
+/* 隱藏模板的 Tab 切換介面 */
+#@config.DomId-tabs {
+    display: none !important;
+}
+
+#@config.DomId-tabContent {
+    display: none !important;
+}
+
+/* 隱藏模板的 Master 卡片 */
+.mmd-master-card {
+    display: none !important;
+}
+
+/* 建立三欄式容器 */
+#@config.DomId {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 按鈕列樣式調整 */
+#@config.DomId .btn-toolbar {
+    margin-bottom: 10px;
+}
+
+/* 新增重新整理按鈕 */
+#btnRefresh {
+    display: inline-block;
+}
+
+/* 主要三欄式佈局容器 */
+.acc-layout-container {
+    display: flex;
+    flex-direction: row; /* 明確設定為橫向排列 */
+    height: calc(100vh - 150px);
+    gap: 0;
+    border: 1px solid #ccc;
+    background: #f5f5f5;
+    overflow: hidden;
+}
+
+/* ========== 面板樣式 ========== */
+.acc-panel {
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    overflow: hidden;
+}
+
+.acc-panel-left {
+    width: 280px;
+    min-width: 200px;
+    flex-shrink: 0;
+}
+
+.acc-panel-mid {
+    width: 400px;
+    min-width: 300px;
+    flex-shrink: 0;
+}
+
+.acc-panel-right {
+    flex: 1;
+    min-width: 280px;
+}
+
+/* ========== 分隔器樣式 ========== */
+.acc-splitter-v {
+    width: 5px;
+    background: #d0d0d0;
+    cursor: col-resize;
+    flex-shrink: 0;
+}
+
+.acc-splitter-v:hover {
+    background: #4a90e2;
+}
+
+.acc-splitter-h {
+    height: 5px;
+    background: #d0d0d0;
+    cursor: row-resize;
+    flex-shrink: 0;
+}
+
+.acc-splitter-h:hover {
+    background: #4a90e2;
+}
+
+/* ========== 區段樣式 ========== */
+.acc-section {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 100%;
+}
+
+.acc-section-header {
+    background: linear-gradient(to bottom, #f0f0f0, #e0e0e0);
+    border-bottom: 1px solid #ccc;
+    padding: 4px 8px;
+    font-weight: bold;
+    font-size: 13px;
+    color: #333;
+    flex-shrink: 0;
+}
+
+.acc-section-body {
+    flex: 1;
+    overflow: auto;
+    background: #fff;
+}
+
+.acc-section-footer {
+    background: #f9f9f9;
+    border-top: 1px solid #ddd;
+    padding: 2px 8px;
+    font-size: 12px;
+    color: #666;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+/* ========== 表格樣式（覆蓋模板） ========== */
+.acc-grid {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 13px;
+}
+
+.acc-grid thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.acc-grid th {
+    background: linear-gradient(to bottom, #f8f8f8, #e8e8e8) !important;
+    border: 1px solid #ccc !important;
+    padding: 4px 6px !important;
+    font-weight: bold;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.acc-grid td {
+    border: 1px solid #e0e0e0 !important;
+    padding: 3px 6px !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.acc-grid tbody tr {
+    background: #fff;
+}
+
+.acc-grid tbody tr:nth-child(even) {
+    background: #f9f9f9;
+}
+
+.acc-grid tbody tr:hover {
+    background: #e8f4fd !important;
+    cursor: pointer;
+}
+
+.acc-grid tbody tr.selected {
+    background: #cce5ff !important;
+    font-weight: bold;
+}
+
+/* ========== Master 表格特殊樣式（不壓縮欄位）========== */
+#master-container .acc-grid {
+    table-layout: auto;
+    width: max-content;
+    min-width: 100%;
+}
+
+#master-container .acc-grid th {
+    white-space: nowrap;
+}
+
+#master-container {
+    overflow-x: auto;
+    overflow-y: auto;
+}
+
+/* ========== 響應式調整 ========== */
+@@media (max-width: 1400px) {
+    .acc-panel-left {
+        width: 240px;
+    }
+}
+
+/* 移除自動垂直堆疊，始終保持橫向佈局 */
+@@media (max-width: 1200px) {
+    .acc-panel-left {
+        width: 200px;
+        min-width: 180px;
+    }
+}
+</style>
+
+<!-- ========== 自訂 JavaScript：改造模板為三欄式佈局 ========== -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const domId = '@config.DomId';
+    const root = document.getElementById(domId);
+
+    if (!root) {
+        console.error('找不到根容器:', domId);
+        return;
+    }
+
+    // 等待模板初始化完成後再改造佈局
+    setTimeout(() => {
+        console.log('開始改造三欄式佈局');
+
+        // 建立三欄式容器HTML
+        const layoutHTML = `
+            <div class="acc-layout-container">
+                <!-- 左側面板：總類 + 分類 -->
+                <div class="acc-panel acc-panel-left">
+                    <!-- 總類區域 -->
+                    <div class="acc-section" style="height: 250px;">
+                        <div class="acc-section-header">總類</div>
+                        <div class="acc-section-body" id="master-container"></div>
+                        <div class="acc-section-footer">
+                            <span id="countAccClass">0 / 0</span>
+                        </div>
+                    </div>
+
+                    <!-- 垂直分隔器 -->
+                    <div class="acc-splitter-h"></div>
+
+                    <!-- 分類區域 -->
+                    <div class="acc-section" style="flex: 1;">
+                        <div class="acc-section-header">分類</div>
+                        <div class="acc-section-body" id="detail0-container"></div>
+                        <div class="acc-section-footer">
+                            <span id="countAccClassDtl">0 / 0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 水平分隔器 -->
+                <div class="acc-splitter-v"></div>
+
+                <!-- 中間面板：總帳科目 -->
+                <div class="acc-panel acc-panel-mid">
+                    <div class="acc-section" style="height: 100%;">
+                        <div class="acc-section-header">總帳科目</div>
+                        <div class="acc-section-body" id="detail1-container"></div>
+                        <div class="acc-section-footer">
+                            <span id="countAccId">0 / 0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 水平分隔器 -->
+                <div class="acc-splitter-v"></div>
+
+                <!-- 右側面板：明細科目 -->
+                <div class="acc-panel acc-panel-right">
+                    <div class="acc-section" style="height: 100%;">
+                        <div class="acc-section-header">明細科目</div>
+                        <div class="acc-section-body" id="detail2-container"></div>
+                        <div class="acc-section-footer">
+                            <span id="countSubAccId">0 / 0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // 尋找按鈕列
+        const btnToolbar = root.querySelector('.btn-toolbar');
+
+        // 添加重新整理按鈕
+        if (btnToolbar && !document.getElementById('btnRefresh')) {
+            const refreshBtn = document.createElement('button');
+            refreshBtn.id = 'btnRefresh';
+            refreshBtn.className = 'btn btn-info shadow-sm px-4';
+            refreshBtn.textContent = '重新整理';
+            refreshBtn.addEventListener('click', () => location.reload());
+            btnToolbar.appendChild(refreshBtn);
+        }
+
+        // 在按鈕列後插入三欄式佈局
+        if (btnToolbar && btnToolbar.parentElement && btnToolbar.parentElement.parentElement) {
+            const container = btnToolbar.parentElement.parentElement;
+            const layoutDiv = document.createElement('div');
+            layoutDiv.innerHTML = layoutHTML;
+            container.appendChild(layoutDiv.firstElementChild);
+        }
+
+        // 移動模板生成的表格到對應位置
+        const masterWrapper = root.querySelector(`#${domId}-masterWrapper`);
+        const masterTable = root.querySelector(`#${domId}-masterGrid`);
+        if (masterWrapper && masterTable) {
+            const masterContainer = document.getElementById('master-container');
+            if (masterContainer) {
+                masterContainer.appendChild(masterTable);
+                masterTable.classList.add('acc-grid');
+
+                // 更新計數
+                updateGridCount(masterTable, 'countAccClass');
+            }
+        }
+
+        // 移動明細表格
+        for (let i = 0; i < 3; i++) {
+            const detailWrapper = root.querySelector(`#${domId}-detail-${i}-wrapper`);
+            const detailTable = root.querySelector(`#${domId}-detail-${i}-grid`);
+            if (detailWrapper && detailTable) {
+                const container = document.getElementById(`detail${i}-container`);
+                if (container) {
+                    container.appendChild(detailTable);
+                    detailTable.classList.add('acc-grid');
+
+                    // 綁定行點擊事件更新計數
+                    const countIds = ['countAccClassDtl', 'countAccId', 'countSubAccId'];
+                    updateGridCount(detailTable, countIds[i]);
+
+                    // 監聽表格變化
+                    const observer = new MutationObserver(() => {
+                        updateGridCount(detailTable, countIds[i]);
+                    });
+                    observer.observe(detailTable.querySelector('tbody'), {
+                        childList: true,
+                        subtree: true
+                    });
+                }
+            }
+        }
+
+        // 綁定分隔器拖曳
+        bindSplitters();
+
+        console.log('三欄式佈局改造完成');
+    }, 500);
+});
+
+// 更新表格計數
+function updateGridCount(table, countId) {
+    const tbody = table.querySelector('tbody');
+    if (tbody) {
+        const rows = tbody.querySelectorAll('tr');
+        let count = 0;
+        rows.forEach(row => {
+            // 排除提示訊息行
+            if (!row.textContent.includes('請點選') && !row.textContent.includes('載入中')) {
+                count++;
+            }
+        });
+        const countElem = document.getElementById(countId);
+        if (countElem) {
+            countElem.textContent = `${count} / ${count}`;
+        }
+    }
+}
+
+// 綁定分隔器拖曳
+function bindSplitters() {
+    const splitters = document.querySelectorAll('.acc-splitter-v, .acc-splitter-h');
+    splitters.forEach(splitter => {
+        splitter.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            const isVertical = splitter.classList.contains('acc-splitter-v');
+            const startPos = isVertical ? e.clientX : e.clientY;
+            const prevPanel = splitter.previousElementSibling;
+            const startSize = isVertical ? prevPanel.offsetWidth : prevPanel.offsetHeight;
+
+            function onMouseMove(e) {
+                const delta = (isVertical ? e.clientX : e.clientY) - startPos;
+                const newSize = startSize + delta;
+
+                if (newSize > 100) {
+                    if (isVertical) {
+                        prevPanel.style.width = newSize + 'px';
+                    } else {
+                        prevPanel.style.height = newSize + 'px';
+                    }
+                }
+            }
+
+            function onMouseUp() {
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+            }
+
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+    });
+}
+</script>
