@@ -85,6 +85,26 @@
     }
 }
 
+<style>
+  .sortable-header .header-label {
+    user-select: none;
+  }
+  .sortable-header:hover .header-label {
+    background: rgba(0, 0, 0, 0.05);
+    padding: 2px 4px;
+    border-radius: 3px;
+  }
+  .sort-icon {
+    display: inline-block;
+    margin-left: 4px;
+    color: #0d6efd;
+    font-size: 0.75em;
+  }
+  .col-resizer {
+    cursor: col-resize;
+  }
+</style>
+
 <div class="table-wrapper my-4 px-4">
   <div class="card shadow-sm border-0 rounded-4">
     <div class="card-body">
@@ -135,7 +155,7 @@
             @foreach (var f in fields)
             {
               var w = ToColWidthPx(f, 10);
-              var isHidden = f.Visible == false;
+              var isHidden = f.Visible == 0;
               var hiddenStyle = isHidden ? "display:none;" : "";
               if (w > 0)
               { <col data-field="@f.FieldName" style="@hiddenStyle width:@($"{w}px");min-width:@($"{w}px");max-width:@($"{w}px")" /> }
@@ -148,10 +168,15 @@
             <tr>
               @foreach (var f in fields)
               {
-                var isHidden = f.Visible == false;
+                var isHidden = f.Visible == 0;
                 var hiddenStyle = isHidden ? "display:none;" : "";
-                <th class="text-nowrap" data-field="@f.FieldName" style="@hiddenStyle">
-                  @((string)f.DisplayLabel)
+                var currentSortBy = ViewData["SortBy"] as string;
+                var currentSortDir = ViewData["SortDir"] as string;
+                var isSorted = string.Equals(currentSortBy, f.FieldName, StringComparison.OrdinalIgnoreCase);
+                var sortIcon = isSorted ? (currentSortDir == "desc" ? "▼" : "▲") : "";
+
+                <th class="text-nowrap sortable-header" data-field="@f.FieldName" style="cursor:pointer;@hiddenStyle">
+                  <span class="header-label">@((string)f.DisplayLabel) <span class="sort-icon">@sortIcon</span></span>
                   <span class="col-resizer" data-field="@f.FieldName"></span>
                 </th>
               }
@@ -179,7 +204,7 @@
                       var keySelfVal = "";
 
                       bool isReadOnly = f.ReadOnly != null && (int)f.ReadOnly != 0;
-                      bool isHidden = f.Visible == false;
+                      bool isHidden = f.Visible == 0;
                       var hiddenStyle = isHidden ? "display:none;" : "";
 
                       // 依 OCX 設定帶出 key 欄位，讓 lookup 有依據
@@ -784,6 +809,40 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (err) {
       console.warn("save width failed", err);
     }
+  });
+});
+
+// 排序功能
+document.addEventListener("DOMContentLoaded", () => {
+  const headers = document.querySelectorAll(".sortable-header .header-label");
+
+  headers.forEach(headerLabel => {
+    headerLabel.addEventListener("click", (e) => {
+      e.stopPropagation(); // 防止觸發 col-resizer
+
+      const th = headerLabel.closest("th");
+      const fieldName = th?.getAttribute("data-field");
+      if (!fieldName) return;
+
+      // 取得當前排序狀態
+      const urlParams = new URLSearchParams(window.location.search);
+      const currentSortBy = urlParams.get("sortBy");
+      const currentSortDir = urlParams.get("sortDir");
+
+      // 決定新的排序方向
+      let newSortDir = "asc";
+      if (currentSortBy === fieldName) {
+        // 同一欄位：切換排序方向
+        newSortDir = currentSortDir === "asc" ? "desc" : "asc";
+      }
+
+      // 更新 URL 參數並重新載入
+      urlParams.set("sortBy", fieldName);
+      urlParams.set("sortDir", newSortDir);
+      urlParams.set("pageIndex", "1"); // 排序時重設到第一頁
+
+      window.location.search = urlParams.toString();
+    });
   });
 });
 </script>

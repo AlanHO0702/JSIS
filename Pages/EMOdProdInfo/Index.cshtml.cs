@@ -43,11 +43,13 @@ namespace PcbErpApi.Pages.EMOdProdInfo
         public List<CURdTableField> TableFields { get; private set; } = new();
         public List<string> KeyFields { get; private set; } = new();
 
-        public async Task OnGetAsync([FromQuery(Name = "pageIndex")] int pageIndex = 1, int pageSize = 50)
+        public async Task OnGetAsync([FromQuery(Name = "pageIndex")] int pageIndex = 1, int pageSize = 50, string? sortBy = null, string? sortDir = null)
         {
             PageNumber = pageIndex <= 0 ? 1 : pageIndex;
             PageSize = pageSize <= 0 ? 50 : pageSize;
             ViewData["Title"] = PageTitle;
+            ViewData["SortBy"] = sortBy;
+            ViewData["SortDir"] = sortDir;
 
             FieldDictList = await LoadFieldDictAsync(DictTableName);
             await ApplyLangDisplaySizeAsync(DictTableName, FieldDictList);
@@ -69,7 +71,7 @@ namespace PcbErpApi.Pages.EMOdProdInfo
                 KeyFields.Add("Revision");
             }
 
-            var orderBy = await GetDefaultOrderByAsync(TableName);
+            var orderBy = BuildOrderByClause(sortBy, sortDir) ?? await GetDefaultOrderByAsync(TableName);
 
             try
             {
@@ -174,6 +176,20 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             sb.Append(" OFFSET ").Append((page - 1) * pageSize).Append(" ROWS FETCH NEXT ").Append(pageSize).Append(" ROWS ONLY");
 
             return sb.ToString();
+        }
+
+        private string? BuildOrderByClause(string? sortBy, string? sortDir)
+        {
+            if (string.IsNullOrWhiteSpace(sortBy))
+                return null;
+
+            // 防止 SQL Injection：只允許合法的欄位名稱
+            var validFieldName = System.Text.RegularExpressions.Regex.IsMatch(sortBy, @"^[a-zA-Z_][a-zA-Z0-9_]*$");
+            if (!validFieldName)
+                return null;
+
+            var direction = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC";
+            return $"[{sortBy}] {direction}";
         }
 
         private async Task<string> GetDefaultOrderByAsync(string tableName)
