@@ -266,27 +266,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <!-- 常用查詢區 -->
-        <div id="commonQuerySection">
-          <h6 class="text-primary mb-2"><i class="bi bi-star-fill me-1"></i>常用查詢</h6>
-          <form id="singleGridQueryForm" class="row g-3 mb-3"></form>
-        </div>
-
-        <!-- 進階查詢區（可展開/收合） -->
-        <div id="advancedQuerySection" class="d-none">
-          <div class="d-flex align-items-center mb-2">
-            <h6 class="text-secondary mb-0"><i class="bi bi-sliders me-1"></i>進階查詢</h6>
-          </div>
-          <form id="singleGridAdvancedForm" class="row g-3"></form>
-        </div>
-
-        <!-- 展開/收合進階查詢按鈕 -->
-        <div class="text-center mt-2" id="advancedToggleContainer" style="display:none;">
-          <button type="button" class="btn btn-link btn-sm text-decoration-none" id="btnToggleAdvanced">
-            <i class="bi bi-chevron-down me-1"></i>
-            <span>顯示進階查詢</span>
-          </button>
-        </div>
+        <form id="singleGridQueryForm" class="row g-3"></form>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary btn-sm" id="btnClearQuery">清除</button>
@@ -668,38 +648,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function buildQueryForm(fields) {
     if (!queryForm) return;
-    const advancedForm = document.getElementById("singleGridAdvancedForm");
-    const advancedSection = document.getElementById("advancedQuerySection");
-    const advancedToggleContainer = document.getElementById("advancedToggleContainer");
-
     queryForm.innerHTML = "";
-    if (advancedForm) advancedForm.innerHTML = "";
 
-    // 取得常用查詢欄位清單（優先從 window._commonQueryFields，否則從 IsCommonQuery 欄位）
-    const commonFieldNames = window._commonQueryFields || [];
-    const commonFieldSet = new Set(commonFieldNames.map(name => name.toLowerCase()));
-
-    // 分離常用查詢和進階查詢欄位
-    let commonFields, advancedFields;
-
-    if (commonFieldSet.size > 0) {
-      // 使用前端設定的常用欄位清單
-      commonFields = fields.filter(f => {
-        const colName = (f.columnName || f.ColumnName || "").toLowerCase();
-        return commonFieldSet.has(colName);
-      });
-      advancedFields = fields.filter(f => {
-        const colName = (f.columnName || f.ColumnName || "").toLowerCase();
-        return !commonFieldSet.has(colName);
-      });
-    } else {
-      // Fallback: 使用 IsCommonQuery 欄位標記
-      commonFields = fields.filter(f => (f.isCommonQuery || f.IsCommonQuery) === 1);
-      advancedFields = fields.filter(f => (f.isCommonQuery || f.IsCommonQuery) !== 1);
-    }
-
-    // 渲染常用查詢欄位
-    commonFields.forEach(f => {
+    // 直接渲染所有查詢欄位
+    fields.forEach(f => {
       const colName = f.columnName || f.ColumnName || "";
       if (!colName) return;
       const caption = f.columnCaption || f.ColumnCaption || colName;
@@ -711,7 +663,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const wrap = document.createElement("div");
       wrap.className = "col-md-4 col-sm-6";
       const label = document.createElement("label");
-      label.className = "form-label text-muted fw-bold";
+      label.className = "form-label text-muted";
       label.textContent = caption;
       const input = document.createElement("input");
       input.className = "form-control form-control-sm";
@@ -726,46 +678,6 @@ document.addEventListener("DOMContentLoaded", () => {
       wrap.appendChild(input);
       queryForm.appendChild(wrap);
     });
-
-    // 渲染進階查詢欄位
-    if (advancedForm && advancedFields.length > 0) {
-      advancedFields.forEach(f => {
-        const colName = f.columnName || f.ColumnName || "";
-        if (!colName) return;
-        const caption = f.columnCaption || f.ColumnCaption || colName;
-        const defVal = f.defaultValue || f.DefaultValue || "";
-        const defEq = (f.defaultEqual || f.DefaultEqual || "").toString().toLowerCase();
-        const dtRaw = f.dataType ?? f.DataType;
-        const dt = Number(dtRaw);
-
-        const wrap = document.createElement("div");
-        wrap.className = "col-md-3 col-sm-6";
-        const label = document.createElement("label");
-        label.className = "form-label text-muted";
-        label.textContent = caption;
-        const input = document.createElement("input");
-        input.className = "form-control form-control-sm";
-        input.name = colName;
-        if (dt === 1) input.type = "date";
-        else if (dt === 2) input.type = "number";
-        else input.type = "text";
-        if (defVal) input.value = defVal;
-        if (defEq === "like") input.placeholder = "模糊查詢";
-
-        wrap.appendChild(label);
-        wrap.appendChild(input);
-        advancedForm.appendChild(wrap);
-      });
-
-      // 顯示展開/收合按鈕
-      if (advancedToggleContainer) {
-        advancedToggleContainer.style.display = "block";
-      }
-    } else {
-      // 沒有進階查詢欄位時，隱藏相關元素
-      if (advancedToggleContainer) advancedToggleContainer.style.display = "none";
-      if (advancedSection) advancedSection.classList.add("d-none");
-    }
   }
 
   btnOpenQuery?.addEventListener("click", async () => {
@@ -773,21 +685,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (queryModalEl && window.bootstrap) {
       const modal = bootstrap.Modal.getOrCreateInstance(queryModalEl);
       modal.show();
-    }
-  });
-
-  // 展開/收合進階查詢
-  const btnToggleAdvanced = document.getElementById("btnToggleAdvanced");
-  const advancedSection = document.getElementById("advancedQuerySection");
-  btnToggleAdvanced?.addEventListener("click", () => {
-    if (!advancedSection) return;
-    const isHidden = advancedSection.classList.contains("d-none");
-    if (isHidden) {
-      advancedSection.classList.remove("d-none");
-      btnToggleAdvanced.innerHTML = '<i class="bi bi-chevron-up me-1"></i><span>隱藏進階查詢</span>';
-    } else {
-      advancedSection.classList.add("d-none");
-      btnToggleAdvanced.innerHTML = '<i class="bi bi-chevron-down me-1"></i><span>顯示進階查詢</span>';
     }
   });
 
@@ -799,39 +696,22 @@ document.addEventListener("DOMContentLoaded", () => {
         if (el.tagName === "INPUT") el.value = "";
       });
     }
-    const advancedForm = document.getElementById("singleGridAdvancedForm");
-    if (advancedForm) {
-      Array.from(advancedForm.elements).forEach(el => {
-        if (el.tagName === "INPUT") el.value = "";
-      });
-    }
   });
 
   const submitQueryForm = () => {
     if (!queryForm) return;
-    const advancedForm = document.getElementById("singleGridAdvancedForm");
     const url = new URL(window.location.href);
     // 保留 pageSize，其餘重新以 pageIndex=1
     url.searchParams.delete("pageIndex");
     url.searchParams.set("pageIndex", "1");
 
-    // 收集常用查詢欄位
+    // 收集查詢欄位
     Array.from(queryForm.elements).forEach(el => {
       if (!el.name) return;
       const val = el.value?.toString() ?? "";
       if (val) url.searchParams.set(el.name, val);
       else url.searchParams.delete(el.name);
     });
-
-    // 收集進階查詢欄位
-    if (advancedForm) {
-      Array.from(advancedForm.elements).forEach(el => {
-        if (!el.name) return;
-        const val = el.value?.toString() ?? "";
-        if (val) url.searchParams.set(el.name, val);
-        else url.searchParams.delete(el.name);
-      });
-    }
 
     window.location.href = url.toString();
   };
