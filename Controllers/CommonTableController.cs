@@ -141,14 +141,7 @@ namespace PcbErpApi.Controllers
                         delCmd.CommandText = delSql;
                         foreach (var kp in keyPairs)
                         {
-<<<<<<< HEAD
-                            if (columns.TryGetValue(kp.Name, out var colInfo))
-                                AddTypedParameter(delCmd, $"@K_{kp.Name}", kp.Value, colInfo);
-                            else
-                                AddTypedParameter(delCmd, $"@K_{kp.Name}", kp.Value, null);
-=======
                             AddTypedParameter(delCmd, $"@K_{kp.Col.Name}", kp.Value, kp.Col);
->>>>>>> d2ab35d42c445ee800f4504371358b25b70088f7
                         }
                         var delAffected = await delCmd.ExecuteNonQueryAsync();
                         results.Add(new { ok = delAffected > 0, affected = delAffected, deleted = true, sql = delSql });
@@ -199,16 +192,7 @@ namespace PcbErpApi.Controllers
 
                     // Key 參數（★ 也需要根據欄位型別轉換）
                     foreach (var p in keyPairs)
-<<<<<<< HEAD
-                    {
-                        if (columns.TryGetValue(p.Name, out var colInfo))
-                            AddTypedParameter(cmd, $"@K_{p.Name}", p.Value, colInfo);
-                        else
-                            AddTypedParameter(cmd, $"@K_{p.Name}", p.Value, null);
-                    }
-=======
                         AddTypedParameter(cmd, $"@K_{p.Col.Name}", p.Value, p.Col);
->>>>>>> d2ab35d42c445ee800f4504371358b25b70088f7
 
                     var affected = await cmd.ExecuteNonQueryAsync();
                     // 若找不到資料，嘗試 INSERT 新增
@@ -373,14 +357,10 @@ ORDER BY idx.index_id, ic.key_ordinal";
         // ★ 依欄位型別建立參數（binary 指定 SqlDbType；空白字串轉 NULL；根據資料庫型別轉換數值）
         private static void AddTypedParameter(DbCommand cmd, string name, object? value, ColumnInfo? col)
         {
-<<<<<<< HEAD
-            var normVal = NormalizeValue(value, col?.DbType);
-=======
             var dbType = col?.DbType ?? string.Empty;
             var normVal = col != null
                 ? ConvertValueByDbType(value, dbType)
                 : NormalizeValue(value);
->>>>>>> d2ab35d42c445ee800f4504371358b25b70088f7
 
             if (cmd is SqlCommand sc)
             {
@@ -408,50 +388,7 @@ ORDER BY idx.index_id, ic.key_ordinal";
 
             if (value is string s)
             {
-<<<<<<< HEAD
-                // 空白字串一律轉 NULL
-                if (string.IsNullOrWhiteSpace(s)) return DBNull.Value;
-
-                // ★ 根據資料庫型別決定如何轉換
-                if (!string.IsNullOrWhiteSpace(dbType))
-                {
-                    var t = dbType.ToLowerInvariant();
-
-                    // 數字型別：嘗試轉換，失敗則回傳 NULL
-                    if (t is "int" or "bigint" or "smallint" or "tinyint")
-                    {
-                        if (long.TryParse(s, out var l)) return l;
-                        return DBNull.Value; // 無法轉換就回傳 NULL
-                    }
-                    if (t.Contains("decimal") || t.Contains("numeric") || t.Contains("money"))
-                    {
-                        if (decimal.TryParse(s, out var d)) return d;
-                        return DBNull.Value;
-                    }
-                    if (t is "float" or "real")
-                    {
-                        if (double.TryParse(s, out var f)) return f;
-                        return DBNull.Value;
-                    }
-                    if (t is "bit")
-                    {
-                        if (bool.TryParse(s, out var b)) return b;
-                        if (s == "0") return false;
-                        if (s == "1") return true;
-                        return DBNull.Value;
-                    }
-                    if (t.Contains("date") || t.Contains("time"))
-                    {
-                        if (DateTime.TryParse(s, out var dt)) return dt;
-                        return DBNull.Value;
-                    }
-                }
-
-                // 字串型別或無法判斷型別：直接回傳
-                return s;
-=======
                 return string.IsNullOrWhiteSpace(s) ? DBNull.Value : s;
->>>>>>> d2ab35d42c445ee800f4504371358b25b70088f7
             }
 
             return value;
