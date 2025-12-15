@@ -69,6 +69,7 @@ namespace PcbErpApi.Pages
 
             var level2List = items
                 .Where(i => i.LevelNo == 2 && i.Enabled == 1 && i.SuperId != null && level1Ids.Contains(i.SuperId))
+                .Where(i => i.ItemType != 1) // 不顯示 ITEMTYPE=1 的項目
                 .OrderBy(i => i.SerialNum)
                 .ToList();
 

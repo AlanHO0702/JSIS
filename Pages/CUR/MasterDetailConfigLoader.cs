@@ -71,9 +71,16 @@ namespace PcbErpApi.Pages.CUR
                     MasterTop = 500
                 };
 
-                cfg.MasterOrderBy = string.IsNullOrWhiteSpace(master.OrderByField)
+                var masterOrder = NormalizeOrderBy(master.OrderByField);
+                cfg.MasterOrderBy = string.IsNullOrWhiteSpace(masterOrder)
                     ? await GetDefaultOrderByAsync(connStr, cfg.MasterTable)
-                    : master.OrderByField;
+                    : masterOrder;
+
+                var detailOrder = NormalizeOrderBy(detail.OrderByField);
+                cfg.DetailOrderBy = string.IsNullOrWhiteSpace(detailOrder)
+                    ? await GetDefaultOrderByAsync(connStr, cfg.DetailTable)
+                    : detailOrder;
+
 
                 result.Config = cfg;
                 result.ItemName = item.ItemName;
@@ -125,11 +132,11 @@ namespace PcbErpApi.Pages.CUR
             await conn.OpenAsync();
 
             const string sql = @"
-SELECT TOP 1 
-       ISNULL(NULLIF(RealTableName,''), TableName) AS RealTableName,
-       ISNULL(NULLIF(DisplayLabel,''), TableName) AS DisplayLabel
-  FROM CURdTableName WITH (NOLOCK)
- WHERE TableName = @tbl";
+            SELECT TOP 1 
+                ISNULL(NULLIF(RealTableName,''), TableName) AS RealTableName,
+                ISNULL(NULLIF(DisplayLabel,''), TableName) AS DisplayLabel
+            FROM CURdTableName WITH (NOLOCK)
+            WHERE TableName = @tbl";
 
             await using var cmd = new SqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@tbl", dictTableName ?? string.Empty);
@@ -150,11 +157,11 @@ SELECT TOP 1
             await conn.OpenAsync();
 
             const string sql = @"
-SELECT TOP 1 c.name
-  FROM sys.columns c
-  JOIN sys.tables t ON t.object_id = c.object_id
- WHERE t.name = @tbl
- ORDER BY c.column_id";
+            SELECT TOP 1 c.name
+            FROM sys.columns c
+            JOIN sys.tables t ON t.object_id = c.object_id
+            WHERE t.name = @tbl
+            ORDER BY c.column_id";
 
             await using var cmd = new SqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@tbl", tableName ?? string.Empty);
@@ -169,6 +176,19 @@ SELECT TOP 1 c.name
             if (string.IsNullOrWhiteSpace(cs))
                 throw new InvalidOperationException("Connection string is not configured.");
             return cs;
+        }
+
+        private static string? NormalizeOrderBy(string? raw)
+        {
+            // 允許舊格式使用 * 或 + 代空白，例如 "RateDate*desc"
+            var s = (raw ?? string.Empty)
+                .Replace('*', ' ')
+                .Replace('+', ' ')
+                .Trim();
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            while (s.Contains("  "))
+                s = s.Replace("  ", " ");
+            return s;
         }
 
         private sealed class TableMeta

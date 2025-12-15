@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using System.Data;
 using System.Data.Common;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Data.SqlClient; // ★ 指定 SQL Server 參數型別用
@@ -42,9 +43,12 @@ namespace PcbErpApi.Controllers
             if (req.Data is null || req.Data.Count == 0)
                 return BadRequest("沒有任何資料要更新");
 
-            var conn = _context.Database.GetDbConnection();
+            var conn = _context.Database.GetDbConnection()
+                      ?? throw new InvalidOperationException("DbConnection 未初始化");
             if (conn.State != ConnectionState.Open) await conn.OpenAsync();
-            using var tx = await conn.BeginTransactionAsync();
+            var txRaw = await conn.BeginTransactionAsync();
+            if (txRaw == null) throw new InvalidOperationException("Transaction 無法建立");
+            using var tx = txRaw;
 
             try
             {
@@ -82,9 +86,21 @@ namespace PcbErpApi.Controllers
                         continue;
                     }
 
+                    // __delete 標記支援刪除
+                    bool isDelete = false;
+                    if (row.TryGetPropertyValue("__delete", out var delNode))
+                    {
+                        if (delNode is JsonValue jv)
+                        {
+                            if (jv.TryGetValue(out bool b)) isDelete = b;
+                            else if (jv.TryGetValue(out string? s))
+                                isDelete = string.Equals(s, "true", StringComparison.OrdinalIgnoreCase) || s == "1";
+                        }
+                    }
+
                     // ★ setPairs 改成攜帶欄位資訊，方便之後決定參數型別
                     var setPairs = new List<(ColumnInfo Col, object? Value)>();
-                    var keyPairs = new List<(string Name, object? Value)>();
+                    var keyPairs = new List<(ColumnInfo Col, object? Value)>();
                     var skipped  = new List<string>();
 
                     foreach (var (name, jv) in row)
@@ -102,10 +118,10 @@ namespace PcbErpApi.Controllers
                         }
 
                         // 其他型別
-                        var val = ConvertJsonToDbValue(jv, col.DbType, col.IsNullable);
+                        var val = ConvertJsonToDbValue(jv, col.DbType);
 
                         if (keyNames.Any(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase)))
-                            keyPairs.Add((col.Name, val));
+                            keyPairs.Add((col, val));
                         else if (updatable.Contains(col.Name, StringComparer.OrdinalIgnoreCase))
                             setPairs.Add((col, val));
                     }
@@ -115,14 +131,31 @@ namespace PcbErpApi.Controllers
                         results.Add(new { ok = false, reason = "鍵欄位不完整或為空", row, keys = keyNames });
                         continue;
                     }
+
+                    if (isDelete)
+                    {
+                        var delWhereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Col.Name}] = @K_{p.Col.Name}"));
+                        var delSql = $"DELETE FROM [{req.TableName}] WHERE {delWhereSql}";
+                        using var delCmd = conn.CreateCommand();
+                        delCmd.Transaction = (System.Data.Common.DbTransaction)tx;
+                        delCmd.CommandText = delSql;
+                        foreach (var kp in keyPairs)
+                        {
+                            AddTypedParameter(delCmd, $"@K_{kp.Col.Name}", kp.Value, kp.Col);
+                        }
+                        var delAffected = await delCmd.ExecuteNonQueryAsync();
+                        results.Add(new { ok = delAffected > 0, affected = delAffected, deleted = true, sql = delSql });
+                        continue;
+                    }
+
                     if (setPairs.Count == 0)
                     {
                         var insertSeen0 = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         var insertPairs0 = new List<(ColumnInfo Col, object? Value)>();
                         foreach (var kp in keyPairs)
                         {
-                            if (columns.TryGetValue(kp.Name, out var col) && insertSeen0.Add(col.Name))
-                                insertPairs0.Add((col, kp.Value));
+                            if (insertSeen0.Add(kp.Col.Name))
+                                insertPairs0.Add((kp.Col, kp.Value));
                         }
                         if (insertPairs0.Count > 0)
                         {
@@ -146,7 +179,7 @@ namespace PcbErpApi.Controllers
                     }
 
                     var setSql   = string.Join(", ", setPairs.Select(p => $"[{p.Col.Name}] = @{p.Col.Name}"));
-                    var whereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Name}] = @K_{p.Name}"));
+                    var whereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Col.Name}] = @K_{p.Col.Name}"));
                     var sql      = $"UPDATE [{req.TableName}] SET {setSql} WHERE {whereSql}";
 
                     using var cmd = conn.CreateCommand();
@@ -157,9 +190,9 @@ namespace PcbErpApi.Controllers
                     foreach (var p in setPairs)
                         AddTypedParameter(cmd, $"@{p.Col.Name}", p.Value, p.Col);
 
-                    // Key 參數（一般用預設即可）
+                    // Key 參數（★ 也需要根據欄位型別轉換）
                     foreach (var p in keyPairs)
-                        AddTypedParameter(cmd, $"@K_{p.Name}", p.Value, null);
+                        AddTypedParameter(cmd, $"@K_{p.Col.Name}", p.Value, p.Col);
 
                     var affected = await cmd.ExecuteNonQueryAsync();
                     // 若找不到資料，嘗試 INSERT 新增
@@ -169,8 +202,8 @@ namespace PcbErpApi.Controllers
                         var insertPairs = new List<(ColumnInfo Col, object? Value)>();
                         foreach (var kp in keyPairs)
                         {
-                            if (columns.TryGetValue(kp.Name, out var col) && insertSeen.Add(col.Name))
-                                insertPairs.Add((col, kp.Value));
+                            if (insertSeen.Add(kp.Col.Name))
+                                insertPairs.Add((kp.Col, kp.Value));
                         }
                         foreach (var sp in setPairs)
                         {
@@ -210,7 +243,7 @@ namespace PcbErpApi.Controllers
         }
 
         // ===== Schema =====
-        private sealed record ColumnInfo(string Name, string DbType, bool IsIdentity, bool IsComputed, bool IsRowVersion, bool IsBinary, bool IsNullable);
+        private sealed record ColumnInfo(string Name, string DbType, bool IsIdentity, bool IsComputed, bool IsRowVersion, bool IsBinary);
 
         private async Task<(Dictionary<string, ColumnInfo> columns, List<string> updatable, List<string> pkCols)>
         LoadTableSchemaAsync(DbConnection conn, IDbTransaction tx, string table)
@@ -227,8 +260,7 @@ SELECT c.name AS ColName,
        t.name AS DbType,
        c.is_identity,
        c.is_computed,
-       c.is_rowguidcol AS is_rowversion,
-       c.is_nullable
+       c.is_rowguidcol AS is_rowversion
 FROM sys.columns c
 JOIN sys.types t ON c.user_type_id = t.user_type_id
 WHERE c.[object_id] = OBJECT_ID(@tbl)";
@@ -245,10 +277,9 @@ WHERE c.[object_id] = OBJECT_ID(@tbl)";
                     var isId = r.GetBoolean(2);
                     var isCmp= r.GetBoolean(3);
                     var isRv = r.GetBoolean(4);
-                    var isNullable = r.GetBoolean(5);
                     var isBin = IsBinaryType(dbt);
 
-                    var info = new ColumnInfo(name, dbt, isId, isCmp, isRv, isBin, isNullable);
+                    var info = new ColumnInfo(name, dbt, isId, isCmp, isRv, isBin);
                     columns[name] = info;
 
                     // 白名單：排除 identity / computed / rowversion / binary / text(ntext)
@@ -323,104 +354,142 @@ ORDER BY idx.index_id, ic.key_ordinal";
 
         // ===== 參數與轉型 =====
 
-        // ★ 依欄位型別建立參數（明確指定 SqlDbType）
+        // ★ 依欄位型別建立參數（binary 指定 SqlDbType；空白字串轉 NULL；根據資料庫型別轉換數值）
         private static void AddTypedParameter(DbCommand cmd, string name, object? value, ColumnInfo? col)
         {
+            var dbType = col?.DbType ?? string.Empty;
+            var normVal = col != null
+                ? ConvertValueByDbType(value, dbType)
+                : NormalizeValue(value);
+
             if (cmd is SqlCommand sc)
             {
-                // 如果有欄位資訊，根據資料庫類型明確指定參數類型
-                if (col != null)
+                if (col != null && col.IsBinary)
                 {
-                    var sqlType = MapToSqlDbType(col.DbType);
-                    if (sqlType.HasValue)
-                    {
-                        var p = sc.Parameters.Add(name, sqlType.Value);
-                        p.Value = value ?? DBNull.Value;
-                        return;
-                    }
+                    var p = sc.Parameters.Add(name, MapSqlDbType(dbType));
+                    p.Value = normVal;
+                    return;
                 }
                 // 其他型別走預設
-                var sp = sc.Parameters.AddWithValue(name, value ?? DBNull.Value);
+                var sp = sc.Parameters.AddWithValue(name, normVal ?? DBNull.Value);
                 return;
             }
 
             // 其他資料庫 provider：退回一般參數
             var prm = cmd.CreateParameter();
             prm.ParameterName = name;
-            prm.Value = value ?? DBNull.Value;
+            prm.Value = normVal ?? DBNull.Value;
             cmd.Parameters.Add(prm);
         }
 
-        private static SqlDbType? MapToSqlDbType(string dbType)
+        private static object NormalizeValue(object? value, string? dbType = null)
         {
+            if (value == null || value == DBNull.Value) return DBNull.Value;
+
+            if (value is string s)
+            {
+                return string.IsNullOrWhiteSpace(s) ? DBNull.Value : s;
+            }
+
+            return value;
+        }
+
+        private static SqlDbType MapSqlDbType(string dbType)
+        {
+            if (string.IsNullOrWhiteSpace(dbType)) return SqlDbType.VarBinary;
             var t = dbType.ToLowerInvariant();
             return t switch
             {
-                // 數值類型
-                "int"           => SqlDbType.Int,
-                "bigint"        => SqlDbType.BigInt,
-                "smallint"      => SqlDbType.SmallInt,
-                "tinyint"       => SqlDbType.TinyInt,
-                "decimal"       => SqlDbType.Decimal,
-                "numeric"       => SqlDbType.Decimal,
-                "money"         => SqlDbType.Money,
-                "smallmoney"    => SqlDbType.SmallMoney,
-                "float"         => SqlDbType.Float,
-                "real"          => SqlDbType.Real,
-
-                // 布林
-                "bit"           => SqlDbType.Bit,
-
-                // 日期時間
-                "datetime"      => SqlDbType.DateTime,
-                "datetime2"     => SqlDbType.DateTime2,
-                "date"          => SqlDbType.Date,
-                "time"          => SqlDbType.Time,
-                "smalldatetime" => SqlDbType.SmallDateTime,
-
-                // 二進位
-                "image"         => SqlDbType.Image,
-                "varbinary"     => SqlDbType.VarBinary,
-                "binary"        => SqlDbType.Binary,
-                "rowversion"    => SqlDbType.Timestamp,
-                "timestamp"     => SqlDbType.Timestamp,
-
-                // 字串類型不指定，讓 AddWithValue 自動推斷
-                _ => null
+                "image"     => SqlDbType.Image,
+                "varbinary" => SqlDbType.VarBinary,
+                "binary"    => SqlDbType.Binary,
+                _           => SqlDbType.VarBinary // fallback
             };
         }
 
-        private static object? ConvertJsonToDbValue(JsonNode? node, string dbType, bool isNullable)
+        private static readonly Dictionary<string, string> AliasBaseTypeMap = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // char / varchar family
+            ["caccid"] = "char",
+            ["caccountid"] = "varchar",
+            ["ccompanyid"] = "varchar",
+            ["ccustpartnum"] = "varchar",
+            ["cdefectid"] = "char",
+            ["cdepartid"] = "char",
+            ["cempid"] = "char",
+            ["cfilmid"] = "char",
+            ["charempid"] = "char",
+            ["chrempid"] = "char",
+            ["chrmattcode"] = "char",
+            ["chrmattgauge"] = "varchar",
+            ["chrmattname"] = "varchar",
+            ["chrpartnum"] = "char",
+            ["chrrevision"] = "char",
+            ["clayerid"] = "char",
+            ["clotnum"] = "varchar",
+            ["cmid"] = "char",
+            ["cname"] = "varchar",
+            ["cnotes"] = "varchar",
+            ["cpaperid"] = "varchar",
+            ["cpapernum"] = "varchar",
+            ["cpartnum"] = "char",
+            ["cproccode"] = "char",
+            ["cprojectid"] = "varchar",
+            ["crevision"] = "char",
+            ["csid"] = "char",
+            ["csubaccid"] = "varchar",
+            ["cuserid"] = "varchar",
+            ["cvaccid"] = "varchar",
+            ["cvaccountid"] = "varchar",
+            ["cvcompanyid"] = "varchar",
+            ["cvcustpartnum"] = "varchar",
+            ["cvdecqnty"] = "decimal",
+            ["cvdecmoney"] = "decimal",
+            ["cvdefectid"] = "varchar",
+            ["cvdepartid"] = "varchar",
+            ["cvempid"] = "varchar",
+            ["cvlayerid"] = "varchar",
+            ["cvlotnum"] = "varchar",
+            ["cvmid"] = "varchar",
+            ["cvmotherissuenum"] = "varchar",
+            ["cvname"] = "varchar",
+            ["cvnotes"] = "varchar",
+            ["cvpaperid"] = "varchar",
+            ["cvpapernum"] = "varchar",
+            ["cvpartnum"] = "varchar",
+            ["cvpartnum120"] = "varchar",
+            ["cvproccode"] = "varchar",
+            ["cvprojectid"] = "varchar",
+            ["cvrevision"] = "varchar",
+            ["cvsid"] = "varchar",
+            ["cvsubaccid"] = "varchar",
+            ["cvuseid"] = "varchar",
+            ["cvuserid"] = "varchar",
+        };
+
+        private static string ResolveDbBaseType(string dbType)
+        {
+            if (string.IsNullOrWhiteSpace(dbType)) return string.Empty;
+            var key = dbType.Trim().ToLowerInvariant();
+            return AliasBaseTypeMap.TryGetValue(key, out var baseType) ? baseType : key;
+        }
+
+        private static object? ConvertJsonToDbValue(JsonNode? node, string dbType)
         {
             if (node is null) return DBNull.Value;
             if (node.GetValueKind() == JsonValueKind.Null) return DBNull.Value;
 
-            var s = node.ToString().Trim();
-            string t = dbType.ToLowerInvariant();
+            var s = node.ToString();
+            string t = ResolveDbBaseType(dbType);
 
-            // 空字串處理：nullable 欄位 → NULL，NOT NULL 欄位 → 預設值
-            if (string.IsNullOrWhiteSpace(s))
-            {
-                if (isNullable) return DBNull.Value;
-
-                // NOT NULL 欄位的預設值
-                if (t is "int" or "bigint" or "smallint" or "tinyint") return 0L;
-                if (t.Contains("decimal") || t.Contains("numeric") || t.Contains("money")) return 0m;
-                if (t is "float" or "real") return 0.0;
-                if (t is "bit") return false;
-                if (t.Contains("date") || t.Contains("time")) return DBNull.Value; // 日期無法預設，還是回傳 NULL
-                return s; // 字串型別保留空字串
-            }
-
-            // 有值時的轉換
             if (t is "int" or "bigint" or "smallint" or "tinyint")
-                return long.TryParse(s, out var l) ? l : (isNullable ? DBNull.Value : 0L);
+                return long.TryParse(s, out var l) ? l : (object?)DBNull.Value;
             if (t.Contains("decimal") || t.Contains("numeric") || t.Contains("money"))
-                return decimal.TryParse(s, out var d) ? d : (isNullable ? DBNull.Value : 0m);
+                return decimal.TryParse(s, out var d) ? d : (object?)DBNull.Value;
             if (t is "float" or "real")
-                return double.TryParse(s, out var f) ? f : (isNullable ? DBNull.Value : 0.0);
+                return double.TryParse(s, out var f) ? f : (object?)DBNull.Value;
             if (t is "bit")
-                return bool.TryParse(s, out var b) ? b : (isNullable ? DBNull.Value : false);
+                return bool.TryParse(s, out var b) ? b : (object?)DBNull.Value;
             if (t.Contains("date") || t.Contains("time"))
                 return DateTime.TryParse(s, out var dt) ? dt : (object?)DBNull.Value;
 
@@ -479,6 +548,32 @@ ORDER BY idx.index_id, ic.key_ordinal";
             return t is "image" or "varbinary" or "binary" or "rowversion" or "timestamp";
         }
 
+        private static object ConvertValueByDbType(object? value, string dbType)
+        {
+            if (value == null || value == DBNull.Value) return DBNull.Value;
+            var s = value.ToString() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(s)) return DBNull.Value;
+
+            var t = ResolveDbBaseType(dbType);
+
+            // 文字類型直接回傳原字串，避免誤轉數字
+            if (t.Contains("char") || t.Contains("text"))
+                return s;
+
+            if (t is "int" or "bigint" or "smallint" or "tinyint")
+                return long.TryParse(s, out var l) ? l : (object?)DBNull.Value;
+            if (t.Contains("decimal") || t.Contains("numeric") || t.Contains("money"))
+                return decimal.TryParse(s, out var d) ? d : (object?)DBNull.Value;
+            if (t is "float" or "real")
+                return double.TryParse(s, out var f) ? f : (object?)DBNull.Value;
+            if (t is "bit")
+                return bool.TryParse(s, out var b) ? b : (object?)DBNull.Value;
+            if (t.Contains("date") || t.Contains("time"))
+                return DateTime.TryParse(s, out var dt) ? dt : (object?)DBNull.Value;
+
+            return s;
+        }
+
         private static bool IsLargeTextType(string dbType)
         {
             var t = dbType.ToLowerInvariant();
@@ -491,23 +586,10 @@ ORDER BY idx.index_id, ic.key_ordinal";
     {
         if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required");
 
-        var tblOk = await _context.Database
-            .SqlQuery<string>($"SELECT name FROM sys.objects WHERE name = {table} AND type IN ('U','V')")
-            .AnyAsync();
+        var tblOk = await TableExistsAsync(table);
+        if (!tblOk) return NotFound($"Table '{table}' not found.");
 
-        if (!tblOk) return NotFound($"Table or View '{table}' not found.");
-
-        string orderSql = "";
-        if (!string.IsNullOrWhiteSpace(orderBy))
-        {
-            var colOk = await _context.Database
-                .SqlQuery<string>($@"SELECT c.name
-                                     FROM sys.columns c
-                                     JOIN sys.objects o ON o.object_id=c.object_id
-                                     WHERE o.name={table} AND o.type IN ('U','V') AND c.name={orderBy}").AnyAsync();
-            if (colOk)
-                orderSql = $" ORDER BY [{orderBy}] {(string.Equals(orderDir, "DESC", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC")}";
-        }
+        var orderSql = await BuildOrderBySqlAsync(table, orderBy, orderDir);
 
         var sql = $"SELECT TOP (@top) * FROM [{table}]{orderSql}";
         var pTop = new SqlParameter("@top", top);
@@ -526,17 +608,15 @@ ORDER BY idx.index_id, ic.key_ordinal";
 
     // 新增：ByKeys(table, keyNames[], keyValues[]) → 多個 = 條件 (AND)
     [HttpGet]
-    public async Task<IActionResult> ByKeys([FromQuery] string table, [FromQuery] string[] keyNames, [FromQuery] string[] keyValues)
+    public async Task<IActionResult> ByKeys([FromQuery] string table, [FromQuery] string[] keyNames, [FromQuery] string[] keyValues, [FromQuery] string? orderBy = null, [FromQuery] string? orderDir = "ASC")
     {
         if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required");
         if (keyNames == null || keyValues == null || keyNames.Length == 0 || keyNames.Length != keyValues.Length)
             return BadRequest("keyNames and keyValues must be same length and not empty.");
 
-        // 驗 table or view
-        var tblOk = await _context.Database
-            .SqlQuery<string>($"SELECT name FROM sys.objects WHERE name = {table} AND type IN ('U','V')")
-            .AnyAsync();
-        if (!tblOk) return NotFound($"Table or View '{table}' not found.");
+        // 驗 table
+        var tblOk = await TableExistsAsync(table);
+        if (!tblOk) return NotFound($"Table '{table}' not found.");
 
         // 驗 column & 組條件
         var whereParts = new List<string>();
@@ -546,12 +626,8 @@ ORDER BY idx.index_id, ic.key_ordinal";
             var col = keyNames[i];
             var val = keyValues[i];
 
-            var colOk = await _context.Database
-                .SqlQuery<string>($@"SELECT c.name
-                                     FROM sys.columns c
-                                     JOIN sys.objects o ON o.object_id=c.object_id
-                                     WHERE o.name={table} AND o.type IN ('U','V') AND c.name={col}").AnyAsync();
-            if (!colOk) return BadRequest($"Column '{col}' not found in table/view '{table}'.");
+            var colOk = await ColumnExistsAsync(table, col);
+            if (!colOk) return BadRequest($"Column '{col}' not found in '{table}'.");
 
             var p = new SqlParameter($"@p{i}", (object?)val ?? DBNull.Value);
             parameters.Add(p);
@@ -559,7 +635,8 @@ ORDER BY idx.index_id, ic.key_ordinal";
         }
 
         var whereSql = string.Join(" AND ", whereParts);
-        var sql = $"SELECT * FROM [{table}] WHERE {whereSql}";
+        var orderSql = await BuildOrderBySqlAsync(table, orderBy, orderDir);
+        var sql = $"SELECT * FROM [{table}] WHERE {whereSql}{orderSql}";
 
         var dt = new DataTable();
         await using var conn = (SqlConnection)_context.Database.GetDbConnection();
@@ -584,6 +661,79 @@ ORDER BY idx.index_id, ic.key_ordinal";
             list.Add(d);
         }
         return list;
+    }
+
+    private async Task<string> BuildOrderBySqlAsync(string table, string? orderByRaw, string? defaultDir = "ASC")
+    {
+        if (string.IsNullOrWhiteSpace(orderByRaw)) return "";
+
+        // 允許舊資料用 * 或 + 代表空白，例如 RateDate*desc
+        var normalized = orderByRaw
+            .Replace('*', ' ')
+            .Replace('+', ' ');
+
+        var parts = normalized
+            .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => p.Trim())
+            .Where(p => !string.IsNullOrWhiteSpace(p));
+
+        var list = new List<string>();
+        foreach (var part in parts)
+        {
+            var tokens = part.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length == 0) continue;
+
+            var col = tokens[0].Trim('[', ']');
+            if (string.IsNullOrWhiteSpace(col)) continue;
+
+            var dirToken = tokens.Skip(1).FirstOrDefault();
+            var dir = string.Equals(dirToken, "DESC", StringComparison.OrdinalIgnoreCase)
+                ? "DESC"
+                : string.Equals(dirToken, "ASC", StringComparison.OrdinalIgnoreCase) ? "ASC"
+                : (string.IsNullOrWhiteSpace(defaultDir) ? "ASC" : defaultDir);
+
+            try
+            {
+                var colOk = await ColumnExistsAsync(table, col);
+                if (!colOk) continue;
+                list.Add($"[{col}] {dir}");
+            }
+            catch
+            {
+                // 無效欄位/連線等問題 → 略過排序，避免 500
+                return "";
+            }
+        }
+
+        return list.Count == 0 ? "" : " ORDER BY " + string.Join(", ", list);
+    }
+
+    private Task<bool> TableExistsAsync(string name)
+    {
+        const string sql = "SELECT 1 FROM sys.objects WHERE name = @n AND type IN ('U','V')";
+        return ExecExistsAsync(sql, new SqlParameter("@n", name ?? string.Empty));
+    }
+
+    private Task<bool> ColumnExistsAsync(string table, string column)
+    {
+        const string sql = @"
+SELECT 1
+  FROM sys.columns c
+  JOIN sys.objects o ON o.object_id = c.object_id AND o.type IN ('U','V')
+ WHERE o.name = @t AND c.name = @c";
+        return ExecExistsAsync(sql,
+            new SqlParameter("@t", table ?? string.Empty),
+            new SqlParameter("@c", column ?? string.Empty));
+    }
+
+    private async Task<bool> ExecExistsAsync(string sql, params SqlParameter[] ps)
+    {
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var cmd = new SqlCommand(sql, conn);
+        if (ps != null) cmd.Parameters.AddRange(ps);
+        var obj = await cmd.ExecuteScalarAsync();
+        return obj != null && obj != DBNull.Value;
     }
     }
 }

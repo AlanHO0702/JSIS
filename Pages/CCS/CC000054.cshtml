@@ -1,4 +1,4 @@
-@page "/CCS/CC000054"
+@page "/CCS/CC000054/{systemId?}"
 @model PcbErpApi.Pages.CCS.CC000054Model
 @using System.Text.Json
 @{
@@ -9,6 +9,35 @@
 <partial name="~/Pages/Shared/_TableSingleGrid.cshtml" model="Model" />
 
 @await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", ViewData["FieldDictList"], ViewData)
+<!-- 單檔專用：新增客戶彈窗 -->
+<div class="modal fade" id="cc000054AddModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title">新增</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label mb-1">客戶代碼</label>
+          <input type="text" class="form-control form-control-sm" id="addCompanyId" placeholder="必填">
+        </div>
+        <div class="mb-2">
+          <label class="form-label mb-1">客戶名稱</label>
+          <input type="text" class="form-control form-control-sm" id="addCompanyName" placeholder="必填">
+        </div>
+        <div class="mb-2">
+          <label class="form-label mb-1">簡稱</label>
+          <input type="text" class="form-control form-control-sm" id="addShortName">
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-success btn-sm" id="btnAddConfirm">確定</button>
+      </div>
+    </div>
+  </div>
+</div>
 @if (!string.IsNullOrWhiteSpace(Model.DictTableName))
 {
     <script>window._dictTableName = '@Model.DictTableName';</script>
@@ -22,6 +51,201 @@
   window._singleRealTable = '@Model.TableName';
   window._cc000054DetailUrl = '@Url.Page("CC000054Detail")';
   window._cc000054KeyFields = @Html.Raw(JsonSerializer.Serialize((Model.KeyFields != null && Model.KeyFields.Count > 0) ? Model.KeyFields : new List<string> { "CompanyId" }));
+  window._cc000054SystemId = @Model.SystemId;
+</script>
+<script>
+// 單檔專用：強制查詢提交時帶入參數並重導向（避免共用樣板被覆蓋）
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('singleGridQueryForm');
+  const btn = document.getElementById('btnQuerySubmit');
+  const currentUrl = new URL(window.location.href);
+  const pageSizeVal = currentUrl.searchParams.get('pageSize') || '50';
+  if (form) {
+    form.setAttribute('method', 'get');
+    form.setAttribute('action', window.location.pathname);
+    // 確保 pageIndex/pageSize 都有
+    let hiddenPage = form.querySelector('input[name="pageIndex"]');
+    if (!hiddenPage) {
+      hiddenPage = document.createElement('input');
+      hiddenPage.type = 'hidden';
+      hiddenPage.name = 'pageIndex';
+      form.appendChild(hiddenPage);
+    }
+    let hiddenSize = form.querySelector('input[name="pageSize"]');
+    if (!hiddenSize) {
+      hiddenSize = document.createElement('input');
+      hiddenSize.type = 'hidden';
+      hiddenSize.name = 'pageSize';
+      form.appendChild(hiddenSize);
+    }
+    hiddenSize.value = pageSizeVal;
+
+    const ensureSubmit = (e) => {
+      if (e) e.preventDefault();
+      hiddenPage.value = '1';
+      // 移除空欄位，避免殘留舊值
+      Array.from(form.elements).forEach(el => {
+        if (!el.name || el.type === 'hidden') return;
+        const val = (el.value || '').toString().trim();
+        if (!val) {
+          // 若空，從 formData 裡移除：submit 會忽略空字串欄位
+          el.disabled = true;
+          setTimeout(() => { el.disabled = false; }, 0);
+        }
+      });
+      form.submit();
+    };
+    form.addEventListener('submit', ensureSubmit);
+    btn?.addEventListener('click', ensureSubmit);
+  }
+
+  const handleSubmit = (e) => {
+    if (e) e.preventDefault();
+    const url = new URL(window.location.href);
+    url.searchParams.delete('pageIndex');
+    url.searchParams.set('pageIndex', '1');
+    if (form) {
+      Array.from(form.elements).forEach(el => {
+        if (!el.name) return;
+        const val = (el.value || '').toString().trim();
+        if (val) url.searchParams.set(el.name, val);
+        else url.searchParams.delete(el.name);
+      });
+    }
+    window.location.href = url.toString();
+  };
+  form?.addEventListener('submit', handleSubmit);
+    btn?.addEventListener('click', handleSubmit);
+
+  // 再加一層保險：監聽查詢按鈕點擊，直接取 modal 內所有 input 值組 URL
+  document.addEventListener('click', (e) => {
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.id !== 'btnQuerySubmit') return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const url = new URL(window.location.origin + window.location.pathname);
+    const qs = new URLSearchParams();
+    qs.set('pageIndex', '1');
+    qs.set('pageSize', pageSizeVal);
+    if (form) {
+      const fd = new FormData(form);
+      for (const [k, v] of fd.entries()) {
+        const val = (v || '').toString().trim();
+        if (!val) continue;
+        qs.set(k, val);
+      }
+    } else {
+      document.querySelectorAll('#singleGridQueryModal input[name]').forEach((inp) => {
+        const name = inp.getAttribute('name') || '';
+        if (!name) return;
+        const val = (inp.value || '').toString().trim();
+        if (val) qs.set(name, val);
+      });
+    }
+    url.search = qs.toString();
+    window.location.href = url.toString();
+  }, true);
+
+  // 單檔專用：新增按鈕與提交
+  const initAddButton = () => {
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'btn btn-outline-success btn-sm fw-bold';
+    addBtn.id = 'btnAddCustomer';
+    addBtn.innerHTML = '<i class="bi bi-plus-circle me-1"></i>新增';
+
+    const queryBtn = document.getElementById('btnOpenQuery');
+    if (queryBtn?.parentElement) {
+      queryBtn.parentElement.appendChild(addBtn);
+    } else {
+      // 樣板容器 fallback：左側第一個按鈕群組
+      const btnGroup = document.querySelector('.table-wrapper .card-body .d-flex.justify-content-between.align-items-center .d-flex.gap-2');
+      if (btnGroup) btnGroup.appendChild(addBtn);
+    }
+    const addModalEl = document.getElementById('cc000054AddModal');
+    const addCompanyId = document.getElementById('addCompanyId');
+    const addCompanyName = document.getElementById('addCompanyName');
+    const addShortName = document.getElementById('addShortName');
+    const btnAddConfirm = document.getElementById('btnAddConfirm');
+    const modal = addModalEl && window.bootstrap ? bootstrap.Modal.getOrCreateInstance(addModalEl) : null;
+    const systemId = window._cc000054SystemId || 1;
+
+    const resetAddForm = () => {
+      if (addCompanyId) addCompanyId.value = '';
+      if (addCompanyName) addCompanyName.value = '';
+      if (addShortName) addShortName.value = '';
+    };
+
+    addBtn?.addEventListener('click', () => {
+      resetAddForm();
+      modal?.show();
+      addCompanyId?.focus();
+    });
+
+    btnAddConfirm?.addEventListener('click', async () => {
+      const cid = (addCompanyId?.value || '').trim();
+      const cname = (addCompanyName?.value || '').trim();
+      const sname = (addShortName?.value || '').trim();
+      if (!cid || !cname) {
+        alert('客戶代碼與客戶名稱為必填');
+        return;
+      }
+      const payloadCompany = {
+        TableName: 'AJNdCompany',
+        KeyFields: ['CompanyId', 'UseId'],
+        Data: [{
+          CompanyId: cid,
+          CompanyName: cname,
+          ShortName: sname,
+          UseId: 'A001'
+        }]
+      };
+      const payloadCompanySystem = {
+        TableName: 'AJNdCompanySystem',
+        KeyFields: ['CompanyId', 'SystemId', 'SubSystemId', 'UseId'],
+        Data: [{
+          CompanyId: cid,
+          SystemId: systemId,
+          SubSystemId: '0',
+          UseId: 'A001'
+        }]
+      };
+      try {
+        const res = await fetch('/api/CommonTable/SaveTableChanges', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payloadCompany)
+        });
+        const txtCompany = await res.text();
+        if (!res.ok) {
+          alert('新增客戶失敗：' + (txtCompany || res.statusText));
+          return;
+        }
+
+        const resSys = await fetch('/api/CommonTable/SaveTableChanges', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payloadCompanySystem)
+        });
+        const txtSys = await resSys.text();
+        if (!resSys.ok) {
+          alert('新增客戶系統資料失敗：' + (txtSys || resSys.statusText));
+          return;
+        }
+
+        modal?.hide();
+        // 帶回 systemId，避免不同系統別看不到系統資料
+        const detailUrl = `${window._cc000054DetailUrl}?CompanyId=${encodeURIComponent(cid)}&systemId=${encodeURIComponent(systemId)}`;
+        window.location.href = detailUrl;
+      } catch (err) {
+        alert('新增失敗：' + err);
+      }
+    });
+  };
+
+  initAddButton();
+});
 </script>
 <script>
   window.SingleGridCustomHandlers = window.SingleGridCustomHandlers || {};
@@ -44,7 +268,9 @@
       return;
     }
     const url = window._cc000054DetailUrl + '?' + qs.toString();
-    window.location.href = url;
+    const sysId = window._cc000054SystemId || '';
+    const finalUrl = sysId ? `${url}&systemId=${encodeURIComponent(sysId)}` : url;
+    window.location.href = finalUrl;
   };
 </script>
 <script src="~/js/fieldDictModal.js"></script>

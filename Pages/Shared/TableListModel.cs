@@ -89,8 +89,13 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // �
 
         // 欄位、lookup設定
         FieldDictList = _dictService.GetFieldDict(TableName, typeof(T));
+
+        // ★ 取得主鍵欄位清單
+        var keyFields = ViewData["KeyFields"] as string[] ?? Array.Empty<string>();
+        var keyFieldSet = new HashSet<string>(keyFields, StringComparer.OrdinalIgnoreCase);
+
         TableFields = FieldDictList
-            .Where(x => x.Visible == 1)
+            .Where(x => x.Visible == 1 || keyFieldSet.Contains(x.FieldName ?? "")) // ★ 主鍵欄位即使不可見也要包含
             .OrderBy(x => x.SerialNum)
             .GroupBy(x => x.FieldName)
             .Select(g => {
@@ -104,7 +109,9 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // �
                     iShowWhere = x.iShowWhere,
                     DataType = x.DataType,
                     FormatStr = x.FormatStr,
-                    LookupResultField = x.LookupResultField
+                    LookupResultField = x.LookupResultField,
+                    ReadOnly = x.ReadOnly,
+                    DisplaySize = x.DisplaySize
                 };
             }).ToList();
         ViewData["Fields"] = TableFields;

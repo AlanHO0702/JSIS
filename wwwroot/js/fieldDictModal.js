@@ -44,7 +44,7 @@
   // ===== 初始化：撈資料（若 tbody 已有資料就不覆蓋）、排序、綁定 =====
   window.initFieldDictModal = async function (tableName, modalId = 'fieldDictModal') {
     const tname = (tableName || window._dictTableName || '').trim();
-    if (!tname) { alert('沒有指定辭典表名'); return; }
+    if (!tname) { return; }
 
     // ⭐ 記錄目前正在編輯的辭典表名，給儲存時統一使用
     window._dictTableName = tname;
@@ -87,7 +87,7 @@
               ondblclick="window.editFieldDetail && window.editFieldDetail('${x.FieldName}')">
 
             <!-- 第 1 欄：序號 + 隱藏欄位 -->
-            <td style="width:60px">
+            <td style="width:40px">
               <input data-field="SerialNum" type="number"
                     value="${x.SerialNum ?? ''}" class="form-control form-control-sm" />
 
@@ -145,7 +145,7 @@
                     class="form-control form-control-sm" />
             </td>
 
-            <td style="width:140px">
+            <td style="width:120px">
               <input data-field="DataType" value="${x.DataType ?? ''}"
                     class="form-control form-control-sm"
                     readonly
@@ -153,7 +153,7 @@
                     tabindex="-1" />
             </td>
 
-            <td style="width:160px">
+            <td style="width:120px">
               <input data-field="FormatStr" value="${x.FormatStr ?? ''}"
                     class="form-control form-control-sm" />
             </td>
@@ -357,7 +357,7 @@
         document.querySelector('meta[name="dict-table"]')?.content ||
         '';
 
-      if (!tname) { alert('沒有指定辭典表名'); return; }
+      if (!tname) { return; }
       window.showDictModal(modalId, tname);
     });
 

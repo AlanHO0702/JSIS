@@ -6,6 +6,8 @@
     var activeKey = Model.ActiveTabKey;
 }
 
+<link rel="stylesheet" href="~/css/grid-toolbar.css" />
+
 <div class="container py-4">
     @if (!string.IsNullOrWhiteSpace(ViewData["LoadError"] as string))
     {
@@ -18,12 +20,11 @@
     }
     else
     {
-        <div class="mb-2 d-flex align-items-center gap-2 flex-wrap">
-            <button type="button" class="btn btn-warning btn-sm fw-bold" id="btnMgEdit">編輯</button>
-            <button type="button" class="btn btn-success btn-sm fw-bold d-none" id="btnMgSave">儲存</button>
-            <button type="button" class="btn btn-outline-primary btn-sm" id="btnMgAdd">新增</button>
-            <button type="button" class="btn btn-outline-success btn-sm d-none" id="btnMgConfirm">✓</button>
-            <button type="button" class="btn btn-outline-danger btn-sm d-none" id="btnMgCancel">☓</button>
+        <div class="mb-2 btn-tight-group">
+            <button type="button" class="btn btn-primary btn-sm" id="btnMgEdit">編輯</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="btnMgAdd">新增</button>
+            <button type="button" class="btn btn-success btn-sm" id="btnMgSave">儲存</button>
+            <button type="button" class="btn btn-danger btn-sm" id="btnMgDelete">刪除</button>
         </div>
 
         <ul class="nav nav-tabs flex-wrap mb-2" role="tablist">
@@ -58,20 +59,19 @@
     }
 </div>
 
+<script src="~/js/gridToolbarTemplate.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     const btnEdit = document.getElementById('btnMgEdit');
-    const btnSave = document.getElementById('btnMgSave');
     const btnAdd = document.getElementById('btnMgAdd');
-    const btnConfirm = document.getElementById('btnMgConfirm');
-    const btnCancel = document.getElementById('btnMgCancel');
+    const btnSave = document.getElementById('btnMgSave');
+    const btnDelete = document.getElementById('btnMgDelete');
     let isEdit = false;
 
     const getActiveGrid = () => document.querySelector('.tab-pane.show.active table[id^="grid-"]');
 
-    const setAddMode = (on) => {
-        btnConfirm?.classList.toggle('d-none', !on);
-        btnCancel?.classList.toggle('d-none', !on);
+    const ensureEditMode = () => {
+        if (!isEdit) toggleEdit();
     };
 
     const toggleEdit = () => {
@@ -79,7 +79,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!grid) return;
         isEdit = !isEdit;
         if (btnEdit) btnEdit.textContent = isEdit ? '檢視' : '編輯';
-        btnSave?.classList.toggle('d-none', !isEdit);
 
         grid.querySelectorAll('tbody tr').forEach(tr => {
             tr.querySelectorAll('td').forEach(td => {
@@ -127,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const addRow = () => {
         const grid = getActiveGrid();
         if (!grid) return;
-        if (btnSave?.classList.contains('d-none')) btnEdit?.click();
+        ensureEditMode();
         const tbody = grid.querySelector('tbody');
         if (!tbody) return;
         const template = tbody.querySelector('tr');
@@ -187,22 +186,43 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        tbody.appendChild(clone);
-        setAddMode(true);
+        if (tbody.firstChild) tbody.insertBefore(clone, tbody.firstChild);
+        else tbody.appendChild(clone);
+        return clone;
     };
 
     const cancelAdd = () => {
         const grid = getActiveGrid();
         if (!grid) return;
         grid.querySelectorAll('tbody tr[data-state="added"]').forEach(tr => tr.remove());
-        setAddMode(false);
     };
 
-    const collectChanges = (grid, onlyAdded = false) => {
+    // 行選取：點擊任何 grid 的 tr 即標記 table-primary，供刪除使用
+    document.addEventListener('click', (e) => {
+        const tr = e.target.closest('table[id^="grid-"] tbody tr');
+        if (!tr) return;
+        const tbody = tr.closest('tbody');
+        if (!tbody) return;
+        tbody.querySelectorAll('tr').forEach(r => r.classList.remove('table-primary'));
+        tr.classList.add('table-primary');
+    });
+
+    const collectChanges = (grid, onlyAdded = false, includeDeleted = false) => {
         const changes = [];
         const keyFieldsRaw = (grid?.dataset.keyFields || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
         grid?.querySelectorAll('tbody tr').forEach(tr => {
             const isAdded = tr.dataset.state === 'added';
+            const isDeleted = tr.dataset.state === 'deleted';
+            if (includeDeleted && isDeleted) {
+                const row = {};
+                keyFieldsRaw.forEach(kf => {
+                    const match = Array.from(tr.querySelectorAll('.cell-edit')).find(i => (i.name || '').toLowerCase() === kf);
+                    if (match) row[match.name] = match.type === 'checkbox' ? (match.checked ? '1' : '0') : (match.value ?? '');
+                });
+                row.__delete = true;
+                changes.push(row);
+                return;
+            }
             let hasDiff = isAdded;
             const row = {};
             tr.querySelectorAll('.cell-edit').forEach(inp => {
@@ -226,11 +246,11 @@ document.addEventListener('DOMContentLoaded', () => {
         return changes;
     };
 
-    const saveChanges = async (onlyAdded = false) => {
+    const saveChanges = async (onlyAdded = false, includeDeleted = false) => {
         const grid = getActiveGrid();
         if (!grid) return;
-        const changes = collectChanges(grid, onlyAdded);
-        if (changes.length === 0) { if (!onlyAdded) toggleEdit(); setAddMode(false); return; }
+        const changes = collectChanges(grid, onlyAdded, includeDeleted);
+        if (changes.length === 0) { if (!onlyAdded) toggleEdit(); return; }
         const tableName = grid.dataset.tableName || grid.dataset.dictTable;
         if (!tableName) { alert('缺少 TableName'); return; }
         const resp = await fetch('/api/CommonTable/SaveTableChanges', {
@@ -240,24 +260,28 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (resp.ok) {
             alert('儲存成功');
-            if (onlyAdded) {
-                setAddMode(false);
-                // 將新增列轉為已存在狀態
-                grid.querySelectorAll('tbody tr[data-state="added"]').forEach(tr => {
-                    tr.dataset.state = '';
-                    tr.classList.remove('table-warning');
-                    tr.querySelectorAll('.cell-edit').forEach(inp => {
-                        inp.defaultValue = inp.value ?? '';
-                    });
-                    tr.querySelectorAll('.cell-view').forEach(span => {
-                        span.textContent = span.dataset?.raw || '';
-                    });
-                });
-            }
             toggleEdit();
         } else {
             alert('儲存失敗: ' + await resp.text());
         }
+    };
+
+    const getSelectedRow = () => {
+        const grid = getActiveGrid();
+        if (!grid) return null;
+        return grid.querySelector('tbody tr.table-primary');
+    };
+
+    const deleteSelectedRow = async () => {
+        const grid = getActiveGrid();
+        if (!grid) return;
+        const sel = getSelectedRow();
+        if (!sel) { alert('請先選擇要刪除的資料列'); return; }
+        if (!confirm('確定要刪除這筆資料嗎？')) return;
+        sel.dataset.state = 'deleted';
+        sel.classList.remove('table-warning');
+        sel.classList.add('table-danger');
+        await saveChanges(false, true);
     };
 
     document.querySelectorAll('[data-mg-tab]').forEach(btn => {
@@ -276,11 +300,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    btnEdit?.addEventListener('click', toggleEdit);
-    btnSave?.addEventListener('click', () => saveChanges(false));
-    btnAdd?.addEventListener('click', addRow);
-    btnConfirm?.addEventListener('click', () => saveChanges(true));
-    btnCancel?.addEventListener('click', cancelAdd);
+    window.createGridController({
+        name: 'multiGrid',
+        btnToggle: btnEdit,
+        btnAdd,
+        btnSave,
+        btnDelete,
+        customToggle: toggleEdit,
+        customAdd: () => addRow(),
+        customSave: () => saveChanges(false),
+        onCancelPending: () => cancelAdd(),
+        onDelete: () => {
+            // 若有未儲存新增，取消；否則刪除選取列
+            const grid = getActiveGrid();
+            const pending = grid?.querySelector('tbody tr[data-state=\"added\"]');
+            if (pending) { cancelAdd(); return; }
+            return deleteSelectedRow();
+        }
+    });
 });
 </script>
 

@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -23,6 +24,17 @@ namespace PcbErpApi.Pages.CCS
 
         private const string DictTable = "AJNdCompany_1";
         private const string DataTable = "AJNdCompany";
+        private static readonly Dictionary<int, string> SystemNameMap = new()
+        {
+            { 1, "銷售客戶" },
+            { 2, "原物料廠商" },
+            { 3, "製程委外廠商" },
+            { 4, "製令委外廠商" },
+            { 5, "進出口廠商" },
+            { 6, "其它廠商" },
+            { 7, "經銷商" },
+            { 9, "臨時客戶" }
+        };
 
         public CC000054Model(PcbErpContext ctx, ITableDictionaryService dictService, ILogger<CC000054Model> logger)
         {
@@ -32,9 +44,11 @@ namespace PcbErpApi.Pages.CCS
         }
 
         public string ItemId => "CC000054";
-        public string PageTitle => "客戶主檔_業務";
+        public string PageTitle => $"客戶主檔 - {SystemName}";
         public string TableName { get; private set; } = DataTable;
         public string DictTableName { get; private set; } = DictTable;
+        public int SystemId { get; private set; } = 1;
+        public string SystemName => SystemNameMap.TryGetValue(SystemId, out var name) ? name : $"System {SystemId}";
         public int PageNumber { get; private set; } = 1;
         public int PageSize { get; private set; } = 50;
         public int TotalCount { get; private set; }
@@ -43,11 +57,14 @@ namespace PcbErpApi.Pages.CCS
         public List<CURdTableField> TableFields { get; private set; } = new();
         public List<string> KeyFields { get; private set; } = new();
 
-        public async Task OnGetAsync([FromQuery(Name = "pageIndex")] int pageIndex = 1, int pageSize = 50)
+        public async Task OnGetAsync([FromRoute(Name = "systemId")] int? systemIdRoute, [FromQuery(Name = "systemId")] int? systemIdQuery, [FromQuery(Name = "pageIndex")] int pageIndex = 1, int pageSize = 50)
         {
+            SystemId = NormalizeSystemId(systemIdQuery ?? systemIdRoute);
             PageNumber = pageIndex <= 0 ? 1 : pageIndex;
             PageSize = pageSize <= 0 ? 50 : pageSize;
             ViewData["Title"] = PageTitle;
+            ViewData["SystemId"] = SystemId;
+            ViewData["SystemName"] = SystemName;
 
             FieldDictList = await LoadFieldDictAsync(DictTableName);
             await ApplyLangDisplaySizeAsync(DictTableName, FieldDictList);
@@ -69,11 +86,14 @@ namespace PcbErpApi.Pages.CCS
             }
 
             var orderBy = await GetDefaultOrderByAsync(TableName);
+            var filterParams = new List<SqlParameter>();
+            var filterSql = BuildFilterFromQuery(FieldDictList, Request.Query, filterParams);
+            AppendSystemFilter(filterParams, SystemId, ref filterSql);
 
             try
             {
-                TotalCount = await CountRowsAsync(TableName, string.Empty, null);
-                Items = await LoadRowsAsync(TableName, string.Empty, orderBy, PageNumber, PageSize, null);
+                TotalCount = await CountRowsAsync(TableName, filterSql, filterParams);
+                Items = await LoadRowsAsync(TableName, filterSql, orderBy, PageNumber, PageSize, filterParams);
             }
             catch (Exception ex)
             {
@@ -280,6 +300,41 @@ SELECT FieldName, DisplaySize
             }
         }
 
+        private string BuildFilterFromQuery(IEnumerable<CURdTableField> fields, IQueryCollection query, List<SqlParameter> parameters)
+        {
+            var dict = fields?
+                .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
+                .ToDictionary(f => f.FieldName!, StringComparer.OrdinalIgnoreCase) ?? new Dictionary<string, CURdTableField>(StringComparer.OrdinalIgnoreCase);
+            var parts = new List<string>();
+            foreach (var kv in query)
+            {
+                var key = kv.Key ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(key)) continue;
+                if (key.Equals("pageIndex", StringComparison.OrdinalIgnoreCase)) continue;
+                if (key.Equals("page", StringComparison.OrdinalIgnoreCase)) continue;
+                if (key.Equals("pageSize", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!dict.TryGetValue(key, out var f))
+                {
+                    // 若辭典沒有這個欄位仍允許直接帶 ColumnName
+                    f = new CURdTableField { FieldName = key, DataType = string.Empty };
+                }
+
+                var val = kv.Value.ToString();
+                if (string.IsNullOrWhiteSpace(val)) continue;
+
+                var paramName = $"@p{parameters.Count}";
+                var dataType = f.DataType?.ToLowerInvariant() ?? string.Empty;
+                var isText = string.IsNullOrEmpty(dataType) || dataType.Contains("char") || dataType.Contains("text") || dataType.Contains("nchar") || dataType.Contains("varchar");
+                var op = isText ? "LIKE" : "=";
+                var pVal = isText ? $"%{val}%" : val;
+
+                parts.Add($"t0.[{f.FieldName}] {op} {paramName}");
+                parameters.Add(new SqlParameter(paramName, pVal));
+            }
+            if (parts.Count == 0) return string.Empty;
+            return "WHERE " + string.Join(" AND ", parts);
+        }
+
         private string GetConnStr()
         {
             var cs = _ctx.Database.GetConnectionString();
@@ -296,6 +351,33 @@ SELECT FieldName, DisplaySize
                 clone.DbType = p.DbType;
                 clone.Direction = p.Direction;
                 yield return clone;
+            }
+        }
+
+        private static int NormalizeSystemId(int? id)
+        {
+            if (id.HasValue && id.Value > 0) return id.Value;
+            return 1;
+        }
+
+        private static void AppendSystemFilter(List<SqlParameter> parameters, int systemId, ref string filterSql)
+        {
+            const string clause = "EXISTS (SELECT 1 FROM AJNdCompanySystem s WHERE s.CompanyId = t0.CompanyId AND s.SystemId = @sysId)";
+            parameters ??= new List<SqlParameter>();
+            parameters.Add(new SqlParameter("@sysId", systemId));
+
+            var where = (filterSql ?? string.Empty).Trim();
+            if (where.Length == 0)
+            {
+                filterSql = "WHERE " + clause;
+            }
+            else if (where.StartsWith("WHERE", StringComparison.OrdinalIgnoreCase))
+            {
+                filterSql = where + " AND " + clause;
+            }
+            else
+            {
+                filterSql = "WHERE " + where + " AND " + clause;
             }
         }
     }

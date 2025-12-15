@@ -135,10 +135,12 @@
             @foreach (var f in fields)
             {
               var w = ToColWidthPx(f, 10);
+              var isHidden = f.Visible == false;
+              var hiddenStyle = isHidden ? "display:none;" : "";
               if (w > 0)
-              { <col data-field="@f.FieldName" style="width:@($"{w}px");min-width:@($"{w}px");max-width:@($"{w}px")" /> }
+              { <col data-field="@f.FieldName" style="@hiddenStyle width:@($"{w}px");min-width:@($"{w}px");max-width:@($"{w}px")" /> }
               else
-              { <col data-field="@f.FieldName" /> }
+              { <col data-field="@f.FieldName" style="@hiddenStyle" /> }
             }
           </colgroup>
 
@@ -146,7 +148,9 @@
             <tr>
               @foreach (var f in fields)
               {
-                <th class="text-nowrap" data-field="@f.FieldName">
+                var isHidden = f.Visible == false;
+                var hiddenStyle = isHidden ? "display:none;" : "";
+                <th class="text-nowrap" data-field="@f.FieldName" style="@hiddenStyle">
                   @((string)f.DisplayLabel)
                   <span class="col-resizer" data-field="@f.FieldName"></span>
                 </th>
@@ -175,6 +179,8 @@
                       var keySelfVal = "";
 
                       bool isReadOnly = f.ReadOnly != null && (int)f.ReadOnly != 0;
+                      bool isHidden = f.Visible == false;
+                      var hiddenStyle = isHidden ? "display:none;" : "";
 
                       // 依 OCX 設定帶出 key 欄位，讓 lookup 有依據
                       if (!string.IsNullOrWhiteSpace(name) && ocxLookupsRaw is not null)
@@ -199,7 +205,7 @@
                               lookupKey = !string.IsNullOrWhiteSpace(keyFieldVal) ? keyFieldVal : keySelfVal;
                       }
 
-                      <td class="text-nowrap" data-field="@name">
+                      <td class="text-nowrap" data-field="@name" style="@hiddenStyle">
                         <span class="cell-view" data-raw="@rawVal" data-lookupkey="@lookupKey">@Fmt(displayValue)</span>
                         <input class="form-control form-control-sm cell-edit d-none @(isReadOnly ? "readonly-cell" : "")"
                                name="@name"
@@ -498,6 +504,7 @@ document.addEventListener("DOMContentLoaded", () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         TableName: "@tableName",
+        KeyFields: KEY_FIELDS,  // ★ 明確告知後端主鍵欄位
         Data: changes
       })
     });
@@ -604,6 +611,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const queryModalEl = document.getElementById("singleGridQueryModal");
   const queryForm = document.getElementById("singleGridQueryForm");
   const btnQuerySubmit = document.getElementById("btnQuerySubmit");
+  const fallbackQueryFields = @Html.Raw(JsonSerializer.Serialize(
+    fields.Select(f => new {
+      ColumnName = f.FieldName,
+      ColumnCaption = f.DisplayLabel,
+      DataType = f.DataType,
+      DefaultEqual = "like"
+    })
+  ));
 
   function goPage(p) {
     if (!Number.isFinite(p) || p < 1) return;
@@ -639,10 +654,15 @@ document.addEventListener("DOMContentLoaded", () => {
       const res = await fetch(`/api/DictSetupApi/QueryFields?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(table)}&lang=TW`);
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-      buildQueryForm(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) && data.length ? data : (fallbackQueryFields || []);
+      buildQueryForm(list);
       queryFieldsLoaded = true;
     } catch (err) {
       console.warn("load query fields failed", err);
+      if (fallbackQueryFields && fallbackQueryFields.length) {
+        buildQueryForm(fallbackQueryFields);
+        queryFieldsLoaded = true;
+      }
     }
   }
 
@@ -787,7 +807,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  btnQuerySubmit?.addEventListener("click", () => {
+  const submitQueryForm = () => {
     if (!queryForm) return;
     const advancedForm = document.getElementById("singleGridAdvancedForm");
     const url = new URL(window.location.href);
@@ -814,6 +834,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     window.location.href = url.toString();
+  };
+
+  btnQuerySubmit?.addEventListener("click", () => submitQueryForm());
+  queryForm?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    submitQueryForm();
   });
 
   // 欄寬拖拉
@@ -881,5 +907,3 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 </script>
-
-
