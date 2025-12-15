@@ -4,7 +4,6 @@ using PcbErpApi.Data;
 using PcbErpApi.Models;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using static PcbErpApi.Pages.EMOdProdInfo.IndexModel;
 
 [Route("api/[controller]/[action]")]
 [ApiController]
