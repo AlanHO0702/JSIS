@@ -173,7 +173,9 @@ const buildBody = async (tbody, dict, rows, onRowClick) => {
       tr.appendChild(td);
     });
 
-    if (onRowClick) tr.addEventListener("click", () => onRowClick(row, tr));
+    if (onRowClick) {
+      tr.addEventListener("click", () => onRowClick(row, tr));
+    }
     tbody.appendChild(tr);
   });
 };
@@ -256,7 +258,13 @@ const loadAllDetails = async (row) => {
 
     const rows = await fetch(url).then(r => r.json());
 
-    await buildBody(tbody, detailDicts[i], rows);
+    // ★ 為 Detail 表格添加 row click 事件處理，實現 Focus 功能
+    await buildBody(tbody, detailDicts[i], rows, (row, tr) => {
+      // 移除所有行的 selected class
+      tbody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
+      // 添加 selected class 到被點擊的行
+      tr.classList.add("selected");
+    });
 
     // if (window._mmdEditing && tbody._editorInstance) {
     //   tbody._editorInstance.rebind();
