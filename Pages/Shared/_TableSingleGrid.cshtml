@@ -812,36 +812,140 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
-// 排序功能
+// AJAX 排序功能
 document.addEventListener("DOMContentLoaded", () => {
   const headers = document.querySelectorAll(".sortable-header .header-label");
+  const tableBody = document.querySelector("#mainGrid tbody");
+  const tableWrapper = document.querySelector(".table-fix-wrapper");
+  let isSorting = false; // 防止重複點擊
+  let currentSortBy = '@ViewData["SortBy"]' || '';
+  let currentSortDir = '@ViewData["SortDir"]' || '';
 
+  // Loading overlay
+  const loadingOverlay = document.createElement('div');
+  loadingOverlay.className = 'table-loading-overlay';
+  loadingOverlay.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>';
+  loadingOverlay.style.cssText = 'position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(255,255,255,0.8);z-index:1000;';
+  tableWrapper?.appendChild(loadingOverlay);
+
+  // 顯示 Loading
+  function showLoading() {
+    if (loadingOverlay) loadingOverlay.style.display = 'flex';
+  }
+
+  // 隱藏 Loading
+  function hideLoading() {
+    if (loadingOverlay) loadingOverlay.style.display = 'none';
+  }
+
+  // 更新排序圖示
+  function updateSortIcons(fieldName, sortDir) {
+    document.querySelectorAll('.sort-icon').forEach(icon => icon.textContent = '');
+    const th = document.querySelector(`.sortable-header[data-field="${fieldName}"]`);
+    if (th) {
+      const icon = th.querySelector('.sort-icon');
+      if (icon) icon.textContent = sortDir === 'desc' ? '▼' : '▲';
+    }
+  }
+
+  // 更新表格內容
+  function updateTableBody(items, fields) {
+    if (!tableBody) return;
+
+    if (!items || items.length === 0) {
+      tableBody.innerHTML = '<tr><td colspan="' + fields.length + '" class="text-center text-muted py-3">（無資料）</td></tr>';
+      return;
+    }
+
+    const ocxLookupPayload = @Html.Raw(JsonSerializer.Serialize(ocxLookupPayload));
+
+    tableBody.innerHTML = items.map(item => {
+      return '<tr>' + fields.map(f => {
+        const fieldName = f.FieldName;
+        const rawVal = item[fieldName] ?? item[fieldName?.toLowerCase()] ?? '';
+        const isHidden = f.Visible == 0;
+        const hiddenStyle = isHidden ? 'display:none;' : '';
+
+        // 簡單格式化
+        let displayVal = rawVal;
+        if (rawVal instanceof Date || (typeof rawVal === 'string' && rawVal.match(/^\d{4}-\d{2}-\d{2}/))) {
+          const date = new Date(rawVal);
+          if (!isNaN(date)) {
+            displayVal = date.toLocaleDateString('zh-TW') + ' ' + date.toLocaleTimeString('zh-TW', {hour: '2-digit', minute: '2-digit'});
+          }
+        } else if (typeof rawVal === 'number') {
+          displayVal = rawVal.toLocaleString('zh-TW');
+        }
+
+        return '<td style="' + hiddenStyle + '">' + (displayVal || '') + '</td>';
+      }).join('') + '</tr>';
+    }).join('');
+  }
+
+  // AJAX 排序處理
+  async function handleSort(fieldName) {
+    if (isSorting) return;
+    isSorting = true;
+    showLoading();
+
+    try {
+      // 處理 Lookup 欄位：先計算實際要排序的欄位名稱
+      let actualFieldName = fieldName;
+      if (fieldName.endsWith('Name')) {
+        const baseFieldName = fieldName.substring(0, fieldName.length - 4);
+        // 檢查這個基礎欄位是否存在
+        const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+        const baseField = fields.find(f => f.FieldName === baseFieldName);
+        if (baseField) {
+          actualFieldName = baseFieldName;
+        }
+      }
+
+      // 決定新的排序方向（使用實際欄位名稱比較）
+      let newSortDir = 'asc';
+      if (currentSortBy === actualFieldName) {
+        newSortDir = currentSortDir === 'asc' ? 'desc' : 'asc';
+      }
+
+      // 呼叫 AJAX API
+      const url = window.location.pathname + '?handler=Data&sortBy=' + encodeURIComponent(actualFieldName) + '&sortDir=' + newSortDir + '&pageIndex=1';
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error('HTTP error! status: ' + response.status);
+      }
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'Unknown error');
+      }
+
+      // 更新表格
+      const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+      updateTableBody(data.items, fields);
+
+      // 更新排序狀態（使用實際傳送的欄位名稱）
+      currentSortBy = actualFieldName;
+      currentSortDir = newSortDir;
+      updateSortIcons(fieldName, newSortDir);
+
+    } catch (err) {
+      console.error('Sort failed:', err);
+      alert('排序失敗：' + err.message);
+    } finally {
+      hideLoading();
+      isSorting = false;
+    }
+  }
+
+  // 綁定點擊事件
   headers.forEach(headerLabel => {
     headerLabel.addEventListener("click", (e) => {
       e.stopPropagation(); // 防止觸發 col-resizer
-
       const th = headerLabel.closest("th");
       const fieldName = th?.getAttribute("data-field");
-      if (!fieldName) return;
-
-      // 取得當前排序狀態
-      const urlParams = new URLSearchParams(window.location.search);
-      const currentSortBy = urlParams.get("sortBy");
-      const currentSortDir = urlParams.get("sortDir");
-
-      // 決定新的排序方向
-      let newSortDir = "asc";
-      if (currentSortBy === fieldName) {
-        // 同一欄位：切換排序方向
-        newSortDir = currentSortDir === "asc" ? "desc" : "asc";
-      }
-
-      // 更新 URL 參數並重新載入
-      urlParams.set("sortBy", fieldName);
-      urlParams.set("sortDir", newSortDir);
-      urlParams.set("pageIndex", "1"); // 排序時重設到第一頁
-
-      window.location.search = urlParams.toString();
+      if (fieldName) handleSort(fieldName);
     });
   });
 });

@@ -43,6 +43,40 @@ namespace PcbErpApi.Pages.EMOdProdInfo
         public List<CURdTableField> TableFields { get; private set; } = new();
         public List<string> KeyFields { get; private set; } = new();
 
+        // AJAX API：只回傳資料 JSON
+        public async Task<IActionResult> OnGetDataAsync(string? sortBy = null, string? sortDir = null, int pageIndex = 1, int pageSize = 50)
+        {
+            try
+            {
+                // 載入欄位字典以便處理 Lookup 欄位
+                FieldDictList = await LoadFieldDictAsync(DictTableName);
+
+                var orderBy = BuildOrderByClause(sortBy, sortDir) ?? await GetDefaultOrderByAsync(TableName);
+                var totalCount = await CountRowsAsync(TableName, string.Empty, null);
+                var items = await LoadRowsAsync(TableName, string.Empty, orderBy, pageIndex, pageSize, null);
+
+                return new JsonResult(new
+                {
+                    success = true,
+                    items = items,
+                    totalCount = totalCount,
+                    pageNumber = pageIndex,
+                    pageSize = pageSize,
+                    sortBy = sortBy,
+                    sortDir = sortDir
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Load EMOdProdInfo data failed (AJAX)");
+                return new JsonResult(new
+                {
+                    success = false,
+                    error = ex.Message
+                });
+            }
+        }
+
         public async Task OnGetAsync([FromQuery(Name = "pageIndex")] int pageIndex = 1, int pageSize = 50, string? sortBy = null, string? sortDir = null)
         {
             PageNumber = pageIndex <= 0 ? 1 : pageIndex;
@@ -188,8 +222,33 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             if (!validFieldName)
                 return null;
 
+            // 檢查是否為 Lookup 欄位，如果是則對應到實際欄位
+            var actualFieldName = GetActualFieldNameForSort(sortBy);
+            if (string.IsNullOrWhiteSpace(actualFieldName))
+                return null;
+
             var direction = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC";
-            return $"[{sortBy}] {direction}";
+            return $"[{actualFieldName}] {direction}";
+        }
+
+        private string? GetActualFieldNameForSort(string fieldName)
+        {
+            // 常見模式：StatusName -> Status, CustomerName -> Customer
+            // 如果欄位名稱以 "Name" 結尾，先嘗試找到對應的基礎欄位
+            if (fieldName.EndsWith("Name", StringComparison.OrdinalIgnoreCase))
+            {
+                var baseFieldName = fieldName.Substring(0, fieldName.Length - 4);
+
+                // 檢查這個基礎欄位是否存在於辭典中
+                var baseField = FieldDictList?.FirstOrDefault(f =>
+                    string.Equals(f.FieldName, baseFieldName, StringComparison.OrdinalIgnoreCase));
+
+                if (baseField != null)
+                    return baseFieldName;
+            }
+
+            // 如果不是 lookup 欄位，或找不到對應的基礎欄位，就用原始名稱
+            return fieldName;
         }
 
         private async Task<string> GetDefaultOrderByAsync(string tableName)
