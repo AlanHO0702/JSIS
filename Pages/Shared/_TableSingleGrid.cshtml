@@ -83,6 +83,29 @@
         var prop = item.GetType().GetProperty(name!, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
         return prop?.GetValue(item);
     }
+
+    // Safely converts dynamic flag values (bool/int/string) into a boolean.
+    private static bool ToFlag(object? v, bool defaultValue = false)
+    {
+        try
+        {
+            switch (v)
+            {
+                case bool b: return b;
+                case int i: return i != 0;
+                case long l: return l != 0;
+                case short s: return s != 0;
+                case byte by: return by != 0;
+                case string str:
+                    if (bool.TryParse(str, out var parsedBool)) return parsedBool;
+                    if (int.TryParse(str, out var n)) return n != 0;
+                    return defaultValue;
+                default:
+                    return defaultValue;
+            }
+        }
+        catch { return defaultValue; }
+    }
 }
 
 <div class="table-wrapper my-4 px-4">
@@ -135,7 +158,7 @@
             @foreach (var f in fields)
             {
               var w = ToColWidthPx(f, 10);
-              var isHidden = f.Visible == false;
+              var isHidden = !ToFlag(f?.Visible, true);
               var hiddenStyle = isHidden ? "display:none;" : "";
               if (w > 0)
               { <col data-field="@f.FieldName" style="@hiddenStyle width:@($"{w}px");min-width:@($"{w}px");max-width:@($"{w}px")" /> }
@@ -148,7 +171,7 @@
             <tr>
               @foreach (var f in fields)
               {
-                var isHidden = f.Visible == false;
+                var isHidden = !ToFlag(f?.Visible, true);
                 var hiddenStyle = isHidden ? "display:none;" : "";
                 <th class="text-nowrap" data-field="@f.FieldName" style="@hiddenStyle">
                   @((string)f.DisplayLabel)
@@ -178,8 +201,8 @@
                       var keyFieldVal = "";
                       var keySelfVal = "";
 
-                      bool isReadOnly = f.ReadOnly != null && (int)f.ReadOnly != 0;
-                      bool isHidden = f.Visible == false;
+                      bool isReadOnly = ToFlag(f?.ReadOnly, false);
+                      bool isHidden = !ToFlag(f?.Visible, true);
                       var hiddenStyle = isHidden ? "display:none;" : "";
 
                       // 依 OCX 設定帶出 key 欄位，讓 lookup 有依據
