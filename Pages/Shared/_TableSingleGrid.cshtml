@@ -83,6 +83,41 @@
         var prop = item.GetType().GetProperty(name!, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
         return prop?.GetValue(item);
     }
+
+    private static bool ToBool(object? raw, bool defaultValue)
+    {
+        if (raw == null) return defaultValue;
+
+        return raw switch
+        {
+            bool b => b,
+            byte b => b != 0,
+            sbyte b => b != 0,
+            short n => n != 0,
+            ushort n => n != 0,
+            int n => n != 0,
+            uint n => n != 0,
+            long n => n != 0,
+            ulong n => n != 0,
+            decimal n => n != 0m,
+            double n => Math.Abs(n) > double.Epsilon,
+            float n => Math.Abs(n) > float.Epsilon,
+            _ => ParseBool(raw.ToString(), defaultValue)
+        };
+
+        static bool ParseBool(string? text, bool fallback)
+        {
+            var s = text?.Trim();
+            if (string.IsNullOrWhiteSpace(s)) return fallback;
+
+            if (bool.TryParse(s, out var b)) return b;
+            if (int.TryParse(s, out var n)) return n != 0;
+            if (string.Equals(s, "Y", StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(s, "N", StringComparison.OrdinalIgnoreCase)) return false;
+
+            return fallback;
+        }
+    }
 }
 
 <div class="table-wrapper my-4 px-4">
@@ -135,7 +170,7 @@
             @foreach (var f in fields)
             {
               var w = ToColWidthPx(f, 10);
-              var isHidden = f.Visible == false;
+              var isHidden = !ToBool(f.Visible, defaultValue: true);
               var hiddenStyle = isHidden ? "display:none;" : "";
               if (w > 0)
               { <col data-field="@f.FieldName" style="@hiddenStyle width:@($"{w}px");min-width:@($"{w}px");max-width:@($"{w}px")" /> }
@@ -148,7 +183,7 @@
             <tr>
               @foreach (var f in fields)
               {
-                var isHidden = f.Visible == false;
+                var isHidden = !ToBool(f.Visible, defaultValue: true);
                 var hiddenStyle = isHidden ? "display:none;" : "";
                 <th class="text-nowrap" data-field="@f.FieldName" style="@hiddenStyle">
                   @((string)f.DisplayLabel)
@@ -178,8 +213,8 @@
                       var keyFieldVal = "";
                       var keySelfVal = "";
 
-                      bool isReadOnly = f.ReadOnly != null && (int)f.ReadOnly != 0;
-                      bool isHidden = f.Visible == false;
+                      bool isReadOnly = ToBool(f.ReadOnly, defaultValue: false);
+                      bool isHidden = !ToBool(f.Visible, defaultValue: true);
                       var hiddenStyle = isHidden ? "display:none;" : "";
 
                       // 依 OCX 設定帶出 key 欄位，讓 lookup 有依據
