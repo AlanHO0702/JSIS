@@ -696,6 +696,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // 更新表格
       const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
       updateTableBody(data.items, fields);
+      applyLookupToTable(); // 套用 lookup 顯示
       console.log('[goPage] Table updated with', data.items.length, 'items');
 
       // 更新分頁資訊
@@ -961,6 +962,37 @@ document.addEventListener("DOMContentLoaded", () => {
         const rawVal = item[fieldName] ?? item[fieldName?.toLowerCase()] ?? '';
         const isHidden = f.Visible == 0;
         const hiddenStyle = isHidden ? 'display:none;' : '';
+        const isReadOnly = f.ReadOnly != null && f.ReadOnly != 0;
+
+        // 計算 lookupKey（與初始渲染邏輯一致）
+        let lookupKey = rawVal;
+        const ocxLookup = ocxLookupPayload[fieldName?.toLowerCase()];
+        if (ocxLookup) {
+          const keyFieldName = ocxLookup.keyField;
+          const keySelfName = ocxLookup.keySelf;
+
+          let keyFieldVal = '';
+          let keySelfVal = '';
+
+          if (keyFieldName) {
+            const kfVal = item[keyFieldName] ?? item[keyFieldName?.toLowerCase()];
+            keyFieldVal = (kfVal !== null && kfVal !== undefined) ? String(kfVal) : '';
+          }
+          if (keySelfName) {
+            const ksVal = item[keySelfName] ?? item[keySelfName?.toLowerCase()];
+            keySelfVal = (ksVal !== null && ksVal !== undefined) ? String(ksVal) : '';
+          }
+
+          // 優先使用 keyFieldVal，其次 keySelfVal，最後才用 rawVal
+          // 這樣可以確保 lookup 欄位（如 StatusName）能用對應的 key 欄位（如 Status）的值
+          if (keyFieldVal !== '') {
+            lookupKey = keyFieldVal;
+          } else if (keySelfVal !== '') {
+            lookupKey = keySelfVal;
+          } else if (lookupKey === '' && rawVal !== null && rawVal !== undefined) {
+            lookupKey = String(rawVal);
+          }
+        }
 
         // 簡單格式化
         let displayVal = rawVal;
@@ -973,7 +1005,22 @@ document.addEventListener("DOMContentLoaded", () => {
           displayVal = rawVal.toLocaleString('zh-TW');
         }
 
-        return '<td style="' + hiddenStyle + '">' + (displayVal || '') + '</td>';
+        // 安全處理值，避免 0 被視為 falsy
+        const safeRawVal = (rawVal !== null && rawVal !== undefined) ? String(rawVal) : '';
+        const safeLookupKey = (lookupKey !== null && lookupKey !== undefined) ? String(lookupKey) : '';
+        const safeDisplayVal = (displayVal !== null && displayVal !== undefined) ? String(displayVal) : '';
+
+        // 產生與初始渲染一致的結構，包含 data-field, cell-view, cell-edit
+        return '<td class="text-nowrap" data-field="' + fieldName + '" style="' + hiddenStyle + '">' +
+          '<span class="cell-view" data-raw="' + safeRawVal + '" data-lookupkey="' + safeLookupKey + '">' + safeDisplayVal + '</span>' +
+          '<input class="form-control form-control-sm cell-edit d-none ' + (isReadOnly ? 'readonly-cell' : '') + '" ' +
+          'name="' + fieldName + '" ' +
+          'value="' + safeRawVal + '" ' +
+          'data-raw="' + safeRawVal + '" ' +
+          'data-lookupkey="' + safeLookupKey + '" ' +
+          'data-readonly="' + (isReadOnly ? '1' : '0') + '" ' +
+          (isReadOnly ? 'readonly' : '') + ' />' +
+          '</td>';
       }).join('') + '</tr>';
     }).join('');
   }
@@ -1020,6 +1067,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // 更新表格
       const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
       updateTableBody(data.items, fields);
+      applyLookupToTable(); // 套用 lookup 顯示
 
       // 更新排序狀態（使用實際傳送的欄位名稱）
       currentSortBy = actualFieldName;
