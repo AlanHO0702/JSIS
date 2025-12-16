@@ -1,6 +1,8 @@
 @model dynamic
 @using PcbErpApi.Helpers
 @using System.Text.Json
+@using System.Collections.Generic
+@using System.Linq
 @{
     // 單頭欄位
     var headerFields = Model.HeaderTableFields; // 可視欄位
@@ -24,9 +26,50 @@
         .OrderBy(g => g.Key)
         .ToDictionary(g => g.Key, g => g.ToList());
 
+    int GetDetailColWidth(TableFieldViewModel c)
+    {
+        int? byFieldWidth = (c?.iFieldWidth != null && c.iFieldWidth > 0) ? c.iFieldWidth.Value : null;
+        int? byDisplaySize = null;
+
+        if (c?.DisplaySize != null && c.DisplaySize > 0)
+        {
+            // 以字元寬度估算（DisplaySize 通常是字元數）
+            var w = c.DisplaySize.Value * 14;
+            byDisplaySize = Math.Min(520, Math.Max(30, w));
+        }
+
+        if (byFieldWidth.HasValue && byDisplaySize.HasValue)
+        {
+            // 若兩者都有，採用較小者，讓 DisplaySize 可以把欄位縮小
+            return Math.Min(Math.Min(520, Math.Max(30, byFieldWidth.Value)), byDisplaySize.Value);
+        }
+
+        if (byFieldWidth.HasValue)
+            return Math.Min(520, Math.Max(30, byFieldWidth.Value));
+
+        if (byDisplaySize.HasValue)
+            return byDisplaySize.Value;
+
+        return 120;
+    }
+
+    var detailTotalWidth = (fields as IEnumerable<TableFieldViewModel>)?.Sum(c => GetDetailColWidth(c)) ?? 0;
+
     var lookupMap = ViewData["LookupDisplayMap"] as Dictionary<string, Dictionary<string, string>>;
 
-    var PaperNum = headerData.ContainsKey("PaperNum") ? headerData["PaperNum"]?.ToString() ?? "" : "";
+    // 安全取單頭欄位值（容許大小寫不同）
+    string GetHeaderVal(string key)
+    {
+        var dict = headerData as IDictionary<string, object> ?? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        if (dict.TryGetValue(key, out var v) && v != null) return v.ToString();
+        var altKey = dict.Keys.FirstOrDefault(k => k.Equals(key, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrEmpty(altKey) && dict.TryGetValue(altKey, out v) && v != null) return v.ToString();
+        return "";
+    }
+
+    var PaperNum = !string.IsNullOrWhiteSpace(keyFieldName)
+        ? GetHeaderVal(keyFieldName)
+        : GetHeaderVal("PaperNum");
 
     var headerLookupMap = ViewData["HeaderLookupMap"] as Dictionary<string, string>;
 
@@ -165,13 +208,15 @@
             ＋
         </button>
         <button type="button" class="btn btn-outline-danger btn-sm" id="btnRowDelete" title="刪除當前列">－</button>
+        <button type="button" class="btn btn-success btn-sm d-none" id="btnDetailConfirm">確認</button>
+        <button type="button" class="btn btn-secondary btn-sm d-none" id="btnDetailCancel">取消</button>
     </div>
-        <table class="erp-table">
+        <table class="erp-table" style="width:@(detailTotalWidth)px;">
             <thead>
               <tr>
                 @foreach (var col in fields)   // ← 不要寫 var dynamic
                 {
-                    var initWidth = (col.iFieldWidth ?? 120);   // ← int? 就給預設 120
+                    var initWidth = GetDetailColWidth(col);
 
                     <th data-field="@col.FieldName"
                         style="width:@(initWidth)px; position:relative;"> 
@@ -185,11 +230,22 @@
                     @if (items != null)
                     {
                         var index = 1;
+                        string GetValue(object obj, string fieldName)
+                        {
+                            if (obj == null) return "";
+                            if (obj is IDictionary<string, object> dic)
+                            {
+                                var kv = dic.FirstOrDefault(k => string.Equals(k.Key, fieldName, StringComparison.OrdinalIgnoreCase));
+                                return kv.Equals(default(KeyValuePair<string, object>)) ? "" : kv.Value?.ToString() ?? "";
+                            }
+                            var prop = obj.GetType().GetProperty(fieldName);
+                            return prop != null ? prop.GetValue(obj, null)?.ToString() ?? "" : "";
+                        }
+
                         foreach (var item in items)
                         {
-                            // 這兩個取值你本來就有
-                            var paperNum = item.GetType().GetProperty("PaperNum")?.GetValue(item, null)?.ToString();
-                            var itemNo   = item.GetType().GetProperty("Item")?.GetValue(item, null)?.ToString();
+                            var paperNum = GetValue(item, "PaperNum");
+                            var itemNo   = GetValue(item, "Item");
 
                             <tr data-paper-num="@paperNum" data-item="@itemNo" data-state="unchanged">
                                 @foreach(var col in fields)
@@ -258,7 +314,8 @@
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
-<script src="~/js/toolbarHandler.js"></script>
+<script src="~/js/toolbarHandler.js?v=@DateTime.Now.Ticks"></script>
+<script src="~/js/gridToolbarTemplate.js"></script>
 <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css" />
 
 <!-- 呼叫元件 -->
@@ -300,7 +357,7 @@ const PAGE = {
 window.__DICT_OPEN__ = false;
 
 // 讓其它工具可以取到目前單號
-window.selectedPaperNum = '@(Model.HeaderData["PaperNum"] ?? "")';
+window.selectedPaperNum = '@(PaperNum)';
 
 // ★ 指定辭典表
 document.addEventListener('DOMContentLoaded', () => {
@@ -364,6 +421,7 @@ new ToolbarHandler({
   formId: "searchForm",
   addApiUrl: PAGE.addApiUrl,
   deleteApiUrlFn: id => `/api/${PAGE.deleteApiUrl}/${id || PAGE.paperNum}`,
+  paperAction: { url: '/api/PaperAction/DoAction', paperId: "@Model.HeaderTableName", eoc: 0, aftFinished: 2 },
   detailRouteTemplate: subTpl,  // 使用單身頁路徑，新增後跳轉到單身頁
   tableName: "@tableName",
   renderTable: null,
@@ -463,34 +521,34 @@ function collectDetails() {
   return details;
 }
 
-let _addingRow = false;
-async function onAddRowClick() {
-  if (_addingRow) return;
-  _addingRow = true;
-  try {
-    const res = await fetch('/api/OrderHeaderApi/AddDetailRow', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ detailTable: PAGE.detailTable, paperNum: PAGE.paperNum })
-    });
-    const json = await res.json();
-    if (!res.ok || !json?.ok) throw new Error(json?.error || '新增失敗');
-    appendDetailRowFromServer(json.row || {});
-  } catch (err) {
-    Swal.fire({icon:'error', title:'新增明細失敗', text: String(err.message || err)});
-  } finally { _addingRow = false; }
+let _pendingNewDetailRow = null;
+
+function computeNextItemNumber() {
+  const rows = Array.from(document.querySelectorAll('.erp-table tbody tr'));
+  let maxItem = 0;
+  rows.forEach(tr => {
+    const v = (tr.dataset.item || '').toString().trim();
+    const n = parseInt(v, 10);
+    if (!isNaN(n) && n > maxItem) maxItem = n;
+  });
+  return maxItem + 1;
 }
 
-function appendDetailRowFromServer(row) {
+function appendEmptyDetailRow() {
   const tbody = document.querySelector('.erp-table tbody');
   const tr = document.createElement('tr');
-  tr.dataset.paperNum = row.PaperNum || PAGE.paperNum;
-  tr.dataset.item = row.Item;
-  tr.dataset.state = 'unchanged';
+  const pn = PAGE.paperNum || getPaperNum();
+  const nextItem = computeNextItemNumber();
+  tr.dataset.paperNum = pn;
+  tr.dataset.item = String(nextItem);
+  tr.dataset.state = 'added';
 
   let tdsHtml = '';
   (PAGE.detailFields || []).forEach((col) => {
-    const v = toCellString(row[col.FieldName], col);
+    let v = '';
+    if ((col.FieldName || '').toLowerCase() === 'papernum') v = pn;
+    if ((col.FieldName || '').toLowerCase() === 'item') v = String(nextItem);
+
     const inputName = `Details[${tbody.rows.length + 1}].${col.FieldName}`;
     tdsHtml += `
       <td>
@@ -510,6 +568,34 @@ function appendDetailRowFromServer(row) {
   tr.querySelectorAll('.cell-edit').forEach(inp => {
     inp.addEventListener('input', () => { if (tr.dataset.state !== 'added') tr.dataset.state = 'modified'; });
   });
+  window.__unsavedChanges = true;
+  return tr;
+}
+
+function showPendingButtons(show) {
+  document.getElementById('btnDetailConfirm')?.classList.toggle('d-none', !show);
+  document.getElementById('btnDetailCancel')?.classList.toggle('d-none', !show);
+}
+
+function cancelPendingDetailRow() {
+  if (!_pendingNewDetailRow) return false;
+  _pendingNewDetailRow.remove();
+  _pendingNewDetailRow = null;
+  showPendingButtons(false);
+  return true;
+}
+
+async function confirmPendingDetailRow() {
+  if (!_pendingNewDetailRow) return;
+  // 交給既有儲存流程（SaveOrderHeader），決定是否寫入 DB
+  document.getElementById('orderHeaderForm')?.requestSubmit();
+}
+
+function onAddRowClick() {
+  // 只先新增前台一筆空資料，不直接寫入資料庫
+  cancelPendingDetailRow();
+  _pendingNewDetailRow = appendEmptyDetailRow();
+  showPendingButtons(true);
 }
 
 // ===== 鍵盤捷徑（↑ ↓ F7 F8），加上 modal 短路 =====
@@ -676,8 +762,9 @@ tbodyEl.addEventListener('focusin', e => {
   const tr = e.target.closest('tr'); if (tr) selectRow(tr);
 });
 document.getElementById('btnAddDetailRow')?.addEventListener('click', onAddRowClick);
-document.getElementById('btnSubAddNew')?.addEventListener('click', (e)=>{ e.preventDefault(); onAddRowClick(); });
 document.getElementById('btnRowDelete')?.addEventListener('click', onDeleteRowClick);
+document.getElementById('btnDetailCancel')?.addEventListener('click', (e) => { e.preventDefault(); cancelPendingDetailRow(); });
+document.getElementById('btnDetailConfirm')?.addEventListener('click', async (e) => { e.preventDefault(); await confirmPendingDetailRow(); });
 
 // ============================
 // 4) 儲存單頭＋單身
@@ -884,16 +971,19 @@ function updateNavButtons() {
   NAV_BTN_NEXT.onclick = () => hasNext && gotoPaper(navIds[navIndex + 1]);
 }
 async function fetchIdListByApi(filters) {
-  const res = await fetch('/api/PagedQuery/IdList', {
+  // 取得所有 id 列表，走通用 DynamicTable API
+  const res = await fetch('/api/DynamicTable/PagedQuery', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table: PAGE.headerTable, keyField: PAGE.keyField, filters: filters || [] })
+    body: JSON.stringify({ table: PAGE.headerTable, filters: [...(filters || []), {Field:"page",Op:"",Value:"1"}, {Field:"pageSize",Op:"",Value:"999999"}] })
   });
   const json = await res.json();
-  return Array.isArray(json.ids) ? json.ids : [];
+  const rows = Array.isArray(json.data) ? json.data : [];
+  return rows.map(r => r[PAGE.keyField]).filter(Boolean);
 }
 async function fetchIdListByPagedQuery(filters) {
+  // 同上，直接用 DynamicTable 取得大筆數據
   const fs = [...(filters || []), {Field:"page",Op:"",Value:"1"}, {Field:"pageSize",Op:"",Value:"999999"}];
-  const res = await busyFetch('/api/PagedQuery/PagedQuery', {
+  const res = await busyFetch('/api/DynamicTable/PagedQuery', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ table: PAGE.headerTable, filters: fs })
   },'切換中…');
@@ -982,7 +1072,7 @@ function getHeaderValueByLabel(labelText) {
   document.addEventListener('mousemove', (e) => {
     if (!isDown || !th) return;
     const dx = e.pageX - startX;
-    const newW = Math.max(50, startWidth + dx);
+    const newW = Math.max(30, startWidth + dx);
     th.style.width = `${newW}px`;
     columnCells(thIndex).forEach(td => td.style.width = `${newW}px`);
   });
@@ -1066,11 +1156,12 @@ body { background: #f7f9fb !important; }
 .erp-table{ width:100%; border-collapse:separate; border-spacing:0; font-size:1.06em; background:#fff; }
 .erp-table thead tr{ background:#e7ecf3; }
 .erp-table th, .erp-table td{
-  background:#f1f5fb; padding:7px 12px; border-bottom:1px solid #c5d1e4; white-space:nowrap; text-align:center;
+  box-sizing: border-box;
+  background:#f1f5fb; padding:6px 8px; border-bottom:1px solid #c5d1e4; white-space:nowrap; text-align:center;
   font-weight:500; border-right:1px solid #dde4ed; height:34px;
 }
 .erp-table th:last-child, .erp-table td:last-child{ border-right:none; }
-.erp-table th{ color:#124d8b; font-weight:700; font-size:1.05em; letter-spacing:1px; background:#e7ecf3; }
+.erp-table th{ color:#124d8b; font-weight:700; font-size:.92em; letter-spacing:.5px; background:#e7ecf3; }
 .erp-table tbody tr:nth-child(even){ background:#f6f9fd; }
 .erp-table tbody tr:hover{ background:#eef7ff; }
 
@@ -1101,8 +1192,8 @@ body { background: #f7f9fb !important; }
 /* --- Action Rail 基礎版位 & 內容右移（固定在樣板）--- */
 :root{
   --fab-left: 12px;
-  --fab-width: 100px;
-  --fab-gap: 20px;
+  --fab-width: 120px;
+  --fab-gap: 14px;
   --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap));
 }
 
@@ -1123,8 +1214,13 @@ body { background: #f7f9fb !important; }
 /* 按鈕的共同外觀（保持在樣板，讓所有頁面一致） */
 .fab{
   position: relative;
-  min-width: var(--fab-width);
-  padding: 8px 12px;
+  width: var(--fab-width);
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: .92rem;
+  letter-spacing: 0;
+  white-space: normal;
+  word-break: break-word;
   background:#ffc107;
   color:#090101;
   font-weight:700;
@@ -1146,7 +1242,7 @@ body { background: #f7f9fb !important; }
 /* 讓表格用固定布局，欄寬才會照 px 生效 + 拖曳把手 */
 .erp-table { table-layout: fixed; }
 .erp-table th { position: relative; }
-.erp-table th .col-resizer{ position: absolute; top: 0; right: 0; bottom: 0; width: 12px; cursor: col-resize; user-select: none; z-index: 2; }
+.erp-table th .col-resizer{ position: absolute; top: 0; right: 0; bottom: 0; width: 8px; cursor: col-resize; user-select: none; z-index: 2; }
 .erp-table th .col-resizer::before { content: none !important; }
 .erp-table th.resizing, .erp-table td.resizing, body.resizing { cursor: col-resize !important; }
 </style>
