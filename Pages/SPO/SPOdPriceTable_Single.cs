@@ -112,8 +112,13 @@ namespace PcbErpApi.Pages.SPO
             }
 
             await ApplyLangDisplaySizeAsync(DictTableName, FieldDictList);
+            var keyFields = await LoadPrimaryKeyColumnsAsync(TableName);
+            if (keyFields.Count > 0)
+                ViewData["KeyFields"] = keyFields;
+
+            var keyFieldSet = new HashSet<string>(keyFields ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
             TableFields = FieldDictList
-                .Where(f => f.Visible == 1)
+                .Where(f => f.Visible == 1 || (!string.IsNullOrWhiteSpace(f.FieldName) && keyFieldSet.Contains(f.FieldName)))
                 .OrderBy(f => f.SerialNum ?? 0)
                 .ToList();
 
@@ -123,6 +128,15 @@ namespace PcbErpApi.Pages.SPO
             ViewData["Fields"] = TableFields;
             ViewData["OrderBy"] = OrderBy;
             ViewData["QueryStringRaw"] = Request.QueryString.Value ?? "";
+
+            try
+            {
+                ViewData["OCXLookups"] = _dictService.GetOCXLookups(DictTableName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetOCXLookups failed for {Table}", DictTableName);
+            }
 
             ModeNum = await LoadModeAsync(ItemId);
             await LoadLookupsAsync(ModeNum);
@@ -159,11 +173,42 @@ namespace PcbErpApi.Pages.SPO
                 _logger.LogError(ex, "Load custom buttons failed for {ItemId}", ItemId);
             }
 
-            var keyFields = BuildKeyFields(setup.Mdkey, setup.LocateKeys);
-            if (keyFields.Count > 0)
-                ViewData["KeyFields"] = keyFields;
-
             return Page();
+        }
+
+        private async Task<List<string>> LoadPrimaryKeyColumnsAsync(string tableName)
+        {
+            if (string.IsNullOrWhiteSpace(tableName)) return new List<string>();
+
+            async Task<List<string>> QueryAsync(string objectName)
+            {
+                var list = new List<string>();
+                var cs = GetConnStr();
+                await using var conn = new SqlConnection(cs);
+                await conn.OpenAsync();
+                const string sql = @"
+SELECT col.name
+  FROM sys.indexes i
+  JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+  JOIN sys.columns col ON col.object_id = ic.object_id AND col.column_id = ic.column_id
+ WHERE i.object_id = OBJECT_ID(@tbl) AND i.is_primary_key = 1
+ ORDER BY ic.key_ordinal;";
+                await using var cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@tbl", objectName);
+                await using var rd = await cmd.ExecuteReaderAsync();
+                while (await rd.ReadAsync())
+                    list.Add(rd.GetString(0));
+                return list;
+            }
+
+            var pk = await QueryAsync(tableName);
+            if (pk.Count > 0) return pk;
+            if (!tableName.Contains('.', StringComparison.OrdinalIgnoreCase))
+            {
+                pk = await QueryAsync("dbo." + tableName);
+                if (pk.Count > 0) return pk;
+            }
+            return new List<string>();
         }
 
         private async Task<string?> ResolveRealTableNameAsync(string dictTableName)
