@@ -92,6 +92,37 @@
 
       table.querySelectorAll("tbody tr").forEach(tr => {
 
+        // ===== 刪除列：只送 KeyFields + __delete =====
+        if (tr.dataset.state === "deleted") {
+          const rowDel = {};
+          // 先嘗試從 cell-edit 取（避免 DOM 還沒塞 hidden）
+          tr.querySelectorAll(".cell-edit").forEach(inp => {
+            if (!inp.name) return;
+            if (keyFieldSet.has((inp.name || "").toLowerCase())) {
+              rowDel[inp.name] = inp.type === "checkbox" ? (inp.checked ? "1" : "0") : (inp.value ?? "");
+            }
+          });
+          // 再補 hidden PK / FK
+          tr.querySelectorAll(".mmd-pk-hidden, .mmd-fk-hidden").forEach(inp => {
+            if (!inp.name) return;
+            if (rowDel[inp.name] === undefined || rowDel[inp.name] === "") rowDel[inp.name] = inp.value ?? "";
+          });
+          // 最後補 KeyFields（若還缺）
+          keyFieldSet.forEach(k => {
+            const has = Object.keys(rowDel).some(n => (n || "").toLowerCase() === k);
+            if (has) return;
+            const inp = Array.from(tr.querySelectorAll('.cell-edit')).find(i => (i.name || '').toLowerCase() === k);
+            const span = inp?.previousElementSibling;
+            const name = inp?.name || k;
+            const val = span?.textContent?.trim() || inp?.value || inp?.dataset?.raw || inp?.defaultValue || "";
+            rowDel[name] = val;
+          });
+
+          rowDel.__delete = true;
+          list.push(rowDel);
+          return;
+        }
+
         let hasDiff = tr.dataset.state === "added";
 
         tr.querySelectorAll(".cell-edit").forEach(inp => {
@@ -207,6 +238,14 @@
         inp.defaultValue = inp.type === "checkbox"
           ? (inp.checked ? "1" : "0")
           : (inp.value ?? "");
+      });
+
+      // 刪除列：成功後移除
+      table.querySelectorAll('tbody tr[data-state="deleted"]').forEach(tr => tr.remove());
+      // 新增列：成功後解除狀態標記
+      table.querySelectorAll('tbody tr[data-state="added"]').forEach(tr => {
+        delete tr.dataset.state;
+        tr.classList.remove("table-warning");
       });
 
       return { ok:true, skipped:false, text:"OK", raw:json };
