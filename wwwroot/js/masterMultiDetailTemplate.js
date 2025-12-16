@@ -254,8 +254,6 @@ const loadAllDetails = async (row) => {
       + names.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
       + values.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("");
 
-    console.log("Detail Query:", url);
-
     const rows = await fetch(url).then(r => r.json());
 
     // ★ 為 Detail 表格添加 row click 事件處理，實現 Focus 功能
@@ -264,6 +262,11 @@ const loadAllDetails = async (row) => {
       tbody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
       // 添加 selected class 到被點擊的行
       tr.classList.add("selected");
+
+      // ★★★ Detail Focus 聯動功能 ★★★
+      if (cfg.EnableDetailFocusCascade) {
+        loadNextDetailFromFocus(i, row);
+      }
     });
 
     // if (window._mmdEditing && tbody._editorInstance) {
@@ -283,6 +286,58 @@ const loadAllDetails = async (row) => {
     }
   }
 };
+
+    // ==============================================================================
+    //   Detail Focus 聯動：點擊某層 Detail 時，載入下一層 Detail 的關聯資料
+    // ==============================================================================
+    const loadNextDetailFromFocus = async (currentDetailIndex, focusedRow) => {
+      const nextIndex = currentDetailIndex + 1;
+
+      // 檢查是否有下一層 Detail
+      if (nextIndex >= (cfg.Details || []).length) {
+        return; // 已經是最後一層，不需要聯動
+      }
+
+      const nextDetail = cfg.Details[nextIndex];
+      const tbody = document.getElementById(`${cfg.DomId}-detail-${nextIndex}-body`);
+      if (!tbody) return;
+
+      const names = [];
+      const values = [];
+
+      // 根據下一層 Detail 的 KeyMap 從當前 focusedRow 中提取對應的欄位值
+      (nextDetail.KeyMap || []).forEach(k => {
+        names.push(k.Detail);           // 用明細的欄位當查詢欄位
+        values.push(focusedRow[k.Master]); // 值取 focusedRow 的欄位值
+      });
+
+      const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(nextDetail.DetailTable)}`
+        + names.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
+        + values.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("");
+
+      const rows = await fetch(url).then(r => r.json());
+
+      // 載入下一層 Detail 的資料，同時保留 Focus 聯動功能
+      await buildBody(tbody, detailDicts[nextIndex], rows, (row, tr) => {
+        tbody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
+        tr.classList.add("selected");
+
+        // 遞迴：如果還有下一層，繼續聯動
+        if (cfg.EnableDetailFocusCascade) {
+          loadNextDetailFromFocus(nextIndex, row);
+        }
+      });
+
+      // 編輯模式處理
+      if (window._mmdEditing && tbody._editorInstance) {
+        if (tbody.offsetParent !== null) {
+          tbody._editorInstance.toggleEdit(true);
+          tbody._pendingRebind = false;
+        } else {
+          tbody._pendingRebind = true;
+        }
+      }
+    };
 
 
     // ==============================================================================
@@ -320,19 +375,17 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
   const d = cfg.Details[i];
   const dict = detailDicts[i];
 
-// ★ 取 PK（IsKey=1）
-let keyFields = dict.filter(f => DICT.isKey(f)).map(f => f.FieldName);
+  // ★ 取 PK（IsKey=1）
+  let keyFields = dict.filter(f => DICT.isKey(f)).map(f => f.FieldName);
 
-// ★ 加上 KeyMap.Detail
-const keyMapKeys = (d.KeyMap || []).map(k => k.Detail);
-keyFields = [...new Set([...keyFields, ...keyMapKeys])];
+  // ★ 加上 KeyMap.Detail
+  const keyMapKeys = (d.KeyMap || []).map(k => k.Detail);
+  keyFields = [...new Set([...keyFields, ...keyMapKeys])];
 
-// ★ 如果 Razor 有指定 PkFields → 通通加入（最高優先權）
-if (d.PkFields && Array.isArray(d.PkFields)) {
-    keyFields = [...new Set([...keyFields, ...d.PkFields])];
-}
-
-console.log(`Detail ${i} final keyFields =`, keyFields);
+  // ★ 如果 Razor 有指定 PkFields → 通通加入（最高優先權）
+  if (d.PkFields && Array.isArray(d.PkFields)) {
+      keyFields = [...new Set([...keyFields, ...d.PkFields])];
+  }
 
   detailEditors[i] = window.makeEditableGrid({
     wrapper: root.querySelector(`#${cfg.DomId}-detail-${i}-wrapper`),

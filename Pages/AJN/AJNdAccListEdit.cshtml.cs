@@ -44,6 +44,9 @@ namespace PcbErpApi.Pages.AJN
                 MasterApi = "/api/AJNdAccClass",
                 MasterTop = 200,
 
+                // ★ 啟用 Detail Focus 聯動功能
+                EnableDetailFocusCascade = true,
+
                 Details = new List<WebRazor.Models.DetailConfig>
                 {
                     // 層級 1：分類
