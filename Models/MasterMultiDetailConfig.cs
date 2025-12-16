@@ -10,6 +10,11 @@ namespace WebRazor.Models
         public int MasterTop { get; set; } = 200;
 
         public List<DetailConfig> Details { get; set; } = new();
+
+        /// <summary>
+        /// 啟用 Detail Focus 聯動：點擊某層 Detail 時，自動載入下一層 Detail 的關聯資料
+        /// </summary>
+        public bool EnableDetailFocusCascade { get; set; } = false;
     }
 
     public class DetailConfig

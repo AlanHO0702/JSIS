@@ -87,27 +87,39 @@
         return prop?.GetValue(item);
     }
 
-    // Safely converts dynamic flag values (bool/int/string) into a boolean.
-    private static bool ToFlag(object? v, bool defaultValue = false)
+    private static bool ToBool(object? raw, bool defaultValue)
     {
-        try
+        if (raw == null) return defaultValue;
+
+        return raw switch
         {
-            switch (v)
-            {
-                case bool b: return b;
-                case int i: return i != 0;
-                case long l: return l != 0;
-                case short s: return s != 0;
-                case byte by: return by != 0;
-                case string str:
-                    if (bool.TryParse(str, out var parsedBool)) return parsedBool;
-                    if (int.TryParse(str, out var n)) return n != 0;
-                    return defaultValue;
-                default:
-                    return defaultValue;
-            }
+            bool b => b,
+            byte b => b != 0,
+            sbyte b => b != 0,
+            short n => n != 0,
+            ushort n => n != 0,
+            int n => n != 0,
+            uint n => n != 0,
+            long n => n != 0,
+            ulong n => n != 0,
+            decimal n => n != 0m,
+            double n => Math.Abs(n) > double.Epsilon,
+            float n => Math.Abs(n) > float.Epsilon,
+            _ => ParseBool(raw.ToString(), defaultValue)
+        };
+
+        static bool ParseBool(string? text, bool fallback)
+        {
+            var s = text?.Trim();
+            if (string.IsNullOrWhiteSpace(s)) return fallback;
+
+            if (bool.TryParse(s, out var b)) return b;
+            if (int.TryParse(s, out var n)) return n != 0;
+            if (string.Equals(s, "Y", StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(s, "N", StringComparison.OrdinalIgnoreCase)) return false;
+
+            return fallback;
         }
-        catch { return defaultValue; }
     }
 }
 
@@ -167,7 +179,7 @@
             @foreach (var f in fields)
             {
               var w = ToColWidthPx(f, 10);
-              var isHidden = !ToFlag(f?.Visible, true);
+              var isHidden = !ToBool(f.Visible, defaultValue: true);
               var hiddenStyle = isHidden ? "display:none;" : "";
               if (w > 0)
               { <col data-field="@f.FieldName" style="@hiddenStyle width:@($"{w}px");min-width:@($"{w}px");max-width:@($"{w}px")" /> }
@@ -180,7 +192,7 @@
             <tr>
               @foreach (var f in fields)
               {
-                var isHidden = !ToFlag(f?.Visible, true);
+                var isHidden = !ToBool(f.Visible, defaultValue: true);
                 var hiddenStyle = isHidden ? "display:none;" : "";
                 <th class="text-nowrap" data-field="@f.FieldName" style="@hiddenStyle">
                   @((string)f.DisplayLabel)
@@ -210,8 +222,8 @@
                       var keyFieldVal = "";
                       var keySelfVal = "";
 
-                      bool isReadOnly = ToFlag(f?.ReadOnly, false);
-                      bool isHidden = !ToFlag(f?.Visible, true);
+                      bool isReadOnly = ToBool(f.ReadOnly, defaultValue: false);
+                      bool isHidden = !ToBool(f.Visible, defaultValue: true);
                       var hiddenStyle = isHidden ? "display:none;" : "";
 
                       // 依 OCX 設定帶出 key 欄位，讓 lookup 有依據

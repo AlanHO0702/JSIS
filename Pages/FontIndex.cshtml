@@ -6,6 +6,26 @@
     var level2List = Model.GetCurrentLevel2();
     Layout = "_Layout";
 
+    var pageMap = new Dictionary<string, string> {
+        {"SA000002","/SPO/SPOdOrderMain" },   // 銷售訂單
+        {"SPO00010","/SPO/SPOdMPSOutMain" },  // 銷貨單
+        {"SPO00013","/SPO/SPO00013" },  // 銷售價格表
+        {"SPO00040", "/SPO/SPO00040"},// 銷售價格表(單一grid)
+        {"AA000015","/AJN/AJNdJourMain" },// 總帳傳票
+        {"FME00020","/FME/FmedIssueMain"},
+        {"CUR00012", "/CUR/CURdSysParams"},
+        {"CURH0002", "/CUR/CURdReportOrderBasPage"},
+        {"CUR00007", "/CUR/CURdGroups"},
+        {"CURH0003", "/CUR/CURdV_SysProcess"},
+        {"CUR00004", "/CUR/NoticeBoard"},
+        {"MP000022", "/CCS/MP000022"},
+        {"MG000006", "/CPN/MGNdSetNum"},
+        {"CFW00005", "/AJN/AJNdDepart"},
+        {"CPN00009", "/CPN/MGNdSpecDemand"},
+        {"AA000008", "/AJN/AJNdAccListEdit"}
+        // 其它功能請自行加入...
+    };
+
     Dictionary<int, int> systemMap = new()
     {
         {1, 1},   // 銷售客戶
@@ -46,25 +66,30 @@
         catch { return null; }
     }
 
-    var pageMap = new Dictionary<string, string> {
-        {"SA000002", "/SPO/SPOdOrderMain"},   // 銷售訂單
-        {"SPO00010", "/SPO/SPOdMPSOutMain"},  // 銷貨單
-        {"SPO00013", "/SPO/SPO00013"},  // 銷售價格表
-        {"SPO00040", "/SPO/SPO00040"},// 銷售價格表(單一grid)
-        {"AA000015", "/AJN/AJNdJourMain"},// 總帳傳票
-        {"FME00020", "/FME/FmedIssueMain"},
-        {"CUR00012", "/CUR/CURdSysParams"},
-        {"CURH0002", "/CUR/CURdReportOrderBasPage"},
-        {"CUR00007", "/CUR/CURdGroups"},
-        {"CURH0003", "/CUR/CURdV_SysProcess"},
-        {"CUR00004", "/CUR/NoticeBoard"},
-        {"MP000022", "/CCS/MP000022"},
-        {"MG000006", "/CPN/MGNdSetNum"},
-        {"CFW00005", "/AJN/AJNdDepart"},
-        {"CPN00009", "/CPN/MGNdSpecDemand"},
-        {"AA000008", "/AJN/AJNdAccListEdit"}
-        // 其它功能請自行加入...
-    };
+    string ResolveItemHint(PcbErpApi.Models.CurdSysItem item)
+    {
+        if (pageMap.TryGetValue(item.ItemId, out var hardPath) && !string.IsNullOrWhiteSpace(hardPath))
+            return hardPath;
+
+        var companyLink = ResolveCompanyLink(item);
+        if (!string.IsNullOrWhiteSpace(companyLink))
+            return companyLink;
+
+        var ocx = item.Ocxtemplete?.Trim().ToLowerInvariant() ?? "";
+
+        if (item.ItemType == 6)
+        {
+            if (ocx.Contains("jsdpaperorgdll")) return "Paper";
+            if (ocx.Contains("jsdsinglegriddll")) return "SingleGrid";
+            if (ocx.Contains("jsdgriddll")) return "MultiGrid";
+            if (ocx.Contains("jsdmasdtldll")) return "MasterDetail";
+        }
+
+        if (item.ItemType == 2 && item.OutputType == 0) return "Report(Direct)";
+        if (item.ItemType == 2 && item.OutputType == 6) return "Report(Generic)";
+
+        return "未設定";
+    }
     
 }
 
@@ -222,17 +247,19 @@ body {
                             ? pageMap[item.ItemId]
                             : ResolveCompanyLink(item) // 公司/廠商主檔樣板
                             ?? (item.ItemType == 2 && item.OutputType == 0 ? $"/Report/Direct/{item.ItemId}"
+                               : item.ItemType == 6 && ocx.Contains("jsdpaperorgdll") ? $"/DynamicTemplate/Paper/{item.ItemId}"
                                : item.ItemType == 6 && ocx.Contains("jsdsinglegriddll") ? $"/CUR/SingleGrid/{item.ItemId}"
                                : item.ItemType == 6 && ocx.Contains("jsdgriddll") ? $"/CUR/MultiGrid/{item.ItemId}"
                                : item.ItemType == 6 && ocx.Contains("jsdmasdtldll") ? $"/CUR/MasterDetail/{item.ItemId}"
                                : null);
+                            var hint = ResolveItemHint(item);
 
                             <li class="list-group-item d-flex justify-content-between align-items-center" id="li-@item.ItemId">
 
                             @if (!string.IsNullOrEmpty(link)) {
-                                <a href="@link" style="flex:1">@item.ItemId - @item.ItemName</a>
+                                <a href="@link" title="@hint" style="flex:1">@item.ItemId - @item.ItemName</a>
                             } else {
-                                <a href="javascript:void(0)" class="dyn-link" data-itemid="@item.ItemId" data-itemname="@item.ItemName" data-superid="@item.SuperId" style="flex:1" onclick="resolveAndGo('@item.ItemId','@item.ItemName','@item.SuperId')">@item.ItemId - @item.ItemName</a>
+                                <a href="javascript:void(0)" title="@hint" class="dyn-link" data-itemid="@item.ItemId" data-itemname="@item.ItemName" data-superid="@item.SuperId" style="flex:1" onclick="resolveAndGo('@item.ItemId','@item.ItemName','@item.SuperId')">@item.ItemId - @item.ItemName</a>
                             }
                                 <button class="btn btn-outline-warning btn-sm"
                                         onclick="addToFavorite('@item.ItemId', '@item.ItemName', '@item.SuperId', '@(item.ClassName ?? string.Empty)', '@(item.PowerType?.ToString() ?? string.Empty)')">★</button>
@@ -280,8 +307,7 @@ body {
     "MP000022": "/CCS/MP000022",
     "MG000006": "/CPN/MGNdSetNum",
     "CFW00005": "/AJN/AJNdDepart",
-    "CPN00009": "/CPN/MGNdSpecDemand",
-    "AA000008": "/AJN/AJNdAccListEdit"
+    "CPN00009": "/CPN/MGNdSpecDemand"
     // 其它功能自行補上
     };
 
@@ -311,6 +337,81 @@ body {
         const sysId = getSystemIdFromPowerType(pt);
         if (!sysId) return null;
         return `/CCS/CC000054/${sysId}`;
+    }
+
+    const itemHintCache = new Map();
+
+    function getTemplateNameFromMeta(meta, itemId) {
+        const hard = pageMap[itemId];
+        if (hard) return hard;
+
+        const companyLink = resolveCompanyLinkFromMeta(meta);
+        if (companyLink) return companyLink;
+
+        const itemType = Number(meta?.itemType ?? meta?.ItemType);
+        const outputType = Number(meta?.outputType ?? meta?.OutputType);
+
+        const pickStr = (obj, keys) => {
+            for (const k of keys) {
+                if (obj && obj[k] !== undefined && obj[k] !== null) return obj[k];
+            }
+            return '';
+        };
+        const ocxRaw = pickStr(meta, [
+            'ocxtemplete', 'Ocxtemplete', 'OCXTemplete', 'ocxTemplete', 'OCXTemplete',
+            'ocxTemplate', 'OCXTemplate', 'ocxtemplate', 'OCXTEMPLATE',
+            'OCX', 'ocx'
+        ]);
+        const ocx = String(ocxRaw).trim().toLowerCase();
+
+        if (itemType === 6) {
+            if (ocx.includes('jsdpaperorgdll')) return 'Paper';
+            if (ocx.includes('jsdsinglegriddll')) return 'SingleGrid';
+            if (ocx.includes('jsdgriddll')) return 'MultiGrid';
+            if (ocx.includes('jsdmasdtldll')) return 'MasterDetail';
+        }
+
+        if (itemType === 2 && outputType === 0) return 'Report(Direct)';
+        if (itemType === 2 && outputType === 6) return 'Report(Generic)';
+
+        return '未設定';
+    }
+
+    function getLocalHint(itemId, className, powerType) {
+        const hard = pageMap[itemId];
+        if (hard) return hard;
+        const localMeta = { ClassName: className, PowerType: powerType };
+        const companyLink = resolveCompanyLinkFromMeta(localMeta);
+        return companyLink || null;
+    }
+
+    async function getItemHint(itemId, className, powerType) {
+        const key = `${itemId}|${className ?? ''}|${powerType ?? ''}`;
+        if (itemHintCache.has(key)) return itemHintCache.get(key);
+
+        const local = getLocalHint(itemId, className, powerType);
+        if (local) {
+            itemHintCache.set(key, local);
+            return local;
+        }
+
+        try {
+            const res = await fetch(`/api/report/item-meta/${itemId}`);
+            if (!res.ok) throw new Error('meta not found');
+            const meta = await res.json();
+            const hint = getTemplateNameFromMeta(meta, itemId);
+            itemHintCache.set(key, hint);
+            return hint;
+        } catch {
+            const hint = '未設定';
+            itemHintCache.set(key, hint);
+            return hint;
+        }
+    }
+
+    async function loadHintOnHover(el, itemId, className, powerType) {
+        if (!el) return;
+        el.title = await getItemHint(itemId, className, powerType);
     }
 
     const selectedLevel1Id = "@Model.SelectedLevel1Id";
@@ -359,7 +460,7 @@ body {
                 return '';
             };
             const ocxRaw = pickStr(meta, [
-                'ocxtemplete','OCXTemplete','ocxTemplete','OCXTemplete',
+                'ocxtemplete','Ocxtemplete','OCXTemplete','ocxTemplete','OCXTemplete',
                 'ocxTemplate','OCXTemplate','ocxtemplate','OCXTEMPLATE',
                 'OCX','ocx'
             ]);
@@ -367,6 +468,7 @@ body {
             let url = '';
             if (itemType === 2 && outputType === 0) url = `/Report/Direct/${itemId}`;
             else if (itemType === 2 && outputType === 6) url = `/Report/Generic/${itemId}`;
+            else if (itemType === 6 && (ocx === 'jsdpaperorgdll.dll' || ocx.includes('jsdpaperorgdll'))) url = `/DynamicTemplate/Paper/${itemId}`;
             else if (itemType === 6 && (ocx === 'jsdsinglegriddll.dll' || ocx.includes('jsdsinglegriddll'))) url = `/CUR/SingleGrid/${itemId}`;
             else if (itemType === 6 && (ocx === 'jsdgriddll.dll' || ocx.includes('jsdgriddll'))) url = `/CUR/MultiGrid/${itemId}`;
             else if (itemType === 6 && (ocx === 'jsdmasdtldll.dll' || ocx.includes('jsdmasdtldll'))) url = `/CUR/MasterDetail/${itemId}`;
@@ -450,9 +552,10 @@ body {
             li.className = "list-group-item d-flex justify-content-between align-items-center";
             li.setAttribute('data-itemid', f.itemId);
             const hard = pageMap[f.itemId];
+            const localHint = getLocalHint(f.itemId, f.className, f.powerType);
             const linkHtml = hard
-                ? `<a href="${hard}" style="cursor:pointer">${f.itemId} - ${f.itemName}</a>`
-                : `<a href="javascript:void(0)" style="cursor:pointer" onclick="resolveAndGo('${f.itemId}','${f.itemName}','${f.superId || ''}','${f.className || ''}','${f.powerType || ''}')">${f.itemId} - ${f.itemName}</a>`;
+                ? `<a href="${hard}" title="${hard}" style="cursor:pointer">${f.itemId} - ${f.itemName}</a>`
+                : `<a href="javascript:void(0)" title="${localHint || '未設定'}" onmouseenter="loadHintOnHover(this,'${f.itemId}','${f.className || ''}','${f.powerType || ''}')" style="cursor:pointer" onclick="resolveAndGo('${f.itemId}','${f.itemName}','${f.superId || ''}','${f.className || ''}','${f.powerType || ''}')">${f.itemId} - ${f.itemName}</a>`;
             li.innerHTML = `${linkHtml}
                 <button class="btn btn-outline-danger btn-sm" onclick="removeFavorite('${f.itemId}')">✕</button>`;
             list.appendChild(li);

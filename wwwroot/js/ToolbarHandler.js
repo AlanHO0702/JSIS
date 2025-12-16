@@ -19,7 +19,7 @@ if (typeof CSS === 'undefined' || typeof CSS.escape !== 'function') {
   CSS.escape = s => String(s).replace(/([^\w-])/g, '\\$1');
 }
 
-class ToolbarHandler {
+  class ToolbarHandler {
   constructor(opts) {
     this.searchBtnId         = opts.searchBtnId;
     this.addBtnId            = opts.addBtnId;
@@ -37,13 +37,15 @@ class ToolbarHandler {
     this.renderPagination    = opts.renderPagination;
     this.renderOrderCount    = opts.renderOrderCount;
     this.restoreSearchForm   = opts.restoreSearchForm;
+    this.pagedQueryUrl       = opts.pagedQueryUrl || '/api/PagedQuery/PagedQuery';
 
     this.lastQueryFilters    = [];
     this.getSelectedId       = opts.getSelectedId || (() => window.selectedPaperNum || null);
-    this.queryRedirectUrl    = opts.queryRedirectUrl || null;
+     this.queryRedirectUrl    = opts.queryRedirectUrl || null;
+     this.paperAction         = opts.paperAction || null; // { url, paperId?, userId?, eoc, aftFinished }
 
-    this.init();
-  }
+     this.init();
+   }
 
   init() {
     // 查詢面板
@@ -56,7 +58,7 @@ class ToolbarHandler {
           const formEl = document.getElementById(this.formId);
           const saved = (this.lastQueryFilters && this.lastQueryFilters.length)
             ? this.lastQueryFilters
-            : (JSON.parse(localStorage.getItem("orderListQueryFilters") || "[]"));
+            : (() => { try { return JSON.parse(localStorage.getItem("orderListQueryFilters") || "[]"); } catch { return []; } })();
           this.restoreSearchForm(formEl, saved);
         }
       }, 100);
@@ -109,15 +111,49 @@ class ToolbarHandler {
       });
       if (!ask.isConfirmed) return;
 
-      const resp = await fetchWithBusy(this.deleteApiUrlFn(selectedId), { method: 'DELETE' }, '作廢中');
-      if (resp.ok) {
-        await Swal.fire({ icon: 'success', title: '作廢成功！' });
-        window.location.href = this.queryRedirectUrl;
-        return;
+      try {
+        // 動態單據：走 PaperAction（CURdPaperAction）
+        if (this.paperAction?.url) {
+          const payload = {
+            paperId: this.paperAction.paperId || this.tableName,
+            paperNum: selectedId,
+            userId: this.paperAction.userId || window._userId || 'admin',
+            eoc: Number(this.paperAction.eoc ?? 0),
+            aftFinished: Number(this.paperAction.aftFinished ?? 2)
+          };
+          const resp = await fetchWithBusy(this.paperAction.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          }, '作廢中');
+
+          if (resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            await Swal.fire({ icon: 'success', title: data.message || '作廢成功！' });
+            if (this.queryRedirectUrl) window.location.href = this.queryRedirectUrl;
+            else location.reload();
+            return;
+          }
+
+          const msg = await resp.text().catch(() => '');
+          await Swal.fire({ icon: 'error', title: msg || '作廢失敗！' });
+          return;
+        }
+
+        // 舊行為：DELETE /api/{Table}/{Id}
+        const resp = await fetchWithBusy(this.deleteApiUrlFn(selectedId), { method: 'DELETE' }, '作廢中');
+        if (resp.ok) {
+          await Swal.fire({ icon: 'success', title: '作廢成功！' });
+          if (this.queryRedirectUrl) window.location.href = this.queryRedirectUrl;
+          else location.reload();
+          return;
+        }
+        let msg = '作廢失敗！';
+        try { const r = await resp.json(); if (r?.error) msg = r.error; } catch {}
+        await Swal.fire({ icon: 'error', title: msg });
+      } catch (e) {
+        await Swal.fire({ icon: 'error', title: '作廢失敗', text: String(e) });
       }
-      let msg = '作廢失敗！';
-      try { const r = await resp.json(); if (r?.error) msg = r.error; } catch {}
-      await Swal.fire({ icon: 'error', title: msg });
     };
 
     // 表單 submit（建立 filters）
@@ -162,8 +198,8 @@ class ToolbarHandler {
       filters.push({ Field: 'pageSize', Op: '', Value: String(this.pageSize) });
 
       this.lastQueryFilters = filters.slice();
-      localStorage.setItem('orderListQueryFilters', JSON.stringify(filters));
-      localStorage.setItem('orderListPageNumber', '1');
+      try { localStorage.setItem('orderListQueryFilters', JSON.stringify(filters)); } catch {}
+      try { localStorage.setItem('orderListPageNumber', '1'); } catch {}
 
       if (typeof this.restoreSearchForm === 'function') {
         this.restoreSearchForm(document.getElementById(this.formId), filters);
@@ -181,7 +217,7 @@ class ToolbarHandler {
       }
 
       // AJAX 查詢（單頁查詢用）
-      const resp = await fetchWithBusy('/api/PagedQuery/PagedQuery', {
+      const resp = await fetchWithBusy(this.pagedQueryUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ table: this.tableName, filters })
