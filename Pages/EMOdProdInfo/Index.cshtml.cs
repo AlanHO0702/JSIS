@@ -166,6 +166,13 @@ namespace PcbErpApi.Pages.EMOdProdInfo
                 {
                     row[columns[i]] = rd.IsDBNull(i) ? null : rd.GetValue(i);
                 }
+
+                // 為虛擬欄位 UserName 填入 Designer 的值（顯示代碼）
+                if (row.ContainsKey("Designer"))
+                {
+                    row["UserName"] = row["Designer"];
+                }
+
                 list.Add(row);
             }
 
