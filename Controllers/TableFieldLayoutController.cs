@@ -18,6 +18,14 @@ public class TableFieldLayoutController : ControllerBase
             ?? throw new InvalidOperationException("DefaultConnection string is missing in configuration.");
     }
 
+    private sealed record DbInfo(string DataSource, string Database);
+
+    private DbInfo GetDbInfo()
+    {
+        var csb = new SqlConnectionStringBuilder(_connStr);
+        return new DbInfo(csb.DataSource ?? "", csb.InitialCatalog ?? "");
+    }
+
     // =========================================
     // 儲存 Header Layout
     // =========================================
@@ -27,50 +35,156 @@ public class TableFieldLayoutController : ControllerBase
         if (request == null)
             return BadRequest("Invalid request format");
 
-        var tableName = request.TableName;
-        var layoutDict = request.LayoutUpdates
-            .Select(x => new { x.FieldName, x.Width, x.Height, x.Top, x.Left, x.iShowWhere })
-            .ToDictionary(x => x.FieldName.ToLower(), x => x);
+        if (string.IsNullOrWhiteSpace(request.TableName))
+            return BadRequest("TableName is required");
+        if (request.LayoutUpdates == null || request.LayoutUpdates.Count == 0)
+            return Ok(new { ok = true, updated = 0 });
 
-        foreach (var layout in layoutDict.Values)
-        {
-            var entity = await _context.CURdTableFields
-                .FirstOrDefaultAsync(f => f.TableName == tableName && f.FieldName.ToLower() == layout.FieldName.ToLower());
+        static string Clean(string s) => (s ?? "")
+            .Trim().Trim('[', ']')
+            .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase)
+            .ToLowerInvariant();
 
-            if (entity != null)
+        var tname = Clean(request.TableName);
+
+        var items = request.LayoutUpdates
+            .Where(x => !string.IsNullOrWhiteSpace(x.FieldName))
+            .Select(x => new
             {
-                bool skipPositionUpdate = layout.Top == 0 && layout.Left == 0
-                    && (entity.iFieldTop ?? 0) != 0 && (entity.iFieldLeft ?? 0) != 0;
+                field = Clean(x.FieldName),
+                width = Math.Max(30, x.Width),
+                height = Math.Max(22, x.Height),
+                top = x.Top,
+                left = x.Left,
+                show = x.iShowWhere
+            })
+            .GroupBy(x => x.field)
+            .Select(g => g.Last())
+            .ToList();
 
-                if (!skipPositionUpdate)
-                {
-                    entity.iFieldTop = layout.Top;
-                    entity.iFieldLeft = layout.Left;
-                }
+        const string sql = @"
+ UPDATE dbo.CURdTableField
+ SET  iFieldWidth  = @Width,
+      iFieldHeight = @Height,
+      iFieldTop    = CASE
+                       WHEN @Top = 0 AND @Left = 0
+                            AND ISNULL(iFieldTop,0) <> 0 AND ISNULL(iFieldLeft,0) <> 0
+                      THEN iFieldTop
+                      ELSE @Top
+                    END,
+     iFieldLeft   = CASE
+                      WHEN @Top = 0 AND @Left = 0
+                           AND ISNULL(iFieldTop,0) <> 0 AND ISNULL(iFieldLeft,0) <> 0
+                      THEN iFieldLeft
+                      ELSE @Left
+                    END,
+     iShowWhere   = @iShowWhere
+ WHERE LOWER(LTRIM(RTRIM(FieldName))) = @FieldName
+   AND (
+        LOWER(LTRIM(RTRIM(TableName))) = @TableName
+     OR LOWER(REPLACE(LTRIM(RTRIM(TableName)),'dbo.','')) = @TableName
+   )";
 
-                entity.iFieldWidth = layout.Width;
-                entity.iFieldHeight = layout.Height;
+        const string sqlLang = @"
+ UPDATE dbo.CURdTableFieldLang
+ SET  IFieldWidth  = @Width,
+      IFieldHeight = @Height,
+      IFieldTop    = CASE
+                       WHEN @Top = 0 AND @Left = 0
+                            AND ISNULL(IFieldTop,0) <> 0 AND ISNULL(IFieldLeft,0) <> 0
+                      THEN IFieldTop
+                      ELSE @Top
+                    END,
+     IFieldLeft   = CASE
+                      WHEN @Top = 0 AND @Left = 0
+                           AND ISNULL(IFieldTop,0) <> 0 AND ISNULL(IFieldLeft,0) <> 0
+                      THEN IFieldLeft
+                      ELSE @Left
+                    END,
+      IShowWhere   = @iShowWhere
+ WHERE LOWER(LTRIM(RTRIM(FieldName))) = @FieldName
+   AND (
+        LOWER(LTRIM(RTRIM(TableName))) = @TableName
+     OR LOWER(REPLACE(LTRIM(RTRIM(TableName)),'dbo.','')) = @TableName
+   )";
 
-                await _context.Database.ExecuteSqlRawAsync(@"
-                    UPDATE CURdTableField
-                    SET  iFieldWidth = @Width, iFieldHeight = @Height,
-                         iFieldTop = @Top, iFieldLeft = @Left,
-                         iShowWhere = @iShowWhere
-                    WHERE LOWER(FieldName) = @FieldName AND TableName = @TableName",
-                    new[]
-                    {
-                        new SqlParameter("@Width", layout.Width),
-                        new SqlParameter("@Height", layout.Height),
-                        new SqlParameter("@FieldName", layout.FieldName),
-                        new SqlParameter("@TableName", tableName),
-                        new SqlParameter("@Top", layout.Top),
-                        new SqlParameter("@Left", layout.Left),
-                        new SqlParameter("@iShowWhere", layout.iShowWhere)
-                    });
-            }
+        int updated = 0;
+        int updatedLang = 0;
+        foreach (var it in items)
+        {
+            updated += await _context.Database.ExecuteSqlRawAsync(
+                sql,
+                new SqlParameter("@Width", it.width),
+                new SqlParameter("@Height", it.height),
+                new SqlParameter("@Top", it.top),
+                new SqlParameter("@Left", it.left),
+                new SqlParameter("@iShowWhere", it.show),
+                new SqlParameter("@FieldName", it.field),
+                new SqlParameter("@TableName", tname)
+            );
+
+            // 同步更新語系表（GetFieldDict / GetTableFieldsFull 會以 Lang 表為準）
+            updatedLang += await _context.Database.ExecuteSqlRawAsync(
+                sqlLang,
+                new SqlParameter("@Width", it.width),
+                new SqlParameter("@Height", it.height),
+                new SqlParameter("@Top", it.top),
+                new SqlParameter("@Left", it.left),
+                new SqlParameter("@iShowWhere", it.show),
+                new SqlParameter("@FieldName", it.field),
+                new SqlParameter("@TableName", tname)
+            );
         }
 
-        return Ok();
+        // 回傳一些可核對資訊（避免「有 updated 但 DB 查不到」其實是查到不同資料庫）
+        var db = GetDbInfo();
+        var sample = items.Take(3).Select(x => new { x.field, x.width }).ToList();
+
+        var paperNum = items.FirstOrDefault(x => x.field == "papernum");
+        if (paperNum != null && !sample.Any(x => x.field == "papernum"))
+        {
+            sample.Add(new { paperNum.field, paperNum.width });
+        }
+
+        // 方便核對：這次真的寫到哪一筆（以 PaperNum 做抽樣）
+        object? paperNumDb = null;
+        if (paperNum != null)
+        {
+            paperNumDb = new
+            {
+                main = await _context.Database.SqlQueryRaw<int>(@"
+                    SELECT TOP 1 iFieldWidth
+                    FROM dbo.CURdTableField
+                    WHERE LOWER(LTRIM(RTRIM(FieldName))) = 'papernum'
+                      AND (
+                            LOWER(LTRIM(RTRIM(TableName))) = {0}
+                         OR LOWER(REPLACE(LTRIM(RTRIM(TableName)),'dbo.','')) = {0}
+                      )", tname).FirstOrDefaultAsync(),
+                lang = await _context.Database.SqlQueryRaw<int>(@"
+                    SELECT TOP 1 IFieldWidth
+                    FROM dbo.CURdTableFieldLang
+                    WHERE LOWER(LTRIM(RTRIM(FieldName))) = 'papernum'
+                      AND (
+                            LOWER(LTRIM(RTRIM(TableName))) = {0}
+                         OR LOWER(REPLACE(LTRIM(RTRIM(TableName)),'dbo.','')) = {0}
+                      )
+                    ORDER BY LanguageId", tname).FirstOrDefaultAsync(),
+            };
+        }
+
+        return Ok(new
+        {
+            ok = true,
+            updated,
+            updatedLang,
+            table = tname,
+            db = db.Database,
+            dataSource = db.DataSource,
+            requested = items.Count,
+            paperNum,
+            paperNumDb,
+            sample
+        });
     }
 
     // =========================================
@@ -162,22 +276,23 @@ public class TableFieldLayoutController : ControllerBase
         int updated = 0;
 
         const string sql = @"
-UPDATE CURdTableField
-SET iFieldWidth = @W, DisplaySize = @DS
-WHERE LOWER(FieldName) = @F
-  AND (
-        LOWER(TableName) = @TN
-     OR LOWER(REPLACE(TableName,'dbo.','')) = @TN
-     )";
+ UPDATE dbo.CURdTableField
+ SET iFieldWidth = @W, DisplaySize = @DS
+ WHERE LOWER(LTRIM(RTRIM(FieldName))) = @F
+   AND (
+        LOWER(LTRIM(RTRIM(TableName))) = @TN
+     OR LOWER(REPLACE(LTRIM(RTRIM(TableName)),'dbo.','')) = @TN
+      )";
 
         const string sqlLang = @"
-UPDATE CURdTableFieldLang
-SET DisplaySize = @DS
-WHERE LOWER(FieldName) = @F
-  AND (
-        LOWER(TableName) = @TN
-     OR LOWER(REPLACE(TableName,'dbo.','')) = @TN
-     )";
+ UPDATE dbo.CURdTableFieldLang
+ SET DisplaySize = @DS,
+     IFieldWidth = @W
+ WHERE LOWER(LTRIM(RTRIM(FieldName))) = @F
+   AND (
+        LOWER(LTRIM(RTRIM(TableName))) = @TN
+     OR LOWER(REPLACE(LTRIM(RTRIM(TableName)),'dbo.','')) = @TN
+      )";
 
         foreach (var it in items)
         {
@@ -195,6 +310,7 @@ WHERE LOWER(FieldName) = @F
             await _context.Database.ExecuteSqlRawAsync(
                 sqlLang,
                 new SqlParameter("@DS", displaySize),
+                new SqlParameter("@W", it.width),
                 new SqlParameter("@F", it.field),
                 new SqlParameter("@TN", tname)
             );
@@ -227,6 +343,7 @@ SELECT
     f.FieldName,
     COALESCE(l.DisplayLabel, f.DisplayLabel, f.FieldName) AS DisplayLabel,
     COALESCE(l.DisplaySize, f.DisplaySize) AS DisplaySize,
+    COALESCE(l.IFieldWidth, f.iFieldWidth) AS FieldWidth,
     f.DataType,
     f.FormatStr,
     f.SerialNum,
@@ -253,6 +370,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
                 FieldName    = rd["FieldName"]?.ToString() ?? "",
                 DisplayLabel = rd["DisplayLabel"]?.ToString() ?? "",
                 DisplaySize  = rd["DisplaySize"] as int?,
+                FieldWidth   = rd["FieldWidth"] as int?,
                 DataType     = rd["DataType"]?.ToString() ?? "",
                 FormatStr    = rd["FormatStr"]?.ToString() ?? "",
                 SerialNum    = rd["SerialNum"] as int?,
@@ -315,6 +433,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         public string FieldName { get; set; } = "";
         public string DisplayLabel { get; set; } = "";
         public int? DisplaySize { get; set; }
+        public int? FieldWidth { get; set; }
         public string DataType { get; set; } = "";
         public string FormatStr { get; set; } = "";
         public int? SerialNum { get; set; }

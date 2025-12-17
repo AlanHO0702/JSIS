@@ -14,17 +14,57 @@
     ViewData["QueryFields"] = Model.QueryFields;
 }
 
-@await Html.PartialAsync("~/Pages/Shared/_TableDetailPartial.cshtml", Model)
+<div class="erp-detail-container">
+    @await Html.PartialAsync("~/Pages/Shared/_DetailHeaderSection.cshtml", Model)
+    @await Html.PartialAsync("~/Pages/Shared/_MultiTabDetail.cshtml")
+</div>
 @await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", Model.FieldDictList, ViewData)
 
-<div class="text-muted small mt-2">
-    DetailTable=@(ViewData["DetailTableName"] ?? "") | DetailCount=@(ViewData["DetailCount"] ?? "")
-</div>
-
-@if (ViewData["DetailLoadError"] is string derr && !string.IsNullOrWhiteSpace(derr))
+@if ((Model.CustomButtons?.Count > 0) || string.Equals(Model.ItemId, "SA000002", StringComparison.OrdinalIgnoreCase))
 {
-    <div class="alert alert-warning mt-2">明細載入錯誤：@derr</div>
+    <style>
+    /* PaperDetail 使用 Action Rail（左側自訂按鈕）時，需預留左側空間，避免單頭/頁籤被擋住 */
+    :root{
+      --fab-left: 12px;
+      --fab-width: 120px;
+      --fab-gap: 14px;
+      --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap));
+    }
+
+    .erp-detail-container{
+        margin-left: var(--rail-reserve) !important;
+        margin-right: 3vw !important;
+        padding: 32px 0 !important;
+    }
+
+    /* toolbar 往回補，維持視覺對齊 */
+    #topToolbar{
+        margin-left: calc(-1 * var(--rail-reserve)) !important;
+        padding-left: 0 !important;
+        justify-content: flex-start !important;
+    }
+    #topToolbar > .ms-2, #topToolbar .btn-toolbar{ margin-left: 0 !important; }
+
+    /* 確保頁籤不會被左側按鈕擋住 */
+    #headerTabs{ position: relative; z-index: 1; margin-left: 0 !important; }
+    .multi-tab-detail{ margin-left: 0 !important; padding-left: 0 !important; }
+    </style>
 }
 
-<script>window._dictTableName = "@Model.DictTableName";</script>
+@using PcbErpApi.Models
+@if (string.Equals(Model.ItemId, "SA000002", StringComparison.OrdinalIgnoreCase))
+{
+    @await Html.PartialAsync("_OrderDetailPicker",
+        new DetailPickerConfig
+        {
+            ModalId = "detailPicker",
+            PaperNum = Model.PaperNum,
+            FetchApi = "/api/OrderDetailSearch/fetch",
+            InsertApi = "/api/OrderDetailSearch/insert",
+            DictTableName = "SPOdOCXOrderPOChice",
+            DictUrlBase = "/DataDict/EditList"
+        })
+}
+
+<script>window._dictTableName = "@(string.IsNullOrWhiteSpace(Model.DetailDictTable) ? Model.DictTableName : Model.DetailDictTable)";</script>
 <script src="~/js/fieldDictModal.js"></script>

@@ -70,15 +70,22 @@ namespace PcbErpApi.Pages.CUR
 
                 var connStr = GetConnStr(ctx);
                 var masterMeta = await GetTableMetaAsync(connStr, master.TableName);
+                var masterTableName = masterMeta?.RealTableName ?? master.TableName;
+                var masterPkFromSql = await GetPrimaryKeyColumnsAsync(connStr, masterTableName);
+                var masterPkFields = Split(master.LocateKeys)
+                    .Concat(masterPkFromSql)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
 
                 var cfg = new MasterMultiDetailConfig
                 {
                     DomId = BuildDomId(itemId),
                     MasterTitle = masterMeta?.DisplayLabel ?? master.TableName,
-                    MasterTable = masterMeta?.RealTableName ?? master.TableName,
+                    MasterTable = masterTableName,
                     MasterDict = master.TableName,
                     MasterApi = string.Empty,
-                    MasterTop = 500
+                    MasterTop = 500,
+                    MasterPkFields = masterPkFields
                 };
 
                 foreach (var d in details)
