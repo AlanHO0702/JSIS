@@ -34,6 +34,34 @@ public class TableDictionaryService : ITableDictionaryService
             .OrderBy(x => x.SerialNum)
             .ToList();
 
+        // 語系欄位設定（目前預設 TW；不存在就略過）
+        var langRows = _context.CurdTableFieldLangs
+            .Where(x => x.TableName == tableName && x.LanguageId == "TW")
+            .ToList();
+
+        if (langRows.Count > 0)
+        {
+            var langMap = langRows
+                .GroupBy(x => x.FieldName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var f in fields)
+            {
+                if (f?.FieldName == null) continue;
+                if (!langMap.TryGetValue(f.FieldName, out var l)) continue;
+
+                // 以語系表為準（通常 UI 位置/顯示寬度都在 Lang 表調整）
+                if (!string.IsNullOrWhiteSpace(l.DisplayLabel))
+                    f.DisplayLabel = l.DisplayLabel;
+
+                if (l.DisplaySize != null && l.DisplaySize > 0)
+                    f.DisplaySize = l.DisplaySize;
+
+                if (l.IFieldWidth > 0)
+                    f.iFieldWidth = l.IFieldWidth;
+            }
+        }
+
         // 資料庫沒填型別時，用 model 的型別補上
         foreach (var f in fields)
         {
@@ -49,38 +77,50 @@ public class TableDictionaryService : ITableDictionaryService
     public List<OCXLookupMap> GetOCXLookups(string tableName)
     {
         var fieldDefs = _context.CURdTableFields
-            .Where(x => x.TableName == tableName && x.OCXLKTableName != null && x.OCXLKResultName != null)
+            .Where(x => x.TableName == tableName
+                        && !string.IsNullOrWhiteSpace(x.OCXLKTableName)
+                        && !string.IsNullOrWhiteSpace(x.OCXLKResultName))
             .ToList();
 
         var result = new List<OCXLookupMap>();
 
+        static string Q(string ident) => $"[{ident.Replace("]", "]]")}]";
+
+        static bool HasInvalidLookupSetting(string? table, string? keyField, string? resultField)
+        {
+            return string.IsNullOrWhiteSpace(table)
+                   || string.IsNullOrWhiteSpace(keyField)
+                   || string.IsNullOrWhiteSpace(resultField);
+        }
+
+        var conn = _context.Database.GetDbConnection();
+        var shouldClose = false;
+        if (conn.State != System.Data.ConnectionState.Open)
+        {
+            conn.Open();
+            shouldClose = true;
+        }
+
         foreach (var field in fieldDefs)
         {
-            try
-            {
-                var lkSetting = _context.CURdOCXTableFieldLK
-                    .FirstOrDefault(x => x.TableName == tableName && x.FieldName == field.FieldName);
+            var lkSetting = _context.CURdOCXTableFieldLK
+                .FirstOrDefault(x => x.TableName == tableName && x.FieldName == field.FieldName);
 
                 if (lkSetting == null) continue;
 
-                var ocxTableName = field.OCXLKTableName;
-                var ocxResultName = field.OCXLKResultName;
-                var keyField = lkSetting.KeyFieldName;
+            var ocxTableName = field.OCXLKTableName;
+            var ocxResultName = field.OCXLKResultName;
+            var keyField = lkSetting.KeyFieldName;
 
-                // 驗證欄位名稱不為空
-                if (string.IsNullOrWhiteSpace(ocxTableName) ||
-                    string.IsNullOrWhiteSpace(ocxResultName) ||
-                    string.IsNullOrWhiteSpace(keyField))
-                {
-                    continue;
-                }
+            if (HasInvalidLookupSetting(ocxTableName, keyField, ocxResultName))
+                continue;
 
-                // 用 raw SQL 動態查表
-                var sql = $"SELECT [{keyField}], [{ocxResultName}] FROM [{ocxTableName}]";
-                var conn = _context.Database.GetDbConnection();
-                var lookupDict = new Dictionary<string, string>();
+            // 用 raw SQL 動態查表（用固定 alias，避免欄名空白/重複/特殊字元造成 reader 取值失敗）
+            var sql = $"SELECT {Q(keyField!)} AS [__k], {Q(ocxResultName!)} AS [__v] FROM {Q(ocxTableName!)}";
+            var lookupDict = new Dictionary<string, string>();
 
-                conn.Open();
+            try
+            {
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = sql;
@@ -88,31 +128,34 @@ public class TableDictionaryService : ITableDictionaryService
                     {
                         while (reader.Read())
                         {
-                            var key = reader[keyField]?.ToString();
-                            var value = reader[ocxResultName]?.ToString();
-                            if (key != null && value != null)
+                            var key = reader["__k"]?.ToString();
+                            var value = reader["__v"]?.ToString();
+                            if (!string.IsNullOrWhiteSpace(key) && value != null)
                             {
                                 lookupDict[key] = value;
                             }
                         }
                     }
                 }
-                conn.Close();
-
-                result.Add(new OCXLookupMap
-                {
-                    FieldName = field.FieldName,
-                    KeySelfName = lkSetting.KeySelfName,
-                    KeyFieldName = keyField,
-                    LookupValues = lookupDict
-                });
             }
-            catch (Exception ex)
+            catch
             {
-                // 記錄錯誤但繼續處理其他欄位
-                Console.WriteLine($"Error loading OCX lookup for field {field.FieldName}: {ex.Message}");
+                // 當 lookup 設定不完整/查表失敗時，不讓整頁爆炸，直接略過該欄位的 lookup
                 continue;
             }
+
+            result.Add(new OCXLookupMap
+            {
+                FieldName = field.FieldName,
+                KeySelfName = lkSetting.KeySelfName,
+                KeyFieldName = keyField,
+                LookupValues = lookupDict
+            });
+        }
+
+        if (shouldClose)
+        {
+            conn.Close();
         }
 
         return result;

@@ -103,6 +103,14 @@
 const buildBody = async (tbody, dict, rows, onRowClick) => {
   tbody.innerHTML = "";
 
+  const getRowValue = (row, fieldName) => {
+    if (!row || fieldName == null) return "";
+    if (row[fieldName] !== undefined) return row[fieldName];
+    const want = String(fieldName).toLowerCase();
+    const hit = Object.keys(row).find(k => String(k).toLowerCase() === want);
+    return hit ? row[hit] : "";
+  };
+
   const fields = dict
     .filter(f => DICT.visible(f) || DICT.isKey(f))
     .sort((a, b) => DICT.order(a) - DICT.order(b));
@@ -116,17 +124,25 @@ const buildBody = async (tbody, dict, rows, onRowClick) => {
   }
 
   const keyMap = tbody._keyMap || [];
+  const keyFields = Array.isArray(tbody._keyFields) ? tbody._keyFields : [];
+  const pkNames = [
+    ...new Set([
+      ...dict.filter(f => DICT.isKey(f)).map(f => f.FieldName),
+      ...keyFields
+    ])
+  ];
 
   rows.forEach(row => {
     const tr = document.createElement("tr");
     tr.style.cursor = "pointer";
 
-    // ★ 插入 PK hidden
-    dict.filter(f => DICT.isKey(f)).forEach(f => {
+    // ★ 插入 PK hidden（包含 cfg/推斷出來的 KeyFields，即使該欄位不顯示也要帶給 SaveTableChanges）
+    pkNames.forEach(name => {
       const pk = document.createElement("input");
       pk.type = "hidden";
-      pk.name = f.FieldName;
-      pk.value = row[f.FieldName];
+      pk.name = name;
+      const v = getRowValue(row, name);
+      pk.value = (v ?? "").toString();
       pk.className = "mmd-pk-hidden";
       tr.append(pk);
     });
@@ -163,7 +179,7 @@ const buildBody = async (tbody, dict, rows, onRowClick) => {
       inp.name = f.FieldName;
 
   // ★★★ 修正：如果該欄位是 PK (IsKey)，或者是唯讀，或者是關聯鍵，都必須鎖定不可編輯 ★★★
-      if (DICT.readonly(f) || f.KeySelfName || DICT.isKey(f)) { 
+      if (DICT.readonly(f) || f.KeySelfName || (DICT.isKey(f) && tr.dataset.state !== "added")) {
         inp.readOnly = true;
         td.classList.add("mmd-readonly-cell");
       }
@@ -173,7 +189,9 @@ const buildBody = async (tbody, dict, rows, onRowClick) => {
       tr.appendChild(td);
     });
 
-    if (onRowClick) tr.addEventListener("click", () => onRowClick(row, tr));
+    if (onRowClick) {
+      tr.addEventListener("click", () => onRowClick(row, tr));
+    }
     tbody.appendChild(tr);
   });
 };
@@ -226,6 +244,9 @@ const buildBody = async (tbody, dict, rows, onRowClick) => {
       detailDicts[i] = dict;
     }
 
+    const activeTarget = { type: "master", index: -1 };
+    let lastMasterRow = null;
+
     // ==============================================================================
     //   切換 Master → 重新載入全部明細
     // ==============================================================================
@@ -241,22 +262,36 @@ const loadAllDetails = async (row) => {
 
     const names = [];
     const values = [];
+    const ctx = {};
 
     // ⭐ 正確作法：查詢明細只用 Master → Detail 的 KeyMap.Master 來查！
     (d.KeyMap || []).forEach(k => {
       names.push(k.Detail);               // 用明細的欄位當查詢欄位
       values.push(row[k.Master]);         // 值取 Master 的欄位值
+      ctx[k.Detail] = row[k.Master];
     });
+    tbody._lastQueryCtx = ctx;
 
     const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(d.DetailTable)}`
       + names.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
       + values.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("");
 
-    console.log("Detail Query:", url);
-
     const rows = await fetch(url).then(r => r.json());
 
-    await buildBody(tbody, detailDicts[i], rows);
+    // ★ 為 Detail 表格添加 row click 事件處理，實現 Focus 功能
+    await buildBody(tbody, detailDicts[i], rows, (row, tr) => {
+      // 移除所有行的 selected class
+      tbody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
+      // 添加 selected class 到被點擊的行
+      tr.classList.add("selected");
+      activeTarget.type = "detail";
+      activeTarget.index = i;
+
+      // ★★★ Detail Focus 聯動功能 ★★★
+      if (cfg.EnableDetailFocusCascade) {
+        loadNextDetailFromFocus(i, row);
+      }
+    });
 
     // if (window._mmdEditing && tbody._editorInstance) {
     //   tbody._editorInstance.rebind();
@@ -276,6 +311,63 @@ const loadAllDetails = async (row) => {
   }
 };
 
+    // ==============================================================================
+    //   Detail Focus 聯動：點擊某層 Detail 時，載入下一層 Detail 的關聯資料
+    // ==============================================================================
+    const loadNextDetailFromFocus = async (currentDetailIndex, focusedRow) => {
+      const nextIndex = currentDetailIndex + 1;
+
+      // 檢查是否有下一層 Detail
+      if (nextIndex >= (cfg.Details || []).length) {
+        return; // 已經是最後一層，不需要聯動
+      }
+
+      const nextDetail = cfg.Details[nextIndex];
+      const tbody = document.getElementById(`${cfg.DomId}-detail-${nextIndex}-body`);
+      if (!tbody) return;
+
+      const names = [];
+      const values = [];
+      const ctx = {};
+
+      // 根據下一層 Detail 的 KeyMap 從當前 focusedRow 中提取對應的欄位值
+      (nextDetail.KeyMap || []).forEach(k => {
+        names.push(k.Detail);           // 用明細的欄位當查詢欄位
+        values.push(focusedRow[k.Master]); // 值取 focusedRow 的欄位值
+        ctx[k.Detail] = focusedRow[k.Master];
+      });
+      tbody._lastQueryCtx = ctx;
+
+      const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(nextDetail.DetailTable)}`
+        + names.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
+        + values.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("");
+
+      const rows = await fetch(url).then(r => r.json());
+
+      // 載入下一層 Detail 的資料，同時保留 Focus 聯動功能
+      await buildBody(tbody, detailDicts[nextIndex], rows, (row, tr) => {
+        tbody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
+        tr.classList.add("selected");
+        activeTarget.type = "detail";
+        activeTarget.index = nextIndex;
+
+        // 遞迴：如果還有下一層，繼續聯動
+        if (cfg.EnableDetailFocusCascade) {
+          loadNextDetailFromFocus(nextIndex, row);
+        }
+      });
+
+      // 編輯模式處理
+      if (window._mmdEditing && tbody._editorInstance) {
+        if (tbody.offsetParent !== null) {
+          tbody._editorInstance.toggleEdit(true);
+          tbody._pendingRebind = false;
+        } else {
+          tbody._pendingRebind = true;
+        }
+      }
+    };
+
 
     // ==============================================================================
     //   畫 Master 表格，掛上 row click event
@@ -283,14 +375,20 @@ const loadAllDetails = async (row) => {
     await buildBody(mBody, masterDict, masterRows, async (row, tr) => {
       Array.from(mBody.children).forEach(x => x.classList.remove("selected"));
       tr.classList.add("selected");
+      activeTarget.type = "master";
+      activeTarget.index = -1;
+      lastMasterRow = row;
       await loadAllDetails(row);
     });
 
     // ==============================================================================
     //   EditableGrid 初始化（含自動偵測 PK）
     // ==============================================================================
-    const editBtn = document.getElementById(`${cfg.DomId}-btnEdit`);
-    const saveBtn = document.getElementById(`${cfg.DomId}-btnSave`);
+    const btnEdit = document.getElementById(`${cfg.DomId}-btnEdit`);
+    const btnAdd = document.getElementById(`${cfg.DomId}-btnAdd`);
+    const btnSave = document.getElementById(`${cfg.DomId}-btnSave`);
+    const btnDelete = document.getElementById(`${cfg.DomId}-btnDelete`);
+    const btnCancel = document.getElementById(`${cfg.DomId}-btnCancel`);
 
     // === 1. Master PK ===
     const masterPK = masterDict.filter(f => DICT.isKey(f)).map(f => f.FieldName);
@@ -306,25 +404,24 @@ const loadAllDetails = async (row) => {
 //  Detail editors 初始化（正確版）
 // ======================================================================
 const detailEditors = [];
+const detailKeyFields = [];
 
 for (let i = 0; i < (cfg.Details || []).length; i++) {
 
   const d = cfg.Details[i];
   const dict = detailDicts[i];
 
-// ★ 取 PK（IsKey=1）
-let keyFields = dict.filter(f => DICT.isKey(f)).map(f => f.FieldName);
+  // ★ 取 PK（IsKey=1）
+  let keyFields = dict.filter(f => DICT.isKey(f)).map(f => f.FieldName);
 
-// ★ 加上 KeyMap.Detail
-const keyMapKeys = (d.KeyMap || []).map(k => k.Detail);
-keyFields = [...new Set([...keyFields, ...keyMapKeys])];
+  // ★ 加上 KeyMap.Detail
+  const keyMapKeys = (d.KeyMap || []).map(k => k.Detail);
+  keyFields = [...new Set([...keyFields, ...keyMapKeys])];
 
-// ★ 如果 Razor 有指定 PkFields → 通通加入（最高優先權）
-if (d.PkFields && Array.isArray(d.PkFields)) {
-    keyFields = [...new Set([...keyFields, ...d.PkFields])];
-}
-
-console.log(`Detail ${i} final keyFields =`, keyFields);
+  // ★ 如果 Razor 有指定 PkFields → 通通加入（最高優先權）
+  if (d.PkFields && Array.isArray(d.PkFields)) {
+      keyFields = [...new Set([...keyFields, ...d.PkFields])];
+  }
 
   detailEditors[i] = window.makeEditableGrid({
     wrapper: root.querySelector(`#${cfg.DomId}-detail-${i}-wrapper`),
@@ -332,11 +429,13 @@ console.log(`Detail ${i} final keyFields =`, keyFields);
     tableName: d.DetailTable,
     keyFields
   });
+  detailKeyFields[i] = keyFields;
 
   // 讓 buildBody 知道該塞哪些 FK hidden
   const tbody = root.querySelector(`#${cfg.DomId}-detail-${i}-body`);
   tbody._editorInstance = detailEditors[i];
   tbody._keyMap = d.KeyMap;
+  tbody._keyFields = keyFields;
 }
 
 // ==============================================================================
@@ -357,69 +456,268 @@ console.log(`Detail ${i} final keyFields =`, keyFields);
                 tbody._editorInstance.toggleEdit(true);
                 tbody._pendingRebind = false;
             }
+
+            const m = (targetId || "").match(/tabpane-(\\d+)$/);
+            if (m) {
+                activeTarget.type = "detail";
+                activeTarget.index = Number(m[1]);
+            }
         });
     });
 
+    const setEditMode = (toEdit) => {
+      const on = !!toEdit;
+      window._mmdEditing = on;
+      masterEditor.toggleEdit(on);
+      detailEditors.forEach(ed => ed.toggleEdit(on));
+      if (btnEdit) btnEdit.textContent = on ? "檢視" : "編輯";
+      root.classList.toggle("mmd-editing", on);
+    };
 
-    // ==============================================================================
-    //  修改 / 保留
-    // ==============================================================================
-    editBtn?.addEventListener("click", () => {
+    const ensureEditMode = () => {
+      if (!masterEditor.isEdit()) setEditMode(true);
+    };
 
-      const toEdit = !masterEditor.isEdit();
-      window._mmdEditing = toEdit;
+    const getActive = () => {
+      if (activeTarget.type === "detail") {
+        const idx = Number(activeTarget.index);
+        const tbody = document.getElementById(`${cfg.DomId}-detail-${idx}-body`);
+        return { type: "detail", index: idx, tbody, editor: detailEditors[idx], keyFields: detailKeyFields[idx], dict: detailDicts[idx] };
+      }
+      return { type: "master", index: -1, tbody: mBody, editor: masterEditor, keyFields: masterPK, dict: masterDict };
+    };
 
-      masterEditor.toggleEdit(toEdit);
-      detailEditors.forEach(ed => ed.toggleEdit(toEdit));
+    const clearSelected = (tbody) => {
+      tbody?.querySelectorAll?.('tr')?.forEach?.(x => x.classList.remove("selected"));
+    };
 
-      editBtn.textContent = toEdit ? "保留" : "修改";
-      saveBtn?.classList.toggle("d-none", !toEdit);
+    const addRowTo = (target) => {
+      const tbody = target.tbody;
+      const dict = target.dict || [];
+      const keyMap = tbody?._keyMap || [];
+      const keyFields = Array.isArray(tbody?._keyFields) ? tbody._keyFields : (target.keyFields || []);
+      if (!tbody) return null;
 
-      root.classList.toggle("mmd-editing", toEdit);
-    });
+      const defaults = {};
+      if (target.type === "detail") {
+        const ctx = tbody._lastQueryCtx;
+        if (!ctx || Object.keys(ctx).length === 0) {
+          Swal?.fire({ icon: "info", title: "請先選取上一層資料", timer: 900, showConfirmButton: false });
+          return null;
+        }
+        Object.assign(defaults, ctx);
+      }
 
-    // ==============================================================================
-    //  儲存
-    // ==============================================================================
-    saveBtn?.addEventListener("click", async () => {
+      const pkNames = [
+        ...new Set([
+          ...dict.filter(f => DICT.isKey(f)).map(f => f.FieldName),
+          ...keyFields
+        ])
+      ];
 
-      const rMaster  = await masterEditor.saveChanges();
+      const fields = dict
+        .filter(f => DICT.visible(f) || DICT.isKey(f))
+        .sort((a, b) => DICT.order(a) - DICT.order(b));
+
+      const tr = document.createElement("tr");
+      tr.dataset.state = "added";
+      tr.classList.add("table-warning");
+      tr.style.cursor = "pointer";
+
+      pkNames.forEach(name => {
+        const pk = document.createElement("input");
+        pk.type = "hidden";
+        pk.name = name;
+        pk.value = (defaults[name] ?? "").toString();
+        pk.className = "mmd-pk-hidden";
+        tr.append(pk);
+      });
+
+      keyMap.forEach(k => {
+        const fk = document.createElement("input");
+        fk.type = "hidden";
+        fk.name = k.Detail;
+        fk.value = (defaults[k.Detail] ?? "").toString();
+        fk.className = "mmd-fk-hidden";
+        tr.append(fk);
+      });
+
+      fields.forEach(f => {
+        const td = document.createElement("td");
+        const raw = defaults[f.FieldName] ?? "";
+
+        const span = document.createElement("span");
+        span.className = "cell-view d-none";
+        span.textContent = "";
+
+        const inp = document.createElement("input");
+        inp.className = "form-control form-control-sm cell-edit";
+        inp.value = (raw ?? "").toString();
+        inp.dataset.raw = (raw ?? "").toString();
+        inp.name = f.FieldName;
+
+        if (DICT.readonly(f) || f.KeySelfName || (DICT.isKey(f) && tr.dataset.state !== "added")) {
+          inp.readOnly = true;
+          td.classList.add("mmd-readonly-cell");
+        }
+
+        td.append(span);
+        td.append(inp);
+        tr.appendChild(td);
+      });
+
+      tr.addEventListener("click", () => {
+        clearSelected(tbody);
+        tr.classList.add("selected");
+        activeTarget.type = target.type;
+        activeTarget.index = target.index;
+      });
+
+      clearSelected(tbody);
+      tr.classList.add("selected");
+      if (tbody.firstChild) tbody.insertBefore(tr, tbody.firstChild);
+      else tbody.appendChild(tr);
+
+      try { tr.scrollIntoView({ block: "nearest" }); } catch { }
+      const firstEditable = Array.from(tr.querySelectorAll("input.cell-edit"))
+        .find(i => !i.readOnly && i.getAttribute("readonly") !== "readonly");
+      if (firstEditable) {
+        try { firstEditable.focus(); } catch { }
+        try { firstEditable.select?.(); } catch { }
+      }
+      return tr;
+    };
+
+    const saveAll = async () => {
+      const rMaster = await masterEditor.saveChanges();
       const rDetails = await Promise.all(detailEditors.map(ed => ed.saveChanges()));
 
       if (rMaster.skipped && rDetails.every(r => r.skipped)) {
-        Swal?.fire({
-          icon: "info",
-          title: "沒有變更",
-          timer: 1000,
-          showConfirmButton: false
-        });
-        return;
+        Swal?.fire({ icon: "info", title: "沒有變更", timer: 1000, showConfirmButton: false });
+        return { ok: true, skipped: true };
       }
 
       const ok = rMaster.ok && rDetails.every(r => r.ok);
       if (!ok) {
-        Swal?.fire({
-          icon: "error",
-          title: "儲存失敗",
-          text: "部分明細未成功"
-        });
+        Swal?.fire({ icon: "error", title: "儲存失敗", text: "部分明細未成功" });
+        return { ok: false, skipped: false };
+      }
+
+      Swal?.fire({ icon: "success", title: "儲存完成", timer: 900, showConfirmButton: false });
+      setEditMode(false);
+      return { ok: true, skipped: false };
+    };
+
+    const deleteSelected = async () => {
+      const notify = (kind, title, text) => {
+        if (window.Swal?.fire) {
+          const opts = { icon: kind, title };
+          if (text) opts.text = text;
+          if (kind === "success" || kind === "info") {
+            opts.timer = 900;
+            opts.showConfirmButton = false;
+          }
+          return Swal.fire(opts);
+        }
+        if (text) alert(`${title}\n${text}`);
+        else alert(title);
+      };
+
+      const confirmDelete = async () => {
+        if (window.Swal?.fire) {
+          const r = await Swal.fire({
+            icon: "warning",
+            title: "確定要刪除？",
+            showCancelButton: true,
+            confirmButtonText: "刪除",
+            cancelButtonText: "取消"
+          });
+          return !!r.isConfirmed;
+        }
+        return confirm("確定要刪除這筆資料嗎？");
+      };
+
+      const t = getActive();
+      const tbody = t.tbody;
+      if (!tbody) return;
+
+      const pickSelectedRow = () => {
+        const activeTr = tbody.querySelector("tr.selected");
+        if (activeTr) return { tr: activeTr, target: t };
+
+        const any = root.querySelector("tbody tr.selected");
+        if (!any) return null;
+
+        const anyTbody = any.closest("tbody");
+        const anyId = anyTbody?.id || "";
+        const m = anyId.match(new RegExp(`^${cfg.DomId}-detail-(\\d+)-body$`));
+        if (m) {
+          const idx = Number(m[1]);
+          const tb = document.getElementById(`${cfg.DomId}-detail-${idx}-body`);
+          return { tr: any, target: { type: "detail", index: idx, tbody: tb, editor: detailEditors[idx] } };
+        }
+        if (anyId === `${cfg.DomId}-m-body`) {
+          return { tr: any, target: { type: "master", index: -1, tbody: mBody, editor: masterEditor } };
+        }
+        return { tr: any, target: t };
+      };
+
+      const picked = pickSelectedRow();
+      const tr = picked?.tr;
+      const target = picked?.target || t;
+      if (!tr) {
+        await notify("info", "請先選擇要刪除的資料列");
         return;
       }
 
-      Swal?.fire({
-        icon: "success",
-        title: "儲存完成",
-        timer: 900,
-        showConfirmButton: false
+      if (tr.dataset.state === "added") {
+        tr.remove();
+        return;
+      }
+
+      const confirmed = await confirmDelete();
+      if (!confirmed) return;
+
+      ensureEditMode();
+      tr.dataset.state = "deleted";
+      tr.classList.add("table-danger");
+
+      const resp = await target.editor.saveChanges();
+      if (!resp.ok) {
+        await notify("error", "刪除失敗", resp.text || "刪除失敗");
+        delete tr.dataset.state;
+        tr.classList.remove("table-danger");
+        return;
+      }
+
+      await notify("success", "刪除完成");
+      if (target.type === "master") location.reload();
+    };
+
+    // 統一按鈕行為：使用通用 toolbar controller（與 MultiGrid 共用）
+    if (window.createGridController) {
+      window.createGridController({
+        name: `mmd-${cfg.DomId}`,
+        btnToggle: btnEdit,
+        btnAdd,
+        btnSave,
+        btnDelete,
+        btnCancel,
+        customToggle: () => setEditMode(!masterEditor.isEdit()),
+        customAdd: () => {
+          ensureEditMode();
+          const row = addRowTo(getActive());
+          return row || false;
+        },
+        customSave: async () => { await saveAll(); },
+        onDelete: async () => { await deleteSelected(); },
+        onCancelPending: (row) => { row?.remove?.(); },
+        onCancelEdit: async () => { location.reload(); }
       });
-
-      masterEditor.toggleEdit(false);
-      detailEditors.forEach(ed => ed.toggleEdit(false));
-
-      editBtn.textContent = "修改";
-      saveBtn.classList.add("d-none");
-      root.classList.remove("mmd-editing");
-    });
+    } else {
+      btnEdit?.addEventListener("click", () => setEditMode(!masterEditor.isEdit()));
+      btnSave?.addEventListener("click", async () => { await saveAll(); });
+    }
   };
   // ==============================================================================
   // INIT：初始化所有 MMD 配置
