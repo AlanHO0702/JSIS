@@ -9,6 +9,11 @@ namespace WebRazor.Models
         public string MasterApi { get; set; }
         public int MasterTop { get; set; } = 200;
 
+        /// <summary>
+        /// Master 主鍵/唯一鍵欄位（用於 SaveTableChanges / 刪除/更新定位）。
+        /// </summary>
+        public List<string> MasterPkFields { get; set; } = new();
+
         public List<DetailConfig> Details { get; set; } = new();
 
         /// <summary>

@@ -64,6 +64,135 @@
     const fieldDicts = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(tabFieldDicts));
     const tabsData = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(tabs));
 
+    function cleanTableName(t) {
+        return (t || '').toString().replace(/^dbo\./i, '').trim().toLowerCase();
+    }
+
+    function getDictTableOfTab(container, tabId) {
+        return (container?.dataset?.dictTable || tabsData?.find(x => x?.Id === tabId)?.DictTable || '').toString();
+    }
+
+    async function fetchFieldWidths(dictTable) {
+        const tn = cleanTableName(dictTable);
+        if (!tn) return new Map();
+        try {
+            const res = await fetch(`/api/TableFieldLayout/DictFields?table=${encodeURIComponent(tn)}&lang=TW`);
+            if (!res.ok) return new Map();
+            const rows = await res.json();
+            const map = new Map();
+            (rows || []).forEach(r => {
+                const field = (r.fieldName || r.FieldName || '').toString();
+                const w = r.fieldWidth ?? r.FieldWidth;
+                const ds = r.displaySize ?? r.DisplaySize;
+                if (!field) return;
+                const px = Number.isFinite(w) ? Number(w) : (Number.isFinite(ds) ? Number(ds) * 10 : null);
+                if (px && px > 0) map.set(field.toLowerCase(), Math.round(px));
+            });
+            return map;
+        } catch {
+            return new Map();
+        }
+    }
+
+    function applyColumnWidth(table, ths, index, width) {
+        const w = Math.max(30, Math.round(width));
+        const th = ths[index];
+        if (!th) return;
+        th.style.width = `${w}px`;
+        Array.from(table.querySelectorAll(`tbody tr td:nth-child(${index + 1})`)).forEach(td => td.style.width = `${w}px`);
+    }
+
+    function applySavedWidths(table, dictTable, fields) {
+        const tn = cleanTableName(dictTable);
+        if (!tn) return;
+        try {
+            const raw = localStorage.getItem(`colwidth:${tn}`);
+            if (!raw) return;
+            const cols = JSON.parse(raw) || [];
+            const ths = Array.from(table.querySelectorAll('thead th'));
+            cols.forEach(c => {
+                const f = (c.fieldName || '').toString();
+                const w = Number(c.width);
+                if (!f || !Number.isFinite(w)) return;
+                const idx = fields.findIndex(x => x.toLowerCase() === f.toLowerCase());
+                if (idx >= 0) applyColumnWidth(table, ths, idx, w);
+            });
+        } catch {}
+    }
+
+    // 欄寬拖曳狀態（全頁共用一次，避免每個 tab 重複掛 document 事件）
+    const resizeState = {
+        active: false,
+        table: null,
+        ths: [],
+        dictTable: '',
+        thIndex: -1,
+        startX: 0,
+        startWidth: 0,
+        saveTimer: null
+    };
+    async function persistWidths() {
+        const { table, ths, dictTable } = resizeState;
+        const tn = cleanTableName(dictTable);
+        if (!table || !ths.length || !tn) return;
+        try {
+            const payload = {
+                tableName: tn,
+                cols: ths.map(th => ({ fieldName: th.dataset.field, width: Math.round(th.getBoundingClientRect().width) }))
+            };
+            await fetch('/api/TableFieldLayout/SaveDetailLayout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).catch(() => {});
+            localStorage.setItem(`colwidth:${tn}`, JSON.stringify(payload.cols));
+        } catch {}
+    }
+    function debouncePersist() {
+        clearTimeout(resizeState.saveTimer);
+        resizeState.saveTimer = setTimeout(persistWidths, 400);
+    }
+    document.addEventListener('mousemove', (e) => {
+        if (!resizeState.active || !resizeState.table) return;
+        const dx = e.pageX - resizeState.startX;
+        const newW = Math.max(30, resizeState.startWidth + dx);
+        applyColumnWidth(resizeState.table, resizeState.ths, resizeState.thIndex, newW);
+    });
+    document.addEventListener('mouseup', () => {
+        if (!resizeState.active) return;
+        resizeState.active = false;
+        document.body.classList.remove('resizing');
+        resizeState.ths.forEach(th => th.classList.remove('resizing'));
+        Array.from(resizeState.table.querySelectorAll('tbody td.resizing')).forEach(td => td.classList.remove('resizing'));
+        debouncePersist();
+        resizeState.table = null;
+        resizeState.ths = [];
+        resizeState.dictTable = '';
+        resizeState.thIndex = -1;
+    });
+
+    function initColumnResize(table, dictTable, fields) {
+        if (!table) return;
+        const ths = Array.from(table.querySelectorAll('thead th'));
+        ths.forEach((th, idx) => {
+            const handle = th.querySelector('.col-resizer');
+            if (!handle) return;
+            handle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                resizeState.active = true;
+                resizeState.table = table;
+                resizeState.ths = ths;
+                resizeState.dictTable = dictTable;
+                resizeState.thIndex = idx;
+                resizeState.startX = e.pageX;
+                resizeState.startWidth = th.getBoundingClientRect().width;
+                document.body.classList.add('resizing');
+                th.classList.add('resizing');
+                Array.from(table.querySelectorAll(`tbody tr td:nth-child(${idx + 1})`)).forEach(td => td.classList.add('resizing'));
+            });
+        });
+    }
+
     // 暴露為全域變數方便除錯
     window._debugFieldDicts = fieldDicts;
     window._debugTabsData = tabsData;
@@ -120,7 +249,7 @@
                 const data = await response.json();
 
                 // 渲染表格
-                renderTable(container, data, tabId);
+                await renderTable(container, data, tabId);
 
                 // 標記為已載入
                 loadedTabs.add(tabId);
@@ -134,13 +263,14 @@
     });
 
     // 渲染表格函式
-    function renderTable(container, data, tabId) {
+    async function renderTable(container, data, tabId) {
         if (!Array.isArray(data) || data.length === 0) {
             container.insertAdjacentHTML('beforeend', '<div class="alert alert-info">無資料</div>');
             return;
         }
 
         const dict = fieldDicts[tabId] || {};
+        const dictTable = getDictTableOfTab(container, tabId);
 
         // Debug 輸出
         console.log(`🔍 [renderTable] tabId: ${tabId}`);
@@ -185,7 +315,7 @@
         // 表頭 - 使用字典取得中文名稱
         fields.forEach(field => {
             const displayName = dict[field] || field;
-            html += `<th><span class="th-text">${displayName}</span></th>`;
+            html += `<th data-field="${field}" style="position:relative;"><span class="th-text">${displayName}</span><span class="col-resizer" draggable="false"></span></th>`;
         });
         html += '</tr></thead><tbody>';
 
@@ -203,6 +333,25 @@
 
         html += '</tbody></table></div>';
         container.insertAdjacentHTML('beforeend', html);
+
+        const table = container.querySelector('.erp-table-wrapper table.erp-table');
+        if (table) {
+            applySavedWidths(table, dictTable, fields);
+            const widthMap = await fetchFieldWidths(dictTable);
+            if (widthMap.size) {
+                const ths = Array.from(table.querySelectorAll('thead th'));
+                fields.forEach((f, idx) => {
+                    const w = widthMap.get(f.toLowerCase());
+                    if (w) applyColumnWidth(table, ths, idx, w);
+                });
+                try {
+                    const tn = cleanTableName(dictTable);
+                    const cols = fields.map((f, idx) => ({ fieldName: f, width: Math.round(ths[idx].getBoundingClientRect().width) }));
+                    localStorage.setItem(`colwidth:${tn}`, JSON.stringify(cols));
+                } catch {}
+            }
+            initColumnResize(table, dictTable, fields);
+        }
 
         // 綁定列選取事件
         const tableWrapper = container.querySelector('.erp-table-wrapper');
@@ -296,7 +445,7 @@
             console.log(`✅ [MultiTab] 資料載入成功 (${Date.now() - startTime}ms):`, data.length, '筆資料');
 
             // 渲染表格
-            renderTable(container, data, tabId);
+            await renderTable(container, data, tabId);
 
             // 標記為已載入
             loadedTabs.add(tabId);
@@ -553,6 +702,7 @@
     border-spacing: 0;
     font-size: 1.06em;
     background: #fff;
+    table-layout: fixed; /* 欄寬拖曳需固定布局 */
 }
 
 .multi-tab-detail .erp-table thead tr {
@@ -586,6 +736,19 @@
     top: 0;
     z-index: 10;
 }
+
+.multi-tab-detail .erp-table th { position: relative; }
+.multi-tab-detail .erp-table th .col-resizer{
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 8px;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 20;
+}
+.multi-tab-detail .erp-table th.resizing,
+.multi-tab-detail .erp-table td.resizing,
+body.resizing { cursor: col-resize !important; }
 
 .multi-tab-detail .erp-table tbody tr:nth-child(even) {
     background: #f6f9fd;

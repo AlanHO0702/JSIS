@@ -803,6 +803,63 @@ document.getElementById('orderHeaderForm').addEventListener('submit', async func
 const editBtn = document.getElementById('btnViewEditToggle');
 if (editBtn) {
   let isEdit = false;
+
+  function setLookupReadOnly(selectEl, readOnly) {
+    if (!selectEl) return;
+    if (readOnly) {
+      selectEl.disabled = false; // 必須可點，才能展開選項
+      selectEl.dataset.lockedValue = selectEl.value ?? '';
+      selectEl.classList.add('lookup-readonly');
+      selectEl.setAttribute('aria-readonly', 'true');
+      selectEl.title = '瀏覽模式：可查看下拉內容，不能修改';
+    } else {
+      selectEl.classList.remove('lookup-readonly');
+      selectEl.removeAttribute('aria-readonly');
+      selectEl.title = '';
+      selectEl.dataset.lockedValue = selectEl.value ?? '';
+      selectEl.disabled = false;
+    }
+  }
+
+  function applyHeaderEditState(editing) {
+    document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
+      .forEach(el => {
+        if (el.closest('.modal')) return;
+        if (el.matches('select.lookup-dropdown')) {
+          setLookupReadOnly(el, !editing);
+        } else {
+          el.disabled = !editing;
+        }
+      });
+  }
+
+  // 瀏覽模式：下拉可展開但不可變更
+  document.addEventListener('change', (e) => {
+    const sel = e.target;
+    if (!(sel instanceof HTMLSelectElement)) return;
+    if (!sel.matches('.erp-header-form select.lookup-dropdown')) return;
+    if (sel.closest('.modal')) return;
+    if (isEdit) return;
+
+    const locked = sel.dataset.lockedValue ?? '';
+    if ((sel.value ?? '') !== locked) {
+      sel.value = locked;
+    }
+    e.stopPropagation();
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    const sel = e.target;
+    if (!(sel instanceof HTMLSelectElement)) return;
+    if (!sel.matches('.erp-header-form select.lookup-dropdown')) return;
+    if (sel.closest('.modal')) return;
+    if (isEdit) return;
+
+    const blockKeys = ['ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', ' ', 'Enter'];
+    if (blockKeys.includes(e.key)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
   const getHeaderValueByLabel = (labelText) => {
     const $li = $('.draggable-field').filter(function () {
       return $(this).children('label').first().text().trim() === labelText;
@@ -820,8 +877,7 @@ if (editBtn) {
       Swal.fire({ icon: 'warning', title: '無法修改', text: `此單據狀態為「${status}」，不可進行修改。`}); return;
     }
     isEdit = !isEdit; editBtn.textContent = isEdit ? '保留' : '修改';
-    document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
-      .forEach(el => { if (!el.closest('.modal')) el.disabled = !isEdit; }); // ★ 不影響 modal 裡的欄位
+    applyHeaderEditState(isEdit); // ★ 不影響 modal 裡的欄位
     document.querySelectorAll('.erp-table .cell-view').forEach(el => el.classList.toggle('d-none', isEdit));
     document.querySelectorAll('.erp-table .cell-edit').forEach(el => el.classList.toggle('d-none', !isEdit));
     document.querySelectorAll('.erp-table .cell-edit').forEach(inp => {
@@ -832,8 +888,7 @@ if (editBtn) {
   });
 
   window.addEventListener('load', () => {
-    document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
-      .forEach(el => { if (!el.closest('.modal')) el.disabled = true; });
+    applyHeaderEditState(false);
     if (localStorage.getItem("afterSave") === "1") {
       localStorage.removeItem("afterSave");
       document.getElementById("btnViewEditToggle")?.click();
@@ -868,7 +923,7 @@ $(function () {
 
     fetch("/api/TableFieldLayout/SaveHeaderLayout", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tableName: "@Model.HeaderTableName".toLowerCase(), layoutUpdates: layout })
+      body: JSON.stringify({ tableName: "@Model.HeaderTableName", layoutUpdates: layout })
     }).catch(()=>{});
   }
 
@@ -884,9 +939,242 @@ $(function () {
       },
       appendTo: "body", zIndex: 10000,
       start: function () { $(this).hide(); },
-      stop:  function () { $(this).show(); }
+      stop: function (event, ui) {
+        const $item = $(this);
+        $item.show();
+
+        // 使用 helper 拖曳時，原元素不會自動換位置，這裡手動把 top/left 寫回 parent 座標系
+        const $parent = $item.parent();
+        const parentOff = $parent.offset();
+        if (parentOff) {
+          $item.css({
+            position: "absolute",
+            top: Math.round(ui.offset.top - parentOff.top),
+            left: Math.round(ui.offset.left - parentOff.left)
+          });
+        }
+
+        debounceSave();
+      }
     });
-    $li.resizable({ handles: "se", minWidth: 50, minHeight: 30, stop: debounceSave });
+    $li.resizable({ handles: "e, se", minWidth: 50, minHeight: 30, stop: debounceSave });
+  });
+
+  // ============================
+  // 6-1) 多選/群組拖曳/對齊（快捷鍵）
+  //  - Ctrl/Meta+點擊：切換選取
+  //  - 點擊空白：清除選取
+  //  - 拖曳任一被選取的 label：整組一起移動
+  //  - L/R/T/B：左/右/上/下對齊（以所選群組的最左/最右/最上/最下為準）
+  //  - H/V：水平/垂直平均分佈（保留最左/最右 或 最上/最下）
+  //  - 方向鍵：微調（Shift=10px）
+  // ============================
+  const $doc = $(document);
+  const SELECTED_CLASS = "md-selected";
+  let dragGroupSnapshot = null; // { baseEl, baseTop, baseLeft, items:[{el, top,left}] }
+
+  function $allFields() { return $(".draggable-field"); }
+  function $selected() { return $allFields().filter("." + SELECTED_CLASS); }
+  function isTypingTarget(e) {
+    const t = e?.target;
+    if (!t) return false;
+    const tag = (t.tagName || "").toLowerCase();
+    return tag === "input" || tag === "textarea" || tag === "select" || t.isContentEditable;
+  }
+  function clearSelection() { $selected().removeClass(SELECTED_CLASS); }
+  function toggleSelection($el) { $el.toggleClass(SELECTED_CLASS); }
+  function selectOnly($el) { clearSelection(); $el.addClass(SELECTED_CLASS); }
+
+  // 點選控制（用 mousedown，避免跟拖曳衝突）
+  $doc.on("mousedown", ".draggable-field label", function (e) {
+    if (window.__DICT_OPEN__) return;
+    const $field = $(this).closest(".draggable-field");
+    if (!$field.length) return;
+
+    // Ctrl/Meta：切換多選；否則點到未選取的就單選
+    if (e.ctrlKey || e.metaKey) {
+      toggleSelection($field);
+    } else if (!$field.hasClass(SELECTED_CLASS)) {
+      selectOnly($field);
+    }
+  });
+  $doc.on("mousedown", function (e) {
+    if (window.__DICT_OPEN__) return;
+    if ($(e.target).closest(".draggable-field, .ui-resizable-handle, .modal").length) return;
+    clearSelection();
+  });
+
+  function ensureDragGroupSnapshot($base) {
+    const $sel = $selected();
+    const $group = ($sel.length ? $sel : $base);
+    if (!$base.hasClass(SELECTED_CLASS) && $sel.length) selectOnly($base);
+    dragGroupSnapshot = {
+      baseEl: $base.get(0),
+      baseTop: Math.round($base.position().top),
+      baseLeft: Math.round($base.position().left),
+      items: $group.toArray().map(el => {
+        const $el = $(el);
+        return { el, top: Math.round($el.position().top), left: Math.round($el.position().left) };
+      })
+    };
+  }
+
+  // 讓拖曳時能夠整組一起移動（用 draggable 的 start/stop hook）
+  $doc.on("dragstart", ".draggable-field", function () { /* noop */ });
+  $allFields().each(function () {
+    const $li = $(this);
+    // jQuery UI draggable 已初始化，上面已設定 stop；這裡用 option 注入 start/stop2 行為
+    $li.draggable("option", "start", function (event) {
+      if (window.__DICT_OPEN__) return;
+      ensureDragGroupSnapshot($(this));
+      $(this).hide();
+    });
+    $li.draggable("option", "stop", function (event, ui) {
+      const $item = $(this);
+      $item.show();
+
+      const $parent = $item.parent();
+      const parentOff = $parent.offset();
+      if (!parentOff) return;
+
+      const newTop = Math.round(ui.offset.top - parentOff.top);
+      const newLeft = Math.round(ui.offset.left - parentOff.left);
+
+      // 單顆或群組：以 base 的 delta 套用到所有選取
+      if (dragGroupSnapshot && dragGroupSnapshot.baseEl === $item.get(0)) {
+        const dy = newTop - dragGroupSnapshot.baseTop;
+        const dx = newLeft - dragGroupSnapshot.baseLeft;
+        dragGroupSnapshot.items.forEach(it => {
+          const $el = $(it.el);
+          $el.css({
+            position: "absolute",
+            top: Math.max(0, it.top + dy),
+            left: Math.max(0, it.left + dx)
+          });
+        });
+        dragGroupSnapshot = null;
+        debounceSave();
+        return;
+      }
+
+      // fallback（理論上走不到）
+      $item.css({ position: "absolute", top: newTop, left: newLeft });
+      dragGroupSnapshot = null;
+      debounceSave();
+    });
+  });
+
+  function applyToSelected(mutator) {
+    const $sel = $selected();
+    if (!$sel.length) return false;
+    $sel.each(function () { mutator($(this)); });
+    debounceSave();
+    return true;
+  }
+  function alignSelected(mode) {
+    const $sel = $selected();
+    if ($sel.length < 2) return false;
+    const boxes = $sel.toArray().map(el => {
+      const $el = $(el);
+      const p = $el.position();
+      const w = $el.outerWidth();
+      const h = $el.outerHeight();
+      const $ctrl = $el.find('select, input, textarea').first();
+      const ctrlOff = $ctrl.length ? $ctrl.offset() : null;
+      const elOff = $el.offset();
+      const ctrlLeftAbs = ctrlOff?.left ?? elOff.left;
+      const ctrlTopAbs = ctrlOff?.top ?? elOff.top;
+      const ctrlW = $ctrl.length ? $ctrl.outerWidth() : w;
+      const ctrlH = $ctrl.length ? $ctrl.outerHeight() : h;
+      return {
+        $el,
+        top: Math.round(p.top),
+        left: Math.round(p.left),
+        right: Math.round(p.left + w),
+        bottom: Math.round(p.top + h),
+        w,
+        h,
+        ctrlLeftAbs,
+        ctrlRightAbs: ctrlLeftAbs + ctrlW,
+        ctrlTopAbs,
+        ctrlBottomAbs: ctrlTopAbs + ctrlH,
+        ctrlW,
+        ctrlH
+      };
+    });
+    // L/R：對齊「輸入欄位」(select/input/textarea)，而非 label
+    const minCtrlLeftAbs = Math.min(...boxes.map(b => b.ctrlLeftAbs));
+    const maxCtrlRightAbs = Math.max(...boxes.map(b => b.ctrlRightAbs));
+
+    const minLeft = Math.min(...boxes.map(b => b.left));
+    const maxRight = Math.max(...boxes.map(b => b.right));
+    const minTop = Math.min(...boxes.map(b => b.top));
+    const maxBottom = Math.max(...boxes.map(b => b.bottom));
+
+    boxes.forEach(b => {
+      if (mode === "L") {
+        const delta = minCtrlLeftAbs - b.ctrlLeftAbs;
+        b.$el.css("left", Math.max(0, Math.round(b.left + delta)));
+      }
+      if (mode === "R") {
+        const targetCtrlLeftAbs = maxCtrlRightAbs - b.ctrlW;
+        const delta = targetCtrlLeftAbs - b.ctrlLeftAbs;
+        b.$el.css("left", Math.max(0, Math.round(b.left + delta)));
+      }
+      if (mode === "T") b.$el.css("top", minTop);
+      if (mode === "B") b.$el.css("top", Math.max(0, maxBottom - b.h));
+    });
+    debounceSave();
+    return true;
+  }
+  function distributeSelected(axis) {
+    const $sel = $selected();
+    if ($sel.length < 3) return false;
+    const boxes = $sel.toArray().map(el => {
+      const $el = $(el);
+      const p = $el.position();
+      const w = $el.outerWidth();
+      const h = $el.outerHeight();
+      return { $el, top: Math.round(p.top), left: Math.round(p.left), w, h };
+    });
+    if (axis === "H") {
+      boxes.sort((a, b) => a.left - b.left);
+      const first = boxes[0], last = boxes[boxes.length - 1];
+      const span = (last.left - first.left);
+      const gaps = boxes.length - 1;
+      const step = gaps ? Math.round(span / gaps) : 0;
+      boxes.forEach((b, i) => b.$el.css("left", Math.max(0, first.left + step * i)));
+    } else {
+      boxes.sort((a, b) => a.top - b.top);
+      const first = boxes[0], last = boxes[boxes.length - 1];
+      const span = (last.top - first.top);
+      const gaps = boxes.length - 1;
+      const step = gaps ? Math.round(span / gaps) : 0;
+      boxes.forEach((b, i) => b.$el.css("top", Math.max(0, first.top + step * i)));
+    }
+    debounceSave();
+    return true;
+  }
+
+  $doc.on("keydown", function (e) {
+    if (window.__DICT_OPEN__) return;
+    if (isTypingTarget(e)) return;
+    const key = (e.key || "").toUpperCase();
+
+    // 對齊
+    if (key === "L" || key === "R" || key === "T" || key === "B") {
+      if (alignSelected(key)) { e.preventDefault(); return; }
+    }
+    // 分佈
+    if (key === "H" || key === "V") {
+      if (distributeSelected(key)) { e.preventDefault(); return; }
+    }
+    // 方向鍵微調
+    const step = e.shiftKey ? 10 : 1;
+    if (e.key === "ArrowLeft")  { if (applyToSelected($el => $el.css("left", Math.max(0, Math.round($el.position().left) - step)))) { e.preventDefault(); } return; }
+    if (e.key === "ArrowRight") { if (applyToSelected($el => $el.css("left", Math.max(0, Math.round($el.position().left) + step)))) { e.preventDefault(); } return; }
+    if (e.key === "ArrowUp")    { if (applyToSelected($el => $el.css("top",  Math.max(0, Math.round($el.position().top) - step)))) { e.preventDefault(); } return; }
+    if (e.key === "ArrowDown")  { if (applyToSelected($el => $el.css("top",  Math.max(0, Math.round($el.position().top) + step)))) { e.preventDefault(); } return; }
   });
 
   $(".header-fields-tab").droppable({
@@ -927,6 +1215,10 @@ $(function () {
         $select.append($opt);
       });
       $select.next('.lookup-label').text($select.find('option:selected').text());
+      // 若是瀏覽模式（readonly），在下拉資料載入後同步 lockedValue，避免變更時回復成空值
+      if ($select.hasClass('lookup-readonly') && $select[0]) {
+        $select[0].dataset.lockedValue = $select.val() ?? '';
+      }
     });
     $select.on('change', function() {
       $(this).next('.lookup-label').text($(this).find('option:selected').text());
@@ -1130,7 +1422,8 @@ body { background: #f7f9fb !important; }
 }
 
 /* draggable 欄位（橫排 label + 控件） */
-.draggable-field{ position:absolute; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; background:transparent; }
+.draggable-field{ position:absolute; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; background:transparent; border:1px dashed transparent; }
+.draggable-field:hover{ border-color:#c7d3e1; }
 .draggable-field.inline{ display:flex; flex-direction:row; align-items: center; gap:4px; flex:0 0 auto; min-width:100px; max-width:100%; }
 .draggable-field label{ cursor:move; font-size:0.85em; margin:0 6px 0 0; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
 .draggable-field.inline .field-control{ flex:1 1 auto; height:100%; display:flex; }
@@ -1144,6 +1437,38 @@ body { background: #f7f9fb !important; }
   overflow: visible !important;
   text-overflow: clip !important;
   max-width: none !important;
+}
+.draggable-field.md-selected{
+  border-radius: 8px;
+  border-color:#5b8def;
+  background:rgba(91,141,239,0.08);
+}
+.erp-header-form select.lookup-dropdown.lookup-readonly{
+  /* 瀏覽模式允許展開下拉，但不允許修改：外觀比照 disabled 的灰底 */
+  background-color: var(--bs-secondary-bg, #e9ecef) !important;
+  color: var(--bs-secondary-color, #6c757d) !important;
+  opacity: 1; /* 避免像 disabled 一樣整體變淡 */
+  cursor: default;
+}
+.erp-header-form select.lookup-dropdown.lookup-readonly:focus{
+  border-color: #ced4da;
+  box-shadow: none !important;
+}
+/* jQuery UI resizable：讓右側拉寬把手更好抓 */
+.draggable-field.ui-resizable .ui-resizable-e{
+  position: absolute;
+  top: 0; right: 0; width: 10px; height: 100%;
+  cursor: ew-resize; background: transparent;
+  z-index: 5;
+}
+.draggable-field.ui-resizable:hover .ui-resizable-e{
+  background: rgba(32,86,172,0.10);
+}
+.draggable-field.ui-resizable .ui-resizable-se{
+  position: absolute;
+  right: 0; bottom: 0; width: 14px; height: 14px;
+  cursor: se-resize; background: transparent;
+  z-index: 5;
 }
 
 /* =========================================
