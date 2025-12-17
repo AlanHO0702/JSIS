@@ -27,7 +27,30 @@
 
     string actionPartial = (ViewData["ActionRailPartial"] as string)
                            ?? "~/Pages/Shared/_ActionRail.Empty.cshtml";
+
+    // ✅ 取得單頭表名稱和 Finished 狀態（針對 FmedIssueMain）
+    string headerTableName = Model.HeaderTableName ?? "";
+    int? finishedValue = null;
+    if (headerTableName == "FMEdIssueMain" && headerData != null && headerData.ContainsKey("Finished"))
+    {
+        var finishedObj = headerData["Finished"];
+        if (finishedObj != null)
+        {
+            int finishedTemp;
+            if (int.TryParse(finishedObj.ToString(), out finishedTemp))
+            {
+                finishedValue = finishedTemp;
+            }
+        }
+    }
 }
+
+<script>
+    // ✅ 將 Finished 狀態暴露給前端 JavaScript
+    window._headerTableName = '@headerTableName';
+    window._finishedStatus = @(finishedValue?.ToString() ?? "null");
+    window._paperNum = '@PaperNum';
+</script>
 
 <div id="topToolbar" class="d-flex align-items-center mb-4" style="gap:12px;">
     <div class="btn-group" role="group" aria-label="row-nav" style="gap:6px;">
@@ -308,14 +331,303 @@ if (editBtn) {
     return ($ctrl.val() || '').toString().trim();
   };
 
-  editBtn.addEventListener('click', function () {
-    const status = getHeaderValueByLabel('單據狀態') || '';
-    if (window.BLOCK_STATUSES && window.BLOCK_STATUSES.includes(status)) {
-      Swal.fire({ icon: 'warning', title: '無法修改', text: `此單據狀態為「${status}」，不可進行修改。`}); return;
+  editBtn.addEventListener('click', async function () {
+    // ✅ 針對 FMEdIssueMain 使用 Finished 欄位檢查（數字）
+    const headerTableName = window._headerTableName;
+    console.log('🔍 [修改按鈕] headerTableName:', headerTableName);
+    console.log('🔍 [修改按鈕] finishedStatus:', window._finishedStatus);
+
+    // ⭐ 如果是從「編輯模式」切回「檢視模式」（保留），則儲存單身資料
+    if (isEdit) {
+      console.log('💾 [保留按鈕] 開始儲存單身資料...');
+
+      // ⭐ 針對 FMEdIssueMain，在儲存前重新檢查資料庫的實際狀態
+      if (headerTableName === 'FMEdIssueMain') {
+        try {
+          const paperNum = window._paperNum || PAGE.paperNum;
+          const resp = await fetch(`/api/FMEdIssueMain/${encodeURIComponent(paperNum)}`);
+          if (resp.ok) {
+            const mainData = await resp.json();
+            const currentFinished = mainData.Finished;
+
+            // 允許儲存的狀態：作業中(0) 和 審核中(3)
+            const allowedStatuses = [0, 3];
+            if (currentFinished !== null && !allowedStatuses.includes(currentFinished)) {
+              const statusMap = {0:'作業中', 1:'已確認', 2:'作廢中', 3:'審核中', 4:'已結案'};
+              const statusName = statusMap[currentFinished] || `代碼:${currentFinished}`;
+
+              console.log('🚫 [保留] 資料庫狀態已變更，無法儲存');
+              await Swal.fire({
+                icon: 'warning',
+                title: '單據狀態已變更',
+                html: `此單據狀態已變更為「<b>${statusName}</b>」，無法儲存修改。<br>請重新整理頁面以取得最新狀態。`,
+                confirmButtonText: '重新整理頁面',
+                showCancelButton: true,
+                cancelButtonText: '取消'
+              }).then((result) => {
+                if (result.isConfirmed) {
+                  location.reload();
+                }
+              });
+              return;
+            }
+          }
+        } catch (err) {
+          console.error('❌ [保留] 檢查狀態失敗:', err);
+          // 繼續執行儲存（讓觸發器決定是否允許）
+        }
+      }
+
+      // 收集所有已修改的列資料（僅限當前單號）
+      const currentPaperNum = window._paperNum || PAGE.paperNum;
+      console.log('🔍 [保留] 當前單號:', currentPaperNum);
+
+      const allChanges = [];
+      const tables = document.querySelectorAll('.multi-tab-detail .table-container');
+
+      for (const container of tables) {
+        const tableName = container.dataset.dictTable;
+        if (!tableName) continue;
+
+        const tbody = container.querySelector('tbody');
+        if (!tbody) continue;
+
+        const rows = tbody.querySelectorAll('tr[data-state="modified"], tr[data-state="added"]');
+        const changes = [];
+
+        for (const row of rows) {
+          // ⭐ 關鍵修正：只處理當前單號的資料
+          const rowPaperNum = row.dataset.paperNum;
+          console.log(`🔍 [保留] 檢查列: rowPaperNum="${rowPaperNum}", currentPaperNum="${currentPaperNum}", state="${row.dataset.state}"`);
+
+          if (rowPaperNum && rowPaperNum !== currentPaperNum) {
+            console.log(`⚠️ [保留] 跳過不同單號的列: ${rowPaperNum} (當前: ${currentPaperNum})`);
+            continue;
+          }
+
+          const rowData = {};
+          const inputs = row.querySelectorAll('.cell-edit');
+
+          for (const inp of inputs) {
+            const fieldName = inp.dataset.field || inp.name;
+            if (fieldName) {
+              // ⭐ 智能型別轉換：數字欄位轉成數字，空值轉成 null
+              let value = inp.value?.trim();
+
+              // 空值統一轉成 null，讓後端處理成 DBNull.Value
+              if (value === '' || value === undefined || value === null) {
+                value = null;
+              } else {
+                // 如果欄位名稱包含常見的數字欄位關鍵字，嘗試轉成數字
+                const numberFieldPatterns = /Qnty|Item|Serial|Amount|Price|Qty|Num|Count|Weight|Rate|Pop|Pcs$/i;
+
+                if (numberFieldPatterns.test(fieldName)) {
+                  // 移除千分位逗號
+                  const cleanValue = value.replace(/,/g, '');
+                  const numValue = Number(cleanValue);
+
+                  // 只有在是有效數字時才轉換，否則保持原值（讓後端報錯）
+                  if (!isNaN(numValue)) {
+                    value = numValue;
+                  }
+                }
+              }
+
+              rowData[fieldName] = value;
+            }
+          }
+
+          // ⭐ 確保 PaperNum 和 Item 一定存在（從 dataset 取得主鍵值）
+          if (!rowData.PaperNum && rowPaperNum) {
+            rowData.PaperNum = rowPaperNum;
+            console.log(`🔑 [保留] 明確加入 PaperNum: ${rowPaperNum}`);
+          }
+
+          const rowItem = row.dataset.item;
+          if (!rowData.Item && rowItem) {
+            // Item 需要轉成數字
+            const itemNum = Number(rowItem);
+            if (!isNaN(itemNum)) {
+              rowData.Item = itemNum;
+              console.log(`🔑 [保留] 明確加入 Item: ${itemNum}`);
+            }
+          }
+
+          // 確保有資料再加入，並且顯示完整的 rowData 內容
+          if (Object.keys(rowData).length > 0) {
+            console.log(`📦 [保留] 收集的完整列資料:`, JSON.stringify(rowData, null, 2));
+            changes.push(rowData);
+          }
+        }
+
+        if (changes.length > 0) {
+          console.log(`📝 [保留] ${tableName} 收集到 ${changes.length} 筆變更`);
+          allChanges.push({ tableName, changes });
+        }
+      }
+
+      // 如果有變更，呼叫儲存 API
+      if (allChanges.length > 0) {
+        try {
+          let saveSuccess = true;
+          let saveErrors = [];
+
+          for (const { tableName, changes } of allChanges) {
+            console.log(`💾 [保留] 儲存 ${tableName}:`, changes);
+
+            // 取得主鍵欄位（從第一筆資料推斷）
+            const firstRow = changes[0];
+            const keyFields = [];
+            if (firstRow.PaperNum !== undefined) keyFields.push('PaperNum');
+            if (firstRow.Item !== undefined) keyFields.push('Item');
+
+            const payload = {
+              TableName: tableName,
+              Data: changes,
+              KeyFields: keyFields
+            };
+
+            const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+
+            if (!resp.ok) {
+              saveSuccess = false;
+              const errorText = await resp.text();
+              saveErrors.push(`${tableName}: ${errorText}`);
+              console.error(`❌ [保留] ${tableName} 儲存失敗:`, errorText);
+            } else {
+              const result = await resp.json();
+              console.log(`✅ [保留] ${tableName} 儲存成功:`, result);
+
+              // 儲存成功後，將所有已修改列的狀態改為 unchanged，並同步更新 view 顯示值
+              const container = document.querySelector(`.table-container[data-dict-table="${tableName}"]`);
+              if (container) {
+                container.querySelectorAll('tr[data-state="modified"], tr[data-state="added"]').forEach(tr => {
+                  tr.dataset.state = 'unchanged';
+
+                  // ⭐ 同步更新 view 顯示值：將 input 的值複製到對應的 cell-view
+                  tr.querySelectorAll('.cell-edit').forEach(input => {
+                    const fieldName = input.dataset.field || input.name;
+                    if (!fieldName) return;
+
+                    // 找到同一個 td 內的 cell-view
+                    const td = input.closest('td');
+                    if (td) {
+                      const viewSpan = td.querySelector('.cell-view');
+                      if (viewSpan) {
+                        // 更新顯示值（保留千分位格式化，如果有的話）
+                        let displayValue = input.value?.trim() || '';
+
+                        // 如果是數字欄位，可以選擇性加上千分位
+                        const numberFieldPatterns = /Qnty|Amount|Price|Qty|Count|Weight$/i;
+                        if (numberFieldPatterns.test(fieldName) && displayValue) {
+                          const num = parseFloat(displayValue.replace(/,/g, ''));
+                          if (!isNaN(num)) {
+                            displayValue = num.toLocaleString('en-US', {
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 4
+                            });
+                          }
+                        }
+
+                        viewSpan.textContent = displayValue;
+                        console.log(`🔄 [保留] 同步更新 ${fieldName}: "${displayValue}"`);
+                      }
+                    }
+                  });
+                });
+              }
+            }
+          }
+
+          if (saveSuccess) {
+            await Swal.fire({
+              icon: 'success',
+              title: '儲存成功',
+              text: '單身資料已成功儲存',
+              timer: 1500,
+              showConfirmButton: false
+            });
+          } else {
+            await Swal.fire({
+              icon: 'error',
+              title: '儲存失敗',
+              html: saveErrors.join('<br>')
+            });
+            return; // 儲存失敗，不切換模式
+          }
+        } catch (err) {
+          console.error('❌ [保留] 儲存錯誤:', err);
+          await Swal.fire({
+            icon: 'error',
+            title: '儲存錯誤',
+            text: String(err)
+          });
+          return; // 發生錯誤，不切換模式
+        }
+      } else {
+        console.log('ℹ️ [保留] 沒有變更需要儲存');
+      }
     }
+
+    // ⭐ 如果是從「檢視模式」切到「編輯模式」（修改），先檢查狀態
+    if (!isEdit) {
+      if (headerTableName === 'FMEdIssueMain') {
+        // 使用後端傳遞的 Finished 狀態
+        const finished = window._finishedStatus;
+
+        // 狀態對照表
+        const statusMap = {0:'作業中', 1:'已確認', 2:'作廢中', 3:'審核中', 4:'已結案'};
+        const statusName = statusMap[finished] || `代碼:${finished}`;
+
+        // 允許修改的狀態：作業中(0) 和 審核中(3)
+        const allowedStatuses = [0, 3];
+        if (finished !== null && !allowedStatuses.includes(finished)) {
+          console.log('🚫 [修改按鈕] 狀態不允許修改，阻止修改');
+          Swal.fire({
+            icon: 'warning',
+            title: '無法修改',
+            html: `單據狀態：<b>${statusName}</b><br>只有「作業中」或「審核中」的單據才能進行修改。`
+          });
+          return;
+        }
+        console.log('✅ [修改按鈕] 狀態允許修改');
+      } else {
+        // 一般單據使用原本的「單據狀態」文字檢查
+        const status = getHeaderValueByLabel('單據狀態') || '';
+        if (window.BLOCK_STATUSES && window.BLOCK_STATUSES.includes(status)) {
+          Swal.fire({ icon: 'warning', title: '無法修改', text: `此單據狀態為「${status}」，不可進行修改。`});
+          return;
+        }
+      }
+    }
+
     isEdit = !isEdit; editBtn.textContent = isEdit ? '保留' : '修改';
+
+    // 切換單頭欄位的 disabled 狀態
     document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
       .forEach(el => { if (!el.closest('.modal')) el.disabled = !isEdit; });
+
+    // ✅ 切換單身表格的顯示/編輯模式（針對 _MultiTabDetail.cshtml）
+    document.querySelectorAll('.multi-tab-detail .erp-table .cell-view')
+      .forEach(el => el.classList.toggle('d-none', isEdit));
+    document.querySelectorAll('.multi-tab-detail .erp-table .cell-edit')
+      .forEach(el => el.classList.toggle('d-none', !isEdit));
+
+    // 綁定 input 事件，標記列為已修改
+    if (isEdit) {
+      document.querySelectorAll('.multi-tab-detail .erp-table .cell-edit').forEach(inp => {
+        inp.addEventListener('input', () => {
+          const tr = inp.closest('tr');
+          if (tr && tr.dataset.state !== 'added') {
+            tr.dataset.state = 'modified';
+          }
+        });
+      });
+    }
   });
 
   window.addEventListener('load', () => {
@@ -569,6 +881,7 @@ body { background: #f7f9fb !important; }
 .highlight-blue{ color:#2564b3; font-weight:700; }
 
 /* --- Action Rail 基礎版位 & 內容右移（固定在樣板）--- */
+/* 更新時間: 2025-03-20 13:45 */
 :root{
   --fab-left: 12px;
   --fab-width: 120px;
@@ -580,10 +893,34 @@ body { background: #f7f9fb !important; }
   position: fixed;
   left: var(--fab-left);
   top: 80px;
+  max-height: calc(100vh - 100px); /* 限制最大高度，避免超出視窗 */
   display: flex;
   flex-direction: column;
   gap: 10px;
   z-index: 900;
+  overflow-y: scroll; /* 永遠顯示捲軸，避免寬度變化 */
+  overflow-x: visible; /* 允許按鈕超出容器，避免被捲軸遮住 */
+}
+
+/* action-rail 的捲軸樣式 - 使用 overlay 模式不佔空間 */
+.action-rail::-webkit-scrollbar {
+  width: 8px;
+}
+
+.action-rail::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.action-rail::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.action-rail::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.4);
+  background-clip: padding-box;
 }
 
 /* 按鈕的共同外觀（保持在樣板，讓所有頁面一致） */

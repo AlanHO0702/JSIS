@@ -106,7 +106,7 @@ public class TableDictionaryService : ITableDictionaryService
             var lkSetting = _context.CURdOCXTableFieldLK
                 .FirstOrDefault(x => x.TableName == tableName && x.FieldName == field.FieldName);
 
-            if (lkSetting == null) continue;
+                if (lkSetting == null) continue;
 
             var ocxTableName = field.OCXLKTableName;
             var ocxResultName = field.OCXLKResultName;
