@@ -3,6 +3,7 @@
     var paperNum = ViewData["PaperNum"]?.ToString() ?? "";
     var tabs = ViewData["Tabs"] as dynamic[] ?? Array.Empty<dynamic>();
     var tabFieldDicts = ViewData["TabFieldDicts"] as Dictionary<string, Dictionary<string, string>> ?? new();
+    var allowEdit = (ViewData["MultiTabAllowEdit"] as bool?) ?? true;
 }
 
 <!-- SweetAlert2 引入 -->
@@ -40,17 +41,15 @@
             <div class="tab-pane fade @isActive"
                  id="content-@tab.Id"
                  role="tabpanel">
-                <!-- 載入中提示 -->
+         
                 <div class="loading-indicator text-center py-5" style="display:@(i == 0 ? "block" : "none");">
                     <div class="spinner-border text-primary" role="status">
                         <span class="visually-hidden">Loading...</span>
                     </div>
                     <p class="mt-2 text-muted">載入中...</p>
                 </div>
-
-                <!-- 表格容器 -->
                 <div class="table-container" data-tab-id="@tab.Id" data-dict-table="@tab.DictTable">
-                    <!-- 動態載入的表格會插入這裡 -->
+                
                 </div>
             </div>
         }
@@ -60,6 +59,7 @@
 <script>
 (function() {
     const paperNum = '@paperNum';
+    const allowEdit = @(allowEdit ? "true" : "false");
     const loadedTabs = new Set();
     const fieldDicts = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(tabFieldDicts));
     const tabsData = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(tabs));
@@ -70,6 +70,12 @@
 
     function getDictTableOfTab(container, tabId) {
         return (container?.dataset?.dictTable || tabsData?.find(x => x?.Id === tabId)?.DictTable || '').toString();
+    }
+
+    function withPaperNum(apiUrl) {
+        const base = (apiUrl || '').toString();
+        const sep = base.includes('?') ? '&' : '?';
+        return `${base}${sep}PaperNum=${encodeURIComponent(paperNum)}`;
     }
 
     async function fetchFieldWidths(dictTable) {
@@ -229,7 +235,7 @@
 
             try {
                 // AJAX 載入資料
-                const response = await fetch(`${apiUrl}?PaperNum=${paperNum}`);
+                const response = await fetch(withPaperNum(apiUrl));
 
                 // 檢查 HTTP 狀態
                 if (!response.ok) {
@@ -276,43 +282,38 @@
         const dict = fieldDicts[tabId] || {};
         const dictTable = getDictTableOfTab(container, tabId);
 
-        // Debug 輸出
-        console.log(`🔍 [renderTable] tabId: ${tabId}`);
-        console.log(`🔍 [renderTable] 字典欄位數量: ${Object.keys(dict).length}`);
-        console.log(`🔍 [renderTable] 字典欄位:`, Object.keys(dict));
+
 
         // 只顯示字典中有的欄位（Visible == 1 的欄位）
         // 如果字典為空，則顯示所有欄位（向後兼容）
         const allFields = Object.keys(data[0]);
-        console.log(`🔍 [renderTable] API 回傳欄位數量: ${allFields.length}`);
-        console.log(`🔍 [renderTable] API 回傳欄位:`, allFields);
 
         const fields = Object.keys(dict).length > 0
             ? Object.keys(dict).filter(f => allFields.includes(f))  // 只顯示字典中且資料有的欄位
             : allFields;  // 如果沒有字典，顯示所有欄位
 
-        console.log(`🔍 [renderTable] 過濾後要顯示的欄位數量: ${fields.length}`);
-        console.log(`🔍 [renderTable] 過濾後要顯示的欄位:`, fields);
 
         if (fields.length === 0) {
             container.insertAdjacentHTML('beforeend', '<div class="alert alert-warning">沒有可顯示的欄位</div>');
             return;
         }
 
-        // 建立表格 - 使用 erp-table 樣式，並在內部加入 +- 按鈕
+        // 建立表格 - 使用 erp-table 樣式
         let html = '<div class="erp-table-wrapper">';
 
-        // +- 按鈕放在 wrapper 內部
-        html += `
-            <div class="d-flex justify-content-start mb-2 tab-action-buttons">
-                <button type="button" class="btn btn-outline-secondary btn-sm btn-add-row" data-tab-id="${tabId}">
-                    ＋
-                </button>
-                <button type="button" class="btn btn-outline-danger btn-sm ms-1 btn-delete-row" data-tab-id="${tabId}" title="刪除當前列">
-                    －
-                </button>
-            </div>
-        `;
+        if (allowEdit) {
+            // +- 按鈕放在 wrapper 內部
+            html += `
+                <div class="d-flex justify-content-start mb-2 tab-action-buttons">
+                    <button type="button" class="btn btn-outline-secondary btn-sm btn-add-row" data-tab-id="${tabId}">
+                        ＋
+                    </button>
+                    <button type="button" class="btn btn-outline-danger btn-sm ms-1 btn-delete-row" data-tab-id="${tabId}" title="刪除當前列">
+                        －
+                    </button>
+                </div>
+            `;
+        }
 
         html += '<table class="erp-table"><thead><tr>';
 
@@ -378,13 +379,11 @@
         }
     }
 
-    // 頁面載入時,立即載入第一個 Tab（訂單明細檔）
-    console.log('📋 [MultiTab] 初始化多分頁載入...');
-    console.log('📋 [MultiTab] tabsData:', tabsData);
+
 
     // 統一使用 async 函式載入第一個頁籤
     async function loadFirstTab() {
-        console.log('🚀 [MultiTab] loadFirstTab() 函式已執行');
+ 
 
         // 直接從 tabsData 取得第一個頁籤資訊（避免 DOM 屬性讀取問題）
         if (!tabsData || tabsData.length === 0) {
@@ -393,7 +392,7 @@
         }
 
         const firstTabData = tabsData[0];
-        console.log('📦 [MultiTab] firstTabData:', firstTabData);
+  
 
         // 使用匿名型別的屬性名稱（首字母大寫）
         const tabId = firstTabData.Id;
@@ -404,11 +403,7 @@
             window._dictTableName = firstTabData.DictTable;
         }
 
-        console.log(`🔄 [MultiTab] 開始載入第一個頁籤: ${tabId}`);
-        console.log(`📍 [MultiTab] API URL: ${apiUrl}?PaperNum=${paperNum}`);
-
         const contentPane = document.getElementById(`content-${tabId}`);
-        console.log('📦 [MultiTab] contentPane:', contentPane);
 
         if (!contentPane) {
             console.error(`❌ [MultiTab] 找不到 contentPane: content-${tabId}`);
@@ -416,7 +411,6 @@
         }
 
         if (loadedTabs.has(tabId)) {
-            console.log(`ℹ️ [MultiTab] 頁籤 ${tabId} 已載入，跳過`);
             return;
         }
 
@@ -434,9 +428,8 @@
 
         try {
             // AJAX 載入資料
-            const response = await fetch(`${apiUrl}?PaperNum=${paperNum}`);
-            console.log(`📡 [MultiTab] 收到回應 (${Date.now() - startTime}ms):`, response.status, response.statusText);
-
+            const response = await fetch(withPaperNum(apiUrl));
+        
             // 檢查 HTTP 狀態
             if (!response.ok) {
                 const errorText = await response.text();
@@ -453,7 +446,7 @@
             }
 
             const data = await response.json();
-            console.log(`✅ [MultiTab] 資料載入成功 (${Date.now() - startTime}ms):`, data.length, '筆資料');
+        
 
             // 渲染表格
             await renderTable(container, data, tabId);
@@ -471,7 +464,7 @@
                 </div>`);
         } finally {
             loading.style.display = 'none';
-            console.log(`🏁 [MultiTab] 載入完成 (${Date.now() - startTime}ms)`);
+    
         }
     }
 
@@ -482,6 +475,7 @@
 
     // 使用事件委派綁定新增按鈕（因為按鈕是動態生成的）
     document.addEventListener('click', async function(e) {
+        if (!allowEdit) return;
         if (!e.target.classList.contains('btn-add-row')) return;
 
         const btn = e.target;
@@ -552,11 +546,12 @@
             this.classList.add('row-selected');
         });
 
-        console.log(`✅ 新增列: ${tabId}, Item: ${newItem}`);
+
     });
 
     // 使用事件委派綁定刪除按鈕（因為按鈕是動態生成的）
     document.addEventListener('click', async function(e) {
+        if (!allowEdit) return;
         if (!e.target.classList.contains('btn-delete-row')) return;
 
         const btn = e.target;
@@ -607,7 +602,7 @@
             const next = selectedRow.nextElementSibling || selectedRow.previousElementSibling;
             selectedRow.remove();
             if (next) next.classList.add('row-selected');
-            console.log(`✅ 刪除未儲存的列: Item ${item}`);
+          
             return;
         }
 
@@ -621,7 +616,6 @@
 
             const deleteUrl = `/api/${tableName}/${encodeURIComponent(paperNum)}/${encodeURIComponent(item)}`;
 
-            console.log(`🗑️ 刪除 API: ${deleteUrl}`);
 
             const response = await fetch(deleteUrl, { method: 'DELETE' });
 
@@ -649,7 +643,7 @@
             selectedRow.remove();
             if (next) next.classList.add('row-selected');
 
-            console.log(`✅ 刪除成功: Item ${item}`);
+ 
             Swal.fire({
                 icon: 'success',
                 title: '刪除完成',

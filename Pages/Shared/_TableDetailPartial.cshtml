@@ -19,13 +19,19 @@
     var keyFieldName = ViewData["KeyFieldName"]?.ToString() ?? "PaperNum";
     var queryRedirectUrl = ViewData["QueryRedirectUrl"]?.ToString() ?? "";
     var DeleteApiUrl = ViewData["DeleteApiUrl"]?.ToString() ?? "";
+    static int NormalizeShowWhere(int? v)
+    {
+        // 有些單據字典的 iShowWhere 會是 0（代表第一頁），若過濾會導致單頭整段消失
+        return (v.HasValue && v.Value > 0) ? v.Value : 1;
+    }
 
     var groupedTabs = headerFieldsList
-        .Where(f => (f.iShowWhere ?? 1) > 0) // ➜ 過濾掉 iShowWhere 為 0 的欄位
-        .GroupBy(f => f.iShowWhere ?? 1)
+        .GroupBy(f => NormalizeShowWhere(f.iShowWhere))
         .OrderBy(g => g.Key)
         .ToDictionary(g => g.Key, g => g.ToList());
 
+    var firstTabKey = groupedTabs.Keys.FirstOrDefault();
+    if (firstTabKey <= 0) firstTabKey = 1;
     int GetDetailColWidth(TableFieldViewModel c)
     {
         int? byFieldWidth = (c?.iFieldWidth != null && c.iFieldWidth > 0) ? c.iFieldWidth.Value : null;
@@ -111,7 +117,7 @@
                 @foreach (var tab in groupedTabs.Keys)
                 {
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link @(tab == 1 ? "active" : "")"
+                        <button class="nav-link @(tab == firstTabKey ? "active" : "")"
                                 id="tab-@tab-tab"
                                 data-bs-toggle="tab"
                                 data-bs-target="#tab-@tab"
@@ -126,7 +132,7 @@
               <div class="tab-content" id="headerTabContent">
                     @foreach (var tab in groupedTabs)
                     {
-                        <div class="tab-pane fade @(tab.Key == 1 ? "show active" : "")"
+                        <div class="tab-pane fade @(tab.Key == firstTabKey ? "show active" : "")"
                             id="tab-@tab.Key" role="tabpanel">
                             <ul class="list-unstyled header-fields-tab"
                                 data-tab-index="@tab.Key"
