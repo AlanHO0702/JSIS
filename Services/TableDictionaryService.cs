@@ -130,7 +130,7 @@ public class TableDictionaryService : ITableDictionaryService
                                          || x.TableName.ToLower().Replace("dbo.", "") == tname)
                                      && x.FieldName == field.FieldName);
 
-            if (lkSetting == null) continue;
+                if (lkSetting == null) continue;
 
             var ocxTableName = field.OCXLKTableName;
             var ocxResultName = field.OCXLKResultName;

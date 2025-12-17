@@ -44,7 +44,7 @@ namespace PcbErpApi.Controllers
         [HttpPost("PagedQuery")]
         public async Task<IActionResult> PagedQuery([FromBody] QueryFilterRequest request)
         {
-            var tableName = request?.Table?.Trim().ToLower();
+            var tableName = request?.Table?.Trim();
             var filters = request?.filters ?? new List<QueryParamDto>();
 
             if (string.IsNullOrEmpty(tableName))
@@ -60,10 +60,12 @@ namespace PcbErpApi.Controllers
             if (!int.TryParse(pageSize, out int pageSizeNumber)) pageSizeNumber = 50;
 
             // 1) 取 DbSet / entityType / query
+            // 將 View 名稱對應到 DbSet 屬性名稱（移除底線和特殊字元）
+            var dbSetName = MapViewNameToDbSetName(tableName);
             var dbSetProp = _context.GetType().GetProperties()
-                .FirstOrDefault(p => p.Name.Equals(tableName, StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(p => p.Name.Equals(dbSetName, StringComparison.OrdinalIgnoreCase));
             if (dbSetProp == null)
-                return BadRequest($"找不到 Table {tableName}");
+                return BadRequest($"找不到 Table {tableName} (嘗試對應到 DbSet: {dbSetName})");
 
             var entityType = dbSetProp.PropertyType.GenericTypeArguments.First();
             var query = (IQueryable)dbSetProp.GetValue(_context);
@@ -127,7 +129,7 @@ namespace PcbErpApi.Controllers
             var lookupMaps = tableDictService.GetOCXLookups(tableName);
 
             var fields = _context.CURdTableFields
-                .Where(f => f.TableName.ToLower() == tableName)
+                .Where(f => f.TableName == tableName)
                 .Select(f => new TableFieldViewModel
                 {
                     FieldName = f.FieldName,
@@ -195,7 +197,22 @@ namespace PcbErpApi.Controllers
             return prop?.Name ?? field; // 找不到就原樣返回（讓你看 log）
         }
 
+        /// <summary>
+        /// 將資料庫 View 名稱對應到 DbSet 屬性名稱
+        /// 例如: FMEdV_ProcNIS_ToStd -> FmedVProcNisToStd
+        /// </summary>
+        private static string MapViewNameToDbSetName(string viewName)
+        {
+            if (string.IsNullOrWhiteSpace(viewName))
+                return viewName;
+
+            // 移除所有底線和特殊字元，保留字母和數字
+            var cleanName = Regex.Replace(viewName, @"[_\-]", "");
+
+            return cleanName;
+        }
+
     }
-    
-    
+
+
 }

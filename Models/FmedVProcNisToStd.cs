@@ -21,7 +21,7 @@ public partial class FmedVProcNisToStd
 
     public int Pop { get; set; }
 
-    public string? Popname { get; set; }
+    public string? PopName { get; set; }
 
     public decimal? Qnty { get; set; }
 

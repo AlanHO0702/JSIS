@@ -39,6 +39,9 @@ namespace PcbErpApi.Data
         public virtual DbSet<AjndSubAccId> AjndSubAccId { get; set; }
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
         public virtual DbSet<EmodProdInfo> EmodProdInfos { get; set; }
+        public virtual DbSet<EmodProcInfo> EmodProcInfos { get; set; }
+        public virtual DbSet<FqcdProcInfo> FqcdProcInfos { get; set; }
+        public virtual DbSet<FmedBigProcParam> FmedBigProcParams { get; set; }
         public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
         public virtual DbSet<CurdOcxtableSetUp> CurdOcxtableSetUp { get; set; }
         public virtual DbSet<CurdPaperPaper> CurdPaperPaper { get; set; }
@@ -895,7 +898,7 @@ namespace PcbErpApi.Data
                 .HasColumnType("decimal(24, 8)")
                 .HasColumnName("PIValueNIS");
             entity.Property(e => e.Pop).HasColumnName("POP");
-            entity.Property(e => e.Popname)
+            entity.Property(e => e.PopName)
                 .HasMaxLength(24)
                 .HasColumnName("POPName");
             entity.Property(e => e.ProcCode)
@@ -1605,6 +1608,104 @@ namespace PcbErpApi.Data
                    .HasMaxLength(12)
                    .IsUnicode(false);
            });
+
+            modelBuilder.Entity<EmodProcInfo>(entity =>
+            {
+                entity.HasKey(e => e.ProcCode);
+
+                entity.ToTable("EMOdProcInfo");
+
+                entity.Property(e => e.ProcCode)
+                    .HasMaxLength(8)
+                    .IsUnicode(false);
+                entity.Property(e => e.ProcName).HasMaxLength(40);
+                entity.Property(e => e.CostCenter)
+                    .HasMaxLength(8)
+                    .IsUnicode(false);
+                entity.Property(e => e.DepartId)
+                    .HasMaxLength(12)
+                    .IsUnicode(false);
+                entity.Property(e => e.CapId)
+                    .HasMaxLength(12)
+                    .IsUnicode(false);
+                entity.Property(e => e.FromTime)
+                    .HasMaxLength(5)
+                    .IsUnicode(false);
+                entity.Property(e => e.DueTime)
+                    .HasMaxLength(5)
+                    .IsUnicode(false);
+                entity.Property(e => e.HaltTime).HasColumnType("datetime");
+                entity.Property(e => e.Memo).HasMaxLength(100);
+                entity.Property(e => e.RuleItem).HasMaxLength(16);
+                entity.Property(e => e.ProcGroup)
+                    .HasMaxLength(4)
+                    .IsUnicode(false);
+                entity.Property(e => e.Other1).HasMaxLength(50);
+                entity.Property(e => e.Other2).HasMaxLength(50);
+                entity.Property(e => e.Other3).HasMaxLength(50);
+                entity.Property(e => e.Other4).HasMaxLength(50);
+                entity.Property(e => e.Other5).HasMaxLength(50);
+                entity.Property(e => e.Qctype)
+                    .HasMaxLength(1)
+                    .IsUnicode(false)
+                    .HasColumnName("QCType");
+                entity.Property(e => e.ProcNameEng).HasMaxLength(40);
+                entity.Property(e => e.ComputeId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false);
+            });
+
+            modelBuilder.Entity<FqcdProcInfo>(entity =>
+            {
+                entity.HasKey(e => e.BProcCode);
+
+                entity.ToTable("FQCdProcInfo");
+
+                entity.Property(e => e.BProcCode)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.BProcName).HasMaxLength(200);
+                entity.Property(e => e.SQU4ValueNum)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.ProfitCenter)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.BProcNameEng).HasMaxLength(200);
+
+                // Ignore 用於 lookup 的欄位（不在資料表中）
+                entity.Ignore(e => e.BPTypeNameM);
+            });
+
+            modelBuilder.Entity<FmedBigProcParam>(entity =>
+            {
+                entity.HasKey(e => new { e.ProcCode, e.ParamId });
+
+                entity.ToTable("FMEdBigProcParam");
+
+                entity.Property(e => e.ProcCode)
+                    .HasMaxLength(8)
+                    .IsUnicode(false);
+                entity.Property(e => e.ProcGroup)
+                    .HasMaxLength(4)
+                    .IsUnicode(false);
+                entity.Property(e => e.ParamId)
+                    .HasMaxLength(20)
+                    .IsUnicode(false);
+                entity.Property(e => e.ParamName).HasMaxLength(100);
+                entity.Property(e => e.ParamValue).HasMaxLength(100);
+                entity.Property(e => e.StdValue).HasMaxLength(100);
+                entity.Property(e => e.Unit).HasMaxLength(20);
+                entity.Property(e => e.ParamType)
+                    .HasMaxLength(20)
+                    .IsUnicode(false);
+                entity.Property(e => e.Memo).HasMaxLength(200);
+                entity.Property(e => e.CreateDate).HasColumnType("datetime");
+                entity.Property(e => e.ModifyDate).HasColumnType("datetime");
+                entity.Property(e => e.Other1).HasMaxLength(50);
+                entity.Property(e => e.Other2).HasMaxLength(50);
+                entity.Property(e => e.Other3).HasMaxLength(50);
+            });
 
             modelBuilder.Entity<EmodProdInfo>(entity =>
             {

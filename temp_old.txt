@@ -19,9 +19,6 @@
     var keyFieldsFromViewData = (IEnumerable<string>)(ViewData["KeyFields"] as IEnumerable<string> ?? Array.Empty<string>());
     var dictFields    = (IEnumerable<dynamic>)(ViewData["FieldDictList"] as IEnumerable<dynamic> ?? fields);
     var dictTableName = (string?)(ViewData["DictTableName"] as string) ?? tableName;
-    var enableRowDelete = (ViewData["EnableRowDelete"] as bool?)
-        ?? (string.Equals(ViewData["EnableRowDelete"]?.ToString(), "true", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(ViewData["EnableRowDelete"]?.ToString(), "1", StringComparison.OrdinalIgnoreCase));
     var ocxLookupsRaw = ViewData["OCXLookups"] as IEnumerable<dynamic>;
     var ocxLookupPayload = ocxLookupsRaw?.ToDictionary(
         k => ((string)k.FieldName).ToLowerInvariant(),
@@ -86,41 +83,6 @@
         var prop = item.GetType().GetProperty(name!, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
         return prop?.GetValue(item);
     }
-
-    private static bool ToBool(object? raw, bool defaultValue)
-    {
-        if (raw == null) return defaultValue;
-
-        return raw switch
-        {
-            bool b => b,
-            byte b => b != 0,
-            sbyte b => b != 0,
-            short n => n != 0,
-            ushort n => n != 0,
-            int n => n != 0,
-            uint n => n != 0,
-            long n => n != 0,
-            ulong n => n != 0,
-            decimal n => n != 0m,
-            double n => Math.Abs(n) > double.Epsilon,
-            float n => Math.Abs(n) > float.Epsilon,
-            _ => ParseBool(raw.ToString(), defaultValue)
-        };
-
-        static bool ParseBool(string? text, bool fallback)
-        {
-            var s = text?.Trim();
-            if (string.IsNullOrWhiteSpace(s)) return fallback;
-
-            if (bool.TryParse(s, out var b)) return b;
-            if (int.TryParse(s, out var n)) return n != 0;
-            if (string.Equals(s, "Y", StringComparison.OrdinalIgnoreCase)) return true;
-            if (string.Equals(s, "N", StringComparison.OrdinalIgnoreCase)) return false;
-
-            return fallback;
-        }
-    }
 }
 
 <style>
@@ -155,12 +117,6 @@
           <button id="btnSaveTable" type="button" class="btn btn-success btn-sm fw-bold d-none">
             <i class="bi bi-save me-1"></i> 儲存
           </button>
-          @if (enableRowDelete)
-          {
-            <button id="btnDeleteRow" type="button" class="btn btn-danger btn-sm fw-bold">
-              <i class="bi bi-trash me-1"></i> &#21034;&#38500;
-            </button>
-          }
           <button id="btnOpenQuery" type="button" class="btn btn-outline-primary btn-sm fw-bold">
             <i class="bi bi-search me-1"></i> 查詢
           </button>
@@ -199,7 +155,7 @@
             @foreach (var f in fields)
             {
               var w = ToColWidthPx(f, 10);
-              var isHidden = !ToBool(f.Visible, defaultValue: true);
+              var isHidden = f.Visible == 0;
               var hiddenStyle = isHidden ? "display:none;" : "";
               if (w > 0)
               { <col data-field="@f.FieldName" style="@hiddenStyle width:@($"{w}px");min-width:@($"{w}px");max-width:@($"{w}px")" /> }
@@ -212,7 +168,7 @@
             <tr>
               @foreach (var f in fields)
               {
-                var isHidden = !ToBool(f.Visible, defaultValue: true);
+                var isHidden = f.Visible == 0;
                 var hiddenStyle = isHidden ? "display:none;" : "";
                 var currentSortBy = ViewData["SortBy"] as string;
                 var currentSortDir = ViewData["SortDir"] as string;
@@ -247,8 +203,8 @@
                       var keyFieldVal = "";
                       var keySelfVal = "";
 
-                      bool isReadOnly = ToBool(f.ReadOnly, defaultValue: false);
-                      bool isHidden = !ToBool(f.Visible, defaultValue: true);
+                      bool isReadOnly = f.ReadOnly != null && (int)f.ReadOnly != 0;
+                      bool isHidden = f.Visible == 0;
                       var hiddenStyle = isHidden ? "display:none;" : "";
 
                       // 依 OCX 設定帶出 key 欄位，讓 lookup 有依據
@@ -370,12 +326,10 @@ table th{position:relative;}
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-<script src="~/js/gridToolbarTemplate.js"></script>
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   const editBtn = document.getElementById("btnEditToggle");
   const saveBtn = document.getElementById("btnSaveTable");
-  const delBtn  = document.getElementById("btnDeleteRow");
   const wrapper = document.querySelector(".table-wrapper");
   const table   = document.getElementById("mainGrid");
   const ocxLookupMaps = @Html.Raw(JsonSerializer.Serialize(ocxLookupPayload));
@@ -582,83 +536,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // 依複合鍵找列
-  async function deleteSelectedRow() {
-    const tr = window.SELECTED_ROW;
-    if (!tr) {
-      Swal.fire({ icon: 'warning', title: '\u8acb\u5148\u9078\u53d6\u4e00\u7b46\u8cc7\u6599' });
-      return;
-    }
-
-    const keyValues = {};
-    KEY_FIELDS.forEach(k => {
-      const inp = Array.from(tr.querySelectorAll('.cell-edit')).find(i => (i.name || '').toLowerCase() === k);
-      if (!inp) return;
-      keyValues[inp.name] = inp.defaultValue ?? inp.value ?? "";
-    });
-
-    const missingKeys = KEY_FIELDS.filter(k => !Object.keys(keyValues).some(n => n.toLowerCase() === k));
-    if (missingKeys.length) {
-      Swal.fire({
-        icon: 'error',
-        title: '\u522a\u9664\u5931\u6557',
-        text: `\u7f3a\u5c11\u4e3b\u9375/\u7d22\u5f15\u6b04\u4f4d: ${missingKeys.join(', ')}`
-      });
-      return;
-    }
-
-    const ok = await Swal.fire({
-      icon: 'warning',
-      title: '\u78ba\u5b9a\u8981\u522a\u9664\u9019\u4e00\u7b46\u55ce\uff1f',
-      showCancelButton: true,
-      confirmButtonText: '\u522a\u9664',
-      cancelButtonText: '\u53d6\u6d88',
-      confirmButtonColor: '#dc3545'
-    });
-    if (!ok.isConfirmed) return;
-
-    const resp = await fetch('/api/CommonTable/SaveTableChanges', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        TableName: "@tableName",
-        KeyFields: KEY_FIELDS,
-        Data: [{ __delete: true, ...keyValues }]
-      })
-    });
-
-    if (!resp.ok) {
-      Swal.fire({ icon: 'error', title: '\u522a\u9664\u5931\u6557', text: await resp.text() });
-      return;
-    }
-
-    let affected = null;
-    try {
-      const json = await resp.json();
-      affected = json?.results?.[0]?.affected ?? null;
-    } catch { }
-
-    tr.remove();
-    window.SELECTED_ROW = null;
-
-    if (typeof affected === 'number' && affected > 1) {
-      Swal.fire({
-        icon: 'warning',
-        title: '\u522a\u9664\u5b8c\u6210',
-        text: `\u6ce8\u610f\uff1a\u5f71\u97ff\u884c\u6578 = ${affected}\uff0c\u5efa\u8b70\u91cd\u65b0\u67e5\u8a62\u78ba\u8a8d`
-      });
-    } else {
-      Swal.fire({ icon: 'success', title: '\u522a\u9664\u5b8c\u6210', timer: 900, showConfirmButton: false });
-    }
-  }
-
-  if (delBtn) {
-    if (window.createGridController) {
-      window.createGridController({ name: 'singleGridDelete', btnDelete: delBtn, onDelete: deleteSelectedRow });
-    } else {
-      delBtn.addEventListener('click', deleteSelectedRow);
-    }
-  }
-
   function findRowByKeys(change) {
     const rows = Array.from(table.querySelectorAll("tbody tr"));
     return rows.find(tr => {
@@ -725,22 +602,14 @@ document.addEventListener("DOMContentLoaded", () => {
   buildCustomButtonsFromMeta();
   wireCustomButtons();
 
-  // 共用狀態變數
-  let isSorting = false; // 防止重複請求（排序、分頁共用）
-  let currentSortBy = '@(ViewData["SortBy"] as string ?? "")';
-  let currentSortDir = '@(ViewData["SortDir"] as string ?? "")';
-
-  // 分頁控制
+  // 分頁控制：直接以 query string 切換頁碼
   const pagerPrev = document.getElementById("pagerPrev");
   const pagerNext = document.getElementById("pagerNext");
   const pagerLast = document.getElementById("pagerLast");
   const pagerFirst = document.getElementById("pagerFirst");
   const pagerPageSize = document.getElementById("pagerPageSize");
-  const pagerCurrentEl = document.getElementById("pagerCurrent");
-  const pagerTotalEl = document.getElementById("pagerTotal");
-  let currentPage = parseInt(pagerCurrentEl?.textContent || "1", 10);
-  let totalPages = parseInt(pagerTotalEl?.textContent || "1", 10);
-  let pageSize = @pageSize;
+  const currentPage = parseInt(document.getElementById("pagerCurrent")?.textContent || "1", 10);
+  const totalPages = parseInt(document.getElementById("pagerTotal")?.textContent || "1", 10);
   const pagerGoInput = document.getElementById("pagerGoInput");
   const pagerGoBtn = document.getElementById("pagerGoBtn");
   const btnOpenQuery = document.getElementById("btnOpenQuery");
@@ -756,113 +625,23 @@ document.addEventListener("DOMContentLoaded", () => {
     })
   ));
 
-  // 更新分頁資訊
-  function updatePager(newPage, newPageSize, newTotalCount) {
-    currentPage = newPage;
-    pageSize = newPageSize;
-    totalPages = Math.max(1, Math.ceil(newTotalCount / newPageSize));
-
-    // 更新 DOM
-    if (pagerCurrentEl) pagerCurrentEl.textContent = currentPage;
-    if (pagerTotalEl) pagerTotalEl.textContent = totalPages;
-    if (pagerGoInput) {
-      pagerGoInput.value = currentPage;
-      pagerGoInput.max = totalPages;
-    }
-
-    // 更新按鈕狀態
-    if (pagerFirst) pagerFirst.disabled = currentPage <= 1;
-    if (pagerPrev) pagerPrev.disabled = currentPage <= 1;
-    if (pagerNext) pagerNext.disabled = currentPage >= totalPages;
-    if (pagerLast) pagerLast.disabled = currentPage >= totalPages;
+  function goPage(p) {
+    if (!Number.isFinite(p) || p < 1) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("pageIndex", p);
+    // 兼容舊的 page 參數：移除以免覆蓋
+    url.searchParams.delete("page");
+    if (pagerPageSize) url.searchParams.set("pageSize", pagerPageSize.value);
+    window.location.href = url.toString();
   }
 
-  async function goPage(p) {
-    console.log('[goPage] Called with p =', p, 'currentPage =', currentPage, 'totalPages =', totalPages);
-
-    if (!Number.isFinite(p) || p < 1) {
-      console.log('[goPage] Invalid page number, returning');
-      return;
-    }
-
-    if (isSorting) {
-      console.log('[goPage] Already sorting, returning');
-      return;
-    }
-
-    isSorting = true;
-    showLoading();
-    console.log('[goPage] Starting page change to', p);
-
-    try {
-      const newPageSize = pagerPageSize ? parseInt(pagerPageSize.value) : pageSize;
-
-      // 呼叫 AJAX API
-      const url = window.location.pathname + '?handler=Data&pageIndex=' + p + '&pageSize=' + newPageSize +
-        (currentSortBy ? '&sortBy=' + encodeURIComponent(currentSortBy) : '') +
-        (currentSortDir ? '&sortDir=' + encodeURIComponent(currentSortDir) : '');
-
-      console.log('[goPage] Fetching URL:', url);
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error('HTTP error! status: ' + response.status);
-      }
-
-      const data = await response.json();
-      console.log('[goPage] Response data:', data);
-
-      if (!data.success) {
-        throw new Error(data.error || 'Unknown error');
-      }
-
-      // 更新表格
-      const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
-      updateTableBody(data.items, fields);
-      applyLookupToTable(); // 套用 lookup 顯示
-      console.log('[goPage] Table updated with', data.items.length, 'items');
-
-      // 更新分頁資訊
-      updatePager(data.pageNumber, newPageSize, data.totalCount);
-      console.log('[goPage] Pager updated: page', data.pageNumber, 'of', totalPages);
-
-    } catch (err) {
-      console.error('[goPage] Page change failed:', err);
-      alert('換頁失敗：' + err.message);
-    } finally {
-      hideLoading();
-      isSorting = false;
-      console.log('[goPage] Finished');
-    }
-  }
-
-  pagerFirst?.addEventListener("click", (e) => {
-    console.log('[pagerFirst] Clicked');
-    e.preventDefault();
-    goPage(1);
-  });
-  pagerPrev?.addEventListener("click", (e) => {
-    console.log('[pagerPrev] Clicked, disabled =', e.currentTarget.disabled, 'currentPage =', currentPage);
-    e.preventDefault();
-    if (!e.currentTarget.disabled) goPage(currentPage - 1);
-  });
-  pagerNext?.addEventListener("click", (e) => {
-    console.log('[pagerNext] Clicked, disabled =', e.currentTarget.disabled, 'currentPage =', currentPage);
-    e.preventDefault();
-    if (!e.currentTarget.disabled) goPage(currentPage + 1);
-  });
-  pagerLast?.addEventListener("click", (e) => {
-    console.log('[pagerLast] Clicked, disabled =', e.currentTarget.disabled, 'totalPages =', totalPages);
-    e.preventDefault();
-    if (!e.currentTarget.disabled) goPage(totalPages);
-  });
-  pagerPageSize?.addEventListener("change", () => {
-    console.log('[pagerPageSize] Changed');
-    goPage(1);
-  });
+  pagerFirst?.addEventListener("click", () => goPage(1));
+  pagerPrev?.addEventListener("click", () => goPage(currentPage - 1));
+  pagerNext?.addEventListener("click", () => goPage(currentPage + 1));
+  pagerLast?.addEventListener("click", () => goPage(totalPages));
+  pagerPageSize?.addEventListener("change", () => goPage(1));
   pagerGoBtn?.addEventListener("click", () => {
     const v = parseInt(pagerGoInput?.value || "1", 10);
-    console.log('[pagerGoBtn] Clicked, value =', v);
     if (Number.isFinite(v)) goPage(Math.min(Math.max(1, v), totalPages));
   });
   pagerGoInput?.addEventListener("keyup", (e) => {
@@ -950,9 +729,6 @@ document.addEventListener("DOMContentLoaded", () => {
     // 保留 pageSize，其餘重新以 pageIndex=1
     url.searchParams.delete("pageIndex");
     url.searchParams.set("pageIndex", "1");
-    // 移除排序參數（排序已改用 AJAX，不需要在網址中）
-    url.searchParams.delete("sortBy");
-    url.searchParams.delete("sortDir");
 
     // 收集查詢欄位
     Array.from(queryForm.elements).forEach(el => {
@@ -1034,185 +810,38 @@ document.addEventListener("DOMContentLoaded", () => {
       console.warn("save width failed", err);
     }
   });
+});
 
-  // ===== AJAX 排序功能 =====
+// 排序功能
+document.addEventListener("DOMContentLoaded", () => {
   const headers = document.querySelectorAll(".sortable-header .header-label");
-  const sortTableBody = document.querySelector("#mainGrid tbody");
-  const tableWrapper = document.querySelector(".table-fix-wrapper");
 
-  // Loading overlay
-  const loadingOverlay = document.createElement('div');
-  loadingOverlay.className = 'table-loading-overlay';
-  loadingOverlay.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>';
-  loadingOverlay.style.cssText = 'position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(255,255,255,0.8);z-index:1000;';
-  tableWrapper?.appendChild(loadingOverlay);
-
-  // 顯示 Loading
-  function showLoading() {
-    if (loadingOverlay) loadingOverlay.style.display = 'flex';
-  }
-
-  // 隱藏 Loading
-  function hideLoading() {
-    if (loadingOverlay) loadingOverlay.style.display = 'none';
-  }
-
-  // 更新排序圖示
-  function updateSortIcons(fieldName, sortDir) {
-    document.querySelectorAll('.sort-icon').forEach(icon => icon.textContent = '');
-    const th = document.querySelector(`.sortable-header[data-field="${fieldName}"]`);
-    if (th) {
-      const icon = th.querySelector('.sort-icon');
-      if (icon) icon.textContent = sortDir === 'desc' ? '▼' : '▲';
-    }
-  }
-
-  // 更新表格內容
-  function updateTableBody(items, fields) {
-    const tbody = sortTableBody || document.querySelector("#mainGrid tbody");
-    if (!tbody) return;
-
-    if (!items || items.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="' + fields.length + '" class="text-center text-muted py-3">（無資料）</td></tr>';
-      return;
-    }
-
-    const ocxLookupPayload = @Html.Raw(JsonSerializer.Serialize(ocxLookupPayload));
-
-    tbody.innerHTML = items.map(item => {
-      return '<tr>' + fields.map(f => {
-        const fieldName = f.FieldName;
-        const rawVal = item[fieldName] ?? item[fieldName?.toLowerCase()] ?? '';
-        const isHidden = f.Visible == 0;
-        const hiddenStyle = isHidden ? 'display:none;' : '';
-        const isReadOnly = f.ReadOnly != null && f.ReadOnly != 0;
-
-        // 計算 lookupKey（與初始渲染邏輯一致）
-        let lookupKey = rawVal;
-        const ocxLookup = ocxLookupPayload[fieldName?.toLowerCase()];
-        if (ocxLookup) {
-          const keyFieldName = ocxLookup.keyField;
-          const keySelfName = ocxLookup.keySelf;
-
-          let keyFieldVal = '';
-          let keySelfVal = '';
-
-          if (keyFieldName) {
-            const kfVal = item[keyFieldName] ?? item[keyFieldName?.toLowerCase()];
-            keyFieldVal = (kfVal !== null && kfVal !== undefined) ? String(kfVal) : '';
-          }
-          if (keySelfName) {
-            const ksVal = item[keySelfName] ?? item[keySelfName?.toLowerCase()];
-            keySelfVal = (ksVal !== null && ksVal !== undefined) ? String(ksVal) : '';
-          }
-
-          // 優先使用 keyFieldVal，其次 keySelfVal，最後才用 rawVal
-          // 這樣可以確保 lookup 欄位（如 StatusName）能用對應的 key 欄位（如 Status）的值
-          if (keyFieldVal !== '') {
-            lookupKey = keyFieldVal;
-          } else if (keySelfVal !== '') {
-            lookupKey = keySelfVal;
-          } else if (lookupKey === '' && rawVal !== null && rawVal !== undefined) {
-            lookupKey = String(rawVal);
-          }
-        }
-
-        // 簡單格式化
-        let displayVal = rawVal;
-        if (rawVal instanceof Date || (typeof rawVal === 'string' && rawVal.match(/^\d{4}-\d{2}-\d{2}/))) {
-          const date = new Date(rawVal);
-          if (!isNaN(date)) {
-            displayVal = date.toLocaleDateString('zh-TW') + ' ' + date.toLocaleTimeString('zh-TW', {hour: '2-digit', minute: '2-digit'});
-          }
-        } else if (typeof rawVal === 'number') {
-          displayVal = rawVal.toLocaleString('zh-TW');
-        }
-
-        // 安全處理值，避免 0 被視為 falsy
-        const safeRawVal = (rawVal !== null && rawVal !== undefined) ? String(rawVal) : '';
-        const safeLookupKey = (lookupKey !== null && lookupKey !== undefined) ? String(lookupKey) : '';
-        const safeDisplayVal = (displayVal !== null && displayVal !== undefined) ? String(displayVal) : '';
-
-        // 產生與初始渲染一致的結構，包含 data-field, cell-view, cell-edit
-        return '<td class="text-nowrap" data-field="' + fieldName + '" style="' + hiddenStyle + '">' +
-          '<span class="cell-view" data-raw="' + safeRawVal + '" data-lookupkey="' + safeLookupKey + '">' + safeDisplayVal + '</span>' +
-          '<input class="form-control form-control-sm cell-edit d-none ' + (isReadOnly ? 'readonly-cell' : '') + '" ' +
-          'name="' + fieldName + '" ' +
-          'value="' + safeRawVal + '" ' +
-          'data-raw="' + safeRawVal + '" ' +
-          'data-lookupkey="' + safeLookupKey + '" ' +
-          'data-readonly="' + (isReadOnly ? '1' : '0') + '" ' +
-          (isReadOnly ? 'readonly' : '') + ' />' +
-          '</td>';
-      }).join('') + '</tr>';
-    }).join('');
-  }
-
-  // AJAX 排序處理
-  async function handleSort(fieldName) {
-    if (isSorting) return;
-    isSorting = true;
-    showLoading();
-
-    try {
-      // 處理 Lookup 欄位：先計算實際要排序的欄位名稱
-      let actualFieldName = fieldName;
-      if (fieldName.endsWith('Name')) {
-        const baseFieldName = fieldName.substring(0, fieldName.length - 4);
-        // 檢查這個基礎欄位是否存在
-        const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
-        const baseField = fields.find(f => f.FieldName === baseFieldName);
-        if (baseField) {
-          actualFieldName = baseFieldName;
-        }
-      }
-
-      // 決定新的排序方向（使用實際欄位名稱比較）
-      let newSortDir = 'asc';
-      if (currentSortBy === actualFieldName) {
-        newSortDir = currentSortDir === 'asc' ? 'desc' : 'asc';
-      }
-
-      // 呼叫 AJAX API
-      const url = window.location.pathname + '?handler=Data&sortBy=' + encodeURIComponent(actualFieldName) + '&sortDir=' + newSortDir + '&pageIndex=1';
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error('HTTP error! status: ' + response.status);
-      }
-
-      const data = await response.json();
-
-      if (!data.success) {
-        throw new Error(data.error || 'Unknown error');
-      }
-
-      // 更新表格
-      const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
-      updateTableBody(data.items, fields);
-      applyLookupToTable(); // 套用 lookup 顯示
-
-      // 更新排序狀態（使用實際傳送的欄位名稱）
-      currentSortBy = actualFieldName;
-      currentSortDir = newSortDir;
-      updateSortIcons(fieldName, newSortDir);
-
-    } catch (err) {
-      console.error('Sort failed:', err);
-      alert('排序失敗：' + err.message);
-    } finally {
-      hideLoading();
-      isSorting = false;
-    }
-  }
-
-  // 綁定點擊事件
   headers.forEach(headerLabel => {
     headerLabel.addEventListener("click", (e) => {
       e.stopPropagation(); // 防止觸發 col-resizer
+
       const th = headerLabel.closest("th");
       const fieldName = th?.getAttribute("data-field");
-      if (fieldName) handleSort(fieldName);
+      if (!fieldName) return;
+
+      // 取得當前排序狀態
+      const urlParams = new URLSearchParams(window.location.search);
+      const currentSortBy = urlParams.get("sortBy");
+      const currentSortDir = urlParams.get("sortDir");
+
+      // 決定新的排序方向
+      let newSortDir = "asc";
+      if (currentSortBy === fieldName) {
+        // 同一欄位：切換排序方向
+        newSortDir = currentSortDir === "asc" ? "desc" : "asc";
+      }
+
+      // 更新 URL 參數並重新載入
+      urlParams.set("sortBy", fieldName);
+      urlParams.set("sortDir", newSortDir);
+      urlParams.set("pageIndex", "1"); // 排序時重設到第一頁
+
+      window.location.search = urlParams.toString();
     });
   });
 });
