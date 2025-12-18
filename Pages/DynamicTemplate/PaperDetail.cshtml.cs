@@ -33,7 +33,9 @@ namespace PcbErpApi.Pages.DynamicTemplate
         public string DetailTable { get; private set; } = string.Empty;
         public string MasterDictTable { get; private set; } = string.Empty;
         public string DetailDictTable { get; private set; } = string.Empty;
-        public string DictTableName => DetailTable;
+        // _DetailHeaderSection / custom buttons 會用 ViewData["DictTableName"] 當作「單身表」辨識
+        // 這裡回傳 DETAIL1 的字典表名（而非 Master），避免像「清除單身」等功能抓錯表
+        public string DictTableName => string.IsNullOrWhiteSpace(DetailDictTable) ? MasterDictTable : DetailDictTable;
         public string AddApiUrl => $"/api/{MasterTable}";
         public string DetailRouteTemplate => $"/DynamicTemplate/Paper/{ItemId}/{{PaperNum}}";
         public string PageTitle { get; private set; } = "單據動態樣板";
@@ -52,7 +54,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
         public List<ItemCustButtonRow> CustomButtons { get; private set; } = new();
 
         public string HeaderTableName => MasterTable;
-        public string TableName => DetailTable;
+        public string TableName => MasterTable;
 
         public async Task<IActionResult> OnGetAsync(string itemId, string paperNum)
         {
@@ -81,16 +83,19 @@ namespace PcbErpApi.Pages.DynamicTemplate
             if (master == null)
                 return NotFound($"No master table for item {itemId}.");
 
-            var detail = setupList
+            var details = setupList
                 .Where(x => (x.TableKind ?? "").StartsWith("Detail", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(x => x.TableKind)
-                .FirstOrDefault();
+                .OrderBy(x => ExtractOrderIndex(x.TableKind))
+                .ThenBy(x => x.TableKind)
+                .ThenBy(x => x.TableName)
+                .ToList();
 
-            if (detail == null)
+            if (details.Count == 0)
                 return NotFound($"No detail table found for item {itemId}.");
 
             MasterDictTable = master.TableName ?? "";
-            DetailDictTable = detail.TableName ?? "";
+            // 保留既有單一 detail 的欄位/lookup 行為（取第一筆作為預設）
+            DetailDictTable = details[0].TableName ?? "";
 
             MasterTable = await ResolveRealTableNameAsync(MasterDictTable) ?? MasterDictTable;
             DetailTable = await ResolveRealTableNameAsync(DetailDictTable) ?? DetailDictTable;
@@ -102,20 +107,39 @@ namespace PcbErpApi.Pages.DynamicTemplate
             // 1) Header data
             HeaderData = await LoadHeaderAsync(MasterDictTable, PaperNum);
 
-            // 2) Detail data
-            Items = await LoadDetailAsync(DetailDictTable, PaperNum);
-            ViewData["DetailTableName"] = DetailDictTable;
-            ViewData["DetailLoadError"] = DetailLoadError;
-            ViewData["DetailCount"] = Items?.Count ?? 0;
-            if ((Items?.Count ?? 0) == 0 && string.IsNullOrWhiteSpace(DetailLoadError))
+            // 2) Multi-detail tabs (DETAIL1/DETAIL2/...)
+            ViewData["PaperNum"] = PaperNum;
+            ViewData["MultiTabAllowEdit"] = false;
+
+            var tabs = new List<object>(details.Count);
+            var tabFieldDicts = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
+            for (var i = 0; i < details.Count; i++)
             {
-                DetailLoadError = $"明細為空：table={DetailDictTable}, paperNum={PaperNum}";
-                ViewData["DetailLoadError"] = DetailLoadError;
+                var d = details[i];
+                var dictTable = d.TableName ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(dictTable)) continue;
+
+                var tabId = $"d{i + 1}";
+                var title = await ResolveDisplayLabelAsync(dictTable) ?? dictTable;
+                var apiUrl = $"/api/DynamicTable/ByPaperNum?table={Uri.EscapeDataString(dictTable)}";
+
+                tabs.Add(new { Id = tabId, Title = title, ApiUrl = apiUrl, DictTable = dictTable });
+
+                var fields = _dictService.GetFieldDict(dictTable, typeof(object));
+                tabFieldDicts[tabId] = fields
+                    .Where(f => f.Visible == 1)
+                    .GroupBy(f => f.FieldName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                    .Where(g => !string.IsNullOrWhiteSpace(g.Key))
+                    .ToDictionary(g => g.Key, g => g.First().DisplayLabel ?? g.Key, StringComparer.OrdinalIgnoreCase);
             }
+
+            ViewData["Tabs"] = tabs.ToArray();
+            ViewData["TabFieldDicts"] = tabFieldDicts;
 
             // 3) Field dictionaries
             var headerFields = _dictService.GetFieldDict(master.TableName ?? "", typeof(object));
-            FieldDictList = _dictService.GetFieldDict(detail.TableName ?? "", typeof(object));
+            FieldDictList = _dictService.GetFieldDict(MasterDictTable, typeof(object));
 
             HeaderTableFields = headerFields
                 .Where(x => x.Visible == 1)
@@ -152,14 +176,8 @@ namespace PcbErpApi.Pages.DynamicTemplate
                     DisplaySize = x.DisplaySize
                 }).ToList();
 
-            // 4) Lookup maps
-            var detailLookup = _dictService.GetOCXLookups(detail.TableName ?? "");
-            LookupDisplayMap = LookupDisplayHelper.BuildLookupDisplayMap(
-                Items,
-                detailLookup,
-                item => $"{GetDictValue(item, "PaperNum")}_{GetDictValue(item, "Item")}"
-            );
-            ViewData["LookupDisplayMap"] = LookupDisplayMap;
+            // 4) Lookup maps（MultiTab 明細採前端即時載入，這裡只保留單頭 lookup）
+            ViewData["LookupDisplayMap"] = new Dictionary<string, Dictionary<string, string>>();
 
             var headerLookup = _dictService.GetOCXLookups(master.TableName ?? "");
             HeaderLookupMap = LookupDisplayHelper.BuildHeaderLookupMap(
@@ -186,10 +204,43 @@ namespace PcbErpApi.Pages.DynamicTemplate
             ViewData["QueryFields"] = QueryFields;
 
             // 6) Custom buttons (left action rail)
-            CustomButtons = await LoadCustomButtonsAsync(itemId);
-            ActionRailPartial = "~/Pages/Shared/_ActionRail.DynamicButtons.cshtml";
+            // 銷售訂單：沿用 SPO 自訂按鈕畫面（不走資料庫動態按鈕）
+            if (string.Equals(itemId, "SA000002", StringComparison.OrdinalIgnoreCase))
+            {
+                CustomButtons = new List<ItemCustButtonRow>();
+                ActionRailPartial = "~/Pages/SPO/OrderSubCustomButton.cshtml";
+            }
+            else
+            {
+                CustomButtons = await LoadCustomButtonsAsync(itemId);
+                ActionRailPartial = "~/Pages/Shared/_ActionRail.DynamicButtons.cshtml";
+            }
 
             return Page();
+        }
+
+        private static int ExtractOrderIndex(string? tableKind)
+        {
+            if (string.IsNullOrWhiteSpace(tableKind)) return int.MaxValue;
+            var m = System.Text.RegularExpressions.Regex.Match(tableKind, "(\\d+)$");
+            return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : int.MaxValue;
+        }
+
+        private async Task<string?> ResolveDisplayLabelAsync(string dictTableName)
+        {
+            var cs = _ctx.Database.GetConnectionString();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            const string sql = @"
+SELECT TOP 1 ISNULL(NULLIF(DisplayLabel,''), TableName) AS DisplayLabel
+  FROM CURdTableName WITH (NOLOCK)
+ WHERE TableName = @tbl";
+
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@tbl", dictTableName ?? string.Empty);
+            var result = await cmd.ExecuteScalarAsync();
+            return result == null || result == DBNull.Value ? null : result.ToString();
         }
 
         private async Task<List<ItemCustButtonRow>> LoadCustomButtonsAsync(string itemId)

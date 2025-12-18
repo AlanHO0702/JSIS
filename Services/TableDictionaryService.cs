@@ -24,19 +24,31 @@ public class TableDictionaryService : ITableDictionaryService
 
     public List<CURdTableField> GetFieldDict(string tableName, Type modelType)
     {
+        static string Clean(string s) => (s ?? "")
+            .Trim().Trim('[', ']')
+            .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase)
+            .ToLowerInvariant();
+
+        var tname = Clean(tableName);
+
         // 取得 model 各屬性型別
         var modelFieldTypes = modelType
             .GetProperties()
             .ToDictionary(p => p.Name, p => GetInputType(p.PropertyType));
 
         var fields = _context.CURdTableFields
-            .Where(x => x.TableName == tableName)
+            .Where(x => x.TableName != null
+                        && (x.TableName.ToLower() == tname
+                            || x.TableName.ToLower().Replace("dbo.", "") == tname))
             .OrderBy(x => x.SerialNum)
             .ToList();
 
         // 語系欄位設定（目前預設 TW；不存在就略過）
         var langRows = _context.CurdTableFieldLangs
-            .Where(x => x.TableName == tableName && x.LanguageId == "TW")
+            .Where(x => x.LanguageId == "TW"
+                        && x.TableName != null
+                        && (x.TableName.ToLower() == tname
+                            || x.TableName.ToLower().Replace("dbo.", "") == tname))
             .ToList();
 
         if (langRows.Count > 0)
@@ -76,8 +88,17 @@ public class TableDictionaryService : ITableDictionaryService
 
     public List<OCXLookupMap> GetOCXLookups(string tableName)
     {
+        static string Clean(string s) => (s ?? "")
+            .Trim().Trim('[', ']')
+            .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase)
+            .ToLowerInvariant();
+
+        var tname = Clean(tableName);
+
         var fieldDefs = _context.CURdTableFields
-            .Where(x => x.TableName == tableName
+            .Where(x => x.TableName != null
+                        && (x.TableName.ToLower() == tname
+                            || x.TableName.ToLower().Replace("dbo.", "") == tname)
                         && !string.IsNullOrWhiteSpace(x.OCXLKTableName)
                         && !string.IsNullOrWhiteSpace(x.OCXLKResultName))
             .ToList();
@@ -104,7 +125,10 @@ public class TableDictionaryService : ITableDictionaryService
         foreach (var field in fieldDefs)
         {
             var lkSetting = _context.CURdOCXTableFieldLK
-                .FirstOrDefault(x => x.TableName == tableName && x.FieldName == field.FieldName);
+                .FirstOrDefault(x => x.TableName != null
+                                     && (x.TableName.ToLower() == tname
+                                         || x.TableName.ToLower().Replace("dbo.", "") == tname)
+                                     && x.FieldName == field.FieldName);
 
                 if (lkSetting == null) continue;
 

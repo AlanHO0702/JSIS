@@ -352,6 +352,152 @@ SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, c.COLUMN_DEFAULT
             }
         }
 
+        // 給多頁籤明細（_MultiTabDetail）使用：依 PaperNum 取回該字典表的所有列
+        // 回傳格式：[{ col1:..., col2:... }, ...]
+        [HttpGet("ByPaperNum")]
+        public async Task<IActionResult> ByPaperNum([FromQuery] string table, [FromQuery] string paperNum, [FromQuery] int top = 9999)
+        {
+            if (string.IsNullOrWhiteSpace(table))
+                return BadRequest("table 必須指定");
+            if (!Regex.IsMatch(table, @"^[A-Za-z0-9_]+$"))
+                return BadRequest("table 名稱不合法");
+            if (string.IsNullOrWhiteSpace(paperNum))
+                return Ok(Array.Empty<Dictionary<string, object?>>());
+
+            top = Math.Clamp(top, 1, 20000);
+            var dictTable = table.Trim();
+
+            var realTable = await _ctx.CurdTableNames
+                .AsNoTracking()
+                .Where(x => x.TableName.ToLower() == dictTable.ToLower())
+                .Select(x => string.IsNullOrWhiteSpace(x.RealTableName) ? x.TableName : x.RealTableName)
+                .FirstOrDefaultAsync();
+            if (string.IsNullOrWhiteSpace(realTable))
+                realTable = dictTable;
+
+            var fieldList = await _ctx.CURdTableFields
+                .AsNoTracking()
+                .Where(f => f.TableName.ToLower() == dictTable.ToLower())
+                .Select(f => f.FieldName)
+                .ToListAsync();
+
+            var cols = fieldList
+                .Where(f => !string.IsNullOrWhiteSpace(f))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            // 若該表沒有辭典欄位設定，避免直接 SELECT *（風險較高）→ 回傳空陣列
+            if (cols.Count == 0)
+                return Ok(Array.Empty<Dictionary<string, object?>>());
+
+            var cs = _ctx.Database.GetConnectionString();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            static string NormalizeSqlName(string raw)
+            {
+                var s = (raw ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+                s = s.Replace("[", string.Empty).Replace("]", string.Empty).Trim();
+                return s;
+            }
+
+            static string Esc(string id) => $"[{id.Replace("]", "]]")}]";
+
+            static string EscTableName(string raw)
+            {
+                var s = NormalizeSqlName(raw);
+                if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+                var parts = s.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                return parts.Length switch
+                {
+                    1 => Esc(parts[0]),
+                    _ => string.Join(".", parts.Select(Esc))
+                };
+            }
+
+            static async Task<HashSet<string>> GetExistingColumnsAsync(SqlConnection conn, string rawTable)
+            {
+                var tbl = NormalizeSqlName(rawTable);
+                if (string.IsNullOrWhiteSpace(tbl)) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                async Task<HashSet<string>> QueryAsync(string objectIdName)
+                {
+                    var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    const string sql = "SELECT name FROM sys.columns WHERE object_id = OBJECT_ID(@t)";
+                    await using var cmd = new SqlCommand(sql, conn);
+                    cmd.Parameters.AddWithValue("@t", objectIdName);
+                    await using var rd = await cmd.ExecuteReaderAsync();
+                    while (await rd.ReadAsync())
+                    {
+                        var n = rd.GetString(0);
+                        if (!string.IsNullOrWhiteSpace(n)) set.Add(n);
+                    }
+                    return set;
+                }
+
+                // 先用原始名稱（可能含 schema），若查不到再 fallback dbo.<name>
+                var set1 = await QueryAsync(tbl);
+                if (set1.Count > 0) return set1;
+
+                if (!tbl.Contains('.', StringComparison.OrdinalIgnoreCase))
+                {
+                    var dboSet = await QueryAsync("dbo." + tbl);
+                    if (dboSet.Count > 0) return dboSet;
+                }
+
+                return set1;
+            }
+
+            var existingCols = await GetExistingColumnsAsync(conn, realTable);
+            if (existingCols.Count == 0)
+                return Ok(Array.Empty<Dictionary<string, object?>>());
+
+            if (!existingCols.Contains("PaperNum"))
+                return BadRequest($"ByPaperNum 失敗: 資料表 {realTable} 缺少欄位 PaperNum");
+
+            // 字典欄位可能包含不存在於實體表的欄位（例如顯示用/舊欄位），需先過濾
+            var safeCols = cols.Where(c => existingCols.Contains(c)).ToList();
+            if (safeCols.Count == 0)
+                return Ok(Array.Empty<Dictionary<string, object?>>());
+
+            var selectCols = string.Join(",", safeCols.Select(Esc));
+            var orderBy = safeCols.Any(c => c.Equals("Item", StringComparison.OrdinalIgnoreCase)) ? Esc("Item") : Esc("PaperNum");
+
+            var sql = $@"
+SELECT TOP (@top) {selectCols}
+  FROM {EscTableName(realTable)} WITH (NOLOCK)
+ WHERE {Esc("PaperNum")} = @paperNum
+ ORDER BY {orderBy};";
+
+            try
+            {
+                await using var cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@top", top);
+                cmd.Parameters.AddWithValue("@paperNum", paperNum);
+
+                var list = new List<Dictionary<string, object?>>();
+                await using var rd = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess);
+                while (await rd.ReadAsync())
+                {
+                    var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                    for (var i = 0; i < rd.FieldCount; i++)
+                    {
+                        var name = rd.GetName(i);
+                        row[name] = rd.IsDBNull(i) ? null : rd.GetValue(i);
+                    }
+                    list.Add(row);
+                }
+
+                return Ok(list);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ByPaperNum failed for {DictTable}({RealTable}) paperNum={PaperNum}", dictTable, realTable, paperNum);
+                return BadRequest($"ByPaperNum 失敗: {ex.Message}");
+            }
+        }
+
         private static IEnumerable<SqlParameter> CloneParams(IEnumerable<SqlParameter> source)
         {
             foreach (var p in source)

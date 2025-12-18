@@ -87,9 +87,10 @@
               ondblclick="window.editFieldDetail && window.editFieldDetail('${x.FieldName}')">
 
             <!-- 第 1 欄：序號 + 隱藏欄位 -->
-            <td style="width:40px">
+            <td style="width:72px">
               <input data-field="SerialNum" type="number"
-                    value="${x.SerialNum ?? ''}" class="form-control form-control-sm" />
+                    value="${x.SerialNum ?? ''}" class="form-control form-control-sm"
+                    style="width:100%; text-align:center;" />
 
               <span class="d-none extra-fields">
                 <input data-field="DisplaySize"  value="${x.DisplaySize  ?? ''}" />
@@ -120,7 +121,7 @@
             <!-- 第 2 ~ 9 欄 -->
             <td style="min-width:180px">${x.FieldName ?? ''}</td>
 
-            <td style="min-width:180px">
+            <td style="min-width:150px">
               <input data-field="DisplayLabel" value="${x.DisplayLabel ?? ''}"
                     class="form-control form-control-sm" />
             </td>
@@ -185,7 +186,67 @@
     // 穩定排序 + 綁保存
     sortDictTbody(tbody);
     bindSaveButton(tbody);
+    initDirtyTracking(tbody);
   };
+
+  // ===== Dirty tracking：只儲存有變更的列 =====
+  function rowSnapshot(tr) {
+    const snap = {};
+    tr.querySelectorAll('input[data-field]').forEach(inp => {
+      const key = inp.getAttribute('data-field');
+      if (!key) return;
+      snap[key] = (inp.type === 'checkbox') ? (inp.checked ? 1 : 0) : (inp.value ?? '');
+    });
+    return snap;
+  }
+  function setRowSnapshot(tr) {
+    tr.dataset.dictSnapshot = JSON.stringify(rowSnapshot(tr));
+  }
+  function isRowDirty(tr) {
+    const prev = tr.dataset.dictSnapshot;
+    if (!prev) return true; // 沒有快照就視為 dirty（避免漏存）
+    let prevObj = null;
+    try { prevObj = JSON.parse(prev); } catch { return true; }
+    const cur = rowSnapshot(tr);
+    const keys = new Set([...Object.keys(prevObj || {}), ...Object.keys(cur)]);
+    for (const k of keys) {
+      const a = prevObj?.[k];
+      const b = cur[k];
+      if ((a ?? '') !== (b ?? '')) return true;
+    }
+    return false;
+  }
+  function syncRowDirtyUi(tr) {
+    const dirty = isRowDirty(tr);
+    tr.dataset.dirty = dirty ? '1' : '0';
+    tr.classList.toggle('dict-row-dirty', dirty);
+  }
+  function initDirtyTracking(tbody) {
+    if (!tbody) return;
+
+    const alreadyBound = tbody.dataset.dirtyBound === '1';
+    if (!alreadyBound) {
+      tbody.dataset.dirtyBound = '1';
+
+      // 監聽變更：只標記當列 dirty，不掃全表
+      tbody.addEventListener('input', (e) => {
+        const tr = e.target?.closest?.('tr');
+        if (!tr) return;
+        syncRowDirtyUi(tr);
+      });
+      tbody.addEventListener('change', (e) => {
+        const tr = e.target?.closest?.('tr');
+        if (!tr) return;
+        syncRowDirtyUi(tr);
+      });
+    }
+
+    // 每次 init 都重建快照（支援切換不同 dict table 時 tbody 會被清空重建）
+    tbody.querySelectorAll('tr').forEach(tr => {
+      setRowSnapshot(tr);
+      syncRowDirtyUi(tr);
+    });
+  }
 
   // ===== 排序（SerialNum → FieldName） =====
   function sortDictTbody(tbody) {
@@ -229,8 +290,17 @@
       return;
     }
 
-    const rows = tbody.querySelectorAll('tr');
-    const data = Array.from(rows).map(tr => {
+    const allRows = Array.from(tbody.querySelectorAll('tr'));
+    const dirtyRows = allRows.filter(tr => tr.dataset.dirty === '1' || isRowDirty(tr));
+    console.log('[fieldDictModal] save changed rows:', dirtyRows.length, '/', allRows.length, 'table:', dictTableName);
+
+    if (dirtyRows.length === 0) {
+      document.body.style.cursor = 'default';
+      alert('沒有任何欄位變更，不需要儲存。');
+      return;
+    }
+
+    const data = dirtyRows.map(tr => {
       const getVal = name => tr.querySelector(`input[data-field="${name}"]`)?.value ?? '';
       const getInt = name => {
         const v = getVal(name);
@@ -284,7 +354,13 @@
       .then(result => {
         document.body.style.cursor = 'default';
         if (result?.success) {
-          alert('全部儲存成功！');
+          // 更新快照：僅更新已儲存的列，避免未改動列被誤判 dirty
+          dirtyRows.forEach(tr => {
+            setRowSnapshot(tr);
+            syncRowDirtyUi(tr);
+          });
+
+          alert(`儲存成功！已更新 ${dirtyRows.length} 筆欄位設定。`);
           window.dispatchEvent(new Event('field-dict-saved'));
           setTimeout(() => location.reload(), 300);
         } else {

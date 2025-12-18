@@ -12,13 +12,19 @@
     var keyFieldName = ViewData["KeyFieldName"]?.ToString() ?? "PaperNum";
     var queryRedirectUrl = ViewData["QueryRedirectUrl"]?.ToString() ?? "";
     var DeleteApiUrl = ViewData["DeleteApiUrl"]?.ToString() ?? "";
+    static int NormalizeShowWhere(int? v)
+    {
+        // 有些單據字典的 iShowWhere 會是 0（代表第一頁），若過濾會導致單頭整段消失
+        return (v.HasValue && v.Value > 0) ? v.Value : 1;
+    }
 
     var groupedTabs = headerFieldsList
-        .Where(f => (f.iShowWhere ?? 1) > 0) // ➜ 過濾掉 iShowWhere 為 0 的欄位
-        .GroupBy(f => f.iShowWhere ?? 1)
+        .GroupBy(f => NormalizeShowWhere(f.iShowWhere))
         .OrderBy(g => g.Key)
         .ToDictionary(g => g.Key, g => g.ToList());
 
+    var firstTabKey = groupedTabs.Keys.FirstOrDefault();
+    if (firstTabKey <= 0) firstTabKey = 1;
     var lookupMap = ViewData["LookupDisplayMap"] as Dictionary<string, Dictionary<string, string>>;
 
     var PaperNum = headerData.ContainsKey("PaperNum") ? headerData["PaperNum"]?.ToString() ?? "" : "";
@@ -84,7 +90,7 @@
             @foreach (var tab in groupedTabs.Keys)
             {
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link @(tab == 1 ? "active" : "")"
+                    <button class="nav-link @(tab == firstTabKey ? "active" : "")"
                             id="tab-@tab-tab"
                             data-bs-toggle="tab"
                             data-bs-target="#tab-@tab"
@@ -99,7 +105,7 @@
         <div class="tab-content" id="headerTabContent">
             @foreach (var tab in groupedTabs)
             {
-                <div class="tab-pane fade @(tab.Key == 1 ? "show active" : "")"
+                <div class="tab-pane fade @(tab.Key == firstTabKey ? "show active" : "")"
                     id="tab-@tab.Key" role="tabpanel">
                     <ul class="list-unstyled header-fields-tab"
                         data-tab-index="@tab.Key"
@@ -320,6 +326,62 @@ document.getElementById('orderHeaderForm').addEventListener('submit', async func
 const editBtn = document.getElementById('btnViewEditToggle');
 if (editBtn) {
   let isEdit = false;
+
+  function setLookupReadOnly(selectEl, readOnly) {
+    if (!selectEl) return;
+    if (readOnly) {
+      selectEl.disabled = false; // 必須可點，才能展開選項
+      selectEl.dataset.lockedValue = selectEl.value ?? '';
+      selectEl.classList.add('lookup-readonly');
+      selectEl.setAttribute('aria-readonly', 'true');
+      selectEl.title = '瀏覽模式：可查看下拉內容，不能修改';
+    } else {
+      selectEl.classList.remove('lookup-readonly');
+      selectEl.removeAttribute('aria-readonly');
+      selectEl.title = '';
+      selectEl.dataset.lockedValue = selectEl.value ?? '';
+      selectEl.disabled = false;
+    }
+  }
+
+  function applyHeaderEditState(editing) {
+    document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
+      .forEach(el => {
+        if (el.closest('.modal')) return;
+        if (el.matches('select.lookup-dropdown')) {
+          setLookupReadOnly(el, !editing);
+        } else {
+          el.disabled = !editing;
+        }
+      });
+  }
+
+  document.addEventListener('change', (e) => {
+    const sel = e.target;
+    if (!(sel instanceof HTMLSelectElement)) return;
+    if (!sel.matches('.erp-header-form select.lookup-dropdown')) return;
+    if (sel.closest('.modal')) return;
+    if (isEdit) return;
+
+    const locked = sel.dataset.lockedValue ?? '';
+    if ((sel.value ?? '') !== locked) {
+      sel.value = locked;
+    }
+    e.stopPropagation();
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    const sel = e.target;
+    if (!(sel instanceof HTMLSelectElement)) return;
+    if (!sel.matches('.erp-header-form select.lookup-dropdown')) return;
+    if (sel.closest('.modal')) return;
+    if (isEdit) return;
+
+    const blockKeys = ['ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', ' ', 'Enter'];
+    if (blockKeys.includes(e.key)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
   const getHeaderValueByLabel = (labelText) => {
     const $li = $('.draggable-field').filter(function () {
       return $(this).children('label').first().text().trim() === labelText;
@@ -606,6 +668,7 @@ if (editBtn) {
     }
 
     isEdit = !isEdit; editBtn.textContent = isEdit ? '保留' : '修改';
+    applyHeaderEditState(isEdit);
 
     // 切換單頭欄位的 disabled 狀態
     document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
@@ -631,8 +694,7 @@ if (editBtn) {
   });
 
   window.addEventListener('load', () => {
-    document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
-      .forEach(el => { if (!el.closest('.modal')) el.disabled = true; });
+    applyHeaderEditState(false);
     if (localStorage.getItem("afterSave") === "1") {
       localStorage.removeItem("afterSave");
       document.getElementById("btnViewEditToggle")?.click();
@@ -667,7 +729,7 @@ $(function () {
 
     fetch("/api/TableFieldLayout/SaveHeaderLayout", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tableName: "@Model.HeaderTableName".toLowerCase(), layoutUpdates: layout })
+      body: JSON.stringify({ tableName: "@Model.HeaderTableName", layoutUpdates: layout })
     }).catch(()=>{});
   }
 
@@ -683,9 +745,231 @@ $(function () {
       },
       appendTo: "body", zIndex: 10000,
       start: function () { $(this).hide(); },
-      stop:  function () { $(this).show(); }
+      stop: function (event, ui) {
+        const $item = $(this);
+        $item.show();
+
+        const $parent = $item.parent();
+        const parentOff = $parent.offset();
+        if (parentOff) {
+          $item.css({
+            position: "absolute",
+            top: Math.round(ui.offset.top - parentOff.top),
+            left: Math.round(ui.offset.left - parentOff.left)
+          });
+        }
+
+        debounceSave();
+      }
     });
-    $li.resizable({ handles: "se", minWidth: 50, minHeight: 30, stop: debounceSave });
+    $li.resizable({ handles: "e, se", minWidth: 50, minHeight: 30, stop: debounceSave });
+  });
+
+  // ============================
+  // 多選/群組拖曳/對齊（快捷鍵）
+  //  - Ctrl/Meta+點擊：切換選取
+  //  - 點擊空白：清除選取
+  //  - 拖曳任一被選取的 label：整組一起移動
+  //  - L/R/T/B：左/右/上/下對齊
+  //  - H/V：水平/垂直平均分佈
+  //  - 方向鍵：微調（Shift=10px）
+  // ============================
+  const $doc = $(document);
+  const SELECTED_CLASS = "md-selected";
+  let dragGroupSnapshot = null;
+
+  function $allFields() { return $(".draggable-field"); }
+  function $selected() { return $allFields().filter("." + SELECTED_CLASS); }
+  function isTypingTarget(e) {
+    const t = e?.target;
+    if (!t) return false;
+    const tag = (t.tagName || "").toLowerCase();
+    return tag === "input" || tag === "textarea" || tag === "select" || t.isContentEditable;
+  }
+  function clearSelection() { $selected().removeClass(SELECTED_CLASS); }
+  function toggleSelection($el) { $el.toggleClass(SELECTED_CLASS); }
+  function selectOnly($el) { clearSelection(); $el.addClass(SELECTED_CLASS); }
+
+  $doc.on("mousedown", ".draggable-field label", function (e) {
+    if (window.__DICT_OPEN__) return;
+    const $field = $(this).closest(".draggable-field");
+    if (!$field.length) return;
+
+    if (e.ctrlKey || e.metaKey) {
+      toggleSelection($field);
+    } else if (!$field.hasClass(SELECTED_CLASS)) {
+      selectOnly($field);
+    }
+  });
+  $doc.on("mousedown", function (e) {
+    if (window.__DICT_OPEN__) return;
+    if ($(e.target).closest(".draggable-field, .ui-resizable-handle, .modal").length) return;
+    clearSelection();
+  });
+
+  function ensureDragGroupSnapshot($base) {
+    const $sel = $selected();
+    const $group = ($sel.length ? $sel : $base);
+    if (!$base.hasClass(SELECTED_CLASS) && $sel.length) selectOnly($base);
+    dragGroupSnapshot = {
+      baseEl: $base.get(0),
+      baseTop: Math.round($base.position().top),
+      baseLeft: Math.round($base.position().left),
+      items: $group.toArray().map(el => {
+        const $el = $(el);
+        return { el, top: Math.round($el.position().top), left: Math.round($el.position().left) };
+      })
+    };
+  }
+
+  $allFields().each(function () {
+    const $li = $(this);
+    $li.draggable("option", "start", function () {
+      if (window.__DICT_OPEN__) return;
+      ensureDragGroupSnapshot($(this));
+      $(this).hide();
+    });
+    $li.draggable("option", "stop", function (event, ui) {
+      const $item = $(this);
+      $item.show();
+
+      const $parent = $item.parent();
+      const parentOff = $parent.offset();
+      if (!parentOff) return;
+
+      const newTop = Math.round(ui.offset.top - parentOff.top);
+      const newLeft = Math.round(ui.offset.left - parentOff.left);
+
+      if (dragGroupSnapshot && dragGroupSnapshot.baseEl === $item.get(0)) {
+        const dy = newTop - dragGroupSnapshot.baseTop;
+        const dx = newLeft - dragGroupSnapshot.baseLeft;
+        dragGroupSnapshot.items.forEach(it => {
+          const $el = $(it.el);
+          $el.css({
+            position: "absolute",
+            top: Math.max(0, it.top + dy),
+            left: Math.max(0, it.left + dx)
+          });
+        });
+        dragGroupSnapshot = null;
+        debounceSave();
+        return;
+      }
+
+      $item.css({ position: "absolute", top: newTop, left: newLeft });
+      dragGroupSnapshot = null;
+      debounceSave();
+    });
+  });
+
+  function applyToSelected(mutator) {
+    const $sel = $selected();
+    if (!$sel.length) return false;
+    $sel.each(function () { mutator($(this)); });
+    debounceSave();
+    return true;
+  }
+  function alignSelected(mode) {
+    const $sel = $selected();
+    if ($sel.length < 2) return false;
+    const boxes = $sel.toArray().map(el => {
+      const $el = $(el);
+      const p = $el.position();
+      const w = $el.outerWidth();
+      const h = $el.outerHeight();
+      const $ctrl = $el.find('select, input, textarea').first();
+      const ctrlOff = $ctrl.length ? $ctrl.offset() : null;
+      const elOff = $el.offset();
+      const ctrlLeftAbs = ctrlOff?.left ?? elOff.left;
+      const ctrlTopAbs = ctrlOff?.top ?? elOff.top;
+      const ctrlW = $ctrl.length ? $ctrl.outerWidth() : w;
+      const ctrlH = $ctrl.length ? $ctrl.outerHeight() : h;
+      return {
+        $el,
+        top: Math.round(p.top),
+        left: Math.round(p.left),
+        right: Math.round(p.left + w),
+        bottom: Math.round(p.top + h),
+        w,
+        h,
+        ctrlLeftAbs,
+        ctrlRightAbs: ctrlLeftAbs + ctrlW,
+        ctrlTopAbs,
+        ctrlBottomAbs: ctrlTopAbs + ctrlH,
+        ctrlW,
+        ctrlH
+      };
+    });
+    const minCtrlLeftAbs = Math.min(...boxes.map(b => b.ctrlLeftAbs));
+    const maxCtrlRightAbs = Math.max(...boxes.map(b => b.ctrlRightAbs));
+
+    const minLeft = Math.min(...boxes.map(b => b.left));
+    const maxRight = Math.max(...boxes.map(b => b.right));
+    const minTop = Math.min(...boxes.map(b => b.top));
+    const maxBottom = Math.max(...boxes.map(b => b.bottom));
+
+    boxes.forEach(b => {
+      if (mode === "L") {
+        const delta = minCtrlLeftAbs - b.ctrlLeftAbs;
+        b.$el.css("left", Math.max(0, Math.round(b.left + delta)));
+      }
+      if (mode === "R") {
+        const targetCtrlLeftAbs = maxCtrlRightAbs - b.ctrlW;
+        const delta = targetCtrlLeftAbs - b.ctrlLeftAbs;
+        b.$el.css("left", Math.max(0, Math.round(b.left + delta)));
+      }
+      if (mode === "T") b.$el.css("top", minTop);
+      if (mode === "B") b.$el.css("top", Math.max(0, maxBottom - b.h));
+    });
+    debounceSave();
+    return true;
+  }
+  function distributeSelected(axis) {
+    const $sel = $selected();
+    if ($sel.length < 3) return false;
+    const boxes = $sel.toArray().map(el => {
+      const $el = $(el);
+      const p = $el.position();
+      const w = $el.outerWidth();
+      const h = $el.outerHeight();
+      return { $el, top: Math.round(p.top), left: Math.round(p.left), w, h };
+    });
+    if (axis === "H") {
+      boxes.sort((a, b) => a.left - b.left);
+      const first = boxes[0], last = boxes[boxes.length - 1];
+      const span = (last.left - first.left);
+      const gaps = boxes.length - 1;
+      const step = gaps ? Math.round(span / gaps) : 0;
+      boxes.forEach((b, i) => b.$el.css("left", Math.max(0, first.left + step * i)));
+    } else {
+      boxes.sort((a, b) => a.top - b.top);
+      const first = boxes[0], last = boxes[boxes.length - 1];
+      const span = (last.top - first.top);
+      const gaps = boxes.length - 1;
+      const step = gaps ? Math.round(span / gaps) : 0;
+      boxes.forEach((b, i) => b.$el.css("top", Math.max(0, first.top + step * i)));
+    }
+    debounceSave();
+    return true;
+  }
+
+  $doc.on("keydown", function (e) {
+    if (window.__DICT_OPEN__) return;
+    if (isTypingTarget(e)) return;
+    const key = (e.key || "").toUpperCase();
+
+    if (key === "L" || key === "R" || key === "T" || key === "B") {
+      if (alignSelected(key)) { e.preventDefault(); return; }
+    }
+    if (key === "H" || key === "V") {
+      if (distributeSelected(key)) { e.preventDefault(); return; }
+    }
+
+    const step = e.shiftKey ? 10 : 1;
+    if (e.key === "ArrowLeft")  { if (applyToSelected($el => $el.css("left", Math.max(0, Math.round($el.position().left) - step)))) { e.preventDefault(); } return; }
+    if (e.key === "ArrowRight") { if (applyToSelected($el => $el.css("left", Math.max(0, Math.round($el.position().left) + step)))) { e.preventDefault(); } return; }
+    if (e.key === "ArrowUp")    { if (applyToSelected($el => $el.css("top",  Math.max(0, Math.round($el.position().top) - step)))) { e.preventDefault(); } return; }
+    if (e.key === "ArrowDown")  { if (applyToSelected($el => $el.css("top",  Math.max(0, Math.round($el.position().top) + step)))) { e.preventDefault(); } return; }
   });
 
   $(".header-fields-tab").droppable({
@@ -726,13 +1010,17 @@ $(function () {
         $select.append($opt);
       });
       $select.next('.lookup-label').text($select.find('option:selected').text());
+      // 若是瀏覽模式（readonly），在下拉資料載入後同步 lockedValue，避免變更時回復成空值
+      if ($select.hasClass('lookup-readonly') && $select[0]) {
+        $select[0].dataset.lockedValue = $select.val() ?? '';
+      }
     });
     $select.on('change', function() {
       $(this).next('.lookup-label').text($(this).find('option:selected').text());
     });
   });
 
-  function setInitialTabHeights(offsetPx = 10) {
+  function setInitialTabHeights(offsetPx = 4) {
     const hiddenTabs = $(".tab-pane").not(".show");
     hiddenTabs.addClass("tmp-show").addClass("show").css("display", "block");
     $(".header-fields-tab").each(function () {
@@ -745,7 +1033,7 @@ $(function () {
     });
     hiddenTabs.removeClass("show tmp-show").css("display", "");
   }
-  requestAnimationFrame(() => setInitialTabHeights(10));
+  requestAnimationFrame(() => setInitialTabHeights(4));
 });
 
 // ============================
@@ -840,6 +1128,9 @@ body { background: #f7f9fb !important; }
 .erp-header-form textarea,
 .erp-header-form input { font-size: 0.95em; }
 
+/* 單頭/單身間距：縮小表單底部留白 */
+.erp-header-form { margin-bottom: .15rem; }
+
 .erp-header-form select.form-select{
   font-size: 1em !important; height: 32px !important; min-height: 32px !important; line-height: 1.15 !important;
   padding: 2px 30px 2px 6px !important; appearance: none; -webkit-appearance: none; -moz-appearance: none;
@@ -847,7 +1138,10 @@ body { background: #f7f9fb !important; }
   background-repeat: no-repeat; background-position: right 10px center; background-size: 14px 14px; box-shadow: none !important; border-radius: 5px !important;
 }
 .header-fields-tab{
-  position: relative; min-height: 120px; padding-bottom: 8px;
+  position: relative;
+  min-height: 72px;
+  padding-bottom: 2px;
+  margin-bottom: .25rem !important;
   background: #eef2f9 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.04);
 }
 .drop-hover{ background-color:#cce5ff !important; border-radius:4px; }
@@ -858,7 +1152,8 @@ body { background: #f7f9fb !important; }
 }
 
 /* draggable 欄位（橫排 label + 控件） */
-.draggable-field{ position:absolute; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; background:transparent; }
+.draggable-field{ position:absolute; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; background:transparent; border:1px dashed transparent; }
+.draggable-field:hover{ border-color:#c7d3e1; }
 .draggable-field.inline{ display:flex; flex-direction:row; align-items: center; gap:4px; flex:0 0 auto; min-width:100px; max-width:100%; }
 .draggable-field label{ cursor:move; font-size:0.85em; margin:0 6px 0 0; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
 .draggable-field.inline .field-control{ flex:1 1 auto; height:100%; display:flex; }
@@ -872,6 +1167,38 @@ body { background: #f7f9fb !important; }
   overflow: visible !important;
   text-overflow: clip !important;
   max-width: none !important;
+}
+.draggable-field.md-selected{
+  border-radius: 8px;
+  border-color:#5b8def;
+  background:rgba(91,141,239,0.08);
+}
+.erp-header-form select.lookup-dropdown.lookup-readonly{
+  /* 瀏覽模式允許展開下拉，但不允許修改：外觀比照 disabled 的灰底 */
+  background-color: var(--bs-secondary-bg, #e9ecef) !important;
+  color: var(--bs-secondary-color, #6c757d) !important;
+  opacity: 1; /* 避免像 disabled 一樣整體變淡 */
+  cursor: default;
+}
+.erp-header-form select.lookup-dropdown.lookup-readonly:focus{
+  border-color: #ced4da;
+  box-shadow: none !important;
+}
+/* jQuery UI resizable：讓右側拉寬把手更好抓 */
+.draggable-field.ui-resizable .ui-resizable-e{
+  position: absolute;
+  top: 0; right: 0; width: 10px; height: 100%;
+  cursor: ew-resize; background: transparent;
+  z-index: 5;
+}
+.draggable-field.ui-resizable:hover .ui-resizable-e{
+  background: rgba(32,86,172,0.10);
+}
+.draggable-field.ui-resizable .ui-resizable-se{
+  position: absolute;
+  right: 0; bottom: 0; width: 14px; height: 14px;
+  cursor: se-resize; background: transparent;
+  z-index: 5;
 }
 
 /* =========================================
