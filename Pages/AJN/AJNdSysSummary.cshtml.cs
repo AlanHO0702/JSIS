@@ -44,6 +44,9 @@ namespace PcbErpApi.Pages.AJN
                 // 不指定 MasterApi，使用預設的 CommonTable API
                 MasterTop = 200,
 
+                // ★ 使用垂直堆疊佈局
+                Layout = LayoutMode.VerticalStack,
+
                 // ★ 啟用 Detail Focus 聯動功能（與 Delphi 的 gridSubDetail1Enter 類似）
                 EnableDetailFocusCascade = true,
 
