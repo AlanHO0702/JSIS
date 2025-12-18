@@ -16,15 +16,21 @@ namespace PcbErpApi.Pages.EMOdProdInfo
         private readonly PcbErpContext _ctx;
         private readonly ITableDictionaryService _dictService;
         private readonly ILogger<DetailModel> _logger;
+        private readonly Services.AuditImageService _auditImageService;
 
         private const string MasterDict = "EMOdProdInfo";
         private const string MasterTable = "EMOdProdInfo";
 
-        public DetailModel(PcbErpContext ctx, ITableDictionaryService dictService, ILogger<DetailModel> logger)
+        public DetailModel(
+            PcbErpContext ctx,
+            ITableDictionaryService dictService,
+            ILogger<DetailModel> logger,
+            Services.AuditImageService auditImageService)
         {
             _ctx = ctx;
             _dictService = dictService;
             _logger = logger;
+            _auditImageService = auditImageService;
         }
 
         public MasterDetailConfig? Config { get; private set; }
@@ -311,5 +317,56 @@ namespace PcbErpApi.Pages.EMOdProdInfo
 
         public record DetailTab(string Key, string Title, string TableName, string DictName, IEnumerable<string> KeyFields, bool IsForm = false, Dictionary<string, string>? ExtraKeys = null);
         public record MasterTab(string Key, string Title, IEnumerable<string> FieldNames);
+
+        /// <summary>
+        /// 產生圖檔 POST Handler
+        /// </summary>
+        public async Task<IActionResult> OnPostGenerateImagesAsync([FromBody] GenerateImagesRequest request)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(request.PartNum) || string.IsNullOrEmpty(request.Revision))
+                {
+                    return new JsonResult(new
+                    {
+                        success = false,
+                        message = "料號和版次不可為空"
+                    });
+                }
+
+                var result = await _auditImageService.GenerateImagesForAuditAsync(
+                    request.PartNum,
+                    request.Revision
+                );
+
+                return new JsonResult(new
+                {
+                    success = result.Success,
+                    message = result.Message,
+                    images = result.GeneratedFiles.Select(f => new
+                    {
+                        type = f.Type,
+                        fileName = f.FileName,
+                        success = f.Success,
+                        errorMessage = f.ErrorMessage
+                    }).ToList()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "產生圖檔時發生錯誤");
+                return new JsonResult(new
+                {
+                    success = false,
+                    message = $"產生圖檔失敗: {ex.Message}"
+                });
+            }
+        }
+
+        public class GenerateImagesRequest
+        {
+            public string PartNum { get; set; } = string.Empty;
+            public string Revision { get; set; } = string.Empty;
+        }
     }
 }
