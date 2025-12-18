@@ -44,6 +44,9 @@ namespace PcbErpApi.Pages.AJN
                 MasterApi = "/api/AJNdAccClass",
                 MasterTop = 200,
 
+                // ★ 使用三欄式橫向佈局
+                Layout = LayoutMode.ThreeColumn,
+
                 // ★ 啟用 Detail Focus 聯動功能
                 EnableDetailFocusCascade = true,
 
