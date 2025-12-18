@@ -1,5 +1,8 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Mvc;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
 using static SpodOrdersModel;
@@ -9,6 +12,9 @@ using static SpodOrdersModel;
 /// </summary>
 public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
 {
+    private const string DynamicItemId = "SA000002"; // 銷售訂單 ItemId（導向動態單據樣板）
+    private readonly PcbErpContext _ctx;
+
     #region 單頭/單身資料屬性
 
     // 單頭資料（API 回傳 Dictionary 格式）
@@ -28,7 +34,10 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
     /// 注入 HttpClient 與欄位服務
     /// </summary>
     public SpodOrderSubModel(IHttpClientFactory httpClientFactory, PcbErpContext context,ITableDictionaryService dictService)
-        : base(httpClientFactory, context, dictService) { }
+        : base(httpClientFactory, context, dictService)
+    {
+        _ctx = context;
+    }
 
     #endregion
 
@@ -50,8 +59,12 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
     /// <summary>
     /// Razor Page 的 OnGet，載入單頭與單身資料，並產生 lookup 對照表
     /// </summary>
-    public async Task OnGetAsync(string PaperNum)
+    public async Task<IActionResult> OnGetAsync(string PaperNum)
     {
+        // 銷售訂單頁改走動態單據樣板（支援 DETAIL2+ 多頁籤），自訂按鈕由 PaperDetailModel 依 itemId 套用
+        if (!string.IsNullOrWhiteSpace(PaperNum))
+            return Redirect($"/DynamicTemplate/Paper/{DynamicItemId}/{Uri.EscapeDataString(PaperNum)}");
+
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
         // Step 1：取得單頭資料
@@ -160,7 +173,166 @@ public class SpodOrderSubModel : TableDetailModel<SpodOrderSub>
         ViewData["HeaderLookupMap"] = HeaderLookupDisplayMap.ContainsKey(headerKey)
             ? HeaderLookupDisplayMap[headerKey]
             : new Dictionary<string, string>();
+
+        // Step 6：若有設定 DETAIL2+，於單身下方顯示多頁籤（僅顯示，不影響原本單身編輯/儲存）
+        await BuildDetailTabsAsync(PaperNum);
+
+        return Page();
     }
 
     #endregion
+
+    private async Task BuildDetailTabsAsync(string paperNum)
+    {
+        ViewData["PaperNum"] = paperNum ?? string.Empty;
+        ViewData["MultiTabAllowEdit"] = false;
+
+        var resolvedItemId = await ResolveItemIdForMultiDetailAsync();
+        if (string.IsNullOrWhiteSpace(resolvedItemId))
+        {
+            ViewData["Tabs"] = Array.Empty<object>();
+            ViewData["TabFieldDicts"] = new Dictionary<string, Dictionary<string, string>>();
+            ViewData["MultiTabDebug"] = $"resolveItemId=empty; detailTable={TableName}; masterTable={HeaderTableName}";
+            return;
+        }
+
+        var setups = await _ctx.CurdOcxtableSetUp.AsNoTracking()
+            .Where(x => x.ItemId == resolvedItemId)
+            .ToListAsync();
+
+        var details = setups
+            .Where(x => (x.TableKind ?? string.Empty).StartsWith("Detail", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(x => ExtractOrderIndex(x.TableKind))
+            .ThenBy(x => x.TableKind)
+            .ThenBy(x => x.TableName)
+            .ToList();
+
+        if (details.Count == 0)
+        {
+            ViewData["Tabs"] = Array.Empty<object>();
+            ViewData["TabFieldDicts"] = new Dictionary<string, Dictionary<string, string>>();
+            ViewData["MultiTabDebug"] = $"itemId={resolvedItemId}; detailSetups=0; rawSetups={setups.Count}";
+            return;
+        }
+
+        // 只顯示 DETAIL2+（DETAIL1 就是本頁原本的 SPOdOrderSub 單身表格）
+        var beforeFilterCount = details.Count;
+        details = details
+            .Where(d => !string.Equals(d.TableName, TableName, StringComparison.OrdinalIgnoreCase))
+            .Where(d => ExtractOrderIndex(d.TableKind) != 1)
+            .ToList();
+
+        if (details.Count == 0)
+        {
+            ViewData["Tabs"] = Array.Empty<object>();
+            ViewData["TabFieldDicts"] = new Dictionary<string, Dictionary<string, string>>();
+            ViewData["MultiTabDebug"] = $"itemId={resolvedItemId}; detailSetups={beforeFilterCount}; afterFilter=0; note=only DETAIL1 found";
+            return;
+        }
+
+        var tabs = new List<object>(details.Count);
+        var tabFieldDicts = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < details.Count; i++)
+        {
+            var d = details[i];
+            var dictTable = (d.TableName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(dictTable)) continue;
+
+            var n = ExtractOrderIndex(d.TableKind);
+            var tabId = (n != int.MaxValue) ? $"d{n}" : $"d{i + 2}";
+
+            var title = await ResolveDisplayLabelAsync(dictTable) ?? dictTable;
+            var apiUrl = $"/api/DynamicTable/ByPaperNum?table={Uri.EscapeDataString(dictTable)}";
+
+            tabs.Add(new { Id = tabId, Title = title, ApiUrl = apiUrl, DictTable = dictTable });
+
+            var fields = _dictService.GetFieldDict(dictTable, typeof(object));
+            tabFieldDicts[tabId] = fields
+                .Where(f => f.Visible == 1)
+                .GroupBy(f => f.FieldName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .Where(g => !string.IsNullOrWhiteSpace(g.Key))
+                .ToDictionary(g => g.Key, g => g.First().DisplayLabel ?? g.Key, StringComparer.OrdinalIgnoreCase);
+        }
+
+        ViewData["Tabs"] = tabs.ToArray();
+        ViewData["TabFieldDicts"] = tabFieldDicts;
+        ViewData["MultiTabDebug"] = $"itemId={resolvedItemId}; detailSetups={beforeFilterCount}; afterFilter={tabs.Count}";
+    }
+
+    private async Task<string?> ResolveItemIdForMultiDetailAsync()
+    {
+        // 優先用目前單身表（DETAIL1）反查 ItemId，比硬編 ItemId 更可靠
+        var detailTableLower = (TableName ?? string.Empty).Trim().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(detailTableLower))
+        {
+            var rows = await _ctx.CurdOcxtableSetUp.AsNoTracking()
+                .Where(x => (x.TableName ?? string.Empty).ToLower() == detailTableLower)
+                .Select(x => new { x.ItemId, x.TableKind })
+                .ToListAsync();
+
+            var hit = rows.FirstOrDefault(r => IsDetail1(r.TableKind))?.ItemId
+                      ?? rows.FirstOrDefault()?.ItemId;
+            if (!string.IsNullOrWhiteSpace(hit)) return hit.Trim();
+        }
+
+        // fallback: 用單頭表反查（MASTER1）
+        var masterTableLower = (HeaderTableName ?? string.Empty).Trim().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(masterTableLower))
+        {
+            var rows = await _ctx.CurdOcxtableSetUp.AsNoTracking()
+                .Where(x => (x.TableName ?? string.Empty).ToLower() == masterTableLower)
+                .Select(x => new { x.ItemId, x.TableKind })
+                .ToListAsync();
+
+            var hit = rows.FirstOrDefault(r => IsMaster1(r.TableKind))?.ItemId
+                      ?? rows.FirstOrDefault()?.ItemId;
+            if (!string.IsNullOrWhiteSpace(hit)) return hit.Trim();
+        }
+
+        // 最後再回到既有預設（舊版銷售訂單 ItemId）
+        return "SA000002";
+    }
+
+    private static bool IsDetail1(string? tableKind)
+    {
+        var s = (tableKind ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        if (!s.Contains("DETAIL", StringComparison.OrdinalIgnoreCase)) return false;
+        return ExtractOrderIndex(s) == 1;
+    }
+
+    private static bool IsMaster1(string? tableKind)
+    {
+        var s = (tableKind ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        if (!s.Contains("MASTER", StringComparison.OrdinalIgnoreCase)) return false;
+        return ExtractOrderIndex(s) == 1;
+    }
+
+    private static int ExtractOrderIndex(string? tableKind)
+    {
+        if (string.IsNullOrWhiteSpace(tableKind)) return int.MaxValue;
+        var m = System.Text.RegularExpressions.Regex.Match(tableKind, "(\\d+)$");
+        return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : int.MaxValue;
+    }
+
+    private async Task<string?> ResolveDisplayLabelAsync(string dictTableName)
+    {
+        var cs = _ctx.Database.GetConnectionString();
+        if (string.IsNullOrWhiteSpace(cs)) return null;
+
+        await using var conn = new SqlConnection(cs);
+        await conn.OpenAsync();
+
+        const string sql = @"
+SELECT TOP 1 ISNULL(NULLIF(DisplayLabel,''), TableName) AS DisplayLabel
+  FROM CURdTableName WITH (NOLOCK)
+ WHERE TableName = @tbl";
+
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@tbl", dictTableName ?? string.Empty);
+        var result = await cmd.ExecuteScalarAsync();
+        return result == null || result == DBNull.Value ? null : result.ToString();
+    }
 }

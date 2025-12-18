@@ -218,6 +218,8 @@ const buildBody = async (tbody, dict, rows, onRowClick) => {
 
     buildHead(mHead, masterDict);
 
+    const uniq = (arr) => [...new Set((arr || []).filter(Boolean).map(s => String(s)))];
+
     // === Master 資料 ===
     const masterUrl = cfg.MasterApi
       ? cfg.MasterApi
@@ -226,6 +228,14 @@ const buildBody = async (tbody, dict, rows, onRowClick) => {
         )}&top=${cfg.MasterTop || 200}`;
 
     const masterRows = await fetch(masterUrl).then(r => r.json());
+
+    // Master key fields: prefer cfg.MasterPkFields, fallback to dict IsKey
+    const masterKeyFields = uniq([
+      ...(masterDict.filter(f => DICT.isKey(f)).map(f => f.FieldName)),
+      ...((cfg.MasterPkFields || []))
+    ]);
+    // Let buildBody inject hidden keys even if not visible
+    mBody._keyFields = masterKeyFields;
 
     // === Detail 辭典 ===
     const detailDicts = [];
@@ -391,7 +401,7 @@ const loadAllDetails = async (row) => {
     const btnCancel = document.getElementById(`${cfg.DomId}-btnCancel`);
 
     // === 1. Master PK ===
-    const masterPK = masterDict.filter(f => DICT.isKey(f)).map(f => f.FieldName);
+    const masterPK = masterKeyFields;
 
     const masterEditor = window.makeEditableGrid({
       wrapper: root.querySelector(`#${cfg.DomId}-masterWrapper`),
@@ -506,6 +516,46 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
           return null;
         }
         Object.assign(defaults, ctx);
+      }
+
+      // 系統慣例：UseId 缺值時預設帶 A001（或由全域覆蓋）
+      const hasUseIdKey = (keyFields || []).some(k => String(k).toLowerCase() === "useid");
+      if (hasUseIdKey && !defaults.UseId) {
+        defaults.UseId = window.DEFAULT_USEID || window._useId || "A001";
+      }
+
+      // 系統慣例：Item 若是鍵欄位且未帶值，預設使用目前明細最大 Item + 1（依當前查詢條件群組）
+      const hasItemKey = (keyFields || []).some(k => String(k).toLowerCase() === "item");
+      if (hasItemKey && (defaults.Item == null || String(defaults.Item).trim() === "")) {
+        const getElValue = (tr, name) => {
+          if (!tr || !name) return "";
+          const want = String(name).toLowerCase();
+          const inp = Array.from(tr.querySelectorAll("input")).find(x => (x.name || "").toLowerCase() === want);
+          if (inp) return inp.value ?? "";
+          const edit = Array.from(tr.querySelectorAll("input.cell-edit")).find(x => (x.name || "").toLowerCase() === want);
+          return edit?.value ?? "";
+        };
+
+        const ctxKeys = Object.keys(tbody._lastQueryCtx || {}).filter(k => String(k).toLowerCase() !== "item");
+        const matchesCtx = (tr) => {
+          for (const k of ctxKeys) {
+            const want = (defaults[k] ?? "").toString();
+            const got = (getElValue(tr, k) ?? "").toString();
+            if (want !== got) return false;
+          }
+          return true;
+        };
+
+        let maxItem = 0;
+        tbody.querySelectorAll("tr").forEach(tr => {
+          if (tr.dataset?.state === "deleted") return;
+          if (!matchesCtx(tr)) return;
+          const raw = getElValue(tr, "Item");
+          const n = parseInt(String(raw ?? "").trim(), 10);
+          if (!isNaN(n) && n > maxItem) maxItem = n;
+        });
+
+        defaults.Item = String(maxItem + 1);
       }
 
       const pkNames = [
