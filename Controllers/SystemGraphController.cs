@@ -1,177 +1,78 @@
 using Microsoft.AspNetCore.Mvc;
-using PcbErpApi.Data;
-using PcbErpApi.Models;
-using System.IO;
-using System.Threading.Tasks;
+using System.Linq;
 
-namespace PcbErpApi.Controllers
+namespace PcbErpApi.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public sealed class SystemGraphController : ControllerBase
 {
-    [Route("api/[controller]/[action]")]
-    [ApiController]
-    public class SystemGraphController : ControllerBase
+    private static readonly (string Ext, string ContentType)[] Allowed =
+    [
+        (".png", "image/png"),
+        (".jpg", "image/jpeg"),
+        (".jpeg", "image/jpeg"),
+        (".gif", "image/gif"),
+        (".webp", "image/webp"),
+        (".svg", "image/svg+xml"),
+        (".bmp", "image/bmp"),
+    ];
+
+    private readonly IWebHostEnvironment _env;
+
+    public SystemGraphController(IWebHostEnvironment env)
     {
-        private readonly PcbErpContext _context;
-        private readonly string _graphPath = @"\\js2023\mis_STD\Client\SystemGraph";
-        private readonly string _manualPath = @"\\js2023\mis_STD\Client\SystemManual";
+        _env = env;
+    }
 
-        public SystemGraphController(PcbErpContext context)
+    // GET /api/SystemGraph/CUR
+    [HttpGet("{systemId}")]
+    public IActionResult Get(string systemId)
+    {
+        var id = (systemId ?? string.Empty).Trim();
+        if (id.Length == 0) return BadRequest("systemId is required.");
+        if (id.Length > 64) return BadRequest("systemId too long.");
+        if (id.IndexOfAny(['/', '\\']) >= 0) return BadRequest("invalid systemId.");
+        if (!id.All(ch => char.IsLetterOrDigit(ch) || ch is '_' or '-')) return BadRequest("invalid systemId.");
+
+        var baseDir = Path.Combine(_env.ContentRootPath, "SystemGraph");
+        if (!Directory.Exists(baseDir)) return NotFound();
+
+        // 1) Match: SystemGraph/{id}.* (case-insensitive)
+        // If multiple, pick the shortest filename (prefer exact match).
+        var files =
+            Directory.EnumerateFiles(baseDir, "*", SearchOption.TopDirectoryOnly)
+                .Select(p => new FileInfo(p))
+                .ToList();
+
+        var candidates = files
+            .Where(fi => string.Equals(Path.GetFileNameWithoutExtension(fi.Name), id, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(fi => fi.Name.Length)
+            .ToList();
+
+        // 2) Fallback: if not found, allow matching by system name (e.g. Chinese filename contains "系統管理")
+        // Client can pass: /api/SystemGraph/CUR?name=系統管理
+        if (candidates.Count == 0)
         {
-            _context = context;
-        }
-
-        public class UploadDto
-        {
-            public string SystemCode { get; set; } = "";
-            public IFormFile File { get; set; } = null!;
-        }
-
-        // =========================
-        // ✅ 上傳圖檔
-        // =========================
-        [HttpPost]
-        [Consumes("multipart/form-data")]
-        public async Task<IActionResult> Upload([FromForm] UploadDto dto)
-        {
-            if (dto.File == null || dto.File.Length == 0)
-                return BadRequest("未選擇檔案");
-            if (string.IsNullOrWhiteSpace(dto.SystemCode))
-                return BadRequest("系統代碼不可為空");
-
-            var ext = Path.GetExtension(dto.File.FileName).ToLower();
-            if (ext != ".bmp") return BadRequest("僅允許上傳 BMP 檔案");
-
-            Directory.CreateDirectory(_graphPath);
-            var saveName = dto.File.FileName.Trim();
-            var savePath = Path.Combine(_graphPath, saveName);
-
-            using (var fs = new FileStream(savePath, FileMode.Create))
+            var name = (Request.Query["name"].ToString() ?? string.Empty).Trim();
+            if (name.Length > 0 && name.Length <= 64)
             {
-                await dto.File.CopyToAsync(fs);
+                candidates = files
+                    .Where(fi =>
+                        fi.Name.Contains(name, StringComparison.OrdinalIgnoreCase) ||
+                        Path.GetFileNameWithoutExtension(fi.Name).Contains(name, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(fi => fi.Name.Length)
+                    .ToList();
             }
-
-            var entity = await _context.CurdSystemSelects.FindAsync(dto.SystemCode);
-            if (entity != null)
-            {
-                entity.GraphName = saveName;
-                _context.Update(entity);
-                await _context.SaveChangesAsync();
-            }
-
-            return Ok(new { message = "圖檔上傳成功", fileName = saveName });
         }
 
-        // =========================
-        // ✅ 上傳手冊
-        // =========================
-        [HttpPost]
-        [Consumes("multipart/form-data")]
-        public async Task<IActionResult> UploadManual([FromForm] UploadDto dto)
-        {
-            if (dto.File == null || dto.File.Length == 0)
-                return BadRequest("未選擇檔案");
-            if (string.IsNullOrWhiteSpace(dto.SystemCode))
-                return BadRequest("系統代碼不可為空");
+        if (candidates.Count == 0) return NotFound();
 
-            var ext = Path.GetExtension(dto.File.FileName).ToLower();
-            if (ext != ".doc" && ext != ".docx")
-                return BadRequest("僅允許上傳 Word 檔案");
+        var file = candidates[0];
+        var ext = file.Extension.ToLowerInvariant();
+        var allowed = Allowed.FirstOrDefault(x => x.Ext == ext);
+        if (allowed.Ext is null) return NotFound();
 
-            Directory.CreateDirectory(_manualPath);
-            var saveName = dto.File.FileName.Trim();
-            var savePath = Path.Combine(_manualPath, saveName);
-
-            using (var fs = new FileStream(savePath, FileMode.Create))
-            {
-                await dto.File.CopyToAsync(fs);
-            }
-
-            var entity = await _context.CurdSystemSelects.FindAsync(dto.SystemCode);
-            if (entity != null)
-            {
-                entity.ManualName = saveName;
-                _context.Update(entity);
-                await _context.SaveChangesAsync();
-            }
-
-            return Ok(new { message = "手冊上傳成功", fileName = saveName });
-        }
-
-        // =========================
-        // ✅ 顯示圖檔
-        // =========================
-        [HttpGet]
-        [Route("/api/SystemGraph/GetImage/{fileName}")]
-        public IActionResult GetImage(string fileName)
-        {
-            var path = Path.Combine(_graphPath, fileName);
-            if (!System.IO.File.Exists(path))
-            {
-                return NotFound(new
-                {
-                    message = "找不到圖檔",
-                    path,
-                    exists = System.IO.Directory.Exists(_graphPath),
-                    fileName
-                });
-            }
-
-            var bytes = System.IO.File.ReadAllBytes(path);
-            return File(bytes, "image/bmp");
-        }
-
-        // ✅ 顯示手冊
-        [HttpGet]
-        [Route("/api/SystemGraph/GetManual/{fileName}")]
-        public IActionResult GetManual(string fileName)
-        {
-            var path = Path.Combine(_manualPath, fileName);
-            if (!System.IO.File.Exists(path))
-                return NotFound(new { message = "找不到手冊", path, fileName });
-
-            var bytes = System.IO.File.ReadAllBytes(path);
-            return File(bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", fileName);
-        }
-
-        // =========================
-        // ✅ 刪除圖檔
-        // =========================
-        [HttpDelete]
-        public async Task<IActionResult> Delete(string systemCode)
-        {
-            var entity = await _context.CurdSystemSelects.FindAsync(systemCode);
-            if (entity == null) return NotFound();
-
-            var fileName = entity.GraphName;
-            if (!string.IsNullOrWhiteSpace(fileName))
-            {
-                var path = Path.Combine(_graphPath, fileName);
-                if (System.IO.File.Exists(path)) System.IO.File.Delete(path);
-                entity.GraphName = null;
-                _context.Update(entity);
-                await _context.SaveChangesAsync();
-            }
-
-            return Ok(new { message = "圖檔刪除成功" });
-        }
-
-        // ✅ 刪除手冊
-        [HttpDelete]
-        public async Task<IActionResult> DeleteManual(string systemCode)
-        {
-            var entity = await _context.CurdSystemSelects.FindAsync(systemCode);
-            if (entity == null) return NotFound();
-
-            var fileName = entity.ManualName;
-            if (!string.IsNullOrWhiteSpace(fileName))
-            {
-                var path = Path.Combine(_manualPath, fileName);
-                if (System.IO.File.Exists(path)) System.IO.File.Delete(path);
-                entity.ManualName = null;
-                _context.Update(entity);
-                await _context.SaveChangesAsync();
-            }
-
-            return Ok(new { message = "手冊刪除成功" });
-        }
+        return PhysicalFile(file.FullName, allowed.ContentType, enableRangeProcessing: true);
     }
 }

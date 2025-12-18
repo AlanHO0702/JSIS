@@ -78,6 +78,96 @@
         return `${base}${sep}PaperNum=${encodeURIComponent(paperNum)}`;
     }
 
+    // Dict meta cache (datatype/format/width...)
+    const DICT_META_CACHE = new Map(); // tn -> Map(fieldLower -> { dataType, formatStr })
+
+    async function fetchDictMeta(dictTable) {
+        const tn = cleanTableName(dictTable);
+        if (!tn) return new Map();
+        if (DICT_META_CACHE.has(tn)) return DICT_META_CACHE.get(tn);
+        try {
+            const res = await fetch(`/api/TableFieldLayout/DictFields?table=${encodeURIComponent(tn)}&lang=TW`);
+            if (!res.ok) {
+                const empty = new Map();
+                DICT_META_CACHE.set(tn, empty);
+                return empty;
+            }
+            const rows = await res.json();
+            const map = new Map();
+            (rows || []).forEach(r => {
+                const field = (r.fieldName || r.FieldName || '').toString();
+                if (!field) return;
+                map.set(field.toLowerCase(), {
+                    dataType: (r.dataType || r.DataType || '').toString(),
+                    formatStr: (r.formatStr || r.FormatStr || '').toString()
+                });
+            });
+            DICT_META_CACHE.set(tn, map);
+            return map;
+        } catch {
+            const empty = new Map();
+            DICT_META_CACHE.set(tn, empty);
+            return empty;
+        }
+    }
+
+    function escapeHtml(v) {
+        return String(v ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function pad2(n) { return String(n).padStart(2, '0'); }
+
+    function tryParseDate(raw) {
+        if (raw == null || raw === '') return null;
+        if (raw instanceof Date && !isNaN(raw)) return raw;
+        const s = String(raw).trim();
+        if (!s) return null;
+        const d = new Date(s);
+        return isNaN(d) ? null : d;
+    }
+
+    function parseDecimalsFromFormat(fmt) {
+        const s = (fmt || '').toString();
+        const dot = s.lastIndexOf('.');
+        if (dot < 0) return null;
+        const tail = s.slice(dot + 1);
+        const m = tail.match(/0+/);
+        if (!m) return Math.min(6, tail.length);
+        return Math.min(8, m[0].length);
+    }
+
+    function formatCellValue(raw, meta) {
+        if (raw == null) return '';
+        const s = String(raw);
+        if (s === '') return '';
+
+        const dataType = (meta?.dataType || '').toLowerCase();
+        const fmt = (meta?.formatStr || '').toLowerCase();
+
+        // Date / DateTime -> show date only (yyyy/MM/dd)
+        if (dataType.includes('date') || fmt.includes('yyyy/mm/dd') || fmt.includes('yyyy-mm-dd')) {
+            const d = tryParseDate(raw);
+            if (!d) return s;
+            return `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
+        }
+
+        // Number formatting
+        if (dataType.includes('int') || dataType.includes('decimal') || dataType.includes('numeric') || dataType.includes('money') || dataType.includes('float') || dataType.includes('real')) {
+            const n = Number(String(raw).replace(/,/g, ''));
+            if (!Number.isFinite(n)) return s;
+            const decimals = parseDecimalsFromFormat(meta?.formatStr);
+            if (decimals != null) return n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+            return n.toLocaleString();
+        }
+
+        return s;
+    }
+
     async function fetchFieldWidths(dictTable) {
         const tn = cleanTableName(dictTable);
         if (!tn) return new Map();
@@ -137,8 +227,10 @@
         startWidth: 0,
         saveTimer: null
     };
-    async function persistWidths() {
-        const { table, ths, dictTable } = resizeState;
+    async function persistWidths(snapshot) {
+        const table = snapshot?.table;
+        const ths = snapshot?.ths || [];
+        const dictTable = snapshot?.dictTable || '';
         const tn = cleanTableName(dictTable);
         if (!table || !ths.length || !tn) return;
         try {
@@ -154,9 +246,10 @@
             localStorage.setItem(`colwidth:${tn}`, JSON.stringify(payload.cols));
         } catch {}
     }
-    function debouncePersist() {
+    function debouncePersist(snapshot) {
         clearTimeout(resizeState.saveTimer);
-        resizeState.saveTimer = setTimeout(persistWidths, 400);
+        const snap = snapshot ? { ...snapshot } : null;
+        resizeState.saveTimer = setTimeout(() => persistWidths(snap), 400);
     }
     document.addEventListener('mousemove', (e) => {
         if (!resizeState.active || !resizeState.table) return;
@@ -170,7 +263,8 @@
         document.body.classList.remove('resizing');
         resizeState.ths.forEach(th => th.classList.remove('resizing'));
         Array.from(resizeState.table.querySelectorAll('tbody td.resizing')).forEach(td => td.classList.remove('resizing'));
-        debouncePersist();
+        // 用 snapshot 避免先清空 state 導致儲存失效
+        debouncePersist({ table: resizeState.table, ths: resizeState.ths, dictTable: resizeState.dictTable });
         resizeState.table = null;
         resizeState.ths = [];
         resizeState.dictTable = '';
@@ -281,6 +375,7 @@
 
         const dict = fieldDicts[tabId] || {};
         const dictTable = getDictTableOfTab(container, tabId);
+        const metaMap = await fetchDictMeta(dictTable);
 
 
 
@@ -330,14 +425,16 @@
             const item = row.Item || row.item || index + 1;
             html += `<tr data-paper-num="${paperNum}" data-item="${item}" data-state="unchanged">`;
             fields.forEach(field => {
-                const value = row[field] ?? '';
+                const raw = row[field] ?? '';
+                const meta = metaMap.get(field.toLowerCase());
+                const value = formatCellValue(raw, meta);
                 // ✅ 雙元素：顯示模式 + 編輯模式
                 html += `<td>
-                    <span class="cell-view">${value}</span>
+                    <span class="cell-view">${escapeHtml(value)}</span>
                     <input type="text"
                            class="cell-edit d-none"
                            data-field="${field}"
-                           value="${value}">
+                           value="${escapeHtml(raw)}">
                 </td>`;
             });
             html += '</tr>';
@@ -665,7 +762,8 @@
 
 <style>
 .multi-tab-detail {
-    padding: 1rem 0;
+    /* 單頭/單身間距：縮小上方留白 */
+    padding: .05rem 0 0;
 }
 
 .multi-tab-detail .nav-tabs {
@@ -693,7 +791,7 @@
 }
 
 .multi-tab-detail .table-container {
-    margin-top: 1rem;
+    margin-top: .2rem;
 }
 
 /* erp-table 完整樣式 */
@@ -709,7 +807,9 @@
 }
 
 .multi-tab-detail .erp-table {
-    width: 100%;
+    /* 欄位少時不要硬撐滿容器寬度：依欄寬縮排，容器保留空白 */
+    width: max-content;
+    display: inline-table;
     border-collapse: separate;
     border-spacing: 0;
     font-size: 1.06em;

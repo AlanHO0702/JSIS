@@ -180,6 +180,19 @@ body {
     color: #155cb5 !important;
     text-decoration: underline !important;
 }
+
+.system-graph-frame{
+    background: #f8fbff;
+    border: 1px solid #e5eaf2;
+    border-radius: 12px;
+    padding: 10px;
+}
+#systemGraphImg{
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    display: block;
+}
 /* 我的最愛區塊專用：去底線，hover再出現 */
 #favorite-list a {
     color: #2766b5;
@@ -204,7 +217,7 @@ body {
                         var level1Id = $"level1-{mod0.ItemId}";
                         var shouldExpand = level1Map.ContainsKey(mod0.ItemId) && level1Map[mod0.ItemId].Any(x => x.ItemId == Model.SelectedLevel1Id);
                         <li>
-                            <a href="javascript:void(0)" onclick="toggleChildren('@level1Id')">
+                            <a href="javascript:void(0)" onclick="toggleChildren('@level1Id','@mod0.ItemId','@mod0.ItemName')">
                                 <span class="icon">📁</span>
                                 <span style="white-space:nowrap">@mod0.ItemId = @mod0.ItemName</span>
                             </a>
@@ -229,11 +242,23 @@ body {
         <!-- 右側功能列表 -->
         <div class="col-12 col-md-5 mb-4">
             <div class="erp-card">
+                <div class="d-flex align-items-center mb-3">
+                    <h4 class="erp-list-title mb-0 me-2">功能列表</h4>
+                </div>
+
+                <div id="systemGraphPanel" class="mb-3" style="display:none;">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div id="systemGraphTitle" class="text-secondary fw-semibold"></div>
+                        <a id="systemGraphOpen" class="small text-decoration-none" href="#" target="_blank" rel="noopener" style="display:none;">開新視窗</a>
+                    </div>
+                    <div class="system-graph-frame mt-2">
+                        <img id="systemGraphImg" alt="系統流程圖" style="display:none;" />
+                        <div id="systemGraphEmpty" class="text-secondary small" style="display:none;">尚未提供流程圖</div>
+                    </div>
+                </div>
+
                 @if (level2List.Any())
                 {
-                    <div class="d-flex align-items-center mb-3">
-                        <h4 class="erp-list-title mb-0 me-2">功能列表</h4>
-                    </div>
                    <ul id="level2-list" class="list-group erp-list-group">
                     @foreach (var item in level2List)
                     {
@@ -273,9 +298,6 @@ body {
                 }
                 else
                 {
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h4 class="erp-list-title mb-0">功能列表</h4>
-                    </div>
                     <p class="text-secondary mt-4">請從左側展開模組並選擇子模組查看功能</p>
                 }
             </div>
@@ -493,9 +515,44 @@ body {
             alert(`找不到對應的頁面: ${itemId}`);
         }
     }
-    window.toggleChildren = function (id) {
+    function showSystemGraph(systemId, systemName) {
+        const panel = document.getElementById('systemGraphPanel');
+        const img = document.getElementById('systemGraphImg');
+        const empty = document.getElementById('systemGraphEmpty');
+        const title = document.getElementById('systemGraphTitle');
+        const open = document.getElementById('systemGraphOpen');
+        if (!panel || !img || !empty || !title || !open) return;
+
+        const sid = (systemId || '').toString().trim();
+        if (!sid) return;
+
+        panel.style.display = 'block';
+        title.textContent = `${sid}${systemName ? ' - ' + systemName : ''} 流程圖`;
+
+        const nameParam = (systemName || '').toString().trim();
+        const url = `/api/SystemGraph/${encodeURIComponent(sid)}?name=${encodeURIComponent(nameParam)}&t=${Date.now()}`;
+        open.href = url;
+        open.style.display = 'none';
+        img.style.display = 'none';
+        empty.style.display = 'none';
+
+        img.onload = () => {
+            img.style.display = 'block';
+            empty.style.display = 'none';
+            open.style.display = 'inline';
+        };
+        img.onerror = () => {
+            img.style.display = 'none';
+            open.style.display = 'none';
+            empty.style.display = 'block';
+        };
+        img.src = url;
+    }
+
+    window.toggleChildren = function (id, systemId, systemName) {
         const el = document.getElementById(id);
         if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+        if (systemId) showSystemGraph(systemId, systemName);
     };
 
     // 確保動態連結有事件（若 inline onclick 被瀏覽器阻擋或失效）
