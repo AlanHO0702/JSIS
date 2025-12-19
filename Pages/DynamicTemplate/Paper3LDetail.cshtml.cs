@@ -2,10 +2,12 @@ using System.Data;
 using System.Linq;
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
+using System.IO;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using PcbErpApi.Data;
 using PcbErpApi.Helpers;
 using PcbErpApi.Models;
@@ -17,12 +19,14 @@ namespace PcbErpApi.Pages.DynamicTemplate
         private readonly PcbErpContext _ctx;
         private readonly ITableDictionaryService _dictService;
         private readonly HttpClient _http;
+        private readonly IWebHostEnvironment _env;
 
-        public Paper3LDetailModel(PcbErpContext ctx, ITableDictionaryService dictService, IHttpClientFactory httpClientFactory)
+        public Paper3LDetailModel(PcbErpContext ctx, ITableDictionaryService dictService, IHttpClientFactory httpClientFactory, IWebHostEnvironment env)
         {
             _ctx = ctx;
             _dictService = dictService;
             _http = httpClientFactory.CreateClient("MyApiClient");
+            _env = env;
         }
 
         public string ItemId { get; private set; } = string.Empty;
@@ -226,20 +230,28 @@ namespace PcbErpApi.Pages.DynamicTemplate
             }
 
             // 7) Action rail：先不套用 DB 動態按鈕（Paper3L 以顯示為主）
-            if (string.Equals(itemId, "SA000002", StringComparison.OrdinalIgnoreCase))
-            {
-                CustomButtons = new List<ItemCustButtonRow>();
-                ActionRailPartial = "~/Pages/SPO/OrderSubCustomButton.cshtml";
-            }
-            else
-            {
-                CustomButtons = await LoadCustomButtonsAsync(itemId);
-                ActionRailPartial = (CustomButtons?.Count ?? 0) > 0
-                    ? "~/Pages/Shared/_ActionRail.DynamicButtons.cshtml"
-                    : "~/Pages/Shared/_ActionRail.Empty.cshtml";
-            }
+            CustomButtons = await LoadCustomButtonsAsync(itemId);
+            ActionRailPartial = (CustomButtons?.Count ?? 0) > 0
+                ? "~/Pages/Shared/_ActionRail.DynamicButtons.cshtml"
+                : "~/Pages/Shared/_ActionRail.Empty.cshtml";
+
+            var logicPartial = ResolveActionRailLogicPartial(itemId);
+            if (!string.IsNullOrWhiteSpace(logicPartial))
+                ViewData["ActionRailLogicPartial"] = logicPartial;
 
             return Page();
+        }
+
+        private string? ResolveActionRailLogicPartial(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId)) return null;
+
+            var fileName = $"{itemId.Trim()}.cshtml";
+            var fullPath = Path.Combine(_env.ContentRootPath, "Pages", "CustomButton", fileName);
+            if (System.IO.File.Exists(fullPath))
+                return $"~/Pages/CustomButton/{fileName}";
+
+            return null;
         }
 
         private static int ExtractOrderIndex(string? tableKind)

@@ -1,0 +1,183 @@
+@model dynamic
+
+<script>
+(() => {
+  window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+  const readPaperNum = (ctx) => {
+    const v = (ctx?.paperNum || window._paperNum || '').toString().trim();
+    if (v) return v;
+    if (typeof window.getPaperNum === 'function') {
+      try { return (window.getPaperNum() || '').toString().trim(); } catch { /* ignore */ }
+    }
+    return '';
+  };
+
+  const readDetailPaperId = () => {
+    const fromPage = (window.PAGE?.detailTable || '').toString().trim();
+    if (fromPage) return fromPage.replace(/^dbo\./i, '');
+
+    const fromGlobal = (window._dictTableName || '').toString().trim();
+    if (fromGlobal) return fromGlobal.replace(/^dbo\./i, '');
+
+    const activeContainer =
+      document.querySelector('.multi-tab-detail .tab-pane.active .table-container') ||
+      document.querySelector('.multi-tab-detail .table-container');
+    const fromDom = (activeContainer?.dataset?.dictTable || '').toString().trim();
+    return fromDom.replace(/^dbo\./i, '');
+  };
+
+  const apiPostJson = async (url, body) => {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {})
+    });
+    const raw = await resp.text();
+    let data;
+    try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
+    return { resp, data };
+  };
+
+  const execByButton = async (buttonName, paperNum) => {
+    const { resp, data } = await apiPostJson('/api/StoredProc/execByButton', {
+      itemId: 'SA000002',
+      buttonName,
+      paperNum
+    });
+    return { resp, data };
+  };
+
+  const calcAmount = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    try {
+      const { resp, data } = await execByButton('btnC5', paperNum);
+      if (resp.ok && data.ok) {
+        await Swal.fire({ icon: 'success', title: '計算完成', timer: 900, showConfirmButton: false });
+        location.reload();
+      } else {
+        Swal.fire({ icon: 'error', title: '呼叫失敗', text: data.error || `HTTP ${resp.status}` });
+      }
+    } catch (e) {
+      Swal.fire({ icon: 'error', title: '網路錯誤', text: String(e) });
+    }
+  };
+
+  const clearDetails = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    const paperId = readDetailPaperId();
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const status = (typeof window.getHeaderValueByLabel === 'function')
+      ? (window.getHeaderValueByLabel('單據狀態') || '')
+      : '';
+
+    const ALLOW = ['作業中', '審核中'];
+    const BLOCK = ['已確認', '已結案', '作廢中'];
+    if (BLOCK.includes(status) || !ALLOW.includes(status)) {
+      return Swal.fire({ icon: 'warning', title: '此狀態不可清除', html: `單據狀態：<b>${status || '（空）'}</b>` });
+    }
+
+    const { isConfirmed } = await Swal.fire({
+      icon: 'warning',
+      title: '確定要清除這張單的所有單身嗎？',
+      html: `單號：<b>${paperNum}</b><br>表：<code>${paperId || ''}</code><br>狀態：<b>${status}</b>`,
+      showCancelButton: true, confirmButtonText: '清除', cancelButtonText: '取消'
+    });
+    if (!isConfirmed) return;
+
+    try {
+      const { resp, data } = await execByButton('btnC7', paperNum);
+
+      if (resp.ok && data.ok) {
+        const msg = (data.rows != null) ? `已清除 ${data.rows} 筆` : '清除完成';
+        await Swal.fire({ icon: 'success', title: msg, timer: 900, showConfirmButton: false });
+        location.reload();
+      } else {
+        Swal.fire({ icon: 'error', title: '清除失敗', text: data.error || `HTTP ${resp.status}` });
+      }
+    } catch (e) {
+      Swal.fire({ icon: 'error', title: '網路錯誤', text: String(e) });
+    }
+  };
+
+  const searchDetails = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (window.OrderDetailPicker_detailPicker?.open) {
+      window.OrderDetailPicker_detailPicker.open({ paperNum });
+      return;
+    }
+    Swal.fire({ icon: 'info', title: '找不到明細搜尋視窗（detailPicker）' });
+  };
+
+  const outAddr = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    const paperId = 'SPOdOrderMain';
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    // 1) 先載入出貨地址選項
+    const resp = await fetch(`/api/OrderSubButton/GetOutAddrOptions?paperId=${encodeURIComponent(paperId)}&paperNum=${encodeURIComponent(paperNum)}`);
+    const data = await resp.json();
+    if (!data.ok) return Swal.fire({ icon: 'error', title: '載入失敗', text: data.error });
+
+    // 2) 顯示選擇視窗
+    const options = (data.list || []).map(x =>
+      `<option value="${x.Addr}" data-title="${x.Title}">${x.Addr}</option>`
+    ).join('');
+
+    const { value: addr } = await Swal.fire({
+      title: data.label || '出貨地址',
+      html: `<select id="addrSel" class="swal2-select">${options}</select>`,
+      showCancelButton: true,
+      confirmButtonText: '確定',
+      cancelButtonText: '取消',
+      preConfirm: () => {
+        const sel = document.getElementById('addrSel');
+        return sel ? {
+          addr: sel.value,
+          title: sel.options[sel.selectedIndex]?.dataset?.title || ''
+        } : null;
+      }
+    });
+    if (!addr) return;
+
+    // 3) 更新到主檔
+    const updateResp = await fetch('/api/OrderSubButton/UpdateOutAddr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paperId, paperNum, addr: addr.addr, title: addr.title })
+    });
+    const updateData = await updateResp.json();
+    if (!updateData.ok) return Swal.fire({ icon: 'error', title: '更新失敗', text: updateData.error });
+
+    await Swal.fire({ icon: 'success', title: '更新完成', timer: 1000, showConfirmButton: false });
+
+    const addrField = document.querySelector('input[name="TransPlace"], input[name="OutAddr"], textarea[name="TransPlace"], textarea[name="OutAddr"]');
+    const titleField = document.querySelector('input[name="PkgTitle"], input[name="ShipTo"], textarea[name="PkgTitle"], textarea[name="ShipTo"]');
+    if (addrField) addrField.value = addr.addr;
+    if (titleField) titleField.value = addr.title;
+
+    const addrValueEl = document.querySelector('[data-field="OutAddr"] span, [data-field="TransPlace"] span');
+    const titleValueEl = document.querySelector('[data-field="ShipTo"] span, [data-field="PkgTitle"] span');
+    if (addrValueEl) addrValueEl.textContent = addr.addr;
+    if (titleValueEl) titleValueEl.textContent = addr.title;
+
+    [addrField, titleField, addrValueEl, titleValueEl].forEach(el => {
+      if (!el) return;
+      el.style.transition = 'background-color 0.5s';
+      el.style.backgroundColor = '#fff8c4';
+      setTimeout(() => el.style.backgroundColor = '', 800);
+    });
+  };
+
+  window.ActionRailCustomHandlers['SA000002'] = {
+    // 依 CURdOCXItemCustButton.ButtonName 對應
+    btnC2: searchDetails,
+    btnC5: calcAmount,
+    btnC7: clearDetails,
+    btnC6: outAddr
+  };
+})();
+</script>
