@@ -38,7 +38,7 @@ namespace PcbErpApi.Pages.AJN
             var config = new MasterMultiDetailConfig
             {
                 DomId = "sysSummary",
-                MasterTitle = "系統單據主檔",
+                MasterTitle = "系統作業",
                 MasterTable = "AJNdSysPaperIdBas",
                 MasterDict = "AJNdSysPaperIdBas",
                 // 不指定 MasterApi，使用預設的 CommonTable API
@@ -55,7 +55,7 @@ namespace PcbErpApi.Pages.AJN
                     // 層級 1：規則主檔（對應 Delphi 的 qryDetail1）
                     new WebRazor.Models.DetailConfig
                     {
-                        DetailTitle = "規則主檔",
+                        DetailTitle = "摘要規則",
                         DetailTable = "AJNdSysPaperIdSub",
                         DetailDict = "AJNdSysPaperIdSub",
                         // 不指定 DetailApi，使用預設的 CommonTable API

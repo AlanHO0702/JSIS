@@ -224,7 +224,7 @@
           {
               var d0 = Model.Details[0];
               var d0Id = $"{domId}-detail-0";
-              <!-- Detail[0] 區域 -->
+              <!-- Detail 區域 -->
               <div class="mmd-panel mmd-panel-stack-detail">
                   <div class="mmd-section-header">
                       <span>@d0.DetailTitle</span>
@@ -251,7 +251,7 @@
           {
               var d1 = Model.Details[1];
               var d1Id = $"{domId}-detail-1";
-              <!-- Detail[1] 區域 -->
+              <!-- SubDetail 區域 -->
               <div class="mmd-panel mmd-panel-stack-subdetail">
                   <div class="mmd-section-header">
                       <span>@d1.DetailTitle</span>
@@ -696,14 +696,23 @@ document.addEventListener('DOMContentLoaded', function() {
         // 三欄式和垂直堆疊佈局需要初始化計數和分隔器
         setTimeout(() => {
             initGridCounts(domId);
-            // 記錄垂直堆疊佈局中摘要對應科目的初始高度
+
+            // 計算並記錄垂直堆疊佈局中 SubDetail 的初始高度
             if (layoutMode === 'VerticalStack') {
+                const container = root.querySelector('.mmd-vertical-stack-container');
                 const subdetailPanel = root.querySelector('.mmd-panel-stack-subdetail');
-                if (subdetailPanel) {
-                    const initialHeight = subdetailPanel.offsetHeight;
-                    subdetailPanel.setAttribute('data-initial-height', initialHeight);
+
+                if (container && subdetailPanel) {
+                    // 計算 SubDetail 的初始高度
+                    // SubDetail高度 = 容器總高度 - Master(120px) - Detail(150px) - 3個分隔器(3x5px=15px)
+                    const containerHeight = container.offsetHeight;
+                    const calculatedSubDetailHeight = containerHeight - 120 - 150 - 15;
+
+                    // 保存計算出的初始高度，用於拖曳限制
+                    subdetailPanel.setAttribute('data-initial-height', calculatedSubDetailHeight);
                 }
             }
+
             bindSplitters();
         }, 300);
     }
@@ -793,10 +802,19 @@ function bindSplitters() {
                                     prevPanel &&
                                     prevPanel.classList.contains('mmd-panel-stack-subdetail');
 
-            // 讀取最後一個分隔器的初始高度（從 data 屬性），作為最小高度限制
-            const initialHeight = isLastHSplitter && prevPanel.hasAttribute('data-initial-height')
-                                    ? parseInt(prevPanel.getAttribute('data-initial-height'))
-                                    : 0;
+            // 根據面板類型決定最小高度限制
+            let minHeightLimit = 100; // 預設值
+            if (!isVertical) {
+                if (prevPanel.classList.contains('mmd-panel-stack-master')) {
+                    minHeightLimit = 120; // Master 的初始高度
+                } else if (prevPanel.classList.contains('mmd-panel-stack-detail')) {
+                    minHeightLimit = 150; // Detail 的初始高度
+                } else if (prevPanel.classList.contains('mmd-panel-stack-subdetail')) {
+                    // SubDetail 使用計算出的初始高度作為最小限制
+                    const savedHeight = prevPanel.getAttribute('data-initial-height');
+                    minHeightLimit = savedHeight ? parseInt(savedHeight) : startSize;
+                }
+            }
 
             if (isLastHSplitter) {
                 prevPanel.style.flex = 'none';
@@ -811,11 +829,7 @@ function bindSplitters() {
                 const newSize = startSize + delta;
                 const newNextSize = startNextSize - delta;
 
-                // 對於最後一個水平分隔器，不能縮小到低於初始高度
-                // 其他分隔器限制最小高度為 100px
-                const minHeight = isLastHSplitter ? initialHeight : 100;
-
-                if (newSize >= minHeight) {
+                if (newSize >= minHeightLimit) {
                     if (isVertical) {
                         prevPanel.style.width = newSize + 'px';
                         if (nextPanel && !isLastHSplitter && newNextSize > 100) {
