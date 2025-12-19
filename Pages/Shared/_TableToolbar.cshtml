@@ -7,7 +7,10 @@
     <button id="btnConfirm" class="btn toolbar-btn success" type="button" >確認</button>
     <button id="btnCancel" class="btn toolbar-btn danger" type="button">退審</button>
     <button id="@Model.DeleteBtnId" class="btn toolbar-btn danger" type="button">@Model.DeleteText</button>
-    <button id="btnPrint" class="btn toolbar-btn" type="button">印單據</button>
+    <span class="print-panel-wrap">
+        <button id="btnPrint" class="btn toolbar-btn" type="button">印單據</button>
+        <div id="printPanel" class="print-panel d-none"></div>
+    </span>
 </div>
 <!-- 查詢條件彈窗 -->
 
@@ -24,6 +27,39 @@
     // 原本：const fetcher = window.http || window.busyFetch || fetch.bind(window);
     const fetcher = (...args) =>
     (window.http || window.busyFetch || fetch.bind(window))(...args);
+
+    const printPanelStyle = document.createElement('style');
+    printPanelStyle.textContent = `
+.print-panel-wrap { position: relative; display: inline-block; }
+.print-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  display: inline-block;
+  width: max-content;
+  min-width: 0;
+  max-width: 360px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #e3e6ee;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+  z-index: 1000;
+}
+.print-panel.d-none { display: none; }
+.print-panel-empty { color: #6b7280; }
+.print-acc { display: grid; gap: 8px; max-height: 240px; overflow: auto; width: max-content; }
+.print-acc-item { border: 1px solid #e9edf5; border-radius: 8px; background: #fbfcff; width: 100%; }
+.print-acc-item[open] { background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+.print-acc-item summary { cursor: pointer; padding: 8px 10px; font-weight: 600; color: #1f3b6d; display: block; }
+.print-acc-item summary::-webkit-details-marker { display: none; }
+.print-acc-item summary::marker { content: ""; }
+.print-acc-item summary::-moz-list-bullet { font-size: 0; }
+.print-acc-summary::after {
+  content: '';
+}
+`;
+    document.head.appendChild(printPanelStyle);
 
 
     document.addEventListener("DOMContentLoaded", function () {
@@ -157,37 +193,132 @@
         }
 
         const btnPrint = document.getElementById('btnPrint');
-        if (btnPrint) {
-            btnPrint.addEventListener('click', async () => {
-            const paperNum = window.selectedPaperNum || document.querySelector('[name="PaperNum"]')?.value;
-            if (!paperNum) { Swal.fire({ icon:'warning', title:'查無單號！' }); return; }
+        const printPanel = document.getElementById('printPanel');
+        let printOptionsCache = null;
 
-            const payload = {
-                spName: _reportSpName,      // 你原本設定的 SP 名稱
-                reportName: _reportSpName,  // rpt 檔名(不含 .rpt)
-                params: { PaperNum: paperNum } // 其他參數照報表需求加，key 不要加 
-            };
+        const buildPrintPayload = (opt, paperNum) => ({
+            spName: opt?.SpName || _reportSpName,
+            reportName: opt?.ReportName || _reportSpName,
+            params: { PaperNum: paperNum }
+        });
 
-            const res = await fetch('/api/report/generate-url', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (!res.ok) {
-                Swal.fire({ icon:'error', title:'報表產生失敗', text: await res.text() });
+        const renderPrintPanel = (options) => {
+            if (!printPanel) return;
+            if (!options || options.length === 0) {
+                printPanel.innerHTML = '<div class="print-panel-empty">沒有可用的列印設定</div>';
                 return;
             }
+            const acc = options.map((o, i) => {
+                const label = o.ItemName || o.ReportName || o.SpName;
+                return `
+<details class="print-acc-item">
+  <summary class="print-acc-summary" data-print-idx="${i}">${label}</summary>
+</details>`;
+            }).join('');
+            printPanel.innerHTML = `<div class="print-acc">${acc}</div>`;
+        };
 
-            const blob = await res.blob();
-            const url = URL.createObjectURL(blob);
-            Swal.fire({
-                html: `<iframe src="${url}" width="100%" height="600px" frameborder="0"></iframe>`,
-                width: '80%', heightAuto: false, showCloseButton: true, showConfirmButton: false,
-                willClose: () => URL.revokeObjectURL(url)
+        const fetchPrintOptions = async () => {
+            const paperId = window._headerTableName || window._tableName || "";
+            if (!paperId) return [];
+            try {
+                const optResp = await fetch(`/api/report/paper-options?paperId=${encodeURIComponent(paperId)}`);
+                if (!optResp.ok) return [];
+                const optData = await optResp.json();
+                return (optData?.ok && Array.isArray(optData.list)) ? optData.list : [];
+            } catch {
+                return [];
+            }
+        };
+
+        const togglePrintPanel = async () => {
+            if (!printPanel) return;
+            if (!printPanel.classList.contains('d-none')) {
+                printPanel.classList.add('d-none');
+                return;
+            }
+            if (printOptionsCache === null) {
+                printOptionsCache = await fetchPrintOptions();
+            }
+            renderPrintPanel(printOptionsCache);
+            printPanel.classList.remove('d-none');
+        };
+
+        if (btnPrint) {
+            btnPrint.addEventListener('click', async () => {
+                const paperNum = window.selectedPaperNum || document.querySelector('[name="PaperNum"]')?.value;
+                if (!paperNum) { Swal.fire({ icon:'warning', title:'查無單號！' }); return; }
+
+                if (printOptionsCache === null) {
+                    printOptionsCache = await fetchPrintOptions();
+                }
+
+                // 若沒有任何設定，沿用舊的直接列印
+                if (!printOptionsCache || printOptionsCache.length === 0) {
+                    if (!_reportSpName) {
+                        Swal.fire({ icon:'warning', title:'沒有可用的列印設定' });
+                        return;
+                    }
+                    const payload = buildPrintPayload(null, paperNum);
+                    const res = await fetch('/api/report/generate-url', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!res.ok) {
+                        Swal.fire({ icon:'error', title:'報表產生失敗', text: await res.text() });
+                        return;
+                    }
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    Swal.fire({
+                        html: `<iframe src="${url}" width="100%" height="600px" frameborder="0"></iframe>`,
+                        width: '80%', heightAuto: false, showCloseButton: true, showConfirmButton: false,
+                        willClose: () => URL.revokeObjectURL(url)
+                    });
+                    return;
+                }
+
+                await togglePrintPanel();
             });
+        }
+
+        if (printPanel) {
+            document.addEventListener('click', (e) => {
+                if (printPanel.classList.contains('d-none')) return;
+                if (btnPrint && (btnPrint.contains(e.target) || printPanel.contains(e.target))) return;
+                printPanel.classList.add('d-none');
             });
 
+            printPanel.addEventListener('click', async (e) => {
+                const summary = e.target.closest('.print-acc-summary');
+                if (!summary) return;
+                e.preventDefault();
+                const idx = parseInt(summary.dataset.printIdx, 10);
+                if (Number.isNaN(idx)) return;
+                const paperNum = window.selectedPaperNum || document.querySelector('[name="PaperNum"]')?.value;
+                if (!paperNum) { Swal.fire({ icon:'warning', title:'查無單號！' }); return; }
+                const selected = (printOptionsCache && printOptionsCache[idx]) ? printOptionsCache[idx] : null;
+                const payload = buildPrintPayload(selected, paperNum);
+
+                const res = await fetch('/api/report/generate-url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) {
+                    Swal.fire({ icon:'error', title:'報表產生失敗', text: await res.text() });
+                    return;
+                }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                Swal.fire({
+                    html: `<iframe src="${url}" width="100%" height="600px" frameborder="0"></iframe>`,
+                    width: '80%', heightAuto: false, showCloseButton: true, showConfirmButton: false,
+                    willClose: () => URL.revokeObjectURL(url)
+                });
+                printPanel.classList.add('d-none');
+            });
         }
 
         const btnSwitch = document.getElementById("btnSwitch");

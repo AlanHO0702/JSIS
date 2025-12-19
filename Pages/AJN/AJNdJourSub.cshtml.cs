@@ -2,7 +2,6 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
-using static SpodOrdersModel;
 
 /// <summary>
 /// SPOdOrderSub 單身頁面的 PageModel，繼承共用樣板 TableDetailModel

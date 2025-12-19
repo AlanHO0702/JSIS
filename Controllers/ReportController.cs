@@ -59,6 +59,57 @@ namespace PcbErpApi.Controllers
             return File(pdfBytes, "application/pdf"); // 前端拿到就是 PDF 流
         }
 
+        [HttpGet("paper-options")]
+        public async Task<IActionResult> GetPaperOptions([FromQuery] string paperId)
+        {
+            if (string.IsNullOrWhiteSpace(paperId))
+                return BadRequest(new { ok = false, error = "缺少 PaperId" });
+
+            var list = new List<object>();
+            var connStr = _config.GetConnectionString("DefaultConnection");
+            await using var conn = new SqlConnection(connStr);
+            await conn.OpenAsync();
+
+            const string sql = @"
+SELECT SerialNum, ItemName, Enabled, ClassName, ObjectName
+  FROM CURdPaperPaper WITH (NOLOCK)
+ WHERE PaperId = @paperId
+ ORDER BY SerialNum;";
+
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@paperId", paperId);
+
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var enabled = rd["Enabled"] == DBNull.Value ? 0 : Convert.ToInt32(rd["Enabled"]);
+                if (enabled != 1) continue;
+
+                var itemName = rd["ItemName"]?.ToString() ?? string.Empty;
+                var className = rd["ClassName"]?.ToString() ?? string.Empty;
+                var objectName = rd["ObjectName"]?.ToString() ?? string.Empty;
+
+                var reportName = className.EndsWith(".rpt", StringComparison.OrdinalIgnoreCase)
+                    ? className[..^4]
+                    : className;
+                if (string.IsNullOrWhiteSpace(reportName))
+                    reportName = objectName;
+
+                var spName = string.IsNullOrWhiteSpace(objectName)
+                    ? reportName
+                    : objectName;
+
+                list.Add(new
+                {
+                    ItemName = itemName,
+                    SpName = spName,
+                    ReportName = reportName
+                });
+            }
+
+            return Ok(new { ok = true, list });
+        }
+
 
         public class BuildRequest
         {
