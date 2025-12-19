@@ -24,6 +24,7 @@
   const GET_API   = window.FIELD_DICT_GET_API  || '/api/TableFieldLayout/GetTableFieldsFull';
   const QUERY_KEY = window.FIELD_DICT_QUERY_KEY || 'table';
   const SAVE_API  = window.FIELD_DICT_SAVE_API || '/api/DictApi/UpdateDictFields';
+  const SAVE_OCXMAPS_API = window.FIELD_DICT_SAVE_OCXMAPS_API || '/api/DictOCX/SaveOCXMapsBatch';
   const QUIET     = !!window.SUPPRESS_DICT_FETCH_ALERT;
 
   // ===== 顯示（會先 init 再 show） =====
@@ -114,6 +115,7 @@
                 <input data-field="OCXLKResultName" value="${x.OCXLKResultName?? ''}" />
                 <input data-field="KeyFieldName" value="${x.KeyFieldName ?? ''}" />
                 <input data-field="KeySelfName" value="${x.KeySelfName ?? ''}" />
+                <input data-field="KeyMapsJson" value="${encodeURIComponent(x.KeyMapsJson ?? '')}" />
 
               </span>
             </td>
@@ -340,37 +342,85 @@
 
         // === 其他欄位 ===
         IsNotesField: getVal('IsNotesField'),
-        ComboStyle: getChk('ComboStyle')
+        ComboStyle: getChk('ComboStyle'),
+
+        // === OCX Lookup（非實體顯示欄位）===
+        OCXLKTableName: getVal('OCXLKTableName'),
+        OCXLKResultName: getVal('OCXLKResultName')
       };
     });
 
-    // 送出 API
-    fetch(apiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    })
-      .then(res => res.json())
-      .then(result => {
-        document.body.style.cursor = 'default';
-        if (result?.success) {
-          // 更新快照：僅更新已儲存的列，避免未改動列被誤判 dirty
-          dirtyRows.forEach(tr => {
-            setRowSnapshot(tr);
-            syncRowDirtyUi(tr);
-          });
+    function buildOcxMapsPayload() {
+      const list = [];
+      dirtyRows.forEach(tr => {
+        const getVal = name => tr.querySelector(`input[data-field="${name}"]`)?.value ?? '';
+        const enc = getVal('KeyMapsJson');
+        let maps = [];
+        try {
+          const raw = decodeURIComponent(enc || '');
+          maps = raw ? (JSON.parse(raw) || []) : [];
+        } catch { maps = []; }
+        if (!Array.isArray(maps)) maps = [];
 
-          alert(`儲存成功！已更新 ${dirtyRows.length} 筆欄位設定。`);
-          window.dispatchEvent(new Event('field-dict-saved'));
-          setTimeout(() => location.reload(), 300);
-        } else {
+        list.push({
+          TableName: dictTableName,
+          FieldName: tr.getAttribute('data-fieldname') || '',
+          Maps: maps
+            .map(m => ({
+              KeyFieldName: (m?.KeyFieldName ?? m?.keyFieldName ?? '').toString().trim(),
+              KeySelfName: (m?.KeySelfName ?? m?.keySelfName ?? '').toString().trim()
+            }))
+            .filter(m => m.KeyFieldName || m.KeySelfName)
+        });
+      });
+      return list;
+    }
+
+    (async () => {
+      try {
+        // 1) 儲存 CURdTableField（含 OCX 表名/顯示欄位）
+        const res = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!result?.success) {
+          document.body.style.cursor = 'default';
           alert(result?.message || '儲存失敗！');
+          return;
         }
-      })
-      .catch(err => {
+
+        // 2) 儲存 CURdOCXTableFieldLK（多組 Key 對應）
+        const ocxPayload = buildOcxMapsPayload();
+        const res2 = await fetch(SAVE_OCXMAPS_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(ocxPayload)
+        });
+        const result2 = await res2.json().catch(() => ({}));
+        if (!result2?.success) {
+          document.body.style.cursor = 'default';
+          alert(result2?.message || 'OCX Key 對應儲存失敗！');
+          return;
+        }
+
+        document.body.style.cursor = 'default';
+
+        // 更新快照：僅更新已儲存的列，避免未改動列被誤判 dirty
+        dirtyRows.forEach(tr => {
+          setRowSnapshot(tr);
+          syncRowDirtyUi(tr);
+        });
+
+        alert(`儲存成功！已更新 ${dirtyRows.length} 筆欄位設定。`);
+        window.dispatchEvent(new Event('field-dict-saved'));
+        setTimeout(() => location.reload(), 300);
+      } catch (err) {
         document.body.style.cursor = 'default';
         alert('API 失敗: ' + err);
-      });
+      }
+    })();
   }
 
   // 讓外面 onclick="saveAllDictFields('#xxx .dictTableBody')" 可直接用
@@ -504,12 +554,66 @@
 
           // ★ 第二層 OCX 設定
           'OCXLKTableName',
-          'OCXLKResultName',
-          'KeyFieldName',
-          'KeySelfName'
+          'OCXLKResultName'
       ];
 
       let currentTr = null;
+      const keyMapBody = modalEl.querySelector('#fdm_keyMapTable tbody');
+      const addKeyBtn = modalEl.querySelector('#fdm_addKeyMap');
+
+      function normalizeKeyMaps(list) {
+          const arr = Array.isArray(list) ? list : [];
+          return arr
+              .map(m => ({
+                  KeyFieldName: (m?.KeyFieldName ?? m?.keyFieldName ?? '').toString().trim(),
+                  KeySelfName: (m?.KeySelfName ?? m?.keySelfName ?? '').toString().trim()
+              }));
+      }
+
+      function renderKeyMapGrid(maps) {
+          if (!keyMapBody) return;
+          const rows = normalizeKeyMaps(maps);
+          const show = rows.length ? rows : [{ KeyFieldName: '', KeySelfName: '' }];
+          keyMapBody.innerHTML = show.map(m => `
+              <tr>
+                <td><input type="text" class="form-control form-control-sm fdm-keyfield" value="${m.KeyFieldName ?? ''}"></td>
+                <td><input type="text" class="form-control form-control-sm fdm-keyself" value="${m.KeySelfName ?? ''}"></td>
+                <td class="text-center">
+                  <button type="button" class="btn btn-outline-danger btn-sm fdm-del-keymap" title="刪除">－</button>
+                </td>
+              </tr>
+          `).join('');
+      }
+
+      function readKeyMapGrid(includeEmpty = false) {
+          if (!keyMapBody) return [];
+          const trs = Array.from(keyMapBody.querySelectorAll('tr'));
+          const rows = trs.map(tr => ({
+              KeyFieldName: (tr.querySelector('input.fdm-keyfield')?.value ?? '').toString().trim(),
+              KeySelfName: (tr.querySelector('input.fdm-keyself')?.value ?? '').toString().trim()
+          }));
+          return includeEmpty ? rows : rows.filter(m => m.KeyFieldName || m.KeySelfName);
+      }
+
+      if (addKeyBtn && !addKeyBtn.dataset.bound) {
+          addKeyBtn.dataset.bound = '1';
+          addKeyBtn.addEventListener('click', () => {
+              const cur = readKeyMapGrid(true);
+              cur.push({ KeyFieldName: '', KeySelfName: '' });
+              renderKeyMapGrid(cur);
+          });
+      }
+
+      if (keyMapBody && !keyMapBody.dataset.bound) {
+          keyMapBody.dataset.bound = '1';
+          keyMapBody.addEventListener('click', (e) => {
+              const btn = e.target?.closest?.('.fdm-del-keymap');
+              if (!btn) return;
+              btn.closest('tr')?.remove();
+              const cur = readKeyMapGrid();
+              if (cur.length === 0) renderKeyMapGrid([{ KeyFieldName: '', KeySelfName: '' }]);
+          });
+      }
 
       // ==================== 打開欄位設定 ====================
       window.editFieldDetail = function (fieldName) {
@@ -547,6 +651,25 @@
               }
           });
 
+          // KeyMapsJson (encoded) → Grid
+          try {
+              const enc = tr.querySelector('input[data-field="KeyMapsJson"]')?.value ?? '';
+              const raw = decodeURIComponent(enc || '');
+              const maps = raw ? (JSON.parse(raw) || []) : [];
+              if (Array.isArray(maps) && maps.length) {
+                  renderKeyMapGrid(maps);
+              } else {
+                  // fallback：用舊的單筆欄位
+                  const kf = tr.querySelector('input[data-field="KeyFieldName"]')?.value ?? '';
+                  const ks = tr.querySelector('input[data-field="KeySelfName"]')?.value ?? '';
+                  renderKeyMapGrid([{ KeyFieldName: kf, KeySelfName: ks }]);
+              }
+          } catch {
+              const kf = tr.querySelector('input[data-field="KeyFieldName"]')?.value ?? '';
+              const ks = tr.querySelector('input[data-field="KeySelfName"]')?.value ?? '';
+              renderKeyMapGrid([{ KeyFieldName: kf, KeySelfName: ks }]);
+          }
+
           bootstrap.Modal.getOrCreateInstance(modalEl).show();
       };
 
@@ -570,6 +693,17 @@
                       rowInput.value = dlgInput.value;
                   }
               });
+
+              // Grid → TR（KeyMapsJson + 同步第一筆到舊欄位）
+              const maps = readKeyMapGrid(false);
+              const kmInp = currentTr.querySelector('input[data-field="KeyMapsJson"]');
+              if (kmInp) kmInp.value = encodeURIComponent(JSON.stringify(maps));
+
+              const first = maps[0] || { KeyFieldName: '', KeySelfName: '' };
+              const kfInp = currentTr.querySelector('input[data-field="KeyFieldName"]');
+              const ksInp = currentTr.querySelector('input[data-field="KeySelfName"]');
+              if (kfInp) kfInp.value = first.KeyFieldName || '';
+              if (ksInp) ksInp.value = first.KeySelfName || '';
 
               bootstrap.Modal.getInstance(modalEl)?.hide();
           });

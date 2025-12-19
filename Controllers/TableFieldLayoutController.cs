@@ -339,15 +339,16 @@ public class TableFieldLayoutController : ControllerBase
         var lname = string.IsNullOrWhiteSpace(lang) ? "TW" : lang.Trim();
 
         const string SQL = @"
-SELECT
-    f.FieldName,
-    COALESCE(l.DisplayLabel, f.DisplayLabel, f.FieldName) AS DisplayLabel,
-    COALESCE(l.DisplaySize, f.DisplaySize) AS DisplaySize,
-    COALESCE(l.IFieldWidth, f.iFieldWidth) AS FieldWidth,
-    f.DataType,
-    f.FormatStr,
-    f.SerialNum,
-    Visible = CASE WHEN ISNULL(f.Visible,1)=1 THEN 1 ELSE 0 END
+ SELECT
+     f.FieldName,
+     COALESCE(l.DisplayLabel, f.DisplayLabel, f.FieldName) AS DisplayLabel,
+     COALESCE(l.DisplaySize, f.DisplaySize) AS DisplaySize,
+     COALESCE(l.IFieldWidth, f.iFieldWidth) AS FieldWidth,
+     f.ComboStyle,
+     f.DataType,
+     f.FormatStr,
+     f.SerialNum,
+     Visible = CASE WHEN ISNULL(f.Visible,1)=1 THEN 1 ELSE 0 END
 FROM CURdTableField f WITH (NOLOCK)
 LEFT JOIN CURdTableFieldLang l WITH (NOLOCK)
        ON l.TableName = f.TableName
@@ -369,11 +370,12 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
             list.Add(new DictFieldDto {
                 FieldName    = rd["FieldName"]?.ToString() ?? "",
                 DisplayLabel = rd["DisplayLabel"]?.ToString() ?? "",
-                DisplaySize  = rd["DisplaySize"] as int?,
-                FieldWidth   = rd["FieldWidth"] as int?,
+                DisplaySize  = rd["DisplaySize"] == DBNull.Value ? null : Convert.ToInt32(rd["DisplaySize"]),
+                FieldWidth   = rd["FieldWidth"] == DBNull.Value ? null : Convert.ToInt32(rd["FieldWidth"]),
+                ComboStyle   = rd["ComboStyle"] == DBNull.Value ? null : Convert.ToInt32(rd["ComboStyle"]),
                 DataType     = rd["DataType"]?.ToString() ?? "",
                 FormatStr    = rd["FormatStr"]?.ToString() ?? "",
-                SerialNum    = rd["SerialNum"] as int?,
+                SerialNum    = rd["SerialNum"] == DBNull.Value ? null : Convert.ToInt32(rd["SerialNum"]),
                 Visible      = (rd["Visible"]?.ToString() ?? "1") == "1"
             });
         }
@@ -434,6 +436,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         public string DisplayLabel { get; set; } = "";
         public int? DisplaySize { get; set; }
         public int? FieldWidth { get; set; }
+        public int? ComboStyle { get; set; }
         public string DataType { get; set; } = "";
         public string FormatStr { get; set; } = "";
         public int? SerialNum { get; set; }
@@ -494,8 +497,16 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         -- ★ 第二層 OCX Lookup（新增）
         f.OCXLKTableName,
         f.OCXLKResultName, 
-        lk.KeyFieldName,
-        lk.KeySelfName
+        lk1.KeyFieldName,
+        lk1.KeySelfName,
+        KeyMapsJson = (
+            SELECT lk2.KeyFieldName, lk2.KeySelfName
+              FROM CURdOCXTableFieldLK lk2 WITH (NOLOCK)
+             WHERE lk2.TableName = f.TableName
+               AND lk2.FieldName = f.FieldName
+             ORDER BY lk2.KeyFieldName, lk2.KeySelfName
+               FOR JSON PATH
+        )
 
     FROM CURdTableField f WITH (NOLOCK)
     LEFT JOIN CURdTableFieldLang l WITH (NOLOCK)
@@ -503,9 +514,13 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         AND l.FieldName = f.FieldName
         AND l.LanguageId = @Lang
 
-    LEFT JOIN CURdOCXTableFieldLK lk WITH (NOLOCK)
-       ON lk.TableName = f.TableName
-       AND lk.FieldName = f.FieldName
+    OUTER APPLY (
+        SELECT TOP 1 lk.KeyFieldName, lk.KeySelfName
+          FROM CURdOCXTableFieldLK lk WITH (NOLOCK)
+         WHERE lk.TableName = f.TableName
+           AND lk.FieldName = f.FieldName
+         ORDER BY lk.KeyFieldName, lk.KeySelfName
+    ) lk1
 
     WHERE (LOWER(f.TableName)=@TN OR LOWER(REPLACE(f.TableName,'dbo.',''))=@TN)
     ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldName;";
@@ -552,7 +567,8 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
                 OCXLKTableName  = rd["OCXLKTableName"]?.ToString() ?? "",
                 OCXLKResultName = rd["OCXLKResultName"]?.ToString() ?? "",
                 KeyFieldName    = rd["KeyFieldName"]?.ToString() ?? "",
-                KeySelfName     = rd["KeySelfName"]?.ToString() ?? ""
+                KeySelfName     = rd["KeySelfName"]?.ToString() ?? "",
+                KeyMapsJson     = rd["KeyMapsJson"]?.ToString() ?? ""
             });
         }
 

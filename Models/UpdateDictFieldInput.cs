@@ -26,4 +26,8 @@ public class UpdateDictFieldInput
     public string LookupResultField { get; set; }
     public string IsNotesField { get; set; }
     public int? iShowWhere { get; set; }
+
+    // 第二層 OCX Lookup（非實體顯示欄位）
+    public string? OCXLKTableName { get; set; }
+    public string? OCXLKResultName { get; set; }
 }
