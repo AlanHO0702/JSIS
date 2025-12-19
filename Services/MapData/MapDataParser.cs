@@ -109,6 +109,12 @@ namespace PcbErpApi.Services.MapData
                     Height = ParseFloat(parts[4])
                 };
 
+                // 解析元件類型（第5個參數）
+                if (parts.Length > 5 && int.TryParse(parts[5], out int componentType))
+                {
+                    element.ComponentType = componentType;
+                }
+
                 // 解析顏色 (索引 5-10 之間可能有顏色)
                 for (int i = 5; i < Math.Min(parts.Length, 12); i++)
                 {
@@ -133,13 +139,15 @@ namespace PcbErpApi.Services.MapData
                     }
                 }
 
-                // 最後一個通常是文字標籤 (C1001, C1002 等)
-                if (parts.Length > 0)
+                // 文字在倒數第 4 個位置 (格式: ...^&顯示文字^&?^&?^&ID)
+                // 例如: ...^&48.8^&1^&0^&C1006 → 顯示 "48.8"
+                // 例如: ...^&^&1^&0^&C1002 → 空白，不顯示
+                if (parts.Length > 3)
                 {
-                    var lastPart = parts[parts.Length - 1].Trim();
-                    if (!string.IsNullOrEmpty(lastPart) && !lastPart.StartsWith("-"))
+                    var textPart = parts[parts.Length - 4].Trim();
+                    if (!string.IsNullOrEmpty(textPart) && !textPart.StartsWith("-"))
                     {
-                        element.Text = lastPart;
+                        element.Text = textPart;
                     }
                 }
 
@@ -306,6 +314,7 @@ namespace PcbErpApi.Services.MapData
         public string? FontName { get; set; }
         public int FontSize { get; set; } = 10;
         public string? Text { get; set; }
+        public int ComponentType { get; set; } = 1; // 1=普通元件, 3=尺寸標註(無框)
     }
 
     /// <summary>

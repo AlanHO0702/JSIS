@@ -152,31 +152,40 @@ namespace PcbErpApi.Services.Rendering
 
         private void RenderComponent(SKCanvas canvas, MapElement element, float x, float y, float w, float h)
         {
+            // 元件類型: 1=普通元件(有框), 3=尺寸標註(無框)
+            var isTextOnly = element.ComponentType == 3;
+
             // 解析顏色：Colors[0]=邊框, Colors[2]=填充
             var strokeColor = element.Colors.Count > 0 ? element.Colors[0] : "clBlue";
-            // 強制使用白色填充，不管 MapData 中的顏色
-            var fillColor = "clWhite";
-
-            // 繪製填充（白色）
-            using var fillPaint = new SKPaint
-            {
-                Color = SKColors.White,
-                Style = SKPaintStyle.Fill,
-                IsAntialias = true
-            };
 
             var rect = new SKRect(x, y, x + w, y + h);
-            canvas.DrawRect(rect, fillPaint);
 
-            // 繪製邊框
-            using var strokePaint = new SKPaint
+            // 只有非文字元件才繪製框
+            if (!isTextOnly)
             {
-                Color = ParseColor(strokeColor),
-                Style = SKPaintStyle.Stroke,
-                StrokeWidth = 2,
-                IsAntialias = true
-            };
-            canvas.DrawRect(rect, strokePaint);
+                // 繪製填充（白色）
+                using var fillPaint = new SKPaint
+                {
+                    Color = SKColors.White,
+                    Style = SKPaintStyle.Fill,
+                    IsAntialias = true
+                };
+                canvas.DrawRect(rect, fillPaint);
+
+                // 繪製邊框 - 全部用黑色
+                // 如果填充色是黑色(clBlack)，表示是最外圍大框，用粗框
+                var isOuterFrame = element.Colors.Count > 2 &&
+                                  element.Colors[2].ToLower() == "clblack";
+
+                using var strokePaint = new SKPaint
+                {
+                    Color = SKColors.Black,  // 全部改成黑色
+                    Style = SKPaintStyle.Stroke,
+                    StrokeWidth = isOuterFrame ? 3 : 1,  // 外框粗一點，內框細一點
+                    IsAntialias = true
+                };
+                canvas.DrawRect(rect, strokePaint);
+            }
 
             // 繪製文字
             if (!string.IsNullOrEmpty(element.Text))
@@ -184,35 +193,104 @@ namespace PcbErpApi.Services.Rendering
                 var fontSize = Math.Max(8, Math.Min(element.FontSize, 20));
                 var textColor = element.Colors.Count > 3 ? element.Colors[3] : "clBlack";
 
+                // 使用支援中文的字型
+                var fontFamily = "Microsoft JhengHei";  // 微軟正黑體（支援中文）
+
                 using var textPaint = new SKPaint
                 {
                     Color = ParseColor(textColor),
                     TextSize = fontSize,
                     IsAntialias = true,
-                    Typeface = SKTypeface.FromFamilyName(element.FontName ?? "Arial")
+                    Typeface = SKTypeface.FromFamilyName(fontFamily)
                 };
 
-                var textX = x + w / 2;
-                var textY = y + h / 2 + textPaint.TextSize / 3;
+                float textX, textY;
                 var textWidth = textPaint.MeasureText(element.Text);
 
-                canvas.DrawText(element.Text, textX - textWidth / 2, textY, textPaint);
+                // 尺寸標註(type=3): 文字靠左，不置中
+                if (isTextOnly)
+                {
+                    textX = x;  // 直接從 x 位置開始
+                    textY = y + h / 2 + textPaint.TextSize / 3;
+                }
+                else
+                {
+                    // 一般元件: 置中
+                    textX = x + w / 2 - textWidth / 2;
+                    textY = y + h / 2 + textPaint.TextSize / 3;
+                }
+
+                canvas.DrawText(element.Text, textX, textY, textPaint);
             }
         }
 
         private void RenderDrawLine(SKCanvas canvas, MapElement element, float x, float y, float w, float h)
         {
-            // DrawLine 在 Delphi 中是畫實心矩形，不是線條！
+            // DrawLine 是尺寸標註用的箭頭線
             using var paint = new SKPaint
             {
                 Color = ParseColor(element.Colors.FirstOrDefault() ?? "clBlack"),
+                Style = SKPaintStyle.Stroke,
+                StrokeWidth = 1,
+                IsAntialias = true
+            };
+
+            // 判斷是水平還是垂直線
+            if (h < w)
+            {
+                // 水平箭頭線
+                var centerY = y + h / 2;
+                canvas.DrawLine(x, centerY, x + w, centerY, paint);
+
+                // 繪製左箭頭
+                DrawArrowHead(canvas, paint, x, centerY, -1, 0);
+                // 繪製右箭頭
+                DrawArrowHead(canvas, paint, x + w, centerY, 1, 0);
+            }
+            else
+            {
+                // 垂直箭頭線
+                var centerX = x + w / 2;
+                canvas.DrawLine(centerX, y, centerX, y + h, paint);
+
+                // 繪製上箭頭
+                DrawArrowHead(canvas, paint, centerX, y, 0, -1);
+                // 繪製下箭頭
+                DrawArrowHead(canvas, paint, centerX, y + h, 0, 1);
+            }
+        }
+
+        private void DrawArrowHead(SKCanvas canvas, SKPaint paint, float x, float y, int dirX, int dirY)
+        {
+            // 箭頭大小
+            const float arrowSize = 5;
+
+            using var fillPaint = new SKPaint
+            {
+                Color = paint.Color,
                 Style = SKPaintStyle.Fill,
                 IsAntialias = true
             };
 
-            // 繪製實心矩形
-            var rect = new SKRect(x, y, x + w, y + h);
-            canvas.DrawRect(rect, paint);
+            // 根據方向繪製箭頭
+            var path = new SKPath();
+            if (dirX != 0)  // 水平箭頭
+            {
+                path.MoveTo(x, y);
+                path.LineTo(x - dirX * arrowSize, y - arrowSize / 2);
+                path.LineTo(x - dirX * arrowSize, y + arrowSize / 2);
+                path.Close();
+            }
+            else  // 垂直箭頭
+            {
+                path.MoveTo(x, y);
+                path.LineTo(x - arrowSize / 2, y - dirY * arrowSize);
+                path.LineTo(x + arrowSize / 2, y - dirY * arrowSize);
+                path.Close();
+            }
+
+            canvas.DrawPath(path, fillPaint);
+            path.Dispose();
         }
 
         private void RenderLine(SKCanvas canvas, MapElement element, float x, float y, float w, float h)
