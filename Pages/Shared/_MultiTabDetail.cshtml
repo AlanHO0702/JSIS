@@ -99,7 +99,8 @@
                 if (!field) return;
                 map.set(field.toLowerCase(), {
                     dataType: (r.dataType || r.DataType || '').toString(),
-                    formatStr: (r.formatStr || r.FormatStr || '').toString()
+                    formatStr: (r.formatStr || r.FormatStr || '').toString(),
+                    comboStyle: Number(r.comboStyle ?? r.ComboStyle ?? 0)
                 });
             });
             DICT_META_CACHE.set(tn, map);
@@ -118,6 +119,24 @@
             .replace(/>/g, '&gt;')
             .replace(/\"/g, '&quot;')
             .replace(/'/g, '&#39;');
+    }
+
+    function extractRowData(tr) {
+        try {
+            if (!tr) return null;
+            const obj = {};
+            tr.querySelectorAll('input.cell-edit[data-field]').forEach(inp => {
+                const f = (inp.dataset.field || '').toString();
+                if (!f) return;
+                if (inp.type === 'checkbox') obj[f] = inp.checked ? '1' : '0';
+                else obj[f] = inp.value;
+            });
+            if (tr.dataset && tr.dataset.paperNum && obj.PaperNum === undefined) obj.PaperNum = tr.dataset.paperNum;
+            if (tr.dataset && tr.dataset.item && obj.Item === undefined) obj.Item = tr.dataset.item;
+            return obj;
+        } catch {
+            return null;
+        }
     }
 
     function pad2(n) { return String(n).padStart(2, '0'); }
@@ -443,6 +462,47 @@
         html += '</tbody></table></div>';
         container.insertAdjacentHTML('beforeend', html);
 
+        // 依辭典設定把「勾選框(ComboStyle=1)」欄位轉成 checkbox 顯示/編輯
+        (function applyCheckboxCells() {
+            try {
+                const wrapper = container.querySelector('.erp-table-wrapper');
+                const table = wrapper?.querySelector('table.erp-table');
+                if (!table) return;
+
+                const checkboxIndexes = [];
+                fields.forEach((f, idx) => {
+                    const meta = metaMap.get(String(f).toLowerCase()) || {};
+                    if (Number(meta.comboStyle || 0) === 1) checkboxIndexes.push(idx);
+                });
+                if (!checkboxIndexes.length) return;
+
+                const rows = Array.from(table.querySelectorAll('tbody tr'));
+                rows.forEach(tr => {
+                    const tds = Array.from(tr.querySelectorAll('td'));
+                    checkboxIndexes.forEach(idx => {
+                        const td = tds[idx];
+                        if (!td) return;
+                        const edit = td.querySelector('input.cell-edit[data-field]');
+                        const view = td.querySelector('.cell-view');
+                        if (!edit || !view) return;
+                        if (edit.type === 'checkbox') return;
+
+                        const raw = (edit.value ?? '').toString().trim().toLowerCase();
+                        const checked = raw === '1' || raw === 'true' || raw === 'y' || raw === 'yes';
+
+                        view.innerHTML = `<input type="checkbox" class="cell-view-checkbox" disabled ${checked ? 'checked' : ''}>`;
+
+                        const chk = document.createElement('input');
+                        chk.type = 'checkbox';
+                        chk.className = edit.className;
+                        chk.dataset.field = edit.dataset.field || '';
+                        chk.checked = checked;
+                        edit.replaceWith(chk);
+                    });
+                });
+            } catch { }
+        })();
+
         const table = container.querySelector('.erp-table-wrapper table.erp-table');
         if (table) {
             applySavedWidths(table, dictTable, fields);
@@ -462,17 +522,36 @@
             initColumnResize(table, dictTable, fields);
         }
 
-        // 綁定列選取事件
+        // 綁定列選取事件（只綁 tbody，避免點到表頭也被當作選取）
         const tableWrapper = container.querySelector('.erp-table-wrapper');
         if (tableWrapper) {
-            tableWrapper.querySelectorAll('tr').forEach(tr => {
+            const tbody = tableWrapper.querySelector('tbody');
+            const rows = tbody ? Array.from(tbody.querySelectorAll('tr')) : [];
+            rows.forEach(tr => {
                 tr.addEventListener('click', function() {
                     // 移除其他列的選取狀態
                     tableWrapper.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
                     // 選取當前列
                     this.classList.add('row-selected');
+                    try {
+                        const rowData = extractRowData(this);
+                        window.dispatchEvent(new CustomEvent('multiTabRowSelected', { detail: { tabId, rowData } }));
+                    } catch {}
                 });
             });
+
+            // 需要第三階聯動時：預設自動選取第一筆（例如 Paper3L）
+            if (window.__multiTabAutoSelectFirstRow) {
+                const hasSelected = !!tableWrapper.querySelector('tbody tr.row-selected');
+                const first = tbody ? tbody.querySelector('tr') : null;
+                if (!hasSelected && first) {
+                    first.classList.add('row-selected');
+                    try {
+                        const rowData = extractRowData(first);
+                        window.dispatchEvent(new CustomEvent('multiTabRowSelected', { detail: { tabId, rowData } }));
+                    } catch {}
+                }
+            }
         }
     }
 
@@ -641,6 +720,10 @@
         newRow.addEventListener('click', function() {
             tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
             this.classList.add('row-selected');
+            try {
+                const rowData = extractRowData(this);
+                window.dispatchEvent(new CustomEvent('multiTabRowSelected', { detail: { tabId, rowData } }));
+            } catch {}
         });
 
 
@@ -914,6 +997,11 @@ body.resizing { cursor: col-resize !important; }
     outline: 2px solid #0d6efd;
     outline-offset: -2px;
     background: #fffef0 !important;  /* ← focus 時淡黃色背景 */
+}
+
+.multi-tab-detail .cell-view-checkbox{
+    transform: scale(1.05);
+    pointer-events: none;
 }
 
 /* 選取列的樣式 */

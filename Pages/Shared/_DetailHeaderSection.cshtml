@@ -58,7 +58,7 @@
     window._paperNum = '@PaperNum';
 </script>
 
-<div id="topToolbar" class="d-flex align-items-center mb-4" style="gap:12px;">
+<div id="topToolbar" class="d-flex align-items-center mb-4" style="gap:12px;" data-dict-table="@headerTableName">
     <div class="btn-group" role="group" aria-label="row-nav" style="gap:6px;">
         <button type="button" class="btn btn-outline-primary" id="btnPrev">上一筆</button>
         <button type="button" class="btn btn-outline-primary" id="btnNext">下一筆</button>
@@ -83,7 +83,7 @@
 </div>
 
 <!-- 單頭可編輯表單 -->
-<form id="orderHeaderForm" class="erp-header-form">
+<form id="orderHeaderForm" class="erp-header-form" data-dict-table="@headerTableName">
     <div class="row">
         <!-- ✅ Tabs 切換列 -->
         <ul class="nav nav-tabs" id="headerTabs" role="tablist">
@@ -141,8 +141,36 @@
                             var liClass = "draggable-field inline"; // 永遠橫排
 
 
-                            // 判斷有 lookup table 設定
-                            if (!string.IsNullOrWhiteSpace(field.LookupTable) &&
+                            var isCheckbox = (field.ComboStyle ?? 0) == 1;
+                            var isReadOnly = (field.ReadOnly ?? 0) == 1;
+
+                            // 1) 勾選框
+                            if (isCheckbox)
+                            {
+                                var s = rawValue?.ToString()?.Trim() ?? "";
+                                var isChecked = s == "1"
+                                                || s.Equals("true", StringComparison.OrdinalIgnoreCase)
+                                                || s.Equals("y", StringComparison.OrdinalIgnoreCase)
+                                                || s.Equals("yes", StringComparison.OrdinalIgnoreCase);
+
+                                <li class="@liClass"
+                                    data-field="@field.FieldName"
+                                    data-tab="@tab.Key"
+                                    style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
+                                    <label>@field.DisplayLabel</label>
+                                    <div class="form-check d-flex align-items-center" style="height:100%; margin:0; padding-left: 1.5rem;">
+                                        <input type="hidden" name="@field.FieldName" value="0" />
+                                        <input class="form-check-input"
+                                               type="checkbox"
+                                               name="@field.FieldName"
+                                               value="1"
+                                               @(isChecked ? "checked" : "")
+                                               @(isReadOnly ? "disabled" : "") />
+                                    </div>
+                                </li>
+                            }
+                            // 2) 判斷有 lookup table 設定
+                            else if (!string.IsNullOrWhiteSpace(field.LookupTable) &&
                                 !string.IsNullOrWhiteSpace(field.LookupKeyField) &&
                                 !string.IsNullOrWhiteSpace(field.LookupResultField))
                             {
@@ -196,7 +224,7 @@
 // ============================
 const PAGE = {
   paperNum: "@PaperNum",
-  keyField: "PaperNum",
+  keyField: ("@(keyFieldName ?? "PaperNum")" || "PaperNum").trim(),
   headerTable: ("@(Model.HeaderTableName ?? "")".trim() || "").toLowerCase(),
   detailTable: "@(tableName ?? "")".trim(),
   queryRedirectUrl: "@(ViewData["QueryRedirectUrl"])",
@@ -233,6 +261,8 @@ new ToolbarHandler({
   formId: "searchForm",
   addApiUrl: PAGE.addApiUrl,
   deleteApiUrlFn: id => `/api/${PAGE.deleteApiUrl}/${id || PAGE.paperNum}`,
+  // 動態單據的作廢：走 PaperAction（避免找不到 /api/{Table}/{PaperNum} controller 而 404）
+  paperAction: { url: '/api/PaperAction/DoAction', paperId: "@Model.HeaderTableName", eoc: 0, aftFinished: 2 },
   detailRouteTemplate: subTpl,  // 使用單身頁路徑，新增後跳轉到單身頁
   tableName: "@tableName",
   renderTable: null,
@@ -1044,7 +1074,17 @@ const NAV_BTN_NEXT = document.getElementById('btnNext');
 let navIds = [], navIndex = -1;
 
 function loadLastFilters() {
-  try { const s = localStorage.getItem("orderListQueryFilters"); return s ? JSON.parse(s) : []; }
+  try {
+    const tn = (PAGE.headerTable || '').toString().trim().toLowerCase();
+    const fk = tn ? `orderListQueryFilters:${tn}` : "orderListQueryFilters";
+    const s1 = localStorage.getItem(fk);
+    if (s1) return JSON.parse(s1);
+
+    // legacy: only accept global filters if they were saved for the same table
+    const legacyTable = (localStorage.getItem("orderListQueryTable") || '').toLowerCase();
+    const s2 = legacyTable === tn ? localStorage.getItem("orderListQueryFilters") : null;
+    return s2 ? JSON.parse(s2) : [];
+  }
   catch { return []; }
 }
 function getDetailBasePath() { return location.pathname.replace(/\/[^\/]+$/, "/"); }
@@ -1052,10 +1092,14 @@ function gotoPaper(pn) { if (!pn) return; localStorage.setItem("lastViewedPaperN
 function updateNavButtons() {
   const hasPrev = navIndex > 0;
   const hasNext = navIndex >= 0 && navIndex < navIds.length - 1;
-  NAV_BTN_PREV.disabled = !hasPrev;
-  NAV_BTN_NEXT.disabled = !hasNext;
-  NAV_BTN_PREV.onclick = () => hasPrev && gotoPaper(navIds[navIndex - 1]);
-  NAV_BTN_NEXT.onclick = () => hasNext && gotoPaper(navIds[navIndex + 1]);
+  if (NAV_BTN_PREV) {
+    NAV_BTN_PREV.disabled = !hasPrev;
+    NAV_BTN_PREV.onclick = () => hasPrev && gotoPaper(navIds[navIndex - 1]);
+  }
+  if (NAV_BTN_NEXT) {
+    NAV_BTN_NEXT.disabled = !hasNext;
+    NAV_BTN_NEXT.onclick = () => hasNext && gotoPaper(navIds[navIndex + 1]);
+  }
 }
 async function fetchIdListByApi(filters) {
   const res = await fetch('/api/PagedQuery/IdList', {
@@ -1075,15 +1119,34 @@ async function fetchIdListByPagedQuery(filters) {
   const rows = Array.isArray(json.data) ? json.data : [];
   return rows.map(r => r[PAGE.keyField]).filter(Boolean);
 }
+async function fetchIdListByDynamicTable(filters) {
+  const fs = [...(filters || []), { Field: "page", Op: "", Value: "1" }, { Field: "pageSize", Op: "", Value: "999999" }];
+  const res = await fetch('/api/DynamicTable/PagedQuery', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table: PAGE.headerTable, filters: fs })
+  });
+  if (!res.ok) throw new Error('DynamicTable/PagedQuery failed');
+  const json = await res.json();
+  const rows = Array.isArray(json.data) ? json.data : [];
+  return rows.map(r => (r?.[PAGE.keyField] ?? r?.[PAGE.keyField?.toLowerCase?.()]))
+    .filter(Boolean)
+    .map(x => x.toString());
+}
 async function initRowNavigation() {
   try {
     const filters = loadLastFilters();
+    // 依序嘗試：IdList（若有）→ PagedQuery（EF DbSet）→ DynamicTable（SQL 動態查詢，最通用）
     try { navIds = await fetchIdListByApi(filters); }
-    catch { navIds = await fetchIdListByPagedQuery(filters); }
-    navIndex = navIds.indexOf(PAGE.paperNum);
+    catch {
+      try { navIds = await fetchIdListByPagedQuery(filters); }
+      catch { navIds = await fetchIdListByDynamicTable(filters); }
+    }
+    const cur = (PAGE.paperNum || '').toString().trim().toLowerCase();
+    navIndex = navIds.findIndex(x => (x || '').toString().trim().toLowerCase() === cur);
     updateNavButtons();
   } catch {
-    NAV_BTN_PREV.disabled = true; NAV_BTN_NEXT.disabled = true;
+    if (NAV_BTN_PREV) NAV_BTN_PREV.disabled = true;
+    if (NAV_BTN_NEXT) NAV_BTN_NEXT.disabled = true;
   }
 }
 initRowNavigation();

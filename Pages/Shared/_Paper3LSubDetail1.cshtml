@@ -1,0 +1,357 @@
+@using System.Text.Json
+@{
+    var sd = ViewData["SubDetail1"] as PcbErpApi.Pages.DynamicTemplate.Paper3LDetailModel.SubDetailClientConfig;
+    if (sd == null || string.IsNullOrWhiteSpace(sd.DictTable))
+    {
+        return;
+    }
+
+    var json = JsonSerializer.Serialize(sd, new JsonSerializerOptions { PropertyNamingPolicy = null });
+}
+
+<div class="paper3l-subdetail mt-3">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="fw-semibold">@sd.Title</div>
+        <div class="text-muted small" id="paper3l-subdetail-count"></div>
+    </div>
+    <div id="paper3l-subdetail-container" class="erp-table-wrapper p-2" style="max-width:1400px;" data-dict-table="@sd.DictTable">
+        <div class="alert alert-info mb-0">請先在上方明細選取一筆資料</div>
+    </div>
+</div>
+
+<script>
+(function() {
+  const cfg = @Html.Raw(json);
+  const container = document.getElementById('paper3l-subdetail-container');
+  const countEl = document.getElementById('paper3l-subdetail-count');
+
+  function cleanTableName(t) {
+    return (t || '').toString().replace(/^dbo\./i, '').trim().toLowerCase();
+  }
+
+  function escapeHtml(v) {
+    return String(v ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function normalizeFieldKey(k) { return (k || '').toString().trim().toLowerCase(); }
+
+  function getValueCaseInsensitive(obj, key) {
+    if (!obj || !key) return undefined;
+    const k = normalizeFieldKey(key);
+    const hitKey = Object.keys(obj).find(x => normalizeFieldKey(x) === k);
+    return hitKey ? obj[hitKey] : undefined;
+  }
+
+  async function fetchFieldWidths(dictTable) {
+    const tn = cleanTableName(dictTable);
+    if (!tn) return new Map();
+    try {
+      const res = await fetch(`/api/TableFieldLayout/DictFields?table=${encodeURIComponent(tn)}&lang=TW`);
+      if (!res.ok) return new Map();
+      const rows = await res.json();
+      const map = new Map();
+      (rows || []).forEach(r => {
+        const field = (r.fieldName || r.FieldName || '').toString();
+        const w = r.fieldWidth ?? r.FieldWidth;
+        const ds = r.displaySize ?? r.DisplaySize;
+        if (!field) return;
+        const px = Number.isFinite(w) ? Number(w) : (Number.isFinite(ds) ? Number(ds) * 10 : null);
+        if (px && px > 0) map.set(field.toLowerCase(), Math.round(px));
+      });
+      return map;
+    } catch {
+      return new Map();
+    }
+  }
+
+  function applyColumnWidth(table, ths, index, width) {
+    const w = Math.max(30, Math.round(width));
+    const th = ths[index];
+    if (!th) return;
+    th.style.width = `${w}px`;
+    Array.from(table.querySelectorAll(`tbody tr td:nth-child(${index + 1})`)).forEach(td => td.style.width = `${w}px`);
+  }
+
+  function applySavedWidths(table, dictTable, fields) {
+    const tn = cleanTableName(dictTable);
+    if (!tn) return;
+    try {
+      const raw = localStorage.getItem(`colwidth:${tn}`);
+      if (!raw) return;
+      const cols = JSON.parse(raw) || [];
+      const ths = Array.from(table.querySelectorAll('thead th'));
+      cols.forEach(c => {
+        const f = (c.fieldName || '').toString();
+        const w = Number(c.width);
+        if (!f || !Number.isFinite(w)) return;
+        const idx = fields.findIndex(x => x.toLowerCase() === f.toLowerCase());
+        if (idx >= 0) applyColumnWidth(table, ths, idx, w);
+      });
+    } catch { }
+  }
+
+  const resizeState = window.__paper3lResizeState || (window.__paper3lResizeState = {
+    active: false,
+    table: null,
+    ths: [],
+    dictTable: '',
+    thIndex: -1,
+    startX: 0,
+    startWidth: 0,
+    saveTimer: null
+  });
+
+  async function persistWidths(snapshot) {
+    const table = snapshot?.table;
+    const ths = snapshot?.ths || [];
+    const dictTable = snapshot?.dictTable || '';
+    const tn = cleanTableName(dictTable);
+    if (!table || !ths.length || !tn) return;
+    try {
+      const payload = {
+        tableName: tn,
+        cols: ths.map(th => ({ fieldName: th.dataset.field, width: Math.round(th.getBoundingClientRect().width) }))
+      };
+      await fetch('/api/TableFieldLayout/SaveDetailLayout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch(() => { });
+      localStorage.setItem(`colwidth:${tn}`, JSON.stringify(payload.cols));
+    } catch { }
+  }
+
+  function debouncePersist(snapshot) {
+    clearTimeout(resizeState.saveTimer);
+    const snap = snapshot ? { ...snapshot } : null;
+    resizeState.saveTimer = setTimeout(() => persistWidths(snap), 400);
+  }
+
+  if (!window.__paper3lResizeBound) {
+    window.__paper3lResizeBound = true;
+    document.addEventListener('mousemove', (e) => {
+      if (!resizeState.active || !resizeState.table) return;
+      const dx = e.pageX - resizeState.startX;
+      const newW = Math.max(30, resizeState.startWidth + dx);
+      applyColumnWidth(resizeState.table, resizeState.ths, resizeState.thIndex, newW);
+    });
+    document.addEventListener('mouseup', () => {
+      if (!resizeState.active) return;
+      resizeState.active = false;
+      document.body.classList.remove('resizing');
+      resizeState.ths.forEach(th => th.classList.remove('resizing'));
+      Array.from(resizeState.table.querySelectorAll('tbody td.resizing')).forEach(td => td.classList.remove('resizing'));
+      debouncePersist({ table: resizeState.table, ths: resizeState.ths, dictTable: resizeState.dictTable });
+      resizeState.table = null;
+      resizeState.ths = [];
+      resizeState.dictTable = '';
+      resizeState.thIndex = -1;
+    });
+  }
+
+  function initColumnResize(table, dictTable) {
+    if (!table) return;
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    ths.forEach((th, idx) => {
+      const handle = th.querySelector('.col-resizer');
+      if (!handle) return;
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        resizeState.active = true;
+        resizeState.table = table;
+        resizeState.ths = ths;
+        resizeState.dictTable = dictTable;
+        resizeState.thIndex = idx;
+        resizeState.startX = e.pageX;
+        resizeState.startWidth = th.getBoundingClientRect().width;
+        document.body.classList.add('resizing');
+        th.classList.add('resizing');
+        Array.from(table.querySelectorAll(`tbody tr td:nth-child(${idx + 1})`)).forEach(td => td.classList.add('resizing'));
+      });
+    });
+  }
+
+  async function loadSubDetail(rowData) {
+    if (!container) return;
+    if (!rowData) {
+      container.innerHTML = '<div class="alert alert-info mb-0">請先在上方明細選取一筆資料</div>';
+      if (countEl) countEl.textContent = '';
+      return;
+    }
+
+    const filters = [];
+    (cfg.KeyMap || []).forEach(km => {
+      const parent = km.ParentField || km.parentField || km.Parent || km.Master;
+      const child = km.ChildField || km.childField || km.Detail || km.Child;
+      if (!parent || !child) return;
+      const v = getValueCaseInsensitive(rowData, parent);
+      if (v === undefined || v === null || String(v).trim() === '') return;
+      filters.push({ Field: child, Op: '=', Value: String(v) });
+    });
+
+    // 若 mdKey 沒設定，至少用 PaperNum 兜底（避免整表撈）
+    if (filters.length === 0) {
+      const pn = getValueCaseInsensitive(rowData, 'PaperNum');
+      if (pn) filters.push({ Field: 'PaperNum', Op: '=', Value: String(pn) });
+    }
+
+    filters.push({ Field: 'page', Op: '', Value: '1' });
+    filters.push({ Field: 'pageSize', Op: '', Value: '9999' });
+
+    container.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
+
+    try {
+      const resp = await fetch('/api/DynamicTable/PagedQuery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ table: cfg.DictTable, filters })
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || `HTTP ${resp.status}`);
+      }
+
+      const json = await resp.json();
+      const rows = (json && json.data) ? json.data : [];
+      await renderTable(rows);
+    } catch (err) {
+      container.innerHTML = `<div class="alert alert-danger mb-0">載入失敗: ${escapeHtml(err && err.message ? err.message : err)}</div>`;
+      if (countEl) countEl.textContent = '';
+    }
+  }
+
+  async function renderTable(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+      container.innerHTML = '<div class="alert alert-info mb-0">無資料</div>';
+      if (countEl) countEl.textContent = '0 / 0';
+      return;
+    }
+
+    const fieldDefs = (cfg.Fields || []).length ? cfg.Fields : Object.keys(rows[0]).map(k => ({ FieldName: k, DisplayLabel: k }));
+    const fields = fieldDefs.map(f => f.FieldName || f.fieldName).filter(Boolean);
+
+    let html = '<div style="overflow:auto;"><table class="erp-table"><thead><tr>';
+    fieldDefs.forEach(f => {
+      const fn = f.FieldName || f.fieldName;
+      if (!fn) return;
+      const lbl = f.DisplayLabel || f.displayLabel || fn;
+      html += `<th data-field="${escapeHtml(fn)}" style="position:relative;"><span class="th-text">${escapeHtml(lbl)}</span><span class="col-resizer" draggable="false"></span></th>`;
+    });
+    html += '</tr></thead><tbody>';
+
+    rows.forEach(r => {
+      html += '<tr>';
+      fields.forEach(fn => {
+        const v = getValueCaseInsensitive(r, fn);
+        html += `<td><span class="cell-view">${escapeHtml(v)}</span></td>`;
+      });
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+    if (countEl) countEl.textContent = `0 / ${rows.length}`;
+
+    const table = container.querySelector('table.erp-table');
+    if (table) {
+      applySavedWidths(table, cfg.DictTable, fields);
+      const widthMap = await fetchFieldWidths(cfg.DictTable);
+      if (widthMap.size) {
+        const ths = Array.from(table.querySelectorAll('thead th'));
+        fields.forEach((f, idx) => {
+          const w = widthMap.get(f.toLowerCase());
+          if (w) applyColumnWidth(table, ths, idx, w);
+        });
+        try {
+          const tn = cleanTableName(cfg.DictTable);
+          const cols = fields.map((f, idx) => ({ fieldName: f, width: Math.round(ths[idx].getBoundingClientRect().width) }));
+          localStorage.setItem(`colwidth:${tn}`, JSON.stringify(cols));
+        } catch { }
+      }
+      initColumnResize(table, cfg.DictTable);
+    }
+  }
+
+  window.addEventListener('multiTabRowSelected', function(ev) {
+    const detail = ev && ev.detail ? ev.detail : null;
+    if (!detail) return;
+    const tabId = detail.tabId;
+    if ((cfg.ParentTabId || '').toString() && tabId !== cfg.ParentTabId) return;
+    loadSubDetail(detail.rowData || null);
+  });
+})();
+</script>
+
+<style>
+.paper3l-subdetail .erp-table-wrapper{
+  background: #fff;
+  box-shadow: 0 4px 18px 0 #c3d4e6;
+  border-radius: 13px;
+  border: 1px solid #d6dbe5;
+}
+
+.paper3l-subdetail .erp-table{
+  width: max-content;
+  display: inline-table;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 1.06em;
+  background: #fff;
+  table-layout: fixed;
+}
+
+.paper3l-subdetail .erp-table thead tr{ background: #e7ecf3; }
+.paper3l-subdetail .erp-table th,
+.paper3l-subdetail .erp-table td{
+  background: #f1f5fb;
+  padding: 0;
+  border-bottom: 1px solid #c5d1e4;
+  white-space: nowrap;
+  text-align: center;
+  font-weight: 500;
+  border-right: 1px solid #dde4ed;
+  height: 34px;
+}
+.paper3l-subdetail .erp-table th:last-child,
+.paper3l-subdetail .erp-table td:last-child{ border-right: none; }
+.paper3l-subdetail .erp-table th{
+  color: #124d8b;
+  font-weight: 700;
+  font-size: 1.05em;
+  letter-spacing: 1px;
+  background: #e7ecf3;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.paper3l-subdetail .erp-table th { position: relative; }
+.paper3l-subdetail .erp-table th .col-resizer{
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  user-select: none;
+  z-index: 20;
+  display: block;
+}
+.paper3l-subdetail .erp-table th.resizing,
+.paper3l-subdetail .erp-table td.resizing,
+body.resizing { cursor: col-resize !important; }
+
+.paper3l-subdetail .erp-table td .cell-view{
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  text-align: inherit;
+  padding: 7px 12px;
+  box-sizing: border-box;
+  white-space: nowrap;
+  line-height: 20px;
+}
+</style>

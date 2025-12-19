@@ -117,6 +117,18 @@ public class DictApiController : ControllerBase
                 AddStr("LookupKeyField", input.LookupKeyField);
                 AddStr("IsNotesField", input.IsNotesField);
 
+                // 第二層 OCX Lookup（允許清空）
+                if (input.OCXLKTableName != null)
+                {
+                    setList.Add("OCXLKTableName = @OCXLKTableName");
+                    cmd.Parameters.AddWithValue("@OCXLKTableName", input.OCXLKTableName ?? "");
+                }
+                if (input.OCXLKResultName != null)
+                {
+                    setList.Add("OCXLKResultName = @OCXLKResultName");
+                    cmd.Parameters.AddWithValue("@OCXLKResultName", input.OCXLKResultName ?? "");
+                }
+
                 if (setList.Count == 0) continue;
 
                 // === 寫入主表 CURdTableField ===
