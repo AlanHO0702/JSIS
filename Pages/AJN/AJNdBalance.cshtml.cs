@@ -87,13 +87,12 @@ namespace PcbErpApi.Pages.AJN
                         PkFields = new List<string> { "SerialNum", "ClassType", "AccId", "SubAccId", "UseId" }
                     },
 
-                    // 層級 2：結轉科目（對應 Delphi 的 qryReverse / AJNdInComeAccIdReverse，可選顯示）
-                    // ★ 與 Master 直接聯動（不再依賴 Detail）
+                    // 層級 2：結轉科目（對應 Delphi 的 qryReverse / AJNdInComeSumExcep，可選顯示）
                     new WebRazor.Models.DetailConfig
                     {
                         DetailTitle = "匯總排除項目",
-                        DetailTable = "AJNdInComeAccIdReverse",
-                        DetailDict = "AJNdInComeAccIdReverse",
+                        DetailTable = "AJNdInComeSumExcep",
+                        DetailDict = "AJNdInComeSumExcep",
                         KeyMap = new List<KeyMapMulti>
                         {
                             new KeyMapMulti { Master = "SerialNum", Detail = "SerialNum" },
