@@ -60,7 +60,7 @@ namespace WebRazor.Models
         /// <summary>
         /// 啟用表格計數顯示（顯示「目前筆數 / 總筆數」）
         /// </summary>
-        public bool EnableGridCounts { get; set; } = false;
+        public bool EnableGridCounts { get; set; } = true;
 
         // ========== BalanceSheet 佈局專用屬性 ==========
 
