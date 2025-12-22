@@ -43,6 +43,48 @@
   }
 
   // ==============================================================================
+  //  Data Fetching Helpers (通用資料抓取函數)
+  // ==============================================================================
+
+  /**
+   * 抓取資料表字典（Table Field Layout）
+   * @param {string} tableName - 資料表名稱
+   * @returns {Promise<Array>} 字典資料
+   */
+  const fetchDict = async (tableName) => {
+    if (!tableName) return [];
+    const url = `/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(tableName)}`;
+    return await fetch(url).then(r => r.json());
+  };
+
+  /**
+   * 抓取資料表的前 N 筆資料
+   * @param {string} tableName - 資料表名稱
+   * @param {number} top - 抓取筆數，預設 200
+   * @returns {Promise<Array>} 資料列陣列
+   */
+  const fetchTopRows = async (tableName, top = 200) => {
+    if (!tableName) return [];
+    const url = `/api/CommonTable/TopRows?table=${encodeURIComponent(tableName)}&top=${top}`;
+    return await fetch(url).then(r => r.json());
+  };
+
+  /**
+   * 根據多組 Key 抓取資料（用於 Master → Detail 關聯查詢）
+   * @param {string} tableName - 資料表名稱
+   * @param {Array<string>} keyNames - Key 欄位名稱陣列
+   * @param {Array<any>} keyValues - Key 值陣列
+   * @returns {Promise<Array>} 資料列陣列
+   */
+  const fetchByKeys = async (tableName, keyNames, keyValues) => {
+    if (!tableName || !keyNames || !keyValues) return [];
+    const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}`
+      + keyNames.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
+      + keyValues.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("");
+    return await fetch(url).then(r => r.json());
+  };
+
+  // ==============================================================================
   //  Dict Helpers
   // ==============================================================================
   const DICT = {
@@ -196,8 +238,6 @@ const buildBody = async (tbody, dict, rows, onRowClick) => {
   });
 };
 
-
-
   // ==============================================================================
   //  初始化主從頁（initOne）
   // ==============================================================================
@@ -210,24 +250,16 @@ const buildBody = async (tbody, dict, rows, onRowClick) => {
     const mBody = root.querySelector(`#${cfg.DomId}-m-body`);
 
     // === Master 辭典 ===
-    const masterDict = await fetch(
-      `/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(
-        cfg.MasterDict || cfg.MasterTable
-      )}`
-    ).then(r => r.json());
+    const masterDict = await fetchDict(cfg.MasterDict || cfg.MasterTable);
 
     buildHead(mHead, masterDict);
 
     const uniq = (arr) => [...new Set((arr || []).filter(Boolean).map(s => String(s)))];
 
     // === Master 資料 ===
-    const masterUrl = cfg.MasterApi
-      ? cfg.MasterApi
-      : `/api/CommonTable/TopRows?table=${encodeURIComponent(
-          cfg.MasterTable
-        )}&top=${cfg.MasterTop || 200}`;
-
-    const masterRows = await fetch(masterUrl).then(r => r.json());
+    const masterRows = cfg.MasterApi
+      ? await fetch(cfg.MasterApi).then(r => r.json())
+      : await fetchTopRows(cfg.MasterTable, cfg.MasterTop || 200);
 
     // Master key fields: prefer cfg.MasterPkFields, fallback to dict IsKey
     const masterKeyFields = uniq([
@@ -243,11 +275,7 @@ const buildBody = async (tbody, dict, rows, onRowClick) => {
       const d = cfg.Details[i];
       const hid = `${cfg.DomId}-detail-${i}-head`;
 
-      const dict = await fetch(
-        `/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(
-          d.DetailDict || d.DetailTable
-        )}`
-      ).then(r => r.json());
+      const dict = await fetchDict(d.DetailDict || d.DetailTable);
 
       const headTr = document.getElementById(hid);
       if (headTr) buildHead(headTr, dict);
@@ -257,11 +285,8 @@ const buildBody = async (tbody, dict, rows, onRowClick) => {
     const activeTarget = { type: "master", index: -1 };
     let lastMasterRow = null;
 
-    // ==============================================================================
-    //   切換 Master → 重新載入全部明細
-    // ==============================================================================
 // ======================================================================
-//   切換 Master → 重新載入全部明細（正確版）
+//   切換 Master → 重新載入全部明細
 // ======================================================================
 const loadAllDetails = async (row) => {
 
@@ -282,11 +307,7 @@ const loadAllDetails = async (row) => {
     });
     tbody._lastQueryCtx = ctx;
 
-    const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(d.DetailTable)}`
-      + names.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
-      + values.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("");
-
-    const rows = await fetch(url).then(r => r.json());
+    const rows = await fetchByKeys(d.DetailTable, names, values);
 
     // ★ 為 Detail 表格添加 row click 事件處理，實現 Focus 功能
     await buildBody(tbody, detailDicts[i], rows, (row, tr) => {
@@ -348,11 +369,7 @@ const loadAllDetails = async (row) => {
       });
       tbody._lastQueryCtx = ctx;
 
-      const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(nextDetail.DetailTable)}`
-        + names.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
-        + values.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("");
-
-      const rows = await fetch(url).then(r => r.json());
+      const rows = await fetchByKeys(nextDetail.DetailTable, names, values);
 
       // 載入下一層 Detail 的資料，同時保留 Focus 聯動功能
       await buildBody(tbody, detailDicts[nextIndex], rows, (row, tr) => {
@@ -769,12 +786,188 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       btnSave?.addEventListener("click", async () => { await saveAll(); });
     }
   };
+
+  // ==============================================================================
+  //  BalanceSheet 佈局專用初始化邏輯
+  // ==============================================================================
+  const initBalanceSheet = async (cfg) => {
+    const root = document.getElementById(cfg.DomId);
+    if (!root) return;
+
+    // 取得所有 DOM 元素
+    const tsHead = root.querySelector(`#${cfg.DomId}-ts-head`);
+    const tsBody = root.querySelector(`#${cfg.DomId}-ts-body`);
+    const mHead = root.querySelector(`#${cfg.DomId}-m-head`);
+    const mBody = root.querySelector(`#${cfg.DomId}-m-body`);
+
+    // 1. 載入 TopSelector 字典
+    const topSelectorDict = await fetchDict(cfg.TopSelectorDict || cfg.TopSelectorTable);
+
+    buildHead(tsHead, topSelectorDict);
+
+    // 2. 載入 TopSelector 資料
+    const topSelectorRows = await fetchTopRows(cfg.TopSelectorTable, 200);
+
+    await buildBody(tsBody, topSelectorDict, topSelectorRows, async (row, tr) => {
+      // 移除所有行的 selected class
+      tsBody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
+      tr.classList.add("selected");
+
+      // 載入對應的 Master 資料
+      await loadMasterFromTopSelector(row);
+    });
+
+    // 3. 載入 Master 字典
+    const masterDict = await fetchDict(cfg.MasterDict || cfg.MasterTable);
+
+    buildHead(mHead, masterDict);
+
+    // 4. Master → Detail 聯動邏輯
+    const loadMasterFromTopSelector = async (topSelectorRow) => {
+      const names = [];
+      const values = [];
+
+      // 根據 MasterToTopKeyMap 從 TopSelector 提取對應的欄位值
+      (cfg.MasterToTopKeyMap || []).forEach(k => {
+        names.push(k.Detail); // Master 的欄位
+        values.push(topSelectorRow[k.Master]); // TopSelector 的欄位值
+      });
+
+      const masterRows = await fetchByKeys(cfg.MasterTable, names, values);
+
+      // 儲存查詢上下文（用於新增資料時自動帶值）
+      const ctx = {};
+      (cfg.MasterToTopKeyMap || []).forEach(k => {
+        ctx[k.Detail] = topSelectorRow[k.Master];
+      });
+      mBody._lastQueryCtx = ctx;
+
+      await buildBody(mBody, masterDict, masterRows, async (row, tr) => {
+        // 移除所有行的 selected class
+        mBody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
+        tr.classList.add("selected");
+
+        // 載入對應的 Detail 資料
+        await loadDetailsFromMaster(row);
+      });
+    };
+
+    // 5. 載入 Detail 資料
+    const loadDetailsFromMaster = async (masterRow) => {
+      for (let i = 0; i < (cfg.Details || []).length; i++) {
+        const d = cfg.Details[i];
+        const dId = `${cfg.DomId}-detail-${i}`;
+        const dHead = root.querySelector(`#${dId}-head`);
+        const dBody = root.querySelector(`#${dId}-body`);
+
+        if (!dBody) continue;
+
+        // 載入字典（如果還沒載入）
+        if (!dBody._dict) {
+          const detailDict = await fetchDict(d.DetailDict || d.DetailTable);
+          dBody._dict = detailDict;
+          if (dHead) buildHead(dHead, detailDict);
+        }
+
+        const names = [];
+        const values = [];
+        const ctx = {};
+
+        (d.KeyMap || []).forEach(k => {
+          names.push(k.Detail);
+          values.push(masterRow[k.Master]);
+          ctx[k.Detail] = masterRow[k.Master];
+        });
+        dBody._lastQueryCtx = ctx;
+
+        const detailRows = await fetchByKeys(d.DetailTable, names, values);
+
+        // ★ 只保留基本的選中功能，不觸發下一層載入（因為都已經平行載入了）
+        await buildBody(dBody, dBody._dict, detailRows, (row, tr) => {
+          // 移除所有行的 selected class
+          dBody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
+          tr.classList.add("selected");
+          // ★ BalanceSheet 佈局：所有 Detail 層級都平行載入，不使用串聯聯動
+        });
+      }
+    };
+
+    // 6. 綁定「新增項目」按鈕事件（如果啟用）
+    if (cfg.EnableTopToolbar) {
+      const btnAddItem = root.querySelector(`#${cfg.DomId}-btnAddItem`);
+      const inputCode = root.querySelector(`#${cfg.DomId}-newItemCode`);
+      const inputName = root.querySelector(`#${cfg.DomId}-newItemName`);
+
+      if (btnAddItem && inputCode && inputName) {
+        btnAddItem.addEventListener('click', async () => {
+          const code = inputCode.value.trim();
+          const name = inputName.value.trim();
+
+          if (!code || !name) {
+            alert('請輸入編碼和項目名稱！');
+            return;
+          }
+
+          // 取得當前選中的 TopSelector 資料
+          const selectedTr = tsBody.querySelector('tr.selected');
+          if (!selectedTr) {
+            alert('請先選擇一筆分組資料！');
+            return;
+          }
+
+          // 這裡應該調用後端 API 來新增項目
+          // 目前先顯示提示訊息
+          alert(`將新增項目：編碼=${code}, 名稱=${name}`);
+
+          // 清空輸入欄位
+          inputCode.value = '';
+          inputName.value = '';
+        });
+      }
+    }
+
+    // 7. 綁定「顯示/隱藏結轉科目」按鈕事件（如果有第二層 Detail）
+    if (cfg.Details && cfg.Details.length > 1) {
+      const btnToggleReverse = root.querySelector(`#${cfg.DomId}-btnToggleReverse`);
+      const d1Panel = root.querySelector(`#${cfg.DomId}-detail-1-panel`);
+      const splitterReverse = root.querySelector('.mmd-splitter-reverse');
+
+      if (btnToggleReverse && d1Panel) {
+        btnToggleReverse.addEventListener('click', () => {
+          const isVisible = d1Panel.style.display !== 'none';
+
+          if (isVisible) {
+            // 隱藏
+            d1Panel.style.display = 'none';
+            if (splitterReverse) splitterReverse.style.display = 'none';
+            btnToggleReverse.textContent = '顯示';
+          } else {
+            // 顯示
+            d1Panel.style.display = '';
+            if (splitterReverse) splitterReverse.style.display = '';
+            btnToggleReverse.textContent = '隱藏';
+          }
+        });
+      }
+    }
+
+    // ★ 注意：計數器和拖曳器的初始化已統一由 _MasterMultiDetailTemplate.cshtml 的
+    //         DOMContentLoaded 事件處理，不需要在此重複調用
+  };
+
   // ==============================================================================
   // INIT：初始化所有 MMD 配置
   // ==============================================================================
   document.addEventListener("DOMContentLoaded", () => {
     const cfgs = window._mmdConfigs || {};
-    Object.values(cfgs).forEach(cfg => initOne(cfg));
+    Object.values(cfgs).forEach(cfg => {
+      // 根據佈局模式選擇初始化方式
+      if (cfg.Layout === 3) { // BalanceSheet
+        initBalanceSheet(cfg);
+      } else {
+        initOne(cfg);
+      }
+    });
   });
 
 })();   // End of IIFE

@@ -46,6 +46,8 @@ namespace PcbErpApi.Pages.AJN
 
                 // ★ 使用垂直堆疊佈局
                 Layout = LayoutMode.VerticalStack,
+                EnableSplitters = true, // 啟用拖曳器功能
+                EnableGridCounts = true, // 啟用表格計數顯示
 
                 // ★ 啟用 Detail Focus 聯動功能（與 Delphi 的 gridSubDetail1Enter 類似）
                 EnableDetailFocusCascade = true,
