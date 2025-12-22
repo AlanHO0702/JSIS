@@ -24,16 +24,82 @@
 }
 
 <script>
-// 先只把按鈕點擊帶出設定（不執行任何邏輯）
-document.querySelectorAll('.action-rail [data-custom-btn="1"]').forEach(btn => {
-  btn.addEventListener('click', (e) => {
-    const el = e.currentTarget;
-    console.log('[CustomButton]', {
-      itemId: '@(Model?.ItemId ?? "")',
-      buttonName: el.getAttribute('data-button-name') || '',
-      caption: (el.textContent || '').trim()
-    });
-  });
-});
-</script>
+(() => {
+  const resolveCustomHandler = (btnName) => {
+    const map = window.ActionRailCustomHandlers || {};
+    const itemId = window._singleItemId || window._itemId || "";
+    if (map[itemId] && typeof map[itemId][btnName] === "function") return map[itemId][btnName];
+    if (typeof map[btnName] === "function") return map[btnName];
+    return null;
+  };
 
+  const readPaperNum = () => {
+    const v = (window._paperNum || "").toString().trim();
+    if (v) return v;
+    if (typeof window.getPaperNum === "function") {
+      try { return (window.getPaperNum() || "").toString().trim(); } catch { /* ignore */ }
+    }
+    return "";
+  };
+
+  const wireActionRailButtons = () => {
+    document.querySelectorAll('.action-rail [data-custom-btn="1"]').forEach(btn => {
+      if (btn.dataset.cbBound === "1") return;
+      btn.dataset.cbBound = "1";
+
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault(); e.stopPropagation();
+
+        const buttonName = btn.getAttribute('data-button-name') || '';
+        if (!buttonName) return;
+
+        const handler = resolveCustomHandler(buttonName);
+        const ctx = {
+          buttonName,
+          itemId: (window._itemId || '@(Model?.ItemId ?? "")').toString(),
+          paperNum: readPaperNum(),
+          headerTable: (window._headerTableName || '@(Model?.HeaderTableName ?? "")').toString(),
+          dictTableName: (window._dictTableName || '').toString(),
+          caption: (btn.textContent || '').trim()
+        };
+
+        if (handler) {
+          try {
+            await handler(ctx);
+          } catch (err) {
+            console.error("action-rail custom button handler error", err);
+            alert(`執行失敗: ${err?.message || err}`);
+          }
+          return;
+        }
+
+        // 無自訂 handler → 嘗試依 DB 設定呼叫 SP (DesignType=3)
+        try {
+          const resp = await fetch('/api/StoredProc/execByButton', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              itemId: ctx.itemId,
+              buttonName: ctx.buttonName,
+              paperNum: ctx.paperNum
+            })
+          });
+          const raw = await resp.text();
+          let data; try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
+          if (resp.ok && data.ok) {
+            alert('執行完成');
+            location.reload();
+            return;
+          }
+          alert(`執行失敗: ${data.error || `HTTP ${resp.status}`}`);
+        } catch (err) {
+          console.error("action-rail execByButton error", err);
+          alert(`執行失敗: ${err?.message || err}`);
+        }
+      });
+    });
+  };
+
+  wireActionRailButtons();
+})();
+</script>
