@@ -38,7 +38,7 @@ namespace PcbErpApi.Pages.AJN
             var config = new MasterMultiDetailConfig
             {
                 DomId = "sysSummary",
-                MasterTitle = "系統單據主檔",
+                MasterTitle = "系統作業",
                 MasterTable = "AJNdSysPaperIdBas",
                 MasterDict = "AJNdSysPaperIdBas",
                 // 不指定 MasterApi，使用預設的 CommonTable API
@@ -46,6 +46,8 @@ namespace PcbErpApi.Pages.AJN
 
                 // ★ 使用垂直堆疊佈局
                 Layout = LayoutMode.VerticalStack,
+                EnableSplitters = true, // 啟用拖曳器功能
+                EnableGridCounts = true, // 啟用表格計數顯示
 
                 // ★ 啟用 Detail Focus 聯動功能（與 Delphi 的 gridSubDetail1Enter 類似）
                 EnableDetailFocusCascade = true,
@@ -55,7 +57,7 @@ namespace PcbErpApi.Pages.AJN
                     // 層級 1：規則主檔（對應 Delphi 的 qryDetail1）
                     new WebRazor.Models.DetailConfig
                     {
-                        DetailTitle = "規則主檔",
+                        DetailTitle = "摘要規則",
                         DetailTable = "AJNdSysPaperIdSub",
                         DetailDict = "AJNdSysPaperIdSub",
                         // 不指定 DetailApi，使用預設的 CommonTable API
