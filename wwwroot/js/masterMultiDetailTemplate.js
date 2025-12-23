@@ -950,9 +950,6 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
         });
       }
     }
-
-    // ★ 注意：計數器和拖曳器的初始化已統一由 _MasterMultiDetailTemplate.cshtml 的
-    //         DOMContentLoaded 事件處理，不需要在此重複調用
   };
 
   // ==============================================================================
@@ -960,7 +957,7 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
   // ==============================================================================
   document.addEventListener("DOMContentLoaded", () => {
     const cfgs = window._mmdConfigs || {};
-    Object.values(cfgs).forEach(cfg => {
+    Object.entries(cfgs).forEach(([domId, cfg]) => {
       // 根據佈局模式選擇初始化方式
       if (cfg.Layout === 3) { // BalanceSheet
         initBalanceSheet(cfg);
@@ -969,5 +966,5 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       }
     });
   });
-
+  
 })();   // End of IIFE
