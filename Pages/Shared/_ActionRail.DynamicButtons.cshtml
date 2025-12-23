@@ -14,14 +14,98 @@
     var hint = (b?.Hint ?? b?.CustHint ?? "").ToString();
     var btnName = (b?.ButtonName ?? "").ToString();
 
+    var designType = (b?.DesignType ?? "").ToString();
+    var searchTemplate = (b?.SearchTemplate ?? "").ToString();
+    var spName = (b?.SpName ?? "").ToString();
+    var execSpName = (b?.ExecSpName ?? "").ToString();
+    var multiSelectDd = (b?.MultiSelectDD ?? "").ToString();
+    var replaceExists = (b?.ReplaceExists ?? "").ToString();
+    var dialogCaption = (b?.DialogCaption ?? "").ToString();
+    var allowSelCount = (b?.AllowSelCount ?? "").ToString();
+
     <button type="button"
             class="fab"
             title="@hint"
             data-custom-btn="1"
-            data-button-name="@btnName">
+            data-button-name="@btnName"
+            data-design-type="@designType"
+            data-search-template="@searchTemplate"
+            data-sp-name="@spName"
+            data-exec-sp-name="@execSpName"
+            data-multi-select-dd="@multiSelectDd"
+            data-replace-exists="@replaceExists"
+            data-dialog-caption="@dialogCaption"
+            data-allow-sel-count="@allowSelCount">
         @caption
     </button>
 }
+
+<div class="modal fade" id="paperSearchModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl paper-search-dialog">
+    <div class="modal-content paper-search-modal">
+      <div class="modal-header">
+        <h5 class="modal-title">查詢並挑選</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form class="row g-2 mb-3 paper-search-form align-items-end"></form>
+        <div class="row paper-search-picker">
+          <div class="col-5 paper-search-col">
+            <div class="paper-search-scroll">
+              <table class="table table-sm table-striped mb-0 paper-search-available">
+                <thead><tr><th style="width:36px;"></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="col-2 paper-search-transfer">
+            <button class="btn btn-outline-primary ps-right" type="button">&rarr;</button>
+            <button class="btn btn-outline-secondary ps-left" type="button">&larr;</button>
+            <div class="form-check mt-4 ps-replace">
+              <input id="paperSearchReplace" class="form-check-input" type="checkbox">
+              <label class="form-check-label" for="paperSearchReplace">取代已存在</label>
+            </div>
+          </div>
+          <div class="col-5 paper-search-col">
+            <div class="paper-search-scroll">
+              <table class="table table-sm table-striped mb-0 paper-search-selected">
+                <thead><tr><th style="width:36px;"></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-success ps-confirm">確定</button>
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  #paperSearchModal .paper-search-dialog { --bs-modal-width: 98vw; --bs-modal-margin: 1vh; }
+  #paperSearchModal .paper-search-modal { height: calc(92vh); display: flex; flex-direction: column; }
+  #paperSearchModal .modal-body { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  #paperSearchModal .modal-footer { position: sticky; bottom: 0; background: #fff; z-index: 3; }
+  #paperSearchModal .paper-search-picker { flex: 1 1 auto; min-height: 0; display: flex; gap: 1rem; }
+  #paperSearchModal .paper-search-col { display: flex; flex-direction: column; min-width: 0; }
+  #paperSearchModal .paper-search-scroll { flex: 1 1 0; min-height: 0; overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; }
+  #paperSearchModal .paper-search-transfer { flex: 0 0 96px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: .75rem; }
+  #paperSearchModal .paper-search-transfer .btn { width: 48px; height: 40px; padding: 0; font-size: 20px; }
+  #paperSearchModal thead th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+  #paperSearchModal table { border-collapse: collapse; }
+  #paperSearchModal th, #paperSearchModal td { border: 1px solid #dee2e6; vertical-align: middle; }
+  #paperSearchModal .paper-search-form .form-label { white-space: nowrap; }
+  #paperSearchModal .ps-fetch.is-loading { pointer-events: none; opacity: .8; }
+  #paperSearchModal .ps-fetch .spin { display: inline-block; margin-right: 6px; animation: ps-spin 0.8s linear infinite; }
+  @@keyframes ps-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @@media (max-width: 991.98px){
+    #paperSearchModal .paper-search-dialog { --bs-modal-width: 100vw; --bs-modal-margin: 0; }
+    #paperSearchModal .paper-search-modal { border-radius: 0; }
+  }
+</style>
 
 <script>
 (() => {
@@ -42,6 +126,411 @@
     return "";
   };
 
+  const paperSearch = (() => {
+    const modalEl = document.getElementById("paperSearchModal");
+    if (modalEl && modalEl.parentElement !== document.body) {
+      document.body.appendChild(modalEl);
+    }
+    const formEl = modalEl?.querySelector(".paper-search-form");
+    const availTable = modalEl?.querySelector(".paper-search-available");
+    const selTable = modalEl?.querySelector(".paper-search-selected");
+    const btnRight = modalEl?.querySelector(".ps-right");
+    const btnLeft = modalEl?.querySelector(".ps-left");
+    const btnConfirm = modalEl?.querySelector(".ps-confirm");
+    const ckReplace = modalEl?.querySelector("#paperSearchReplace");
+    const titleEl = modalEl?.querySelector(".modal-title");
+
+    const state = {
+      itemId: "",
+      buttonName: "",
+      paperNum: "",
+      allowSelCount: 0,
+      replaceExists: 0,
+      dict: [],
+      searchParams: [],
+      insertKeys: [],
+      inputs: {},
+      available: [],
+      selected: [],
+      editableFields: new Set()
+    };
+
+    const withJwtHeaders = (init = {}) => {
+      const jwt = localStorage.getItem("jwtId");
+      const headers = Object.assign({}, init.headers || {});
+      if (jwt) headers["X-JWTID"] = jwt;
+      return { ...init, headers };
+    };
+
+    const toNumber = (v, fallback = 0) => {
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) ? n : fallback;
+    };
+
+    const normalizeKey = (name) => (name || "").replace(/^@@/, "").toLowerCase();
+
+    const getRowValue = (row, field) => {
+      if (!row) return "";
+      const key = normalizeKey(field);
+      const hit = Object.keys(row).find(k => k.toLowerCase() === key);
+      if (!hit) return "";
+      const val = row[hit];
+      return val == null ? "" : val;
+    };
+
+    const clearTable = (table) => {
+      const head = table?.querySelector("thead tr");
+      const body = table?.querySelector("tbody");
+      if (head) head.innerHTML = '<th style="width:36px;"></th>';
+      if (body) body.innerHTML = "";
+    };
+
+    const buildHeads = () => {
+      const headHtml = (state.dict || []).map(c => {
+        const w = Math.max(40, Number(c.DisplaySize ?? 120));
+        return `<th data-field="${c.FieldName}" style="min-width:${w}px;width:${w}px;">${c.DisplayLabel ?? ""}</th>`;
+      }).join("");
+      availTable?.querySelector("thead tr")?.insertAdjacentHTML("beforeend", headHtml);
+      selTable?.querySelector("thead tr")?.insertAdjacentHTML("beforeend", headHtml);
+    };
+
+    const fmtCell = (val, col) => {
+      if (val == null) return "";
+      if ((col.DataType || "").toString().toLowerCase().includes("date")) {
+        const d = new Date(val);
+        if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+      }
+      if ((col.DataType || "").toString().toLowerCase().includes("number")) {
+        const n = Number(String(val).replace(/,/g, ""));
+        if (!Number.isNaN(n)) return n.toLocaleString();
+      }
+      return String(val);
+    };
+
+    const renderRows = () => {
+      const cols = state.dict || [];
+      const availBody = availTable?.querySelector("tbody");
+      const selBody = selTable?.querySelector("tbody");
+      if (!availBody || !selBody) return;
+
+      const availHtml = state.available.map(r => {
+        const tds = cols.map(c => {
+          const v = getRowValue(r.data, c.FieldName);
+          const cls = (c.DataType || "").toString().toLowerCase().includes("number") ? "text-end" : "";
+          return `<td class="${cls}">${fmtCell(v, c)}</td>`;
+        }).join("");
+        return `<tr data-idx="${r.idx}"><td><input type="checkbox" class="form-check-input ps-chk"></td>${tds}</tr>`;
+      }).join("");
+
+      const selHtml = state.selected.map(r => {
+        const tds = cols.map(c => {
+          const f = normalizeKey(c.FieldName);
+          const v = getRowValue(r.data, c.FieldName);
+          const cls = (c.DataType || "").toString().toLowerCase().includes("number") ? "text-end" : "";
+          if (state.editableFields.has(f)) {
+            return `<td class="${cls}"><input data-field="${c.FieldName}" class="form-control form-control-sm ${cls}" value="${v}"></td>`;
+          }
+          return `<td class="${cls}">${fmtCell(v, c)}</td>`;
+        }).join("");
+        return `<tr data-idx="${r.idx}"><td><input type="checkbox" class="form-check-input ps-sel"></td>${tds}</tr>`;
+      }).join("");
+
+      availBody.innerHTML = availHtml;
+      selBody.innerHTML = selHtml;
+    };
+
+    const moveRight = () => {
+      if (!availTable) return;
+      const checked = Array.from(availTable.querySelectorAll("tbody tr"))
+        .filter(tr => tr.querySelector(".ps-chk")?.checked);
+      if (!checked.length) return;
+      if (state.allowSelCount > 0 && (state.selected.length + checked.length) > state.allowSelCount) {
+        alert(`最多只能選 ${state.allowSelCount} 筆`);
+        return;
+      }
+      checked.forEach(tr => {
+        const idx = Number(tr.dataset.idx);
+        const row = state.available.find(x => x.idx === idx);
+        if (!row) return;
+        state.selected.push(row);
+        state.available = state.available.filter(x => x.idx !== idx);
+      });
+      renderRows();
+    };
+
+    const moveLeft = () => {
+      if (!selTable) return;
+      const checked = Array.from(selTable.querySelectorAll("tbody tr"))
+        .filter(tr => tr.querySelector(".ps-sel")?.checked);
+      if (!checked.length) return;
+      checked.forEach(tr => {
+        const idx = Number(tr.dataset.idx);
+        const row = state.selected.find(x => x.idx === idx);
+        if (!row) return;
+        state.available.push(row);
+        state.selected = state.selected.filter(x => x.idx !== idx);
+      });
+      renderRows();
+    };
+
+    const collectInputs = () => {
+      const values = {};
+      (state.searchParams || []).forEach(p => {
+        const name = normalizeKey(p.ParamName || p.paramName);
+        if (!name) return;
+        const input = formEl?.querySelector(`[data-param="${name}"]`);
+        if (input) {
+          values[name] = input.value ?? "";
+          return;
+        }
+        const defVal = p.DefaultValue ?? p.defaultValue ?? p.ParamValue ?? p.paramValue;
+        values[name] = defVal == null ? "" : defVal;
+      });
+      state.inputs = values;
+      return values;
+    };
+
+    const readSelectedRows = () => {
+      const rows = state.selected.map(r => ({ ...r.data }));
+      if (!selTable) return rows;
+      selTable.querySelectorAll("tbody tr").forEach((tr, idx) => {
+        const row = rows[idx] || {};
+        tr.querySelectorAll("input[data-field]").forEach(inp => {
+          const field = inp.getAttribute("data-field");
+          if (!field) return;
+          row[field] = inp.value;
+        });
+        rows[idx] = row;
+      });
+      return rows;
+    };
+
+    const loadDict = async (table) => {
+      if (!table) throw new Error("MultiSelectDD is required");
+      const url = `/api/TableFieldLayout/DictFields?table=${encodeURIComponent(table)}&lang=TW`;
+      const res = await fetch(url, withJwtHeaders());
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      if (!Array.isArray(data)) throw new Error("DictFields payload is not array");
+      state.dict = data.filter(x => (x.Visible ?? x.visible) === 1 || (x.Visible ?? x.visible) === true).map(c => ({
+        FieldName: c.FieldName ?? c.fieldName,
+        DisplayLabel: c.DisplayLabel ?? c.displayLabel,
+        DisplaySize: c.DisplaySize ?? c.displaySize,
+        DataType: c.DataType ?? c.dataType
+      }));
+      return state.dict;
+    };
+
+    const loadParamOptions = async (itemId, buttonName, paramName) => {
+      const url = `/api/PaperSearch/ParamOptions?itemId=${encodeURIComponent(itemId)}&buttonName=${encodeURIComponent(buttonName)}&paramName=${encodeURIComponent(paramName)}`;
+      const res = await fetch(url, withJwtHeaders());
+      if (!res.ok) throw new Error(await res.text());
+      return await res.json();
+    };
+
+    const buildForm = async (itemId, buttonName) => {
+      if (!formEl) return;
+      formEl.innerHTML = "";
+      for (const p of (state.searchParams || [])) {
+        const name = normalizeKey(p.ParamName || p.paramName);
+        if (!name) continue;
+        const visible = Number(p.iVisible ?? p.IVisible ?? 0) === 1;
+        if (!visible) continue;
+
+        const wrap = document.createElement("div");
+        wrap.className = "col-auto";
+        const label = document.createElement("label");
+        label.className = "form-label mb-1";
+        label.textContent = p.DisplayName || p.displayName || name;
+        wrap.appendChild(label);
+
+        const controlType = Number(p.ControlType ?? p.controlType ?? 0);
+        if (controlType === 1) {
+          const select = document.createElement("select");
+          select.className = "form-select form-select-sm";
+          select.setAttribute("data-param", name);
+          const emptyOpt = document.createElement("option");
+          emptyOpt.value = "";
+          emptyOpt.textContent = "";
+          select.appendChild(emptyOpt);
+          wrap.appendChild(select);
+          try {
+            const options = await loadParamOptions(itemId, buttonName, p.ParamName || p.paramName);
+            if (Array.isArray(options)) {
+              options.forEach(opt => {
+                const o = document.createElement("option");
+                const val = opt.value ?? opt.Value ?? "";
+                const text = opt.text ?? opt.Text ?? "";
+                o.value = val;
+                o.textContent = val || text;
+                if (text && text !== val) o.title = text;
+                select.appendChild(o);
+              });
+            }
+          } catch (err) {
+            console.warn("load options failed", err);
+          }
+          const defVal = p.DefaultValue ?? p.defaultValue;
+          if (defVal != null && defVal !== "") select.value = defVal;
+          select.addEventListener("keydown", (ev) => {
+            if (ev.key === "Delete" || ev.key === "Backspace") {
+              select.value = "";
+            }
+          });
+        } else {
+          const input = document.createElement("input");
+          input.className = "form-control form-control-sm";
+          input.type = "text";
+          input.setAttribute("data-param", name);
+          const defVal = p.DefaultValue ?? p.defaultValue;
+          if (defVal != null && defVal !== "") input.value = defVal;
+          const readOnly = Number(p.iReadOnly ?? p.IReadOnly ?? 0) === 1;
+          if (readOnly) input.readOnly = true;
+          wrap.appendChild(input);
+        }
+
+        formEl.appendChild(wrap);
+      }
+
+      const fetchWrap = document.createElement("div");
+      fetchWrap.className = "col d-flex align-items-end gap-3 flex-wrap";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-primary ps-fetch ms-auto";
+      btn.textContent = "資料重取";
+      fetchWrap.appendChild(btn);
+      formEl.appendChild(fetchWrap);
+    };
+
+    const setFetchLoading = (loading) => {
+      const btn = formEl?.querySelector(".ps-fetch");
+      if (!btn) return;
+      if (loading) {
+        btn.classList.add("is-loading");
+        btn.setAttribute("aria-busy", "true");
+        btn.innerHTML = '<span class="spin">↻</span>查詢中...';
+      } else {
+        btn.classList.remove("is-loading");
+        btn.removeAttribute("aria-busy");
+        btn.textContent = "資料重取";
+      }
+    };
+
+    const fetchSearch = async () => {
+      setFetchLoading(true);
+      const payload = {
+        itemId: state.itemId,
+        buttonName: state.buttonName,
+        paperNum: state.paperNum,
+        params: collectInputs()
+      };
+      try {
+        const res = await fetch("/api/PaperSearch/Search", withJwtHeaders({
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        }));
+        const raw = await res.text();
+        let data; try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
+        if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        state.available = (data.data || []).map((r, i) => ({ idx: i, data: r }));
+        state.selected = [];
+        renderRows();
+      } finally {
+        setFetchLoading(false);
+      }
+    };
+
+    const confirmInsert = async () => {
+      collectInputs();
+      const rows = readSelectedRows();
+      if (!rows.length) {
+        alert("尚未選擇任何項目");
+        return;
+      }
+      const payload = {
+        itemId: state.itemId,
+        buttonName: state.buttonName,
+        paperNum: state.paperNum,
+        replace: !!ckReplace?.checked,
+        inputs: state.inputs,
+        rows
+      };
+      const res = await fetch("/api/PaperSearch/Confirm", withJwtHeaders({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }));
+      const raw = await res.text();
+      let data; try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
+      if (!res.ok || !data.ok) {
+        alert(`匯入失敗: ${data.error || `HTTP ${res.status}`}`);
+        return;
+      }
+      alert(`匯入完成（${data.rows || 0} 筆）`);
+      location.reload();
+    };
+
+    const open = async (ctx, meta) => {
+      if (!modalEl) return;
+      state.itemId = ctx.itemId || "";
+      state.buttonName = ctx.buttonName || "";
+      state.paperNum = ctx.paperNum || "";
+      state.allowSelCount = toNumber(meta.allowSelCount, 0);
+      state.replaceExists = toNumber(meta.replaceExists, 0);
+      state.editableFields = new Set();
+
+      const configUrl = `/api/PaperSearch/Config?itemId=${encodeURIComponent(state.itemId)}&buttonName=${encodeURIComponent(state.buttonName)}`;
+      const res = await fetch(configUrl, withJwtHeaders());
+      if (!res.ok) {
+        alert(await res.text());
+        return;
+      }
+      const cfg = await res.json();
+      state.searchParams = cfg.searchParams || cfg.SearchParams || [];
+      state.insertKeys = cfg.insertKeys || cfg.InsertKeys || [];
+
+      state.editableFields = new Set(
+        (state.insertKeys || [])
+          .filter(k => Number(k.PositionType ?? k.positionType) === 0)
+          .map(k => normalizeKey(k.KeyFieldName || k.keyFieldName))
+          .filter(k => k)
+      );
+
+      const caption = meta.dialogCaption || cfg.dialogCaption || cfg.DialogCaption || ctx.caption || "查詢並挑選";
+      if (titleEl) titleEl.textContent = caption;
+      if (ckReplace) ckReplace.checked = false;
+      if (state.replaceExists) ckReplace?.closest(".ps-replace")?.classList.remove("d-none");
+      else ckReplace?.closest(".ps-replace")?.classList.add("d-none");
+
+      clearTable(availTable);
+      clearTable(selTable);
+      await loadDict(meta.multiSelectDd || cfg.multiSelectDd || cfg.MultiSelectDd || "");
+      buildHeads();
+      await buildForm(state.itemId, state.buttonName);
+      state.available = [];
+      state.selected = [];
+      renderRows();
+
+      if (window.bootstrap) {
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.show();
+      }
+    };
+
+    btnRight?.addEventListener("click", moveRight);
+    btnLeft?.addEventListener("click", moveLeft);
+    btnConfirm?.addEventListener("click", (e) => { e.preventDefault(); confirmInsert(); });
+    modalEl?.addEventListener("click", (ev) => {
+      const btn = ev.target.closest(".ps-fetch");
+      if (!btn) return;
+      ev.preventDefault();
+      fetchSearch().catch(err => alert(`查詢失敗: ${err?.message || err}`));
+    });
+
+    return { open };
+  })();
+
   const wireActionRailButtons = () => {
     document.querySelectorAll('.action-rail [data-custom-btn="1"]').forEach(btn => {
       if (btn.dataset.cbBound === "1") return;
@@ -54,6 +543,18 @@
         if (!buttonName) return;
 
         const handler = resolveCustomHandler(buttonName);
+        const designType = parseInt(btn.dataset.designType || "0", 10);
+        const searchTemplate = (btn.dataset.searchTemplate || "").toLowerCase();
+        const meta = {
+          designType,
+          searchTemplate,
+          spName: btn.dataset.spName || "",
+          execSpName: btn.dataset.execSpName || "",
+          multiSelectDd: btn.dataset.multiSelectDd || "",
+          replaceExists: btn.dataset.replaceExists || "",
+          dialogCaption: btn.dataset.dialogCaption || "",
+          allowSelCount: btn.dataset.allowSelCount || ""
+        };
         const ctx = {
           buttonName,
           itemId: (window._itemId || '@(Model?.ItemId ?? "")').toString(),
@@ -68,6 +569,16 @@
             await handler(ctx);
           } catch (err) {
             console.error("action-rail custom button handler error", err);
+            alert(`執行失敗: ${err?.message || err}`);
+          }
+          return;
+        }
+
+        if (designType === 1 && searchTemplate === "jsdpapersearchdll.dll") {
+          try {
+            await paperSearch.open(ctx, meta);
+          } catch (err) {
+            console.error("paper search template error", err);
             alert(`執行失敗: ${err?.message || err}`);
           }
           return;

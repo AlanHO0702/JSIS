@@ -13,105 +13,6 @@
     return '';
   };
 
-  const readDetailPaperId = () => {
-    const fromPage = (window.PAGE?.detailTable || '').toString().trim();
-    if (fromPage) return fromPage.replace(/^dbo\./i, '');
-
-    const fromGlobal = (window._dictTableName || '').toString().trim();
-    if (fromGlobal) return fromGlobal.replace(/^dbo\./i, '');
-
-    const activeContainer =
-      document.querySelector('.multi-tab-detail .tab-pane.active .table-container') ||
-      document.querySelector('.multi-tab-detail .table-container');
-    const fromDom = (activeContainer?.dataset?.dictTable || '').toString().trim();
-    return fromDom.replace(/^dbo\./i, '');
-  };
-
-  const apiPostJson = async (url, body) => {
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body ?? {})
-    });
-    const raw = await resp.text();
-    let data;
-    try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
-    return { resp, data };
-  };
-
-  const execByButton = async (buttonName, paperNum) => {
-    const { resp, data } = await apiPostJson('/api/StoredProc/execByButton', {
-      itemId: 'SA000002',
-      buttonName,
-      paperNum
-    });
-    return { resp, data };
-  };
-
-  const calcAmount = async (ctx) => {
-    const paperNum = readPaperNum(ctx);
-    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
-
-    try {
-      const { resp, data } = await execByButton('btnC5', paperNum);
-      if (resp.ok && data.ok) {
-        await Swal.fire({ icon: 'success', title: '計算完成', timer: 900, showConfirmButton: false });
-        location.reload();
-      } else {
-        Swal.fire({ icon: 'error', title: '呼叫失敗', text: data.error || `HTTP ${resp.status}` });
-      }
-    } catch (e) {
-      Swal.fire({ icon: 'error', title: '網路錯誤', text: String(e) });
-    }
-  };
-
-  const clearDetails = async (ctx) => {
-    const paperNum = readPaperNum(ctx);
-    const paperId = readDetailPaperId();
-    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
-
-    const status = (typeof window.getHeaderValueByLabel === 'function')
-      ? (window.getHeaderValueByLabel('單據狀態') || '')
-      : '';
-
-    const ALLOW = ['作業中', '審核中'];
-    const BLOCK = ['已確認', '已結案', '作廢中'];
-    if (BLOCK.includes(status) || !ALLOW.includes(status)) {
-      return Swal.fire({ icon: 'warning', title: '此狀態不可清除', html: `單據狀態：<b>${status || '（空）'}</b>` });
-    }
-
-    const { isConfirmed } = await Swal.fire({
-      icon: 'warning',
-      title: '確定要清除這張單的所有單身嗎？',
-      html: `單號：<b>${paperNum}</b><br>表：<code>${paperId || ''}</code><br>狀態：<b>${status}</b>`,
-      showCancelButton: true, confirmButtonText: '清除', cancelButtonText: '取消'
-    });
-    if (!isConfirmed) return;
-
-    try {
-      const { resp, data } = await execByButton('btnC7', paperNum);
-
-      if (resp.ok && data.ok) {
-        const msg = (data.rows != null) ? `已清除 ${data.rows} 筆` : '清除完成';
-        await Swal.fire({ icon: 'success', title: msg, timer: 900, showConfirmButton: false });
-        location.reload();
-      } else {
-        Swal.fire({ icon: 'error', title: '清除失敗', text: data.error || `HTTP ${resp.status}` });
-      }
-    } catch (e) {
-      Swal.fire({ icon: 'error', title: '網路錯誤', text: String(e) });
-    }
-  };
-
-  const searchDetails = async (ctx) => {
-    const paperNum = readPaperNum(ctx);
-    if (window.OrderDetailPicker_detailPicker?.open) {
-      window.OrderDetailPicker_detailPicker.open({ paperNum });
-      return;
-    }
-    Swal.fire({ icon: 'info', title: '找不到明細搜尋視窗（detailPicker）' });
-  };
-
   const outAddr = async (ctx) => {
     const paperNum = readPaperNum(ctx);
     const paperId = 'SPOdOrderMain';
@@ -174,9 +75,6 @@
 
   window.ActionRailCustomHandlers['SA000002'] = {
     // 依 CURdOCXItemCustButton.ButtonName 對應
-    btnC2: searchDetails,
-    btnC5: calcAmount,
-    btnC7: clearDetails,
     btnC6: outAddr
   };
 })();
