@@ -269,7 +269,8 @@ SELECT TOP 1 ISNULL(NULLIF(DisplayLabel,''), TableName) AS DisplayLabel
 SELECT ItemId, SerialNum, ButtonName,
        CustCaption, CustHint,
        bVisible, bNeedNum, bNeedInEdit, DesignType,
-       OCXName, CoClassName, SpName, ExecSpName
+       OCXName, CoClassName, SpName, ExecSpName,
+       SearchTemplate, MultiSelectDD, ReplaceExists, DialogCaption, AllowSelCount
   FROM CURdOCXItemCustButton WITH (NOLOCK)
  WHERE ItemId = @itemId
  ORDER BY SerialNum, ButtonName;";
@@ -300,6 +301,11 @@ SELECT ItemId, SerialNum, ButtonName,
                     CoClassName = rd["CoClassName"]?.ToString() ?? string.Empty,
                     SpName = rd["SpName"]?.ToString() ?? string.Empty,
                     ExecSpName = rd["ExecSpName"]?.ToString() ?? string.Empty,
+                    SearchTemplate = rd["SearchTemplate"]?.ToString() ?? string.Empty,
+                    MultiSelectDD = rd["MultiSelectDD"]?.ToString() ?? string.Empty,
+                    ReplaceExists = TryToInt(rd["ReplaceExists"]),
+                    DialogCaption = rd["DialogCaption"]?.ToString() ?? string.Empty,
+                    AllowSelCount = TryToInt(rd["AllowSelCount"]),
                     bNeedNum = TryToInt(rd["bNeedNum"]),
                     bNeedInEdit = TryToInt(rd["bNeedInEdit"]),
                     DesignType = TryToInt(rd["DesignType"])
@@ -320,6 +326,11 @@ SELECT ItemId, SerialNum, ButtonName,
             public string CoClassName { get; set; } = string.Empty;
             public string SpName { get; set; } = string.Empty;
             public string ExecSpName { get; set; } = string.Empty;
+            public string SearchTemplate { get; set; } = string.Empty;
+            public string MultiSelectDD { get; set; } = string.Empty;
+            public int? ReplaceExists { get; set; }
+            public string DialogCaption { get; set; } = string.Empty;
+            public int? AllowSelCount { get; set; }
             public int? bNeedNum { get; set; }
             public int? bNeedInEdit { get; set; }
             public int? DesignType { get; set; }
