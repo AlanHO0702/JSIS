@@ -79,28 +79,77 @@ namespace PcbErpApi.Services
         }
 
         /// <summary>
-        /// 取得疊構圖資料
+        /// 取得疊構圖資料（透過 SP EMOdLayerPressMap）
         /// </summary>
         public async Task<string?> GetStackupMapDataAsync(string partNum, string revision)
         {
             try
             {
-                var stackup = await _context.EmodLayerPresses
-                    .Where(m => m.PartNum == partNum
-                             && m.Revision == revision
-                             && m.LayerId == "L0~0")
-                    .FirstOrDefaultAsync();
+                // 使用 ADO.NET 直接呼叫 SP
+                using var connection = _context.Database.GetDbConnection();
+                await connection.OpenAsync();
 
-                if (stackup == null)
+                using var command = connection.CreateCommand();
+                command.CommandText = "EMOdLayerPressMap";
+                command.CommandType = System.Data.CommandType.StoredProcedure;
+
+                // 加入參數
+                var paramPartNum = command.CreateParameter();
+                paramPartNum.ParameterName = "@PartNum";
+                paramPartNum.Value = partNum;
+                command.Parameters.Add(paramPartNum);
+
+                var paramRevision = command.CreateParameter();
+                paramRevision.ParameterName = "@Revision";
+                paramRevision.Value = revision;
+                command.Parameters.Add(paramRevision);
+
+                var paramAftLayerId = command.CreateParameter();
+                paramAftLayerId.ParameterName = "@AftLayerId";
+                paramAftLayerId.Value = "L0~0";
+                command.Parameters.Add(paramAftLayerId);
+
+                _logger.LogInformation("Calling SP EMOdLayerPressMap with PartNum={PartNum}, Revision={Revision}",
+                    partNum, revision);
+
+                string? mapData1 = null;
+                string? mapData2 = null;
+                string? mapData3 = null;
+
+                using var reader = await command.ExecuteReaderAsync();
+                if (await reader.ReadAsync())
+                {
+                    // 讀取三個 MapData 欄位
+                    mapData1 = reader.IsDBNull(0) ? null : reader.GetString(0);
+                    mapData2 = reader.IsDBNull(1) ? null : reader.GetString(1);
+                    mapData3 = reader.IsDBNull(2) ? null : reader.GetString(2);
+
+                    _logger.LogInformation("Stackup MapData retrieved: MapData_1={Len1}, MapData_2={Len2}, MapData_3={Len3}",
+                        mapData1?.Length ?? 0, mapData2?.Length ?? 0, mapData3?.Length ?? 0);
+
+                    // Debug: 輸出 MapData 內容的前面部分
+                    if (!string.IsNullOrEmpty(mapData1))
+                    {
+                        _logger.LogInformation("MapData_1 preview (first 500 chars): {Preview}",
+                            mapData1.Substring(0, Math.Min(500, mapData1.Length)));
+                    }
+                    if (!string.IsNullOrEmpty(mapData2))
+                    {
+                        _logger.LogInformation("MapData_2 preview (first 500 chars): {Preview}",
+                            mapData2.Substring(0, Math.Min(500, mapData2.Length)));
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("No stackup data found for {PartNum}/{Revision}", partNum, revision);
                     return null;
+                }
 
-                return (stackup.MapData_1 ?? "") +
-                       (stackup.MapData_2 ?? "") +
-                       (stackup.MapData_3 ?? "");
+                return (mapData1 ?? "") + (mapData2 ?? "") + (mapData3 ?? "");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting stackup MapData for {PartNum}/{Revision}",
+                _logger.LogError(ex, "Error calling EMOdLayerPressMap for {PartNum}/{Revision}",
                     partNum, revision);
                 return null;
             }
@@ -143,7 +192,7 @@ namespace PcbErpApi.Services
                 // 使用通用渲染器渲染 MapData
                 _logger.LogInformation("Rendering {Type} map for {PartNum}/{Revision} using UniversalMapRenderer",
                     mapType, partNum, revision);
-                return _universalRenderer.RenderFromMapData(mapData, width, height);
+                return _universalRenderer.RenderFromMapData(mapData, width, height, mapType);
             }
             catch (Exception ex)
             {

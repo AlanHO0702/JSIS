@@ -19,13 +19,18 @@ namespace PcbErpApi.Services.Rendering
             _parser = parser;
         }
 
+        private MapType? _currentMapType;
+
         /// <summary>
         /// 從 MapData 字串渲染圖片
         /// </summary>
-        public byte[] RenderFromMapData(string mapData, int imageWidth = 1200, int imageHeight = 800)
+        public byte[] RenderFromMapData(string mapData, int imageWidth = 1200, int imageHeight = 800, MapType? mapType = null)
         {
             try
             {
+                // 儲存當前圖形類型，供渲染時判斷
+                _currentMapType = mapType;
+
                 // 解析 MapData
                 var parsed = _parser.Parse(mapData);
 
@@ -53,15 +58,28 @@ namespace PcbErpApi.Services.Rendering
                 var scaleY = (imageHeight - 160) / (bounds.MaxY - bounds.MinY);
                 var scale = Math.Min(scaleX, scaleY);
 
+                // 疊構圖：限制最小縮放比例，避免圖層太小或擠在一起
+                if (_currentMapType == MapType.Stackup)
+                {
+                    scale = Math.Max(scale, 2.0f);  // 最小縮放比例為 1.0（不縮小）
+                }
+
                 // 偏移量 (置中)
-                var offsetX = 80 + (imageWidth - 160 - (bounds.MaxX - bounds.MinX) * scale) / 2;
-                var offsetY = 80 + (imageHeight - 160 - (bounds.MaxY - bounds.MinY) * scale) / 2;
+                var offsetX = 0;// + (imageWidth  - (bounds.MaxX - bounds.MinX) * scale);// / 2;
+                var offsetY = 40;// + (imageHeight - (bounds.MaxY - bounds.MinY) * scale) / 2;
 
                 _logger.LogInformation("Scale: {Scale}, Offset: ({OffsetX}, {OffsetY})",
                     scale, offsetX, offsetY);
 
-                // 渲染所有元素
-                foreach (var element in parsed.Elements)
+                // 渲染所有元素（分兩階段：先渲染元件和矩形，再渲染箭頭線，確保箭頭在最上層）
+                // 第一階段：渲染 Component, Rectangle, Line, Text
+                foreach (var element in parsed.Elements.Where(e => e.Type != MapElementType.DrawLine))
+                {
+                    RenderElement(canvas, element, scale, offsetX, offsetY, bounds);
+                }
+
+                // 第二階段：渲染 DrawLine（箭頭），確保在最上層
+                foreach (var element in parsed.Elements.Where(e => e.Type == MapElementType.DrawLine))
                 {
                     RenderElement(canvas, element, scale, offsetX, offsetY, bounds);
                 }
@@ -152,8 +170,9 @@ namespace PcbErpApi.Services.Rendering
 
         private void RenderComponent(SKCanvas canvas, MapElement element, float x, float y, float w, float h)
         {
-            // 元件類型: 1=普通元件(有框), 3=尺寸標註(無框)
+            // 元件類型: 1=普通元件(有框), 2=裁切孔位標記(圓圈), 3=尺寸標註(無框)
             var isTextOnly = element.ComponentType == 3;
+            var isCircleMarker = element.ComponentType == 2;
 
             // 解析顏色：Colors[0]=邊框, Colors[2]=填充
             var strokeColor = element.Colors.Count > 0 ? element.Colors[0] : "clBlue";
@@ -163,34 +182,188 @@ namespace PcbErpApi.Services.Rendering
             // 只有非文字元件才繪製框
             if (!isTextOnly)
             {
-                // 繪製填充（白色）
-                using var fillPaint = new SKPaint
-                {
-                    Color = SKColors.White,
-                    Style = SKPaintStyle.Fill,
-                    IsAntialias = true
-                };
-                canvas.DrawRect(rect, fillPaint);
+                // 疊構圖的 ComponentType=2 是矩形層，不是圓圈
+                var isStackupLayer = isCircleMarker && _currentMapType == MapType.Stackup;
 
-                // 繪製邊框 - 全部用黑色
-                // 如果填充色是黑色(clBlack)，表示是最外圍大框，用粗框
-                var isOuterFrame = element.Colors.Count > 2 &&
-                                  element.Colors[2].ToLower() == "clblack";
-
-                using var strokePaint = new SKPaint
+                if (isCircleMarker && !isStackupLayer)
                 {
-                    Color = SKColors.Black,  // 全部改成黑色
-                    Style = SKPaintStyle.Stroke,
-                    StrokeWidth = isOuterFrame ? 3 : 1,  // 外框粗一點，內框細一點
-                    IsAntialias = true
-                };
-                canvas.DrawRect(rect, strokePaint);
+                    // ComponentType=2 (非疊構圖): 繪製圓圈標記（用於 PF 裁切孔位）
+                    var centerX = x + w / 2;
+                    var centerY = y + h / 2;
+                    var radius = Math.Min(w, h) / 2;  // 圓圈半徑為矩形較小邊的一半
+
+                    using var strokePaint = new SKPaint
+                    {
+                        Color = SKColors.Black,
+                        Style = SKPaintStyle.Stroke,
+                        StrokeWidth = 1,
+                        IsAntialias = true
+                    };
+                    canvas.DrawCircle(centerX, centerY, radius, strokePaint);
+
+                    // 檢查是否需要畫斜線（根據填充色判斷）
+                    // clTeal 或其他特殊顏色表示需要斜線標記
+                    var fillColor = element.Colors.Count > 2 ? element.Colors[2] : "";
+                    if (fillColor.ToLower() == "clteal" || fillColor.ToLower() == "clgray")
+                    {
+                        // 繪製多條斜線填充（從右上到左下）
+                        var spacing = 8f;  // 斜線間距
+                        var lineCount = (int)(radius * 2 / spacing);  // 計算需要幾條線
+
+                        for (int i = -lineCount; i <= lineCount; i++)
+                        {
+                            var offsetX = i * spacing;
+
+                            // 計算斜線的起點和終點（從右上到左下）
+                            var startX = centerX + offsetX + radius;
+                            var startY = centerY - radius;
+                            var endX = centerX + offsetX - radius;
+                            var endY = centerY + radius;
+
+                            // 裁剪線條使其只在圓圈內顯示
+                            canvas.Save();
+                            var clipPath = new SKPath();
+                            clipPath.AddCircle(centerX, centerY, radius);
+                            canvas.ClipPath(clipPath);
+
+                            canvas.DrawLine(startX, startY, endX, endY, strokePaint);
+
+                            canvas.Restore();
+                            clipPath.Dispose();
+                        }
+                    }
+                }
+                else
+                {
+                    // ComponentType=1 或疊構圖的 ComponentType=2: 繪製矩形
+
+                    // 只有非疊構圖才繪製白色填充（疊構圖只要斜線，不要實心背景）
+                    if (_currentMapType != MapType.Stackup)
+                    {
+                        using var fillPaint = new SKPaint
+                        {
+                            Color = SKColors.White,
+                            Style = SKPaintStyle.Fill,
+                            IsAntialias = true
+                        };
+                        canvas.DrawRect(rect, fillPaint);
+                    }
+
+                    // 根據填充顏色繪製斜線或實心填充（疊構圖特有）
+                    var fillColor = element.Colors.Count > 2 ? element.Colors[2] : "";
+                    if (_currentMapType == MapType.Stackup && !string.IsNullOrEmpty(fillColor) && fillColor.ToLower() != "clwhite")
+                    {
+                        var fillColorLower = fillColor.ToLower();
+
+                        // clAqua (青色) 或 clTeal (青綠色) = 半成品，使用青色 #008080 實心填滿
+                        if (fillColorLower == "clteal")
+                        {
+                            using var solidFillPaint = new SKPaint
+                            {
+                                Color = SKColor.Parse("#008080"),  // 青色 #008080
+                                Style = SKPaintStyle.Fill,
+                                IsAntialias = true
+                            };
+                            canvas.DrawRect(rect, solidFillPaint);
+                        }
+                        else if (fillColorLower == "claqua" )
+                        {
+                            using var solidFillPaint = new SKPaint
+                            {
+                                Color = SKColor.Parse("#000000"),
+                                Style = SKPaintStyle.Fill,
+                                IsAntialias = true
+                            };
+                            canvas.DrawRect(rect, solidFillPaint);
+                        }
+                        // clRed (紅色) = 基板，使用交叉斜線（XX樣式）
+                        else if (fillColorLower == "clred")
+                        {
+                            var hatchColor = ParseColor(fillColor);
+
+                            using var hatchPaint = new SKPaint
+                            {
+                                Color = hatchColor,
+                                Style = SKPaintStyle.Stroke,
+                                StrokeWidth = 1,
+                                IsAntialias = true
+                            };
+
+                            var spacing = 8f;
+
+                            canvas.Save();
+                            canvas.ClipRect(rect);
+
+                            // 第一組斜線：左上到右下 (\\\)
+                            for (float offsetX = 0; offsetX <= w; offsetX += spacing)
+                            {
+                                var startX = x + offsetX;
+                                var startY = y;
+                                canvas.DrawLine(startX, startY, startX + h, startY + h, hatchPaint);
+                            }
+
+                            // 第二組斜線：右上到左下 (///)，形成交叉 (XXX)
+                            for (float offsetX = 0; offsetX <= w; offsetX += spacing)
+                            {
+                                var startX = x + offsetX;
+                                var startY = y;
+                                canvas.DrawLine(startX, startY, startX - h, startY + h, hatchPaint);
+                            }
+
+                            canvas.Restore();
+                        }
+                        else
+                        {
+                            // 其他顏色（clGreen, clBlue等）：單向斜線填充
+                            var hatchColor = ParseColor(fillColor);
+
+                            using var hatchPaint = new SKPaint
+                            {
+                                Color = hatchColor,
+                                Style = SKPaintStyle.Stroke,
+                                StrokeWidth = 1,
+                                IsAntialias = true
+                            };
+
+                            // 繪製斜線填充（從左上到右下）
+                            var spacing = 10f;
+
+                            // 從左到右繪製斜線
+                            for (float offsetX = 0; offsetX <= w; offsetX += spacing)
+                            {
+                                var startX = x + offsetX;
+                                var startY = y;
+
+                                canvas.Save();
+                                canvas.ClipRect(rect);
+                                canvas.DrawLine(startX, startY, startX + h, startY + h, hatchPaint);
+                                canvas.Restore();
+                            }
+                        }
+                    }
+
+                    // 繪製邊框 - 全部用黑色，統一粗度
+                    using var strokePaint = new SKPaint
+                    {
+                        Color = SKColors.Black,
+                        Style = SKPaintStyle.Stroke,
+                        StrokeWidth = 1,  // 統一粗度為 1
+                        IsAntialias = true
+                    };
+                    canvas.DrawRect(rect, strokePaint);
+                }
             }
 
             // 繪製文字
-            if (!string.IsNullOrEmpty(element.Text))
+            // 疊構圖特殊處理：ComponentType=1 的矩形不顯示文字（文字由 ComponentType=3 單獨顯示）
+            var isStackupRect = (_currentMapType == MapType.Stackup && element.ComponentType == 1);
+
+            if (!string.IsNullOrEmpty(element.Text) && !isStackupRect)
             {
-                var fontSize = Math.Max(8, Math.Min(element.FontSize, 20));
+                // 疊構圖使用較小的字體，其他圖形使用較大的字體
+                var fontSize = _currentMapType == MapType.Stackup
+                    ? Math.Max(16, Math.Min(element.FontSize * 2, 24))  // 疊構圖: 16-24 (放大)
+                    : Math.Max(20, Math.Min(element.FontSize, 40)); // 其他圖形: 20-40
                 var textColor = element.Colors.Count > 3 ? element.Colors[3] : "clBlack";
 
                 // 使用支援中文的字型
@@ -212,6 +385,23 @@ namespace PcbErpApi.Services.Rendering
                 {
                     textX = x;  // 直接從 x 位置開始
                     textY = y + h / 2 + textPaint.TextSize / 3;
+
+                    // 為尺寸標註文字繪製白色背景（避免被線條遮住）
+                    var textHeight = textPaint.TextSize;
+                    var bgRect = new SKRect(
+                        textX - 2,
+                        textY - textHeight + 2,
+                        textX + textWidth + 2,
+                        textY + 4
+                    );
+
+                    using var bgPaint = new SKPaint
+                    {
+                        Color = SKColors.White,
+                        Style = SKPaintStyle.Fill,
+                        IsAntialias = true
+                    };
+                    canvas.DrawRect(bgRect, bgPaint);
                 }
                 else
                 {
@@ -226,7 +416,6 @@ namespace PcbErpApi.Services.Rendering
 
         private void RenderDrawLine(SKCanvas canvas, MapElement element, float x, float y, float w, float h)
         {
-            // DrawLine 是尺寸標註用的箭頭線
             using var paint = new SKPaint
             {
                 Color = ParseColor(element.Colors.FirstOrDefault() ?? "clBlack"),
@@ -235,35 +424,71 @@ namespace PcbErpApi.Services.Rendering
                 IsAntialias = true
             };
 
-            // 判斷是水平還是垂直線
-            if (h < w)
-            {
-                // 水平箭頭線
-                var centerY = y + h / 2;
-                canvas.DrawLine(x, centerY, x + w, centerY, paint);
+            // 判斷是圓圈標記還是箭頭線
+            // 如果寬度和高度都很小（< 15），表示是裁切孔位標記（畫圓圈）
+            const float circleThreshold = 15;
+            var isCircleMarker = w < circleThreshold && h < circleThreshold;
 
-                // 繪製左箭頭
-                DrawArrowHead(canvas, paint, x, centerY, -1, 0);
-                // 繪製右箭頭
-                DrawArrowHead(canvas, paint, x + w, centerY, 1, 0);
+            if (isCircleMarker)
+            {
+                // 繪製圓圈標記（用於 PF 裁切孔位）
+                var centerX = x + w / 2;
+                var centerY = y + h / 2;
+                var radius = 8f;  // 圓圈半徑
+
+                // 空心圓圈
+                canvas.DrawCircle(centerX, centerY, radius, paint);
             }
             else
             {
-                // 垂直箭頭線
-                var centerX = x + w / 2;
-                canvas.DrawLine(centerX, y, centerX, y + h, paint);
+                // 繪製線條（用於尺寸標註）
+                // PF (PP裁切) 圖只畫直線，其他圖畫箭頭
+                var isPfMap = _currentMapType == MapType.PF;
 
-                // 繪製上箭頭
-                DrawArrowHead(canvas, paint, centerX, y, 0, -1);
-                // 繪製下箭頭
-                DrawArrowHead(canvas, paint, centerX, y + h, 0, 1);
+                if (h < w)
+                {
+                    // 水平線
+                    var centerY = y + h / 2;
+
+                    // PF 圖的長水平線需要往下調整，對齊圓圈邊緣
+                    if (isPfMap && w > 200)  // 長水平線
+                    {
+                        // 往下調整 Y 座標，讓線條貼合圓圈頂部邊緣
+                        var adjustedY = centerY + 3;  // 往下調整約 10 像素
+                        canvas.DrawLine(x, adjustedY, x + w, adjustedY, paint);
+                    }
+                    else
+                    {
+                        canvas.DrawLine(x, centerY, x + w, centerY, paint);
+
+                        if (!isPfMap)
+                        {
+                            // 繪製左右箭頭
+                            DrawArrowHead(canvas, paint, x, centerY, -1, 0);
+                            DrawArrowHead(canvas, paint, x + w, centerY, 1, 0);
+                        }
+                    }
+                }
+                else
+                {
+                    // 垂直線
+                    var centerX = x + w / 2;
+                    canvas.DrawLine(centerX, y, centerX, y + h, paint);
+
+                    if (!isPfMap)
+                    {
+                        // 繪製上下箭頭
+                        DrawArrowHead(canvas, paint, centerX, y, 0, -1);
+                        DrawArrowHead(canvas, paint, centerX, y + h, 0, 1);
+                    }
+                }
             }
         }
 
         private void DrawArrowHead(SKCanvas canvas, SKPaint paint, float x, float y, int dirX, int dirY)
         {
             // 箭頭大小
-            const float arrowSize = 5;
+            const float arrowSize = 6;
 
             using var fillPaint = new SKPaint
             {
@@ -272,7 +497,6 @@ namespace PcbErpApi.Services.Rendering
                 IsAntialias = true
             };
 
-            // 根據方向繪製箭頭
             var path = new SKPath();
             if (dirX != 0)  // 水平箭頭
             {

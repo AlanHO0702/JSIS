@@ -40,8 +40,8 @@ namespace PcbErpApi.Controllers
             string partNum,
             string revision,
             string type,
-            [FromQuery] int width = 800,
-            [FromQuery] int height = 600)
+            [FromQuery] int width = 600,
+            [FromQuery] int height = 500)
         {
             try
             {
