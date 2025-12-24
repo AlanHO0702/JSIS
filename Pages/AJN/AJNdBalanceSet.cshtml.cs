@@ -6,14 +6,14 @@ using WebRazor.Models;
 namespace PcbErpApi.Pages.AJN
 {
     /// <summary>
-    /// 損益表設定 - 四層級主從式編輯頁面（BalanceSheet 佈局）
-    /// 對應 Delphi 的 BalanceDLL.pas (paperType=0)
+    /// 資產負債表設定 - 四層級主從式編輯頁面（BalanceSheet 佈局）
+    /// 對應 Delphi 的 BalanceDLL.pas (paperType=1)
     /// </summary>
-    public class AJNdBalanceModel : PageModel
+    public class AJNdBalanceSetModel : PageModel
     {
-        private readonly ILogger<AJNdBalanceModel> _logger;
+        private readonly ILogger<AJNdBalanceSetModel> _logger;
 
-        public AJNdBalanceModel(ILogger<AJNdBalanceModel> logger)
+        public AJNdBalanceSetModel(ILogger<AJNdBalanceSetModel> logger)
         {
             _logger = logger;
         }
@@ -21,12 +21,12 @@ namespace PcbErpApi.Pages.AJN
         /// <summary>
         /// 頁面標題
         /// </summary>
-        public string PageTitle => "損益表設定";
+        public string PageTitle => "資產負債表設定";
 
         /// <summary>
         /// 主表格名稱（用於相容性）
         /// </summary>
-        public string TableName => "AJNdIncome";
+        public string TableName => "AJNdbalanceSet";
 
         // 為了相容 View 中的 PaginationModel，提供預設值
         public int PageNumber => 1;
@@ -38,12 +38,12 @@ namespace PcbErpApi.Pages.AJN
             // 設定三層級主從式結構（BalanceSheet 佈局 - 使用統一的 Master → Details 架構）
             var config = new MasterMultiDetailConfig
             {
-                DomId = "balance",
+                DomId = "balanceSet",
 
                 // ========== Master 設定 ==========
-                MasterTitle = "損益項目",
-                MasterTable = "AJNdIncomeGroup",
-                MasterDict = "AJNdIncomeGroup",
+                MasterTitle = "資產負債項目",
+                MasterTable = "AJNdbalanceGroup",
+                MasterDict = "AJNdbalanceGroup",
                 MasterTop = 200,
                 MasterPkFields = new List<string> { "SerialNum", "UseId" },
 
@@ -58,48 +58,34 @@ namespace PcbErpApi.Pages.AJN
                 // ========== Details 設定 ==========
                 Details = new List<WebRazor.Models.DetailConfig>
                 {
-                    // Detail[0]：損益表項目設定
+                    // Detail[0]：資產負債表項目設定（原 Master）
                     new WebRazor.Models.DetailConfig
                     {
-                        DetailTitle = "",
-                        DetailTable = "AJNdIncome",
-                        DetailDict = "AJNdIncome",
+                        DetailTitle = "資產負債表項目設定",
+                        DetailTable = "AJNdbalanceSet",
+                        DetailDict = "AJNdbalanceSet",
                         KeyMap = new List<KeyMapMulti>
                         {
                             new KeyMapMulti { Master = "SerialNum", Detail = "SerialNum" },
                             new KeyMapMulti { Master = "UseId", Detail = "UseId" }
                         },
-                        PkFields = new List<string> { "SerialNum", "ClassType", "UseId" }
+                        PkFields = new List<string> { "Item", "ClassType", "UseId", "SerialNum" }
                     },
 
-                    // Detail[1]：損益表科目設定
+                    // Detail[1]：資產負債表科目設定（原 Details[0]）
                     new WebRazor.Models.DetailConfig
                     {
-                        DetailTitle = "損益表科目設定",
-                        DetailTable = "AJNdIncomeAccId",
-                        DetailDict = "AJNdIncomeAccId",
+                        DetailTitle = "資產負債表科目設定",
+                        DetailTable = "AJNdbalanceSetAccId",
+                        DetailDict = "AJNdbalanceSetAccId",
                         KeyMap = new List<KeyMapMulti>
                         {
-                            new KeyMapMulti { Master = "SerialNum", Detail = "SerialNum" },
+                            new KeyMapMulti { Master = "Item", Detail = "Item" },
                             new KeyMapMulti { Master = "ClassType", Detail = "ClassType" },
-                            new KeyMapMulti { Master = "UseId", Detail = "UseId" }
+                            new KeyMapMulti { Master = "UseId", Detail = "UseId" },
+                            new KeyMapMulti { Master = "SerialNum", Detail = "SerialNum" }
                         },
-                        PkFields = new List<string> { "SerialNum", "ClassType", "AccId", "SubAccId", "UseId" }
-                    },
-
-                    // Detail[2]：匯總排除項目
-                    new WebRazor.Models.DetailConfig
-                    {
-                        DetailTitle = "匯總排除項目",
-                        DetailTable = "AJNdInComeSumExcep",
-                        DetailDict = "AJNdInComeSumExcep",
-                        KeyMap = new List<KeyMapMulti>
-                        {
-                            new KeyMapMulti { Master = "SerialNum", Detail = "SerialNum" },
-                            new KeyMapMulti { Master = "ClassType", Detail = "ClassType" },
-                            new KeyMapMulti { Master = "UseId", Detail = "UseId" }
-                        },
-                        PkFields = new List<string> { "SerialNum", "ClassType", "ClassTypeExcep", "UseId" }
+                        PkFields = new List<string> { "Item", "AccId", "SubAccId", "ClassType", "UseId", "SerialNum" }
                     }
                 }
             };

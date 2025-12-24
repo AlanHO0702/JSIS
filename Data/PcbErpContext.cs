@@ -33,10 +33,6 @@ namespace PcbErpApi.Data
         public virtual DbSet<AjndJourMain> AjndJourMain { get; set; }
         public virtual DbSet<AjndJourSub> AjndJourSub { get; set; }
         public virtual DbSet<AjndDepart> AjndDepart { get; set; }
-        public virtual DbSet<AjndAccClass> AjndAccClass { get; set; }
-        public virtual DbSet<AjndAccClassDtl> AjndAccClassDtl { get; set; }
-        public virtual DbSet<AjndAccId> AjndAccId { get; set; }
-        public virtual DbSet<AjndSubAccId> AjndSubAccId { get; set; }
         public virtual DbSet<CurdUser> CurdUsers { get; set; }
         public virtual DbSet<EmodProdInfo> EmodProdInfos { get; set; }
         public virtual DbSet<EmodProcInfo> EmodProcInfos { get; set; }
@@ -1255,12 +1251,6 @@ namespace PcbErpApi.Data
 
                 e.ToTable(tb => tb.HasTrigger("CURdSysParams_tIU")); // ✅ EF 會改用普通 UPDATE
 
-            });
-
-            // AJNdSubAccId 複合主鍵配置
-            modelBuilder.Entity<AjndSubAccId>(entity =>
-            {
-                entity.HasKey(e => new { e.AccId, e.SubAccId });
             });
 
             modelBuilder.Entity<CurdBu>(entity =>
