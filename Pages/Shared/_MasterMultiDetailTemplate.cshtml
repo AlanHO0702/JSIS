@@ -9,6 +9,7 @@
 }
 
 <link rel="stylesheet" href="~/css/grid-toolbar.css" />
+<link rel="stylesheet" href="~/css/masterMultiDetailTemplate.css" />
 
 <div id="@domId" class="mmd-wrapper mmd-layout-@layoutMode.ToString().ToLower() container-fluid px-2 px-md-4">
 
@@ -286,24 +287,31 @@
   }
   else if (layoutMode == WebRazor.Models.LayoutMode.BalanceSheet)
   {
-      <!-- ==================== 資產負債表佈局（四層結構） ==================== -->
+      <!-- ==================== 資產負債表佈局（三層級聯動：Master → Detail → SubDetail） ==================== -->
+      <!--
+          資料流結構：
+          1. Master (頂部) → Detail[0] (左側區域)
+          2. Detail[0] (左側) → Detail[1]... (右側所有頁籤)
+
+          類似垂直堆疊的三層級聯動，但使用橫向分割的視覺佈局
+       -->
       <div class="mmd-balancesheet-container">
-          <!-- 頂部區域：分組選擇器 + 工具列 -->
-          <div class="mmd-panel mmd-panel-top-selector" style="height: @(Model.TopSelectorHeight)px;" data-min-height="80">
+          <!-- 頂部區域：Master + 工具列 -->
+          <div class="mmd-panel mmd-panel-top-selector" style="height: @(Model.MasterHeight)px;" data-min-height="80">
               <div class="d-flex h-100">
-                  <!-- 左側：分組選擇器 Grid (75% 寬度，3:1 比例) -->
+                  <!-- 左側：Master Grid (75% 寬度，3:1 比例) -->
                   <div class="mmd-top-selector-grid" style="flex: 3; min-width: 0;">
                       <div class="mmd-section-header">
-                          <span>@(Model.TopSelectorTitle ?? Model.TopSelectorTable)</span>
-                          <span id="@domId-count-topselector"></span>
+                          <span>@masterTitle</span>
+                          <span id="@domId-count-master"></span>
                       </div>
-                      <div class="mmd-section-body" id="@domId-topSelectorWrapper">
-                          <table id="@domId-topSelectorGrid"
-                                 class="mmd-grid mmd-topselector-table"
-                                 data-dict-table="@Model.TopSelectorDict"
+                      <div class="mmd-section-body" id="@domId-masterWrapper">
+                          <table id="@domId-masterGrid"
+                                 class="mmd-grid mmd-master-table"
+                                 data-dict-table="@Model.MasterDict"
                                  tabindex="0">
-                              <thead><tr id="@domId-ts-head"></tr></thead>
-                              <tbody id="@domId-ts-body"></tbody>
+                              <thead><tr id="@domId-m-head"></tr></thead>
+                              <tbody id="@domId-m-body"></tbody>
                           </table>
                       </div>
                   </div>
@@ -338,40 +346,46 @@
           <!-- 水平分隔器 -->
           <div class="mmd-splitter mmd-splitter-h" data-target="top-selector"></div>
 
-          <!-- 主要區域：Master + Detail -->
+          <!-- 主要區域：Detail[0] + Detail[1]... -->
           <div class="mmd-panel mmd-panel-main-area d-flex" style="flex: 1; overflow: hidden;">
-              <!-- 左側：Master Grid -->
-              <div class="mmd-panel mmd-panel-master" style="width: 300px;" data-min-width="200">
-                  <div class="mmd-section-header">
-                      <span>@masterTitle</span>
-                      <span id="@domId-count-master"></span>
+              @if (Model.Details.Count > 0)
+              {
+                  var d0 = Model.Details[0];
+                  var d0Id = $"{domId}-detail-0";
+                  <!-- 左側：Detail[0] Grid -->
+                  <div class="mmd-panel mmd-panel-master" style="width: 300px;" data-min-width="200">
+                      <div class="mmd-section-header">
+                          <span>@d0.DetailTitle</span>
+                          <span id="@domId-count-detail-0"></span>
+                      </div>
+                      <div class="mmd-section-body" id="@d0Id-wrapper">
+                          <table id="@d0Id-grid"
+                                 class="mmd-grid mmd-detail-table"
+                                 data-dict-table="@d0.DetailDict"
+                                 tabindex="0">
+                              <thead><tr id="@d0Id-head"></tr></thead>
+                              <tbody id="@d0Id-body">
+                                  <tr><td class="text-center text-muted p-3">請點選上方一筆分組資料</td></tr>
+                              </tbody>
+                          </table>
+                      </div>
                   </div>
-                  <div class="mmd-section-body" id="@domId-masterWrapper">
-                      <table id="@domId-masterGrid"
-                             class="mmd-grid mmd-master-table"
-                             data-dict-table="@Model.MasterDict"
-                             tabindex="0">
-                          <thead><tr id="@domId-m-head"></tr></thead>
-                          <tbody id="@domId-m-body">
-                              <tr><td class="text-center text-muted p-3">請點選上方一筆分組資料</td></tr>
-                          </tbody>
-                      </table>
-                  </div>
-              </div>
 
-              <!-- 垂直分隔器 -->
-              <div class="mmd-splitter mmd-splitter-v" data-target="master"></div>
+                  <!-- 垂直分隔器 -->
+                  <div class="mmd-splitter mmd-splitter-v" data-target="master"></div>
+              }
 
-              <!-- 右側：Detail Tabs -->
-              <div class="mmd-panel mmd-panel-detail flex-fill">
-                  @if (Model.Details.Count > 0)
-                  {
+              @if (Model.Details.Count > 1)
+              {
+                  <!-- 右側：Detail[1]... Tabs -->
+                  <div class="mmd-panel mmd-panel-detail flex-fill">
                       <!-- 頁籤導航 -->
                       <ul class="nav nav-tabs mmd-detail-tabs" id="@domId-detail-tabs">
-                          @for (int i = 0; i < Model.Details.Count; i++)
+                          @for (int i = 1; i < Model.Details.Count; i++)
                           {
                               var d = Model.Details[i];
-                              var active = (i == 0 ? "active" : "");
+                              var dId = $"{domId}-detail-{i}";
+                              var active = (i == 1 ? "active" : "");
                               <li class="nav-item">
                                   <button class="nav-link @active"
                                           id="@domId-detail-tab-@i"
@@ -387,11 +401,11 @@
 
                       <!-- 頁籤內容 -->
                       <div class="tab-content mmd-detail-tab-content" id="@domId-detail-tabContent">
-                          @for (int i = 0; i < Model.Details.Count; i++)
+                          @for (int i = 1; i < Model.Details.Count; i++)
                           {
                               var d = Model.Details[i];
                               var dId = $"{domId}-detail-{i}";
-                              var active = (i == 0 ? "show active" : "");
+                              var active = (i == 1 ? "show active" : "");
 
                               <div class="tab-pane fade @active" id="@domId-detail-tabpane-@i">
                                   <div class="mmd-section-body mmd-tabpane-body" id="@dId-wrapper">
@@ -408,8 +422,8 @@
                               </div>
                           }
                       </div>
-                  }
-              </div>
+                  </div>
+              }
           </div>
       </div>
   }
@@ -424,794 +438,3 @@ window._mmdConfigs["@domId"] = @Html.Raw(json);
 <script src="/js/editableGrid.js"></script>
 <script src="/js/masterMultiDetailTemplate.js"></script>
 <script src="~/js/gridToolbarTemplate.js"></script>
-
-<style>
-/* ========================================================= */
-/* 1. 基礎表格樣式 (ERP 風格) - 所有佈局共用                   */
-/* ========================================================= */
-.mmd-wrapper table {
-    table-layout: fixed;
-}
-
-.mmd-wrapper table th,
-.mmd-wrapper table td {
-    padding: 3px 4px !important;
-    font-size: 13px !important;
-    border-right: 1px solid #e0e0e0 !important;
-    border-bottom: 1px solid #e0e0e0 !important;
-}
-
-.mmd-wrapper table th {
-    background: #f5f7fa !important;
-    font-weight: bold;
-    border-left: 1px solid #e0e0e0 !important;
-}
-
-.mmd-wrapper table td:first-child {
-    border-left: 1px solid #e0e0e0 !important;
-}
-
-/* ========================================================= */
-/* 2. 儲存格顯示與編輯 - 所有佈局共用                          */
-/* ========================================================= */
-.cell-view {
-    display: block;
-    width: 100%;
-    padding: 3px 4px !important;
-    font-size: 13px !important;
-    background: transparent !important;
-    border: none !important;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.cell-edit {
-    width: 100%;
-    height: 28px !important;
-    padding: 2px 4px !important;
-    font-size: 13px !important;
-    border-radius: 3px !important;
-    box-sizing: border-box;
-}
-
-.mmd-editing .mmd-readonly-cell { background: #eeeeee !important; }
-.mmd-editing .mmd-readonly-cell .cell-edit { background: #eeeeee !important; cursor: not-allowed; }
-.mmd-editing .mmd-readonly-cell .cell-view { background: #eeeeee !important; color: #555 !important; }
-
-.nav-tabs .nav-link { font-size: 13px !important; padding: 6px 12px !important; color: #495057; }
-.nav-tabs .nav-link.active { font-weight: bold; color: #000; }
-
-/* ========================================================= */
-/* 3. Tabs 佈局樣式（預設佈局）                               */
-/* ========================================================= */
-.mmd-layout-tabs {
-    display: block !important;
-    height: auto !important;
-    min-height: 0 !important;
-    overflow: visible !important;
-    padding-bottom: 50px;
-}
-
-.mmd-layout-tabs .mmd-master-card {
-    margin-bottom: 20px !important;
-    flex: none !important;
-}
-
-.mmd-layout-tabs .mmd-master-scroll {
-    max-height: 300px;
-    overflow-y: auto;
-    border-bottom: 1px solid #dee2e6;
-}
-
-.mmd-layout-tabs #@domId-tabs {
-    display: flex !important;
-    flex-wrap: wrap !important;
-    margin-bottom: 0 !important;
-    border-bottom: 1px solid #dee2e6;
-}
-
-.mmd-layout-tabs #@domId-tabContent,
-.mmd-layout-tabs #@domId-tabContent .card-body {
-    height: auto !important;
-    flex: none !important;
-    display: block !important;
-}
-
-.mmd-layout-tabs #@domId-tabContent .tab-pane {
-    height: auto !important;
-    flex: none !important;
-}
-
-.mmd-layout-tabs .mmd-detail-card {
-    margin-top: 0 !important;
-    border-top-left-radius: 0 !important;
-    border-top-right-radius: 0 !important;
-    border-top: none !important;
-    flex: none !important;
-}
-
-.mmd-layout-tabs .mmd-detail-scroll {
-    max-height: 500px;
-    overflow-y: auto !important;
-    overflow-x: auto;
-    min-height: 50px;
-}
-
-/* 讓欄位很多時可水平卷軸瀏覽 */
-.mmd-detail-table,
-.mmd-master-table {
-    width: max-content;
-    min-width: 100%;
-}
-
-/* ========================================================= */
-/* 4. 三欄式佈局樣式                                          */
-/* ========================================================= */
-.mmd-layout-threecolumn {
-    min-height: 100vh;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    box-sizing: border-box;
-    padding: 0.5rem 0;
-}
-
-.mmd-layout-threecolumn > .d-flex {
-    flex-shrink: 0;
-}
-
-.mmd-three-column-container {
-    display: flex;
-    flex-direction: row;
-    flex: 1;
-    min-height: 0;
-    gap: 0;
-    border: 1px solid #ccc;
-    background: #f5f5f5;
-    overflow: hidden;
-}
-
-.mmd-three-column-container .mmd-panel {
-    display: flex;
-    flex-direction: column;
-    background: #fff;
-    overflow: hidden;
-}
-
-.mmd-three-column-container .mmd-panel-left {
-    width: 280px;
-    min-width: 200px;
-    flex-shrink: 0;
-}
-
-.mmd-three-column-container .mmd-panel-mid {
-    width: 400px;
-    min-width: 300px;
-    flex-shrink: 0;
-}
-
-.mmd-three-column-container .mmd-panel-right {
-    flex: 1;
-    min-width: 280px;
-}
-
-.mmd-three-column-container .mmd-section {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    height: 100%;
-}
-
-.mmd-three-column-container .mmd-section-master {
-    height: 250px;
-    min-height: 150px;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-}
-
-.mmd-three-column-container .mmd-section-detail0 {
-    flex: 1;
-    min-height: 100px;
-    display: flex;
-    flex-direction: column;
-}
-
-/* ========================================================= */
-/* 5. 垂直堆疊佈局樣式                                        */
-/* ========================================================= */
-.mmd-layout-verticalstack {
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    overflow: auto;
-    box-sizing: border-box;
-    padding: 0.5rem 0;
-}
-
-.mmd-layout-verticalstack > .d-flex {
-    flex-shrink: 0;
-}
-
-.mmd-vertical-stack-container {
-    display: flex;
-    flex-direction: column;
-    min-height: calc(100vh - 5rem);
-    overflow: visible;
-    border: 1px solid #ccc;
-    background: #f5f5f5;
-}
-
-.mmd-vertical-stack-container .mmd-panel {
-    display: flex;
-    flex-direction: column;
-    background: #fff;
-    overflow: hidden;
-}
-
-.mmd-vertical-stack-container .mmd-panel-stack-master {
-    height: 120px;
-    min-height: 80px;
-    flex-shrink: 0;
-}
-
-.mmd-vertical-stack-container .mmd-panel-stack-detail {
-    height: 150px;
-    min-height: 100px;
-    flex-shrink: 0;
-}
-
-.mmd-vertical-stack-container .mmd-panel-stack-subdetail {
-    flex: 1;
-    min-height: 100px;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-}
-
-.mmd-vertical-stack-container .mmd-panel-filler {
-    flex: 0;
-    min-height: 0;
-    background: #f5f5f5;
-}
-
-/* ========================================================= */
-/* 6. 共用區段樣式                                            */
-/* ========================================================= */
-.mmd-section-header {
-    background: linear-gradient(to bottom, #f0f0f0, #e0e0e0);
-    border-bottom: 1px solid #ccc;
-    padding: 4px 8px;
-    font-weight: bold;
-    font-size: 13px;
-    color: #333;
-    flex-shrink: 0;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.mmd-section-body {
-    flex: 1;
-    overflow: auto;
-    background: #fff;
-}
-
-/* ========================================================= */
-/* 7. 分隔器樣式                                              */
-/* ========================================================= */
-.mmd-splitter-v {
-    width: 5px;
-    background: #d0d0d0;
-    cursor: col-resize;
-    flex-shrink: 0;
-}
-
-.mmd-splitter-v:hover {
-    background: #4a90e2;
-}
-
-.mmd-splitter-h {
-    height: 5px;
-    background: #d0d0d0;
-    cursor: row-resize;
-    flex-shrink: 0;
-}
-
-.mmd-splitter-h:hover {
-    background: #4a90e2;
-}
-
-/* ========================================================= */
-/* 8. 表格樣式（三欄式和垂直堆疊專用）                         */
-/* ========================================================= */
-.mmd-grid {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-    font-size: 13px;
-}
-
-.mmd-grid thead {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-}
-
-.mmd-grid th {
-    background: linear-gradient(to bottom, #f8f8f8, #e8e8e8) !important;
-    border: 1px solid #ccc !important;
-    padding: 4px 6px !important;
-    font-weight: bold;
-    text-align: left;
-    white-space: nowrap;
-}
-
-.mmd-grid td {
-    border: 1px solid #e0e0e0 !important;
-    padding: 3px 6px !important;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.mmd-grid tbody tr {
-    background: #fff;
-}
-
-.mmd-grid tbody tr:nth-child(even) {
-    background: #f9f9f9;
-}
-
-.mmd-grid tbody tr:hover {
-    background: #e8f4fd !important;
-    cursor: pointer;
-}
-
-/* Master 表格特殊樣式（不壓縮欄位）*/
-.mmd-layout-threecolumn .mmd-master-table {
-    table-layout: auto;
-    width: max-content;
-    min-width: 100%;
-}
-
-.mmd-layout-verticalstack .mmd-master-table {
-    table-layout: auto !important;
-}
-
-.mmd-layout-verticalstack .mmd-detail-table {
-    table-layout: auto !important;
-}
-
-/* ========================================================= */
-/* 9. 選中行的樣式 (Master 和 Detail 共用)                    */
-/* ========================================================= */
-.mmd-master-table tbody tr.selected,
-.mmd-detail-table tbody tr.selected,
-.mmd-grid tbody tr.selected {
-    background-color: #d1ecf1 !important;
-    font-weight: 500;
-}
-
-.mmd-master-table tbody tr.selected td,
-.mmd-detail-table tbody tr.selected td,
-.mmd-grid tbody tr.selected td {
-    background-color: #d1ecf1 !important;
-    border-color: #bee5eb !important;
-}
-
-.mmd-grid tbody tr.selected,
-.mmd-grid tbody tr.selected:nth-child(even) {
-    background: #cce5ff !important;
-    font-weight: bold;
-}
-
-.mmd-grid tbody tr.selected td,
-.mmd-grid tbody tr.selected:nth-child(even) td {
-    background: #cce5ff !important;
-}
-
-/* ========================================================= */
-/* 9. BalanceSheet 佈局樣式                                  */
-/* ========================================================= */
-.mmd-balancesheet-container {
-    display: flex;
-    flex-direction: column;
-    height: 95vh;
-    overflow: hidden;
-}
-
-/* 頂部選擇器區域 */
-.mmd-panel-top-selector {
-    flex-shrink: 0;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    overflow: hidden;
-    background: #fff;
-}
-
-.mmd-top-selector-grid {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    overflow: hidden;
-}
-
-.mmd-top-toolbar {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    overflow: hidden;
-    background: #f8f9fa;
-}
-
-/* 主要區域 */
-.mmd-panel-main-area {
-    display: flex;
-    flex: 1;
-    overflow: hidden;
-}
-
-.mmd-balancesheet-container .mmd-panel-master {
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    overflow: hidden;
-    background: #fff;
-}
-
-.mmd-balancesheet-container .mmd-panel-detail {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    overflow: hidden;
-    background: #fff;
-}
-
-.mmd-panel-reverse {
-    flex-shrink: 0;
-    border-top: 1px solid #ddd;
-    background: #fff;
-}
-
-/* BalanceSheet 佈局的表格樣式 */
-.mmd-layout-balancesheet .mmd-topselector-table {
-    background: #fff;
-}
-
-.mmd-layout-balancesheet .mmd-topselector-table tbody tr {
-    cursor: pointer;
-}
-
-.mmd-layout-balancesheet .mmd-topselector-table tbody tr:hover {
-    background-color: #f0f8ff !important;
-}
-
-.mmd-layout-balancesheet .mmd-master-table tbody tr {
-    cursor: pointer;
-}
-
-.mmd-layout-balancesheet .mmd-master-table tbody tr:hover {
-    background-color: #f0f8ff !important;
-}
-
-/* BalanceSheet 佈局的 Detail 頁籤樣式 */
-.mmd-layout-balancesheet .mmd-detail-tabs {
-    flex-shrink: 0;
-    border-bottom: 1px solid #dee2e6;
-    background: #f8f9fa;
-    margin: 0;
-    padding: 0 8px;
-}
-
-.mmd-layout-balancesheet .mmd-detail-tabs .nav-link {
-    font-size: 13px !important;
-    padding: 6px 12px !important;
-    color: #495057;
-    border: 1px solid transparent;
-    border-top-left-radius: 0.25rem;
-    border-top-right-radius: 0.25rem;
-}
-
-.mmd-layout-balancesheet .mmd-detail-tabs .nav-link.active {
-    font-weight: bold;
-    color: #000;
-    background-color: #fff;
-    border-color: #dee2e6 #dee2e6 #fff;
-}
-
-.mmd-layout-balancesheet .mmd-detail-tabs .nav-link:hover {
-    border-color: #e9ecef #e9ecef #dee2e6;
-}
-
-.mmd-layout-balancesheet .mmd-detail-tab-content {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-}
-
-.mmd-layout-balancesheet .mmd-detail-tab-content .tab-pane {
-    height: 100%;
-    display: none;
-}
-
-.mmd-layout-balancesheet .mmd-detail-tab-content .tab-pane.active {
-    display: flex;
-    flex-direction: column;
-}
-
-.mmd-layout-balancesheet .mmd-tabpane-body {
-    flex: 1;
-    overflow: auto;
-    padding: 0 !important;
-    background: #fff;
-}
-
-.mmd-layout-balancesheet .mmd-tabpane-body .mmd-grid {
-    width: 100%;
-    margin: 0;
-}
-
-.mmd-layout-balancesheet .mmd-tabpane-body .mmd-grid thead {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-}
-</style>
-
-<script>
-// ========================================================
-// 初始化：根據佈局模式執行不同的初始化邏輯
-// ========================================================
-document.addEventListener('DOMContentLoaded', function() {
-    const domId = '@domId';
-    const layoutMode = '@layoutMode';
-    const root = document.getElementById(domId);
-
-    if (!root) {
-        console.error('找不到根容器:', domId);
-        return;
-    }
-
-    // 從配置中讀取設定
-    const cfg = window._mmdConfigs ? window._mmdConfigs[domId] : null;
-    if (!cfg) {
-        console.warn('找不到配置:', domId);
-        return;
-    }
-
-    // 延遲初始化，確保 DOM 完全載入和 JS 初始化完成
-    setTimeout(() => {
-        // ★ 根據配置啟用計數器（cfg.EnableGridCounts）
-        if (cfg.EnableGridCounts) {
-            initGridCounts(domId);
-        }
-
-        // VerticalStack 佈局：計算並記錄 SubDetail 的動態最小高度
-        if (layoutMode === 'VerticalStack') {
-            const container = root.querySelector('.mmd-vertical-stack-container');
-            const subdetailPanel = root.querySelector('.mmd-panel-stack-subdetail');
-
-            if (container && subdetailPanel) {
-                // 計算 SubDetail 的初始高度
-                // SubDetail高度 = 容器總高度 - Master(120px) - Detail(150px) - 3個分隔器(3x5px=15px)
-                const containerHeight = container.offsetHeight;
-                const calculatedSubDetailHeight = containerHeight - 120 - 150 - 15;
-
-                // 保存計算出的初始高度作為最小高度限制，用於拖曳限制
-                subdetailPanel.setAttribute('data-min-height', calculatedSubDetailHeight);
-            }
-        }
-
-        // ★ 根據配置啟用拖曳器（cfg.EnableSplitters）
-        if (cfg.EnableSplitters) {
-            bindSplitters();
-        }
-    }, 300);
-});
-
-// ========================================================
-// 初始化表格計數（通用版，支援所有佈局）
-// ========================================================
-function initGridCounts(domId) {
-    // 選擇所有表格：支援 Tabs、ThreeColumn、VerticalStack、BalanceSheet 佈局
-    const tables = document.querySelectorAll(
-        `#${domId} .mmd-grid, ` +
-        `#${domId} .mmd-master-table, ` +
-        `#${domId} .mmd-detail-table, ` +
-        `#${domId} .mmd-topselector-table`
-    );
-
-    tables.forEach(table => {
-        // 支援大小寫的 wrapper：-wrapper（小寫）和 Wrapper（大寫）
-        const wrapper = table.closest('[id$="-wrapper"], [id$="Wrapper"]') || table.closest('.mmd-section-body');
-        if (!wrapper) return;
-
-        // 解析 wrapper ID 以確定計數器 ID
-        const wrapperId = wrapper.id.replace('-wrapper', '').replace('Wrapper', '').replace(`${domId}-`, '');
-        let countId = '';
-
-        // Master 表格計數器
-        if (wrapperId === 'master') {
-            countId = `${domId}-count-master`;
-        }
-        // TopSelector 表格計數器（BalanceSheet 專用）
-        else if (wrapperId === 'topSelector') {
-            countId = `${domId}-count-topselector`;
-        }
-        // Detail 表格計數器
-        else if (wrapperId.startsWith('detail-')) {
-            const detailIndex = wrapperId.replace('detail-', '');
-            countId = `${domId}-count-detail-${detailIndex}`;
-        }
-
-        if (countId) {
-            // 初始更新計數
-            updateGridCount(table, countId);
-
-            // 監聽表格變化，自動更新計數
-            const tbody = table.querySelector('tbody');
-            if (tbody) {
-                const observer = new MutationObserver(() => {
-                    updateGridCount(table, countId);
-                });
-                observer.observe(tbody, {
-                    childList: true,
-                    subtree: true
-                });
-            }
-        }
-    });
-}
-
-// ========================================================
-// 更新表格計數
-// ========================================================
-function updateGridCount(table, countId) {
-    const tbody = table.querySelector('tbody');
-    if (!tbody) return;
-
-    const rows = tbody.querySelectorAll('tr');
-    let count = 0;
-    let selectedIndex = 0;
-
-    rows.forEach((row, index) => {
-        // 排除提示訊息行
-        if (!row.textContent.includes('請點選') && !row.textContent.includes('載入中')) {
-            count++;
-            if (row.classList.contains('selected')) {
-                selectedIndex = count;
-            }
-        }
-    });
-
-    const countElem = document.getElementById(countId);
-    if (countElem) {
-        // ★ 統一設定計數器格式（只需在此處修改）
-        countElem.className = 'badge bg-secondary';
-        countElem.textContent = `${selectedIndex > 0 ? selectedIndex : count} / ${count}`;
-    }
-}
-
-// ========================================================
-// 綁定分隔器拖曳
-// ========================================================
-function bindSplitters() {
-    const splitters = document.querySelectorAll('.mmd-splitter-v, .mmd-splitter-h');
-    splitters.forEach(splitter => {
-        splitter.addEventListener('mousedown', function(e) {
-            e.preventDefault();
-            const isVertical = splitter.classList.contains('mmd-splitter-v');
-            const startPos = isVertical ? e.clientX : e.clientY;
-            const prevPanel = splitter.previousElementSibling;
-            const nextPanel = splitter.nextElementSibling;
-            const startSize = isVertical ? prevPanel.offsetWidth : prevPanel.offsetHeight;
-            const startNextSize = nextPanel ? (isVertical ? nextPanel.offsetWidth : nextPanel.offsetHeight) : 0;
-
-            // 檢查是否為最後一個水平分隔器（垂直堆疊佈局的底部拖曳器）
-            const isLastHSplitter = !isVertical &&
-                                    prevPanel &&
-                                    prevPanel.classList.contains('mmd-panel-stack-subdetail');
-
-            // 從 data 屬性讀取最小高度/寬度限制
-            const minHeightLimit = parseInt(prevPanel.getAttribute('data-min-height')) || 100;
-            const minWidthLimit = parseInt(prevPanel.getAttribute('data-min-width')) || 200;
-
-            if (isLastHSplitter) {
-                prevPanel.style.flex = 'none';
-                prevPanel.style.height = startSize + 'px';
-                if (nextPanel) {
-                    nextPanel.style.flex = '1';
-                }
-            }
-
-            function onMouseMove(e) {
-                const delta = (isVertical ? e.clientX : e.clientY) - startPos;
-                const newSize = startSize + delta;
-                const newNextSize = startNextSize - delta;
-
-                // 使用對應的最小限制
-                const minLimit = isVertical ? minWidthLimit : minHeightLimit;
-
-                if (newSize >= minLimit) {
-                    if (isVertical) {
-                        prevPanel.style.width = newSize + 'px';
-                        if (nextPanel && !isLastHSplitter && newNextSize > minWidthLimit) {
-                            nextPanel.style.width = newNextSize + 'px';
-                        }
-                    } else {
-                        prevPanel.style.height = newSize + 'px';
-                        // 最後一個水平分隔器允許無限增長，不限制 nextPanel 大小
-                        if (!isLastHSplitter && nextPanel && newNextSize > minHeightLimit) {
-                            nextPanel.style.height = newNextSize + 'px';
-                        }
-                        // 對於最後一個分隔器，讓 filler 自動調整（可以為 0）
-                        if (isLastHSplitter && nextPanel) {
-                            nextPanel.style.minHeight = '0';
-                        }
-                    }
-                }
-            }
-
-            function onMouseUp() {
-                document.removeEventListener('mousemove', onMouseMove);
-                document.removeEventListener('mouseup', onMouseUp);
-            }
-
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp);
-        });
-    });
-}
-
-// ========================================================
-// 監聽選中行變化，更新計數顯示（通用版，支援所有佈局）
-// ========================================================
-document.addEventListener('click', function(e) {
-    const tr = e.target.closest('tr');
-    if (tr && tr.parentElement.tagName === 'TBODY') {
-        const table = tr.closest('table');
-        // 支援所有表格類型
-        const isValidTable = table && (
-            table.classList.contains('mmd-grid') ||
-            table.classList.contains('mmd-master-table') ||
-            table.classList.contains('mmd-detail-table') ||
-            table.classList.contains('mmd-topselector-table')
-        );
-
-        if (isValidTable) {
-            // 支援大小寫的 wrapper：-wrapper（小寫）和 Wrapper（大寫）
-            const wrapper = table.closest('[id$="-wrapper"], [id$="Wrapper"]') || table.closest('.mmd-section-body');
-            if (!wrapper) return;
-
-            const domId = table.id.split('-')[0];
-            const wrapperId = wrapper.id.replace('-wrapper', '').replace('Wrapper', '').replace(`${domId}-`, '');
-            let countId = '';
-
-            // Master 表格計數器
-            if (wrapperId === 'master') {
-                countId = `${domId}-count-master`;
-            }
-            // TopSelector 表格計數器（BalanceSheet 專用）
-            else if (wrapperId === 'topSelector') {
-                countId = `${domId}-count-topselector`;
-            }
-            // Detail 表格計數器
-            else if (wrapperId.startsWith('detail-')) {
-                const detailIndex = wrapperId.replace('detail-', '');
-                countId = `${domId}-count-detail-${detailIndex}`;
-            }
-
-            if (countId) {
-                setTimeout(() => updateGridCount(table, countId), 100);
-            }
-        }
-    }
-});
-</script>
