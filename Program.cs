@@ -36,9 +36,6 @@ builder.Services.AddRazorPages();
         options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
     });*/
 
-// 註冊 API Controllers 服務（支援 [ApiController]）
-builder.Services.AddControllers();
-
 builder.Services.Configure<ApiSettings>(builder.Configuration.GetSection("PcbErpApi"));
 builder.Services.AddHttpClient("MyApiClient", (sp, client) =>
 {
