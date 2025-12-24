@@ -63,6 +63,8 @@
     const loadedTabs = new Set();
     const fieldDicts = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(tabFieldDicts));
     const tabsData = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(tabs));
+    window._multiTabTabs = tabsData;
+    window._multiTabSelectedRows = window._multiTabSelectedRows || {};
 
     function cleanTableName(t) {
         return (t || '').toString().replace(/^dbo\./i, '').trim().toLowerCase();
@@ -235,6 +237,27 @@
         } catch {}
     }
 
+    const DETAIL_DEFAULTS_CACHE = new Map(); // tn -> defaults
+    async function fetchDetailDefaults(dictTable) {
+        const tn = cleanTableName(dictTable);
+        if (!tn) return {};
+        if (DETAIL_DEFAULTS_CACHE.has(tn)) return DETAIL_DEFAULTS_CACHE.get(tn);
+        try {
+            const res = await fetch(`/api/OrderHeaderApi/DetailDefaults?table=${encodeURIComponent(tn)}`);
+            if (!res.ok) {
+                DETAIL_DEFAULTS_CACHE.set(tn, {});
+                return {};
+            }
+            const data = await res.json();
+            const defs = data?.defaults || {};
+            DETAIL_DEFAULTS_CACHE.set(tn, defs);
+            return defs;
+        } catch {
+            DETAIL_DEFAULTS_CACHE.set(tn, {});
+            return {};
+        }
+    }
+
     // 欄寬拖曳狀態（全頁共用一次，避免每個 tab 重複掛 document 事件）
     const resizeState = {
         active: false,
@@ -387,23 +410,25 @@
         const existingAlerts = container.querySelectorAll('.alert');
         existingAlerts.forEach(a => a.remove());
 
-        if (!Array.isArray(data) || data.length === 0) {
-            container.insertAdjacentHTML('beforeend', '<div class="alert alert-info">無資料</div>');
-            return;
-        }
+        const rows = Array.isArray(data) ? data : [];
 
         const dict = fieldDicts[tabId] || {};
         const dictTable = getDictTableOfTab(container, tabId);
+        const dictKey = cleanTableName(dictTable);
+        window._detailFieldDicts = window._detailFieldDicts || {};
+        if (dictKey) {
+            window._detailFieldDicts[dictKey] = dict;
+        }
         const metaMap = await fetchDictMeta(dictTable);
 
 
 
         // 只顯示字典中有的欄位（Visible == 1 的欄位）
         // 如果字典為空，則顯示所有欄位（向後兼容）
-        const allFields = Object.keys(data[0]);
+        const allFields = rows.length > 0 ? Object.keys(rows[0]) : [];
 
-        const fields = Object.keys(dict).length > 0
-            ? Object.keys(dict).filter(f => allFields.includes(f))  // 只顯示字典中且資料有的欄位
+        let fields = Object.keys(dict).length > 0
+            ? Object.keys(dict).filter(f => (allFields.length ? allFields.includes(f) : true))
             : allFields;  // 如果沒有字典，顯示所有欄位
 
 
@@ -411,6 +436,8 @@
             container.insertAdjacentHTML('beforeend', '<div class="alert alert-warning">沒有可顯示的欄位</div>');
             return;
         }
+
+        const defaults = await fetchDetailDefaults(dictTable);
 
         // 建立表格 - 使用 erp-table 樣式
         let html = '<div class="erp-table-wrapper">';
@@ -438,26 +465,45 @@
         });
         html += '</tr></thead><tbody>';
 
-        // 表身
-        data.forEach((row, index) => {
+        const renderRow = (row, index, options) => {
+            const opts = options || {};
+            const isAdded = opts.isAdded === true;
             const paperNum = row.PaperNum || row.paperNum || '';
-            const item = row.Item || row.item || index + 1;
-            html += `<tr data-paper-num="${paperNum}" data-item="${item}" data-state="unchanged">`;
+            const item = (row.Item ?? row.item);
+            const itemVal = item == null ? (index + 1) : item;
+            const state = opts.state || (isAdded ? "added" : "unchanged");
+            const selClass = opts.selected ? " row-selected" : (isAdded ? " row-selected" : "");
+            const viewClass = "cell-view";
+            const editClass = "cell-edit d-none";
+            html += `<tr data-paper-num="${paperNum}" data-item="${itemVal}" data-state="${state}" class="${selClass.trim()}">`;
             fields.forEach(field => {
                 const raw = row[field] ?? '';
                 const meta = metaMap.get(field.toLowerCase());
                 const value = formatCellValue(raw, meta);
-                // ✅ 雙元素：顯示模式 + 編輯模式
+                // ? 雙元素：顯示模式 + 編輯模式
                 html += `<td>
-                    <span class="cell-view">${escapeHtml(value)}</span>
+                    <span class="${viewClass}">${escapeHtml(value)}</span>
                     <input type="text"
-                           class="cell-edit d-none"
+                           class="${editClass}"
                            data-field="${field}"
                            value="${escapeHtml(raw)}">
                 </td>`;
             });
             html += '</tr>';
-        });
+        };
+
+        if (rows.length > 0) {
+            rows.forEach((row, index) => renderRow(row, index, { isAdded: false }));
+        } else {
+            const blank = {};
+            blank.Item = "";
+            renderRow(blank, 0, { state: "empty", selected: false, isAdded: false });
+            try {
+                window._multiTabSelectedRows = window._multiTabSelectedRows || {};
+                window._multiTabSelectedRows[tabId] = blank;
+                window.dispatchEvent(new CustomEvent('multiTabRowSelected', { detail: { tabId, rowData: blank } }));
+            } catch { }
+        }
 
         html += '</tbody></table></div>';
         container.insertAdjacentHTML('beforeend', html);
@@ -522,23 +568,32 @@
             initColumnResize(table, dictTable, fields);
         }
 
-        // 綁定列選取事件（只綁 tbody，避免點到表頭也被當作選取）
+        // 綁定列選取事件（委派到 tbody，確保點擊/編輯儲存格也能選取整列）
         const tableWrapper = container.querySelector('.erp-table-wrapper');
         if (tableWrapper) {
             const tbody = tableWrapper.querySelector('tbody');
-            const rows = tbody ? Array.from(tbody.querySelectorAll('tr')) : [];
-            rows.forEach(tr => {
-                tr.addEventListener('click', function() {
-                    // 移除其他列的選取狀態
+            if (tbody) {
+                const selectRow = (tr) => {
+                    if (!tr) return;
                     tableWrapper.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
-                    // 選取當前列
-                    this.classList.add('row-selected');
+                    tr.classList.add('row-selected');
                     try {
-                        const rowData = extractRowData(this);
+                        const rowData = extractRowData(tr);
+                        if (rowData) {
+                            window._multiTabSelectedRows[tabId] = rowData;
+                        }
                         window.dispatchEvent(new CustomEvent('multiTabRowSelected', { detail: { tabId, rowData } }));
                     } catch {}
+                };
+                tbody.addEventListener('click', (e) => {
+                    const tr = e.target.closest('tr');
+                    if (tr && tbody.contains(tr)) selectRow(tr);
                 });
-            });
+                tbody.addEventListener('focusin', (e) => {
+                    const tr = e.target.closest('tr');
+                    if (tr && tbody.contains(tr)) selectRow(tr);
+                });
+            }
 
             // 需要第三階聯動時：預設自動選取第一筆（例如 Paper3L）
             if (window.__multiTabAutoSelectFirstRow) {
@@ -548,6 +603,9 @@
                     first.classList.add('row-selected');
                     try {
                         const rowData = extractRowData(first);
+                        if (rowData) {
+                            window._multiTabSelectedRows[tabId] = rowData;
+                        }
                         window.dispatchEvent(new CustomEvent('multiTabRowSelected', { detail: { tabId, rowData } }));
                     } catch {}
                 }
@@ -1036,3 +1094,4 @@ body.resizing { cursor: col-resize !important; }
     background-color: #e7f3ff !important;
 }
 </style>
+

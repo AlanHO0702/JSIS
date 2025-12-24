@@ -181,6 +181,8 @@
     if (!rowData) {
       container.innerHTML = '<div class="alert alert-info mb-0">請先在上方明細選取一筆資料</div>';
       if (countEl) countEl.textContent = '';
+      window._paper3lSubDetailSelectedRows = window._paper3lSubDetailSelectedRows || {};
+      window._paper3lSubDetailSelectedRows["1"] = null;
       return;
     }
 
@@ -198,6 +200,11 @@
     if (filters.length === 0) {
       const pn = getValueCaseInsensitive(rowData, 'PaperNum');
       if (pn) filters.push({ Field: 'PaperNum', Op: '=', Value: String(pn) });
+    }
+
+    if (filters.length === 0) {
+      await renderTable([]);
+      return;
     }
 
     filters.push({ Field: 'page', Op: '', Value: '1' });
@@ -227,13 +234,57 @@
 
   async function renderTable(rows) {
     if (!Array.isArray(rows) || rows.length === 0) {
-      container.innerHTML = '<div class="alert alert-info mb-0">無資料</div>';
+      const fieldDefs = (cfg.Fields || []).length ? cfg.Fields : [];
+      if (!fieldDefs.length) {
+        container.innerHTML = '<div class="alert alert-info mb-0">無資料</div>';
+        if (countEl) countEl.textContent = '0 / 0';
+        window._paper3lSubDetailSelectedRows = window._paper3lSubDetailSelectedRows || {};
+        window._paper3lSubDetailSelectedRows["1"] = null;
+        return;
+      }
+
+      const fields = fieldDefs.map(f => f.FieldName || f.fieldName).filter(Boolean);
+      let html = '<div style="overflow:auto;"><table class="erp-table"><thead><tr>';
+      fieldDefs.forEach(f => {
+        const fn = f.FieldName || f.fieldName;
+        if (!fn) return;
+        const lbl = f.DisplayLabel || f.displayLabel || fn;
+        html += `<th data-field="${escapeHtml(fn)}" style="position:relative;"><span class="th-text">${escapeHtml(lbl)}</span><span class="col-resizer" draggable="false"></span></th>`;
+      });
+      html += '</tr></thead><tbody>';
+      html += '<tr data-idx="0">';
+      fields.forEach(fn => {
+        html += '<td><span class="cell-view"></span></td>';
+      });
+      html += '</tr></tbody></table></div>';
+      container.innerHTML = html;
       if (countEl) countEl.textContent = '0 / 0';
+      window._paper3lSubDetailSelectedRows = window._paper3lSubDetailSelectedRows || {};
+      window._paper3lSubDetailSelectedRows["1"] = null;
+      const table = container.querySelector('table.erp-table');
+      if (table) {
+        applySavedWidths(table, cfg.DictTable, fields);
+        const widthMap = await fetchFieldWidths(cfg.DictTable);
+        if (widthMap.size) {
+          const ths = Array.from(table.querySelectorAll('thead th'));
+          fields.forEach((f, idx) => {
+            const w = widthMap.get(f.toLowerCase());
+            if (w) applyColumnWidth(table, ths, idx, w);
+          });
+          try {
+            const tn = cleanTableName(cfg.DictTable);
+            const cols = fields.map((f, idx) => ({ fieldName: f, width: Math.round(ths[idx].getBoundingClientRect().width) }));
+            localStorage.setItem(`colwidth:${tn}`, JSON.stringify(cols));
+          } catch { }
+        }
+        initColumnResize(table, cfg.DictTable);
+      }
       return;
     }
 
     const fieldDefs = (cfg.Fields || []).length ? cfg.Fields : Object.keys(rows[0]).map(k => ({ FieldName: k, DisplayLabel: k }));
     const fields = fieldDefs.map(f => f.FieldName || f.fieldName).filter(Boolean);
+    window._paper3lSubDetailSelectedRows = window._paper3lSubDetailSelectedRows || {};
 
     let html = '<div style="overflow:auto;"><table class="erp-table"><thead><tr>';
     fieldDefs.forEach(f => {
@@ -244,8 +295,8 @@
     });
     html += '</tr></thead><tbody>';
 
-    rows.forEach(r => {
-      html += '<tr>';
+    rows.forEach((r, idx) => {
+      html += `<tr data-idx="${idx}">`;
       fields.forEach(fn => {
         const v = getValueCaseInsensitive(r, fn);
         html += `<td><span class="cell-view">${escapeHtml(v)}</span></td>`;
@@ -256,6 +307,7 @@
     html += '</tbody></table></div>';
     container.innerHTML = html;
     if (countEl) countEl.textContent = `0 / ${rows.length}`;
+    window._paper3lSubDetailSelectedRows["1"] = rows[0] || null;
 
     const table = container.querySelector('table.erp-table');
     if (table) {
@@ -274,6 +326,20 @@
         } catch { }
       }
       initColumnResize(table, cfg.DictTable);
+    }
+
+    const tbody = container.querySelector('tbody');
+    if (tbody) {
+      tbody.addEventListener('click', (e) => {
+        const tr = e.target.closest('tr');
+        if (!tr || !tbody.contains(tr)) return;
+        tbody.querySelectorAll('tr.row-selected').forEach(x => x.classList.remove('row-selected'));
+        tr.classList.add('row-selected');
+        const idx = parseInt(tr.dataset.idx || '-1', 10);
+        if (!isNaN(idx) && rows[idx]) {
+          window._paper3lSubDetailSelectedRows["1"] = rows[idx];
+        }
+      });
     }
   }
 

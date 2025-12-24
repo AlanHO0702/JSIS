@@ -167,7 +167,7 @@
       return Number.isFinite(n) ? n : fallback;
     };
 
-    const normalizeKey = (name) => (name || "").replace(/^@@/, "").toLowerCase();
+    const normalizeKey = (name) => (name || "").replace(/^@@+/, "").toLowerCase();
 
     const getRowValue = (row, field) => {
       if (!row) return "";
@@ -283,9 +283,15 @@
           values[name] = input.value ?? "";
           return;
         }
-        const defVal = p.DefaultValue ?? p.defaultValue ?? p.ParamValue ?? p.paramValue;
+        const tableKind = p.TableKind ?? p.tableKind;
+        const paramValue = p.ParamValue ?? p.paramValue;
+        const fromKind = paramValue ? getDefaultFromTableKind(tableKind, paramValue) : "";
+        const defVal = fromKind || (p.DefaultValue ?? p.defaultValue ?? p.ParamValue ?? p.paramValue);
         values[name] = defVal == null ? "" : defVal;
       });
+      if (values.useid != null && String(values.useid).trim() === "") {
+        values.useid = window.DEFAULT_USEID || window._useId || "A001";
+      }
       state.inputs = values;
       return values;
     };
@@ -328,6 +334,58 @@
       return await res.json();
     };
 
+    const getHeaderFieldValue = (name) => {
+      const key = (name || "").toString().trim();
+      if (!key) return "";
+      const form = document.getElementById("orderHeaderForm");
+      const el = form?.querySelector(`[name="${CSS.escape(key)}"]`);
+      if (!el) return "";
+      if (el instanceof HTMLSelectElement) {
+        return (el.value || "").toString().trim();
+      }
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        return (el.value || "").toString().trim();
+      }
+      return "";
+    };
+
+    const isMaster1 = (v) => (v || "").toString().trim().toLowerCase() === "master1";
+
+    const getRowFieldValue = (row, field) => {
+      if (!row || !field) return "";
+      const key = String(field).toLowerCase();
+      const hit = Object.keys(row).find(k => String(k).toLowerCase() === key);
+      const val = hit ? row[hit] : "";
+      return val == null ? "" : String(val).trim();
+    };
+
+    const getDetailRowByIndex = (index) => {
+      const tabs = window._multiTabTabs || window._debugTabsData || [];
+      const tab = tabs[index];
+      const tabId = tab?.Id || tab?.id;
+      if (!tabId) return null;
+      const selected = window._multiTabSelectedRows?.[tabId];
+      if (selected) return selected;
+      return null;
+    };
+
+    const getSubDetailRowByIndex = (index) => {
+      return window._paper3lSubDetailSelectedRows?.[String(index + 1)] || null;
+    };
+
+    const getDefaultFromTableKind = (tableKind, fieldName) => {
+      const kind = (tableKind || "").toString().trim().toLowerCase();
+      if (!kind || !fieldName) return "";
+      if (kind === "master1") return getHeaderFieldValue(fieldName);
+      const m = kind.match(/^(detail|subdetail)(\d+)$/);
+      if (!m) return "";
+      const idx = Math.max(0, parseInt(m[2], 10) - 1);
+      if (m[1] === "detail") {
+        return getRowFieldValue(getDetailRowByIndex(idx), fieldName);
+      }
+      return getRowFieldValue(getSubDetailRowByIndex(idx), fieldName);
+    };
+
     const buildForm = async (itemId, buttonName) => {
       if (!formEl) return;
       formEl.innerHTML = "";
@@ -345,6 +403,12 @@
         wrap.appendChild(label);
 
         const controlType = Number(p.ControlType ?? p.controlType ?? 0);
+        const tableKind = p.TableKind ?? p.tableKind;
+        const paramValue = p.ParamValue ?? p.paramValue;
+        let headerDefault = "";
+        if (paramValue) {
+          headerDefault = getDefaultFromTableKind(tableKind, paramValue);
+        }
         if (controlType === 1) {
           const select = document.createElement("select");
           select.className = "form-select form-select-sm";
@@ -362,7 +426,7 @@
                 const val = opt.value ?? opt.Value ?? "";
                 const text = opt.text ?? opt.Text ?? "";
                 o.value = val;
-                o.textContent = val || text;
+                o.textContent = text ? `${val} ${text}`.trim() : val;
                 if (text && text !== val) o.title = text;
                 select.appendChild(o);
               });
@@ -370,7 +434,7 @@
           } catch (err) {
             console.warn("load options failed", err);
           }
-          const defVal = p.DefaultValue ?? p.defaultValue;
+          const defVal = headerDefault || (p.DefaultValue ?? p.defaultValue);
           if (defVal != null && defVal !== "") select.value = defVal;
           select.addEventListener("keydown", (ev) => {
             if (ev.key === "Delete" || ev.key === "Backspace") {
@@ -382,7 +446,7 @@
           input.className = "form-control form-control-sm";
           input.type = "text";
           input.setAttribute("data-param", name);
-          const defVal = p.DefaultValue ?? p.defaultValue;
+          const defVal = headerDefault || (p.DefaultValue ?? p.defaultValue);
           if (defVal != null && defVal !== "") input.value = defVal;
           const readOnly = Number(p.iReadOnly ?? p.IReadOnly ?? 0) === 1;
           if (readOnly) input.readOnly = true;
