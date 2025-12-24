@@ -101,6 +101,168 @@
     isKey:   f => (f.IsKey ?? 0) === 1
   };
 
+  // ==============================================================================
+  //  UI Helpers - 將佈局模式轉換為字串
+  // ==============================================================================
+  function getLayoutModeString(layout) {
+    const modes = {
+      0: 'Tabs',
+      1: 'ThreeColumn',
+      2: 'VerticalStack',
+      3: 'BalanceSheet'
+    };
+    return modes[layout] || 'Tabs';
+  }
+
+  // ==============================================================================
+  //  UI Helpers - 初始化表格計數（通用版，支援所有佈局）
+  // ==============================================================================
+  function initGridCounts(domId) {
+    // 選擇所有表格：支援 Tabs、ThreeColumn、VerticalStack、BalanceSheet 佈局
+    const tables = document.querySelectorAll(
+      `#${domId} .mmd-grid, ` +
+      `#${domId} .mmd-master-table, ` +
+      `#${domId} .mmd-detail-table`
+    );
+
+    tables.forEach(table => {
+      // 支援大小寫的 wrapper：-wrapper（小寫）和 Wrapper（大寫）
+      const wrapper = table.closest('[id$="-wrapper"], [id$="Wrapper"]') || table.closest('.mmd-section-body');
+      if (!wrapper) return;
+
+      // 解析 wrapper ID 以確定計數器 ID
+      const wrapperId = wrapper.id.replace('-wrapper', '').replace('Wrapper', '').replace(`${domId}-`, '');
+      let countId = '';
+
+      // Master 表格計數器
+      if (wrapperId === 'master') {
+        countId = `${domId}-count-master`;
+      }
+      // Detail 表格計數器
+      else if (wrapperId.startsWith('detail-')) {
+        const detailIndex = wrapperId.replace('detail-', '');
+        countId = `${domId}-count-detail-${detailIndex}`;
+      }
+
+      if (countId) {
+        // 初始更新計數
+        updateGridCount(table, countId);
+
+        // 監聽表格變化，自動更新計數
+        const tbody = table.querySelector('tbody');
+        if (tbody) {
+          const observer = new MutationObserver(() => {
+            updateGridCount(table, countId);
+          });
+          observer.observe(tbody, {
+            childList: true,
+            subtree: true
+          });
+        }
+      }
+    });
+  }
+
+  // ==============================================================================
+  //  UI Helpers - 更新表格計數
+  // ==============================================================================
+  function updateGridCount(table, countId) {
+    const tbody = table.querySelector('tbody');
+    if (!tbody) return;
+
+    const rows = tbody.querySelectorAll('tr');
+    let count = 0;
+    let selectedIndex = 0;
+
+    rows.forEach((row) => {
+      // 排除提示訊息行
+      if (!row.textContent.includes('請點選') && !row.textContent.includes('載入中')) {
+        count++;
+        if (row.classList.contains('selected')) {
+          selectedIndex = count;
+        }
+      }
+    });
+
+    const countElem = document.getElementById(countId);
+    if (countElem) {
+      // ★ 統一設定計數器格式（只需在此處修改）
+      countElem.className = 'badge bg-secondary';
+      countElem.textContent = `${selectedIndex > 0 ? selectedIndex : count} / ${count}`;
+    }
+  }
+
+  // ==============================================================================
+  //  UI Helpers - 綁定分隔器拖曳
+  // ==============================================================================
+  function bindSplitters() {
+    const splitters = document.querySelectorAll('.mmd-splitter-v, .mmd-splitter-h');
+    splitters.forEach(splitter => {
+      splitter.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        const isVertical = splitter.classList.contains('mmd-splitter-v');
+        const startPos = isVertical ? e.clientX : e.clientY;
+        const prevPanel = splitter.previousElementSibling;
+        const nextPanel = splitter.nextElementSibling;
+        const startSize = isVertical ? prevPanel.offsetWidth : prevPanel.offsetHeight;
+        const startNextSize = nextPanel ? (isVertical ? nextPanel.offsetWidth : nextPanel.offsetHeight) : 0;
+
+        // 檢查是否為最後一個水平分隔器（垂直堆疊佈局的底部拖曳器）
+        const isLastHSplitter = !isVertical &&
+                                prevPanel &&
+                                prevPanel.classList.contains('mmd-panel-stack-subdetail');
+
+        // 從 data 屬性讀取最小高度/寬度限制
+        const minHeightLimit = parseInt(prevPanel.getAttribute('data-min-height')) || 100;
+        const minWidthLimit = parseInt(prevPanel.getAttribute('data-min-width')) || 200;
+
+        if (isLastHSplitter) {
+          prevPanel.style.flex = 'none';
+          prevPanel.style.height = startSize + 'px';
+          if (nextPanel) {
+            nextPanel.style.flex = '1';
+          }
+        }
+
+        function onMouseMove(e) {
+          const delta = (isVertical ? e.clientX : e.clientY) - startPos;
+          const newSize = startSize + delta;
+          const newNextSize = startNextSize - delta;
+
+          // 使用對應的最小限制
+          const minLimit = isVertical ? minWidthLimit : minHeightLimit;
+
+          if (newSize >= minLimit) {
+            if (isVertical) {
+              prevPanel.style.width = newSize + 'px';
+              if (nextPanel && !isLastHSplitter && newNextSize > minWidthLimit) {
+                nextPanel.style.width = newNextSize + 'px';
+              }
+            } else {
+              prevPanel.style.height = newSize + 'px';
+              // 最後一個水平分隔器允許無限增長，不限制 nextPanel 大小
+              if (!isLastHSplitter && nextPanel && newNextSize > minHeightLimit) {
+                nextPanel.style.height = newNextSize + 'px';
+              }
+              // 對於最後一個分隔器，讓 filler 自動調整（可以為 0）
+              if (isLastHSplitter && nextPanel) {
+                nextPanel.style.minHeight = '0';
+              }
+            }
+          }
+        }
+
+        function onMouseUp() {
+          document.removeEventListener('mousemove', onMouseMove);
+          document.removeEventListener('mouseup', onMouseUp);
+        }
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+      });
+    });
+  }
+
   const fmtCell = (val, fmt, dataType) => {
     if (val == null || val === "") return "";
 
@@ -248,6 +410,36 @@ const buildBody = async (tbody, dict, rows, onRowClick) => {
 
     const mHead = root.querySelector(`#${cfg.DomId}-m-head`);
     const mBody = root.querySelector(`#${cfg.DomId}-m-body`);
+
+    // ★ UI 初始化：計數器、拖曳器等
+    const layoutMode = cfg.Layout;
+    const layoutModeStr = getLayoutModeString(layoutMode);
+
+    // 根據配置啟用計數器
+    if (cfg.EnableGridCounts) {
+      initGridCounts(cfg.DomId);
+    }
+
+    // VerticalStack 佈局：計算並記錄 SubDetail 的動態最小高度
+    if (layoutModeStr === 'VerticalStack') {
+      const container = root.querySelector('.mmd-vertical-stack-container');
+      const subdetailPanel = root.querySelector('.mmd-panel-stack-subdetail');
+
+      if (container && subdetailPanel) {
+        // 計算 SubDetail 的初始高度
+        // SubDetail高度 = 容器總高度 - Master(120px) - Detail(150px) - 3個分隔器(3x5px=15px)
+        const containerHeight = container.offsetHeight;
+        const calculatedSubDetailHeight = containerHeight - 120 - 150 - 15;
+
+        // 保存計算出的初始高度作為最小高度限制，用於拖曳限制
+        subdetailPanel.setAttribute('data-min-height', calculatedSubDetailHeight);
+      }
+    }
+
+    // 根據配置啟用拖曳器
+    if (cfg.EnableSplitters) {
+      bindSplitters();
+    }
 
     // === Master 辭典 ===
     const masterDict = await fetchDict(cfg.MasterDict || cfg.MasterTable);
@@ -788,183 +980,54 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
   };
 
   // ==============================================================================
-  //  BalanceSheet 佈局專用初始化邏輯
-  // ==============================================================================
-  const initBalanceSheet = async (cfg) => {
-    const root = document.getElementById(cfg.DomId);
-    if (!root) return;
-
-    // 取得所有 DOM 元素
-    const tsHead = root.querySelector(`#${cfg.DomId}-ts-head`);
-    const tsBody = root.querySelector(`#${cfg.DomId}-ts-body`);
-    const mHead = root.querySelector(`#${cfg.DomId}-m-head`);
-    const mBody = root.querySelector(`#${cfg.DomId}-m-body`);
-
-    // 1. 載入 TopSelector 字典
-    const topSelectorDict = await fetchDict(cfg.TopSelectorDict || cfg.TopSelectorTable);
-
-    buildHead(tsHead, topSelectorDict);
-
-    // 2. 載入 TopSelector 資料
-    const topSelectorRows = await fetchTopRows(cfg.TopSelectorTable, 200);
-
-    await buildBody(tsBody, topSelectorDict, topSelectorRows, async (row, tr) => {
-      // 移除所有行的 selected class
-      tsBody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
-      tr.classList.add("selected");
-
-      // 載入對應的 Master 資料
-      await loadMasterFromTopSelector(row);
-    });
-
-    // 3. 載入 Master 字典
-    const masterDict = await fetchDict(cfg.MasterDict || cfg.MasterTable);
-
-    buildHead(mHead, masterDict);
-
-    // 4. Master → Detail 聯動邏輯
-    const loadMasterFromTopSelector = async (topSelectorRow) => {
-      const names = [];
-      const values = [];
-
-      // 根據 MasterToTopKeyMap 從 TopSelector 提取對應的欄位值
-      (cfg.MasterToTopKeyMap || []).forEach(k => {
-        names.push(k.Detail); // Master 的欄位
-        values.push(topSelectorRow[k.Master]); // TopSelector 的欄位值
-      });
-
-      const masterRows = await fetchByKeys(cfg.MasterTable, names, values);
-
-      // 儲存查詢上下文（用於新增資料時自動帶值）
-      const ctx = {};
-      (cfg.MasterToTopKeyMap || []).forEach(k => {
-        ctx[k.Detail] = topSelectorRow[k.Master];
-      });
-      mBody._lastQueryCtx = ctx;
-
-      await buildBody(mBody, masterDict, masterRows, async (row, tr) => {
-        // 移除所有行的 selected class
-        mBody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
-        tr.classList.add("selected");
-
-        // 載入對應的 Detail 資料
-        await loadDetailsFromMaster(row);
-      });
-    };
-
-    // 5. 載入 Detail 資料
-    const loadDetailsFromMaster = async (masterRow) => {
-      for (let i = 0; i < (cfg.Details || []).length; i++) {
-        const d = cfg.Details[i];
-        const dId = `${cfg.DomId}-detail-${i}`;
-        const dHead = root.querySelector(`#${dId}-head`);
-        const dBody = root.querySelector(`#${dId}-body`);
-
-        if (!dBody) continue;
-
-        // 載入字典（如果還沒載入）
-        if (!dBody._dict) {
-          const detailDict = await fetchDict(d.DetailDict || d.DetailTable);
-          dBody._dict = detailDict;
-          if (dHead) buildHead(dHead, detailDict);
-        }
-
-        const names = [];
-        const values = [];
-        const ctx = {};
-
-        (d.KeyMap || []).forEach(k => {
-          names.push(k.Detail);
-          values.push(masterRow[k.Master]);
-          ctx[k.Detail] = masterRow[k.Master];
-        });
-        dBody._lastQueryCtx = ctx;
-
-        const detailRows = await fetchByKeys(d.DetailTable, names, values);
-
-        // ★ 只保留基本的選中功能，不觸發下一層載入（因為都已經平行載入了）
-        await buildBody(dBody, dBody._dict, detailRows, (row, tr) => {
-          // 移除所有行的 selected class
-          dBody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
-          tr.classList.add("selected");
-          // ★ BalanceSheet 佈局：所有 Detail 層級都平行載入，不使用串聯聯動
-        });
-      }
-    };
-
-    // 6. 綁定「新增項目」按鈕事件（如果啟用）
-    if (cfg.EnableTopToolbar) {
-      const btnAddItem = root.querySelector(`#${cfg.DomId}-btnAddItem`);
-      const inputCode = root.querySelector(`#${cfg.DomId}-newItemCode`);
-      const inputName = root.querySelector(`#${cfg.DomId}-newItemName`);
-
-      if (btnAddItem && inputCode && inputName) {
-        btnAddItem.addEventListener('click', async () => {
-          const code = inputCode.value.trim();
-          const name = inputName.value.trim();
-
-          if (!code || !name) {
-            alert('請輸入編碼和項目名稱！');
-            return;
-          }
-
-          // 取得當前選中的 TopSelector 資料
-          const selectedTr = tsBody.querySelector('tr.selected');
-          if (!selectedTr) {
-            alert('請先選擇一筆分組資料！');
-            return;
-          }
-
-          // 這裡應該調用後端 API 來新增項目
-          // 目前先顯示提示訊息
-          alert(`將新增項目：編碼=${code}, 名稱=${name}`);
-
-          // 清空輸入欄位
-          inputCode.value = '';
-          inputName.value = '';
-        });
-      }
-    }
-
-    // 7. 綁定「顯示/隱藏結轉科目」按鈕事件（如果有第二層 Detail）
-    if (cfg.Details && cfg.Details.length > 1) {
-      const btnToggleReverse = root.querySelector(`#${cfg.DomId}-btnToggleReverse`);
-      const d1Panel = root.querySelector(`#${cfg.DomId}-detail-1-panel`);
-      const splitterReverse = root.querySelector('.mmd-splitter-reverse');
-
-      if (btnToggleReverse && d1Panel) {
-        btnToggleReverse.addEventListener('click', () => {
-          const isVisible = d1Panel.style.display !== 'none';
-
-          if (isVisible) {
-            // 隱藏
-            d1Panel.style.display = 'none';
-            if (splitterReverse) splitterReverse.style.display = 'none';
-            btnToggleReverse.textContent = '顯示';
-          } else {
-            // 顯示
-            d1Panel.style.display = '';
-            if (splitterReverse) splitterReverse.style.display = '';
-            btnToggleReverse.textContent = '隱藏';
-          }
-        });
-      }
-    }
-  };
-
-  // ==============================================================================
   // INIT：初始化所有 MMD 配置
   // ==============================================================================
   document.addEventListener("DOMContentLoaded", () => {
     const cfgs = window._mmdConfigs || {};
     Object.entries(cfgs).forEach(([domId, cfg]) => {
-      // 根據佈局模式選擇初始化方式
-      if (cfg.Layout === 3) { // BalanceSheet
-        initBalanceSheet(cfg);
-      } else {
-        initOne(cfg);
-      }
+      // 統一使用 initOne 處理所有佈局模式
+      initOne(cfg);
     });
   });
-  
+
+  // ==============================================================================
+  //  全局監聽：監聽選中行變化，更新計數顯示（通用版，支援所有佈局）
+  // ==============================================================================
+  document.addEventListener('click', function(e) {
+    const tr = e.target.closest('tr');
+    if (tr && tr.parentElement.tagName === 'TBODY') {
+      const table = tr.closest('table');
+      // 支援所有表格類型
+      const isValidTable = table && (
+        table.classList.contains('mmd-grid') ||
+        table.classList.contains('mmd-master-table') ||
+        table.classList.contains('mmd-detail-table')
+      );
+
+      if (isValidTable) {
+        // 支援大小寫的 wrapper：-wrapper（小寫）和 Wrapper（大寫）
+        const wrapper = table.closest('[id$="-wrapper"], [id$="Wrapper"]') || table.closest('.mmd-section-body');
+        if (!wrapper) return;
+
+        const domId = table.id.split('-')[0];
+        const wrapperId = wrapper.id.replace('-wrapper', '').replace('Wrapper', '').replace(`${domId}-`, '');
+        let countId = '';
+
+        // Master 表格計數器
+        if (wrapperId === 'master') {
+          countId = `${domId}-count-master`;
+        }
+        // Detail 表格計數器
+        else if (wrapperId.startsWith('detail-')) {
+          const detailIndex = wrapperId.replace('detail-', '');
+          countId = `${domId}-count-detail-${detailIndex}`;
+        }
+
+        if (countId) {
+          setTimeout(() => updateGridCount(table, countId), 100);
+        }
+      }
+    }
+  });
+
 })();   // End of IIFE

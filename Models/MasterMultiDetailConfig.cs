@@ -65,35 +65,9 @@ namespace WebRazor.Models
         // ========== BalanceSheet 佈局專用屬性 ==========
 
         /// <summary>
-        /// 頂層選擇器標題（BalanceSheet 佈局專用）
+        /// Master 區域高度（BalanceSheet 佈局專用，預設 150px）
         /// </summary>
-        public string TopSelectorTitle { get; set; }
-
-        /// <summary>
-        /// 頂層選擇器資料表（BalanceSheet 佈局專用）
-        /// </summary>
-        public string TopSelectorTable { get; set; }
-
-        /// <summary>
-        /// 頂層選擇器字典名稱（BalanceSheet 佈局專用）
-        /// </summary>
-        public string TopSelectorDict { get; set; }
-
-        /// <summary>
-        /// 頂層選擇器高度（BalanceSheet 佈局專用，預設 150px）
-        /// </summary>
-        public int TopSelectorHeight { get; set; } = 150;
-
-        /// <summary>
-        /// 頂層選擇器主鍵欄位（BalanceSheet 佈局專用）
-        /// </summary>
-        public List<string> TopSelectorPkFields { get; set; } = new();
-
-        /// <summary>
-        /// Master 到 TopSelector 的關聯鍵（BalanceSheet 佈局專用）
-        /// 例如：Master.SerialNum -> TopSelector.SerialNum
-        /// </summary>
-        public List<KeyMapMulti> MasterToTopKeyMap { get; set; } = new();
+        public int MasterHeight { get; set; } = 150;
 
         /// <summary>
         /// 啟用頂部工具列（新增項目功能，BalanceSheet 佈局專用）
