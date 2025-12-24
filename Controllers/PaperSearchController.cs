@@ -29,6 +29,7 @@ public class PaperSearchController : ControllerBase
         public string? CommandText { get; set; }
         public string? DefaultValue { get; set; }
         public int? DefaultType { get; set; }
+        public string? TableKind { get; set; }
         public string EditMask { get; set; } = string.Empty;
         public string SuperId { get; set; } = string.Empty;
         public int? ParamSN { get; set; }
@@ -188,18 +189,27 @@ public class PaperSearchController : ControllerBase
             if (paramValues.TryGetValue(spParam.ParameterName, out var val))
                 spParam.Value = CoerceParamValue(spParam, val);
             else
-                spParam.Value = spParam.Value ?? DBNull.Value;
+                spParam.Value = CoerceParamValue(spParam, string.Empty);
         }
 
-        var rows = new List<Dictionary<string, object?>>();
+        var allSets = new List<List<Dictionary<string, object?>>>();
         await using var rdr = await cmd.ExecuteReaderAsync();
-        while (await rdr.ReadAsync())
+        do
         {
-            var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            for (int i = 0; i < rdr.FieldCount; i++)
-                row[rdr.GetName(i)] = rdr.IsDBNull(i) ? null : rdr.GetValue(i);
-            rows.Add(row);
-        }
+            var rows = new List<Dictionary<string, object?>>();
+            while (await rdr.ReadAsync())
+            {
+                var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < rdr.FieldCount; i++)
+                    row[rdr.GetName(i)] = rdr.IsDBNull(i) ? null : rdr.GetValue(i);
+                rows.Add(row);
+            }
+            allSets.Add(rows);
+        } while (await rdr.NextResultAsync());
+
+        var pickedRows = allSets.FirstOrDefault(s => s.Count > 0)
+            ?? allSets.FirstOrDefault()
+            ?? new List<Dictionary<string, object?>>();
 
         if (debug == 1)
         {
@@ -209,10 +219,10 @@ public class PaperSearchController : ControllerBase
                 if (spParam.Direction == ParameterDirection.ReturnValue) continue;
                 echo[spParam.ParameterName] = spParam.Value == DBNull.Value ? null : spParam.Value;
             }
-            return Ok(new { ok = true, data = rows, debugParams = echo });
+            return Ok(new { ok = true, data = pickedRows, debugParams = echo });
         }
 
-        return Ok(new { ok = true, data = rows });
+        return Ok(new { ok = true, data = pickedRows });
     }
 
     [HttpPost("Confirm")]
@@ -325,6 +335,8 @@ public class PaperSearchController : ControllerBase
                 var inputVal = GetInput(inputs, p.ParamName);
                 if (inputVal is string s && string.IsNullOrWhiteSpace(s)) inputVal = null;
                 if (inputVal != null) return inputVal;
+                var dateDefault = GetDefaultDateRange(p.ParamName);
+                if (dateDefault != null) return dateDefault;
                 if (TryGetDefaultValue(defaultMap, p.ParamName, out var defFromList))
                     return defFromList;
                 if (!string.IsNullOrWhiteSpace(p.DefaultValue)) return p.DefaultValue;
@@ -342,9 +354,17 @@ public class PaperSearchController : ControllerBase
                     return defVal;
                 return p.ParamValue ?? p.DefaultValue ?? string.Empty;
             case 2:
-                return string.IsNullOrWhiteSpace(userId) ? null : userId;
+            {
+                var inputVal = GetInput(inputs, p.ParamName);
+                if (inputVal != null) return inputVal;
+                return string.IsNullOrWhiteSpace(userId) ? string.Empty : userId;
+            }
             case 3:
-                return string.IsNullOrWhiteSpace(useId) ? null : useId;
+            {
+                var inputVal = GetInput(inputs, p.ParamName);
+                if (inputVal != null) return inputVal;
+                return string.IsNullOrWhiteSpace(useId) ? string.Empty : useId;
+            }
             case 4:
                 return systemId ?? string.Empty;
             case 5:
@@ -425,6 +445,16 @@ public class PaperSearchController : ControllerBase
         return null;
     }
 
+    private static string? GetDefaultDateRange(string? paramName)
+    {
+        var name = (paramName ?? string.Empty).Trim().TrimStart('@').ToLowerInvariant();
+        if (name.Contains("begindate") || name.Contains("startdate"))
+            return "1999-01-01";
+        if (name.Contains("enddate"))
+            return "9999-01-01";
+        return null;
+    }
+
     private async Task<(string UserId, string UseId)> LoadUserContextAsync(SqlConnection conn, SqlTransaction? tx = null)
     {
         var userId = string.Empty;
@@ -458,7 +488,6 @@ public class PaperSearchController : ControllerBase
                 ?? User?.Claims?.FirstOrDefault(c => string.Equals(c.Type, "useid", StringComparison.OrdinalIgnoreCase));
             useId = claim?.Value?.Trim() ?? string.Empty;
         }
-
         if (string.IsNullOrWhiteSpace(useId)) useId = "A001";
 
         return (userId, useId);
@@ -521,7 +550,7 @@ SELECT TOP 1 ItemId, ButtonName, ISNULL(DesignType,0) AS DesignType,
         var list = new List<SearchParamRow>();
         var cmd = new SqlCommand(@"
 SELECT ItemId, ButtonName, ParamName, DisplayName, ControlType, CommandText,
-       DefaultValue, DefaultType, EditMask, SuperId, ParamSN, ParamValue,
+       DefaultValue, DefaultType, TableKind, EditMask, SuperId, ParamSN, ParamValue,
        ParamType, iReadOnly, iVisible
   FROM CURdOCXSearchParams WITH (NOLOCK)
  WHERE ItemId=@itemId AND ButtonName=@btn
@@ -541,6 +570,7 @@ SELECT ItemId, ButtonName, ParamName, DisplayName, ControlType, CommandText,
                 CommandText = rd["CommandText"] == DBNull.Value ? null : rd["CommandText"]?.ToString(),
                 DefaultValue = rd["DefaultValue"] == DBNull.Value ? null : rd["DefaultValue"]?.ToString(),
                 DefaultType = TryToInt(rd["DefaultType"]),
+                TableKind = rd["TableKind"] == DBNull.Value ? null : rd["TableKind"]?.ToString(),
                 EditMask = rd["EditMask"]?.ToString() ?? string.Empty,
                 SuperId = rd["SuperId"]?.ToString() ?? string.Empty,
                 ParamSN = TryToInt(rd["ParamSN"]),
@@ -648,8 +678,13 @@ SELECT TOP 1 CommandText
             if (string.IsNullOrWhiteSpace(s))
             {
                 if (IsStringType(spParam)) return string.Empty;
-                if (IsIntType(spParam) && ShouldBlankIntAsZero(spParam)) return 0;
-                return DBNull.Value;
+                if (IsDateType(spParam)) return DBNull.Value;
+                if (IsIntType(spParam)) return 0;
+                if (IsLongType(spParam)) return 0L;
+                if (IsDecimalType(spParam)) return 0m;
+                if (IsFloatType(spParam)) return 0d;
+                if (IsBitType(spParam)) return 0;
+                return string.Empty;
             }
             if (IsIntType(spParam) && int.TryParse(s, out var i)) return i;
             if (IsIntType(spParam)) return DBNull.Value;

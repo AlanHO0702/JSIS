@@ -761,6 +761,41 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       if (target.type === "master") location.reload();
     };
 
+    const addSubDetailRow = () => {
+      const t = getActive();
+      if (t.type !== "detail" || t.index < 1) {
+        if (window.Swal?.fire) {
+          Swal.fire({ icon: "info", title: "請先選取第二層或第三層明細" });
+        } else {
+          alert("請先選取第二層或第三層明細");
+        }
+        return false;
+      }
+      ensureEditMode();
+      const row = addRowTo(t);
+      return !!row;
+    };
+
+    const deleteSubDetailRow = async () => {
+      const t = getActive();
+      if (t.type !== "detail" || t.index < 1) {
+        if (window.Swal?.fire) {
+          await Swal.fire({ icon: "info", title: "請先選取第二層或第三層明細" });
+        } else {
+          alert("請先選取第二層或第三層明細");
+        }
+        return false;
+      }
+      await deleteSelected();
+      return true;
+    };
+
+    window._mmdApi = window._mmdApi || {};
+    window._mmdApi[cfg.DomId] = {
+      addSubDetailRow,
+      deleteSubDetailRow
+    };
+
     // 統一按鈕行為：使用通用 toolbar controller（與 MultiGrid 共用）
     if (window.createGridController) {
       window.createGridController({

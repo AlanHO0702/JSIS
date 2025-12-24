@@ -65,6 +65,10 @@
         <button type="button" class="btn btn-outline-primary" id="btnPrev">上一筆</button>
         <button type="button" class="btn btn-outline-primary" id="btnNext">下一筆</button>
     </div>
+    <div class="btn-group" role="group" aria-label="sub-detail">
+        <button type="button" class="btn btn-outline-success btn-sm" id="btnSubDetailAdd" title="新增第二/第三階項次">+</button>
+        <button type="button" class="btn btn-outline-danger btn-sm" id="btnSubDetailDelete" title="刪減第二/第三階項次">-</button>
+    </div>
     <button type="submit" class="btn toolbar-btn" form="orderHeaderForm">
         儲存
     </button>
@@ -469,6 +473,17 @@ async function saveMultiTabChanges(options) {
     let saveSuccess = true;
     let saveErrors = [];
 
+    const formatSaveError = (raw, tableName) => {
+      const text = (raw || '').toString();
+      const key = (tableName || '').toString().replace(/^dbo\./i, '').trim().toLowerCase();
+      const dict = window._detailFieldDicts?.[key] || {};
+      const colMatch = text.match(/資料行\s+'([^']+)'/i) || text.match(/column\s+'([^']+)'/i);
+      const col = colMatch ? colMatch[1] : '';
+      if (!col) return text;
+      const label = dict[col] || dict[col.toLowerCase?.()] || col;
+      return `${label}(${col})不能為空`;
+    };
+
     for (const { tableName, changes } of allChanges) {
       console.log(`?? [儲存] 儲存 ${tableName}:`, changes);
 
@@ -493,7 +508,8 @@ async function saveMultiTabChanges(options) {
       if (!resp.ok) {
         saveSuccess = false;
         const errorText = await resp.text();
-        saveErrors.push(`${tableName}: ${errorText}`);
+        const friendly = formatSaveError(errorText, tableName);
+        saveErrors.push(`${tableName}: ${friendly}`);
         console.error(`? [儲存] ${tableName} 儲存失敗:`, errorText);
       } else {
         const result = await resp.json();
@@ -1173,6 +1189,207 @@ async function initRowNavigation() {
   }
 }
 initRowNavigation();
+
+// ============================
+// 固定工具列：第二/第三階新增刪減
+// ============================
+(function wireSubDetailToolbar() {
+  const btnAdd = document.getElementById('btnSubDetailAdd');
+  const btnDel = document.getElementById('btnSubDetailDelete');
+  if (!btnAdd && !btnDel) return;
+  btnAdd?.classList.remove('d-none');
+  btnDel?.classList.remove('d-none');
+  const root = document.querySelector('.mmd-wrapper');
+
+  const pickApi = () => {
+    const domId = root?.id;
+    if (domId && window._mmdApi?.[domId]) return window._mmdApi[domId];
+    const keys = Object.keys(window._mmdApi || {});
+    return keys.length ? window._mmdApi[keys[0]] : null;
+  };
+
+  const warn = (msg) => {
+    if (window.Swal?.fire) Swal.fire({ icon: 'info', title: msg });
+    else alert(msg);
+  };
+
+  const clickMultiTabAction = (kind) => {
+    const selector = kind === 'add' ? '.btn-add-row' : '.btn-delete-row';
+    const activePane = document.querySelector('.multi-tab-detail .tab-pane.active');
+    const scope = activePane || document.querySelector('.multi-tab-detail');
+    if (!scope) return { ok: false, reason: 'no-multitab' };
+    const btn = scope.querySelector(selector) || document.querySelector(`.multi-tab-detail ${selector}`);
+    if (!btn) return { ok: false, reason: 'no-button' };
+    btn.click();
+    return { ok: true };
+  };
+
+  const getActiveMultiTabCtx = () => {
+    const activePane = document.querySelector('.multi-tab-detail .tab-pane.active');
+    if (!activePane) return null;
+    const navBtn = document.querySelector('.multi-tab-detail .nav-link.active[data-api-url]');
+    const apiUrl = navBtn?.dataset?.apiUrl || '';
+    const tbody = activePane.querySelector('tbody');
+    let selectedRow = tbody?.querySelector('tr.row-selected') || null;
+    if (!selectedRow) {
+      const focusTr = document.activeElement?.closest?.('.multi-tab-detail tbody tr');
+      if (focusTr && tbody?.contains(focusTr)) selectedRow = focusTr;
+    }
+    return { activePane, apiUrl, tbody, selectedRow };
+  };
+
+  const detailDefaultsCache = {};
+
+  const escAttr = (v) => String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  const getDetailDefaults = async (table) => {
+    const key = (table || '').toString().toLowerCase();
+    if (!key) return {};
+    if (detailDefaultsCache[key]) return detailDefaultsCache[key];
+    const url = `/api/OrderHeaderApi/DetailDefaults?table=${encodeURIComponent(table)}`;
+    const res = await fetch(url);
+    if (!res.ok) return {};
+    const data = await res.json();
+    const defs = data?.defaults || {};
+    detailDefaultsCache[key] = defs;
+    return defs;
+  };
+
+  const addMultiTabBlankRow = async () => {
+    const ctx = getActiveMultiTabCtx();
+    if (!ctx || !ctx.tbody) return { ok: false, reason: 'no-multitab' };
+    const { activePane, tbody } = ctx;
+    const table = activePane.querySelector('table.erp-table');
+    const fields = Array.from(table?.querySelectorAll('thead th') || [])
+      .map(th => (th.dataset.field || '').toString())
+      .filter(Boolean);
+    if (!fields.length) return { ok: false, reason: 'no-fields' };
+
+    const dictTable = activePane?.querySelector?.('.table-container')?.dataset?.dictTable || '';
+    const safeTable = (dictTable || '').toString().replace(/^dbo\./i, '').trim();
+    const defaults = safeTable ? await getDetailDefaults(safeTable) : {};
+
+    let maxItem = 0;
+    tbody.querySelectorAll('tr').forEach(tr => {
+      const n = parseInt(tr.dataset.item || '', 10);
+      if (!isNaN(n) && n > maxItem) maxItem = n;
+    });
+    const newItem = maxItem + 1;
+    const pn = (getPaperNum() || '').trim();
+
+    const isEditing = !!document.querySelector('.multi-tab-detail .cell-edit:not(.d-none)');
+    const viewClass = isEditing ? 'cell-view d-none' : 'cell-view';
+    const editClass = isEditing ? 'cell-edit' : 'cell-edit d-none';
+    let html = `<tr data-paper-num="${pn}" data-item="${newItem}" data-state="added" class="row-selected">`;
+    fields.forEach(field => {
+      const defVal = (defaults && Object.prototype.hasOwnProperty.call(defaults, field)) ? defaults[field] : '';
+      const value = defVal == null ? '' : String(defVal);
+      const safeValue = escAttr(value);
+      html += `<td>
+        <span class="${viewClass}">${safeValue}</span>
+        <input type="text" class="${editClass}" data-field="${field}" value="${safeValue}">
+      </td>`;
+    });
+    html += '</tr>';
+
+    tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+    tbody.insertAdjacentHTML('beforeend', html);
+    const newRow = tbody.querySelector('tr:last-child');
+    if (newRow) {
+      const firstInput = newRow.querySelector('input.cell-edit');
+      if (firstInput) {
+        try { firstInput.focus(); } catch {}
+      }
+    }
+    return { ok: true };
+  };
+
+  const deleteMultiTabSelectedRow = async () => {
+    const ctx = getActiveMultiTabCtx();
+    if (!ctx || !ctx.tbody) return { ok: false, reason: 'no-multitab' };
+    const { apiUrl, selectedRow, tbody, activePane } = ctx;
+    if (!selectedRow) return { ok: false, reason: 'no-row' };
+
+    const paperNum = selectedRow.dataset.paperNum || '';
+    const item = selectedRow.dataset.item || '';
+    const state = selectedRow.dataset.state || '';
+
+    const { isConfirmed } = await Swal.fire({
+      icon: 'question',
+      title: '確定要刪除這一筆明細？',
+      text: `項次：${item}`,
+      showCancelButton: true,
+      confirmButtonText: '刪除',
+      cancelButtonText: '取消',
+      confirmButtonColor: '#dc3545'
+    });
+    if (!isConfirmed) return { ok: true, canceled: true };
+
+    if (state === 'added') {
+      const next = selectedRow.nextElementSibling || selectedRow.previousElementSibling;
+      selectedRow.remove();
+      if (next) next.classList.add('row-selected');
+      return { ok: true };
+    }
+
+    const dictTable = activePane?.querySelector?.('.table-container')?.dataset?.dictTable || '';
+    const safeTable = (dictTable || '').toString().replace(/^dbo\./i, '').trim();
+    if (!safeTable) return { ok: false, reason: 'no-table' };
+
+    const deleteUrl = `/api/OrderHeaderApi/DeleteRow?table=${encodeURIComponent(safeTable)}&paperNum=${encodeURIComponent(paperNum)}&item=${encodeURIComponent(item)}`;
+    const response = await fetch(deleteUrl, { method: 'DELETE' });
+    if (!response.ok) {
+      let errorMessage = `HTTP ${response.status}`;
+      try {
+        const errorData = await response.json();
+        if (errorData && errorData.error) errorMessage = errorData.error;
+      } catch {
+        try {
+          const errorText = await response.text();
+          if (errorText) errorMessage = errorText;
+        } catch {}
+      }
+      return { ok: false, reason: 'delete-failed', error: errorMessage };
+    }
+
+    const next = selectedRow.nextElementSibling || selectedRow.previousElementSibling;
+    selectedRow.remove();
+    if (next) next.classList.add('row-selected');
+    return { ok: true };
+  };
+
+  btnAdd?.addEventListener('click', async () => {
+    const api = pickApi();
+    if (api?.addSubDetailRow) {
+      api.addSubDetailRow();
+      return;
+    }
+    const r = await addMultiTabBlankRow();
+    if (!r.ok) {
+      warn(r.reason === 'no-fields' ? '找不到明細欄位' : '請先切到明細分頁再新增');
+    }
+  });
+
+  btnDel?.addEventListener('click', () => {
+    const api = pickApi();
+    if (api?.deleteSubDetailRow) {
+      api.deleteSubDetailRow();
+      return;
+    }
+    deleteMultiTabSelectedRow().then((r) => {
+      if (r?.ok) return;
+      if (r?.reason === 'no-row') return warn('請先選取列再刪除');
+      if (r?.reason === 'no-table') return warn('找不到明細表設定');
+      if (r?.reason === 'delete-failed') return warn(`刪除失敗：${r.error || ''}`.trim());
+      const k = clickMultiTabAction('delete');
+      if (!k.ok) warn(k.reason === 'no-button' ? '請先切到明細分頁並選取列再刪除' : '找不到明細按鈕控制器');
+    });
+  });
+})();
 
 // ============================
 // 其他：把最後檢視的單號存在 localStorage

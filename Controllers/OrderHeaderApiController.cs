@@ -461,6 +461,57 @@ public class OrderHeaderApiController : ControllerBase
         return o is int i ? i : (int?)null;
     }
 
+    private static string UnwrapDefault(string raw)
+    {
+        var s = (raw ?? string.Empty).Trim();
+        while (s.StartsWith("(", StringComparison.Ordinal) && s.EndsWith(")", StringComparison.Ordinal) && s.Length >= 2)
+        {
+            s = s.Substring(1, s.Length - 2).Trim();
+        }
+        return s;
+    }
+
+    private object? ConvertSqlDefault(string raw, string dbType)
+    {
+        var s = UnwrapDefault(raw);
+        if (string.IsNullOrWhiteSpace(s)) return null;
+        if (string.Equals(s, "null", StringComparison.OrdinalIgnoreCase)) return null;
+
+        if (s.StartsWith("N'", StringComparison.OrdinalIgnoreCase) || s.StartsWith("'", StringComparison.Ordinal))
+        {
+            var t = s.StartsWith("N'", StringComparison.OrdinalIgnoreCase) ? s.Substring(1) : s;
+            if (t.StartsWith("'", StringComparison.Ordinal) && t.EndsWith("'", StringComparison.Ordinal) && t.Length >= 2)
+            {
+                var inner = t.Substring(1, t.Length - 2).Replace("''", "'");
+                return inner;
+            }
+            return t.Trim('\'');
+        }
+
+        if (string.Equals(s, "getdate()", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(s, "sysdatetime()", StringComparison.OrdinalIgnoreCase))
+            return DateTime.Now;
+        if (string.Equals(s, "getutcdate()", StringComparison.OrdinalIgnoreCase))
+            return DateTime.UtcNow;
+        if (string.Equals(s, "newid()", StringComparison.OrdinalIgnoreCase))
+            return Guid.NewGuid().ToString();
+
+        return ParseStringForDbType(s, dbType);
+    }
+
+    private static object DefaultForType(string dbType)
+    {
+        var t = (dbType ?? "").ToLowerInvariant();
+        return t switch
+        {
+            "int" or "smallint" or "tinyint" or "bigint" => 0,
+            "decimal" or "numeric" or "money" or "smallmoney" or "float" or "real" => 0,
+            "bit" => 0,
+            var x when x.Contains("date") => DateTime.Now,
+            _ => string.Empty
+        };
+    }
+
     public class AddDetailRowReq
     {
         public string DetailTable { get; set; } // ex: "SpodOrderSub"
@@ -504,6 +555,97 @@ public class OrderHeaderApiController : ControllerBase
 
         _tableMeta[table] = (types, nullable);
         return (types, nullable);
+    }
+
+    private static readonly Dictionary<string, (Dictionary<string, string> types, Dictionary<string, bool> nullable, Dictionary<string, string?> defaults)> _tableMetaWithDefaults
+        = new(StringComparer.OrdinalIgnoreCase);
+
+    private (Dictionary<string, string> types, Dictionary<string, bool> nullable, Dictionary<string, string?> defaults) GetTableMetaWithDefaults(string table)
+    {
+        if (_tableMetaWithDefaults.TryGetValue(table, out var m)) return m;
+
+        var types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var nullable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var defaults = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+        using var conn = new SqlConnection(_connStr);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME = @t";
+        cmd.Parameters.AddWithValue("@t", table);
+
+        using var rd = cmd.ExecuteReader();
+        while (rd.Read())
+        {
+            var col = rd.GetString(0);
+            types[col] = rd.GetString(1);
+            nullable[col] = rd.GetString(2).Equals("YES", StringComparison.OrdinalIgnoreCase);
+            defaults[col] = rd.IsDBNull(3) ? null : rd.GetString(3);
+        }
+
+        _tableMetaWithDefaults[table] = (types, nullable, defaults);
+        return (types, nullable, defaults);
+    }
+
+    [HttpGet("DetailDefaults")]
+    public IActionResult DetailDefaults([FromQuery] string table)
+    {
+        if (string.IsNullOrWhiteSpace(table))
+            return BadRequest("table required");
+
+        var t = SafeTable(table.Trim());
+        var (types, nullable, defaultsRaw) = GetTableMetaWithDefaults(t);
+
+        var tableDefaults = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["AJNdJourSub"] = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["AccId"] = "1101",
+                ["SubAccId"] = "01",
+                ["IsD"] = "1"
+            },
+            ["SPOdOrderSub"] = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["PartNum"] = "----",
+                ["qnty"] = 0,
+                ["UnitPrice"] = 0,
+                ["SubTotal"] = 0
+            }
+        };
+
+        var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in types)
+        {
+            var col = kv.Key;
+            if (col.Equals("PaperNum", StringComparison.OrdinalIgnoreCase) ||
+                col.Equals("Item", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (defaultsRaw.TryGetValue(col, out var raw) && !string.IsNullOrWhiteSpace(raw))
+            {
+                result[col] = ConvertSqlDefault(raw, kv.Value);
+                continue;
+            }
+
+            if (!nullable.TryGetValue(col, out var isNullable) || !isNullable)
+            {
+                result[col] = DefaultForType(kv.Value);
+            }
+        }
+
+        if (tableDefaults.TryGetValue(t, out var cfg))
+        {
+            foreach (var kv in cfg)
+            {
+                if (!types.TryGetValue(kv.Key, out var dbType)) continue;
+                result[kv.Key] = ConvertJsonToDbType(kv.Value, dbType);
+            }
+        }
+
+        return Ok(new { ok = true, defaults = result });
     }
 
     [HttpPost("AddDetailRow")]
