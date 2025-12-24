@@ -58,10 +58,10 @@ namespace PcbErpApi.Pages.AJN
                 // ========== Details 設定 ==========
                 Details = new List<WebRazor.Models.DetailConfig>
                 {
-                    // Detail[0]：損益表項目設定（原 Master）
+                    // Detail[0]：損益表項目設定
                     new WebRazor.Models.DetailConfig
                     {
-                        DetailTitle = "損益表項目設定",
+                        DetailTitle = "",
                         DetailTable = "AJNdIncome",
                         DetailDict = "AJNdIncome",
                         KeyMap = new List<KeyMapMulti>
@@ -72,7 +72,7 @@ namespace PcbErpApi.Pages.AJN
                         PkFields = new List<string> { "SerialNum", "ClassType", "UseId" }
                     },
 
-                    // Detail[1]：損益表科目設定（原 Details[0]）
+                    // Detail[1]：損益表科目設定
                     new WebRazor.Models.DetailConfig
                     {
                         DetailTitle = "損益表科目設定",
@@ -87,7 +87,7 @@ namespace PcbErpApi.Pages.AJN
                         PkFields = new List<string> { "SerialNum", "ClassType", "AccId", "SubAccId", "UseId" }
                     },
 
-                    // Detail[2]：匯總排除項目（原 Details[1]）
+                    // Detail[2]：匯總排除項目
                     new WebRazor.Models.DetailConfig
                     {
                         DetailTitle = "匯總排除項目",
@@ -99,7 +99,7 @@ namespace PcbErpApi.Pages.AJN
                             new KeyMapMulti { Master = "ClassType", Detail = "ClassType" },
                             new KeyMapMulti { Master = "UseId", Detail = "UseId" }
                         },
-                        PkFields = new List<string> { "SerialNum", "AccId", "SubAccId", "ClassType", "UseId" }
+                        PkFields = new List<string> { "SerialNum", "ClassType", "ClassTypeExcep", "UseId" }
                     }
                 }
             };

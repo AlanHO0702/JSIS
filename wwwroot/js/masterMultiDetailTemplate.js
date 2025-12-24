@@ -512,7 +512,14 @@ const loadAllDetails = async (row) => {
 
       // ★★★ Detail Focus 聯動功能 ★★★
       if (cfg.EnableDetailFocusCascade) {
-        loadNextDetailFromFocus(i, row);
+        // BalanceSheet 佈局（Layout = 3）使用平行式聯動，其他佈局使用串聯式聯動
+        if (layoutMode === 3) {
+          // 平行式：點擊 Detail[0] → 同時載入 Detail[1], Detail[2], ...
+          loadAllSubDetailsFromFocus(i, row);
+        } else {
+          // 串聯式：點擊 Detail[i] → 載入 Detail[i+1] → 載入 Detail[i+2] → ...
+          loadNextDetailFromFocus(i, row);
+        }
       }
     });
 
@@ -535,7 +542,7 @@ const loadAllDetails = async (row) => {
 };
 
     // ==============================================================================
-    //   Detail Focus 聯動：點擊某層 Detail 時，載入下一層 Detail 的關聯資料
+    //   Detail Focus 聯動：點擊某層 Detail 時，載入下一層 Detail 的關聯資料（串聯式）
     // ==============================================================================
     const loadNextDetailFromFocus = async (currentDetailIndex, focusedRow) => {
       const nextIndex = currentDetailIndex + 1;
@@ -583,6 +590,53 @@ const loadAllDetails = async (row) => {
           tbody._pendingRebind = false;
         } else {
           tbody._pendingRebind = true;
+        }
+      }
+    };
+
+    // ==============================================================================
+    //   Detail Focus 聯動：點擊某層 Detail 時，載入所有後續的 SubDetail 關聯資料（平行式）
+    //   適用於資產負債表等需要同時更新多個頁籤的佈局
+    // ==============================================================================
+    const loadAllSubDetailsFromFocus = async (currentDetailIndex, focusedRow) => {
+      // ★ 從當前 Detail 的下一個開始，平行載入所有後續的 Detail
+      // 例如：點擊 Detail[0] → 同時載入 Detail[1], Detail[2], Detail[3]...
+      for (let nextIndex = currentDetailIndex + 1; nextIndex < (cfg.Details || []).length; nextIndex++) {
+        const nextDetail = cfg.Details[nextIndex];
+        const tbody = document.getElementById(`${cfg.DomId}-detail-${nextIndex}-body`);
+        if (!tbody) continue;
+
+        const names = [];
+        const values = [];
+        const ctx = {};
+
+        // 根據 SubDetail 的 KeyMap 從當前 focusedRow 中提取對應的欄位值
+        (nextDetail.KeyMap || []).forEach(k => {
+          names.push(k.Detail);           // 用明細的欄位當查詢欄位
+          values.push(focusedRow[k.Master]); // 值取 focusedRow 的欄位值
+          ctx[k.Detail] = focusedRow[k.Master];
+        });
+        tbody._lastQueryCtx = ctx;
+
+        const rows = await fetchByKeys(nextDetail.DetailTable, names, values);
+
+        // 載入 SubDetail 的資料（不需要遞迴，因為迴圈已經處理所有層級）
+        await buildBody(tbody, detailDicts[nextIndex], rows, (row, tr) => {
+          tbody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
+          tr.classList.add("selected");
+          activeTarget.type = "detail";
+          activeTarget.index = nextIndex;
+          // ★ 不再遞迴聯動，避免串聯式連動
+        });
+
+        // 編輯模式處理
+        if (window._mmdEditing && tbody._editorInstance) {
+          if (tbody.offsetParent !== null) {
+            tbody._editorInstance.toggleEdit(true);
+            tbody._pendingRebind = false;
+          } else {
+            tbody._pendingRebind = true;
+          }
         }
       }
     };

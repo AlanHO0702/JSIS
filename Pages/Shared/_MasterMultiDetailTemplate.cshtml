@@ -287,7 +287,14 @@
   }
   else if (layoutMode == WebRazor.Models.LayoutMode.BalanceSheet)
   {
-      <!-- ==================== 資產負債表佈局（改用 Master → Details 結構） ==================== -->
+      <!-- ==================== 資產負債表佈局（三層級聯動：Master → Detail → SubDetail） ==================== -->
+      <!--
+          資料流結構：
+          1. Master (頂部) → Detail[0] (左側區域)
+          2. Detail[0] (左側) → Detail[1]... (右側所有頁籤)
+
+          類似垂直堆疊的三層級聯動，但使用橫向分割的視覺佈局
+       -->
       <div class="mmd-balancesheet-container">
           <!-- 頂部區域：Master + 工具列 -->
           <div class="mmd-panel mmd-panel-top-selector" style="height: @(Model.MasterHeight)px;" data-min-height="80">
@@ -339,49 +346,54 @@
           <!-- 水平分隔器 -->
           <div class="mmd-splitter mmd-splitter-h" data-target="top-selector"></div>
 
-          <!-- 主要區域：Detail[0] (原 Master) + Detail[1]... (原 Details) -->
+          <!-- 主要區域：Detail[0] + Detail[1]... -->
           <div class="mmd-panel mmd-panel-main-area d-flex" style="flex: 1; overflow: hidden;">
-              <!-- 左側：Detail[0] Grid (原 Master) -->
-              <div class="mmd-panel mmd-panel-master" style="width: 300px;" data-min-width="200">
-                  <div class="mmd-section-header">
-                      <span>@masterTitle</span>
-                      <span id="@domId-count-detail-0"></span>
+              @if (Model.Details.Count > 0)
+              {
+                  var d0 = Model.Details[0];
+                  var d0Id = $"{domId}-detail-0";
+                  <!-- 左側：Detail[0] Grid -->
+                  <div class="mmd-panel mmd-panel-master" style="width: 300px;" data-min-width="200">
+                      <div class="mmd-section-header">
+                          <span>@d0.DetailTitle</span>
+                          <span id="@domId-count-detail-0"></span>
+                      </div>
+                      <div class="mmd-section-body" id="@d0Id-wrapper">
+                          <table id="@d0Id-grid"
+                                 class="mmd-grid mmd-detail-table"
+                                 data-dict-table="@d0.DetailDict"
+                                 tabindex="0">
+                              <thead><tr id="@d0Id-head"></tr></thead>
+                              <tbody id="@d0Id-body">
+                                  <tr><td class="text-center text-muted p-3">請點選上方一筆分組資料</td></tr>
+                              </tbody>
+                          </table>
+                      </div>
                   </div>
-                  <div class="mmd-section-body" id="@domId-detail-0-wrapper">
-                      <table id="@domId-detail-0-grid"
-                             class="mmd-grid mmd-detail-table"
-                             data-dict-table="@Model.MasterDict"
-                             tabindex="0">
-                          <thead><tr id="@domId-detail-0-head"></tr></thead>
-                          <tbody id="@domId-detail-0-body">
-                              <tr><td class="text-center text-muted p-3">請點選上方一筆分組資料</td></tr>
-                          </tbody>
-                      </table>
-                  </div>
-              </div>
 
-              <!-- 垂直分隔器 -->
-              <div class="mmd-splitter mmd-splitter-v" data-target="master"></div>
+                  <!-- 垂直分隔器 -->
+                  <div class="mmd-splitter mmd-splitter-v" data-target="master"></div>
+              }
 
-              <!-- 右側：Detail[1]... Tabs (原 Details) -->
-              <div class="mmd-panel mmd-panel-detail flex-fill">
-                  @if (Model.Details.Count > 0)
-                  {
+              @if (Model.Details.Count > 1)
+              {
+                  <!-- 右側：Detail[1]... Tabs -->
+                  <div class="mmd-panel mmd-panel-detail flex-fill">
                       <!-- 頁籤導航 -->
                       <ul class="nav nav-tabs mmd-detail-tabs" id="@domId-detail-tabs">
-                          @for (int i = 0; i < Model.Details.Count; i++)
+                          @for (int i = 1; i < Model.Details.Count; i++)
                           {
                               var d = Model.Details[i];
-                              var detailIndex = i + 1;  <!-- ★ 索引 +1 -->
-                              var active = (i == 0 ? "active" : "");
+                              var dId = $"{domId}-detail-{i}";
+                              var active = (i == 1 ? "active" : "");
                               <li class="nav-item">
                                   <button class="nav-link @active"
-                                          id="@domId-detail-tab-@detailIndex"
+                                          id="@domId-detail-tab-@i"
                                           data-bs-toggle="tab"
-                                          data-bs-target="#@domId-detail-tabpane-@detailIndex"
+                                          data-bs-target="#@domId-detail-tabpane-@i"
                                           type="button">
                                       @d.DetailTitle
-                                      <span id="@domId-count-detail-@detailIndex" class="ms-2"></span>
+                                      <span id="@domId-count-detail-@i" class="ms-2"></span>
                                   </button>
                               </li>
                           }
@@ -389,14 +401,13 @@
 
                       <!-- 頁籤內容 -->
                       <div class="tab-content mmd-detail-tab-content" id="@domId-detail-tabContent">
-                          @for (int i = 0; i < Model.Details.Count; i++)
+                          @for (int i = 1; i < Model.Details.Count; i++)
                           {
                               var d = Model.Details[i];
-                              var detailIndex = i + 1;  <!-- ★ 索引 +1 -->
-                              var dId = $"{domId}-detail-{detailIndex}";
-                              var active = (i == 0 ? "show active" : "");
+                              var dId = $"{domId}-detail-{i}";
+                              var active = (i == 1 ? "show active" : "");
 
-                              <div class="tab-pane fade @active" id="@domId-detail-tabpane-@detailIndex">
+                              <div class="tab-pane fade @active" id="@domId-detail-tabpane-@i">
                                   <div class="mmd-section-body mmd-tabpane-body" id="@dId-wrapper">
                                       <table id="@dId-grid"
                                              class="mmd-grid mmd-detail-table"
@@ -411,8 +422,8 @@
                               </div>
                           }
                       </div>
-                  }
-              </div>
+                  </div>
+              }
           </div>
       </div>
   }
