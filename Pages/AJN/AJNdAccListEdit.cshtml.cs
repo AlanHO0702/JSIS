@@ -41,8 +41,8 @@ namespace PcbErpApi.Pages.AJN
                 MasterTitle = "總類",
                 MasterTable = "AJNdAccClass",
                 MasterDict = "AJNdAccClass",
-                MasterApi = "/api/AJNdAccClass",
                 MasterTop = 200,
+                MasterPkFields = new List<string> { "ClassId", "UseId" },
 
                 // ★ 使用三欄式橫向佈局
                 Layout = LayoutMode.ThreeColumn,
@@ -60,12 +60,12 @@ namespace PcbErpApi.Pages.AJN
                         DetailTitle = "分類",
                         DetailTable = "AJNdAccClassDtl",
                         DetailDict = "AJNdAccClassDtl",
-                        DetailApi = "/api/AJNdAccClassDtl",
                         KeyMap = new List<KeyMapMulti>
                         {
-                            new KeyMapMulti { Master = "ClassId", Detail = "ClassId" }
+                            new KeyMapMulti { Master = "ClassId", Detail = "ClassId" },
+                            new KeyMapMulti { Master = "UseId", Detail = "UseId" }
                         },
-                        PkFields = new List<string> { "ClassId", "ClassDtlId" }
+                        PkFields = new List<string> { "ClassDtlId", "UseId" }
                     },
 
                     // 層級 2：總帳科目
@@ -74,30 +74,28 @@ namespace PcbErpApi.Pages.AJN
                         DetailTitle = "總帳科目",
                         DetailTable = "AJNdAccId",
                         DetailDict = "AJNdAccId",
-                        DetailApi = "/api/AJNdAccId",
                         KeyMap = new List<KeyMapMulti>
                         {
                             new KeyMapMulti { Master = "ClassId", Detail = "ClassId" },
-                            new KeyMapMulti { Master = "ClassDtlId", Detail = "ClassDtlId" }
+                            new KeyMapMulti { Master = "ClassDtlId", Detail = "ClassDtlId" },
+                            new KeyMapMulti { Master = "UseId", Detail = "UseId" }
                         },
-                        PkFields = new List<string> { "ClassId", "ClassDtlId", "AccId" }
+                        PkFields = new List<string> { "AccId", "UseId" }
                     },
 
-                    // 層級 3：明細科目（僅第一層）
+                    // 層級 3：明細科目
                     new WebRazor.Models.DetailConfig
                     {
                         DetailTitle = "明細科目",
                         DetailTable = "AJNdSubAccId",
                         DetailDict = "AJNdSubAccId",
-                        DetailApi = "/api/AJNdSubAccId?OnlyFirstLevel=true",
                         KeyMap = new List<KeyMapMulti>
                         {
-                            new KeyMapMulti { Master = "AccId", Detail = "AccId" }
+                            new KeyMapMulti { Master = "AccId", Detail = "AccId" },
+                            new KeyMapMulti { Master = "UseId", Detail = "UseId" }
                         },
-                        PkFields = new List<string> { "AccId", "SubAccId" }
+                        PkFields = new List<string> { "AccId", "SubAccId", "UseId" }
                     }
-
-                    // 註：次明細科目（Detail4）可根據系統參數動態啟用
                 }
             };
 
