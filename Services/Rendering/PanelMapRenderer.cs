@@ -60,14 +60,23 @@ namespace PcbErpApi.Services.Rendering
                     return EncodeToJpeg(surface);
                 }
 
-                // 計算縮放比例
-                float scaleX = imageWidth / (data.TotalWidth + 100); // 留邊距
-                float scaleY = imageHeight / (data.TotalHeight + 100);
-                float scale = Math.Min(scaleX, scaleY) * 0.8f;
+                // 計算縮放比例（留少量邊距並放大）
+                float margin = 10; // 固定邊距
+                float scaleX = (imageWidth - margin * 2) / data.TotalWidth;
+                float scaleY = (imageHeight - margin * 2) / data.TotalHeight;
+                float scale = Math.Min(scaleX, scaleY);
+
+                // 額外放大倍數（讓圖案更大）
+                scale = scale * 3.0f;
+
+                _logger.LogInformation("Panel縮放: TotalSize=({W},{H}), ImageSize=({IW},{IH}), Scale={S}",
+                    data.TotalWidth, data.TotalHeight, imageWidth, imageHeight, scale);
 
                 // 計算置中偏移
-                float offsetX = (imageWidth - data.TotalWidth * scale) / 2;
-                float offsetY = (imageHeight - data.TotalHeight * scale) / 2;
+                float scaledWidth = data.TotalWidth * scale;
+                float scaledHeight = data.TotalHeight * scale;
+                float offsetX = (imageWidth - scaledWidth) / 2;
+                float offsetY = (imageHeight - scaledHeight) / 2;
 
                 canvas.Translate(offsetX, offsetY);
                 canvas.Scale(scale);

@@ -221,9 +221,9 @@ namespace PcbErpApi.Services
                 return fullPath;
             }
 
-            // 渲染圖片
-            int width = mapType == MapType.Stackup ? 900 : 1200;
-            int height = mapType == MapType.Stackup ? 700 : 900;
+            // 渲染圖片（報表用適中尺寸）
+            int width = mapType == MapType.Stackup ? 500 : 600;
+            int height = mapType == MapType.Stackup ? 500 : 600;
 
             var imageBytes = await RenderMapAsync(partNum, revision, mapType, width, height);
 
@@ -237,7 +237,7 @@ namespace PcbErpApi.Services
         private async Task<string> GetImagePathAsync()
         {
             var path = await _context.CURdSysParams
-                .Where(p => p.SystemId == "EMO" && p.ParamId == "JpgPath")
+                .Where(p => p.SystemId == "EMO" && p.ParamId == "MapDataPath")
                 .Select(p => p.Value)
                 .FirstOrDefaultAsync();
 
@@ -245,7 +245,7 @@ namespace PcbErpApi.Services
             {
                 // 如果沒有設定，使用預設路徑
                 path = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "images", "maps");
-                _logger.LogWarning("JpgPath not configured, using default: {Path}", path);
+                _logger.LogWarning("MapDataPath not configured, using default: {Path}", path);
             }
 
             // 確保目錄存在

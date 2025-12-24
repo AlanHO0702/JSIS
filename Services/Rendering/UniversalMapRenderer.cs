@@ -58,18 +58,22 @@ namespace PcbErpApi.Services.Rendering
                 var scaleY = (imageHeight - 160) / (bounds.MaxY - bounds.MinY);
                 var scale = Math.Min(scaleX, scaleY);
 
-                // 疊構圖：限制最小縮放比例，避免圖層太小或擠在一起
+                // 根據圖形類型限制最小縮放比例
                 if (_currentMapType == MapType.Stackup)
                 {
-                    scale = Math.Max(scale, 2.0f);  // 最小縮放比例為 1.0（不縮小）
+                    scale = Math.Max(scale, 2.0f);  // 疊構圖：最小縮放比例為 2.0
+                }
+                else if (_currentMapType == MapType.Panel || _currentMapType == MapType.Cut || _currentMapType == MapType.PF)
+                {
+                    scale = Math.Max(scale, 0.75f);  // 裁板/排板/PF圖：最小縮放比例為 4.0（讓圖更大）
                 }
 
                 // 偏移量 (置中)
-                var offsetX = 0;// + (imageWidth  - (bounds.MaxX - bounds.MinX) * scale);// / 2;
-                var offsetY = 40;// + (imageHeight - (bounds.MaxY - bounds.MinY) * scale) / 2;
+                var offsetX = 0;
+                var offsetY = 40;
 
-                _logger.LogInformation("Scale: {Scale}, Offset: ({OffsetX}, {OffsetY})",
-                    scale, offsetX, offsetY);
+                _logger.LogInformation("{MapType} Scale: {Scale}, Offset: ({OffsetX}, {OffsetY})",
+                    _currentMapType, scale, offsetX, offsetY);
 
                 // 渲染所有元素（分兩階段：先渲染元件和矩形，再渲染箭頭線，確保箭頭在最上層）
                 // 第一階段：渲染 Component, Rectangle, Line, Text

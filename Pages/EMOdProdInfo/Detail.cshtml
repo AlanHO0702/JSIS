@@ -17,6 +17,9 @@ else
 {
     <div class="d-flex align-items-center gap-2 mb-2 mt-1">
         <a class="btn btn-link btn-sm" href="@Url.Page("Index")">回列表</a>
+        <button type="button" class="btn btn-primary btn-sm" id="btnGenerateImages">
+            <i class="bi bi-images"></i> 產生圖檔
+        </button>
     </div>
 
     <!-- 頂部基本資訊區（全寬度）-->
@@ -624,6 +627,79 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!formTabLoaded && detailTabs.length > 0) {
         formTabLoaded = true;
         setTimeout(() => loadDetailTab(detailTabs[0]), 100);
+      }
+    });
+  }
+
+  // 產生圖檔按鈕
+  const btnGenerateImages = document.getElementById('btnGenerateImages');
+  if (btnGenerateImages) {
+    btnGenerateImages.addEventListener('click', async () => {
+      const partNum = currentMasterKeys.PartNum || currentMasterKeys.partnum;
+      const revision = currentMasterKeys.Revision || currentMasterKeys.revision;
+
+      if (!partNum || !revision) {
+        alert('無法取得料號或版次，請重新載入頁面');
+        return;
+      }
+
+      if (!confirm(`確定要產生圖檔？\n\n料號: ${partNum}\n版次: ${revision}`)) {
+        return;
+      }
+
+      // 顯示載入中狀態
+      const originalHtml = btnGenerateImages.innerHTML;
+      btnGenerateImages.disabled = true;
+      btnGenerateImages.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>產生中...';
+
+      try {
+        const response = await fetch('/api/imagegeneration/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            PartNum: partNum,
+            Revision: revision
+          })
+        });
+
+        // 先取得文字內容以便除錯
+        const text = await response.text();
+        console.log('Response text:', text);
+
+        // 檢查回應狀態
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${text.substring(0, 200)}`);
+        }
+
+        // 嘗試解析 JSON
+        let result;
+        try {
+          result = JSON.parse(text);
+        } catch (e) {
+          throw new Error(`回應不是有效的 JSON 格式。回應內容：${text.substring(0, 200)}`);
+        }
+
+        if (result.success) {
+          let message = '圖檔產生成功！\n\n';
+          if (result.images && result.images.length > 0) {
+            message += '產生的圖檔：\n';
+            result.images.forEach(img => {
+              message += `- ${img.type}: ${img.success ? img.fileName : '失敗 - ' + (img.errorMessage || '未知錯誤')}\n`;
+            });
+          }
+          alert(message);
+        } else {
+          alert('產生圖檔失敗：\n' + (result.message || '未知錯誤'));
+        }
+      } catch (err) {
+        console.error('Generate images error:', err);
+        alert('產生圖檔時發生錯誤：\n' + err.message);
+      } finally {
+        // 恢復按鈕狀態
+        btnGenerateImages.disabled = false;
+        btnGenerateImages.innerHTML = originalHtml;
       }
     });
   }

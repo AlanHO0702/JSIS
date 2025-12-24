@@ -321,11 +321,12 @@ namespace PcbErpApi.Pages.EMOdProdInfo
         /// <summary>
         /// 產生圖檔 POST Handler
         /// </summary>
-        public async Task<IActionResult> OnPostGenerateImagesAsync([FromBody] GenerateImagesRequest request)
+        [IgnoreAntiforgeryToken]
+        public async Task<IActionResult> OnPostGenerateImagesAsync(string? partNum, string? revision)
         {
             try
             {
-                if (string.IsNullOrEmpty(request.PartNum) || string.IsNullOrEmpty(request.Revision))
+                if (string.IsNullOrEmpty(partNum) || string.IsNullOrEmpty(revision))
                 {
                     return new JsonResult(new
                     {
@@ -335,8 +336,8 @@ namespace PcbErpApi.Pages.EMOdProdInfo
                 }
 
                 var result = await _auditImageService.GenerateImagesForAuditAsync(
-                    request.PartNum,
-                    request.Revision
+                    partNum,
+                    revision
                 );
 
                 return new JsonResult(new
