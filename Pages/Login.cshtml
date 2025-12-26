@@ -36,6 +36,26 @@
       .login-input-group .bi{ position:absolute; left:14px; top:53%; transform:translateY(-50%); color:#b1c6e4; font-size:1.24rem; }
       .login-input{ padding-left:2.2rem; border-radius:9px; border:1.5px solid #d2d9e6; background:#f5f8fd; height:48px; font-size:1.08rem; color:#24345a; transition:border-color .18s, box-shadow .18s; }
       .login-input:focus{ border-color:#2766b5; box-shadow:0 0 0 2px #2766b540; background:#f7fbff; color:#17467e; }
+      .login-meta-row{ display:flex; align-items:center; gap:10px; margin:8px 0 16px; }
+      .login-meta-row .label{ color:#64748b; font-weight:600; min-width:48px; }
+      .login-meta-row .value-box{
+        padding: 4px 10px;
+        border: 1px solid #cbd5f5;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #1f2937;
+        font-weight: 600;
+      }
+      .login-meta-row .login-select{
+        height: 40px;
+        padding: 4px 10px;
+        border: 1.5px solid #d2d9e6;
+        border-radius: 6px;
+        background: #f5f8fd;
+        color: #24345a;
+        font-weight: 600;
+        min-width: 160px;
+      }
       .login-btn{ background:linear-gradient(90deg,#2766b5 0%,#4198f7 100%); color:#fff; font-weight:bold; font-size:1.13rem; border-radius:9px; width:100%; border:none; box-shadow:0 3px 16px #2766b527; margin-top:14px; transition:background .22s, box-shadow .14s; }
       .login-btn:hover{ background:linear-gradient(90deg,#17467e 0%,#2766b5 100%); box-shadow:0 6px 24px #2766b540; }
       #login-error{ font-size:1rem; padding:.7rem 1rem; }
@@ -76,11 +96,15 @@
       <form id="login-form" autocomplete="off">
         <div class="login-input-group">
           <span class="bi bi-person"></span>
-          <input id="userid" class="form-control login-input" autocomplete="username" placeholder="帳號" />
+          <select id="userid" class="form-control login-input" autocomplete="username"></select>
         </div>
         <div class="login-input-group">
           <span class="bi bi-lock"></span>
           <input id="password" type="password" class="form-control login-input" autocomplete="current-password" placeholder="密碼" />
+        </div>
+        <div class="login-meta-row">
+          <span class="label">公司別</span>
+          <select id="loginBuSelect" class="login-select"></select>
         </div>
         <button type="submit" class="login-btn">登入</button>
       </form>
@@ -184,9 +208,69 @@
         const uidEl = document.getElementById("userid");
         const pwdEl = document.getElementById("password");
         const errDiv = document.getElementById("login-error");
+        const buSelectEl = document.getElementById("loginBuSelect");
 
         const lastUser = localStorage.getItem("erpLoginUserId");
-        if (lastUser) uidEl.value = lastUser;
+
+        const populateUserOptions = async () => {
+            if (!uidEl) return;
+            uidEl.innerHTML = "";
+
+            try {
+                const resp = await fetch("/api/Login/UserList");
+                if (!resp.ok) throw new Error("load failed");
+                const items = await resp.json();
+                if (Array.isArray(items) && items.length > 0) {
+                    items.forEach(item => {
+                        const optId = document.createElement("option");
+                        optId.value = item.userId || "";
+                        const displayName = item.userName ? ` ${item.userName}` : "";
+                        optId.textContent = `${item.userId || ""}${displayName}`;
+                        uidEl.appendChild(optId);
+                    });
+                    uidEl.value = lastUser || uidEl.options[0]?.value || "";
+                } else {
+                    const opt = document.createElement("option");
+                    opt.value = "";
+                    opt.textContent = "無可用使用者";
+                    uidEl.appendChild(opt);
+                }
+            } catch {
+                const opt = document.createElement("option");
+                opt.value = "";
+                opt.textContent = "載入失敗";
+                uidEl.appendChild(opt);
+            }
+        };
+
+        const populateBuOptions = async () => {
+            if (!buSelectEl) return;
+            const lastBuId = localStorage.getItem("erpLoginBUId");
+            buSelectEl.innerHTML = "";
+
+            try {
+                const resp = await fetch("/api/Login/BuList");
+                if (!resp.ok) throw new Error("load failed");
+                const items = await resp.json();
+                if (Array.isArray(items)) {
+                    items.forEach(item => {
+                        const opt = document.createElement("option");
+                        opt.value = item.buId || "";
+                        opt.textContent = item.buName || item.buId || "";
+                        if (lastBuId && opt.value === lastBuId) opt.selected = true;
+                        buSelectEl.appendChild(opt);
+                    });
+                }
+            } catch {
+                const opt = document.createElement("option");
+                opt.value = "";
+                opt.textContent = "未指定";
+                buSelectEl.appendChild(opt);
+            }
+        };
+
+        populateUserOptions();
+        populateBuOptions();
 
         document.getElementById("login-form").addEventListener("submit", async function (e) {
             e.preventDefault();
@@ -219,6 +303,15 @@
                 if (resp.ok) {
                     const result = await resp.json();
                     localStorage.setItem("jwtId", result.jwtId);
+                    if (buSelectEl && buSelectEl.selectedOptions.length > 0) {
+                        const opt = buSelectEl.selectedOptions[0];
+                        localStorage.setItem("erpLoginBUId", opt.value || "");
+                        localStorage.setItem("erpLoginBUName", opt.textContent || "");
+                    } else if (result.buName) {
+                        localStorage.setItem("erpLoginBUName", result.buName);
+                    } else {
+                        localStorage.removeItem("erpLoginBUName");
+                    }
                     window.location.href = "/FontIndex";
                 } else {
                     const result = await resp.json().catch(() => ({}));

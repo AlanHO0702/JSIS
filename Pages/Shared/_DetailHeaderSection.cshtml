@@ -30,6 +30,7 @@
     var PaperNum = headerData.ContainsKey("PaperNum") ? headerData["PaperNum"]?.ToString() ?? "" : "";
 
     var headerLookupMap = ViewData["HeaderLookupMap"] as Dictionary<string, string>;
+    var headerTabBaseLabel = ViewData["HeaderTableDisplayLabel"]?.ToString() ?? "分頁";
 
     string actionPartial = (ViewData["ActionRailPartial"] as string)
                            ?? "~/Pages/Shared/_ActionRail.Empty.cshtml";
@@ -60,19 +61,17 @@
     window._paperNum = '@PaperNum';
 </script>
 
-<div id="topToolbar" class="d-flex align-items-center mb-4" style="gap:12px;" data-dict-table="@headerTableName">
-    <div class="btn-group" role="group" aria-label="row-nav" style="gap:6px;">
-        <button type="button" class="btn btn-outline-primary" id="btnPrev">上一筆</button>
-        <button type="button" class="btn btn-outline-primary" id="btnNext">下一筆</button>
+<div id="topToolbar" class="top-toolbar" data-dict-table="@headerTableName">
+    <div class="toolbar-icon-row" role="group" aria-label="row-nav-and-sub-detail">
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnPrev" title="上一筆" aria-label="上一筆"><span class="toolbar-icon">&laquo;</span></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnNext" title="下一筆" aria-label="下一筆"><span class="toolbar-icon">&raquo;</span></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add" id="btnSubDetailAdd" title="新增第二/第三階項次" aria-label="新增第二或第三階項次"><span class="toolbar-icon">+</span></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-del" id="btnSubDetailDelete" title="刪減第二/第三階項次" aria-label="刪減第二或第三階項次"><span class="toolbar-icon">-</span></button>
+        <button type="submit" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add toolbar-btn-check" id="btnSaveHeader" form="orderHeaderForm" title="儲存" aria-label="儲存"><span class="toolbar-icon">✓</span></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-cancel toolbar-btn-check" id="btnCancelChanges" title="取消變更" aria-label="取消變更"><span class="toolbar-icon">&times;</span></button>
     </div>
-    <div class="btn-group" role="group" aria-label="sub-detail">
-        <button type="button" class="btn btn-outline-success btn-sm" id="btnSubDetailAdd" title="新增第二/第三階項次">+</button>
-        <button type="button" class="btn btn-outline-danger btn-sm" id="btnSubDetailDelete" title="刪減第二/第三階項次">-</button>
-    </div>
-    <button type="submit" class="btn toolbar-btn" form="orderHeaderForm">
-        儲存
-    </button>
-    <div class="ms-2">
+    <div class="toolbar-main">
+    <div>
         @await Html.PartialAsync("_TableToolbar", new TableToolbarModel {
             SearchBtnId = "btnSubSearch",
             AddBtnId = "btnSubAddNew",
@@ -81,6 +80,7 @@
             ModalId = "searchModal",
             ReportSpName = ViewData["ReportSpName"]?.ToString() ?? ""   // 👈 從外層再傳進來
         })
+    </div>
     </div>
 </div>
 
@@ -106,7 +106,7 @@
                             data-bs-toggle="tab"
                             data-bs-target="#tab-@tab"
                             type="button" role="tab">
-                        分頁 @tab
+                        @(tab <= 1 ? headerTabBaseLabel : $"{headerTabBaseLabel}{tab}")
                     </button>
                 </li>
             }
@@ -624,6 +624,9 @@ document.getElementById('orderHeaderForm').addEventListener('submit', async func
 const editBtn = document.getElementById('btnViewEditToggle');
 if (editBtn) {
   let isEdit = false;
+  if (localStorage.getItem("afterSave") === "1" && typeof window.__headerIsEdit !== 'boolean') {
+    window.__headerIsEdit = true;
+  }
 
   function setLookupReadOnly(selectEl, readOnly) {
     if (!selectEl) return;
@@ -652,6 +655,32 @@ if (editBtn) {
           el.disabled = !editing;
         }
       });
+  }
+
+  function applyToolbarEditState(editing) {
+    const editOnlyIds = ['btnSubDetailAdd', 'btnSubDetailDelete', 'btnSaveHeader', 'btnCancelChanges'];
+    editOnlyIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.disabled = !editing;
+      el.classList.toggle('disabled', !editing);
+    });
+
+    const viewOnlyIds = ['btnSubSearch', 'btnSwitch', 'btnSubAddNew', 'btnPrint', 'btnCancel', 'btnPrev', 'btnNext'];
+    viewOnlyIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (editing) {
+        el.dataset.prevDisabled = el.disabled ? '1' : '0';
+        el.disabled = true;
+        el.classList.add('disabled');
+      } else {
+        const wasDisabled = el.dataset.prevDisabled === '1';
+        el.disabled = wasDisabled;
+        if (!wasDisabled) el.classList.remove('disabled');
+        delete el.dataset.prevDisabled;
+      }
+    });
   }
 
   document.addEventListener('change', (e) => {
@@ -690,6 +719,42 @@ if (editBtn) {
     if ($ctrl.is('select')) return $ctrl.find('option:selected').text().trim();
     return ($ctrl.val() || '').toString().trim();
   };
+
+  function setHeaderEditMode(editing) {
+    isEdit = !!editing;
+    window.__headerIsEdit = isEdit;
+    try {
+      window.dispatchEvent(new CustomEvent('headerEditModeChanged', { detail: { isEdit } }));
+    } catch {}
+    editBtn.textContent = isEdit ? '保留' : '修改';
+    applyHeaderEditState(isEdit);
+    applyToolbarEditState(isEdit);
+
+    // 切換單頭欄位的 disabled 狀態
+    document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
+      .forEach(el => { if (!el.closest('.modal')) el.disabled = !isEdit; });
+
+    // ? 切換單身表格的顯示/編輯模式（針對 _MultiTabDetail.cshtml）
+    document.querySelectorAll('.multi-tab-detail .erp-table .cell-view')
+      .forEach(el => el.classList.toggle('d-none', isEdit));
+    document.querySelectorAll('.multi-tab-detail .erp-table .cell-edit')
+      .forEach(el => el.classList.toggle('d-none', !isEdit));
+
+    // 綁定 input 事件，標記列為已修改
+    if (isEdit) {
+      document.querySelectorAll('.multi-tab-detail .erp-table .cell-edit').forEach(inp => {
+        inp.addEventListener('input', () => {
+          const tr = inp.closest('tr');
+          if (tr && tr.dataset.state !== 'added') {
+            tr.dataset.state = 'modified';
+          }
+          window.__unsavedChanges = true;
+        });
+      });
+    }
+  }
+
+  window.__setHeaderEditMode = setHeaderEditMode;
 
   editBtn.addEventListener('click', async function () {
     // ✅ 針對 FMEdIssueMain 使用 Finished 欄位檢查（數字）
@@ -736,34 +801,12 @@ if (editBtn) {
       }
     }
 
-    isEdit = !isEdit; editBtn.textContent = isEdit ? '保留' : '修改';
-    applyHeaderEditState(isEdit);
-
-    // 切換單頭欄位的 disabled 狀態
-    document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
-      .forEach(el => { if (!el.closest('.modal')) el.disabled = !isEdit; });
-
-    // ✅ 切換單身表格的顯示/編輯模式（針對 _MultiTabDetail.cshtml）
-    document.querySelectorAll('.multi-tab-detail .erp-table .cell-view')
-      .forEach(el => el.classList.toggle('d-none', isEdit));
-    document.querySelectorAll('.multi-tab-detail .erp-table .cell-edit')
-      .forEach(el => el.classList.toggle('d-none', !isEdit));
-
-    // 綁定 input 事件，標記列為已修改
-    if (isEdit) {
-      document.querySelectorAll('.multi-tab-detail .erp-table .cell-edit').forEach(inp => {
-        inp.addEventListener('input', () => {
-          const tr = inp.closest('tr');
-          if (tr && tr.dataset.state !== 'added') {
-            tr.dataset.state = 'modified';
-          }
-        });
-      });
-    }
+    setHeaderEditMode(!isEdit);
   });
 
   window.addEventListener('load', () => {
-    applyHeaderEditState(false);
+    captureHeaderInitValues();
+    setHeaderEditMode(false);
     if (localStorage.getItem("afterSave") === "1") {
       localStorage.removeItem("afterSave");
       document.getElementById("btnViewEditToggle")?.click();
@@ -1259,6 +1302,24 @@ initRowNavigation();
     return defs;
   };
 
+  function isMultiTabBlankRow(tr, fields) {
+    if (!tr) return false;
+    const inputs = Array.from(tr.querySelectorAll('.cell-edit[data-field]'));
+    if (!inputs.length) return false;
+    let hasValue = false;
+    inputs.forEach(inp => {
+      const f = (inp.dataset.field || '').toString().toLowerCase();
+      if (f === 'papernum' || f === 'item') return;
+      const val = (inp.value ?? '').toString().trim();
+      if (val === '') return;
+      if (/^[-–—]+$/.test(val)) return;
+      const num = Number(val);
+      if (Number.isFinite(num) && num === 0) return;
+      hasValue = true;
+    });
+    return !hasValue;
+  }
+
   const addMultiTabBlankRow = async () => {
     const ctx = getActiveMultiTabCtx();
     if (!ctx || !ctx.tbody) return { ok: false, reason: 'no-multitab' };
@@ -1284,16 +1345,31 @@ initRowNavigation();
     const isEditing = !!document.querySelector('.multi-tab-detail .cell-edit:not(.d-none)');
     const viewClass = isEditing ? 'cell-view d-none' : 'cell-view';
     const editClass = isEditing ? 'cell-edit' : 'cell-edit d-none';
+
+    const pendingRow = tbody.querySelector('tr[data-state="added"]');
+    const blankRow = pendingRow || Array.from(tbody.querySelectorAll('tr')).find(tr => isMultiTabBlankRow(tr, fields));
+    if (blankRow) {
+      tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+      blankRow.classList.add('row-selected');
+      blankRow.dataset.state = 'added';
+      if (!blankRow.dataset.paperNum) blankRow.dataset.paperNum = pn;
+      if (!blankRow.dataset.item) blankRow.dataset.item = String(newItem);
+      blankRow.querySelectorAll('.cell-view').forEach(el => el.classList.add('d-none'));
+      blankRow.querySelectorAll('.cell-edit').forEach(el => el.classList.remove('d-none'));
+      const first = blankRow.querySelector('.cell-edit');
+      first?.focus();
+      return { ok: true, reused: true };
+    }
     let html = `<tr data-paper-num="${pn}" data-item="${newItem}" data-state="added" class="row-selected">`;
-    fields.forEach(field => {
-      const defVal = (defaults && Object.prototype.hasOwnProperty.call(defaults, field)) ? defaults[field] : '';
-      const value = defVal == null ? '' : String(defVal);
-      const safeValue = escAttr(value);
-      html += `<td>
-        <span class="${viewClass}">${safeValue}</span>
-        <input type="text" class="${editClass}" data-field="${field}" value="${safeValue}">
-      </td>`;
-    });
+      fields.forEach(field => {
+        const defVal = (defaults && Object.prototype.hasOwnProperty.call(defaults, field)) ? defaults[field] : '';
+        const value = defVal == null ? '' : String(defVal);
+        const safeValue = escAttr(value);
+        html += `<td>
+          <span class="${viewClass}" data-init-view="${safeValue}">${safeValue}</span>
+          <input type="text" class="${editClass}" data-field="${field}" data-init="${safeValue}" value="${safeValue}">
+        </td>`;
+      });
     html += '</tr>';
 
     tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
@@ -1409,11 +1485,64 @@ function getHeaderValueByLabel(labelText) {
 }
 
 // 未儲存旗標
-window.__unsavedChanges = false;
+  function syncLookupLabel(selectEl) {
+    const label = selectEl?.nextElementSibling;
+    if (label && label.classList.contains('lookup-label')) {
+      const text = selectEl.options[selectEl.selectedIndex]?.text ?? '';
+      label.textContent = text;
+    }
+  }
+
+  function captureHeaderInitValues() {
+    document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
+      .forEach(el => {
+        if (el.closest('.modal')) return;
+        if (el.dataset.init != null) return;
+        if (el.type === 'checkbox') {
+          el.dataset.init = el.checked ? '1' : '0';
+        } else {
+          el.dataset.init = el.value ?? '';
+        }
+      });
+  }
+
+  function resetHeaderForm() {
+    document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
+      .forEach(el => {
+        if (el.closest('.modal')) return;
+        const init = el.dataset.init ?? '';
+        if (el.type === 'checkbox') {
+          el.checked = init === '1' || init.toLowerCase?.() === 'true';
+        } else {
+          el.value = init;
+        }
+        if (el.matches('select.lookup-dropdown')) syncLookupLabel(el);
+      });
+  }
+
+  window.__unsavedChanges = false;
 document.addEventListener('input', (e) => {
   if (e.target.closest('.erp-header-form')) window.__unsavedChanges = true;
 });
 window.addEventListener('pageshow', () => { window.__unsavedChanges = false; });
+
+  const cancelChangesBtn = document.getElementById('btnCancelChanges');
+  if (cancelChangesBtn) {
+    cancelChangesBtn.addEventListener('click', () => {
+      if (window.__unsavedChanges) {
+        if (!confirm('取消未儲存的變更並還原資料？')) return;
+      }
+
+      resetHeaderForm();
+      if (typeof window.resetMultiTabEdits === 'function') {
+        window.resetMultiTabEdits();
+      }
+      if (typeof window.__setHeaderEditMode === 'function') {
+        window.__setHeaderEditMode(false);
+      }
+      window.__unsavedChanges = false;
+    });
+  }
 </script>
 
 <style>
@@ -1421,7 +1550,7 @@ window.addEventListener('pageshow', () => { window.__unsavedChanges = false; });
    A) 全局/版面
    ========================================= */
 body { background: #f7f9fb !important; }
-.erp-detail-container { min-height: 100vh; padding: 32px 0; margin-left: 3vw; margin-right: 3vw; }
+.erp-detail-container { min-height: 100vh; padding: 12px 0; margin-left: 3vw; margin-right: 3vw; }
 
 /* =========================================
    B) Header 表單 & Tabs
@@ -1429,16 +1558,24 @@ body { background: #f7f9fb !important; }
 .erp-header-form,
 .erp-header-form select,
 .erp-header-form textarea,
-.erp-header-form input { font-size: 0.95em; }
+.erp-header-form input { font-size: var(--field-value-size); }
 
-/* 單頭/單身向右微調（對齊紅線） */
+/* 單頭/單身寬度與左側間距一致 */
 .erp-header-form,
 .multi-tab-detail {
-  padding-left: 24px;
+  padding-left: var(--detail-left-pad);
+  max-width: var(--detail-max-width);
+  width: 100%;
+  box-sizing: border-box;
+}
+.erp-header-form .row{
+  margin-left: 0;
+  margin-right: 0;
+  --bs-gutter-x: 0;
 }
 
 /* 單頭/單身間距：縮小表單底部留白 */
-.erp-header-form { margin-bottom: .15rem; }
+.erp-header-form { margin-bottom: 0; }
 
 .erp-header-form select.form-select{
   font-size: 1em !important; height: 32px !important; min-height: 32px !important; line-height: 1.15 !important;
@@ -1449,28 +1586,109 @@ body { background: #f7f9fb !important; }
 .header-fields-tab{
   position: relative;
   min-height: 72px;
+  width: 100%;
+  box-sizing: border-box;
   padding-bottom: 2px;
   margin-bottom: .25rem !important;
   background: #eef2f9 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.04);
 }
 .drop-hover{ background-color:#cce5ff !important; border-radius:4px; }
 
-.erp-header-form .nav-tabs .nav-link{ border-radius:8px 8px 0 0 !important; padding:7px 18px; font-size:1.05em; font-weight:500; color:#235eb8; }
+.erp-header-form .nav-tabs .nav-link{ border-radius:8px 8px 0 0 !important; padding:var(--tab-pad-y) var(--tab-pad-x); font-size:var(--field-label-size); font-weight:500; color:#235eb8; }
 .erp-header-form .nav-tabs .nav-link.active{
   background:#fff; color:#124d8b; border-color:#bdd2f7 #bdd2f7 #fff #bdd2f7 !important; box-shadow:0 2px 6px 0 #e4ecf7; font-weight:bold;
+}
+
+.top-toolbar{
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  width: 100%;
+  padding-left: var(--detail-left-pad);
+  margin-bottom: 14px;
+}
+.top-toolbar .toolbar-icon-row{
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.top-toolbar .toolbar-icon-row #btnPrev{
+  margin-left: 16px;
+}
+.top-toolbar .toolbar-main{
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.top-toolbar .toolbar-main > div{
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.top-toolbar .toolbar-btn{
+  font-size: var(--top-toolbar-font-size);
+  height: var(--top-toolbar-btn-height);
+  min-height: var(--top-toolbar-btn-height);
+  padding: 0 12px;
+  line-height: 1;
+}
+.top-toolbar .toolbar-btn-icon{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--top-toolbar-btn-height);
+  min-height: var(--top-toolbar-btn-height);
+  padding: 0;
+  width: 30px;
+  border-radius: 8px;
+  font-size: var(--top-toolbar-icon-font-size);
+  line-height: 1;
+}
+.top-toolbar .toolbar-btn-icon .toolbar-icon{
+  display: inline-block;
+}
+.top-toolbar #btnPrev .toolbar-icon,
+.top-toolbar #btnNext .toolbar-icon,
+.top-toolbar #btnSubDetailDelete .toolbar-icon{
+  transform: translateY(-3px);
+}
+.top-toolbar .toolbar-btn:disabled{
+  background: #9aa7bb;
+  cursor: not-allowed;
+  box-shadow: none;
+  opacity: 0.7;
+}
+.top-toolbar .toolbar-btn-add{
+  background: #0e9f4b;
+}
+.top-toolbar .toolbar-btn-del{
+  background: #e04848;
+}
+.top-toolbar .toolbar-btn-cancel{
+  background: #e04848;
+}
+.top-toolbar .toolbar-btn-check,
+.top-toolbar .toolbar-btn-cancel{
+  font-size: 18px;
 }
 
 /* draggable 欄位（橫排 label + 控件） */
 .draggable-field{ position:absolute; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; background:transparent; border:1px dashed transparent; }
 .draggable-field:hover{ border-color:#c7d3e1; }
 .draggable-field.inline{ display:flex; flex-direction:row; align-items: center; gap:4px; flex:0 0 auto; min-width:100px; max-width:100%; }
-.draggable-field label{ cursor:move; font-size:0.85em; margin:0 6px 0 0; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
+.draggable-field label{ cursor:move; font-size:var(--field-label-size); margin:0 6px 0 0; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
 .draggable-field.inline .field-control{ flex:1 1 auto; height:100%; display:flex; }
 .draggable-field.inline textarea,
 .draggable-field.inline input,
 .draggable-field.inline .form-select{
-  flex:1 1 auto; width:100%; height:100%; min-height:32px; line-height:1.2; resize:none; padding:4px 6px; font-size:0.95em;
+  flex:1 1 auto; width:100%; height:100%; min-height:32px; line-height:1.2; resize:none; padding:4px 6px; font-size:var(--field-value-size);
 }
+/* 明細表頭/欄位字體大小一致 */
+.erp-table th{ font-size: var(--field-label-size); }
+.erp-table td{ font-size: var(--field-value-size); }
 .draggable-field.inline label{
   white-space: nowrap !important;
   overflow: visible !important;
@@ -1523,19 +1741,25 @@ body { background: #f7f9fb !important; }
   --fab-width: 120px;
   --fab-gap: 14px;
   --rail-reserve: 146px;
+  --action-rail-top: 64px;
 }
 
 .action-rail{
   position: fixed;
   left: var(--fab-left);
-  top: 80px;
-  max-height: calc(100vh - 100px); /* 限制最大高度，避免超出視窗 */
+  top: var(--action-rail-top);
+  max-height: calc(100vh - (var(--action-rail-top) + 20px)); /* 限制最大高度，避免超出視窗 */
   display: flex;
   flex-direction: column;
   gap: 10px;
   z-index: 900;
   overflow-y: scroll; /* 永遠顯示捲軸，避免寬度變化 */
   overflow-x: visible; /* 允許按鈕超出容器，避免被捲軸遮住 */
+}
+
+body.with-toolbar .action-rail{
+  top: calc(var(--action-rail-top) + var(--app-toolbar-height, 0px));
+  max-height: calc(100vh - (var(--action-rail-top) + 20px + var(--app-toolbar-height, 0px)));
 }
 
 /* action-rail 的捲軸樣式 - 使用 overlay 模式不佔空間 */
