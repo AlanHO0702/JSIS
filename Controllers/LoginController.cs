@@ -78,7 +78,66 @@ public class LoginController : ControllerBase
         _context.CURdUserOnline.Add(online);
         await _context.SaveChangesAsync();
 
-        return Ok(new { success = true, jwtId });
+        string? buName = null;
+        if (!string.IsNullOrWhiteSpace(user.Buid))
+        {
+            buName = await _context.CurdBus
+                .Where(b => b.Buid == user.Buid)
+                .Select(b => b.Buname)
+                .FirstOrDefaultAsync();
+        }
+
+        return Ok(new { success = true, jwtId, buName });
+    }
+
+    [HttpGet("BuList")]
+    public async Task<IActionResult> BuList()
+    {
+        var items = await _context.CurdBus
+            .AsNoTracking()
+            .OrderBy(b => b.Buid)
+            .Select(b => new
+            {
+                buId = b.Buid,
+                buName = b.Buname
+            })
+            .ToListAsync();
+
+        return Ok(items);
+    }
+
+    [HttpGet("UserInfo")]
+    public async Task<IActionResult> UserInfo([FromQuery] string userId)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+            return BadRequest(new { error = "userId is required" });
+
+        var user = await _context.CurdUsers
+            .AsNoTracking()
+            .Where(u => u.UserId == userId)
+            .Select(u => new { userId = u.UserId, userName = u.UserName })
+            .FirstOrDefaultAsync();
+
+        if (user == null)
+            return NotFound(new { error = "user not found" });
+
+        return Ok(user);
+    }
+
+    [HttpGet("UserList")]
+    public async Task<IActionResult> UserList()
+    {
+        var items = await _context.CurdUsers
+            .AsNoTracking()
+            .OrderBy(u => u.UserId)
+            .Select(u => new
+            {
+                userId = u.UserId,
+                userName = u.UserName
+            })
+            .ToListAsync();
+
+        return Ok(items);
     }
 
     // Ping 更新緩存時間

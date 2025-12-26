@@ -107,6 +107,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
             ReportSpName = master.RunSqlafterAdd;
             var display = master.TableName ?? itemId;
             PageTitle = $"{display}（{paperNum}）";
+            ViewData["HeaderTableDisplayLabel"] = await ResolveDisplayLabelAsync(MasterDictTable) ?? MasterDictTable;
 
             // 1) Header data
             HeaderData = await LoadHeaderAsync(MasterDictTable, PaperNum);

@@ -13,6 +13,7 @@
     var tableTitle = ViewData["TableTitle"] as string ?? "";
     var showRowNumber = ViewData["ShowRowNumber"] as bool? ?? true;
     var headerFieldsList = ((IEnumerable<TableFieldViewModel>)Model.HeaderTableFields).ToList();
+    var headerTabBaseLabel = ViewData["HeaderTableDisplayLabel"]?.ToString() ?? "分頁";
     var addApiUrl = ViewData["AddApiUrl"]?.ToString() ?? "";
     var detailRouteTemplate = ViewData["SubRouteTemplate"]?.ToString() ?? "";
     var tableName = ViewData["DictTableName"]?.ToString() ?? "";
@@ -85,15 +86,17 @@
 }
 
 <div class="erp-detail-container">
-    <div id="topToolbar" class="d-flex align-items-center mb-4" style="gap:12px;" data-dict-table="@Model.HeaderTableName">
-        <div class="btn-group" role="group" aria-label="row-nav" style="gap:6px;">
-            <button type="button" class="btn btn-outline-primary" id="btnPrev">上一筆</button>
-            <button type="button" class="btn btn-outline-primary" id="btnNext">下一筆</button>
+    <div id="topToolbar" class="top-toolbar mb-2" data-dict-table="@Model.HeaderTableName">
+        <div class="toolbar-icon-row" role="group" aria-label="row-nav-and-sub-detail">
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnPrev" title="上一筆" aria-label="上一筆"><span class="toolbar-icon">&laquo;</span></button>
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnNext" title="下一筆" aria-label="下一筆"><span class="toolbar-icon">&raquo;</span></button>
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add" id="btnSubDetailAdd" title="新增第二/第三階項次" aria-label="新增第二或第三階項次"><span class="toolbar-icon">+</span></button>
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-del" id="btnSubDetailDelete" title="刪減第二/第三階項次" aria-label="刪減第二或第三階項次"><span class="toolbar-icon">-</span></button>
+        <button type="submit" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add toolbar-btn-check" id="btnSaveHeader" form="orderHeaderForm" title="儲存" aria-label="儲存"><span class="toolbar-icon">✓</span></button>
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-cancel toolbar-btn-check" id="btnCancelChanges" title="取消變更" aria-label="取消變更"><span class="toolbar-icon">&times;</span></button>
         </div>
-        <button type="submit" class="btn toolbar-btn" form="orderHeaderForm">
-            儲存
-        </button>
-        <div class="ms-2">
+        <div class="toolbar-main">
+        <div>
             @await Html.PartialAsync("_TableToolbar", new TableToolbarModel {
                 SearchBtnId = "btnSubSearch",
                 AddBtnId = "btnSubAddNew",
@@ -102,6 +105,7 @@
                 ModalId = "searchModal",
                 ReportSpName = ViewData["ReportSpName"]?.ToString() ?? ""   // 👈 從外層再傳進來
             })
+        </div>
         </div>
     </div>
 
@@ -122,7 +126,7 @@
                                 data-bs-toggle="tab"
                                 data-bs-target="#tab-@tab"
                                 type="button" role="tab">
-                            分頁 @tab
+                            @(tab <= 1 ? headerTabBaseLabel : $"{headerTabBaseLabel}{tab}")
                         </button>
                     </li>
                 }
@@ -540,6 +544,49 @@ function computeNextItemNumber() {
   return maxItem + 1;
 }
 
+function isBlankDetailRow(tr) {
+  if (!tr) return false;
+  const inputs = Array.from(tr.querySelectorAll('.cell-edit'));
+  if (!inputs.length) return false;
+  let hasValue = false;
+  inputs.forEach(inp => {
+    const f = (inp.dataset.field || '').toString().toLowerCase();
+    if (f === 'papernum' || f === 'item') return;
+    const val = (inp.value ?? '').toString().trim();
+    if (val === '') return;
+    if (/^[-–—]+$/.test(val)) return;
+    if (/^[0-9.,]+$/.test(val)) {
+      const num = parseFloat(val.replace(/,/g, ''));
+      if (Number.isFinite(num) && num === 0) return;
+    }
+    hasValue = true;
+  });
+  return !hasValue;
+}
+
+function primeBlankRow(tr) {
+  if (!tr) return;
+  const pn = PAGE.paperNum || getPaperNum();
+  const nextItem = computeNextItemNumber();
+  if (!tr.dataset.paperNum) tr.dataset.paperNum = pn;
+  if (!tr.dataset.item) tr.dataset.item = String(nextItem);
+  tr.querySelectorAll('.cell-edit').forEach(inp => {
+    const f = (inp.dataset.field || '').toString().toLowerCase();
+    if (f === 'papernum' && !inp.value) {
+      inp.value = tr.dataset.paperNum || pn;
+      inp.dataset.init = inp.value;
+      const span = inp.closest('td')?.querySelector('.cell-view');
+      if (span) span.textContent = inp.value;
+    }
+    if (f === 'item' && !inp.value) {
+      inp.value = tr.dataset.item || String(nextItem);
+      inp.dataset.init = inp.value;
+      const span = inp.closest('td')?.querySelector('.cell-view');
+      if (span) span.textContent = inp.value;
+    }
+  });
+}
+
 function appendEmptyDetailRow() {
   const tbody = document.querySelector('.erp-table tbody');
   const tr = document.createElement('tr');
@@ -599,6 +646,21 @@ async function confirmPendingDetailRow() {
 
 function onAddRowClick() {
   // 只先新增前台一筆空資料，不直接寫入資料庫
+  const selected = document.querySelector('.erp-table tbody tr.row-selected');
+  const blankRow = (selected && isBlankDetailRow(selected))
+    ? selected
+    : Array.from(document.querySelectorAll('.erp-table tbody tr')).find(isBlankDetailRow);
+  if (blankRow) {
+    if (_pendingNewDetailRow && _pendingNewDetailRow !== blankRow) _pendingNewDetailRow.remove();
+    _pendingNewDetailRow = blankRow;
+    primeBlankRow(blankRow);
+    blankRow.dataset.state = 'added';
+    makeRowEditable(blankRow);
+    selectRow(blankRow);
+    showPendingButtons(true);
+    window.__unsavedChanges = true;
+    return;
+  }
   cancelPendingDetailRow();
   _pendingNewDetailRow = appendEmptyDetailRow();
   showPendingButtons(true);
@@ -839,6 +901,32 @@ if (editBtn) {
       });
   }
 
+  function applyToolbarEditState(editing) {
+    const editOnlyIds = ['btnSubDetailAdd', 'btnSubDetailDelete', 'btnSaveHeader', 'btnCancelChanges'];
+    editOnlyIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.disabled = !editing;
+      el.classList.toggle('disabled', !editing);
+    });
+
+    const viewOnlyIds = ['btnSubSearch', 'btnSwitch', 'btnSubAddNew', 'btnPrint', 'btnCancel', 'btnPrev', 'btnNext'];
+    viewOnlyIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (editing) {
+        el.dataset.prevDisabled = el.disabled ? '1' : '0';
+        el.disabled = true;
+        el.classList.add('disabled');
+      } else {
+        const wasDisabled = el.dataset.prevDisabled === '1';
+        el.disabled = wasDisabled;
+        if (!wasDisabled) el.classList.remove('disabled');
+        delete el.dataset.prevDisabled;
+      }
+    });
+  }
+
   // 瀏覽模式：下拉可展開但不可變更
   document.addEventListener('change', (e) => {
     const sel = e.target;
@@ -884,6 +972,7 @@ if (editBtn) {
     }
     isEdit = !isEdit; editBtn.textContent = isEdit ? '保留' : '修改';
     applyHeaderEditState(isEdit); // ★ 不影響 modal 裡的欄位
+    applyToolbarEditState(isEdit);
     document.querySelectorAll('.erp-table .cell-view').forEach(el => el.classList.toggle('d-none', isEdit));
     document.querySelectorAll('.erp-table .cell-edit').forEach(el => el.classList.toggle('d-none', !isEdit));
     document.querySelectorAll('.erp-table .cell-edit').forEach(inp => {
@@ -895,6 +984,7 @@ if (editBtn) {
 
   window.addEventListener('load', () => {
     applyHeaderEditState(false);
+    applyToolbarEditState(false);
     if (localStorage.getItem("afterSave") === "1") {
       localStorage.removeItem("afterSave");
       document.getElementById("btnViewEditToggle")?.click();
@@ -1386,12 +1476,97 @@ function getHeaderValueByLabel(labelText) {
   });
 })();
 
+function normalizeBool(val) {
+  const s = (val ?? '').toString().trim().toLowerCase();
+  return s === '1' || s === 'true' || s === 'y' || s === 'yes';
+}
+
+function syncLookupLabel(selectEl) {
+  const label = selectEl?.nextElementSibling;
+  if (label && label.classList.contains('lookup-label')) {
+    const text = selectEl.options[selectEl.selectedIndex]?.text ?? '';
+    label.textContent = text;
+  }
+}
+
+function captureHeaderInitValues() {
+  document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
+    .forEach(el => {
+      if (el.closest('.modal')) return;
+      if (el.dataset.init != null) return;
+      if (el.type === 'checkbox') {
+        el.dataset.init = el.checked ? '1' : '0';
+      } else {
+        el.dataset.init = el.value ?? '';
+      }
+    });
+}
+
+function resetHeaderForm() {
+  document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
+    .forEach(el => {
+      if (el.closest('.modal')) return;
+      const init = el.dataset.init ?? '';
+      if (el.type === 'checkbox') {
+        el.checked = normalizeBool(init);
+      } else {
+        el.value = init;
+      }
+      if (el.matches('select.lookup-dropdown')) syncLookupLabel(el);
+    });
+}
+
+function resetDetailTable() {
+  const tbody = document.querySelector('.erp-table tbody');
+  if (!tbody) return;
+  Array.from(tbody.querySelectorAll('tr')).forEach(tr => {
+    const state = (tr.dataset.state || '').toString().toLowerCase();
+    if (state === 'added') {
+      tr.remove();
+      return;
+    }
+
+    tr.dataset.state = 'unchanged';
+    tr.querySelectorAll('.cell-edit').forEach(inp => {
+      const init = inp.dataset.init ?? '';
+      if (inp.type === 'checkbox') {
+        inp.checked = normalizeBool(init);
+      } else {
+        inp.value = init;
+      }
+      const view = inp.closest('td')?.querySelector('.cell-view');
+      if (view && inp.type !== 'checkbox') view.textContent = init;
+      if (view && inp.type === 'checkbox') {
+        const viewChk = view.querySelector('input.cell-view-checkbox');
+        if (viewChk) viewChk.checked = normalizeBool(init);
+      }
+    });
+    tr.querySelectorAll('.cell-view').forEach(el => el.classList.remove('d-none'));
+    tr.querySelectorAll('.cell-edit').forEach(el => el.classList.add('d-none'));
+  });
+  _pendingNewDetailRow = null;
+  showPendingButtons(false);
+}
+
 // 未儲存旗標
 window.__unsavedChanges = false;
 document.addEventListener('input', (e) => {
   if (e.target.closest('.erp-header-form, .erp-table')) window.__unsavedChanges = true;
 });
 window.addEventListener('pageshow', () => { window.__unsavedChanges = false; });
+window.addEventListener('load', () => { captureHeaderInitValues(); });
+
+const cancelChangesBtn = document.getElementById('btnCancelChanges');
+if (cancelChangesBtn) {
+  cancelChangesBtn.addEventListener('click', () => {
+    if (window.__unsavedChanges) {
+      if (!confirm('取消未儲存的變更並還原資料？')) return;
+    }
+    resetHeaderForm();
+    resetDetailTable();
+    window.__unsavedChanges = false;
+  });
+}
 </script>
 
 
@@ -1400,7 +1575,7 @@ window.addEventListener('pageshow', () => { window.__unsavedChanges = false; });
    A) 全局/版面
    ========================================= */
 body { background: #f7f9fb !important; }
-.erp-detail-container { min-height: 100vh; padding: 32px 0; margin-left: 3vw; margin-right: 3vw; }
+.erp-detail-container { min-height: 100vh; padding: 12px 0; margin-left: 3vw; margin-right: 3vw; }
 
 /* =========================================
    B) Header 表單 & Tabs
@@ -1408,7 +1583,21 @@ body { background: #f7f9fb !important; }
 .erp-header-form,
 .erp-header-form select,
 .erp-header-form textarea,
-.erp-header-form input { font-size: 0.95em; }
+.erp-header-form input { font-size: var(--field-value-size); }
+
+.erp-header-form,
+.erp-table-wrapper{
+  padding-left: var(--detail-left-pad);
+  max-width: var(--detail-max-width);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.erp-header-form .row{
+  margin-left: 0;
+  margin-right: 0;
+  --bs-gutter-x: 0;
+}
 
 .erp-header-form select.form-select{
   font-size: 1em !important; height: 32px !important; min-height: 32px !important; line-height: 1.15 !important;
@@ -1418,20 +1607,86 @@ body { background: #f7f9fb !important; }
 }
 .header-fields-tab{
   position: relative; min-height: 120px; padding-bottom: 8px;
+  width: 100%;
+  box-sizing: border-box;
   background: #eef2f9 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.04);
 }
 .drop-hover{ background-color:#cce5ff !important; border-radius:4px; }
 
-.erp-header-form .nav-tabs .nav-link{ border-radius:8px 8px 0 0 !important; padding:7px 18px; font-size:1.05em; font-weight:500; color:#235eb8; }
+.erp-header-form .nav-tabs .nav-link{ border-radius:8px 8px 0 0 !important; padding:var(--tab-pad-y) var(--tab-pad-x); font-size:var(--field-label-size); font-weight:500; color:#235eb8; }
 .erp-header-form .nav-tabs .nav-link.active{
   background:#fff; color:#124d8b; border-color:#bdd2f7 #bdd2f7 #fff #bdd2f7 !important; box-shadow:0 2px 6px 0 #e4ecf7; font-weight:bold;
+}
+
+.top-toolbar{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.top-toolbar .toolbar-icon-row{
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.top-toolbar .toolbar-main{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.top-toolbar .toolbar-btn{
+  font-size: var(--top-toolbar-font-size);
+  height: var(--top-toolbar-btn-height);
+  min-height: var(--top-toolbar-btn-height);
+  padding: 0 12px;
+  line-height: 1;
+}
+.top-toolbar .toolbar-btn-icon{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--top-toolbar-btn-height);
+  min-height: var(--top-toolbar-btn-height);
+  padding: 0;
+  width: 30px;
+  border-radius: 8px;
+  font-size: var(--top-toolbar-icon-font-size);
+  line-height: 1;
+}
+.top-toolbar .toolbar-btn-icon .toolbar-icon{
+  display: inline-block;
+}
+.top-toolbar #btnPrev .toolbar-icon,
+.top-toolbar #btnNext .toolbar-icon,
+.top-toolbar #btnSubDetailDelete .toolbar-icon{
+  transform: translateY(-3px);
+}
+.top-toolbar .toolbar-btn:disabled{
+  background: #9aa7bb;
+  cursor: not-allowed;
+  box-shadow: none;
+  opacity: 0.7;
+}
+.top-toolbar .toolbar-btn-add{
+  background: #0e9f4b;
+}
+.top-toolbar .toolbar-btn-del{
+  background: #e04848;
+}
+.top-toolbar .toolbar-btn-cancel{
+  background: #e04848;
+}
+.top-toolbar .toolbar-btn-check,
+.top-toolbar .toolbar-btn-cancel{
+  font-size: 18px;
 }
 
 /* draggable 欄位（橫排 label + 控件） */
 .draggable-field{ position:absolute; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; background:transparent; border:1px dashed transparent; }
 .draggable-field:hover{ border-color:#c7d3e1; }
 .draggable-field.inline{ display:flex; flex-direction:row; align-items: center; gap:4px; flex:0 0 auto; min-width:100px; max-width:100%; }
-.draggable-field label{ cursor:move; font-size:0.85em; margin:0 6px 0 0; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
+.draggable-field label{ cursor:move; font-size:var(--field-label-size); margin:0 6px 0 0; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
 .draggable-field.inline .field-control{ flex:1 1 auto; height:100%; display:flex; }
 .draggable-field.inline textarea,
 .draggable-field.inline input,
@@ -1497,7 +1752,8 @@ body { background: #f7f9fb !important; }
 .erp-table tbody tr:hover{ background:#eef7ff; }
 
 /* 顯示/編輯雙層：span 顯示、input 編輯（切換 display） */
-.erp-table td{ position:relative; padding:0; }
+.erp-table th{ font-size: var(--field-label-size); }
+.erp-table td{ position:relative; padding:0; font-size: var(--field-value-size); }
 .erp-table td .cell-view{ display:inline-block; width:100%; text-align:inherit; }
 .erp-table td .cell-edit{
   width:100% !important; height:100% !important; box-sizing:border-box; margin:0; border:none; border-radius:0;
@@ -1538,6 +1794,10 @@ body { background: #f7f9fb !important; }
   z-index: 900;
 }
 
+body.with-toolbar .action-rail{
+  top: calc(80px + var(--app-toolbar-height, 0px));
+}
+
 /* 內容往右騰出空間；toolbar 往回補，維持視覺對齊 */
 .erp-detail-container{ margin-left: var(--rail-reserve); }
 #topToolbar{ margin-left: calc(-1 * var(--rail-reserve)) !important; }
@@ -1563,7 +1823,7 @@ body { background: #f7f9fb !important; }
 .fab:hover{ filter:brightness(0.95); }
 .fab-red{ background:#dc3545; color:#fff; }
 .fab-blue{ background:#3583dc; color:#fff; }
-.erp-detail-container{ margin-left: var(--rail-reserve); margin-right: 3vw; padding: 32px 0; }
+.erp-detail-container{ margin-left: var(--rail-reserve); margin-right: 3vw; padding: 12px 0; }
 #btnCalcAmount { border: 0 !important; outline: none !important; -webkit-tap-highlight-color: transparent; }
 #btnCalcAmount:focus, #btnCalcAmount:focus-visible, #btnCalcAmount:active { outline: none !important; box-shadow: 0 6px 16px rgba(0,0,0,.2) !important; }
 #btnCalcAmount::-moz-focus-inner { border: 0 !important; }
@@ -1577,3 +1837,4 @@ body { background: #f7f9fb !important; }
 .erp-table th .col-resizer::before { content: none !important; }
 .erp-table th.resizing, .erp-table td.resizing, body.resizing { cursor: col-resize !important; }
 </style>
+.erp-header-form { margin-bottom: 0; }
