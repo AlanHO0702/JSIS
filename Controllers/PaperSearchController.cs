@@ -82,6 +82,14 @@ public class PaperSearchController : ControllerBase
         public List<Dictionary<string, object>> Rows { get; set; } = new();
     }
 
+    public class PaperSearchRunSpRequest
+    {
+        public string ItemId { get; set; } = string.Empty;
+        public string ButtonName { get; set; } = string.Empty;
+        public string PaperNum { get; set; } = string.Empty;
+        public Dictionary<string, object>? Params { get; set; }
+    }
+
     [HttpGet("Config")]
     public async Task<IActionResult> Config([FromQuery] string itemId, [FromQuery] string buttonName)
     {
@@ -100,8 +108,12 @@ public class PaperSearchController : ControllerBase
         return Ok(cfg);
     }
 
-    [HttpGet("ParamOptions")]
-    public async Task<IActionResult> ParamOptions([FromQuery] string itemId, [FromQuery] string buttonName, [FromQuery] string paramName)
+    [HttpGet("ParamOptionsV2")]
+    public async Task<IActionResult> ParamOptions(
+        [FromQuery] string itemId,
+        [FromQuery] string buttonName,
+        [FromQuery] string paramName,
+        [FromQuery] string? superValue = null)
     {
         if (string.IsNullOrWhiteSpace(itemId) || string.IsNullOrWhiteSpace(buttonName) || string.IsNullOrWhiteSpace(paramName))
             return BadRequest("ItemId/ButtonName/ParamName required");
@@ -109,39 +121,63 @@ public class PaperSearchController : ControllerBase
         await using var conn = new SqlConnection(_cs);
         await conn.OpenAsync();
 
-        var sql = await LoadParamCommandTextAsync(conn, itemId, buttonName, paramName);
+        var searchParams = await LoadSearchParamsAsync(conn, itemId, buttonName);
+        var paramRow = searchParams.FirstOrDefault(p =>
+            NormalizeInputKey(p.ParamName) == NormalizeInputKey(paramName));
+        var sql = paramRow?.CommandText ?? string.Empty;
         if (string.IsNullOrWhiteSpace(sql))
             return NotFound();
 
         var raw = sql.Trim();
+        if (raw.Contains("@@@@@", StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(superValue))
+                return Ok(Array.Empty<object>());
+            raw = raw.Replace("@@@@@", "@p0", StringComparison.Ordinal);
+        }
         if (!raw.StartsWith("select", StringComparison.OrdinalIgnoreCase))
             return BadRequest("Only SELECT is allowed");
 
         await using var cmd = new SqlCommand(raw, conn);
-        await using var reader = await cmd.ExecuteReaderAsync();
-
-        var ordValue = -1;
-        var ordText = -1;
-        for (int i = 0; i < reader.FieldCount; i++)
+        if (raw.Contains("@p0", StringComparison.Ordinal))
         {
-            var name = reader.GetName(i);
-            if (ordValue == -1 && name.Equals("value", StringComparison.OrdinalIgnoreCase)) ordValue = i;
-            if (ordText == -1 && name.Equals("text", StringComparison.OrdinalIgnoreCase)) ordText = i;
-            if (ordValue == -1 && name.Equals("item", StringComparison.OrdinalIgnoreCase)) ordValue = i;
-            if (ordText == -1 && name.Equals("itemname", StringComparison.OrdinalIgnoreCase)) ordText = i;
+            if (DateTime.TryParse(superValue, out var dt))
+                cmd.Parameters.AddWithValue("@p0", dt);
+            else
+                cmd.Parameters.AddWithValue("@p0", superValue ?? string.Empty);
         }
-        if (ordValue == -1 && reader.FieldCount > 0) ordValue = 0;
-        if (ordText == -1 && reader.FieldCount > 1) ordText = 1;
-        if (ordText == -1) ordText = ordValue;
 
-        var list = new List<object>();
-        while (await reader.ReadAsync())
+        try
         {
-            var value = reader.IsDBNull(ordValue) ? "" : reader.GetValue(ordValue)?.ToString() ?? "";
-            var text = reader.IsDBNull(ordText) ? "" : reader.GetValue(ordText)?.ToString() ?? "";
-            list.Add(new { value, text });
+            await using var reader = await cmd.ExecuteReaderAsync();
+
+            var ordValue = -1;
+            var ordText = -1;
+            for (int i = 0; i < reader.FieldCount; i++)
+            {
+                var name = reader.GetName(i);
+                if (ordValue == -1 && name.Equals("value", StringComparison.OrdinalIgnoreCase)) ordValue = i;
+                if (ordText == -1 && name.Equals("text", StringComparison.OrdinalIgnoreCase)) ordText = i;
+                if (ordValue == -1 && name.Equals("item", StringComparison.OrdinalIgnoreCase)) ordValue = i;
+                if (ordText == -1 && name.Equals("itemname", StringComparison.OrdinalIgnoreCase)) ordText = i;
+            }
+            if (ordValue == -1 && reader.FieldCount > 0) ordValue = 0;
+            if (ordText == -1 && reader.FieldCount > 1) ordText = 1;
+            if (ordText == -1) ordText = ordValue;
+
+            var list = new List<object>();
+            while (await reader.ReadAsync())
+            {
+                var value = reader.IsDBNull(ordValue) ? "" : reader.GetValue(ordValue)?.ToString() ?? "";
+                var text = reader.IsDBNull(ordText) ? "" : reader.GetValue(ordText)?.ToString() ?? "";
+                list.Add(new { value, text });
+            }
+            return Ok(list);
         }
-        return Ok(list);
+        catch (Exception ex)
+        {
+            return StatusCode(500, ex.GetBaseException().Message);
+        }
     }
 
     [HttpPost("Search")]
@@ -285,6 +321,69 @@ public class PaperSearchController : ControllerBase
         }
     }
 
+    [HttpPost("RunSpExec")]
+    public async Task<IActionResult> RunSp([FromBody] PaperSearchRunSpRequest req, [FromQuery] int debug = 0)
+    {
+        if (string.IsNullOrWhiteSpace(req.ItemId) || string.IsNullOrWhiteSpace(req.ButtonName))
+            return BadRequest(new { ok = false, error = "ItemId/ButtonName 為必填" });
+
+        await using var conn = new SqlConnection(_cs);
+        await conn.OpenAsync();
+
+        var cfg = await LoadButtonConfigAsync(conn, req.ItemId, req.ButtonName);
+        if (cfg == null)
+            return BadRequest(new { ok = false, error = "找不到按鈕設定" });
+
+        var spRaw = string.IsNullOrWhiteSpace(cfg.SpName) ? cfg.ExecSpName : cfg.SpName;
+        if (string.IsNullOrWhiteSpace(spRaw))
+            return BadRequest(new { ok = false, error = "找不到 SP 名稱" });
+
+        var spName = ValidateProcName(spRaw);
+        var searchParams = await LoadSearchParamsAsync(conn, req.ItemId, req.ButtonName);
+        var defaultMap = await LoadSearchDefaultMapAsync(conn, req.ItemId, req.ButtonName);
+        var inputs = NormalizeInputs(req.Params);
+        var systemId = await LoadSystemIdAsync(conn, req.ItemId);
+        var (userId, useId) = await LoadUserContextAsync(conn);
+
+        var paramValues = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in searchParams)
+        {
+            var paramName = NormalizeParamName(p.ParamName);
+            if (string.IsNullOrWhiteSpace(paramName)) continue;
+            var value = ResolveSearchParamValue(p, inputs, req.PaperNum, systemId, userId, useId, defaultMap);
+            paramValues[paramName] = value;
+        }
+
+        await using var cmd = new SqlCommand(spName, conn)
+        {
+            CommandType = CommandType.StoredProcedure,
+            CommandTimeout = 180
+        };
+
+        SqlCommandBuilder.DeriveParameters(cmd);
+        foreach (SqlParameter spParam in cmd.Parameters)
+        {
+            if (spParam.Direction == ParameterDirection.ReturnValue) continue;
+            if (paramValues.TryGetValue(spParam.ParameterName, out var val))
+                spParam.Value = CoerceParamValue(spParam, val);
+            else
+                spParam.Value = CoerceParamValue(spParam, string.Empty);
+        }
+
+        var affected = await cmd.ExecuteNonQueryAsync();
+        if (debug == 1)
+        {
+            var echo = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (SqlParameter spParam in cmd.Parameters)
+            {
+                if (spParam.Direction == ParameterDirection.ReturnValue) continue;
+                echo[spParam.ParameterName] = spParam.Value == DBNull.Value ? null : spParam.Value;
+            }
+            return Ok(new { ok = true, rowsAffected = affected, debugParams = echo });
+        }
+        return Ok(new { ok = true, rowsAffected = affected });
+    }
+
     private static string NormalizeParamName(string name)
     {
         if (string.IsNullOrWhiteSpace(name)) return string.Empty;
@@ -350,9 +449,14 @@ public class PaperSearchController : ControllerBase
                 return string.Empty;
             }
             case 1:
+            {
+                var inputVal = GetInput(inputs, p.ParamName);
+                if (inputVal is string s && string.IsNullOrWhiteSpace(s)) inputVal = null;
+                if (inputVal != null) return inputVal;
                 if (TryGetDefaultValue(defaultMap, p.ParamName, out var defVal))
                     return defVal;
                 return p.ParamValue ?? p.DefaultValue ?? string.Empty;
+            }
             case 2:
             {
                 var inputVal = GetInput(inputs, p.ParamName);
@@ -448,9 +552,9 @@ public class PaperSearchController : ControllerBase
     private static string? GetDefaultDateRange(string? paramName)
     {
         var name = (paramName ?? string.Empty).Trim().TrimStart('@').ToLowerInvariant();
-        if (name.Contains("begindate") || name.Contains("startdate"))
+        if (name.Contains("begindate") || name.Contains("startdate") || name.Contains("bscribedate"))
             return "1999-01-01";
-        if (name.Contains("enddate"))
+        if (name.Contains("enddate") || name.Contains("escribedate"))
             return "9999-01-01";
         return null;
     }
