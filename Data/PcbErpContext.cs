@@ -7,8 +7,12 @@ namespace PcbErpApi.Data
     {
         public PcbErpContext(DbContextOptions<PcbErpContext> options) : base(options) { }
         public DbSet<SpodOrderMain> SpodOrderMain => Set<SpodOrderMain>();
-        
+
         public DbSet<SPOdMPSOutMain> SPOdMPSOutMain => Set<SPOdMPSOutMain>();
+        public DbSet<FosdOrderMain> FosdOrderMain => Set<FosdOrderMain>();
+        public DbSet<FosdOrderSub> FosdOrderSub => Set<FosdOrderSub>();
+        public DbSet<FosdReceiveMain> FosdReceiveMain => Set<FosdReceiveMain>();
+        public DbSet<FosdReceiveSub> FosdReceiveSub => Set<FosdReceiveSub>();
         public DbSet<SpodPoKind> SpodPoKind => Set<SpodPoKind>();
 
         public DbSet<CurdUser> CurdUser => Set<CurdUser>();
@@ -1245,6 +1249,19 @@ namespace PcbErpApi.Data
             modelBuilder.Entity<CURdTableField>().ToTable("CURdTableField");
 
             modelBuilder.Entity<SpodOrderSub>()
+            .HasKey(x => new { x.PaperNum, x.Item });
+
+            // FOSd委外出廠/回廠單據設定
+            modelBuilder.Entity<FosdOrderMain>()
+            .HasKey(x => x.PaperNum);
+
+            modelBuilder.Entity<FosdOrderSub>()
+            .HasKey(x => new { x.PaperNum, x.Item });
+
+            modelBuilder.Entity<FosdReceiveMain>()
+            .HasKey(x => x.PaperNum);
+
+            modelBuilder.Entity<FosdReceiveSub>()
             .HasKey(x => new { x.PaperNum, x.Item });
 
             modelBuilder.Entity<CURdSysParams>(e =>
