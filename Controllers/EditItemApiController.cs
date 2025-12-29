@@ -20,6 +20,37 @@ namespace PcbErpApi.Controllers
             public int SerialNum { get; set; }
             public int Enabled { get; set; }   // 0=停用, 1=啟用
             public string Notes { get; set; } = "";
+            public string Ocxtemplete { get; set; } = "";
+        }
+
+        public class OcxTempleteOption
+        {
+            public string OcxTemplete { get; set; } = "";
+            public string OcxTempleteName { get; set; } = "";
+        }
+
+        [HttpGet("OcxTempleteOptions")]
+        public async Task<IActionResult> GetOcxTempleteOptions()
+        {
+            await using var conn = _context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "select OCXTemplete, OCXTempleteName from CURdOCXTemplete";
+
+            var list = new List<OcxTempleteOption>();
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                list.Add(new OcxTempleteOption
+                {
+                    OcxTemplete = reader["OCXTemplete"]?.ToString() ?? "",
+                    OcxTempleteName = reader["OCXTempleteName"]?.ToString() ?? ""
+                });
+            }
+
+            return Ok(list);
         }
 
         [HttpPost]
@@ -39,6 +70,7 @@ namespace PcbErpApi.Controllers
             item.SerialNum = dto.SerialNum;
             item.Enabled   = dto.Enabled;
             item.Notes   = dto.Notes?.Trim();
+            item.Ocxtemplete = dto.Ocxtemplete?.Trim();
 
             await _context.SaveChangesAsync();
             return Ok(new { success = true });
