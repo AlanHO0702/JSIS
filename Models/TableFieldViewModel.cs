@@ -18,4 +18,5 @@ public class TableFieldViewModel
     public string? LookupResultField { get; set; }
     public int? ReadOnly { get; set; }
     public int? DisplaySize { get; set; }
+    public int? ComboStyle { get; set; } // 辭典「勾選框」(CURdTableField.ComboStyle)
 }

@@ -1,0 +1,81 @@
+@model dynamic
+
+<script>
+(() => {
+  window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+  const readPaperNum = (ctx) => {
+    const v = (ctx?.paperNum || window._paperNum || '').toString().trim();
+    if (v) return v;
+    if (typeof window.getPaperNum === 'function') {
+      try { return (window.getPaperNum() || '').toString().trim(); } catch { /* ignore */ }
+    }
+    return '';
+  };
+
+  const outAddr = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    const paperId = 'SPOdOrderMain';
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    // 1) 先載入出貨地址選項
+    const resp = await fetch(`/api/OrderSubButton/GetOutAddrOptions?paperId=${encodeURIComponent(paperId)}&paperNum=${encodeURIComponent(paperNum)}`);
+    const data = await resp.json();
+    if (!data.ok) return Swal.fire({ icon: 'error', title: '載入失敗', text: data.error });
+
+    // 2) 顯示選擇視窗
+    const options = (data.list || []).map(x =>
+      `<option value="${x.Addr}" data-title="${x.Title}">${x.Addr}</option>`
+    ).join('');
+
+    const { value: addr } = await Swal.fire({
+      title: data.label || '出貨地址',
+      html: `<select id="addrSel" class="swal2-select">${options}</select>`,
+      showCancelButton: true,
+      confirmButtonText: '確定',
+      cancelButtonText: '取消',
+      preConfirm: () => {
+        const sel = document.getElementById('addrSel');
+        return sel ? {
+          addr: sel.value,
+          title: sel.options[sel.selectedIndex]?.dataset?.title || ''
+        } : null;
+      }
+    });
+    if (!addr) return;
+
+    // 3) 更新到主檔
+    const updateResp = await fetch('/api/OrderSubButton/UpdateOutAddr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paperId, paperNum, addr: addr.addr, title: addr.title })
+    });
+    const updateData = await updateResp.json();
+    if (!updateData.ok) return Swal.fire({ icon: 'error', title: '更新失敗', text: updateData.error });
+
+    await Swal.fire({ icon: 'success', title: '更新完成', timer: 1000, showConfirmButton: false });
+
+    const addrField = document.querySelector('input[name="TransPlace"], input[name="OutAddr"], textarea[name="TransPlace"], textarea[name="OutAddr"]');
+    const titleField = document.querySelector('input[name="PkgTitle"], input[name="ShipTo"], textarea[name="PkgTitle"], textarea[name="ShipTo"]');
+    if (addrField) addrField.value = addr.addr;
+    if (titleField) titleField.value = addr.title;
+
+    const addrValueEl = document.querySelector('[data-field="OutAddr"] span, [data-field="TransPlace"] span');
+    const titleValueEl = document.querySelector('[data-field="ShipTo"] span, [data-field="PkgTitle"] span');
+    if (addrValueEl) addrValueEl.textContent = addr.addr;
+    if (titleValueEl) titleValueEl.textContent = addr.title;
+
+    [addrField, titleField, addrValueEl, titleValueEl].forEach(el => {
+      if (!el) return;
+      el.style.transition = 'background-color 0.5s';
+      el.style.backgroundColor = '#fff8c4';
+      setTimeout(() => el.style.backgroundColor = '', 800);
+    });
+  };
+
+  window.ActionRailCustomHandlers['SA000002'] = {
+    // 依 CURdOCXItemCustButton.ButtonName 對應
+    btnC6: outAddr
+  };
+})();
+</script>

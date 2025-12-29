@@ -1,8 +1,7 @@
-using System.Text;
+using System.Data;
 using System.Linq;
 using System.Net.Http.Json;
-using System.Collections.Generic;
-using System.Data;
+using System.Text.RegularExpressions;
 using System.IO;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -15,14 +14,14 @@ using PcbErpApi.Models;
 
 namespace PcbErpApi.Pages.DynamicTemplate
 {
-    public class PaperDetailModel : PageModel
+    public class Paper3LDetailModel : PageModel
     {
         private readonly PcbErpContext _ctx;
         private readonly ITableDictionaryService _dictService;
         private readonly HttpClient _http;
         private readonly IWebHostEnvironment _env;
 
-        public PaperDetailModel(PcbErpContext ctx, ITableDictionaryService dictService, IHttpClientFactory httpClientFactory, IWebHostEnvironment env)
+        public Paper3LDetailModel(PcbErpContext ctx, ITableDictionaryService dictService, IHttpClientFactory httpClientFactory, IWebHostEnvironment env)
         {
             _ctx = ctx;
             _dictService = dictService;
@@ -37,28 +36,26 @@ namespace PcbErpApi.Pages.DynamicTemplate
         public string DetailTable { get; private set; } = string.Empty;
         public string MasterDictTable { get; private set; } = string.Empty;
         public string DetailDictTable { get; private set; } = string.Empty;
+
         // _DetailHeaderSection / custom buttons 會用 ViewData["DictTableName"] 當作「單身表」辨識
-        // 這裡回傳 DETAIL1 的字典表名（而非 Master），避免像「清除單身」等功能抓錯表
         public string DictTableName => string.IsNullOrWhiteSpace(DetailDictTable) ? MasterDictTable : DetailDictTable;
-        public string AddApiUrl => $"/api/{MasterTable}";
-        public string DetailRouteTemplate => $"/DynamicTemplate/Paper/{ItemId}/{{PaperNum}}";
-        public string PageTitle { get; private set; } = "單據動態樣板";
+
+        public string DetailRouteTemplate => $"/DynamicTemplate/Paper3L/{ItemId}/{{PaperNum}}";
+        public string PageTitle { get; private set; } = "單據動態樣板(三階)";
         public string? ReportSpName { get; private set; }
         public string? ActionRailPartial { get; private set; }
 
-        public List<Dictionary<string, object?>> Items { get; private set; } = new();
-        public List<TableFieldViewModel> TableFields { get; private set; } = new();
-        public List<TableFieldViewModel> HeaderTableFields { get; private set; } = new();
         public List<CURdTableField> FieldDictList { get; private set; } = new();
+        public List<TableFieldViewModel> HeaderTableFields { get; private set; } = new();
         public Dictionary<string, object> HeaderData { get; private set; } = new();
-        public Dictionary<string, Dictionary<string, string>> LookupDisplayMap { get; private set; } = new();
         public Dictionary<string, string> HeaderLookupMap { get; private set; } = new();
         public List<QueryFieldViewModel> QueryFields { get; private set; } = new();
-        public string? DetailLoadError { get; private set; }
         public List<ItemCustButtonRow> CustomButtons { get; private set; } = new();
 
         public string HeaderTableName => MasterDictTable;
         public string TableName => MasterTable;
+
+        public SubDetailClientConfig? SubDetail1 { get; private set; }
 
         public async Task<IActionResult> OnGetAsync(string itemId, string paperNum)
         {
@@ -70,9 +67,17 @@ namespace PcbErpApi.Pages.DynamicTemplate
 
             var sysItem = await _ctx.CurdSysItems.AsNoTracking()
                 .Where(x => x.ItemId == itemId)
-                .Select(x => new { x.ItemId, x.ItemName })
+                .Select(x => new { x.ItemId, x.ItemName, x.ItemType, x.Ocxtemplete })
                 .FirstOrDefaultAsync();
-            ItemName = sysItem?.ItemName ?? string.Empty;
+
+            if (sysItem == null)
+                return NotFound($"Item {itemId} not found.");
+
+            var ocx = (sysItem.Ocxtemplete ?? string.Empty).Trim();
+            if (sysItem.ItemType != 6 || !ocx.Equals("JSdPaper3LDLL.dll", StringComparison.OrdinalIgnoreCase))
+                return NotFound($"Item {itemId} is not a JSdPaper3LDLL paper(3-level) item.");
+
+            ItemName = sysItem.ItemName ?? string.Empty;
 
             var setupList = await _ctx.CurdOcxtableSetUp.AsNoTracking()
                 .Where(x => x.ItemId == itemId)
@@ -97,8 +102,12 @@ namespace PcbErpApi.Pages.DynamicTemplate
             if (details.Count == 0)
                 return NotFound($"No detail table found for item {itemId}.");
 
+            // ★ 三階：多抓一個 SubDetail1（對應第二階的 DETAIL1）
+            var subDetail1Setup = setupList.FirstOrDefault(x =>
+                string.Equals((x.TableKind ?? string.Empty).Trim(), "SubDetail1", StringComparison.OrdinalIgnoreCase)
+                || (x.TableKind ?? string.Empty).StartsWith("SubDetail", StringComparison.OrdinalIgnoreCase));
+
             MasterDictTable = master.TableName ?? "";
-            // 保留既有單一 detail 的欄位/lookup 行為（取第一筆作為預設）
             DetailDictTable = details[0].TableName ?? "";
 
             MasterTable = await ResolveRealTableNameAsync(MasterDictTable) ?? MasterDictTable;
@@ -134,6 +143,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
                 var fields = _dictService.GetFieldDict(dictTable, typeof(object));
                 tabFieldDicts[tabId] = fields
                     .Where(f => f.Visible == 1)
+                    .OrderBy(f => f.SerialNum ?? 0)
                     .GroupBy(f => f.FieldName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                     .Where(g => !string.IsNullOrWhiteSpace(g.Key))
                     .ToDictionary(g => g.Key, g => g.First().DisplayLabel ?? g.Key, StringComparer.OrdinalIgnoreCase);
@@ -142,7 +152,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
             ViewData["Tabs"] = tabs.ToArray();
             ViewData["TabFieldDicts"] = tabFieldDicts;
 
-            // 3) Field dictionaries
+            // 3) Field dictionaries (header + modal)
             var headerFields = _dictService.GetFieldDict(master.TableName ?? "", typeof(object));
             FieldDictList = _dictService.GetFieldDict(MasterDictTable, typeof(object));
 
@@ -166,30 +176,13 @@ namespace PcbErpApi.Pages.DynamicTemplate
                     ComboStyle = x.ComboStyle
                 }).ToList();
 
-            TableFields = FieldDictList
-                .Where(x => x.Visible == 1)
-                .OrderBy(x => x.SerialNum)
-                .Select(x => new TableFieldViewModel
-                {
-                    FieldName = x.FieldName,
-                    DisplayLabel = x.DisplayLabel,
-                    SerialNum = x.SerialNum ?? 0,
-                    Visible = true,
-                    LookupResultField = x.LookupResultField,
-                    DataType = x.DataType,
-                    FormatStr = x.FormatStr,
-                    iFieldWidth = x.iFieldWidth,
-                    DisplaySize = x.DisplaySize,
-                    ComboStyle = x.ComboStyle
-                }).ToList();
-
-            // 4) Lookup maps（MultiTab 明細採前端即時載入，這裡只保留單頭 lookup）
+            // 4) Header lookup maps（MultiTab 明細採前端即時載入，這裡只保留單頭 lookup）
             ViewData["LookupDisplayMap"] = new Dictionary<string, Dictionary<string, string>>();
 
             var headerLookup = _dictService.GetOCXLookups(master.TableName ?? "");
             HeaderLookupMap = LookupDisplayHelper.BuildHeaderLookupMap(
-                HeaderData.ToDictionary(k => k.Key, v => v.Value)
-                , headerLookup);
+                HeaderData.ToDictionary(k => k.Key, v => v.Value),
+                headerLookup);
             ViewData["HeaderLookupMap"] = HeaderLookupMap;
 
             // 5) Query fields (for search modal reuse)
@@ -210,7 +203,34 @@ namespace PcbErpApi.Pages.DynamicTemplate
                 .ToList();
             ViewData["QueryFields"] = QueryFields;
 
-            // 6) Custom buttons (left action rail)
+            // 6) SubDetail1 (third level) - 依 MdKey 對應到第二階（預設用 DETAIL1 / tab d1）
+            if (subDetail1Setup != null && !string.IsNullOrWhiteSpace(subDetail1Setup.TableName))
+            {
+                var dictTable = subDetail1Setup.TableName!.Trim();
+                var title = await ResolveDisplayLabelAsync(dictTable) ?? dictTable;
+                var keyMap = BuildKeyMap(subDetail1Setup.Mdkey);
+
+                var fields = _dictService.GetFieldDict(dictTable, typeof(object))
+                    .Where(f => f.Visible == 1)
+                    .OrderBy(f => f.SerialNum ?? 0)
+                    .GroupBy(f => f.FieldName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                    .Where(g => !string.IsNullOrWhiteSpace(g.Key))
+                    .Select(g => new SubDetailFieldDef(g.Key, g.First().DisplayLabel ?? g.Key))
+                    .ToList();
+
+                SubDetail1 = new SubDetailClientConfig
+                {
+                    Title = title,
+                    DictTable = dictTable,
+                    ParentTabId = "d1",
+                    KeyMap = keyMap,
+                    Fields = fields
+                };
+
+                ViewData["SubDetail1"] = SubDetail1;
+            }
+
+            // 7) Action rail：先不套用 DB 動態按鈕（Paper3L 以顯示為主）
             CustomButtons = await LoadCustomButtonsAsync(itemId);
             ActionRailPartial = (CustomButtons?.Count ?? 0) > 0
                 ? "~/Pages/Shared/_ActionRail.DynamicButtons.cshtml"
@@ -238,8 +258,30 @@ namespace PcbErpApi.Pages.DynamicTemplate
         private static int ExtractOrderIndex(string? tableKind)
         {
             if (string.IsNullOrWhiteSpace(tableKind)) return int.MaxValue;
-            var m = System.Text.RegularExpressions.Regex.Match(tableKind, "(\\d+)$");
+            var m = Regex.Match(tableKind, "(\\d+)$");
             return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : int.MaxValue;
+        }
+
+        private static List<KeyMapPair> BuildKeyMap(string? mdKey)
+        {
+            var parts = (mdKey ?? string.Empty)
+                .Split(new[] { ';', ',', '|' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => s.Trim())
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .ToList();
+
+            if (parts.Count == 0) return new List<KeyMapPair>();
+
+            var list = new List<KeyMapPair>(parts.Count);
+            foreach (var k in parts)
+            {
+                var segs = k.Split(new[] { ':', '=' }, StringSplitOptions.RemoveEmptyEntries);
+                var parent = segs.Length > 0 ? segs[0].Trim() : k.Trim();
+                var child = segs.Length > 1 ? segs[1].Trim() : parent;
+                if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(child)) continue;
+                list.Add(new KeyMapPair(parent, child));
+            }
+            return list;
         }
 
         private async Task<string?> ResolveDisplayLabelAsync(string dictTableName)
@@ -259,61 +301,61 @@ SELECT TOP 1 ISNULL(NULLIF(DisplayLabel,''), TableName) AS DisplayLabel
             return result == null || result == DBNull.Value ? null : result.ToString();
         }
 
-        private async Task<List<ItemCustButtonRow>> LoadCustomButtonsAsync(string itemId)
+        private async Task<string?> ResolveRealTableNameAsync(string dictTableName)
         {
-            var list = new List<ItemCustButtonRow>();
             var cs = _ctx.Database.GetConnectionString();
             await using var conn = new SqlConnection(cs);
             await conn.OpenAsync();
 
-            var sql = @"
-SELECT ItemId, SerialNum, ButtonName,
-       CustCaption, CustHint,
-       bVisible, bNeedNum, bNeedInEdit, DesignType,
-       OCXName, CoClassName, SpName, ExecSpName,
-       SearchTemplate, MultiSelectDD, ReplaceExists, DialogCaption, AllowSelCount
-  FROM CURdOCXItemCustButton WITH (NOLOCK)
- WHERE ItemId = @itemId
- ORDER BY SerialNum, ButtonName;";
+            const string sql = @"
+SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
+  FROM CURdTableName WITH (NOLOCK)
+ WHERE TableName = @tbl";
 
             await using var cmd = new SqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("@itemId", itemId ?? string.Empty);
+            cmd.Parameters.AddWithValue("@tbl", dictTableName ?? string.Empty);
+            var result = await cmd.ExecuteScalarAsync();
+            return result == null || result == DBNull.Value ? null : result.ToString();
+        }
 
-            await using var rd = await cmd.ExecuteReaderAsync();
-            while (await rd.ReadAsync())
+        private async Task<Dictionary<string, object>> LoadHeaderAsync(string tableName, string paperNum)
+        {
+            var baseUrl = $"{Request.Scheme}://{Request.Host}";
+            var url = $"{baseUrl}/api/DynamicTable/PagedQuery";
+            var payload = new
             {
-                var visible = TryToInt(rd["bVisible"]);
-                if (visible.HasValue && visible.Value != 1) continue;
-
-                var buttonName = rd["ButtonName"]?.ToString() ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(buttonName)) continue;
-
-                var caption = rd["CustCaption"]?.ToString() ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(caption)) caption = buttonName;
-
-                list.Add(new ItemCustButtonRow
+                table = tableName,
+                filters = new[]
                 {
-                    ItemId = rd["ItemId"]?.ToString() ?? string.Empty,
-                    SerialNum = TryToInt(rd["SerialNum"]),
-                    ButtonName = buttonName,
-                    Caption = caption,
-                    Hint = rd["CustHint"]?.ToString() ?? string.Empty,
-                    OCXName = rd["OCXName"]?.ToString() ?? string.Empty,
-                    CoClassName = rd["CoClassName"]?.ToString() ?? string.Empty,
-                    SpName = rd["SpName"]?.ToString() ?? string.Empty,
-                    ExecSpName = rd["ExecSpName"]?.ToString() ?? string.Empty,
-                    SearchTemplate = rd["SearchTemplate"]?.ToString() ?? string.Empty,
-                    MultiSelectDD = rd["MultiSelectDD"]?.ToString() ?? string.Empty,
-                    ReplaceExists = TryToInt(rd["ReplaceExists"]),
-                    DialogCaption = rd["DialogCaption"]?.ToString() ?? string.Empty,
-                    AllowSelCount = TryToInt(rd["AllowSelCount"]),
-                    bNeedNum = TryToInt(rd["bNeedNum"]),
-                    bNeedInEdit = TryToInt(rd["bNeedInEdit"]),
-                    DesignType = TryToInt(rd["DesignType"])
-                });
-            }
+                    new { Field = "PaperNum", Op = "=", Value = paperNum },
+                    new { Field = "page", Op = "", Value = "1" },
+                    new { Field = "pageSize", Op = "", Value = "1" }
+                }
+            };
+            var resp = await _http.PostAsJsonAsync(url, payload);
+            if (!resp.IsSuccessStatusCode)
+                return new Dictionary<string, object>();
+            var json = await resp.Content.ReadFromJsonAsync<DynamicTableResult>();
+            var first = json?.data?.FirstOrDefault();
+            return first != null ? first : new Dictionary<string, object>();
+        }
 
-            return list;
+        public class DynamicTableResult
+        {
+            public int totalCount { get; set; }
+            public List<Dictionary<string, object?>>? data { get; set; }
+        }
+
+        public sealed record KeyMapPair(string ParentField, string ChildField);
+        public sealed record SubDetailFieldDef(string FieldName, string DisplayLabel);
+
+        public sealed class SubDetailClientConfig
+        {
+            public string Title { get; set; } = string.Empty;
+            public string DictTable { get; set; } = string.Empty;
+            public string ParentTabId { get; set; } = "d1";
+            public List<KeyMapPair> KeyMap { get; set; } = new();
+            public List<SubDetailFieldDef> Fields { get; set; } = new();
         }
 
         public class ItemCustButtonRow
@@ -337,94 +379,55 @@ SELECT ItemId, SerialNum, ButtonName,
             public int? DesignType { get; set; }
         }
 
-        private async Task<Dictionary<string, object>> LoadHeaderAsync(string tableName, string paperNum)
+        private async Task<List<ItemCustButtonRow>> LoadCustomButtonsAsync(string itemId)
         {
-            var baseUrl = $"{Request.Scheme}://{Request.Host}";
-            var url = $"{baseUrl}/api/DynamicTable/PagedQuery";
-            var payload = new
-            {
-                table = tableName,
-                filters = new[]
-                {
-                    new { Field = "PaperNum", Op = "=", Value = paperNum },
-                    new { Field = "page", Op = "", Value = "1" },
-                    new { Field = "pageSize", Op = "", Value = "1" }
-                }
-            };
-            var resp = await _http.PostAsJsonAsync(url, payload);
-            if (!resp.IsSuccessStatusCode)
-            {
-                var body = await resp.Content.ReadAsStringAsync();
-                DetailLoadError ??= $"Header API {resp.StatusCode} {resp.ReasonPhrase}: {body}";
-                return new Dictionary<string, object>();
-            }
-            var json = await resp.Content.ReadFromJsonAsync<DynamicTableResult>();
-            var first = json?.data?.FirstOrDefault();
-            return first != null ? first : new Dictionary<string, object>();
-        }
-
-        private async Task<List<Dictionary<string, object?>>> LoadDetailAsync(string tableName, string paperNum)
-        {
-            var baseUrl = $"{Request.Scheme}://{Request.Host}";
-            var url = $"{baseUrl}/api/DynamicTable/PagedQuery";
-            var payload = new
-            {
-                table = tableName,
-                filters = new[]
-                {
-                    new { Field = "PaperNum", Op = "=", Value = paperNum },
-                    new { Field = "page", Op = "", Value = "1" },
-                    new { Field = "pageSize", Op = "", Value = "9999" }
-                }
-            };
-            try
-            {
-                var resp = await _http.PostAsJsonAsync(url, payload);
-                if (!resp.IsSuccessStatusCode)
-                {
-                    var body = await resp.Content.ReadAsStringAsync();
-                    DetailLoadError = $"Detail API {resp.StatusCode} {resp.ReasonPhrase}: {body}";
-                    return new List<Dictionary<string, object?>>();
-                }
-                var json = await resp.Content.ReadFromJsonAsync<DynamicTableResult>();
-                return json?.data ?? new List<Dictionary<string, object?>>();
-            }
-            catch (HttpRequestException ex)
-            {
-                DetailLoadError = $"Detail API exception: {ex.Message}";
-                return new List<Dictionary<string, object?>>();
-            }
-        }
-
-        public class DynamicTableResult
-        {
-            public int totalCount { get; set; }
-            public List<Dictionary<string, object?>>? data { get; set; }
-            public Dictionary<string, Dictionary<string, string>>? lookupMapData { get; set; }
-        }
-
-        private async Task<string?> ResolveRealTableNameAsync(string dictTableName)
-        {
+            var list = new List<ItemCustButtonRow>();
             var cs = _ctx.Database.GetConnectionString();
             await using var conn = new SqlConnection(cs);
             await conn.OpenAsync();
 
             const string sql = @"
-SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
-  FROM CURdTableName WITH (NOLOCK)
- WHERE TableName = @tbl";
+SELECT ItemId, SerialNum, ButtonName,
+       CustCaption, CustHint,
+       bVisible, bNeedNum, bNeedInEdit, DesignType,
+       OCXName, CoClassName, SpName, ExecSpName,
+       SearchTemplate, MultiSelectDD, ReplaceExists, DialogCaption, AllowSelCount
+  FROM CURdOCXItemCustButton WITH (NOLOCK)
+ WHERE ItemId = @itemId
+ ORDER BY SerialNum, ButtonName;";
 
             await using var cmd = new SqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("@tbl", dictTableName ?? string.Empty);
-            var result = await cmd.ExecuteScalarAsync();
-            return result == null || result == DBNull.Value ? null : result.ToString();
-        }
+            cmd.Parameters.AddWithValue("@itemId", itemId ?? string.Empty);
 
-        private static string GetDictValue(Dictionary<string, object?> dict, string field)
-        {
-            if (dict == null) return string.Empty;
-            var hit = dict.FirstOrDefault(kv => kv.Key.Equals(field, StringComparison.OrdinalIgnoreCase));
-            return hit.Equals(default(KeyValuePair<string, object?>)) ? string.Empty : hit.Value?.ToString() ?? string.Empty;
+            await using var rd = await cmd.ExecuteReaderAsync(CommandBehavior.CloseConnection);
+            while (await rd.ReadAsync())
+            {
+                var visible = TryToInt(rd["bVisible"]);
+                if (visible.HasValue && visible.Value == 0) continue;
+
+                list.Add(new ItemCustButtonRow
+                {
+                    ItemId = rd["ItemId"]?.ToString() ?? string.Empty,
+                    SerialNum = TryToInt(rd["SerialNum"]),
+                    ButtonName = rd["ButtonName"]?.ToString() ?? string.Empty,
+                    Caption = rd["CustCaption"]?.ToString() ?? string.Empty,
+                    Hint = rd["CustHint"]?.ToString() ?? string.Empty,
+                    OCXName = rd["OCXName"]?.ToString() ?? string.Empty,
+                    CoClassName = rd["CoClassName"]?.ToString() ?? string.Empty,
+                    SpName = rd["SpName"]?.ToString() ?? string.Empty,
+                    ExecSpName = rd["ExecSpName"]?.ToString() ?? string.Empty,
+                    SearchTemplate = rd["SearchTemplate"]?.ToString() ?? string.Empty,
+                    MultiSelectDD = rd["MultiSelectDD"]?.ToString() ?? string.Empty,
+                    ReplaceExists = TryToInt(rd["ReplaceExists"]),
+                    DialogCaption = rd["DialogCaption"]?.ToString() ?? string.Empty,
+                    AllowSelCount = TryToInt(rd["AllowSelCount"]),
+                    bNeedNum = TryToInt(rd["bNeedNum"]),
+                    bNeedInEdit = TryToInt(rd["bNeedInEdit"]),
+                    DesignType = TryToInt(rd["DesignType"])
+                });
+            }
+
+            return list;
         }
 
         private static int? TryToInt(object? o)

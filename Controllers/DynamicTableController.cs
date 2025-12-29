@@ -325,12 +325,46 @@ SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, c.COLUMN_DEFAULT
                     }
                 }
 
-                // lookup map（失敗不要影響主要資料回傳）
+                // lookup（失敗不要影響主要資料回傳）
                 Dictionary<string, Dictionary<string, string>> lookupMapData = new();
                 try
                 {
                     var tableDictService = new TableDictionaryService(_ctx);
                     var lookupMaps = tableDictService.GetOCXLookups(dictTable);
+
+                    // 1) 補上 OCX Lookup 的「非實體顯示欄位」（第三階子明細會用到）
+                    if (lookupMaps.Count > 0)
+                    {
+                        foreach (var row in result)
+                        {
+                            foreach (var map in lookupMaps)
+                            {
+                                if (map == null || string.IsNullOrWhiteSpace(map.FieldName)) continue;
+
+                                // 若實體欄位本來就存在，避免覆寫
+                                if (row.ContainsKey(map.FieldName)) continue;
+
+                                static string ToKey(object? v) => v == null || v == DBNull.Value ? "" : v.ToString()?.Trim() ?? "";
+
+                                var key = "";
+                                if (!string.IsNullOrWhiteSpace(map.KeyFieldName) && row.TryGetValue(map.KeyFieldName, out var keyFieldVal))
+                                    key = ToKey(keyFieldVal);
+                                if (string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(map.KeySelfName) && row.TryGetValue(map.KeySelfName, out var keySelfVal))
+                                    key = ToKey(keySelfVal);
+                                if (string.IsNullOrWhiteSpace(key) && row.TryGetValue(map.FieldName, out var rawVal))
+                                    key = ToKey(rawVal);
+
+                                var display = "";
+                                if (!string.IsNullOrWhiteSpace(key) && map.LookupValues != null && map.LookupValues.TryGetValue(key, out var dv) && dv != null)
+                                    display = dv;
+
+                                // 即使沒找到，也補空字串，避免前端因第一筆缺值而不產生欄位
+                                row[map.FieldName] = display;
+                            }
+                        }
+                    }
+
+                    // 2) 舊版回傳 lookupMapData（其他頁面可能仍在用）
                     lookupMapData = LookupDisplayHelper.BuildLookupDisplayMap(
                         result,
                         lookupMaps,
@@ -470,30 +504,72 @@ SELECT TOP (@top) {selectCols}
  WHERE {Esc("PaperNum")} = @paperNum
  ORDER BY {orderBy};";
 
-            try
-            {
-                await using var cmd = new SqlCommand(sql, conn);
-                cmd.Parameters.AddWithValue("@top", top);
-                cmd.Parameters.AddWithValue("@paperNum", paperNum);
-
-                var list = new List<Dictionary<string, object?>>();
-                await using var rd = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess);
-                while (await rd.ReadAsync())
+                try
                 {
-                    var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-                    for (var i = 0; i < rd.FieldCount; i++)
-                    {
-                        var name = rd.GetName(i);
-                        row[name] = rd.IsDBNull(i) ? null : rd.GetValue(i);
-                    }
-                    list.Add(row);
-                }
+                    await using var cmd = new SqlCommand(sql, conn);
+                    cmd.Parameters.AddWithValue("@top", top);
+                    cmd.Parameters.AddWithValue("@paperNum", paperNum);
 
-                return Ok(list);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "ByPaperNum failed for {DictTable}({RealTable}) paperNum={PaperNum}", dictTable, realTable, paperNum);
+                    var list = new List<Dictionary<string, object?>>();
+                    await using var rd = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess);
+                    while (await rd.ReadAsync())
+                    {
+                        var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                        for (var i = 0; i < rd.FieldCount; i++)
+                        {
+                            var name = rd.GetName(i);
+                            row[name] = rd.IsDBNull(i) ? null : rd.GetValue(i);
+                        }
+                        list.Add(row);
+                    }
+
+                    // 補上 OCX Lookup 的「非實體顯示欄位」（例如 MatName/StatusName）
+                    // 讓前端 (_MultiTabDetail) 可直接顯示，不必依賴實體表欄位存在。
+                    try
+                    {
+                        var tableDictService = new TableDictionaryService(_ctx);
+                        var lookupMaps = tableDictService.GetOCXLookups(dictTable);
+                        if (lookupMaps.Count > 0)
+                        {
+                            foreach (var row in list)
+                            {
+                                foreach (var map in lookupMaps)
+                                {
+                                    if (map == null || string.IsNullOrWhiteSpace(map.FieldName)) continue;
+
+                                    // 若該顯示欄位本來就存在於實體表，前面 safeCols 已會選出，這裡不要覆寫
+                                    if (existingCols.Contains(map.FieldName)) continue;
+
+                                    static string ToKey(object? v) => v == null || v == DBNull.Value ? "" : v.ToString()?.Trim() ?? "";
+
+                                    var key = "";
+                                    if (!string.IsNullOrWhiteSpace(map.KeyFieldName) && row.TryGetValue(map.KeyFieldName, out var keyFieldVal))
+                                        key = ToKey(keyFieldVal);
+                                    if (string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(map.KeySelfName) && row.TryGetValue(map.KeySelfName, out var keySelfVal))
+                                        key = ToKey(keySelfVal);
+                                    if (string.IsNullOrWhiteSpace(key) && row.TryGetValue(map.FieldName, out var rawVal))
+                                        key = ToKey(rawVal);
+
+                                    var display = "";
+                                    if (!string.IsNullOrWhiteSpace(key) && map.LookupValues != null && map.LookupValues.TryGetValue(key, out var dv) && dv != null)
+                                        display = dv;
+
+                                    // 無論是否找到，都補一個 key，確保前端能產生欄位（避免第一列缺值導致欄位被吃掉）
+                                    row[map.FieldName] = display;
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "ByPaperNum: build OCX lookup display failed for {DictTable}", dictTable);
+                    }
+
+                    return Ok(list);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "ByPaperNum failed for {DictTable}({RealTable}) paperNum={PaperNum}", dictTable, realTable, paperNum);
                 return BadRequest($"ByPaperNum 失敗: {ex.Message}");
             }
         }

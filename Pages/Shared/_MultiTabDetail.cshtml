@@ -33,7 +33,7 @@
     </ul>
 
     <!-- Tab 內容區 -->
-    <div class="tab-content mt-3">
+    <div class="tab-content mt-0">
         @for (int i = 0; i < tabs.Length; i++)
         {
             var tab = tabs[i];
@@ -63,6 +63,27 @@
     const loadedTabs = new Set();
     const fieldDicts = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(tabFieldDicts));
     const tabsData = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(tabs));
+    window._multiTabTabs = tabsData;
+    window._multiTabSelectedRows = window._multiTabSelectedRows || {};
+
+    function getHeaderEditState() {
+        if (typeof window.__headerIsEdit === 'boolean') return window.__headerIsEdit;
+        const btn = document.getElementById('btnViewEditToggle');
+        return !!btn && (btn.textContent || '').trim() === '保留';
+    }
+
+    function applyMultiTabEditMode(isEdit) {
+        const effectiveEdit = (typeof isEdit === 'boolean') ? isEdit : getHeaderEditState();
+        const canEdit = !!effectiveEdit && allowEdit;
+        document.querySelectorAll('.multi-tab-detail .erp-table .cell-view')
+            .forEach(el => el.classList.toggle('d-none', canEdit));
+        document.querySelectorAll('.multi-tab-detail .erp-table .cell-edit')
+            .forEach(el => el.classList.toggle('d-none', !canEdit));
+    }
+
+    window.addEventListener('headerEditModeChanged', (e) => {
+        applyMultiTabEditMode(!!(e?.detail?.isEdit));
+    });
 
     function cleanTableName(t) {
         return (t || '').toString().replace(/^dbo\./i, '').trim().toLowerCase();
@@ -99,7 +120,8 @@
                 if (!field) return;
                 map.set(field.toLowerCase(), {
                     dataType: (r.dataType || r.DataType || '').toString(),
-                    formatStr: (r.formatStr || r.FormatStr || '').toString()
+                    formatStr: (r.formatStr || r.FormatStr || '').toString(),
+                    comboStyle: Number(r.comboStyle ?? r.ComboStyle ?? 0)
                 });
             });
             DICT_META_CACHE.set(tn, map);
@@ -118,6 +140,24 @@
             .replace(/>/g, '&gt;')
             .replace(/\"/g, '&quot;')
             .replace(/'/g, '&#39;');
+    }
+
+    function extractRowData(tr) {
+        try {
+            if (!tr) return null;
+            const obj = {};
+            tr.querySelectorAll('input.cell-edit[data-field]').forEach(inp => {
+                const f = (inp.dataset.field || '').toString();
+                if (!f) return;
+                if (inp.type === 'checkbox') obj[f] = inp.checked ? '1' : '0';
+                else obj[f] = inp.value;
+            });
+            if (tr.dataset && tr.dataset.paperNum && obj.PaperNum === undefined) obj.PaperNum = tr.dataset.paperNum;
+            if (tr.dataset && tr.dataset.item && obj.Item === undefined) obj.Item = tr.dataset.item;
+            return obj;
+        } catch {
+            return null;
+        }
     }
 
     function pad2(n) { return String(n).padStart(2, '0'); }
@@ -214,6 +254,27 @@
                 if (idx >= 0) applyColumnWidth(table, ths, idx, w);
             });
         } catch {}
+    }
+
+    const DETAIL_DEFAULTS_CACHE = new Map(); // tn -> defaults
+    async function fetchDetailDefaults(dictTable) {
+        const tn = cleanTableName(dictTable);
+        if (!tn) return {};
+        if (DETAIL_DEFAULTS_CACHE.has(tn)) return DETAIL_DEFAULTS_CACHE.get(tn);
+        try {
+            const res = await fetch(`/api/OrderHeaderApi/DetailDefaults?table=${encodeURIComponent(tn)}`);
+            if (!res.ok) {
+                DETAIL_DEFAULTS_CACHE.set(tn, {});
+                return {};
+            }
+            const data = await res.json();
+            const defs = data?.defaults || {};
+            DETAIL_DEFAULTS_CACHE.set(tn, defs);
+            return defs;
+        } catch {
+            DETAIL_DEFAULTS_CACHE.set(tn, {});
+            return {};
+        }
     }
 
     // 欄寬拖曳狀態（全頁共用一次，避免每個 tab 重複掛 document 事件）
@@ -368,23 +429,25 @@
         const existingAlerts = container.querySelectorAll('.alert');
         existingAlerts.forEach(a => a.remove());
 
-        if (!Array.isArray(data) || data.length === 0) {
-            container.insertAdjacentHTML('beforeend', '<div class="alert alert-info">無資料</div>');
-            return;
-        }
+        const rows = Array.isArray(data) ? data : [];
 
         const dict = fieldDicts[tabId] || {};
         const dictTable = getDictTableOfTab(container, tabId);
+        const dictKey = cleanTableName(dictTable);
+        window._detailFieldDicts = window._detailFieldDicts || {};
+        if (dictKey) {
+            window._detailFieldDicts[dictKey] = dict;
+        }
         const metaMap = await fetchDictMeta(dictTable);
 
 
 
         // 只顯示字典中有的欄位（Visible == 1 的欄位）
         // 如果字典為空，則顯示所有欄位（向後兼容）
-        const allFields = Object.keys(data[0]);
+        const allFields = rows.length > 0 ? Object.keys(rows[0]) : [];
 
-        const fields = Object.keys(dict).length > 0
-            ? Object.keys(dict).filter(f => allFields.includes(f))  // 只顯示字典中且資料有的欄位
+        let fields = Object.keys(dict).length > 0
+            ? Object.keys(dict).filter(f => (allFields.length ? allFields.includes(f) : true))
             : allFields;  // 如果沒有字典，顯示所有欄位
 
 
@@ -392,6 +455,8 @@
             container.insertAdjacentHTML('beforeend', '<div class="alert alert-warning">沒有可顯示的欄位</div>');
             return;
         }
+
+        const defaults = await fetchDetailDefaults(dictTable);
 
         // 建立表格 - 使用 erp-table 樣式
         let html = '<div class="erp-table-wrapper">';
@@ -419,29 +484,92 @@
         });
         html += '</tr></thead><tbody>';
 
-        // 表身
-        data.forEach((row, index) => {
+        const renderRow = (row, index, options) => {
+            const opts = options || {};
+            const isAdded = opts.isAdded === true;
             const paperNum = row.PaperNum || row.paperNum || '';
-            const item = row.Item || row.item || index + 1;
-            html += `<tr data-paper-num="${paperNum}" data-item="${item}" data-state="unchanged">`;
+            const item = (row.Item ?? row.item);
+            const itemVal = item == null ? (index + 1) : item;
+            const state = opts.state || (isAdded ? "added" : "unchanged");
+            const selClass = opts.selected ? " row-selected" : (isAdded ? " row-selected" : "");
+            const viewClass = "cell-view";
+            const editClass = "cell-edit d-none";
+            html += `<tr data-paper-num="${paperNum}" data-item="${itemVal}" data-state="${state}" class="${selClass.trim()}">`;
             fields.forEach(field => {
                 const raw = row[field] ?? '';
                 const meta = metaMap.get(field.toLowerCase());
                 const value = formatCellValue(raw, meta);
-                // ✅ 雙元素：顯示模式 + 編輯模式
-                html += `<td>
-                    <span class="cell-view">${escapeHtml(value)}</span>
-                    <input type="text"
-                           class="cell-edit d-none"
-                           data-field="${field}"
-                           value="${escapeHtml(raw)}">
-                </td>`;
+                // ? 雙元素：顯示模式 + 編輯模式
+                  html += `<td>
+                      <span class="${viewClass}" data-init-view="${escapeHtml(value)}">${escapeHtml(value)}</span>
+                      <input type="text"
+                             class="${editClass}"
+                             data-field="${field}"
+                             data-init="${escapeHtml(raw)}"
+                             value="${escapeHtml(raw)}">
+                  </td>`;
             });
             html += '</tr>';
-        });
+        };
+
+        if (rows.length > 0) {
+            rows.forEach((row, index) => renderRow(row, index, { isAdded: false }));
+        } else {
+            const blank = {};
+            blank.Item = "";
+            renderRow(blank, 0, { state: "empty", selected: false, isAdded: false });
+            try {
+                window._multiTabSelectedRows = window._multiTabSelectedRows || {};
+                window._multiTabSelectedRows[tabId] = blank;
+                window.dispatchEvent(new CustomEvent('multiTabRowSelected', { detail: { tabId, rowData: blank } }));
+            } catch { }
+        }
 
         html += '</tbody></table></div>';
         container.insertAdjacentHTML('beforeend', html);
+        applyMultiTabEditMode(!!window.__headerIsEdit);
+
+        // 依辭典設定把「勾選框(ComboStyle=1)」欄位轉成 checkbox 顯示/編輯
+        (function applyCheckboxCells() {
+            try {
+                const wrapper = container.querySelector('.erp-table-wrapper');
+                const table = wrapper?.querySelector('table.erp-table');
+                if (!table) return;
+
+                const checkboxIndexes = [];
+                fields.forEach((f, idx) => {
+                    const meta = metaMap.get(String(f).toLowerCase()) || {};
+                    if (Number(meta.comboStyle || 0) === 1) checkboxIndexes.push(idx);
+                });
+                if (!checkboxIndexes.length) return;
+
+                const rows = Array.from(table.querySelectorAll('tbody tr'));
+                rows.forEach(tr => {
+                    const tds = Array.from(tr.querySelectorAll('td'));
+                    checkboxIndexes.forEach(idx => {
+                        const td = tds[idx];
+                        if (!td) return;
+                        const edit = td.querySelector('input.cell-edit[data-field]');
+                        const view = td.querySelector('.cell-view');
+                        if (!edit || !view) return;
+                        if (edit.type === 'checkbox') return;
+
+                        const raw = (edit.value ?? '').toString().trim().toLowerCase();
+                        const checked = raw === '1' || raw === 'true' || raw === 'y' || raw === 'yes';
+
+                        view.innerHTML = `<input type="checkbox" class="cell-view-checkbox" disabled ${checked ? 'checked' : ''}>`;
+
+                        const chk = document.createElement('input');
+                        chk.type = 'checkbox';
+                        chk.className = edit.className;
+                        chk.dataset.field = edit.dataset.field || '';
+                        chk.dataset.init = edit.dataset.init || '';
+                        chk.checked = checked;
+                        edit.replaceWith(chk);
+                    });
+                });
+            } catch { }
+        })();
 
         const table = container.querySelector('.erp-table-wrapper table.erp-table');
         if (table) {
@@ -462,17 +590,48 @@
             initColumnResize(table, dictTable, fields);
         }
 
-        // 綁定列選取事件
+        // 綁定列選取事件（委派到 tbody，確保點擊/編輯儲存格也能選取整列）
         const tableWrapper = container.querySelector('.erp-table-wrapper');
         if (tableWrapper) {
-            tableWrapper.querySelectorAll('tr').forEach(tr => {
-                tr.addEventListener('click', function() {
-                    // 移除其他列的選取狀態
+            const tbody = tableWrapper.querySelector('tbody');
+            if (tbody) {
+                const selectRow = (tr) => {
+                    if (!tr) return;
                     tableWrapper.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
-                    // 選取當前列
-                    this.classList.add('row-selected');
+                    tr.classList.add('row-selected');
+                    try {
+                        const rowData = extractRowData(tr);
+                        if (rowData) {
+                            window._multiTabSelectedRows[tabId] = rowData;
+                        }
+                        window.dispatchEvent(new CustomEvent('multiTabRowSelected', { detail: { tabId, rowData } }));
+                    } catch {}
+                };
+                tbody.addEventListener('click', (e) => {
+                    const tr = e.target.closest('tr');
+                    if (tr && tbody.contains(tr)) selectRow(tr);
                 });
-            });
+                tbody.addEventListener('focusin', (e) => {
+                    const tr = e.target.closest('tr');
+                    if (tr && tbody.contains(tr)) selectRow(tr);
+                });
+            }
+
+            // 需要第三階聯動時：預設自動選取第一筆（例如 Paper3L）
+            if (window.__multiTabAutoSelectFirstRow) {
+                const hasSelected = !!tableWrapper.querySelector('tbody tr.row-selected');
+                const first = tbody ? tbody.querySelector('tr') : null;
+                if (!hasSelected && first) {
+                    first.classList.add('row-selected');
+                    try {
+                        const rowData = extractRowData(first);
+                        if (rowData) {
+                            window._multiTabSelectedRows[tabId] = rowData;
+                        }
+                        window.dispatchEvent(new CustomEvent('multiTabRowSelected', { detail: { tabId, rowData } }));
+                    } catch {}
+                }
+            }
         }
     }
 
@@ -570,6 +729,24 @@
 
     // ========== 新增/刪除列功能 ==========
 
+    function isMultiTabBlankRow(tr) {
+        if (!tr) return false;
+        const inputs = Array.from(tr.querySelectorAll('.cell-edit[data-field]'));
+        if (!inputs.length) return false;
+        let hasValue = false;
+        inputs.forEach(inp => {
+            const f = (inp.dataset.field || '').toString().toLowerCase();
+            if (f === 'papernum' || f === 'item') return;
+            const val = (inp.value ?? '').toString().trim();
+            if (val === '') return;
+            if (/^[-–—]+$/.test(val)) return;
+            const num = Number(val);
+            if (Number.isFinite(num) && num === 0) return;
+            hasValue = true;
+        });
+        return !hasValue;
+    }
+
     // 使用事件委派綁定新增按鈕（因為按鈕是動態生成的）
     document.addEventListener('click', async function(e) {
         if (!allowEdit) return;
@@ -607,6 +784,19 @@
             return;
         }
 
+        const pendingRow = tbody.querySelector('tr[data-state="added"]');
+        const blankRow = pendingRow || Array.from(tbody.querySelectorAll('tr')).find(isMultiTabBlankRow);
+        if (blankRow) {
+            tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+            blankRow.classList.add('row-selected');
+            blankRow.dataset.state = 'added';
+            blankRow.querySelectorAll('.cell-view').forEach(el => el.classList.add('d-none'));
+            blankRow.querySelectorAll('.cell-edit').forEach(el => el.classList.remove('d-none'));
+            const first = blankRow.querySelector('.cell-edit');
+            first?.focus();
+            return;
+        }
+
         // 計算新的 Item 編號
         const rows = tbody.querySelectorAll('tr');
         let maxItem = 0;
@@ -620,13 +810,14 @@
         let html = `<tr data-paper-num="${paperNum}" data-item="${newItem}" data-state="added" class="row-selected">`;
         fields.forEach(field => {
             // ✅ 雙元素：顯示模式 + 編輯模式
-            html += `<td>
-                <span class="cell-view"></span>
-                <input type="text"
-                       class="cell-edit d-none"
-                       data-field="${field}"
-                       value="">
-            </td>`;
+              html += `<td>
+                  <span class="cell-view" data-init-view=""></span>
+                  <input type="text"
+                         class="cell-edit d-none"
+                         data-field="${field}"
+                         data-init=""
+                         value="">
+              </td>`;
         });
         html += '</tr>';
 
@@ -641,6 +832,10 @@
         newRow.addEventListener('click', function() {
             tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
             this.classList.add('row-selected');
+            try {
+                const rowData = extractRowData(this);
+                window.dispatchEvent(new CustomEvent('multiTabRowSelected', { detail: { tabId, rowData } }));
+            } catch {}
         });
 
 
@@ -757,6 +952,49 @@
             });
         }
     });
+
+    function normalizeBool(val) {
+        const s = (val ?? '').toString().trim().toLowerCase();
+        return s === '1' || s === 'true' || s === 'y' || s === 'yes';
+    }
+
+    function resetMultiTabEdits() {
+        document.querySelectorAll('.multi-tab-detail table.erp-table').forEach(table => {
+            const rows = Array.from(table.querySelectorAll('tbody tr'));
+            rows.forEach(tr => {
+                const state = (tr.dataset.state || '').toString().toLowerCase();
+                if (state === 'added') {
+                    tr.remove();
+                    return;
+                }
+
+                tr.dataset.state = 'unchanged';
+                tr.querySelectorAll('td').forEach(td => {
+                    const edit = td.querySelector('.cell-edit[data-field]');
+                    const view = td.querySelector('.cell-view');
+                    if (!edit) return;
+
+                    const init = edit.dataset.init ?? '';
+                    if (edit.type === 'checkbox') {
+                        const checked = normalizeBool(init);
+                        edit.checked = checked;
+                        const viewChk = view?.querySelector('input.cell-view-checkbox');
+                        if (viewChk) viewChk.checked = checked;
+                    } else {
+                        edit.value = init;
+                        if (view) {
+                            view.textContent = view.dataset.initView ?? init;
+                        }
+                    }
+                });
+
+                tr.querySelectorAll('.cell-view').forEach(el => el.classList.remove('d-none'));
+                tr.querySelectorAll('.cell-edit').forEach(el => el.classList.add('d-none'));
+            });
+        });
+    }
+
+    window.resetMultiTabEdits = resetMultiTabEdits;
 })();
 </script>
 
@@ -764,41 +1002,51 @@
 .multi-tab-detail {
     /* 單頭/單身間距：縮小上方留白 */
     padding: .05rem 0 0;
+    padding-left: var(--detail-left-pad);
+    max-width: var(--detail-max-width);
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .multi-tab-detail .nav-tabs {
-    border-bottom: 2px solid #dee2e6;
+    border-bottom: 1px solid #dee2e6;
+    margin-bottom: 0;
 }
 
 .multi-tab-detail .nav-link {
-    color: #495057;
-    border: none;
-    border-bottom: 3px solid transparent;
-    padding: 0.75rem 1.5rem;
-    transition: all 0.3s;
+    color: #235eb8;
+    border: 1px solid transparent;
+    border-radius: 8px 8px 0 0;
+    padding: var(--tab-pad-y) var(--tab-pad-x);
+    background: transparent;
+    transition: color 0.2s ease-in-out, background 0.2s ease-in-out, border-color 0.2s ease-in-out;
+    font-size: var(--field-label-size);
+    font-weight: 500;
 }
 
 .multi-tab-detail .nav-link:hover {
-    background-color: #f8f9fa;
-    border-bottom-color: #6c757d;
+    background-color: #f5f7fb;
+    border-color: #dee2e6 #dee2e6 #fff #dee2e6;
 }
 
 .multi-tab-detail .nav-link.active {
-    color: #0d6efd;
-    background-color: transparent;
-    border-bottom-color: #0d6efd;
-    font-weight: 600;
+    color: #124d8b;
+    background-color: #ffffff;
+    border-color: #bdd2f7 #bdd2f7 #fff #bdd2f7;
+    box-shadow: 0 2px 6px 0 #e4ecf7;
+    font-weight: 700;
 }
 
 .multi-tab-detail .table-container {
-    margin-top: .2rem;
+    margin-top: 0;
 }
 
 /* erp-table 完整樣式 */
 .multi-tab-detail .erp-table-wrapper {
     background: #fff;
     box-shadow: 0 4px 18px 0 #c3d4e6;
-    max-width: 1400px;
+    max-width: 100%;
+    width: 100%;
     overflow-x: auto;
     padding: 8px !important;
     border-radius: 0 0 13px 13px;
@@ -812,7 +1060,7 @@
     display: inline-table;
     border-collapse: separate;
     border-spacing: 0;
-    font-size: 1.06em;
+    font-size: var(--field-value-size);
     background: #fff;
     table-layout: fixed; /* 欄寬拖曳需固定布局 */
 }
@@ -841,8 +1089,8 @@
 .multi-tab-detail .erp-table th {
     color: #124d8b;
     font-weight: 700;
-    font-size: 1.05em;
-    letter-spacing: 1px;
+    font-size: var(--field-label-size);
+    letter-spacing: .5px;
     background: #e7ecf3;
     position: sticky;
     top: 0;
@@ -916,6 +1164,11 @@ body.resizing { cursor: col-resize !important; }
     background: #fffef0 !important;  /* ← focus 時淡黃色背景 */
 }
 
+.multi-tab-detail .cell-view-checkbox{
+    transform: scale(1.05);
+    pointer-events: none;
+}
+
 /* 選取列的樣式 */
 .multi-tab-detail .erp-table tbody tr {
     cursor: pointer;
@@ -948,3 +1201,4 @@ body.resizing { cursor: col-resize !important; }
     background-color: #e7f3ff !important;
 }
 </style>
+

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Helpers;
 using PcbErpApi.Models;
@@ -121,7 +122,8 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 Visible = true,
                 LookupResultField = x.LookupResultField,
                 DataType = x.DataType,
-                FormatStr = x.FormatStr
+                FormatStr = x.FormatStr,
+                ComboStyle = x.ComboStyle
             }).ToList();
 
         // 分頁資訊：根據 iShowWhere 分群
@@ -150,7 +152,8 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 FormatStr = x.FormatStr,
                 LookupTable = x.LookupTable,
                 LookupKeyField = x.LookupKeyField,
-                LookupResultField = x.LookupResultField
+                LookupResultField = x.LookupResultField,
+                ComboStyle = x.ComboStyle
             }).ToList();
 
         // Lookup Map 資料 (單身 + 單頭)
@@ -168,6 +171,15 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
         // 單頭 lookup 值轉換
         var headerLookupDict = LookupDisplayHelper.BuildHeaderLookupMap(HeaderData, headerLookupMaps);
         ViewData["HeaderLookupMap"] = headerLookupDict;
+
+        var headerDisplayLabel = await _context.CurdTableNames
+            .AsNoTracking()
+            .Where(x => x.TableName == HeaderTableName)
+            .Select(x => string.IsNullOrWhiteSpace(x.DisplayLabel) ? x.TableName : x.DisplayLabel)
+            .FirstOrDefaultAsync();
+        ViewData["HeaderTableDisplayLabel"] = string.IsNullOrWhiteSpace(headerDisplayLabel)
+            ? HeaderTableName
+            : headerDisplayLabel;
         
 
         // 取得查詢欄位設定（cache/service 取最快）
