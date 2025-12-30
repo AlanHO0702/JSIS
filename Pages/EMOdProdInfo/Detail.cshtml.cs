@@ -42,7 +42,7 @@ namespace PcbErpApi.Pages.EMOdProdInfo
 
         public async Task<IActionResult> OnGetAsync()
         {
-            ViewData["Title"] = "工程資料維護 - 詳細";
+            ViewData["Title"] = "EMO00004 工程資料維護";
 
             try
             {
@@ -75,7 +75,7 @@ namespace PcbErpApi.Pages.EMOdProdInfo
                 ExtraTabs = BuildExtraTabs();
                 MasterTabs = BuildMasterTabs();
 
-                // 層別資料 API（EMOdProdLayer）
+                // 層別資料 API（EMOdProdLayer）- 用於左側層別清單
                 if (MasterKeyValues.Count > 0)
                 {
                     LayerPressApi = BuildByKeysApi("EMOdProdLayer", MasterKeyValues);
@@ -219,9 +219,9 @@ namespace PcbErpApi.Pages.EMOdProdInfo
                 new DetailTab(
                     "pressmethod",
                     "壓合方式",
-                    "EMOdPressMatDtl",
-                    "EMOdPressMatDtl",
-                    new [] { "PartNum", "Revision" }
+                    "EMOdProdTier",
+                    "EMOdProdTier",
+                    new [] { "PartNum", "Revision", "LayerId" }
                 ),
                 // 途程內容
                 new DetailTab(
@@ -229,7 +229,7 @@ namespace PcbErpApi.Pages.EMOdProdInfo
                     "途程內容",
                     "EMOdLayerRoute",
                     "EMOdLayerRoute",
-                    new [] { "PartNum", "Revision" }
+                    new [] { "PartNum", "Revision", "LayerId" }
                 ),
                 // 產品工程圖
                 new DetailTab(

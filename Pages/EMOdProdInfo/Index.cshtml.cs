@@ -32,7 +32,7 @@ namespace PcbErpApi.Pages.EMOdProdInfo
         }
 
         public string ItemId => "EMO00004";
-        public string PageTitle => "工程資料維護";
+        public string PageTitle => "EMO00004 工程資料維護";
         public string TableName { get; private set; } = DataTable;
         public string DictTableName { get; private set; } = DictTable;
         public int PageNumber { get; private set; } = 1;

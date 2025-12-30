@@ -35,21 +35,21 @@ else
         <!-- 左側：層別面板 + 內部資料 -->
         <div style="width: 180px; flex-shrink: 0;">
             <!-- 層別面板 -->
-            <div class="card shadow-sm border-0 rounded mb-2">
-                <div class="card-header bg-light fw-bold text-center py-2" style="border-bottom: 2px solid #dee2e6;">
+            <div class="card shadow-sm border-0 rounded mb-2" style="height: 350px; display: flex; flex-direction: column;">
+                <div class="card-header bg-light fw-bold text-center py-2" style="border-bottom: 2px solid #dee2e6; flex-shrink: 0;">
                     層別
                 </div>
-                <div class="card-body p-0" id="layer-list" style="max-height: 400px; overflow-y: auto;">
+                <div class="card-body p-0" id="layer-list" style="flex: 1; overflow-y: auto; overflow-x: hidden;">
                     <div class="text-center text-muted py-3">載入中...</div>
                 </div>
             </div>
 
             <!-- 內部資料 -->
-            <div class="card shadow-sm border-0 rounded">
-                <div class="card-header text-white fw-bold py-2" style="background-color: #17a2b8;">
+            <div class="card shadow-sm border-0 rounded" style="height: 250px; display: flex; flex-direction: column;">
+                <div class="card-header text-white fw-bold py-2" style="background-color: #17a2b8; flex-shrink: 0;">
                     內部資料
                 </div>
-                <div class="card-body p-2" id="submit-history-container" style="max-height: 300px; overflow-y: auto; font-size: 12px;">
+                <div class="card-body p-2" id="submit-history-container" style="flex: 1; overflow-y: auto; font-size: 12px;">
                     <div class="text-center text-muted py-2">載入中...</div>
                 </div>
             </div>
@@ -209,6 +209,86 @@ document.addEventListener('DOMContentLoaded', () => {
       .then(r => r.json());
   }
 
+  // 儲存層別資料
+  let layerData = [];
+
+  // 建立階層樹狀結構
+  function buildLayerTree(rows) {
+    // 建立 LayerId 到資料的映射
+    const layerMap = new Map();
+    rows.forEach(row => {
+      const layerId = (row.LayerId || row.layerid || '').trim();
+      layerMap.set(layerId, {
+        ...row,
+        children: []
+      });
+    });
+
+    // 建立父子關係
+    const rootNodes = [];
+    rows.forEach(row => {
+      const layerId = (row.LayerId || row.layerid || '').trim();
+      const aftLayerId = (row.AftLayerId || row.aftlayerid || '').trim();
+      const node = layerMap.get(layerId);
+
+      if (!aftLayerId || aftLayerId === '') {
+        // 根節點
+        rootNodes.push(node);
+      } else {
+        // 子節點，加到父節點的 children
+        const parentNode = layerMap.get(aftLayerId);
+        if (parentNode) {
+          parentNode.children.push(node);
+        } else {
+          // 找不到父節點，視為根節點
+          rootNodes.push(node);
+        }
+      }
+    });
+
+    return rootNodes;
+  }
+
+  // 遞迴渲染樹狀節點
+  function renderLayerNode(node, level = 0, isFirst = false) {
+    const layerId = (node.LayerId || node.layerid || '').trim();
+    const layerName = node.LayerName || node.layername || layerId;
+    const hasChildren = node.children && node.children.length > 0;
+    const degree = node.Degree || node.degree || 0;
+
+    // 縮排距離（每層 16px）
+    const indent = level * 16;
+
+    // 展開圖示（預設全展開）
+    const toggleIcon = hasChildren ? '▼' : '';
+    const isActive = isFirst && level === 0 ? 'active' : '';
+
+    // 預設全展開，所以 display 設為空字串（顯示）
+    const displayStyle = 'display: block;';
+
+    let html = `
+      <div class="layer-item ${isActive}"
+           data-layer-id="${layerId}"
+           data-layer-name="${layerName}"
+           data-level="${level}"
+           data-has-children="${hasChildren}"
+           data-expanded="true"
+           style="padding-left: ${indent + 12}px; ${displayStyle}">
+        ${toggleIcon ? `<span class="toggle-icon" style="margin-right: 4px; cursor: pointer; user-select: none;">${toggleIcon}</span>` : '<span style="margin-right: 14px;"></span>'}
+        <span class="layer-name">${layerName}</span>
+      </div>
+    `;
+
+    // 遞迴渲染子節點（預設全展開）
+    if (hasChildren) {
+      node.children.forEach((child, idx) => {
+        html += renderLayerNode(child, level + 1, false);
+      });
+    }
+
+    return html;
+  }
+
   // 載入層別資料
   function loadLayerPress() {
     const layerListEl = document.getElementById('layer-list');
@@ -225,49 +305,173 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        // 顯示層別清單
-        // 優先使用 LayerSeq (層序號)，或從 FromLayer 和 ToLayer 組合顯示（如 L1-6）
-        const html = rows.map((row, idx) => {
-          let layerName = '';
+        // 儲存層別資料供後續使用
+        layerData = rows;
 
-          // 嘗試不同的欄位組合
-          if (row.LayerSeq || row.layerseq) {
-            layerName = row.LayerSeq || row.layerseq;
-          } else if (row.LayerName || row.layername) {
-            layerName = row.LayerName || row.layername;
-          } else if ((row.FromLayer || row.fromlayer) && (row.ToLayer || row.tolayer)) {
-            const from = row.FromLayer || row.fromlayer;
-            const to = row.ToLayer || row.tolayer;
-            layerName = `L${from}-${to}`;
-          } else if (row.Layer || row.layer) {
-            layerName = row.Layer || row.layer;
-          } else {
-            layerName = `層${idx + 1}`;
-          }
+        // 建立樹狀結構
+        const tree = buildLayerTree(rows);
 
-          const isActive = idx === 0 ? 'active' : '';
-          return `
-            <div class="layer-item ${isActive}" data-layer-idx="${idx}">
-              ${layerName}
-            </div>
-          `;
-        }).join('');
+        // 渲染樹狀清單
+        let html = '';
+        tree.forEach((rootNode, idx) => {
+          html += renderLayerNode(rootNode, 0, idx === 0);
+        });
 
         layerListEl.innerHTML = html;
 
-        // 點擊層別項目
+        // 點擊層別項目（選中並載入資料）
         layerListEl.querySelectorAll('.layer-item').forEach(item => {
-          item.addEventListener('click', () => {
+          // 綁定點擊整個層別項目的事件
+          item.addEventListener('click', (e) => {
+            // 移除所有 active 狀態
             layerListEl.querySelectorAll('.layer-item').forEach(el => el.classList.remove('active'));
             item.classList.add('active');
-            // 可以在此處顯示該層別的詳細資料
+
+            // 取得選中的層別資料
+            const layerId = item.dataset.layerId;
+            const layerName = item.dataset.layerName;
+
+            // 觸發載入壓合明細資料
+            loadLayerPressDetail(layerId, layerName);
           });
+
+          // 綁定展開/收合事件（優先級更高）
+          const toggleIcon = item.querySelector('.toggle-icon');
+          if (toggleIcon) {
+            toggleIcon.addEventListener('click', (e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              toggleLayerNode(item);
+            });
+          }
         });
+
+        // 預設載入第一個層別的資料
+        if (rows.length > 0) {
+          const firstLayerId = (rows[0].LayerId || rows[0].layerid || '').trim();
+          const firstLayerName = rows[0].LayerName || rows[0].layername || '';
+          loadLayerPressDetail(firstLayerId, firstLayerName);
+        }
       })
       .catch(err => {
         console.error('Load layer press error:', err);
         layerListEl.innerHTML = '<div class="text-center text-danger py-3">載入失敗</div>';
       });
+  }
+
+  // 展開/收合層別節點
+  function toggleLayerNode(item) {
+    const layerId = item.dataset.layerId;
+    const isExpanded = item.dataset.expanded === 'true';
+    const level = parseInt(item.dataset.level || '0');
+    const toggleIcon = item.querySelector('.toggle-icon');
+
+    if (!toggleIcon) return;
+
+    // 切換展開狀態
+    const newExpanded = !isExpanded;
+    item.dataset.expanded = newExpanded;
+    toggleIcon.textContent = newExpanded ? '▼' : '▶';
+
+    // 遞迴顯示/隱藏子節點
+    function toggleChildren(parentLevel, shouldShow) {
+      let nextItem = item.nextElementSibling;
+
+      while (nextItem && nextItem.classList.contains('layer-item')) {
+        const nextLevel = parseInt(nextItem.dataset.level || '0');
+
+        // 只處理子節點
+        if (nextLevel <= parentLevel) {
+          break;
+        }
+
+        if (shouldShow) {
+          // 展開：顯示直接子節點
+          if (nextLevel === parentLevel + 1) {
+            nextItem.style.display = 'block';
+
+            // 如果這個子節點本身也是展開的，遞迴顯示它的子節點
+            const childExpanded = nextItem.dataset.expanded === 'true';
+            if (childExpanded) {
+              // 遞迴處理這個子節點的子節點
+              showExpandedDescendants(nextItem, nextLevel);
+            }
+          }
+        } else {
+          // 收合：隱藏所有子孫節點
+          nextItem.style.display = 'none';
+        }
+
+        nextItem = nextItem.nextElementSibling;
+      }
+    }
+
+    // 遞迴顯示所有展開狀態的子孫節點
+    function showExpandedDescendants(parentItem, parentLevel) {
+      let nextItem = parentItem.nextElementSibling;
+
+      while (nextItem && nextItem.classList.contains('layer-item')) {
+        const nextLevel = parseInt(nextItem.dataset.level || '0');
+
+        // 只處理子節點
+        if (nextLevel <= parentLevel) {
+          break;
+        }
+
+        // 顯示直接子節點
+        if (nextLevel === parentLevel + 1) {
+          nextItem.style.display = 'block';
+
+          // 如果這個子節點也是展開的，繼續遞迴
+          const childExpanded = nextItem.dataset.expanded === 'true';
+          if (childExpanded) {
+            showExpandedDescendants(nextItem, nextLevel);
+          }
+        }
+
+        nextItem = nextItem.nextElementSibling;
+      }
+    }
+
+    toggleChildren(level, newExpanded);
+  }
+
+  // 載入層別相關的資料（壓合明細、壓合方式、途程內容）
+  function loadLayerPressDetail(layerId, layerName) {
+    // 需要根據 LayerId 載入的頁籤列表
+    const layerTabs = [
+      { key: 'layerpress', table: 'EMOdLayerPress', dict: 'EMOdLayerPress', title: '壓合明細/替代料' },
+      { key: 'pressmethod', table: 'EMOdProdTier', dict: 'EMOdProdTier', title: '壓合方式' },
+      { key: 'layerroute', table: 'EMOdLayerRoute', dict: 'EMOdLayerRoute', title: '途程內容' }
+    ];
+
+    // 為每個頁籤載入資料
+    layerTabs.forEach(tab => {
+      // 建立查詢參數（使用 LayerId 來篩選）
+      const qs = new URLSearchParams();
+      qs.append('keyNames', 'PartNum');
+      qs.append('keyValues', currentMasterKeys.PartNum || currentMasterKeys.partnum || '');
+      qs.append('keyNames', 'Revision');
+      qs.append('keyValues', currentMasterKeys.Revision || currentMasterKeys.revision || '');
+      qs.append('keyNames', 'LayerId');
+      qs.append('keyValues', layerId);
+
+      const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tab.table)}&${qs.toString()}`;
+
+      Promise.all([
+        getDict(tab.dict),
+        fetch(url).then(r => r.json())
+      ]).then(([dict, rows]) => {
+        buildTable(tab.key, dict, rows);
+      }).catch(err => {
+        console.error(`Load ${tab.title} error:`, err);
+        const table = document.getElementById(`grid-${tab.key}`);
+        if (table) {
+          const tbody = table.querySelector('tbody');
+          if (tbody) tbody.innerHTML = `<tr><td colspan="100" class="text-center text-danger py-3">載入失敗: ${err.message}</td></tr>`;
+        }
+      });
+    });
   }
 
   // 載入送審歷史資料
@@ -538,6 +742,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const tableName = tabBtn.dataset.table;
     const dictName = tabBtn.dataset.dict;
+
+    // 特殊處理：這些頁籤由左側層別控制，不在此處載入
+    const layerControlledTabs = ['layerpress', 'pressmethod', 'layerroute'];
+    if (layerControlledTabs.includes(tabKey)) {
+      // 顯示提示訊息
+      const table = document.getElementById(`grid-${tabKey}`);
+      if (table) {
+        const tbody = table.querySelector('tbody');
+        if (tbody && tbody.querySelector('td')?.textContent.includes('請點選上方主檔資料')) {
+          tbody.innerHTML = '<tr><td colspan="100" class="text-center text-muted py-3">請點選左側層別以顯示對應資料</td></tr>';
+        }
+      }
+      return;
+    }
+
     const keyFields = (tabBtn.dataset.keyfields || '').split(',').filter(k => k.trim());
     const extraKeys = tabBtn.dataset.extraKeys || '';
 
@@ -750,11 +969,13 @@ document.addEventListener('DOMContentLoaded', () => {
 /* 層別項目樣式 */
 .layer-item {
   cursor: pointer;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-bottom: 1px solid #dee2e6;
   transition: all 0.15s ease;
-  text-align: center;
   font-size: 14px;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
 }
 
 .layer-item:hover {
@@ -768,9 +989,28 @@ document.addEventListener('DOMContentLoaded', () => {
   border-left: 4px solid #0056b3;
 }
 
-/* 確保層別面板不會太高 */
+.layer-item .toggle-icon {
+  display: inline-block;
+  width: 12px;
+  font-size: 10px;
+  color: #666;
+  transition: transform 0.2s ease;
+}
+
+.layer-item.active .toggle-icon {
+  color: white;
+}
+
+.layer-item .layer-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+/* 層別面板內的項目不換行 */
 #layer-list {
-  max-height: calc(100vh - 200px);
+  min-width: 180px;
 }
 </style>
 
