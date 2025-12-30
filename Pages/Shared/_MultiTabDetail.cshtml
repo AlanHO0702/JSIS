@@ -100,7 +100,9 @@
     }
 
     // Dict meta cache (datatype/format/width...)
-    const DICT_META_CACHE = new Map(); // tn -> Map(fieldLower -> { dataType, formatStr })
+    const DICT_META_CACHE = new Map(); // tn -> Map(fieldLower -> { dataType, formatStr, comboStyle })
+    const LOOKUP_META_CACHE = new Map(); // tn -> Map(fieldLower -> { table, key, result })
+    const LOOKUP_DATA_CACHE = new Map(); // tn -> Map(fieldLower -> Map(key -> label))
 
     async function fetchDictMeta(dictTable) {
         const tn = cleanTableName(dictTable);
@@ -133,6 +135,79 @@
         }
     }
 
+    async function fetchLookupMeta(dictTable) {
+        const tn = cleanTableName(dictTable);
+        if (!tn) return new Map();
+        if (LOOKUP_META_CACHE.has(tn)) return LOOKUP_META_CACHE.get(tn);
+        try {
+            const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(tn)}&lang=TW`);
+            if (!res.ok) {
+                const empty = new Map();
+                LOOKUP_META_CACHE.set(tn, empty);
+                return empty;
+            }
+            const rows = await res.json();
+            const map = new Map();
+            (rows || []).forEach(r => {
+                const field = (r.fieldName || r.FieldName || '').toString();
+                if (!field) return;
+                const table = (r.lookupTable || r.LookupTable || '').toString();
+                const key = (r.lookupKeyField || r.LookupKeyField || '').toString();
+                const result = (r.lookupResultField || r.LookupResultField || '').toString();
+                const ocxTable = (r.ocxLKTableName || r.OCXLKTableName || '').toString();
+                const ocxResult = (r.ocxLKResultName || r.OCXLKResultName || '').toString();
+                const ocxKeyField = (r.keyFieldName || r.KeyFieldName || '').toString();
+                const ocxKeySelf = (r.keySelfName || r.KeySelfName || '').toString();
+                if (table && key && result) {
+                    map.set(field.toLowerCase(), { field, table, key, result, keySelf: '', source: 'lookup' });
+                    return;
+                }
+                if (ocxTable && ocxKeyField && ocxResult) {
+                    map.set(field.toLowerCase(), { field, table: ocxTable, key: ocxKeyField, result: ocxResult, keySelf: ocxKeySelf, source: 'ocx' });
+                }
+            });
+            LOOKUP_META_CACHE.set(tn, map);
+            return map;
+        } catch {
+            const empty = new Map();
+            LOOKUP_META_CACHE.set(tn, empty);
+            return empty;
+        }
+    }
+
+    async function fetchLookupMaps(dictTable) {
+        const tn = cleanTableName(dictTable);
+        if (!tn) return new Map();
+        if (LOOKUP_DATA_CACHE.has(tn)) return LOOKUP_DATA_CACHE.get(tn);
+        const meta = await fetchLookupMeta(dictTable);
+        const fieldMap = new Map();
+        for (const [field, cfg] of meta.entries()) {
+            try {
+                const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(cfg.table)}&key=${encodeURIComponent(cfg.key)}&result=${encodeURIComponent(cfg.result)}`;
+                const res = await fetch(url);
+                if (!res.ok) continue;
+                const data = await res.json();
+                const map = new Map();
+                (data || []).forEach(row => {
+                    const key = row.key == null ? '' : String(row.key);
+                    if (key === '') return;
+                    const label = Object.keys(row)
+                        .filter(p => p.startsWith('result'))
+                        .map(p => row[p])
+                        .filter(v => v != null && typeof v !== 'object' && String(v).trim() !== '')
+                        .map(v => String(v))
+                        .join(' - ');
+                    const trimmed = key.trim();
+                    map.set(key, label || key);
+                    if (trimmed && trimmed !== key) map.set(trimmed, label || trimmed);
+                });
+                fieldMap.set(field, map);
+            } catch { }
+        }
+        LOOKUP_DATA_CACHE.set(tn, fieldMap);
+        return fieldMap;
+    }
+
     function escapeHtml(v) {
         return String(v ?? '')
             .replace(/&/g, '&amp;')
@@ -160,6 +235,15 @@
         }
     }
 
+    function normalizeFieldKey(k) { return (k || '').toString().trim().toLowerCase(); }
+
+    function getValueCaseInsensitive(obj, key) {
+        if (!obj || !key) return undefined;
+        const k = normalizeFieldKey(key);
+        const hitKey = Object.keys(obj).find(x => normalizeFieldKey(x) === k);
+        return hitKey ? obj[hitKey] : undefined;
+    }
+
     function pad2(n) { return String(n).padStart(2, '0'); }
 
     function tryParseDate(raw) {
@@ -181,10 +265,28 @@
         return Math.min(8, m[0].length);
     }
 
-    function formatCellValue(raw, meta) {
+    function formatCellValue(raw, meta, lookupMap, row, lookupMeta, allowLookup, lookupKeyOverride) {
         if (raw == null) return '';
+        if (typeof raw === 'object') return '';
         const s = String(raw);
+        if (s === '[object Object]') return '';
+
+        if (allowLookup && lookupMap) {
+            let key = lookupKeyOverride != null ? String(lookupKeyOverride) : s;
+            if ((!key || key.trim() === '') && (lookupMeta?.keySelf || lookupMeta?.key)) {
+                const fallbackKey = lookupMeta?.keySelf || lookupMeta?.key || '';
+                const fallback = getValueCaseInsensitive(row, fallbackKey);
+                key = fallback == null ? '' : String(fallback);
+            }
+            if (key && lookupMap.has(key)) return lookupMap.get(key) ?? key;
+            const trimmed = key ? key.trim() : '';
+            if (trimmed && lookupMap.has(trimmed)) return lookupMap.get(trimmed) ?? trimmed;
+        }
+
         if (s === '') return '';
+        if (s.includes(' - ') && !allowLookup) {
+            return s.split(' - ')[0].trim();
+        }
 
         const dataType = (meta?.dataType || '').toLowerCase();
         const fmt = (meta?.formatStr || '').toLowerCase();
@@ -439,6 +541,16 @@
             window._detailFieldDicts[dictKey] = dict;
         }
         const metaMap = await fetchDictMeta(dictTable);
+        const lookupMeta = await fetchLookupMeta(dictTable);
+        const lookupMaps = await fetchLookupMaps(dictTable);
+        const lookupResultMap = new Map();
+        for (const [fieldLower, cfg] of lookupMeta.entries()) {
+            const resultLower = (cfg?.result || '').toString().toLowerCase();
+            if (!resultLower) continue;
+            const map = lookupMaps.get(fieldLower);
+            if (!map) continue;
+            if (!lookupResultMap.has(resultLower)) lookupResultMap.set(resultLower, { map, meta: cfg });
+        }
 
 
 
@@ -496,18 +608,59 @@
             const editClass = "cell-edit d-none";
             html += `<tr data-paper-num="${paperNum}" data-item="${itemVal}" data-state="${state}" class="${selClass.trim()}">`;
             fields.forEach(field => {
-                const raw = row[field] ?? '';
-                const meta = metaMap.get(field.toLowerCase());
-                const value = formatCellValue(raw, meta);
-                // ? 雙元素：顯示模式 + 編輯模式
-                  html += `<td>
-                      <span class="${viewClass}" data-init-view="${escapeHtml(value)}">${escapeHtml(value)}</span>
-                      <input type="text"
-                             class="${editClass}"
-                             data-field="${field}"
-                             data-init="${escapeHtml(raw)}"
-                             value="${escapeHtml(raw)}">
-                  </td>`;
+                  let rawValue = row[field] ?? '';
+                const fieldLower = field.toLowerCase();
+                const meta = metaMap.get(fieldLower);
+                let lookupMap = lookupMaps.get(fieldLower);
+                let metaLookup = lookupMeta.get(fieldLower);
+                if (!metaLookup) {
+                    const alt = lookupResultMap.get(fieldLower);
+                    if (alt) {
+                        metaLookup = alt.meta;
+                        lookupMap = alt.map;
+                    }
+                }
+                const displayName = dict[field] || field;
+                  const metaKeySelf = (metaLookup?.keySelf || '').toString().toLowerCase();
+                  const metaKey = (metaLookup?.key || '').toString().toLowerCase();
+                  const metaResult = (metaLookup?.result || '').toString().toLowerCase();
+                  const isResultField = metaResult !== '' && metaResult === fieldLower;
+                  const allowLookup = !!(metaLookup && metaLookup.table && metaLookup.key && metaLookup.result)
+                      && (isResultField || (fieldLower !== metaKeySelf && fieldLower !== metaKey));
+                let lookupKeyOverride = null;
+                  if (allowLookup && metaLookup?.source === 'ocx') {
+                      const candidates = [];
+                      if (metaLookup?.keySelf) candidates.push(metaLookup.keySelf);
+                      if (metaLookup?.key) candidates.push(metaLookup.key);
+                    for (const alt of candidates) {
+                        const keyVal = getValueCaseInsensitive(row, alt);
+                        if (keyVal != null && String(keyVal).trim() !== '') {
+                            lookupKeyOverride = keyVal;
+                            break;
+                        }
+                    }
+                }
+                    const keyStr = lookupKeyOverride == null ? '' : String(lookupKeyOverride).trim();
+                    const keyIsEmpty = keyStr === '';
+                    const keyFieldName = metaLookup?.source === 'ocx' ? (metaLookup?.keySelf || metaLookup?.key || '') : '';
+                    const keyRawVal = keyFieldName ? getValueCaseInsensitive(row, keyFieldName) : null;
+                    const keyRawStr = keyRawVal == null ? '' : String(keyRawVal).trim();
+                    const keySourceMissing = !!keyFieldName && keyRawStr === '';
+                    if (keySourceMissing) {
+                        rawValue = '';
+                    }
+                    const rawStr = rawValue == null ? '' : String(rawValue);
+                    const canLookup = allowLookup && !keySourceMissing && (rawStr !== '' || !keyIsEmpty);
+                    const value = formatCellValue(rawValue, meta, lookupMap, row, metaLookup, canLookup, lookupKeyOverride);
+                  // ? 雙元素：顯示模式 + 編輯模式
+                    html += `<td>
+                        <span class="${viewClass}" data-init-view="${escapeHtml(value)}">${escapeHtml(value)}</span>
+                        <input type="text"
+                               class="${editClass}"
+                               data-field="${field}"
+                               data-init="${escapeHtml(rawValue)}"
+                               value="${escapeHtml(rawValue)}">
+                    </td>`;
             });
             html += '</tr>';
         };

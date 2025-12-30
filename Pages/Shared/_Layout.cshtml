@@ -300,6 +300,80 @@
   </script>
 
   <script>
+    // Global draggable Bootstrap modals (drag by header).
+    (() => {
+      function initDraggable(modalEl) {
+        if (!modalEl || modalEl.dataset.dragInit === "1") return;
+        const dialog = modalEl.querySelector(".modal-dialog");
+        const header = modalEl.querySelector(".modal-header");
+        if (!dialog || !header) return;
+        modalEl.dataset.dragInit = "1";
+        header.style.cursor = "move";
+
+        let dragging = false;
+        let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+        const resetDialog = () => {
+          dialog.style.position = "";
+          dialog.style.left = "";
+          dialog.style.top = "";
+          dialog.style.margin = "";
+          dialog.style.transform = "";
+        };
+
+        const begin = (ev) => {
+          const isMouse = ev.pointerType === "mouse" || ev.pointerType === undefined;
+          if (isMouse && ev.button !== 0) return;
+          if (ev.target?.closest("button, input, select, textarea, a")) return;
+          const rect = dialog.getBoundingClientRect();
+          dialog.style.position = "fixed";
+          dialog.style.margin = "0";
+          dialog.style.left = `${rect.left}px`;
+          dialog.style.top = `${rect.top}px`;
+          dialog.style.transform = "none";
+          startX = ev.clientX;
+          startY = ev.clientY;
+          startLeft = rect.left;
+          startTop = rect.top;
+          dragging = true;
+          if (header.setPointerCapture && ev.pointerId !== undefined) {
+            header.setPointerCapture(ev.pointerId);
+          }
+          document.body.classList.add("modal-dragging");
+          ev.preventDefault();
+        };
+
+        const move = (ev) => {
+          if (!dragging) return;
+          const dx = ev.clientX - startX;
+          const dy = ev.clientY - startY;
+          dialog.style.left = `${startLeft + dx}px`;
+          dialog.style.top = `${startTop + dy}px`;
+        };
+
+        const end = () => {
+          if (!dragging) return;
+          dragging = false;
+          document.body.classList.remove("modal-dragging");
+        };
+
+        header.addEventListener("pointerdown", begin);
+        header.addEventListener("pointermove", move);
+        header.addEventListener("pointerup", end);
+        header.addEventListener("pointercancel", end);
+
+        modalEl.addEventListener("hidden.bs.modal", resetDialog);
+        modalEl.addEventListener("show.bs.modal", resetDialog);
+      }
+
+      document.addEventListener("shown.bs.modal", (e) => {
+        const modalEl = e.target;
+        if (modalEl && modalEl.classList?.contains("modal")) initDraggable(modalEl);
+      });
+    })();
+  </script>
+
+  <script>
     // ===============================
     // ✅ 全站 Loading Overlay 控制邏輯
     // ===============================
