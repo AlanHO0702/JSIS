@@ -295,10 +295,11 @@ new ToolbarHandler({
     e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
     const base = ("@queryRedirectUrl" || '').trim().replace(/\/$/, '');
     if (!base) { Swal.fire({ icon: 'error', title: '未提供返回主頁路徑' }); return; }
-    const id = (PAGE_PAPER_NUM || window.selectedPaperNum || '').trim();
-    const sep = base.includes('?') ? '&' : '?';
-    const url = id ? `${base}${sep}${encodeURIComponent(KEY_FIELD)}=${encodeURIComponent(id)}` : base;
-    location.href = url;
+      const id = (PAGE_PAPER_NUM || window.selectedPaperNum || '').trim();
+      if (id) {
+        localStorage.setItem("lastViewedPaperNum", id);
+      }
+      location.href = base;
   }, { capture: true });
 })();
 
@@ -464,6 +465,13 @@ async function saveMultiTabChanges(options) {
     }
   }
 
+  const subDetailPayload = (typeof window.__paper3lSubDetailCollectChanges === 'function')
+    ? window.__paper3lSubDetailCollectChanges()
+    : null;
+  if (subDetailPayload?.changes?.length) {
+    allChanges.push(subDetailPayload);
+  }
+
   if (allChanges.length === 0) {
     console.log('?? [儲存] 沒有變更需要儲存');
     return { ok: true, hasChanges: false };
@@ -484,14 +492,16 @@ async function saveMultiTabChanges(options) {
       return `${label}(${col})不能為空`;
     };
 
-    for (const { tableName, changes } of allChanges) {
+    for (const { tableName, changes, keyFields: keyFieldsOverride } of allChanges) {
       console.log(`?? [儲存] 儲存 ${tableName}:`, changes);
 
       // 取得主鍵欄位（從第一筆資料推斷）
       const firstRow = changes[0];
-      const keyFields = [];
-      if (firstRow.PaperNum !== undefined) keyFields.push('PaperNum');
-      if (firstRow.Item !== undefined) keyFields.push('Item');
+      const keyFields = Array.isArray(keyFieldsOverride) ? keyFieldsOverride.slice(0) : [];
+      if (keyFields.length === 0) {
+        if (firstRow.PaperNum !== undefined) keyFields.push('PaperNum');
+        if (firstRow.Item !== undefined) keyFields.push('Item');
+      }
 
       const payload = {
         TableName: tableName,

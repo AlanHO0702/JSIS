@@ -52,6 +52,94 @@
     return hitKey ? obj[hitKey] : undefined;
   }
 
+  function hasFieldCaseInsensitive(obj, key) {
+    if (!obj || !key) return false;
+    const k = normalizeFieldKey(key);
+    return Object.keys(obj).some(x => normalizeFieldKey(x) === k);
+  }
+
+  const LOOKUP_META_CACHE = new Map(); // tn -> Map(fieldLower -> { table, key, result, keySelf, field })
+  const LOOKUP_DATA_CACHE = new Map(); // tn -> Map(fieldLower -> Map(key -> label))
+
+  async function fetchLookupMeta(dictTable) {
+    const tn = cleanTableName(dictTable);
+    if (!tn) return new Map();
+    if (LOOKUP_META_CACHE.has(tn)) return LOOKUP_META_CACHE.get(tn);
+    try {
+      const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(tn)}&lang=TW`);
+      if (!res.ok) {
+        const empty = new Map();
+        LOOKUP_META_CACHE.set(tn, empty);
+        return empty;
+      }
+      const rows = await res.json();
+      const map = new Map();
+      (rows || []).forEach(r => {
+        const field = (r.fieldName || r.FieldName || '').toString();
+        if (!field) return;
+        const table = (r.lookupTable || r.LookupTable || '').toString();
+        const key = (r.lookupKeyField || r.LookupKeyField || '').toString();
+        const result = (r.lookupResultField || r.LookupResultField || '').toString();
+        const ocxTable = (r.ocxLKTableName || r.OCXLKTableName || '').toString();
+        const ocxResult = (r.ocxLKResultName || r.OCXLKResultName || '').toString();
+        const ocxKeyField = (r.keyFieldName || r.KeyFieldName || '').toString();
+        const ocxKeySelf = (r.keySelfName || r.KeySelfName || '').toString();
+        const keyMapsRaw = (r.keyMapsJson || r.KeyMapsJson || '').toString();
+        let keyMaps = [];
+        if (keyMapsRaw) {
+          try { keyMaps = JSON.parse(keyMapsRaw) || []; } catch { keyMaps = []; }
+        }
+        if (table && key && result) {
+          map.set(field.toLowerCase(), { field, table, key, result, keySelf: '', source: 'lookup', keyMaps });
+          return;
+        }
+        if (ocxTable && ocxKeyField && ocxResult) {
+          map.set(field.toLowerCase(), { field, table: ocxTable, key: ocxKeyField, result: ocxResult, keySelf: ocxKeySelf, source: 'ocx', keyMaps });
+        }
+      });
+      LOOKUP_META_CACHE.set(tn, map);
+      return map;
+    } catch {
+      const empty = new Map();
+      LOOKUP_META_CACHE.set(tn, empty);
+      return empty;
+    }
+  }
+
+  async function fetchLookupMaps(dictTable) {
+    const tn = cleanTableName(dictTable);
+    if (!tn) return new Map();
+    if (LOOKUP_DATA_CACHE.has(tn)) return LOOKUP_DATA_CACHE.get(tn);
+    const meta = await fetchLookupMeta(dictTable);
+    const fieldMap = new Map();
+    for (const [field, cfg] of meta.entries()) {
+      try {
+        const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(cfg.table)}&key=${encodeURIComponent(cfg.key)}&result=${encodeURIComponent(cfg.result)}`;
+        const res = await fetch(url);
+        if (!res.ok) continue;
+        const data = await res.json();
+        const map = new Map();
+        (data || []).forEach(row => {
+          const key = row.key == null ? '' : String(row.key);
+          if (key === '') return;
+          const labelParts = Object.keys(row)
+            .filter(p => p.startsWith('result'))
+            .map(p => row[p])
+            .filter(v => v != null && typeof v !== 'object' && String(v).trim() !== '')
+            .map(v => String(v));
+          const deduped = labelParts.filter(v => v.trim() !== key.trim());
+          const label = (deduped.length ? deduped : labelParts).join(' - ');
+          const trimmed = key.trim();
+          map.set(key, label || key);
+          if (trimmed && trimmed !== key) map.set(trimmed, label || trimmed);
+        });
+        fieldMap.set(field, map);
+      } catch { }
+    }
+    LOOKUP_DATA_CACHE.set(tn, fieldMap);
+    return fieldMap;
+  }
+
   async function fetchFieldWidths(dictTable) {
     const tn = cleanTableName(dictTable);
     if (!tn) return new Map();
@@ -237,7 +325,35 @@
     }
   }
 
+  function getCellValue(row, fieldName) {
+    const v = getValueCaseInsensitive(row, fieldName);
+    if (v == null) return '';
+    if (typeof v === 'object') return '';
+    const s = String(v);
+    return s === '[object Object]' ? '' : v;
+  }
+
+  function applyEditMode(isEdit) {
+    container?.querySelectorAll('.cell-view').forEach(el => el.classList.toggle('d-none', isEdit));
+    container?.querySelectorAll('.cell-edit').forEach(el => el.classList.toggle('d-none', !isEdit));
+  }
+
+  function buildKeyFieldsFromRow(row) {
+    const candidates = ['PaperNum', 'Item', 'SeqNum', 'Seq', 'SerialNum', 'LineNum', 'LineId', 'RowNo'];
+    return candidates.filter(k => row && row[k] !== undefined);
+  }
+
   async function renderTable(rows) {
+    const lookupMeta = await fetchLookupMeta(cfg.DictTable);
+    const lookupMaps = await fetchLookupMaps(cfg.DictTable);
+    const lookupResultMap = new Map();
+    for (const [fieldLower, cfgMeta] of lookupMeta.entries()) {
+      const resultLower = (cfgMeta?.result || '').toString().toLowerCase();
+      if (!resultLower) continue;
+      const map = lookupMaps.get(fieldLower);
+      if (!map) continue;
+      if (!lookupResultMap.has(resultLower)) lookupResultMap.set(resultLower, { map, meta: cfgMeta });
+    }
     if (!Array.isArray(rows) || rows.length === 0) {
       const fieldDefs = (cfg.Fields || []).length ? cfg.Fields : [];
       if (!fieldDefs.length) {
@@ -259,7 +375,7 @@
       html += '</tr></thead><tbody>';
       html += '<tr data-idx="0">';
       fields.forEach(fn => {
-        html += '<td><span class="cell-view"></span></td>';
+        html += `<td><span class="cell-view"></span><input class="cell-edit d-none" data-field="${escapeHtml(fn)}" value=""></td>`;
       });
       html += '</tr></tbody></table></div>';
       container.innerHTML = html;
@@ -284,6 +400,7 @@
         }
         initColumnResize(table, cfg.DictTable);
       }
+      applyEditMode(!!window.__headerIsEdit);
       return;
     }
 
@@ -301,10 +418,61 @@
     html += '</tr></thead><tbody>';
 
     rows.forEach((r, idx) => {
-      html += `<tr data-idx="${idx}">`;
+      html += `<tr data-idx="${idx}" data-state="unchanged">`;
       fields.forEach(fn => {
-        const v = getValueCaseInsensitive(r, fn);
-        html += `<td><span class="cell-view">${escapeHtml(v)}</span></td>`;
+        const raw = getCellValue(r, fn);
+        const hasField = hasFieldCaseInsensitive(r, fn);
+        if (typeof raw === 'object') {
+          html += `<td><span class="cell-view"></span><input class="cell-edit d-none" data-field="${escapeHtml(fn)}" value=""></td>`;
+          return;
+        }
+        const fieldLower = fn.toLowerCase();
+        let meta = lookupMeta.get(fieldLower);
+        let lookupMap = lookupMaps.get(fieldLower);
+        if (!meta) {
+          const alt = lookupResultMap.get(fieldLower);
+          if (alt) {
+            meta = alt.meta;
+            lookupMap = alt.map;
+          }
+        }
+        let display = raw;
+        const metaKeySelf = (meta?.keySelf || '').toString().toLowerCase();
+        const metaKey = (meta?.key || '').toString().toLowerCase();
+        const hasMultiKey = meta?.source === 'ocx'
+          && Array.isArray(meta?.keyMaps)
+          && meta.keyMaps.length > 1;
+        const allowLookup = !!(meta && meta.table && meta.key && meta.result)
+          && !hasMultiKey
+          && fieldLower !== metaKeySelf
+          && fieldLower !== metaKey;
+        if (allowLookup && lookupMap) {
+          let matched = false;
+          let key = display;
+          if ((!key || String(key).trim() === '') && (meta.keySelf || meta.key)) {
+            const fallbackKey = meta.keySelf || meta.key || '';
+            const fallback = getValueCaseInsensitive(r, fallbackKey);
+            key = fallback == null ? '' : String(fallback);
+          }
+          const keyStr = key == null ? '' : String(key);
+          if (keyStr && lookupMap.has(keyStr)) {
+            display = lookupMap.get(keyStr) ?? keyStr;
+            matched = true;
+          }
+          const trimmed = keyStr.trim();
+          if (!matched && trimmed && lookupMap.has(trimmed)) {
+            display = lookupMap.get(trimmed) ?? trimmed;
+            matched = true;
+          }
+          if (!matched && meta?.source === 'ocx' && !hasField) display = '';
+        } else if (typeof display === 'string' && display.includes(' - ')) {
+          display = display.split(' - ')[0].trim();
+        }
+        if (hasMultiKey && !hasField && fieldLower !== metaKeySelf && fieldLower !== metaKey) {
+          display = '';
+        }
+        const v = display == null || typeof display === 'object' ? '' : String(display);
+        html += `<td><span class="cell-view">${escapeHtml(v)}</span><input class="cell-edit d-none" data-field="${escapeHtml(fn)}" value="${escapeHtml(raw)}"></td>`;
       });
       html += '</tr>';
     });
@@ -335,6 +503,13 @@
 
     const tbody = container.querySelector('tbody');
     if (tbody) {
+      tbody.addEventListener('input', (e) => {
+        const inp = e.target;
+        if (!inp.classList.contains('cell-edit')) return;
+        const tr = inp.closest('tr');
+        if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
+        window.__unsavedChanges = true;
+      });
       tbody.addEventListener('click', (e) => {
         const tr = e.target.closest('tr');
         if (!tr || !tbody.contains(tr)) return;
@@ -346,6 +521,26 @@
         }
       });
     }
+
+    applyEditMode(!!window.__headerIsEdit);
+
+    window.__paper3lSubDetailCollectChanges = () => {
+      const t = container?.querySelector('tbody');
+      if (!t) return null;
+      const changes = [];
+      t.querySelectorAll('tr[data-state="modified"], tr[data-state="added"]').forEach(tr => {
+        const row = {};
+        tr.querySelectorAll('input.cell-edit[data-field]').forEach(inp => {
+          const field = inp.dataset.field || '';
+          if (!field) return;
+          row[field] = (inp.value ?? '').trim();
+        });
+        if (Object.keys(row).length > 0) changes.push(row);
+      });
+      if (changes.length === 0) return null;
+      const keyFields = buildKeyFieldsFromRow(changes[0]);
+      return { tableName: cfg.DictTable, changes, keyFields };
+    };
   }
 
   window.addEventListener('multiTabRowSelected', function(ev) {
@@ -354,6 +549,10 @@
     const tabId = detail.tabId;
     if ((cfg.ParentTabId || '').toString() && tabId !== cfg.ParentTabId) return;
     loadSubDetail(detail.rowData || null);
+  });
+
+  window.addEventListener('headerEditModeChanged', (e) => {
+    applyEditMode(!!(e?.detail?.isEdit));
   });
 })();
 </script>
@@ -439,5 +638,27 @@ body.resizing { cursor: col-resize !important; }
   box-sizing: border-box;
   white-space: nowrap;
   line-height: 20px;
+}
+.paper3l-subdetail .erp-table td .cell-edit{
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  box-sizing: border-box;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: #fff;
+  font-size: inherit;
+  font-weight: inherit;
+  font-family: inherit;
+  line-height: 20px;
+  text-align: inherit;
+  padding: 7px 12px;
+  white-space: nowrap;
+}
+.paper3l-subdetail .erp-table td .cell-edit:focus{
+  outline: 2px solid #0d6efd;
+  outline-offset: -2px;
+  background: #fffef0;
 }
 </style>
