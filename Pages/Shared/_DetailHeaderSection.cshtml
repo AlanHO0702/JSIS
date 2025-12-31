@@ -1469,10 +1469,27 @@ initRowNavigation();
     return { ok: true };
   };
 
+  const tryAddPaper3L = () => {
+    if (typeof window.__paper3lSubDetailAddRow !== 'function') return { handled: false };
+    if (window.__activeDetailGrid !== 'paper3l') return { handled: false };
+    try {
+      const res = window.__paper3lSubDetailAddRow();
+      return res && typeof res === 'object' ? res : { handled: false };
+    } catch (err) {
+      return { handled: true, ok: false, reason: 'add-failed', error: err?.message || String(err) };
+    }
+  };
+
   btnAdd?.addEventListener('click', async () => {
     const api = pickApi();
     if (api?.addSubDetailRow) {
       api.addSubDetailRow();
+      return;
+    }
+    const r3 = tryAddPaper3L();
+    if (r3?.handled) {
+      if (r3?.ok) return;
+      if (r3?.reason === 'add-failed') return warn(`新增失敗：${r3.error || ''}`.trim());
       return;
     }
     const r = await addMultiTabBlankRow();
@@ -1481,20 +1498,38 @@ initRowNavigation();
     }
   });
 
-  btnDel?.addEventListener('click', () => {
+  const tryDeletePaper3L = async () => {
+    if (typeof window.__paper3lSubDetailDeleteRow !== 'function') return { handled: false };
+    if (window.__activeDetailGrid !== 'paper3l') return { handled: false };
+    try {
+      const res = await window.__paper3lSubDetailDeleteRow();
+      return res && typeof res === 'object' ? res : { handled: false };
+    } catch (err) {
+      return { handled: true, ok: false, reason: 'delete-failed', error: err?.message || String(err) };
+    }
+  };
+
+  btnDel?.addEventListener('click', async () => {
     const api = pickApi();
     if (api?.deleteSubDetailRow) {
       api.deleteSubDetailRow();
       return;
     }
-    deleteMultiTabSelectedRow().then((r) => {
-      if (r?.ok) return;
-      if (r?.reason === 'no-row') return warn('請先選取列再刪除');
-      if (r?.reason === 'no-table') return warn('找不到明細表設定');
-      if (r?.reason === 'delete-failed') return warn(`刪除失敗：${r.error || ''}`.trim());
-      const k = clickMultiTabAction('delete');
-      if (!k.ok) warn(k.reason === 'no-button' ? '請先切到明細分頁並選取列再刪除' : '找不到明細按鈕控制器');
-    });
+    const r3 = await tryDeletePaper3L();
+    if (r3?.handled) {
+      if (r3?.ok || r3?.canceled) return;
+      if (r3?.reason === 'no-row') return warn('請先選取列再刪除');
+      if (r3?.reason === 'no-keys') return warn('找不到第三階鍵欄位');
+      if (r3?.reason === 'delete-failed') return warn(`刪除失敗：${r3.error || ''}`.trim());
+      return;
+    }
+    const r = await deleteMultiTabSelectedRow();
+    if (r?.ok) return;
+    if (r?.reason === 'no-row') return warn('請先選取列再刪除');
+    if (r?.reason === 'no-table') return warn('找不到明細表設定');
+    if (r?.reason === 'delete-failed') return warn(`刪除失敗：${r.error || ''}`.trim());
+    const k = clickMultiTabAction('delete');
+    if (!k.ok) warn(k.reason === 'no-button' ? '請先切到明細分頁並選取列再刪除' : '找不到明細按鈕控制器');
   });
 })();
 
@@ -1559,7 +1594,8 @@ window.addEventListener('pageshow', () => { window.__unsavedChanges = false; });
 
   const cancelChangesBtn = document.getElementById('btnCancelChanges');
   if (cancelChangesBtn) {
-    cancelChangesBtn.addEventListener('click', () => {
+    cancelChangesBtn.addEventListener('click', async () => {
+      const wasEdit = !!window.__headerIsEdit;
       if (window.__unsavedChanges) {
         if (!confirm('取消未儲存的變更並還原資料？')) return;
       }
@@ -1568,8 +1604,12 @@ window.addEventListener('pageshow', () => { window.__unsavedChanges = false; });
       if (typeof window.resetMultiTabEdits === 'function') {
         window.resetMultiTabEdits();
       }
+      if (typeof window.__paper3lSubDetailReset === 'function') {
+        try { await window.__paper3lSubDetailReset(wasEdit); } catch {}
+      }
       if (typeof window.__setHeaderEditMode === 'function') {
         window.__setHeaderEditMode(false);
+        if (wasEdit) window.__setHeaderEditMode(true);
       }
       window.__unsavedChanges = false;
     });

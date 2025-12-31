@@ -29,6 +29,15 @@
   const cfg = @Html.Raw(json);
   const container = document.getElementById('paper3l-subdetail-container');
   const countEl = document.getElementById('paper3l-subdetail-count');
+  let lastRows = null;
+  if (container) {
+    container.addEventListener('pointerdown', () => {
+      window.__activeDetailGrid = 'paper3l';
+    }, true);
+    container.addEventListener('click', () => {
+      window.__activeDetailGrid = 'paper3l';
+    }, true);
+  }
 
   function cleanTableName(t) {
     return (t || '').toString().replace(/^dbo\./i, '').trim().toLowerCase();
@@ -398,7 +407,6 @@
     const cleanup = () => {
       list.remove();
       document.removeEventListener('mousedown', onDocDown, true);
-      window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onResize, true);
     };
 
@@ -458,7 +466,6 @@
       if (list.contains(e.target)) return;
       cleanup();
     };
-    const onScroll = () => cleanup();
     const onResize = () => cleanup();
 
     const onPick = (e) => {
@@ -477,7 +484,6 @@
     document.body.appendChild(list);
     positionDropdown(list, td);
     document.addEventListener('mousedown', onDocDown, true);
-    window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onResize, true);
   }
 
@@ -486,7 +492,29 @@
     return candidates.filter(k => row && row[k] !== undefined);
   }
 
+  function isBlankRow(tr) {
+    if (!tr) return false;
+    const inputs = Array.from(tr.querySelectorAll('input.cell-edit[data-field]'));
+    if (!inputs.length) return false;
+    let hasValue = false;
+    inputs.forEach(inp => {
+      const v = (inp.value ?? '').toString().trim();
+      if (v === '') return;
+      if (/^[-–—]+$/.test(v)) return;
+      const num = Number(v.replace(/,/g, ''));
+      if (Number.isFinite(num) && num === 0) return;
+      hasValue = true;
+    });
+    return !hasValue;
+  }
+
   async function renderTable(rows) {
+    rows = Array.isArray(rows) ? rows : [];
+    try {
+      lastRows = JSON.parse(JSON.stringify(rows));
+    } catch {
+      lastRows = rows.map(r => ({ ...r }));
+    }
     const lookupMeta = await fetchLookupMeta(cfg.DictTable);
     const lookupMaps = await fetchLookupMaps(cfg.DictTable);
     const lookupResultMap = new Map();
@@ -553,6 +581,39 @@
         }
         initColumnResize(table, cfg.DictTable);
       }
+      const tbody = container.querySelector('tbody');
+      if (tbody) {
+        tbody.addEventListener('input', (e) => {
+          window.__activeDetailGrid = 'paper3l';
+          const inp = e.target;
+          if (!inp.classList.contains('cell-edit')) return;
+          const tr = inp.closest('tr');
+          if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
+          window.__unsavedChanges = true;
+        });
+        tbody.addEventListener('click', (e) => {
+          window.__activeDetailGrid = 'paper3l';
+          const tr = e.target.closest('tr');
+          if (!tr || !tbody.contains(tr)) return;
+          tbody.querySelectorAll('tr.row-selected').forEach(x => x.classList.remove('row-selected'));
+          tr.classList.add('row-selected');
+          window._paper3lSubDetailSelectedRows["1"] = {};
+        });
+        tbody.addEventListener('focusin', () => {
+          window.__activeDetailGrid = 'paper3l';
+        });
+        tbody.addEventListener('dblclick', (e) => {
+          const td = e.target.closest('td');
+          if (!td || !tbody.contains(td)) return;
+          const field = td.dataset.lookupField;
+          if (!field) return;
+          const fieldLower = field.toLowerCase();
+          const map = lookupMaps.get(fieldLower);
+          if (!map || map.size === 0) return;
+          openLookupDropdown(td, field, map);
+        });
+      }
+
       applyEditMode(!!window.__headerIsEdit);
       return;
     }
@@ -668,6 +729,7 @@
     const tbody = container.querySelector('tbody');
     if (tbody) {
       tbody.addEventListener('input', (e) => {
+        window.__activeDetailGrid = 'paper3l';
         const inp = e.target;
         if (!inp.classList.contains('cell-edit')) return;
         const tr = inp.closest('tr');
@@ -675,6 +737,7 @@
         window.__unsavedChanges = true;
       });
       tbody.addEventListener('click', (e) => {
+        window.__activeDetailGrid = 'paper3l';
         const tr = e.target.closest('tr');
         if (!tr || !tbody.contains(tr)) return;
         tbody.querySelectorAll('tr.row-selected').forEach(x => x.classList.remove('row-selected'));
@@ -683,6 +746,9 @@
         if (!isNaN(idx) && rows[idx]) {
           window._paper3lSubDetailSelectedRows["1"] = rows[idx];
         }
+      });
+      tbody.addEventListener('focusin', () => {
+        window.__activeDetailGrid = 'paper3l';
       });
       tbody.addEventListener('dblclick', (e) => {
         const td = e.target.closest('td');
@@ -721,7 +787,152 @@
       const keyFields = buildKeyFieldsFromRow(changes[0]);
       return { tableName: cfg.DictTable, changes, keyFields };
     };
+
+    window.__paper3lSubDetailAddRow = () => {
+      const t = container?.querySelector('tbody');
+      if (!t) return { handled: false };
+
+      const pending = t.querySelector('tr[data-state="added"]');
+      if (pending) {
+        t.querySelectorAll('tr.row-selected').forEach(x => x.classList.remove('row-selected'));
+        pending.classList.add('row-selected');
+        pending.querySelectorAll('.cell-view').forEach(el => el.classList.add('d-none'));
+        pending.querySelectorAll('.cell-edit').forEach(el => el.classList.remove('d-none'));
+        pending.querySelector('.cell-edit')?.focus();
+        return { handled: true, ok: true, reused: true };
+      }
+
+      const blankRow = Array.from(t.querySelectorAll('tr')).find(isBlankRow);
+      if (blankRow) {
+        t.querySelectorAll('tr.row-selected').forEach(x => x.classList.remove('row-selected'));
+        blankRow.classList.add('row-selected');
+        blankRow.dataset.state = 'added';
+        blankRow.querySelectorAll('.cell-view').forEach(el => el.classList.add('d-none'));
+        blankRow.querySelectorAll('.cell-edit').forEach(el => el.classList.remove('d-none'));
+        blankRow.querySelector('.cell-edit')?.focus();
+        return { handled: true, ok: true, reused: true };
+      }
+
+      const isEditing = !!container.querySelector('.cell-edit:not(.d-none)');
+      const viewClass = isEditing ? 'cell-view d-none' : 'cell-view';
+      const editClass = isEditing ? 'cell-edit' : 'cell-edit d-none';
+
+      let html = '<tr data-state="added" class="row-selected">';
+      fields.forEach(fn => {
+        const fieldLower = fn.toLowerCase();
+        let meta = lookupMeta.get(fieldLower);
+        let lookupMap = lookupMaps.get(fieldLower);
+        if (!meta) {
+          const alt = lookupResultMap.get(fieldLower);
+          if (alt) {
+            meta = alt.meta;
+            lookupMap = alt.map;
+          }
+        }
+        const metaFieldLower = (meta?.field || '').toString().toLowerCase();
+        const canDropdown = !!(meta?.source === 'lookup'
+          && lookupMap && lookupMap.size
+          && ((metaFieldLower && metaFieldLower === fieldLower) || (meta?.result || '').toString().toLowerCase() === fieldLower));
+        const keyFieldAttr = canDropdown ? ` data-lookup-key-field="${escapeHtml(meta?.key || '')}"` : "";
+        const resultFieldAttr = canDropdown ? ` data-lookup-result-field="${escapeHtml(meta?.result || '')}"` : "";
+        const lookupAttr = canDropdown
+          ? ` class="lookup-cell" data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
+          : "";
+        html += `<td${lookupAttr}><span class="${viewClass}"></span><input class="${editClass}" data-field="${escapeHtml(fn)}" data-init="" value=""></td>`;
+      });
+      html += '</tr>';
+
+      t.querySelectorAll('tr.row-selected').forEach(x => x.classList.remove('row-selected'));
+      t.insertAdjacentHTML('beforeend', html);
+      const newRow = t.querySelector('tr:last-child');
+      newRow?.querySelector('.cell-edit')?.focus();
+      return { handled: true, ok: true };
+    };
+
+    window.__paper3lSubDetailDeleteRow = async () => {
+      const t = container?.querySelector('tbody');
+      if (!t) return { handled: false };
+      const selected = t.querySelector('tr.row-selected');
+      if (!selected) return { handled: true, ok: false, reason: 'no-row' };
+
+      const state = (selected.dataset.state || '').toString().toLowerCase();
+      if (state === 'added') {
+        const next = selected.nextElementSibling || selected.previousElementSibling;
+        selected.remove();
+        if (next) next.classList.add('row-selected');
+        return { handled: true, ok: true };
+      }
+
+      let row = {};
+      selected.querySelectorAll('input.cell-edit[data-field]').forEach(inp => {
+        const field = (inp.dataset.field || '').toString();
+        if (!field) return;
+        if (inp.type === 'checkbox') row[field] = inp.checked ? '1' : '0';
+        else row[field] = (inp.value ?? '').toString().trim();
+      });
+
+      const cached = window._paper3lSubDetailSelectedRows?.["1"];
+      let keyFields = buildKeyFieldsFromRow(row);
+      if (keyFields.length === 0 && cached) {
+        keyFields = buildKeyFieldsFromRow(cached);
+        keyFields.forEach(k => {
+          if (row[k] == null || row[k] === '') row[k] = cached[k];
+        });
+      }
+      if (keyFields.length === 0) return { handled: true, ok: false, reason: 'no-keys' };
+
+      const { isConfirmed } = await Swal.fire({
+        icon: 'question',
+        title: '確定要刪除這一筆明細？',
+        showCancelButton: true,
+        confirmButtonText: '刪除',
+        cancelButtonText: '取消',
+        confirmButtonColor: '#dc3545'
+      });
+      if (!isConfirmed) return { handled: true, ok: true, canceled: true };
+
+      const payload = { TableName: cfg.DictTable, Data: [{ ...row, __delete: true }], KeyFields: keyFields };
+      const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!resp.ok) {
+        let errorMessage = `HTTP ${resp.status}`;
+        try {
+          const errorData = await resp.json();
+          if (errorData && (errorData.error || errorData.message)) {
+            errorMessage = errorData.error || errorData.message;
+          }
+        } catch {
+          try {
+            const errorText = await resp.text();
+            if (errorText) errorMessage = errorText;
+          } catch { }
+        }
+        return { handled: true, ok: false, reason: 'delete-failed', error: errorMessage };
+      }
+
+      const next = selected.nextElementSibling || selected.previousElementSibling;
+      selected.remove();
+      if (next) next.classList.add('row-selected');
+      return { handled: true, ok: true };
+    };
   }
+
+  window.__paper3lSubDetailReset = async (keepEdit = true) => {
+    if (!container) return;
+    let rows = [];
+    if (Array.isArray(lastRows)) {
+      try {
+        rows = JSON.parse(JSON.stringify(lastRows));
+      } catch {
+        rows = lastRows.map(r => ({ ...r }));
+      }
+    }
+    await renderTable(rows);
+    if (keepEdit) applyEditMode(true);
+  };
 
   window.addEventListener('multiTabRowSelected', function(ev) {
     const detail = ev && ev.detail ? ev.detail : null;
