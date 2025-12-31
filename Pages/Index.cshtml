@@ -61,7 +61,7 @@
               id="li-@item.ItemId"
               data-item-id="@item.ItemId"
               onclick="selectItem('@item.ItemId')"
-              ondblclick="openEditModal('@item.ItemId', '@item.ItemName', '@item.SuperId', '@item.SystemId', '@item.SerialNum', @((item.Enabled)), '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Notes ?? ""))')"
+              ondblclick="openEditModal('@item.ItemId', '@item.ItemName', '@item.SuperId', '@item.SystemId', '@item.SerialNum', @((item.Enabled)), '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Notes ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Ocxtemplete ?? ""))')"
               style="cursor:pointer;">
               @item.ItemId - @item.ItemName
           </li>
@@ -113,8 +113,8 @@
 </div>
 
 <!-- 編輯功能 Modal -->
-<div class="modal fade" id="editItemModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
+<div class="modal fade draggable-modal" id="editItemModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable edit-item-dialog">
     <form id="editItemForm" class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">編輯功能項目</h5>
@@ -122,12 +122,36 @@
       </div>
       <div class="modal-body">
         <input type="hidden" id="editItemId" />
-        <div class="mb-3"><label class="form-label">功能名稱</label><input type="text" class="form-control" id="editItemName" required /></div>
-        <div class="mb-3"><label class="form-label">上層代碼</label><input type="text" class="form-control" id="editSuperId" readonly /></div>
-        <div class="mb-3"><label class="form-label">系統別</label><input type="text" class="form-control" id="editSystemId" readonly /></div>
-        <div class="mb-3"><label class="form-label">序號</label><input type="number" class="form-control" id="editSerialNum" /></div>
-        <div class="form-check mb-3"><input type="checkbox" class="form-check-input" id="editEnabled"><label class="form-check-label" for="editEnabled">功能啟用</label></div>
-        <div class="mb-3"><label class="form-label">功能說明</label><textarea class="form-control" id="editNotes" rows="3"></textarea></div>
+        <div class="edit-item-grid">
+          <div class="mb-3">
+            <label class="form-label">功能名稱</label>
+            <input type="text" class="form-control" id="editItemName" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">上層代碼</label>
+            <input type="text" class="form-control" id="editSuperId" readonly />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">系統別</label>
+            <input type="text" class="form-control" id="editSystemId" readonly />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">序號</label>
+            <input type="number" class="form-control" id="editSerialNum" />
+          </div>
+          <div class="form-check mb-3 edit-item-check">
+            <input type="checkbox" class="form-check-input" id="editEnabled">
+            <label class="form-check-label" for="editEnabled">功能啟用</label>
+          </div>
+          <div class="mb-3 grid-span-2">
+            <label class="form-label">功能說明</label>
+            <textarea class="form-control" id="editNotes" rows="3"></textarea>
+          </div>
+          <div class="mb-3 grid-span-2">
+            <label class="form-label">使用模板</label>
+            <select class="form-select" id="editOcxtemplete"></select>
+          </div>
+        </div>
         <div id="editAlert" class="alert alert-danger d-none" role="alert"></div>
       </div>
       <div class="modal-footer">
@@ -325,20 +349,50 @@ window.openAddModal = async function () {
   new bootstrap.Modal(document.getElementById('addItemModal')).show();
 };
 
-window.openEditModal = function (itemId, itemName, superId, systemId, serialNum, enabled, Notes) {
+window.openEditModal = function (itemId, itemName, superId, systemId, serialNum, enabled, Notes, ocxtemplete) {
   document.getElementById('editItemId').value    = itemId;
   document.getElementById('editItemName').value  = itemName;
   document.getElementById('editSuperId').value   = superId;
   document.getElementById('editSystemId').value  = systemId;
   document.getElementById('editSerialNum').value = (serialNum ?? '');
   document.getElementById('editNotes').value     = (Notes ?? '');
+  ensureOcxTempleteOptions(ocxtemplete ?? '');
   const isEnabled = (enabled === 1 || enabled === '1' || enabled === true || enabled === 'true');
   document.getElementById('editEnabled').checked = isEnabled;
   document.getElementById('editAlert').classList.add('d-none');
+  initDraggableModal('editItemModal');
   new bootstrap.Modal(document.getElementById('editItemModal')).show();
 };
 
 /* ========= 新增 / 編輯提交 ========= */
+let _ocxTempleteCache = null;
+async function ensureOcxTempleteOptions(selectedValue) {
+  const select = document.getElementById('editOcxtemplete');
+  if (!select) return;
+  if (!_ocxTempleteCache) {
+    try {
+      const fetcher = window.busyFetch || fetch;
+      const res = await fetcher("/api/EditItemApi/OcxTempleteOptions");
+      _ocxTempleteCache = res.ok ? await res.json() : [];
+    } catch {
+      _ocxTempleteCache = [];
+    }
+  }
+  select.innerHTML = "";
+  const emptyOpt = document.createElement("option");
+  emptyOpt.value = "";
+  emptyOpt.textContent = "";
+  select.appendChild(emptyOpt);
+  _ocxTempleteCache.forEach(opt => {
+    const o = document.createElement("option");
+    o.value = opt.ocxTemplete || opt.OcxTemplete || opt.OCXTemplete || "";
+    const name = opt.ocxTempleteName || opt.OcxTempleteName || opt.OCXTempleteName || "";
+    o.textContent = name ? `${o.value} - ${name}` : o.value;
+    select.appendChild(o);
+  });
+  select.value = selectedValue || "";
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   // 新增送出
   document.getElementById('addItemForm')?.addEventListener('submit', async (e) => {
@@ -385,12 +439,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const serialNum = Number(document.getElementById('editSerialNum').value || 0);
     const enabled   = document.getElementById('editEnabled').checked ? 1 : 0;
     const notes     = document.getElementById('editNotes').value;
+    const ocxtemplete = document.getElementById('editOcxtemplete').value;
     const alertBox  = document.getElementById('editAlert');
     if (!itemId || !itemName) { alertBox.textContent = "請填寫完整資料"; alertBox.classList.remove('d-none'); return; }
     try {
       const res = await fetch("/api/EditItemApi", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itemId, itemName, superId, serialNum, enabled, notes })
+        body: JSON.stringify({ itemId, itemName, superId, serialNum, enabled, notes, ocxtemplete })
       });
       const data = await res.json();
       if (!res.ok || !data.success) { alertBox.textContent = data?.message || "更新失敗"; alertBox.classList.remove('d-none'); return; }
@@ -508,6 +563,59 @@ function safeGetModal(id){
   if (!el) return null;                     // 保護：DOM 不存在
   return bootstrap.Modal.getInstance(el) 
       || new bootstrap.Modal(el);           // 若沒 instance -> 自動 new
+}
+
+function initDraggableModal(modalId){
+  const modalEl = document.getElementById(modalId);
+  if (!modalEl || modalEl.dataset.dragInit === "1") return;
+  const dialog = modalEl.querySelector('.modal-dialog');
+  const header = modalEl.querySelector('.modal-header');
+  if (!dialog || !header) return;
+  modalEl.dataset.dragInit = "1";
+  header.style.cursor = "move";
+
+  let dragging = false;
+  let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+  header.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('button')) return;
+    dragging = true;
+    const rect = dialog.getBoundingClientRect();
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = rect.left;
+    startTop = rect.top;
+    dialog.style.transform = "none";
+    dialog.style.margin = "0";
+    dialog.style.left = `${startLeft}px`;
+    dialog.style.top = `${startTop}px`;
+    document.body.classList.add('modal-dragging');
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    dialog.style.left = `${startLeft + dx}px`;
+    dialog.style.top = `${startTop + dy}px`;
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove('modal-dragging');
+  });
+
+  modalEl.addEventListener('shown.bs.modal', () => {
+    const rect = dialog.getBoundingClientRect();
+    const left = Math.max(10, (window.innerWidth - rect.width) / 2);
+    const top = Math.max(60, (window.innerHeight - rect.height) / 2 + 40);
+    dialog.style.transform = "none";
+    dialog.style.margin = "0";
+    dialog.style.left = `${left}px`;
+    dialog.style.top = `${top}px`;
+  });
 }
 
 /* ========= 報表設定 ========= */
@@ -924,4 +1032,20 @@ window.toggleBtnDetail = toggleBtnDetail;
 #customBtnTable td input.form-control { width: 100%; }
 
 .cb-detail td { background:#fafafa; }
+
+.draggable-modal .modal-dialog { position: fixed; margin: 0; }
+.edit-item-dialog { max-width: 980px; width: calc(100vw - 80px); }
+.edit-item-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 12px 16px;
+}
+.edit-item-check { align-self: end; }
+.grid-span-2 { grid-column: 1 / -1; }
+body.modal-dragging { user-select: none; }
+
+@@media (max-width: 768px) {
+  .edit-item-dialog { width: 96vw; max-width: 96vw; }
+  .edit-item-grid { grid-template-columns: 1fr; }
+}
 </style>
