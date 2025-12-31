@@ -315,6 +315,11 @@ function normalizeNumberFields(obj, fieldDefs) {
   });
 }
 
+function normalizeBool(val) {
+  const s = (val ?? '').toString().trim().toLowerCase();
+  return s === '1' || s === 'true' || s === 'y' || s === 'yes';
+}
+
 function withTemporarilyEnabled(formEl, callback) {
   const disabledEls = Array.from(formEl.querySelectorAll('input:disabled, select:disabled, textarea:disabled'));
   disabledEls.forEach(el => el.disabled = false);
@@ -395,6 +400,7 @@ async function saveMultiTabChanges(options) {
     const changes = [];
 
     for (const row of rows) {
+      const isAdded = (row.dataset.state || '').toString().toLowerCase() === 'added';
       // ? 關鍵修正：只處理當前單號的資料
       const rowPaperNum = row.dataset.paperNum;
       console.log(`?? [儲存] 檢查列: rowPaperNum="${rowPaperNum}", currentPaperNum="${currentPaperNum}", state="${row.dataset.state}"`);
@@ -405,13 +411,25 @@ async function saveMultiTabChanges(options) {
       }
 
       const rowData = {};
+      let hasChangedField = false;
       const inputs = row.querySelectorAll('.cell-edit');
 
       for (const inp of inputs) {
         const fieldName = inp.dataset.field || inp.name;
         if (fieldName) {
+          let currentValue = '';
+          let initValue = inp.dataset.init ?? '';
+          if (inp.type === 'checkbox') {
+            currentValue = inp.checked ? '1' : '0';
+            initValue = normalizeBool(initValue) ? '1' : '0';
+          } else {
+            currentValue = (inp.value ?? '').trim();
+            initValue = (initValue ?? '').toString().trim();
+          }
+          if (!isAdded && currentValue === initValue) continue;
+
           // ? 智能型別轉換：數字欄位轉成數字，空值轉成 null
-          let value = inp.value?.trim();
+          let value = currentValue;
 
           // 空值統一轉成 null，讓後端處理成 DBNull.Value
           if (value === '' || value === undefined || value === null) {
@@ -433,8 +451,11 @@ async function saveMultiTabChanges(options) {
           }
 
           rowData[fieldName] = value;
+          hasChangedField = true;
         }
       }
+
+      if (!isAdded && !hasChangedField) continue;
 
       // ? 確保 PaperNum 和 Item 一定存在（從 dataset 取得主鍵值）
       if (!rowData.PaperNum && rowPaperNum) {

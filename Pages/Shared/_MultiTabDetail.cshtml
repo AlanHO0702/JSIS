@@ -310,6 +310,146 @@
         return s;
     }
 
+    const LOOKUP_EMPTY_LABEL = '--請選擇--';
+
+    function buildLookupList(field, lookupMap, currentKey) {
+        const list = document.createElement('div');
+        list.className = 'lookup-dropdown-list';
+        list.dataset.field = field;
+
+        const addItem = (key, label) => {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'lookup-dropdown-item';
+            item.dataset.key = key == null ? '' : String(key);
+            item.textContent = label == null ? String(key ?? '') : String(label);
+            if ((currentKey ?? '') === (key ?? '')) item.classList.add('is-selected');
+            list.appendChild(item);
+        };
+
+        addItem('', LOOKUP_EMPTY_LABEL);
+        for (const [key, label] of lookupMap.entries()) {
+            if (key == null || String(key) === '') continue;
+            addItem(String(key), label);
+        }
+        return list;
+    }
+
+    function positionDropdown(list, anchor) {
+        if (!list || !anchor) return;
+        const rect = anchor.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const maxHeight = Math.max(140, Math.min(260, spaceBelow - 8));
+        const placeBelow = spaceBelow >= 140;
+        list.style.position = 'fixed';
+        list.style.left = `${Math.max(6, rect.left)}px`;
+        list.style.top = placeBelow ? `${rect.bottom}px` : `${Math.max(6, rect.top - maxHeight)}px`;
+        list.style.minWidth = `${Math.max(120, rect.width)}px`;
+        list.style.maxHeight = `${maxHeight}px`;
+    }
+
+    function openLookupDropdown(td, field, lookupMap) {
+        if (!td || !lookupMap || lookupMap.size === 0) return;
+        const existing = document.querySelector('.lookup-dropdown-list');
+        if (existing) existing.remove();
+
+        const edit = td.querySelector('.cell-edit[data-field]');
+        const view = td.querySelector('.cell-view');
+        if (!edit || !view) return;
+
+        const canApply = allowEdit && getHeaderEditState();
+        const currentKey = edit.type === 'checkbox' ? (edit.checked ? '1' : '0') : (edit.value ?? '');
+        const list = buildLookupList(field, lookupMap, currentKey);
+
+        const cleanup = () => {
+            list.remove();
+            document.removeEventListener('mousedown', onDocDown, true);
+            window.removeEventListener('scroll', onScroll, true);
+            window.removeEventListener('resize', onResize, true);
+        };
+
+        const setRowFieldValue = (tr, fieldName, value, viewText) => {
+            if (!tr || !fieldName) return;
+            const target = Array.from(tr.querySelectorAll('input.cell-edit[data-field]'))
+                .find(inp => (inp.dataset.field || '').toString().toLowerCase() === fieldName.toLowerCase());
+            if (!target) return;
+            target.value = value ?? '';
+            const cell = target.closest('td');
+            const viewEl = cell?.querySelector('.cell-view');
+            if (viewEl) viewEl.textContent = viewText ?? value ?? '';
+        };
+
+        const updateRowCache = (tr, fieldName, value) => {
+            if (!tr || !fieldName) return;
+            const container = tr.closest('.table-container');
+            const tabId = container?.dataset?.tabId;
+            if (!tabId) return;
+            const rowData = window._multiTabSelectedRows?.[tabId];
+            if (!rowData) return;
+            rowData[fieldName] = value ?? '';
+        };
+
+        const applySelection = (newKey, label) => {
+            if (!canApply) {
+                cleanup();
+                return;
+            }
+            const tr = td.closest('tr');
+            const keyField = (td.dataset.lookupKeyField || '').toString();
+            const keyValue = newKey ?? '';
+            edit.value = keyValue ?? '';
+            view.textContent = keyValue ?? '';
+            view.dataset.initView = keyValue ?? '';
+            setRowFieldValue(tr, field, keyValue, keyValue);
+            // Force repaint even if view/edit toggles are out of sync
+            requestAnimationFrame(() => {
+                if (view) view.textContent = keyValue ?? '';
+                if (edit) edit.value = keyValue ?? '';
+            });
+
+            if (keyField && keyField.toLowerCase() !== (field || '').toString().toLowerCase()) {
+                setRowFieldValue(tr, keyField, keyValue, keyValue);
+            }
+
+            updateRowCache(tr, field, keyValue);
+            if (keyField) updateRowCache(tr, keyField, keyValue);
+
+            if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
+            window.__unsavedChanges = true;
+            try {
+                edit.dispatchEvent(new Event('input', { bubbles: true }));
+                edit.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch {}
+            cleanup();
+        };
+
+        const onDocDown = (e) => {
+            if (list.contains(e.target)) return;
+            cleanup();
+        };
+        const onScroll = () => cleanup();
+        const onResize = () => cleanup();
+
+        const onPick = (e) => {
+            const item = e.target.closest('.lookup-dropdown-item');
+            if (!item) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const key = item.dataset.key ?? '';
+            const label = item.textContent ?? key;
+            applySelection(key, label);
+        };
+        list.addEventListener('pointerdown', onPick);
+        list.addEventListener('mousedown', onPick);
+        list.addEventListener('click', onPick);
+
+        document.body.appendChild(list);
+        positionDropdown(list, td);
+        document.addEventListener('mousedown', onDocDown, true);
+        window.addEventListener('scroll', onScroll, true);
+        window.addEventListener('resize', onResize, true);
+    }
+
     async function fetchFieldWidths(dictTable) {
         const tn = cleanTableName(dictTable);
         if (!tn) return new Map();
@@ -569,6 +709,8 @@
         }
 
         const defaults = await fetchDetailDefaults(dictTable);
+        const lookupFieldSet = new Set();
+        const lookupMetaMap = {};
 
         // 建立表格 - 使用 erp-table 樣式
         let html = '<div class="erp-table-wrapper">';
@@ -627,6 +769,14 @@
                   const isResultField = metaResult !== '' && metaResult === fieldLower;
                   const allowLookup = !!(metaLookup && metaLookup.table && metaLookup.key && metaLookup.result)
                       && (isResultField || (fieldLower !== metaKeySelf && fieldLower !== metaKey));
+                  const metaFieldLower = (metaLookup?.field || '').toString().toLowerCase();
+                  const canDropdown = !!(metaLookup?.source === 'lookup'
+                      && lookupMap && lookupMap.size
+                      && ((metaFieldLower && metaFieldLower === fieldLower) || (metaResult && metaResult === fieldLower)));
+                  if (canDropdown) lookupFieldSet.add(field);
+                  if (canDropdown) {
+                      lookupMetaMap[fieldLower] = { key: metaLookup?.key || '', result: metaLookup?.result || '' };
+                  }
                 let lookupKeyOverride = null;
                   if (allowLookup && metaLookup?.source === 'ocx') {
                       const candidates = [];
@@ -650,10 +800,15 @@
                         rawValue = '';
                     }
                     const rawStr = rawValue == null ? '' : String(rawValue);
-                    const canLookup = allowLookup && !keySourceMissing && (rawStr !== '' || !keyIsEmpty);
+                    const canLookup = allowLookup && !canDropdown && !keySourceMissing && (rawStr !== '' || !keyIsEmpty);
                     const value = formatCellValue(rawValue, meta, lookupMap, row, metaLookup, canLookup, lookupKeyOverride);
                   // ? 雙元素：顯示模式 + 編輯模式
-                    html += `<td>
+                    const keyFieldAttr = canDropdown ? ` data-lookup-key-field="${escapeHtml(metaLookup?.key || '')}"` : "";
+                    const resultFieldAttr = canDropdown ? ` data-lookup-result-field="${escapeHtml(metaLookup?.result || '')}"` : "";
+                    const lookupAttr = canDropdown
+                        ? ` class="lookup-cell" data-lookup-field="${escapeHtml(field)}"${keyFieldAttr}${resultFieldAttr}`
+                        : "";
+                    html += `<td${lookupAttr}>
                         <span class="${viewClass}" data-init-view="${escapeHtml(value)}">${escapeHtml(value)}</span>
                         <input type="text"
                                class="${editClass}"
@@ -680,6 +835,10 @@
 
         html += '</tbody></table></div>';
         container.insertAdjacentHTML('beforeend', html);
+        window._multiTabLookupFields = window._multiTabLookupFields || {};
+        window._multiTabLookupFields[tabId] = Array.from(lookupFieldSet);
+        window._multiTabLookupMeta = window._multiTabLookupMeta || {};
+        window._multiTabLookupMeta[tabId] = lookupMetaMap;
         applyMultiTabEditMode(!!window.__headerIsEdit);
 
         // 依辭典設定把「勾選框(ComboStyle=1)」欄位轉成 checkbox 顯示/編輯
@@ -750,15 +909,30 @@
             if (tbody) {
                 const selectRow = (tr) => {
                     if (!tr) return;
+                    const sameKey = (() => {
+                        try {
+                            const prev = window._multiTabSelectedRows?.[tabId] || null;
+                            if (!prev) return false;
+                            const prevItem = (prev.Item ?? prev.item ?? '').toString();
+                            const prevPaper = (prev.PaperNum ?? prev.paperNum ?? '').toString();
+                            const curItem = (tr.dataset.item || '').toString();
+                            const curPaper = (tr.dataset.paperNum || '').toString();
+                            return prevItem === curItem && prevPaper === curPaper;
+                        } catch {
+                            return false;
+                        }
+                    })();
                     tableWrapper.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
                     tr.classList.add('row-selected');
-                    try {
-                        const rowData = extractRowData(tr);
-                        if (rowData) {
-                            window._multiTabSelectedRows[tabId] = rowData;
-                        }
-                        window.dispatchEvent(new CustomEvent('multiTabRowSelected', { detail: { tabId, rowData } }));
-                    } catch {}
+                    if (!sameKey) {
+                        try {
+                            const rowData = extractRowData(tr);
+                            if (rowData) {
+                                window._multiTabSelectedRows[tabId] = rowData;
+                            }
+                            window.dispatchEvent(new CustomEvent('multiTabRowSelected', { detail: { tabId, rowData } }));
+                        } catch {}
+                    }
                 };
                 tbody.addEventListener('click', (e) => {
                     const tr = e.target.closest('tr');
@@ -767,6 +941,16 @@
                 tbody.addEventListener('focusin', (e) => {
                     const tr = e.target.closest('tr');
                     if (tr && tbody.contains(tr)) selectRow(tr);
+                });
+                tbody.addEventListener('dblclick', (e) => {
+                    const td = e.target.closest('td');
+                    if (!td || !tbody.contains(td)) return;
+                    const field = td.dataset.lookupField;
+                    if (!field) return;
+                    const fieldLower = field.toLowerCase();
+                    const map = lookupMaps.get(fieldLower);
+                    if (!map || map.size === 0) return;
+                    openLookupDropdown(td, field, map);
                 });
             }
 
@@ -927,6 +1111,9 @@
         // 建立新列（暫時在前端新增，還沒儲存到資料庫）
         const dict = fieldDicts[tabId] || {};
         const fields = Object.keys(dict).length > 0 ? Object.keys(dict) : [];
+        const lookupFields = (window._multiTabLookupFields || {})[tabId] || [];
+        const lookupMetaMap = (window._multiTabLookupMeta || {})[tabId] || {};
+        const lookupSet = new Set(lookupFields.map(f => String(f).toLowerCase()));
 
         if (fields.length === 0) {
             Swal.fire({
@@ -963,7 +1150,15 @@
         let html = `<tr data-paper-num="${paperNum}" data-item="${newItem}" data-state="added" class="row-selected">`;
         fields.forEach(field => {
             // ✅ 雙元素：顯示模式 + 編輯模式
-              html += `<td>
+            const fieldLower = String(field).toLowerCase();
+            const isLookup = lookupSet.has(fieldLower);
+            const meta = lookupMetaMap[fieldLower] || {};
+            const keyFieldAttr = isLookup ? ` data-lookup-key-field="${meta.key || ''}"` : '';
+            const resultFieldAttr = isLookup ? ` data-lookup-result-field="${meta.result || ''}"` : '';
+            const lookupAttr = isLookup
+                ? ` class="lookup-cell" data-lookup-field="${field}"${keyFieldAttr}${resultFieldAttr}`
+                : '';
+              html += `<td${lookupAttr}>
                   <span class="cell-view" data-init-view=""></span>
                   <input type="text"
                          class="cell-edit d-none"
@@ -1315,6 +1510,41 @@ body.resizing { cursor: col-resize !important; }
     outline: 2px solid #0d6efd;
     outline-offset: -2px;
     background: #fffef0 !important;  /* ← focus 時淡黃色背景 */
+}
+
+.multi-tab-detail .erp-table td.lookup-cell .cell-view,
+.multi-tab-detail .erp-table td.lookup-cell .cell-edit {
+    background: #fff7e0 !important;
+}
+
+.lookup-dropdown-list {
+    z-index: 2000;
+    background: #fff;
+    border: 1px solid #b6c2d9;
+    border-radius: 6px;
+    box-shadow: 0 8px 20px rgba(30, 41, 59, 0.18);
+    overflow: auto;
+}
+
+.lookup-dropdown-item {
+    display: block;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    padding: 6px 10px;
+    font-size: var(--field-value-size);
+    cursor: pointer;
+}
+
+.lookup-dropdown-item:hover,
+.lookup-dropdown-item:focus {
+    background: #e2e8f0;
+    outline: none;
+}
+
+.lookup-dropdown-item.is-selected {
+    background: #dbeafe;
 }
 
 .multi-tab-detail .cell-view-checkbox{
