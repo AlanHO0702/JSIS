@@ -114,7 +114,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
 
             // 2) Multi-detail tabs (DETAIL1/DETAIL2/...)
             ViewData["PaperNum"] = PaperNum;
-            ViewData["MultiTabAllowEdit"] = false;
+            ViewData["MultiTabAllowEdit"] = true;
 
             var tabs = new List<object>(details.Count);
             var tabFieldDicts = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
