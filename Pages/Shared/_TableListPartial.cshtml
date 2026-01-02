@@ -31,14 +31,15 @@
     .table-list-page { background: #f7f9fb; min-height: 100vh; }
     .table-list-page .container { max-width: 100%; }
     .table-list-page .title-row { display: flex; justify-content: space-between; align-items: flex-end; }
-    .table-list-page .order-count { font-size: 1rem; color: #666; margin-bottom: 6px; }
+    .table-list-page .order-count { font-size: var(--field-value-size); color: #666; margin-bottom: 6px; }
     .table-list-page .table { box-shadow: 0 2px 12px 0 #c3d4e6; border-radius: 16px; overflow: hidden; background: #fff; }
-    .table-list-page .table th, .table-list-page .table td { vertical-align: middle !important; white-space: nowrap; font-size: 1rem; border: none; }
+    .table-list-page .table th, .table-list-page .table td { vertical-align: middle !important; white-space: nowrap; border: none; }
     .table-list-page .table th {
         background: linear-gradient(90deg, #e8f2fe 0%, #f3f8ff 100%);
-        color: #2056ac; letter-spacing: 2px; font-weight: 600;
+        color: #2056ac; letter-spacing: 2px; font-weight: 600; font-size: var(--field-label-size);
         border-bottom: 2px solid #bdd2f7; padding: 14px 10px;
     }
+    .table-list-page .table td { font-size: var(--field-value-size); }
     .table-list-page .table tbody tr { transition: background .15s; }
     .table-list-page .table tbody tr:hover { background: #f0f8ff !important; }
     .table-list-page .table td { border-top: 1px solid #f0f3f7 !important; padding: 11px 10px; }
@@ -95,6 +96,28 @@
     }
 
     .table-list-page .hscroll-spacer{ height: 1px; }  /* 只負責撐寬度 */
+
+    .table-list-page .toolbar-count-box{
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+        height: var(--top-toolbar-btn-height, 36px);
+        min-width: 74px;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-weight: 700;
+        line-height: 1.05;
+        color: #fff;
+        background: #1e4db7;
+        user-select: none;
+    }
+    .table-list-page .toolbar-count-box.mode-edit,
+    .table-list-page .toolbar-count-box.mode-view{
+        background: #1e4db7;
+    }
+    .table-list-page #toolbarDetailCount{
+        display: none;
+    }
 </style>
 
 <div class="table-list-page">
@@ -448,6 +471,7 @@ function renderTable(data) {
       document.querySelectorAll(".row-link.selected").forEach(r => r.classList.remove("selected"));
       row.classList.add("selected");
       window.selectedPaperNum = row.getAttribute("data-paper-num");
+      updateToolbarHeaderCountForRow(row);
     });
     row.addEventListener("dblclick", () => {
       const url = row.getAttribute("data-url");
@@ -514,6 +538,27 @@ function renderOrderCount(totalCount, pageSize, pageNumber) {
   const end   = Math.min(pageNumber * pageSize, totalCount);
   document.getElementById('orderCountInfo').innerHTML =
     `共 <span style="font-weight:bold">${totalCount}</span> 筆，顯示第 ${start} ~ ${end} 筆`;
+  const headerCountEl = document.getElementById('toolbarHeaderCount');
+  if (headerCountEl) {
+    headerCountEl.textContent = totalCount > 0 ? `${start}/${totalCount}` : '--/--';
+  }
+}
+
+function updateToolbarHeaderCountForRow(row) {
+  const headerCountEl = document.getElementById('toolbarHeaderCount');
+  if (!headerCountEl || !row) return;
+  const totalText = headerCountEl.textContent || '';
+  const totalMatch = totalText.match(/\/(\d+)/);
+  const total = totalMatch ? parseInt(totalMatch[1], 10) : 0;
+  const tbody = row.closest('tbody');
+  if (!tbody) return;
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  const idx = rows.indexOf(row);
+  if (idx < 0 || total <= 0) return;
+  const startText = document.getElementById('orderCountInfo')?.textContent || '';
+  const rangeMatch = startText.match(/第\\s*(\\d+)\\s*~/);
+  const pageStart = rangeMatch ? parseInt(rangeMatch[1], 10) : 1;
+  headerCountEl.textContent = `${pageStart + idx}/${total}`;
 }
 
 function doQuery(page = 1) {
@@ -679,6 +724,7 @@ document.addEventListener("DOMContentLoaded", function () {
     doQuery(state.pageNumber || 1);
   } else {
     renderTable(@Html.Raw(Json.Serialize(Model.Items)));
+    renderOrderCount(@Model.TotalCount, @Model.PageSize, @Model.PageNumber);
   }
 
   // 切換（檢查是否允許修改）

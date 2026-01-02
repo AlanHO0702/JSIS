@@ -86,6 +86,14 @@
         applyMultiTabEditMode(!!(e?.detail?.isEdit));
     });
 
+    document.querySelectorAll('.multi-tab-detail .nav-link').forEach(btn => {
+        btn.addEventListener('shown.bs.tab', () => {
+            if (typeof window.__updateToolbarCounts === 'function') {
+                window.__updateToolbarCounts();
+            }
+        });
+    });
+
     function cleanTableName(t) {
         return (t || '').toString().replace(/^dbo\./i, '').trim().toLowerCase();
     }
@@ -104,6 +112,7 @@
     const DICT_META_CACHE = new Map(); // tn -> Map(fieldLower -> { dataType, formatStr, comboStyle })
     const LOOKUP_META_CACHE = new Map(); // tn -> Map(fieldLower -> { table, key, result })
     const LOOKUP_DATA_CACHE = new Map(); // tn -> Map(fieldLower -> Map(key -> label))
+    const READONLY_META_CACHE = new Map(); // tn -> Map(fieldLower -> boolean)
 
     async function fetchDictMeta(dictTable) {
         const tn = cleanTableName(dictTable);
@@ -172,6 +181,34 @@
         } catch {
             const empty = new Map();
             LOOKUP_META_CACHE.set(tn, empty);
+            return empty;
+        }
+    }
+
+    async function fetchReadOnlyMeta(dictTable) {
+        const tn = cleanTableName(dictTable);
+        if (!tn) return new Map();
+        if (READONLY_META_CACHE.has(tn)) return READONLY_META_CACHE.get(tn);
+        try {
+            const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(tn)}&lang=TW`);
+            if (!res.ok) {
+                const empty = new Map();
+                READONLY_META_CACHE.set(tn, empty);
+                return empty;
+            }
+            const rows = await res.json();
+            const map = new Map();
+            (rows || []).forEach(r => {
+                const field = (r.fieldName || r.FieldName || '').toString();
+                if (!field) return;
+                const ro = Number(r.readOnly ?? r.ReadOnly ?? 0) === 1;
+                map.set(field.toLowerCase(), ro);
+            });
+            READONLY_META_CACHE.set(tn, map);
+            return map;
+        } catch {
+            const empty = new Map();
+            READONLY_META_CACHE.set(tn, empty);
             return empty;
         }
     }
@@ -358,7 +395,9 @@
         const view = td.querySelector('.cell-view');
         if (!edit || !view) return;
 
-        const canApply = allowEdit && getHeaderEditState();
+        const isReadOnly = td.dataset.readonly === '1' || edit.dataset.readonly === '1';
+        if (isReadOnly) return;
+        const canApply = allowEdit && getHeaderEditState() && !isReadOnly;
         const currentKey = edit.type === 'checkbox' ? (edit.checked ? '1' : '0') : (edit.value ?? '');
         const list = buildLookupList(field, lookupMap, currentKey);
 
@@ -679,6 +718,11 @@
             window._detailFieldDicts[dictKey] = dict;
         }
         const metaMap = await fetchDictMeta(dictTable);
+        const readOnlyMap = await fetchReadOnlyMeta(dictTable);
+        if (dictKey) {
+            window._detailFieldReadOnlyMap = window._detailFieldReadOnlyMap || {};
+            window._detailFieldReadOnlyMap[dictKey] = Object.fromEntries(readOnlyMap.entries());
+        }
         const lookupMeta = await fetchLookupMeta(dictTable);
         const lookupMaps = await fetchLookupMaps(dictTable);
         const lookupResultMap = new Map();
@@ -737,6 +781,9 @@
                   let rawValue = row[field] ?? '';
                 const fieldLower = field.toLowerCase();
                 const meta = metaMap.get(fieldLower);
+                const isReadOnly = readOnlyMap.get(fieldLower) === true;
+                const roClass = isReadOnly ? ' readonly-cell' : '';
+                const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
                 let lookupMap = lookupMaps.get(fieldLower);
                 let metaLookup = lookupMeta.get(fieldLower);
                 if (!metaLookup) {
@@ -792,13 +839,14 @@
                     const lookupAttr = canDropdown
                         ? ` class="lookup-cell" data-lookup-field="${escapeHtml(field)}"${keyFieldAttr}${resultFieldAttr}`
                         : "";
-                    html += `<td${lookupAttr}>
-                        <span class="${viewClass}" data-init-view="${escapeHtml(value)}">${escapeHtml(value)}</span>
+                    const tdReadOnlyAttr = ` data-readonly="${isReadOnly ? '1' : '0'}"`;
+                    html += `<td${lookupAttr}${tdReadOnlyAttr}>
+                        <span class="${viewClass}${roClass}" data-init-view="${escapeHtml(value)}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(value)}</span>
                         <input type="text"
-                               class="${editClass}"
+                               class="${editClass}${roClass}"
                                data-field="${field}"
                                data-init="${escapeHtml(rawValue)}"
-                               value="${escapeHtml(rawValue)}">
+                               value="${escapeHtml(rawValue)}"${roAttr}>
                     </td>`;
             });
             html += '</tr>';
@@ -824,6 +872,9 @@
         window._multiTabLookupMeta = window._multiTabLookupMeta || {};
         window._multiTabLookupMeta[tabId] = lookupMetaMap;
         applyMultiTabEditMode(!!window.__headerIsEdit);
+        if (typeof window.__updateToolbarCounts === 'function') {
+            window.__updateToolbarCounts();
+        }
 
         // 依辭典設定把「勾選框(ComboStyle=1)」欄位轉成 checkbox 顯示/編輯
         (function applyCheckboxCells() {
@@ -860,7 +911,9 @@
                         chk.className = edit.className;
                         chk.dataset.field = edit.dataset.field || '';
                         chk.dataset.init = edit.dataset.init || '';
+                        chk.dataset.readonly = edit.dataset.readonly || '0';
                         chk.checked = checked;
+                        if (chk.dataset.readonly === '1') chk.disabled = true;
                         edit.replaceWith(chk);
                     });
                 });
@@ -922,11 +975,17 @@
                     window.__activeDetailGrid = 'multitab';
                     const tr = e.target.closest('tr');
                     if (tr && tbody.contains(tr)) selectRow(tr);
+                    if (typeof window.__updateToolbarCounts === 'function') {
+                        window.__updateToolbarCounts();
+                    }
                 });
                 tbody.addEventListener('focusin', (e) => {
                     window.__activeDetailGrid = 'multitab';
                     const tr = e.target.closest('tr');
                     if (tr && tbody.contains(tr)) selectRow(tr);
+                    if (typeof window.__updateToolbarCounts === 'function') {
+                        window.__updateToolbarCounts();
+                    }
                 });
                 tbody.addEventListener('dblclick', (e) => {
                     const td = e.target.closest('td');
@@ -1264,6 +1323,17 @@ body.resizing { cursor: col-resize !important; }
 .multi-tab-detail .erp-table td.lookup-cell .cell-view,
 .multi-tab-detail .erp-table td.lookup-cell .cell-edit {
     background: #fff7e0 !important;
+}
+
+.multi-tab-detail .erp-table td .cell-view.readonly-cell,
+.multi-tab-detail .erp-table td .cell-edit.readonly-cell {
+    background: #e9ecef !important;
+    color: #6c757d !important;
+    cursor: not-allowed;
+}
+.multi-tab-detail .erp-table td .cell-edit.readonly-cell:focus {
+    outline: none;
+    background: #e9ecef !important;
 }
 
 .lookup-dropdown-list {
