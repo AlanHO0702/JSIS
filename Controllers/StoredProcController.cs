@@ -61,6 +61,12 @@ public class StoredProcController : ControllerBase
             ["FMEdIssueUnLock"] = new StoredProcDef(
             ProcName: "dbo.FMEdIssueUnLock",
             RequiredParams: new[] { "PaperNum" }
+        ),
+
+            // APR00002 確認前檢查
+            ["SPOdEInvTypeChk"] = new StoredProcDef(
+            ProcName: "dbo.SPOdEInvTypeChk",
+            RequiredParams: new[] { "PaperId", "PaperNum", "Action" }
         )
 
         };

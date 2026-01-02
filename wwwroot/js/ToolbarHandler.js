@@ -66,12 +66,23 @@ if (typeof CSS === 'undefined' || typeof CSS.escape !== 'function') {
 
     // 新增
     document.getElementById(this.addBtnId).onclick = async () => {
-      // ========== Hook: beforeAdd ==========
-      if (typeof window.executeGlobalTemplateHook === 'function') {
-        const hookResult = window.executeGlobalTemplateHook('beforeAdd');
-        if (hookResult === false) {
-          console.log('[ToolbarHandler] beforeAdd Hook 中止新增');
-          return;
+      // ========== Hook: beforeAdd (Inherited) ==========
+      const itemId = window._itemId || window._singleItemId || '';
+      if (itemId) {
+        const hooks = window.InheritedActionHooks || {};
+        const beforeAddFn = hooks[itemId]?.beforeAdd || hooks.beforeAdd;
+        if (typeof beforeAddFn === 'function') {
+          try {
+            const result = await beforeAddFn({ tableName: this.tableName, userId: window._userId || 'admin' });
+            if (result === false) {
+              console.log('[新增] beforeAdd Hook 中止操作');
+              return;
+            }
+          } catch (err) {
+            console.error('[Inherited] beforeAdd 執行失敗:', err);
+            await Swal.fire({ icon: 'error', title: 'Hook 執行失敗', text: err?.message || String(err) });
+            return;
+          }
         }
       }
 
@@ -91,9 +102,17 @@ if (typeof CSS === 'undefined' || typeof CSS.escape !== 'function') {
       const data = await resp.json();
       const paperNum = data.paperNum || data.PaperNum || '';
 
-      // ========== Hook: afterAdd ==========
-      if (typeof window.executeGlobalTemplateHook === 'function') {
-        window.executeGlobalTemplateHook('afterAdd', { paperNum, data });
+      // ========== Hook: afterAdd (Inherited) ==========
+      if (itemId) {
+        const hooks = window.InheritedActionHooks || {};
+        const afterAddFn = hooks[itemId]?.afterAdd || hooks.afterAdd;
+        if (typeof afterAddFn === 'function') {
+          try {
+            await afterAddFn({ tableName: this.tableName, paperNum, userId: window._userId || 'admin', result: data });
+          } catch (err) {
+            console.error('[Inherited] afterAdd 執行失敗:', err);
+          }
+        }
       }
 
       if (paperNum) {
@@ -118,15 +137,6 @@ if (typeof CSS === 'undefined' || typeof CSS.escape !== 'function') {
         return;
       }
 
-      // ========== Hook: beforeDelete ==========
-      if (typeof window.executeGlobalTemplateHook === 'function') {
-        const hookResult = window.executeGlobalTemplateHook('beforeDelete', { selectedId });
-        if (hookResult === false) {
-          console.log('[ToolbarHandler] beforeDelete Hook 中止作廢');
-          return;
-        }
-      }
-
       const ask = await Swal.fire({
         title: '確定要作廢這筆單據？',
         icon: 'question',
@@ -137,6 +147,26 @@ if (typeof CSS === 'undefined' || typeof CSS.escape !== 'function') {
       if (!ask.isConfirmed) return;
 
       try {
+        // ========== Hook: beforeDelete (Inherited) ==========
+        const itemId = window._itemId || window._singleItemId || '';
+        if (itemId) {
+          const hooks = window.InheritedActionHooks || {};
+          const beforeDeleteFn = hooks[itemId]?.beforeDelete || hooks.beforeDelete;
+          if (typeof beforeDeleteFn === 'function') {
+            try {
+              const result = await beforeDeleteFn({ tableName: this.tableName, paperNum: selectedId, userId: window._userId || 'admin' });
+              if (result === false) {
+                console.log('[作廢] beforeDelete Hook 中止操作');
+                return;
+              }
+            } catch (err) {
+              console.error('[Inherited] beforeDelete 執行失敗:', err);
+              await Swal.fire({ icon: 'error', title: 'Hook 執行失敗', text: err?.message || String(err) });
+              return;
+            }
+          }
+        }
+
         // 動態單據：走 PaperAction（CURdPaperAction）
         if (this.paperAction?.url) {
           const payload = {
@@ -154,12 +184,21 @@ if (typeof CSS === 'undefined' || typeof CSS.escape !== 'function') {
 
           if (resp.ok) {
             const data = await resp.json().catch(() => ({}));
-            await Swal.fire({ icon: 'success', title: data.message || '作廢成功！' });
 
-            // ========== Hook: afterDelete ==========
-            if (typeof window.executeGlobalTemplateHook === 'function') {
-              window.executeGlobalTemplateHook('afterDelete', { selectedId });
+            // ========== Hook: afterDelete (Inherited) ==========
+            if (itemId) {
+              const hooks = window.InheritedActionHooks || {};
+              const afterDeleteFn = hooks[itemId]?.afterDelete || hooks.afterDelete;
+              if (typeof afterDeleteFn === 'function') {
+                try {
+                  await afterDeleteFn({ tableName: this.tableName, paperNum: selectedId, userId: window._userId || 'admin', result: data });
+                } catch (err) {
+                  console.error('[Inherited] afterDelete 執行失敗:', err);
+                }
+              }
             }
+
+            await Swal.fire({ icon: 'success', title: data.message || '作廢成功！' });
 
             if (this.queryRedirectUrl) window.location.href = this.queryRedirectUrl;
             else location.reload();
@@ -174,12 +213,20 @@ if (typeof CSS === 'undefined' || typeof CSS.escape !== 'function') {
         // 舊行為：DELETE /api/{Table}/{Id}
         const resp = await fetchWithBusy(this.deleteApiUrlFn(selectedId), { method: 'DELETE' }, '作廢中');
         if (resp.ok) {
-          await Swal.fire({ icon: 'success', title: '作廢成功！' });
-
-          // ========== Hook: afterDelete ==========
-          if (typeof window.executeGlobalTemplateHook === 'function') {
-            window.executeGlobalTemplateHook('afterDelete', { selectedId });
+          // ========== Hook: afterDelete (Inherited) ==========
+          if (itemId) {
+            const hooks = window.InheritedActionHooks || {};
+            const afterDeleteFn = hooks[itemId]?.afterDelete || hooks.afterDelete;
+            if (typeof afterDeleteFn === 'function') {
+              try {
+                await afterDeleteFn({ tableName: this.tableName, paperNum: selectedId, userId: window._userId || 'admin' });
+              } catch (err) {
+                console.error('[Inherited] afterDelete 執行失敗:', err);
+              }
+            }
           }
+
+          await Swal.fire({ icon: 'success', title: '作廢成功！' });
 
           if (this.queryRedirectUrl) window.location.href = this.queryRedirectUrl;
           else location.reload();
