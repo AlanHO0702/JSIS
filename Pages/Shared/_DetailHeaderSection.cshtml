@@ -154,6 +154,8 @@
 
                             var isCheckbox = (field.ComboStyle ?? 0) == 1;
                             var isReadOnly = (field.ReadOnly ?? 0) == 1;
+                            var readOnlyClass = isReadOnly ? " dict-readonly" : "";
+                            var readOnlyAttr = isReadOnly ? " data-readonly=\"1\"" : " data-readonly=\"0\"";
 
                             // 1) 勾選框
                             if (isCheckbox)
@@ -176,7 +178,8 @@
                                                name="@field.FieldName"
                                                value="1"
                                                @(isChecked ? "checked" : "")
-                                               @(isReadOnly ? "disabled" : "") />
+                                               @(isReadOnly ? "disabled" : "")
+                                               @Html.Raw(readOnlyAttr) />
                                     </div>
                                 </li>
                             }
@@ -191,12 +194,13 @@
                                     data-tab="@tab.Key"
                                     style="top:@(field.iFieldTop ?? 0)px; left:@(field.iFieldLeft ?? 0)px; width:@(field.iFieldWidth ?? 160)px; height:@(field.iFieldHeight ?? 44)px;">
                                     <label>@field.DisplayLabel</label>
-                                    <select class="form-select lookup-dropdown"
+                                    <select class="form-select lookup-dropdown@readOnlyClass"
                                             name="@field.FieldName"
                                             data-table="@field.LookupTable"
                                             data-key="@field.LookupKeyField"
                                             data-result="@field.LookupResultField.Replace(" ", "")"
-                                            data-selected="@rawValue">
+                                            data-selected="@rawValue"
+                                            @Html.Raw(readOnlyAttr)>
                                         <option value="">--請選擇--</option>
                                     </select>
                                 </li>
@@ -208,8 +212,10 @@
                                     data-tab="@tab.Key"
                                     style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
                                     <label>@field.DisplayLabel</label>
-                                    <textarea class="form-control resizable-input"
-                                            name="@field.FieldName">@displayText</textarea>
+                                    <textarea class="form-control resizable-input@readOnlyClass"
+                                            name="@field.FieldName"
+                                            @(isReadOnly ? "readonly" : "")
+                                            @Html.Raw(readOnlyAttr)>@displayText</textarea>
                                 </li>
                             }
                         }
@@ -680,10 +686,21 @@ if (editBtn) {
     document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
       .forEach(el => {
         if (el.closest('.modal')) return;
+        const isDictReadOnly = el.dataset.readonly === '1';
         if (el.matches('select.lookup-dropdown')) {
-          setLookupReadOnly(el, !editing);
+          setLookupReadOnly(el, isDictReadOnly || !editing);
         } else {
-          el.disabled = !editing;
+          if (isDictReadOnly) {
+            if (el.type === 'checkbox') {
+              el.disabled = true;
+            } else {
+              el.readOnly = true;
+            }
+            el.classList.add('dict-readonly');
+            el.disabled = false;
+          } else {
+            el.disabled = !editing;
+          }
         }
       });
   }
@@ -719,7 +736,7 @@ if (editBtn) {
     if (!(sel instanceof HTMLSelectElement)) return;
     if (!sel.matches('.erp-header-form select.lookup-dropdown')) return;
     if (sel.closest('.modal')) return;
-    if (isEdit) return;
+    if (isEdit && sel.dataset.readonly !== '1') return;
 
     const locked = sel.dataset.lockedValue ?? '';
     if ((sel.value ?? '') !== locked) {
@@ -732,7 +749,7 @@ if (editBtn) {
     if (!(sel instanceof HTMLSelectElement)) return;
     if (!sel.matches('.erp-header-form select.lookup-dropdown')) return;
     if (sel.closest('.modal')) return;
-    if (isEdit) return;
+    if (isEdit && sel.dataset.readonly !== '1') return;
 
     const blockKeys = ['ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', ' ', 'Enter'];
     if (blockKeys.includes(e.key)) {
@@ -757,13 +774,39 @@ if (editBtn) {
     try {
       window.dispatchEvent(new CustomEvent('headerEditModeChanged', { detail: { isEdit } }));
     } catch {}
+    const topToolbar = document.getElementById('topToolbar');
+    if (topToolbar) {
+      topToolbar.classList.toggle('mode-edit', isEdit);
+      topToolbar.classList.toggle('mode-view', !isEdit);
+    }
+    const countBox = document.getElementById('toolbarCountBox');
+    if (countBox) {
+      countBox.classList.toggle('mode-edit', isEdit);
+      countBox.classList.toggle('mode-view', !isEdit);
+    }
     editBtn.textContent = isEdit ? '保留' : '修改';
     applyHeaderEditState(isEdit);
     applyToolbarEditState(isEdit);
 
     // 切換單頭欄位的 disabled 狀態
     document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
-      .forEach(el => { if (!el.closest('.modal')) el.disabled = !isEdit; });
+      .forEach(el => {
+        if (el.closest('.modal')) return;
+        const isDictReadOnly = el.dataset.readonly === '1';
+        if (isDictReadOnly) {
+          if (el.matches('select.lookup-dropdown')) {
+            setLookupReadOnly(el, true);
+          } else if (el.type === 'checkbox') {
+            el.disabled = true;
+          } else {
+            el.readOnly = true;
+            el.disabled = false;
+          }
+          el.classList.add('dict-readonly');
+        } else {
+          el.disabled = !isEdit;
+        }
+      });
 
     // ? 切換單身表格的顯示/編輯模式（針對 _MultiTabDetail.cshtml）
     document.querySelectorAll('.multi-tab-detail .erp-table .cell-view')
@@ -1185,6 +1228,8 @@ $(function () {
 const NAV_BTN_PREV = document.getElementById('btnPrev');
 const NAV_BTN_NEXT = document.getElementById('btnNext');
 let navIds = [], navIndex = -1;
+const headerCountEl = document.getElementById('toolbarHeaderCount');
+const detailCountEl = document.getElementById('toolbarDetailCount');
 
 function loadLastFilters() {
   try {
@@ -1213,6 +1258,7 @@ function updateNavButtons() {
     NAV_BTN_NEXT.disabled = !hasNext;
     NAV_BTN_NEXT.onclick = () => hasNext && gotoPaper(navIds[navIndex + 1]);
   }
+  updateToolbarCounts();
 }
 async function fetchIdListByApi(filters) {
   const res = await fetch('/api/PagedQuery/IdList', {
@@ -1263,6 +1309,37 @@ async function initRowNavigation() {
   }
 }
 initRowNavigation();
+
+function getActiveDetailRowStats() {
+  const activePane = document.querySelector('.multi-tab-detail .tab-pane.show.active');
+  if (!activePane) return { index: 0, total: 0 };
+  const tbody = activePane.querySelector('tbody');
+  if (!tbody) return { index: 0, total: 0 };
+  const rows = Array.from(tbody.querySelectorAll('tr'))
+    .filter(tr => (tr.dataset.state || '').toString().toLowerCase() !== 'empty');
+  const total = rows.length;
+  if (!total) return { index: 0, total: 0 };
+  const selected = tbody.querySelector('tr.row-selected');
+  const idx = selected ? rows.indexOf(selected) + 1 : 1;
+  return { index: idx, total };
+}
+
+function updateToolbarCounts() {
+  if (headerCountEl) {
+    const total = navIds.length;
+    if (total > 0 && navIndex >= 0) {
+      headerCountEl.textContent = `${navIndex + 1}/${total}`;
+    } else {
+      headerCountEl.textContent = '--/--';
+    }
+  }
+  if (detailCountEl) {
+    const stats = getActiveDetailRowStats();
+    detailCountEl.textContent = stats.total > 0 ? `${stats.index}/${stats.total}` : '--/--';
+  }
+}
+
+window.__updateToolbarCounts = updateToolbarCounts;
 
 // ============================
 // 固定工具列：第二/第三階新增刪減
@@ -1364,6 +1441,9 @@ initRowNavigation();
     const dictTable = activePane?.querySelector?.('.table-container')?.dataset?.dictTable || '';
     const safeTable = (dictTable || '').toString().replace(/^dbo\./i, '').trim();
     const defaults = safeTable ? await getDetailDefaults(safeTable) : {};
+    const readOnlyMap = safeTable && window._detailFieldReadOnlyMap
+      ? (window._detailFieldReadOnlyMap[safeTable.toLowerCase()] || {})
+      : {};
 
     let maxItem = 0;
     tbody.querySelectorAll('tr').forEach(tr => {
@@ -1389,16 +1469,20 @@ initRowNavigation();
       blankRow.querySelectorAll('.cell-edit').forEach(el => el.classList.remove('d-none'));
       const first = blankRow.querySelector('.cell-edit');
       first?.focus();
+      if (typeof window.__updateToolbarCounts === 'function') window.__updateToolbarCounts();
       return { ok: true, reused: true };
     }
     let html = `<tr data-paper-num="${pn}" data-item="${newItem}" data-state="added" class="row-selected">`;
       fields.forEach(field => {
+        const isReadOnly = !!readOnlyMap[(field || '').toString().toLowerCase()];
+        const roClass = isReadOnly ? ' readonly-cell' : '';
+        const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
         const defVal = (defaults && Object.prototype.hasOwnProperty.call(defaults, field)) ? defaults[field] : '';
         const value = defVal == null ? '' : String(defVal);
         const safeValue = escAttr(value);
-        html += `<td>
-          <span class="${viewClass}" data-init-view="${safeValue}">${safeValue}</span>
-          <input type="text" class="${editClass}" data-field="${field}" data-init="${safeValue}" value="${safeValue}">
+        html += `<td data-readonly="${isReadOnly ? '1' : '0'}">
+          <span class="${viewClass}${roClass}" data-init-view="${safeValue}" data-readonly="${isReadOnly ? '1' : '0'}">${safeValue}</span>
+          <input type="text" class="${editClass}${roClass}" data-field="${field}" data-init="${safeValue}" value="${safeValue}"${roAttr}>
         </td>`;
       });
     html += '</tr>';
@@ -1412,6 +1496,7 @@ initRowNavigation();
         try { firstInput.focus(); } catch {}
       }
     }
+    if (typeof window.__updateToolbarCounts === 'function') window.__updateToolbarCounts();
     return { ok: true };
   };
 
@@ -1440,6 +1525,7 @@ initRowNavigation();
       const next = selectedRow.nextElementSibling || selectedRow.previousElementSibling;
       selectedRow.remove();
       if (next) next.classList.add('row-selected');
+      if (typeof window.__updateToolbarCounts === 'function') window.__updateToolbarCounts();
       return { ok: true };
     }
 
@@ -1466,6 +1552,7 @@ initRowNavigation();
     const next = selectedRow.nextElementSibling || selectedRow.previousElementSibling;
     selectedRow.remove();
     if (next) next.classList.add('row-selected');
+    if (typeof window.__updateToolbarCounts === 'function') window.__updateToolbarCounts();
     return { ok: true };
   };
 
@@ -1678,6 +1765,8 @@ body { background: #f7f9fb !important; }
   width: 100%;
   padding-left: var(--detail-left-pad);
   margin-bottom: 14px;
+  border-radius: 10px;
+  transition: background-color 0.2s ease;
 }
 .top-toolbar .toolbar-icon-row{
   display: flex;
@@ -1745,6 +1834,34 @@ body { background: #f7f9fb !important; }
 .top-toolbar .toolbar-btn-cancel{
   font-size: 18px;
 }
+.top-toolbar.mode-view,
+.top-toolbar.mode-edit{
+  background: transparent;
+}
+
+.toolbar-count-box{
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: var(--top-toolbar-btn-height, 36px);
+  min-width: 74px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-weight: 700;
+  line-height: 1.05;
+  color: #fff;
+  user-select: none;
+}
+.toolbar-count-box .count-line{
+  font-size: 0.75rem;
+}
+.toolbar-count-box.mode-view{
+  background: #1e4db7;
+}
+.toolbar-count-box.mode-edit{
+  background: #f00000;
+}
 
 /* draggable 欄位（橫排 label + 控件） */
 .draggable-field{ position:absolute; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; background:transparent; border:1px dashed transparent; }
@@ -1781,6 +1898,14 @@ body { background: #f7f9fb !important; }
 .erp-header-form select.lookup-dropdown.lookup-readonly:focus{
   border-color: #ced4da;
   box-shadow: none !important;
+}
+.erp-header-form .dict-readonly,
+.erp-header-form .dict-readonly:focus{
+  background-color: var(--bs-secondary-bg, #e9ecef) !important;
+  color: var(--bs-secondary-color, #6c757d) !important;
+  border-color: #ced4da !important;
+  box-shadow: none !important;
+  cursor: not-allowed;
 }
 /* jQuery UI resizable：讓右側拉寬把手更好抓 */
 .draggable-field.ui-resizable .ui-resizable-e{

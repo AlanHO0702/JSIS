@@ -61,9 +61,25 @@
               id="li-@item.ItemId"
               data-item-id="@item.ItemId"
               onclick="selectItem('@item.ItemId')"
-              ondblclick="openEditModal('@item.ItemId', '@item.ItemName', '@item.SuperId', '@item.SystemId', '@item.SerialNum', @((item.Enabled)), '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Notes ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Ocxtemplete ?? ""))')"
+              ondblclick="openEditModal('@item.ItemId', '@item.ItemName', '@item.SuperId', '@item.SystemId', '@item.SerialNum', @((item.Enabled)), '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Notes ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Ocxtemplete ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.SWebMenuId ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.SWebSuperMenuId ?? ""))', '@(item.IWebMenuOrderSeq?.ToString() ?? "")', '@(item.IWebMenuLevel?.ToString() ?? "")', '@(item.IWebEnable?.ToString() ?? "")')"
               style="cursor:pointer;">
-              @item.ItemId - @item.ItemName
+              @if (item.IWebMenuOrderSeq.HasValue)
+              {
+                  <span class="text-muted me-2">[@item.IWebMenuOrderSeq]</span>
+              }
+              <span>@item.ItemId - @item.ItemName</span>
+              @if (!string.IsNullOrWhiteSpace(item.SWebMenuId))
+              {
+                  <span class="text-muted ms-2">(@item.SWebMenuId)</span>
+              }
+              @if (item.Enabled == 1)
+              {
+                  <span class="badge bg-success ms-2">已啟用</span>
+              }
+              @if (item.IWebEnable == 1)
+              {
+                  <span class="badge bg-primary ms-2">前台啟用</span>
+              }
           </li>
         }
       }
@@ -139,9 +155,29 @@
             <label class="form-label">序號</label>
             <input type="number" class="form-control" id="editSerialNum" />
           </div>
+          <div class="mb-3">
+            <label class="form-label">前台選單代碼</label>
+            <input type="text" class="form-control" id="editSWebMenuId" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">前台上層代碼</label>
+            <input type="text" class="form-control" id="editSWebSuperMenuId" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">前台排序</label>
+            <input type="number" class="form-control" id="editIWebMenuOrderSeq" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">前台層級</label>
+            <input type="number" class="form-control" id="editIWebMenuLevel" />
+          </div>
           <div class="form-check mb-3 edit-item-check">
             <input type="checkbox" class="form-check-input" id="editEnabled">
             <label class="form-check-label" for="editEnabled">功能啟用</label>
+          </div>
+          <div class="form-check mb-3 edit-item-check">
+            <input type="checkbox" class="form-check-input" id="editIWebEnable">
+            <label class="form-check-label" for="editIWebEnable">前台啟用</label>
           </div>
           <div class="mb-3 grid-span-2">
             <label class="form-label">功能說明</label>
@@ -349,16 +385,22 @@ window.openAddModal = async function () {
   new bootstrap.Modal(document.getElementById('addItemModal')).show();
 };
 
-window.openEditModal = function (itemId, itemName, superId, systemId, serialNum, enabled, Notes, ocxtemplete) {
+window.openEditModal = function (itemId, itemName, superId, systemId, serialNum, enabled, Notes, ocxtemplete, sWebMenuId, sWebSuperMenuId, iWebMenuOrderSeq, iWebMenuLevel, iWebEnable) {
   document.getElementById('editItemId').value    = itemId;
   document.getElementById('editItemName').value  = itemName;
   document.getElementById('editSuperId').value   = superId;
   document.getElementById('editSystemId').value  = systemId;
   document.getElementById('editSerialNum').value = (serialNum ?? '');
+  document.getElementById('editSWebMenuId').value = (sWebMenuId ?? '');
+  document.getElementById('editSWebSuperMenuId').value = (sWebSuperMenuId ?? '');
+  document.getElementById('editIWebMenuOrderSeq').value = (iWebMenuOrderSeq ?? '');
+  document.getElementById('editIWebMenuLevel').value = (iWebMenuLevel ?? '');
   document.getElementById('editNotes').value     = (Notes ?? '');
   ensureOcxTempleteOptions(ocxtemplete ?? '');
   const isEnabled = (enabled === 1 || enabled === '1' || enabled === true || enabled === 'true');
   document.getElementById('editEnabled').checked = isEnabled;
+  const isWebEnabled = (iWebEnable === 1 || iWebEnable === '1' || iWebEnable === true || iWebEnable === 'true');
+  document.getElementById('editIWebEnable').checked = isWebEnabled;
   document.getElementById('editAlert').classList.add('d-none');
   initDraggableModal('editItemModal');
   new bootstrap.Modal(document.getElementById('editItemModal')).show();
@@ -440,18 +482,49 @@ document.addEventListener('DOMContentLoaded', () => {
     const enabled   = document.getElementById('editEnabled').checked ? 1 : 0;
     const notes     = document.getElementById('editNotes').value;
     const ocxtemplete = document.getElementById('editOcxtemplete').value;
+    const sWebMenuId = document.getElementById('editSWebMenuId').value.trim();
+    const sWebSuperMenuId = document.getElementById('editSWebSuperMenuId').value.trim();
+    const webMenuOrderSeqRaw = document.getElementById('editIWebMenuOrderSeq').value.trim();
+    const webMenuLevelRaw = document.getElementById('editIWebMenuLevel').value.trim();
+    const iWebMenuOrderSeq = webMenuOrderSeqRaw === "" ? null : Number(webMenuOrderSeqRaw);
+    const iWebMenuLevel = webMenuLevelRaw === "" ? null : Number(webMenuLevelRaw);
+    const iWebEnable = document.getElementById('editIWebEnable').checked ? 1 : 0;
     const alertBox  = document.getElementById('editAlert');
     if (!itemId || !itemName) { alertBox.textContent = "請填寫完整資料"; alertBox.classList.remove('d-none'); return; }
     try {
       const res = await fetch("/api/EditItemApi", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itemId, itemName, superId, serialNum, enabled, notes, ocxtemplete })
+        body: JSON.stringify({
+          itemId,
+          itemName,
+          superId,
+          serialNum,
+          enabled,
+          notes,
+          ocxtemplete,
+          sWebMenuId,
+          sWebSuperMenuId,
+          iWebMenuOrderSeq,
+          iWebMenuLevel,
+          iWebEnable
+        })
       });
       const data = await res.json();
       if (!res.ok || !data.success) { alertBox.textContent = data?.message || "更新失敗"; alertBox.classList.remove('d-none'); return; }
       const li = document.getElementById("li-" + itemId);
-      if (li) li.textContent = `${itemId} - ${itemName}`;
-      safeGetModal('addItemModal')?.hide();
+      if (li) {
+        const orderSpan = (iWebMenuOrderSeq !== null && iWebMenuOrderSeq !== undefined && String(iWebMenuOrderSeq).trim() !== '')
+          ? ` <span class="text-muted me-2">[${iWebMenuOrderSeq}]</span>` : '';
+        const webMenuSpan = sWebMenuId ? ` <span class="text-muted ms-2">(${sWebMenuId})</span>` : '';
+        const enabledSpan = enabled === 1 ? ' <span class="badge bg-success ms-2">已啟用</span>' : '';
+        const webEnabledSpan = iWebEnable === 1 ? ' <span class="badge bg-primary ms-2">前台啟用</span>' : '';
+        li.innerHTML = `${orderSpan}<span>${itemId} - ${itemName}</span>${webMenuSpan}${enabledSpan}${webEnabledSpan}`;
+        const systemId = document.getElementById('editSystemId').value.trim();
+        const q = (v) => JSON.stringify(v ?? "");
+        const dbl = `openEditModal(${q(itemId)}, ${q(itemName)}, ${q(superId)}, ${q(systemId)}, ${serialNum}, ${enabled}, ${q(notes)}, ${q(ocxtemplete)}, ${q(sWebMenuId)}, ${q(sWebSuperMenuId)}, ${q(iWebMenuOrderSeq ?? "")}, ${q(iWebMenuLevel ?? "")}, ${q(iWebEnable)})`;
+        li.setAttribute("ondblclick", dbl);
+      }
+      safeGetModal('editItemModal')?.hide();
       alert("更新成功！");
     } catch (ex) { alertBox.textContent = "發生錯誤：" + ex.message; alertBox.classList.remove('d-none'); }
   });

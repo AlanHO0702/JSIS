@@ -30,6 +30,7 @@
   const container = document.getElementById('paper3l-subdetail-container');
   const countEl = document.getElementById('paper3l-subdetail-count');
   let lastRows = null;
+  let readOnlyMap = new Map();
   if (container) {
     container.addEventListener('pointerdown', () => {
       window.__activeDetailGrid = 'paper3l';
@@ -69,6 +70,7 @@
 
   const LOOKUP_META_CACHE = new Map(); // tn -> Map(fieldLower -> { table, key, result, keySelf, field })
   const LOOKUP_DATA_CACHE = new Map(); // tn -> Map(fieldLower -> Map(key -> label))
+  const READONLY_META_CACHE = new Map(); // tn -> Map(fieldLower -> boolean)
 
   async function fetchLookupMeta(dictTable) {
     const tn = cleanTableName(dictTable);
@@ -111,6 +113,34 @@
     } catch {
       const empty = new Map();
       LOOKUP_META_CACHE.set(tn, empty);
+      return empty;
+    }
+  }
+
+  async function fetchReadOnlyMeta(dictTable) {
+    const tn = cleanTableName(dictTable);
+    if (!tn) return new Map();
+    if (READONLY_META_CACHE.has(tn)) return READONLY_META_CACHE.get(tn);
+    try {
+      const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(tn)}&lang=TW`);
+      if (!res.ok) {
+        const empty = new Map();
+        READONLY_META_CACHE.set(tn, empty);
+        return empty;
+      }
+      const rows = await res.json();
+      const map = new Map();
+      (rows || []).forEach(r => {
+        const field = (r.fieldName || r.FieldName || '').toString();
+        if (!field) return;
+        const ro = Number(r.readOnly ?? r.ReadOnly ?? 0) === 1;
+        map.set(field.toLowerCase(), ro);
+      });
+      READONLY_META_CACHE.set(tn, map);
+      return map;
+    } catch {
+      const empty = new Map();
+      READONLY_META_CACHE.set(tn, empty);
       return empty;
     }
   }
@@ -400,7 +430,9 @@
     const view = td.querySelector('.cell-view');
     if (!edit || !view) return;
 
-    const canApply = getHeaderEditState();
+    const isReadOnly = td.dataset.readonly === '1' || edit.dataset.readonly === '1';
+    if (isReadOnly) return;
+    const canApply = getHeaderEditState() && !isReadOnly;
     const currentKey = edit.type === 'checkbox' ? (edit.checked ? '1' : '0') : (edit.value ?? '');
     const list = buildLookupList(field, lookupMap, currentKey);
 
@@ -517,6 +549,7 @@
     }
     const lookupMeta = await fetchLookupMeta(cfg.DictTable);
     const lookupMaps = await fetchLookupMaps(cfg.DictTable);
+    readOnlyMap = await fetchReadOnlyMeta(cfg.DictTable);
     const lookupResultMap = new Map();
     for (const [fieldLower, cfgMeta] of lookupMeta.entries()) {
       const resultLower = (cfgMeta?.result || '').toString().toLowerCase();
@@ -547,6 +580,9 @@
       html += '<tr data-idx="0">';
       fields.forEach(fn => {
         const fieldLower = fn.toLowerCase();
+        const isReadOnly = readOnlyMap.get(fieldLower) === true;
+        const roClass = isReadOnly ? ' readonly-cell' : '';
+        const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
         const meta = lookupMeta.get(fieldLower);
         const lookupMap = lookupMaps.get(fieldLower);
         const metaFieldLower = (meta?.field || '').toString().toLowerCase();
@@ -556,7 +592,7 @@
         const lookupAttr = canDropdown
           ? ` class="lookup-cell" data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
           : "";
-        html += `<td${lookupAttr}><span class="cell-view"></span><input class="cell-edit d-none" data-field="${escapeHtml(fn)}" data-init="" value=""></td>`;
+        html += `<td${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="cell-edit d-none${roClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}></td>`;
       });
       html += '</tr></tbody></table></div>';
       container.innerHTML = html;
@@ -598,9 +634,15 @@
           tbody.querySelectorAll('tr.row-selected').forEach(x => x.classList.remove('row-selected'));
           tr.classList.add('row-selected');
           window._paper3lSubDetailSelectedRows["1"] = {};
+          if (typeof window.__updateToolbarCounts === 'function') {
+            window.__updateToolbarCounts();
+          }
         });
         tbody.addEventListener('focusin', () => {
           window.__activeDetailGrid = 'paper3l';
+          if (typeof window.__updateToolbarCounts === 'function') {
+            window.__updateToolbarCounts();
+          }
         });
         tbody.addEventListener('dblclick', (e) => {
           const td = e.target.closest('td');
@@ -637,10 +679,16 @@
         const raw = getCellValue(r, fn);
         const hasField = hasFieldCaseInsensitive(r, fn);
         if (typeof raw === 'object') {
-          html += `<td><span class="cell-view"></span><input class="cell-edit d-none" data-field="${escapeHtml(fn)}" value=""></td>`;
+          const isReadOnly = readOnlyMap.get(fn.toLowerCase()) === true;
+          const roClass = isReadOnly ? ' readonly-cell' : '';
+          const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
+          html += `<td data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}"></span><input class="cell-edit d-none${roClass}" data-field="${escapeHtml(fn)}" value=""${roAttr}></td>`;
           return;
         }
         const fieldLower = fn.toLowerCase();
+        const isReadOnly = readOnlyMap.get(fieldLower) === true;
+        const roClass = isReadOnly ? ' readonly-cell' : '';
+        const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
         let meta = lookupMeta.get(fieldLower);
         let lookupMap = lookupMaps.get(fieldLower);
         if (!meta) {
@@ -697,7 +745,7 @@
         const lookupAttr = canDropdown
           ? ` class="lookup-cell" data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
           : "";
-        html += `<td${lookupAttr}><span class="cell-view">${escapeHtml(v)}</span><input class="cell-edit d-none" data-field="${escapeHtml(fn)}" data-init="${escapeHtml(raw)}" value="${escapeHtml(raw)}"></td>`;
+        html += `<td${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(v)}</span><input class="cell-edit d-none${roClass}" data-field="${escapeHtml(fn)}" data-init="${escapeHtml(raw)}" value="${escapeHtml(raw)}"${roAttr}></td>`;
       });
       html += '</tr>';
     });
@@ -746,9 +794,15 @@
         if (!isNaN(idx) && rows[idx]) {
           window._paper3lSubDetailSelectedRows["1"] = rows[idx];
         }
+        if (typeof window.__updateToolbarCounts === 'function') {
+          window.__updateToolbarCounts();
+        }
       });
       tbody.addEventListener('focusin', () => {
         window.__activeDetailGrid = 'paper3l';
+        if (typeof window.__updateToolbarCounts === 'function') {
+          window.__updateToolbarCounts();
+        }
       });
       tbody.addEventListener('dblclick', (e) => {
         const td = e.target.closest('td');
@@ -820,6 +874,9 @@
       let html = '<tr data-state="added" class="row-selected">';
       fields.forEach(fn => {
         const fieldLower = fn.toLowerCase();
+        const isReadOnly = readOnlyMap.get(fieldLower) === true;
+        const roClass = isReadOnly ? ' readonly-cell' : '';
+        const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
         let meta = lookupMeta.get(fieldLower);
         let lookupMap = lookupMaps.get(fieldLower);
         if (!meta) {
@@ -838,7 +895,7 @@
         const lookupAttr = canDropdown
           ? ` class="lookup-cell" data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
           : "";
-        html += `<td${lookupAttr}><span class="${viewClass}"></span><input class="${editClass}" data-field="${escapeHtml(fn)}" data-init="" value=""></td>`;
+        html += `<td${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="${viewClass}${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="${editClass}${roClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}></td>`;
       });
       html += '</tr>';
 
@@ -1057,6 +1114,17 @@ body.resizing { cursor: col-resize !important; }
 .paper3l-subdetail .erp-table td.lookup-cell .cell-view,
 .paper3l-subdetail .erp-table td.lookup-cell .cell-edit{
   background: #fff7e0;
+}
+
+.paper3l-subdetail .erp-table td .cell-view.readonly-cell,
+.paper3l-subdetail .erp-table td .cell-edit.readonly-cell{
+  background: #e9ecef !important;
+  color: #6c757d !important;
+  cursor: not-allowed;
+}
+.paper3l-subdetail .erp-table td .cell-edit.readonly-cell:focus{
+  outline: none;
+  background: #e9ecef !important;
 }
 
 .lookup-dropdown-list{
