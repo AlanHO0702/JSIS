@@ -66,6 +66,15 @@ if (typeof CSS === 'undefined' || typeof CSS.escape !== 'function') {
 
     // 新增
     document.getElementById(this.addBtnId).onclick = async () => {
+      // ========== Hook: beforeAdd ==========
+      if (typeof window.executeGlobalTemplateHook === 'function') {
+        const hookResult = window.executeGlobalTemplateHook('beforeAdd');
+        if (hookResult === false) {
+          console.log('[ToolbarHandler] beforeAdd Hook 中止新增');
+          return;
+        }
+      }
+
       const ask = await Swal.fire({
         title: '確定要新增一張新單據？',
         icon: 'question',
@@ -81,6 +90,12 @@ if (typeof CSS === 'undefined' || typeof CSS.escape !== 'function') {
 
       const data = await resp.json();
       const paperNum = data.paperNum || data.PaperNum || '';
+
+      // ========== Hook: afterAdd ==========
+      if (typeof window.executeGlobalTemplateHook === 'function') {
+        window.executeGlobalTemplateHook('afterAdd', { paperNum, data });
+      }
+
       if (paperNum) {
         // 支援兩種格式的佔位符：{PaperNum} 和 {0}
         console.log('[ToolbarHandler] detailRouteTemplate:', this.detailRouteTemplate);
@@ -102,6 +117,16 @@ if (typeof CSS === 'undefined' || typeof CSS.escape !== 'function') {
         await Swal.fire({ icon: 'warning', title: '請先點選一筆資料', confirmButtonText: '確定' });
         return;
       }
+
+      // ========== Hook: beforeDelete ==========
+      if (typeof window.executeGlobalTemplateHook === 'function') {
+        const hookResult = window.executeGlobalTemplateHook('beforeDelete', { selectedId });
+        if (hookResult === false) {
+          console.log('[ToolbarHandler] beforeDelete Hook 中止作廢');
+          return;
+        }
+      }
+
       const ask = await Swal.fire({
         title: '確定要作廢這筆單據？',
         icon: 'question',
@@ -130,6 +155,12 @@ if (typeof CSS === 'undefined' || typeof CSS.escape !== 'function') {
           if (resp.ok) {
             const data = await resp.json().catch(() => ({}));
             await Swal.fire({ icon: 'success', title: data.message || '作廢成功！' });
+
+            // ========== Hook: afterDelete ==========
+            if (typeof window.executeGlobalTemplateHook === 'function') {
+              window.executeGlobalTemplateHook('afterDelete', { selectedId });
+            }
+
             if (this.queryRedirectUrl) window.location.href = this.queryRedirectUrl;
             else location.reload();
             return;
@@ -144,6 +175,12 @@ if (typeof CSS === 'undefined' || typeof CSS.escape !== 'function') {
         const resp = await fetchWithBusy(this.deleteApiUrlFn(selectedId), { method: 'DELETE' }, '作廢中');
         if (resp.ok) {
           await Swal.fire({ icon: 'success', title: '作廢成功！' });
+
+          // ========== Hook: afterDelete ==========
+          if (typeof window.executeGlobalTemplateHook === 'function') {
+            window.executeGlobalTemplateHook('afterDelete', { selectedId });
+          }
+
           if (this.queryRedirectUrl) window.location.href = this.queryRedirectUrl;
           else location.reload();
           return;
