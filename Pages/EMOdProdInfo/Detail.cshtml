@@ -554,27 +554,135 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // 載入送審歷史資料
-  function loadSubmitHistory(row) {
+  async function loadSubmitHistory(row) {
     const container = document.getElementById('submit-history-container');
     if (!container) return;
 
-    // 從 masterData 中取得內部資料欄位
-    const historyData = [
-      { label: '作業', value: row.UseId || row.useid || '追審' },
-      { label: '使用者', value: row.UserId || row.userid || row.Designer || row.designer || 'Admin' },
-      { label: '異動日期', value: formatDateTime(row.EditTime || row.edittime) },
-      { label: '設計中', value: formatDateTime(row.DatetimeCol1 || row.datetimecol1) },
-      { label: '設計完成', value: formatDateTime(row.DatetimeCol2 || row.datetimecol2) },
-      { label: '已審核', value: formatDateTime(row.DatetimeCol3 || row.datetimecol3) },
-      { label: '已核准', value: formatDateTime(row.DatetimeCol4 || row.datetimecol4) }
-    ];
+    // 查詢歷史記錄資料（EMOdProdLog）
+    const qs = new URLSearchParams();
+    qs.append('keyNames', 'PartNum');
+    qs.append('keyValues', currentMasterKeys.PartNum || currentMasterKeys.partnum || '');
+    qs.append('keyNames', 'Revision');
+    qs.append('keyValues', currentMasterKeys.Revision || currentMasterKeys.revision || '');
 
-    container.innerHTML = historyData.map(item => `
-      <div class="mb-1" style="border-bottom: 1px solid #eee; padding-bottom: 4px;">
-        <div style="font-weight: bold; color: #555; font-size: 11px;">${item.label}</div>
-        <div style="color: #333; font-size: 11px;">${item.value || '----'}</div>
-      </div>
-    `).join('');
+    const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent('EMOdProdLog')}&${qs.toString()}`;
+
+    try {
+      // 同時載入資料和字典（用於 LOOKUP 轉換）
+      const [dataResponse, dictResponse] = await Promise.all([
+        fetch(url).then(r => r.json()),
+        fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent('EMOdProdLog')}`).then(r => r.json())
+      ]);
+
+      const rows = dataResponse || [];
+      const dict = dictResponse || [];
+
+      if (!rows || rows.length === 0) {
+        container.innerHTML = '<div class="text-center text-muted py-2">無歷史資料</div>';
+        return;
+      }
+
+      // 建立 LOOKUP 快取：{ FieldName: { LookupTable, LookupKey, LookupValue } }
+      const lookupFields = {};
+      dict.forEach(field => {
+        if (field.LookupTable && field.LookupKey && field.LookupValue) {
+          lookupFields[field.FieldName] = {
+            table: field.LookupTable,
+            key: field.LookupKey,
+            value: field.LookupValue
+          };
+        }
+      });
+
+      // 需要展開的欄位
+      const fieldsToExpand = ['IOType', 'AftStatus'];
+      const lookupCache = {};
+
+      // 載入所有需要的 LOOKUP 資料
+      const lookupPromises = fieldsToExpand
+        .filter(fieldName => lookupFields[fieldName])
+        .map(async fieldName => {
+          const lookup = lookupFields[fieldName];
+          try {
+            const response = await fetch(`/api/CommonTable/All?table=${encodeURIComponent(lookup.table)}`);
+            const data = await response.json();
+            lookupCache[fieldName] = data || [];
+          } catch (err) {
+            console.error(`Failed to load lookup for ${fieldName}:`, err);
+            lookupCache[fieldName] = [];
+          }
+        });
+
+      await Promise.all(lookupPromises);
+
+      // 轉換函數：根據 LOOKUP 配置將代碼轉換為名稱
+      function getLookupValue(fieldName, code) {
+        if (!lookupFields[fieldName] || !lookupCache[fieldName]) return code;
+
+        const lookup = lookupFields[fieldName];
+        const lookupData = lookupCache[fieldName];
+        const record = lookupData.find(item => {
+          const keyValue = item[lookup.key] ?? item[lookup.key.toLowerCase()];
+          return String(keyValue) === String(code);
+        });
+
+        if (record) {
+          return record[lookup.value] ?? record[lookup.value.toLowerCase()] ?? code;
+        }
+        return code;
+      }
+
+      // 根據舊系統格式顯示多筆歷史記錄
+      container.innerHTML = '<table style="width: 100%; font-size: 11px; border-collapse: collapse;">' +
+        '<thead style="background-color: #17a2b8; color: white;">' +
+        '<tr>' +
+        '<th style="padding: 4px 6px; text-align: left; border: 1px solid #dee2e6;">作業</th>' +
+        '<th style="padding: 4px 6px; text-align: left; border: 1px solid #dee2e6;">狀態</th>' +
+        '<th style="padding: 4px 6px; text-align: left; border: 1px solid #dee2e6;">異動日期</th>' +
+        '<th style="padding: 4px 6px; text-align: left; border: 1px solid #dee2e6;">使用者</th>' +
+        '</tr>' +
+        '</thead>' +
+        '<tbody>' +
+        rows.map((record, index) => {
+          // 使用 LOOKUP 轉換
+          const ioType = record.IOType || record.iotype || '';
+          const aftStatus = record.AftStatus || record.aftstatus || '';
+          const ioTypeName = getLookupValue('IOType', ioType);
+          const aftStatusName = getLookupValue('AftStatus', aftStatus);
+          const buildDate = formatDateOnly(record.BuildDate || record.builddate);
+          const userId = record.UserId || record.userid || '';
+          const bgColor = index % 2 === 0 ? '#ffffff' : '#f8f9fa';
+
+          return `
+            <tr style="background-color: ${bgColor};">
+              <td style="padding: 4px 6px; border: 1px solid #dee2e6;">${ioTypeName}</td>
+              <td style="padding: 4px 6px; border: 1px solid #dee2e6;">${aftStatusName}</td>
+              <td style="padding: 4px 6px; border: 1px solid #dee2e6;">${buildDate}</td>
+              <td style="padding: 4px 6px; border: 1px solid #dee2e6;">${userId}</td>
+            </tr>
+          `;
+        }).join('') +
+        '</tbody>' +
+        '</table>';
+    } catch (err) {
+      console.error('Load submit history error:', err);
+      container.innerHTML = '<div class="text-center text-muted py-2">載入失敗</div>';
+    }
+  }
+
+  function formatDateOnly(val) {
+    if (!val) return '';
+    try {
+      const date = new Date(val);
+      if (isNaN(date.getTime())) return val;
+      return date.toLocaleDateString('zh-TW', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).replace(/\//g, '/');
+    } catch {
+      return val;
+    }
   }
 
   function formatDateTime(val) {
