@@ -24,10 +24,13 @@ else
 
     <!-- 頂部基本資訊區（全寬度）-->
     <div id="emodprodinfo-header"
-         class="card shadow-sm border-0 rounded mb-2 p-3"
+         class="card shadow-sm border-0 rounded mb-2"
          data-dict="@cfg?.MasterDict"
-         style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);">
-        <div class="row g-2" id="header-fields"></div>
+         style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); padding: 0.5rem 0.75rem;">
+        <!-- 第一行 -->
+        <div class="d-flex align-items-center mb-1 gap-2" id="header-row-1"></div>
+        <!-- 第二行 -->
+        <div class="d-flex align-items-center gap-2" id="header-row-2"></div>
     </div>
 
     <!-- 主要內容區：左側層別+內部資料 + 右側規格/表單 -->
@@ -277,8 +280,17 @@ document.addEventListener('DOMContentLoaded', () => {
   let masterData = null;
   let masterDict = null;
 
-  // 頂部基本資訊區要顯示的欄位
-  const headerFields = ['PartNum', 'Revision', 'CustomerPartNum', 'CustomerSSName', 'Status', 'StatusName', 'Designer', 'UserName'];
+  // 第一行欄位：料號、版次、客戶料號、預鑄列印(checkbox)、預設不料本(checkbox)、暫停發料(checkbox)、混款(checkbox)
+  const headerRow1Fields = ['PartNum', 'Revision', 'CustomerPartNum'];
+  const headerRow1Checkboxes = [
+    { field: 'IsPrintPrecast', label: '傳統列印' },
+    { field: 'IsNotTemplate', label: '預設下料版本' },
+    { field: 'IsStopIssue', label: '暫停發料' },
+    { field: 'IsMixed', label: '混裁' }
+  ];
+
+  // 第二行欄位：狀態名稱、製程碼、產品用途、設計者、陣列種、設計日期、客戶機種
+  const headerRow2Fields = ['StatusName', 'ProcessCode', 'ProductUsage', 'Designer', 'ArrayCount', 'DesignDate', 'CustomerSSName'];
 
   // 層別資料 API
   const layerPressApiUrl = '@Html.Raw(Model.LayerPressApi ?? "")';
@@ -577,6 +589,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const rows = dataResponse || [];
       const dict = dictResponse || [];
 
+      console.log('=== EMOdProdLog Dictionary ===');
+      console.log('All fields:', dict.map(f => ({ FieldName: f.FieldName, LookupTable: f.LookupTable, LookupKey: f.LookupKey, LookupValue: f.LookupValue })));
+      console.log('IOType field:', dict.find(f => f.FieldName === 'IOType'));
+      console.log('AftStatus field:', dict.find(f => f.FieldName === 'AftStatus'));
+
       if (!rows || rows.length === 0) {
         container.innerHTML = '<div class="text-center text-muted py-2">無歷史資料</div>';
         return;
@@ -715,18 +732,57 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderHeaderFields(dict, row) {
-    const container = document.getElementById('header-fields');
-    if (!container) return;
+    const row1Container = document.getElementById('header-row-1');
+    const row2Container = document.getElementById('header-row-2');
+    if (!row1Container || !row2Container) return;
 
-    const fields = headerFields.map(fn => dict.find(f => f.FieldName === fn)).filter(f => f);
+    // === 第一行 ===
+    let row1Html = '';
 
-    container.innerHTML = fields.map(f => {
+    // 第一行的一般欄位
+    const row1Fields = headerRow1Fields.map(fn => dict.find(f => f.FieldName === fn)).filter(f => f);
+    row1Fields.forEach(f => {
       const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
-      return `<div class="col-md-3 d-flex align-items-center mb-2">
-        <label class="form-label fw-bold text-primary mb-0 me-2" style="white-space: nowrap;">${f.DisplayLabel || f.FieldName}</label>
-        <input type="text" class="form-control form-control-sm bg-white" style="flex: 1;" value="${val}" readonly>
-      </div>`;
-    }).join('');
+      row1Html += `
+        <div class="d-flex align-items-center" style="margin-right: 1rem;">
+          <label class="mb-0 me-2" style="white-space: nowrap; font-size: 13px; font-weight: 600; color: #0066cc;">${f.DisplayLabel || f.FieldName}</label>
+          <input type="text" class="form-control form-control-sm bg-white" style="width: 150px; font-size: 13px; padding: 0.25rem 0.5rem; height: 28px;" value="${val}" readonly>
+        </div>
+      `;
+    });
+
+    // 第一行的勾選框
+    headerRow1Checkboxes.forEach(chk => {
+      const val = row[chk.field] ?? row[chk.field.toLowerCase()] ?? '';
+      const isChecked = val === '1' || val === 1 || val === true || val === 'true';
+      row1Html += `
+        <div class="form-check" style="font-size: 13px; margin-right: 1rem;">
+          <input class="form-check-input header-checkbox" type="checkbox" id="chk_${chk.field}"
+                 ${isChecked ? 'checked' : ''} disabled>
+          <label class="form-check-label" for="chk_${chk.field}" style="color: #000000; font-weight: 500;">
+            ${chk.label}
+          </label>
+        </div>
+      `;
+    });
+
+    row1Container.innerHTML = row1Html;
+
+    // === 第二行 ===
+    let row2Html = '';
+
+    const row2Fields = headerRow2Fields.map(fn => dict.find(f => f.FieldName === fn)).filter(f => f);
+    row2Fields.forEach(f => {
+      const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+      row2Html += `
+        <div class="d-flex align-items-center" style="margin-right: 1rem;">
+          <label class="mb-0 me-2" style="white-space: nowrap; font-size: 13px; font-weight: 600; color: #0066cc;">${f.DisplayLabel || f.FieldName}</label>
+          <input type="text" class="form-control form-control-sm bg-white" style="width: 150px; font-size: 13px; padding: 0.25rem 0.5rem; height: 28px;" value="${val}" readonly>
+        </div>
+      `;
+    });
+
+    row2Container.innerHTML = row2Html;
   }
 
   function renderMasterTab(tabKey, dict, row) {
@@ -1250,6 +1306,31 @@ document.addEventListener('DOMContentLoaded', () => {
 /* 層別面板內的項目不換行 */
 #layer-list {
   min-width: 180px;
+}
+
+/* 頂部勾選框樣式 */
+.header-checkbox {
+  opacity: 1 !important;
+  cursor: not-allowed !important;
+  width: 16px;
+  height: 16px;
+}
+
+.header-checkbox:disabled {
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+.header-checkbox:checked {
+  background-color: #0d6efd !important;
+  border-color: #0d6efd !important;
+  opacity: 1 !important;
+}
+
+/* 修正 disabled checkbox 的 label 文字顏色 */
+.header-checkbox:disabled + label {
+  color: #000000 !important;
+  opacity: 1 !important;
 }
 </style>
 
