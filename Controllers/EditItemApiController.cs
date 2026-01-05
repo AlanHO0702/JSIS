@@ -21,6 +21,11 @@ namespace PcbErpApi.Controllers
             public int Enabled { get; set; }   // 0=停用, 1=啟用
             public string Notes { get; set; } = "";
             public string Ocxtemplete { get; set; } = "";
+            public string SWebMenuId { get; set; } = "";
+            public string SWebSuperMenuId { get; set; } = "";
+            public long? IWebMenuOrderSeq { get; set; }
+            public int? IWebMenuLevel { get; set; }
+            public int? IWebEnable { get; set; }
         }
 
         public class OcxTempleteOption
@@ -71,6 +76,11 @@ namespace PcbErpApi.Controllers
             item.Enabled   = dto.Enabled;
             item.Notes   = dto.Notes?.Trim();
             item.Ocxtemplete = dto.Ocxtemplete?.Trim();
+            item.SWebMenuId = string.IsNullOrWhiteSpace(dto.SWebMenuId) ? null : dto.SWebMenuId.Trim();
+            item.SWebSuperMenuId = string.IsNullOrWhiteSpace(dto.SWebSuperMenuId) ? null : dto.SWebSuperMenuId.Trim();
+            item.IWebMenuOrderSeq = dto.IWebMenuOrderSeq;
+            item.IWebMenuLevel = dto.IWebMenuLevel;
+            item.IWebEnable = dto.IWebEnable;
 
             await _context.SaveChangesAsync();
             return Ok(new { success = true });

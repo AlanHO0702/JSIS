@@ -2384,6 +2384,17 @@ namespace PcbErpApi.Data
                         entity.Property(e => e.FlowCondField3)
                             .HasMaxLength(50)
                             .IsUnicode(false);
+                        entity.Property(e => e.SWebMenuId)
+                            .HasMaxLength(255)
+                            .IsUnicode(false)
+                            .HasColumnName("sWebMenuId");
+                        entity.Property(e => e.SWebSuperMenuId)
+                            .HasMaxLength(255)
+                            .IsUnicode(false)
+                            .HasColumnName("sWebSuperMenuId");
+                        entity.Property(e => e.IWebMenuOrderSeq).HasColumnName("iWebMenuOrderSeq");
+                        entity.Property(e => e.IWebMenuLevel).HasColumnName("iWebMenuLevel");
+                        entity.Property(e => e.IWebEnable).HasColumnName("iWeb_Enable");
                         entity.Property(e => e.FlowPrcId)
                             .HasMaxLength(30)
                             .IsUnicode(false);

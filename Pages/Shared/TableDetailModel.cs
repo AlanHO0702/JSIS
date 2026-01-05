@@ -123,7 +123,8 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 LookupResultField = x.LookupResultField,
                 DataType = x.DataType,
                 FormatStr = x.FormatStr,
-                ComboStyle = x.ComboStyle
+                ComboStyle = x.ComboStyle,
+                ReadOnly = x.ReadOnly
             }).ToList();
 
         // 分頁資訊：根據 iShowWhere 分群
@@ -153,7 +154,8 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 LookupTable = x.LookupTable,
                 LookupKeyField = x.LookupKeyField,
                 LookupResultField = x.LookupResultField,
-                ComboStyle = x.ComboStyle
+                ComboStyle = x.ComboStyle,
+                ReadOnly = x.ReadOnly
             }).ToList();
 
         // Lookup Map 資料 (單身 + 單頭)

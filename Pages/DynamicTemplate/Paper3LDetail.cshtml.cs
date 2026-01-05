@@ -173,7 +173,8 @@ namespace PcbErpApi.Pages.DynamicTemplate
                     LookupTable = x.LookupTable,
                     LookupKeyField = x.LookupKeyField,
                     LookupResultField = x.LookupResultField,
-                    ComboStyle = x.ComboStyle
+                    ComboStyle = x.ComboStyle,
+                    ReadOnly = x.ReadOnly
                 }).ToList();
 
             // 4) Header lookup maps（MultiTab 明細採前端即時載入，這裡只保留單頭 lookup）

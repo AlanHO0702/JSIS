@@ -65,6 +65,7 @@
     const tabsData = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(tabs));
     window._multiTabTabs = tabsData;
     window._multiTabSelectedRows = window._multiTabSelectedRows || {};
+    if (!window.__activeDetailGrid) window.__activeDetailGrid = 'multitab';
 
     function getHeaderEditState() {
         if (typeof window.__headerIsEdit === 'boolean') return window.__headerIsEdit;
@@ -85,6 +86,14 @@
         applyMultiTabEditMode(!!(e?.detail?.isEdit));
     });
 
+    document.querySelectorAll('.multi-tab-detail .nav-link').forEach(btn => {
+        btn.addEventListener('shown.bs.tab', () => {
+            if (typeof window.__updateToolbarCounts === 'function') {
+                window.__updateToolbarCounts();
+            }
+        });
+    });
+
     function cleanTableName(t) {
         return (t || '').toString().replace(/^dbo\./i, '').trim().toLowerCase();
     }
@@ -103,6 +112,7 @@
     const DICT_META_CACHE = new Map(); // tn -> Map(fieldLower -> { dataType, formatStr, comboStyle })
     const LOOKUP_META_CACHE = new Map(); // tn -> Map(fieldLower -> { table, key, result })
     const LOOKUP_DATA_CACHE = new Map(); // tn -> Map(fieldLower -> Map(key -> label))
+    const READONLY_META_CACHE = new Map(); // tn -> Map(fieldLower -> boolean)
 
     async function fetchDictMeta(dictTable) {
         const tn = cleanTableName(dictTable);
@@ -171,6 +181,34 @@
         } catch {
             const empty = new Map();
             LOOKUP_META_CACHE.set(tn, empty);
+            return empty;
+        }
+    }
+
+    async function fetchReadOnlyMeta(dictTable) {
+        const tn = cleanTableName(dictTable);
+        if (!tn) return new Map();
+        if (READONLY_META_CACHE.has(tn)) return READONLY_META_CACHE.get(tn);
+        try {
+            const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(tn)}&lang=TW`);
+            if (!res.ok) {
+                const empty = new Map();
+                READONLY_META_CACHE.set(tn, empty);
+                return empty;
+            }
+            const rows = await res.json();
+            const map = new Map();
+            (rows || []).forEach(r => {
+                const field = (r.fieldName || r.FieldName || '').toString();
+                if (!field) return;
+                const ro = Number(r.readOnly ?? r.ReadOnly ?? 0) === 1;
+                map.set(field.toLowerCase(), ro);
+            });
+            READONLY_META_CACHE.set(tn, map);
+            return map;
+        } catch {
+            const empty = new Map();
+            READONLY_META_CACHE.set(tn, empty);
             return empty;
         }
     }
@@ -357,14 +395,15 @@
         const view = td.querySelector('.cell-view');
         if (!edit || !view) return;
 
-        const canApply = allowEdit && getHeaderEditState();
+        const isReadOnly = td.dataset.readonly === '1' || edit.dataset.readonly === '1';
+        if (isReadOnly) return;
+        const canApply = allowEdit && getHeaderEditState() && !isReadOnly;
         const currentKey = edit.type === 'checkbox' ? (edit.checked ? '1' : '0') : (edit.value ?? '');
         const list = buildLookupList(field, lookupMap, currentKey);
 
         const cleanup = () => {
             list.remove();
             document.removeEventListener('mousedown', onDocDown, true);
-            window.removeEventListener('scroll', onScroll, true);
             window.removeEventListener('resize', onResize, true);
         };
 
@@ -427,7 +466,6 @@
             if (list.contains(e.target)) return;
             cleanup();
         };
-        const onScroll = () => cleanup();
         const onResize = () => cleanup();
 
         const onPick = (e) => {
@@ -446,7 +484,6 @@
         document.body.appendChild(list);
         positionDropdown(list, td);
         document.addEventListener('mousedown', onDocDown, true);
-        window.addEventListener('scroll', onScroll, true);
         window.addEventListener('resize', onResize, true);
     }
 
@@ -681,6 +718,11 @@
             window._detailFieldDicts[dictKey] = dict;
         }
         const metaMap = await fetchDictMeta(dictTable);
+        const readOnlyMap = await fetchReadOnlyMeta(dictTable);
+        if (dictKey) {
+            window._detailFieldReadOnlyMap = window._detailFieldReadOnlyMap || {};
+            window._detailFieldReadOnlyMap[dictKey] = Object.fromEntries(readOnlyMap.entries());
+        }
         const lookupMeta = await fetchLookupMeta(dictTable);
         const lookupMaps = await fetchLookupMaps(dictTable);
         const lookupResultMap = new Map();
@@ -715,20 +757,6 @@
         // 建立表格 - 使用 erp-table 樣式
         let html = '<div class="erp-table-wrapper">';
 
-        if (allowEdit) {
-            // +- 按鈕放在 wrapper 內部
-            html += `
-                <div class="d-flex justify-content-start mb-2 tab-action-buttons">
-                    <button type="button" class="btn btn-outline-secondary btn-sm btn-add-row" data-tab-id="${tabId}">
-                        ＋
-                    </button>
-                    <button type="button" class="btn btn-outline-danger btn-sm ms-1 btn-delete-row" data-tab-id="${tabId}" title="刪除當前列">
-                        －
-                    </button>
-                </div>
-            `;
-        }
-
         html += '<table class="erp-table"><thead><tr>';
 
         // 表頭 - 使用字典取得中文名稱
@@ -753,6 +781,9 @@
                   let rawValue = row[field] ?? '';
                 const fieldLower = field.toLowerCase();
                 const meta = metaMap.get(fieldLower);
+                const isReadOnly = readOnlyMap.get(fieldLower) === true;
+                const roClass = isReadOnly ? ' readonly-cell' : '';
+                const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
                 let lookupMap = lookupMaps.get(fieldLower);
                 let metaLookup = lookupMeta.get(fieldLower);
                 if (!metaLookup) {
@@ -808,13 +839,14 @@
                     const lookupAttr = canDropdown
                         ? ` class="lookup-cell" data-lookup-field="${escapeHtml(field)}"${keyFieldAttr}${resultFieldAttr}`
                         : "";
-                    html += `<td${lookupAttr}>
-                        <span class="${viewClass}" data-init-view="${escapeHtml(value)}">${escapeHtml(value)}</span>
+                    const tdReadOnlyAttr = ` data-readonly="${isReadOnly ? '1' : '0'}"`;
+                    html += `<td${lookupAttr}${tdReadOnlyAttr}>
+                        <span class="${viewClass}${roClass}" data-init-view="${escapeHtml(value)}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(value)}</span>
                         <input type="text"
-                               class="${editClass}"
+                               class="${editClass}${roClass}"
                                data-field="${field}"
                                data-init="${escapeHtml(rawValue)}"
-                               value="${escapeHtml(rawValue)}">
+                               value="${escapeHtml(rawValue)}"${roAttr}>
                     </td>`;
             });
             html += '</tr>';
@@ -840,6 +872,9 @@
         window._multiTabLookupMeta = window._multiTabLookupMeta || {};
         window._multiTabLookupMeta[tabId] = lookupMetaMap;
         applyMultiTabEditMode(!!window.__headerIsEdit);
+        if (typeof window.__updateToolbarCounts === 'function') {
+            window.__updateToolbarCounts();
+        }
 
         // 依辭典設定把「勾選框(ComboStyle=1)」欄位轉成 checkbox 顯示/編輯
         (function applyCheckboxCells() {
@@ -876,7 +911,9 @@
                         chk.className = edit.className;
                         chk.dataset.field = edit.dataset.field || '';
                         chk.dataset.init = edit.dataset.init || '';
+                        chk.dataset.readonly = edit.dataset.readonly || '0';
                         chk.checked = checked;
+                        if (chk.dataset.readonly === '1') chk.disabled = true;
                         edit.replaceWith(chk);
                     });
                 });
@@ -935,12 +972,20 @@
                     }
                 };
                 tbody.addEventListener('click', (e) => {
+                    window.__activeDetailGrid = 'multitab';
                     const tr = e.target.closest('tr');
                     if (tr && tbody.contains(tr)) selectRow(tr);
+                    if (typeof window.__updateToolbarCounts === 'function') {
+                        window.__updateToolbarCounts();
+                    }
                 });
                 tbody.addEventListener('focusin', (e) => {
+                    window.__activeDetailGrid = 'multitab';
                     const tr = e.target.closest('tr');
                     if (tr && tbody.contains(tr)) selectRow(tr);
+                    if (typeof window.__updateToolbarCounts === 'function') {
+                        window.__updateToolbarCounts();
+                    }
                 });
                 tbody.addEventListener('dblclick', (e) => {
                     const td = e.target.closest('td');
@@ -1063,243 +1108,6 @@
 
     // 使用 setTimeout 確保 DOM 完全就緒後執行
     setTimeout(() => loadFirstTab(), 100);
-
-    // ========== 新增/刪除列功能 ==========
-
-    function isMultiTabBlankRow(tr) {
-        if (!tr) return false;
-        const inputs = Array.from(tr.querySelectorAll('.cell-edit[data-field]'));
-        if (!inputs.length) return false;
-        let hasValue = false;
-        inputs.forEach(inp => {
-            const f = (inp.dataset.field || '').toString().toLowerCase();
-            if (f === 'papernum' || f === 'item') return;
-            const val = (inp.value ?? '').toString().trim();
-            if (val === '') return;
-            if (/^[-–—]+$/.test(val)) return;
-            const num = Number(val);
-            if (Number.isFinite(num) && num === 0) return;
-            hasValue = true;
-        });
-        return !hasValue;
-    }
-
-    // 使用事件委派綁定新增按鈕（因為按鈕是動態生成的）
-    document.addEventListener('click', async function(e) {
-        if (!allowEdit) return;
-        if (!e.target.classList.contains('btn-add-row')) return;
-
-        const btn = e.target;
-        const tabId = btn.dataset.tabId;
-        const tabPane = document.getElementById(`content-${tabId}`);
-        const container = tabPane.querySelector('.table-container');
-        const tbody = container.querySelector('tbody');
-
-        if (!tbody) {
-            Swal.fire({
-                icon: 'error',
-                title: '錯誤',
-                text: '找不到表格內容'
-            });
-            return;
-        }
-
-        // 取得該分頁的 API URL
-        const tabButton = document.querySelector(`[data-bs-target="#content-${tabId}"]`);
-        const apiUrl = tabButton.dataset.apiUrl;
-
-        // 建立新列（暫時在前端新增，還沒儲存到資料庫）
-        const dict = fieldDicts[tabId] || {};
-        const fields = Object.keys(dict).length > 0 ? Object.keys(dict) : [];
-        const lookupFields = (window._multiTabLookupFields || {})[tabId] || [];
-        const lookupMetaMap = (window._multiTabLookupMeta || {})[tabId] || {};
-        const lookupSet = new Set(lookupFields.map(f => String(f).toLowerCase()));
-
-        if (fields.length === 0) {
-            Swal.fire({
-                icon: 'warning',
-                title: '無法取得欄位資訊',
-                text: '請確認資料字典設定是否正確'
-            });
-            return;
-        }
-
-        const pendingRow = tbody.querySelector('tr[data-state="added"]');
-        const blankRow = pendingRow || Array.from(tbody.querySelectorAll('tr')).find(isMultiTabBlankRow);
-        if (blankRow) {
-            tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
-            blankRow.classList.add('row-selected');
-            blankRow.dataset.state = 'added';
-            blankRow.querySelectorAll('.cell-view').forEach(el => el.classList.add('d-none'));
-            blankRow.querySelectorAll('.cell-edit').forEach(el => el.classList.remove('d-none'));
-            const first = blankRow.querySelector('.cell-edit');
-            first?.focus();
-            return;
-        }
-
-        // 計算新的 Item 編號
-        const rows = tbody.querySelectorAll('tr');
-        let maxItem = 0;
-        rows.forEach(row => {
-            const item = parseInt(row.dataset.item) || 0;
-            if (item > maxItem) maxItem = item;
-        });
-        const newItem = maxItem + 1;
-
-        // 建立新列 HTML
-        let html = `<tr data-paper-num="${paperNum}" data-item="${newItem}" data-state="added" class="row-selected">`;
-        fields.forEach(field => {
-            // ✅ 雙元素：顯示模式 + 編輯模式
-            const fieldLower = String(field).toLowerCase();
-            const isLookup = lookupSet.has(fieldLower);
-            const meta = lookupMetaMap[fieldLower] || {};
-            const keyFieldAttr = isLookup ? ` data-lookup-key-field="${meta.key || ''}"` : '';
-            const resultFieldAttr = isLookup ? ` data-lookup-result-field="${meta.result || ''}"` : '';
-            const lookupAttr = isLookup
-                ? ` class="lookup-cell" data-lookup-field="${field}"${keyFieldAttr}${resultFieldAttr}`
-                : '';
-              html += `<td${lookupAttr}>
-                  <span class="cell-view" data-init-view=""></span>
-                  <input type="text"
-                         class="cell-edit d-none"
-                         data-field="${field}"
-                         data-init=""
-                         value="">
-              </td>`;
-        });
-        html += '</tr>';
-
-        // 移除其他列的選取狀態
-        tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
-
-        // 插入新列
-        tbody.insertAdjacentHTML('beforeend', html);
-
-        // 綁定新列的點擊事件
-        const newRow = tbody.querySelector('tr:last-child');
-        newRow.addEventListener('click', function() {
-            tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
-            this.classList.add('row-selected');
-            try {
-                const rowData = extractRowData(this);
-                window.dispatchEvent(new CustomEvent('multiTabRowSelected', { detail: { tabId, rowData } }));
-            } catch {}
-        });
-
-
-    });
-
-    // 使用事件委派綁定刪除按鈕（因為按鈕是動態生成的）
-    document.addEventListener('click', async function(e) {
-        if (!allowEdit) return;
-        if (!e.target.classList.contains('btn-delete-row')) return;
-
-        const btn = e.target;
-        const tabId = btn.dataset.tabId;
-        const tabPane = document.getElementById(`content-${tabId}`);
-        const container = tabPane.querySelector('.table-container');
-        const tbody = container.querySelector('tbody');
-
-        if (!tbody) {
-            Swal.fire({
-                icon: 'error',
-                title: '錯誤',
-                text: '找不到表格內容'
-            });
-            return;
-        }
-
-        const selectedRow = tbody.querySelector('tr.row-selected');
-        if (!selectedRow) {
-            Swal.fire({
-                icon: 'info',
-                title: '請先選取要刪除的列'
-            });
-            return;
-        }
-
-        const paperNum = selectedRow.dataset.paperNum;
-        const item = selectedRow.dataset.item;
-        const state = selectedRow.dataset.state;
-
-        // 使用 SweetAlert2 確認對話框
-        const { isConfirmed } = await Swal.fire({
-            icon: 'question',
-            title: '確定要刪除這一筆明細？',
-            text: `項次：${item}`,
-            showCancelButton: true,
-            confirmButtonText: '刪除',
-            cancelButtonText: '取消',
-            confirmButtonColor: '#dc3545'
-        });
-
-        if (!isConfirmed) {
-            return;
-        }
-
-        // 如果是新增但未儲存的列，直接移除
-        if (state === 'added') {
-            const next = selectedRow.nextElementSibling || selectedRow.previousElementSibling;
-            selectedRow.remove();
-            if (next) next.classList.add('row-selected');
-          
-            return;
-        }
-
-        // 已儲存的列，呼叫 API 刪除
-        try {
-            const tabButton = document.querySelector(`[data-bs-target="#content-${tabId}"]`);
-            const apiUrl = tabButton.dataset.apiUrl;
-
-            // 從 apiUrl 取得資料表名稱，例如 /api/FmedIssueMat -> FmedIssueMat
-            const tableName = apiUrl.split('/').pop();
-
-            const deleteUrl = `/api/${tableName}/${encodeURIComponent(paperNum)}/${encodeURIComponent(item)}`;
-
-
-            const response = await fetch(deleteUrl, { method: 'DELETE' });
-
-            if (!response.ok) {
-                // 嘗試解析後端的錯誤訊息
-                let errorMessage = `HTTP ${response.status}`;
-                try {
-                    const errorData = await response.json();
-                    if (errorData && errorData.error) {
-                        errorMessage = errorData.error;
-                    }
-                } catch (e) {
-                    // 如果不是 JSON 格式，嘗試讀取純文字
-                    try {
-                        const errorText = await response.text();
-                        if (errorText) errorMessage = errorText;
-                    } catch (e2) {
-                        // 保持原本的錯誤訊息
-                    }
-                }
-                throw new Error(errorMessage);
-            }
-
-            const next = selectedRow.nextElementSibling || selectedRow.previousElementSibling;
-            selectedRow.remove();
-            if (next) next.classList.add('row-selected');
-
- 
-            Swal.fire({
-                icon: 'success',
-                title: '刪除完成',
-                timer: 1500,
-                showConfirmButton: false
-            });
-        } catch (error) {
-            console.error('刪除失敗:', error);
-            Swal.fire({
-                icon: 'error',
-                title: '刪除失敗',
-                text: error.message,
-                confirmButtonText: '確定'
-            });
-        }
-    });
 
     function normalizeBool(val) {
         const s = (val ?? '').toString().trim().toLowerCase();
@@ -1517,6 +1325,17 @@ body.resizing { cursor: col-resize !important; }
     background: #fff7e0 !important;
 }
 
+.multi-tab-detail .erp-table td .cell-view.readonly-cell,
+.multi-tab-detail .erp-table td .cell-edit.readonly-cell {
+    background: #e9ecef !important;
+    color: #6c757d !important;
+    cursor: not-allowed;
+}
+.multi-tab-detail .erp-table td .cell-edit.readonly-cell:focus {
+    outline: none;
+    background: #e9ecef !important;
+}
+
 .lookup-dropdown-list {
     z-index: 2000;
     background: #fff;
@@ -1584,4 +1403,5 @@ body.resizing { cursor: col-resize !important; }
     background-color: #e7f3ff !important;
 }
 </style>
+
 

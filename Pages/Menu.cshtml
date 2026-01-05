@@ -1,0 +1,743 @@
+@page
+@using System.Text.Json
+@model PcbErpApi.Pages.MenuModel
+@{
+    var level0 = Model.Level0Items;
+    var level1Map = Model.Level1Map;
+    var level2List = Model.SelectedItems;
+    Layout = "_Layout";
+
+    var pageMap = new Dictionary<string, string> {
+        {"SPO00013","/SPO/SPO00013" },  // 銷售價格表
+        {"SPO00040", "/SPO/SPO00040"},// 銷售價格表(單一grid)
+        {"FME00020","/FME/FmedIssueMain"},
+        {"CUR00012", "/CUR/CURdSysParams"},
+        {"CURH0002", "/CUR/CURdReportOrderBasPage"},
+        {"CUR00007", "/CUR/CURdGroups"},
+        {"CURH0003", "/CUR/CURdV_SysProcess"},
+        {"CUR00004", "/CUR/NoticeBoard"},
+        {"MP000022", "/CCS/MP000022"},
+        {"MG000006", "/CPN/MGNdSetNum"},
+        {"CFW00005", "/AJN/AJNdDepart"},
+        {"CPN00009", "/CPN/MGNdSpecDemand"},
+        {"AA000008", "/AJN/AJNdAccListEdit"},
+        {"AJN00069", "/AJN/AJNdSysSummary"},
+        {"EMO00004", "/EMOdProdInfo" },
+        {"AJ000005", "/AJN/AJNdBalance"},
+        {"AJN00001", "/AJN/AJNdBalanceSet"},
+        // 其它功能請自行加入...
+    };
+
+    Dictionary<int, int> systemMap = new()
+    {
+        {1, 1},   // 銷售客戶
+        {2, 2},   // 原物料廠商
+        {3, 3},   // 製程委外廠商
+        {4, 4},   // 製令委外廠商
+        {5, 5},   // 進出口廠商
+        {6, 6},   // 其它廠商
+        {7, 7},   // 經銷商
+        {9, 9},   // 臨時客戶
+        {103, 1}  // 客戶授信額度設定 -> 視為銷售客戶
+    };
+
+    int? ResolveCompanySystem(object? powerTypeObj)
+    {
+        try
+        {
+            if (powerTypeObj == null) return null;
+            var valStr = powerTypeObj.ToString();
+            if (string.IsNullOrWhiteSpace(valStr)) return null;
+            if (!int.TryParse(valStr, out var pt)) return null;
+            return systemMap.TryGetValue(pt, out var sys) ? sys : null;
+        }
+        catch { return null; }
+    }
+
+    string? ResolveCompanyLink(dynamic item)
+    {
+        try
+        {
+            var cls = (item?.ClassName ?? string.Empty).ToString().Trim();
+            if (!cls.Equals("CCSdCompanyDLL.dll", StringComparison.OrdinalIgnoreCase))
+                return null;
+            var sysId = ResolveCompanySystem(item?.PowerType);
+            if (!sysId.HasValue) return null;
+            return $"/CCS/CC000054/{sysId.Value}";
+        }
+        catch { return null; }
+    }
+
+    string ResolveItemHint(PcbErpApi.Models.CurdSysItem item)
+    {
+        if (pageMap.TryGetValue(item.ItemId, out var hardPath) && !string.IsNullOrWhiteSpace(hardPath))
+            return hardPath;
+
+        var companyLink = ResolveCompanyLink(item);
+        if (!string.IsNullOrWhiteSpace(companyLink))
+            return companyLink;
+
+        var ocx = item.Ocxtemplete?.Trim().ToLowerInvariant() ?? "";
+
+        if (item.ItemType == 6)
+        {
+            if (ocx.Contains("jsdpaper3ldll")) return "Paper3L";
+            if (ocx.Contains("jsdpaperorgdll")) return "Paper";
+            if (ocx.Contains("jsdsinglegriddll")) return "SingleGrid";
+            if (ocx.Contains("jsdgriddll")) return "MultiGrid";
+            if (ocx.Contains("jsdmasdtldll")) return "MasterDetail";
+            if (ocx.Contains("jsdmasmultidtldll")) return "MasterMultiDetail";
+        }
+
+        if (item.ItemType == 2 && item.OutputType == 0) return "Report(Direct)";
+        if (item.ItemType == 2 && item.OutputType == 6) return "Report(Generic)";
+
+        return "未設定";
+    }
+    
+}
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+
+<style>
+body {
+    background: #f4f6fb;
+    font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+}
+.erp-sidebar {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px #0001;
+    padding: 20px 12px 20px 20px;
+    min-height: 600px;
+}
+.erp-sidebar h4 {
+    color: #2766b5;
+    font-weight: bold;
+    margin-bottom: 18px;
+    font-size: 1.15rem;
+    letter-spacing: 2px;
+}
+.erp-nav-group li {
+    margin-bottom: 5px;
+}
+.erp-nav-group a {
+    display: flex;
+    align-items: center;
+    border-radius: 6px;
+    padding: 7px 12px;
+    color: #2766b5;
+    font-weight: 500;
+    font-size: 1rem;
+    background: transparent;
+    transition: background 0.13s, color 0.13s;
+    text-decoration: none;
+}
+.erp-nav-group a:hover, .erp-nav-group a.active {
+    background: #e7f1fd;
+    color: #124684;
+    text-decoration: none;
+}
+.erp-nav-group .icon {
+    font-size: 1.2rem;
+    margin-right: 8px;
+    color: #60a4e0;
+}
+.erp-card {
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 2px 10px #0001;
+    padding: 34px 36px 36px 36px;
+    min-height: 550px;
+}
+.erp-list-title {
+    font-weight: bold;
+    color: #333;
+    letter-spacing: 2px;
+}
+.erp-list-group .list-group-item {
+    border: none;
+    border-bottom: 1px solid #eee;
+    padding: 12px 16px;
+    font-size: 1.05rem;
+    transition: background 0.1s;
+    background: transparent;
+    cursor: pointer;
+}
+.erp-list-group .list-group-item:last-child {
+    border-bottom: none;
+}
+.erp-list-group .list-group-item:hover {
+    background: #f0f8ff;
+}
+.erp-list-group .list-group-item a,
+#favorite-list a {
+    color: #333 !important;
+    text-decoration: none !important;
+    transition: color 0.15s, text-decoration 0.15s;
+}
+.erp-list-group .list-group-item a:hover,
+#favorite-list a:hover {
+    color: #155cb5 !important;
+    text-decoration: underline !important;
+}
+
+.system-graph-frame{
+    background: #f8fbff;
+    border: 1px solid #e5eaf2;
+    border-radius: 12px;
+    padding: 10px;
+}
+#systemGraphImg{
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    display: block;
+}
+/* 我的最愛區塊專用：去底線，hover再出現 */
+#favorite-list a {
+    color: #2766b5;
+    text-decoration: none;
+    transition: color 0.15s, text-decoration 0.15s;
+}
+#favorite-list a:hover {
+    color: #155cb5;
+    text-decoration: underline;
+}
+</style>
+
+<div class="container py-4">
+    <div class="row gx-4">
+        <!-- 左側模組 -->
+        <div class="col-12 col-md-3 mb-4">
+            <div class="erp-sidebar">
+                <h4>系統模組</h4>
+                <ul class="erp-nav-group" style="list-style: none; padding-left: 0;">
+                    @foreach (var mod0 in level0)
+                    {
+                        var webMenuId0 = mod0.SWebMenuId ?? "";
+                        var level1Id = $"level1-{webMenuId0}";
+                        var shouldExpand0 = level1Map.ContainsKey(webMenuId0) && (
+                            level1Map[webMenuId0].Any(x => (x.SWebMenuId ?? "") == Model.SelectedLevel1Id) ||
+                            level1Map[webMenuId0].Any(x => {
+                                var k = x.SWebMenuId ?? "";
+                                return Model.Level2Map.TryGetValue(k, out var l2) && l2.Any(y => (y.SWebMenuId ?? "") == Model.SelectedLevel1Id);
+                            })
+                        );
+                        var isGroup0 = Model.IsWebMenuGroup(mod0);
+                        <li>
+                            @if (isGroup0)
+                            {
+                                <a href="javascript:void(0)" onclick="toggleChildren('@level1Id','@mod0.ItemId','@mod0.ItemName')">
+                                    <span class="icon">📁</span>
+                                    <span style="white-space:nowrap">@((string.IsNullOrWhiteSpace(mod0.SWebMenuId) ? mod0.ItemId : mod0.SWebMenuId)) - @mod0.ItemName</span>
+                                </a>
+                            }
+                            else
+                            {
+                                <a href="javascript:void(0)" class="dyn-link" data-itemid="@mod0.ItemId" data-itemname="@mod0.ItemName" data-superid="@mod0.SWebSuperMenuId">
+                                    <span class="icon">📁</span>
+                                    <span style="white-space:nowrap">@((string.IsNullOrWhiteSpace(mod0.SWebMenuId) ? mod0.ItemId : mod0.SWebMenuId)) - @mod0.ItemName</span>
+                                </a>
+                            }
+                            @if (level1Map.ContainsKey(webMenuId0))
+                            {
+                                <ul id="@level1Id" class="ms-3 mt-1 mb-2" style="display: @(shouldExpand0 ? "block" : "none"); list-style:none;">
+                                    @foreach (var mod1 in level1Map[webMenuId0])
+                                    {
+                                        var webMenuId1 = mod1.SWebMenuId ?? "";
+                                        var level2Id = $"level2-{webMenuId1}";
+                                        var shouldExpand1 = Model.Level2Map.ContainsKey(webMenuId1) && (
+                                            string.Equals(webMenuId1, Model.SelectedLevel1Id, StringComparison.OrdinalIgnoreCase) ||
+                                            Model.Level2Map[webMenuId1].Any(x => (x.SWebMenuId ?? "") == Model.SelectedLevel1Id)
+                                        );
+                                        var isGroup1 = Model.IsWebMenuGroup(mod1);
+                                        <li>
+                                            @if (isGroup1)
+                                            {
+                                                <a asp-page="/Menu" asp-route-level1Id="@webMenuId1" style="color: #548bc7; font-size:0.97rem; font-weight:400; margin:3px 0 2px 0;">
+                                                    <span class="icon">➡️</span>@(string.IsNullOrWhiteSpace(mod1.SWebMenuId) ? mod1.ItemId : mod1.SWebMenuId) - @mod1.ItemName
+                                                </a>
+                                            }
+                                            else
+                                            {
+                                                <a href="javascript:void(0)" class="dyn-link" data-itemid="@mod1.ItemId" data-itemname="@mod1.ItemName" data-superid="@mod1.SWebSuperMenuId" style="color: #548bc7; font-size:0.97rem; font-weight:400; margin:3px 0 2px 0;">
+                                                    <span class="icon">➡️</span>@(string.IsNullOrWhiteSpace(mod1.SWebMenuId) ? mod1.ItemId : mod1.SWebMenuId) - @mod1.ItemName
+                                                </a>
+                                            }
+                                            @if (Model.Level2Map.ContainsKey(webMenuId1))
+                                            {
+                                                <ul id="@level2Id" class="ms-3 mt-1 mb-2" style="display: @(shouldExpand1 ? "block" : "none"); list-style:none;">
+                                                    @foreach (var mod2 in Model.Level2Map[webMenuId1])
+                                                    {
+                                                        var isGroup2 = Model.IsWebMenuGroup(mod2);
+                                                        <li>
+                                                            @if (isGroup2)
+                                                            {
+                                                                <a asp-page="/Menu" asp-route-level1Id="@mod2.SWebMenuId" style="color: #6c8fc7; font-size:0.94rem; font-weight:400; margin:3px 0 2px 0;">
+                                                                    <span class="icon">➡️</span>@(string.IsNullOrWhiteSpace(mod2.SWebMenuId) ? mod2.ItemId : mod2.SWebMenuId) - @mod2.ItemName
+                                                                </a>
+                                                            }
+                                                            else
+                                                            {
+                                                                <a href="javascript:void(0)" class="dyn-link" data-itemid="@mod2.ItemId" data-itemname="@mod2.ItemName" data-superid="@mod2.SWebSuperMenuId" style="color: #6c8fc7; font-size:0.94rem; font-weight:400; margin:3px 0 2px 0;">
+                                                                    <span class="icon">➡️</span>@(string.IsNullOrWhiteSpace(mod2.SWebMenuId) ? mod2.ItemId : mod2.SWebMenuId) - @mod2.ItemName
+                                                                </a>
+                                                            }
+                                                        </li>
+                                                    }
+                                                </ul>
+                                            }
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        </li>
+                    }
+                </ul>
+            </div>
+        </div>
+        <!-- 右側功能列表 -->
+        <div class="col-12 col-md-5 mb-4">
+            <div class="erp-card">
+                <div class="d-flex align-items-center mb-3">
+                    <h4 class="erp-list-title mb-0 me-2">功能列表</h4>
+                </div>
+
+                <div id="systemGraphPanel" class="mb-3" style="display:none;">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div id="systemGraphTitle" class="text-secondary fw-semibold"></div>
+                        <a id="systemGraphOpen" class="small text-decoration-none" href="#" target="_blank" rel="noopener" style="display:none;">開新視窗</a>
+                    </div>
+                    <div class="system-graph-frame mt-2">
+                        <img id="systemGraphImg" alt="系統流程圖" style="display:none;" />
+                        <div id="systemGraphEmpty" class="text-secondary small" style="display:none;">尚未提供流程圖</div>
+                    </div>
+                </div>
+
+                @if (level2List.Any())
+                {
+                   <ul id="level2-list" class="list-group erp-list-group">
+                    @foreach (var item in level2List)
+                    {
+                        if (item.ItemType == 4)
+                        {
+                            <li class="list-group-item p-0" id="li-@item.ItemId">
+                                <hr class="m-0" />
+                            </li>
+                        }
+                        else
+                        {
+                            var ocx = item.Ocxtemplete?.Trim().ToLowerInvariant() ?? "";
+                            var link = pageMap.ContainsKey(item.ItemId)
+                             ? pageMap[item.ItemId]
+                             : ResolveCompanyLink(item) // 公司/廠商主檔樣板
+                             ?? (item.ItemType == 2 && item.OutputType == 0 ? $"/Report/Direct/{item.ItemId}"
+                                : item.ItemType == 6 && ocx.Contains("jsdpaper3ldll") ? $"/DynamicTemplate/Paper3L/{item.ItemId}"
+                                : item.ItemType == 6 && ocx.Contains("jsdpaperorgdll") ? $"/DynamicTemplate/Paper/{item.ItemId}"
+                                : item.ItemType == 6 && ocx.Contains("jsdsinglegriddll") ? $"/CUR/SingleGrid/{item.ItemId}"
+                                : item.ItemType == 6 && ocx.Contains("jsdgriddll") ? $"/CUR/MultiGrid/{item.ItemId}"
+                                : item.ItemType == 6 && ocx.Contains("jsdmasdtldll") ? $"/CUR/MasterDetail/{item.ItemId}"
+                                : item.ItemType == 6 && ocx.Contains("jsdmasmultidtldll") ? $"/CUR/MasterMultiDetail/{item.ItemId}"
+                                : null);
+                               
+                            var hint = ResolveItemHint(item);
+                            var displayWebMenuId = string.IsNullOrWhiteSpace(item.SWebMenuId) ? item.ItemId : item.SWebMenuId;
+
+                            <li class="list-group-item d-flex justify-content-between align-items-center" id="li-@item.ItemId">
+
+                            @if (!string.IsNullOrEmpty(link)) {
+                                <a href="@link" title="@hint" style="flex:1">@displayWebMenuId - @item.ItemName</a>
+                            } else {
+                                <a href="javascript:void(0)" title="@hint" class="dyn-link" data-itemid="@item.ItemId" data-itemname="@item.ItemName" data-superid="@item.SWebSuperMenuId" style="flex:1" onclick="resolveAndGo('@item.ItemId','@item.ItemName','@item.SWebSuperMenuId')">@displayWebMenuId - @item.ItemName</a>
+                            }
+                                <button class="btn btn-outline-warning btn-sm"
+                                        onclick="addToFavorite('@item.ItemId', '@item.ItemName', '@item.SWebSuperMenuId', '@(item.ClassName ?? string.Empty)', '@(item.PowerType?.ToString() ?? string.Empty)')">★</button>
+                            </li>
+                        }
+                    }
+                    </ul>
+                }
+                else
+                {
+                    <p class="text-secondary mt-4">請從左側展開模組並選擇子模組查看功能</p>
+                }
+            </div>
+        </div>
+         <!-- 我的最愛區塊 -->
+        <div class="col-12 col-md-4 mb-4">
+            <div class="erp-card" style="min-height: 300px;">
+                <h5 class="erp-list-title mb-3">★ 我的最愛</h5>
+                <ul id="favorite-list" class="list-group erp-list-group"></ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+
+<script>
+    const pageMap = {
+    "SPO00013": "/SPO/SPO00013",
+    "SPO00040": "/SPO/SPO00040",
+    "FME00020": "/FME/FmedIssueMain",
+    "CUR00012": "/CUR/CURdSysParams",
+    "CURH0002": "/CUR/CURdReportOrderBasPage",
+    "CUR00007": "/CUR/CURdGroups",
+    "CURH0003": "/CUR/CURdV_SysProcess",
+    "CUR00004": "/CUR/NoticeBoard",
+    "FPE00004": "/EMOdProcInfo/Index",
+    "QC000209": "/FQCdProcInfo/Index",
+    "MP000022": "/CCS/MP000022",
+    "MG000006": "/CPN/MGNdSetNum",
+    "CFW00005": "/AJN/AJNdDepart",
+    "CPN00009": "/CPN/MGNdSpecDemand",
+    "AA000008": "/AJN/AJNdAccListEdit",
+    "AJN00069": "/AJN/AJNdSysSummary",
+    "EMO00004":  "/EMOdProdInfo",
+    "AJ000005": "/AJN/AJNdBalance",
+    "AJN00001": "/AJN/AJNdBalanceSet",
+    // 其它功能自行補上
+    };
+    const webMenuIdMap = @Html.Raw(JsonSerializer.Serialize(Model.ItemIdToWebMenuId));
+
+    function getSystemIdFromPowerType(ptRaw) {
+        if (ptRaw === null || ptRaw === undefined) return null;
+        const num = parseInt(ptRaw, 10);
+        if (Number.isNaN(num)) return null;
+        const map = {
+            1: 1,  // 銷售客戶
+            2: 2,  // 原物料廠商
+            3: 3,  // 製程委外廠商
+            4: 4,  // 製令委外廠商
+            5: 5,  // 進出口廠商
+            6: 6,  // 其它廠商
+            7: 7,  // 經銷商
+            9: 9,  // 臨時客戶
+            103: 1 // 客戶授信額度 -> 視為銷售客戶
+        };
+        return map[num] ?? null;
+    }
+
+    function resolveCompanyLinkFromMeta(meta) {
+        if (!meta) return null;
+        const cls = String(meta.className ?? meta.ClassName ?? "").trim().toLowerCase();
+        if (cls !== "ccsdcompanydll.dll") return null;
+        const pt = meta.powerType ?? meta.PowerType;
+        const sysId = getSystemIdFromPowerType(pt);
+        if (!sysId) return null;
+        return `/CCS/CC000054/${sysId}`;
+    }
+
+    const itemHintCache = new Map();
+
+    function getTemplateNameFromMeta(meta, itemId) {
+        const hard = pageMap[itemId];
+        if (hard) return hard;
+
+        const companyLink = resolveCompanyLinkFromMeta(meta);
+        if (companyLink) return companyLink;
+
+        const itemType = Number(meta?.itemType ?? meta?.ItemType);
+        const outputType = Number(meta?.outputType ?? meta?.OutputType);
+
+        const pickStr = (obj, keys) => {
+            for (const k of keys) {
+                if (obj && obj[k] !== undefined && obj[k] !== null) return obj[k];
+            }
+            return '';
+        };
+        const ocxRaw = pickStr(meta, [
+            'ocxtemplete', 'Ocxtemplete', 'OCXTemplete', 'ocxTemplete', 'OCXTemplete',
+            'ocxTemplate', 'OCXTemplate', 'ocxtemplate', 'OCXTEMPLATE',
+            'OCX', 'ocx'
+        ]);
+        const ocx = String(ocxRaw).trim().toLowerCase();
+
+        if (itemType === 6) {
+            if (ocx.includes('jsdpaper3ldll')) return 'Paper3L';
+            if (ocx.includes('jsdpaperorgdll')) return 'Paper';
+            if (ocx.includes('jsdsinglegriddll')) return 'SingleGrid';
+            if (ocx.includes('jsdgriddll')) return 'MultiGrid';
+            if (ocx.includes('jsdmasdtldll')) return 'MasterDetail';
+            if (ocx.includes('jsdmasmultidtldll')) return 'MasterMultiDetail';
+        }
+
+        if (itemType === 2 && outputType === 0) return 'Report(Direct)';
+        if (itemType === 2 && outputType === 6) return 'Report(Generic)';
+
+        return '未設定';
+    }
+
+    function getLocalHint(itemId, className, powerType) {
+        const hard = pageMap[itemId];
+        if (hard) return hard;
+        const localMeta = { ClassName: className, PowerType: powerType };
+        const companyLink = resolveCompanyLinkFromMeta(localMeta);
+        return companyLink || null;
+    }
+
+    async function getItemHint(itemId, className, powerType) {
+        const key = `${itemId}|${className ?? ''}|${powerType ?? ''}`;
+        if (itemHintCache.has(key)) return itemHintCache.get(key);
+
+        const local = getLocalHint(itemId, className, powerType);
+        if (local) {
+            itemHintCache.set(key, local);
+            return local;
+        }
+
+        try {
+            const res = await fetch(`/api/report/item-meta/${itemId}`);
+            if (!res.ok) throw new Error('meta not found');
+            const meta = await res.json();
+            const hint = getTemplateNameFromMeta(meta, itemId);
+            itemHintCache.set(key, hint);
+            return hint;
+        } catch {
+            const hint = '未設定';
+            itemHintCache.set(key, hint);
+            return hint;
+        }
+    }
+
+    async function loadHintOnHover(el, itemId, className, powerType) {
+        if (!el) return;
+        el.title = await getItemHint(itemId, className, powerType);
+    }
+
+    const selectedLevel1Id = "@Model.SelectedLevel1Id";
+
+    async function resolveAndGo(itemId, itemName, superId, className, powerType) {
+        console.debug('resolveAndGo click', { itemId, itemName, superId });
+        const hard = pageMap[itemId];
+        if (hard) { location.href = hard; return; }
+
+        // 先嘗試本地 className/powerType 映射（我的最愛可帶進來）
+        const localMeta = { ClassName: className, PowerType: powerType };
+        const localLink = resolveCompanyLinkFromMeta(localMeta);
+        if (localLink) { location.href = localLink; return; }
+
+        try {
+            const metaUrl = `/api/report/item-meta/${itemId}`;
+            console.debug('fetch meta', metaUrl);
+            const res = await fetch(metaUrl);
+            if (!res.ok) throw new Error('not found');
+            const meta = await res.json();
+
+            // 若有從 my favorites 觸發，補齊並回存 class/power/superId，避免下次缺資料
+            try {
+                const favs = getFavorites();
+                const idx = favs.findIndex(f => f.itemId === itemId);
+                if (idx >= 0) {
+                    const mClass = meta.ClassName ?? meta.className ?? '';
+                    const mPower = meta.PowerType ?? meta.powerType ?? '';
+                    const mSuper = meta.SuperId ?? meta.superId ?? superId ?? '';
+                    favs[idx].className = mClass?.toString() ?? '';
+                    favs[idx].powerType = mPower?.toString() ?? '';
+                    favs[idx].superId = mSuper?.toString() ?? favs[idx].superId ?? '';
+                    setFavorites(favs);
+                }
+            } catch (err) { console.warn('favorite meta backfill failed', err); }
+
+            const companyLink = resolveCompanyLinkFromMeta(meta);
+            if (companyLink) { location.href = companyLink; return; }
+
+            const itemType = Number(meta.itemType ?? meta.ItemType);
+            const outputType = Number(meta.outputType ?? meta.OutputType);
+            const pickStr = (obj, keys) => {
+                for (const k of keys) {
+                    if (obj && obj[k] !== undefined && obj[k] !== null) return obj[k];
+                }
+                return '';
+            };
+            const ocxRaw = pickStr(meta, [
+                'ocxtemplete','Ocxtemplete','OCXTemplete','ocxTemplete','OCXTemplete',
+                'ocxTemplate','OCXTemplate','ocxtemplate','OCXTEMPLATE',
+                'OCX','ocx'
+            ]);
+            const ocx = String(ocxRaw).trim().toLowerCase();
+            let url = '';
+            if (itemType === 2 && outputType === 0) url = `/Report/Direct/${itemId}`;
+            else if (itemType === 2 && outputType === 6) url = `/Report/Generic/${itemId}`;
+            else if (itemType === 6 && (ocx === 'jsdpaper3ldll.dll' || ocx.includes('jsdpaper3ldll'))) url = `/DynamicTemplate/Paper3L/${itemId}`;
+            else if (itemType === 6 && (ocx === 'jsdpaperorgdll.dll' || ocx.includes('jsdpaperorgdll'))) url = `/DynamicTemplate/Paper/${itemId}`;
+            else if (itemType === 6 && (ocx === 'jsdsinglegriddll.dll' || ocx.includes('jsdsinglegriddll'))) url = `/CUR/SingleGrid/${itemId}`;
+            else if (itemType === 6 && (ocx === 'jsdgriddll.dll' || ocx.includes('jsdgriddll'))) url = `/CUR/MultiGrid/${itemId}`;
+            else if (itemType === 6 && (ocx === 'jsdmasdtldll.dll' || ocx.includes('jsdmasdtldll'))) url = `/CUR/MasterDetail/${itemId}`;
+            else if (itemType === 6 && (ocx === 'jsdmasmultidtldll.dll' || ocx.includes('jsdmasmultidtldll'))) url = `/CUR/MasterMultiDetail/${itemId}`;
+
+            if (url) { location.href = url; return; }
+            if (superId) { location.href = `?level1Id=${superId}`; return; }
+        } catch (err) {
+            console.warn('resolveAndGo meta error', err);
+        }
+        if (superId) {
+            location.href = `?level1Id=${superId}`;
+        } else {
+            alert(`找不到對應的頁面: ${itemId}`);
+        }
+    }
+    function showSystemGraph(systemId, systemName) {
+        const panel = document.getElementById('systemGraphPanel');
+        const img = document.getElementById('systemGraphImg');
+        const empty = document.getElementById('systemGraphEmpty');
+        const title = document.getElementById('systemGraphTitle');
+        const open = document.getElementById('systemGraphOpen');
+        const list = document.getElementById('level2-list');
+        if (!panel || !img || !empty || !title || !open) return;
+
+        const sid = (systemId || '').toString().trim();
+        if (!sid) return;
+
+        panel.style.display = 'block';
+        title.textContent = `${sid}${systemName ? ' - ' + systemName : ''} 流程圖`;
+
+        // 顯示流程圖時，右側功能清單先隱藏（避免圖下方又出現功能項目）
+        if (list) list.style.display = 'none';
+
+        const nameParam = (systemName || '').toString().trim();
+        const url = `/api/SystemGraph/${encodeURIComponent(sid)}?name=${encodeURIComponent(nameParam)}&t=${Date.now()}`;
+        open.href = url;
+        open.style.display = 'none';
+        img.style.display = 'none';
+        empty.style.display = 'none';
+
+        img.onload = () => {
+            img.style.display = 'block';
+            empty.style.display = 'none';
+            open.style.display = 'inline';
+        };
+        img.onerror = () => {
+            img.style.display = 'none';
+            open.style.display = 'none';
+            empty.style.display = 'block';
+        };
+        img.src = url;
+    }
+
+    window.toggleChildren = function (id, systemId, systemName) {
+        const el = document.getElementById(id);
+        if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+        if (systemId) showSystemGraph(systemId, systemName);
+    };
+
+    // 確保動態連結有事件（若 inline onclick 被瀏覽器阻擋或失效）
+    document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('click', (ev) => {
+            const link = ev.target.closest('.dyn-link');
+            if (!link) return;
+            ev.preventDefault();
+            const itemId = link.dataset.itemid || link.getAttribute('data-itemid');
+            const itemName = link.dataset.itemname || link.getAttribute('data-itemname');
+            const superId = link.dataset.superid || link.getAttribute('data-superid');
+            const cls = link.dataset.classname || link.getAttribute('data-classname') || "";
+            const pt = link.dataset.powertype || link.getAttribute('data-powertype') || "";
+            resolveAndGo(itemId, itemName, superId, cls, pt);
+        });
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const addItemEl = document.getElementById('addItemModal');
+        const editItemEl = document.getElementById('editItemModal');
+        let addItemModal = addItemEl ? new bootstrap.Modal(addItemEl) : null;
+        let editItemModal = editItemEl ? new bootstrap.Modal(editItemEl) : null;
+
+        window.openEditModal = function (itemId, itemName, superId, itemType) {
+            document.getElementById('editItemId').value = itemId;
+            document.getElementById('editItemName').value = itemName;
+            document.getElementById('editSuperId').value = superId;
+            document.getElementById('editItemType').value = itemType;
+            document.getElementById('editAlert').classList.add('d-none');
+            if (editItemModal) editItemModal.show();
+        };
+
+    });
+    function getFavorites() {
+    return JSON.parse(localStorage.getItem('erpFavorites') || '[]');
+        }
+
+        function setFavorites(favs) {
+            localStorage.setItem('erpFavorites', JSON.stringify(favs));
+        }
+
+        function addToFavorite(itemId, itemName, superId, className, powerType) {
+            let favs = getFavorites();
+            if (!favs.find(x => x.itemId === itemId)) {
+                favs.push({ itemId, itemName, superId, className, powerType });
+                setFavorites(favs);
+                renderFavorites();
+            }
+        }
+
+        function removeFavorite(itemId) {
+            let favs = getFavorites().filter(x => x.itemId !== itemId);
+            setFavorites(favs);
+            renderFavorites();
+        }
+
+        function renderFavorites() {
+        const list = document.getElementById('favorite-list');
+        const favs = getFavorites();
+        list.innerHTML = '';
+        favs.forEach(f => {
+            let li = document.createElement('li');
+            li.className = "list-group-item d-flex justify-content-between align-items-center";
+            li.setAttribute('data-itemid', f.itemId);
+            const displayId = webMenuIdMap[f.itemId] || f.itemId;
+            const hard = pageMap[f.itemId];
+            const localHint = getLocalHint(f.itemId, f.className, f.powerType);
+            const linkHtml = hard
+                ? `<a href="${hard}" title="${hard}" style="cursor:pointer">${displayId} - ${f.itemName}</a>`
+                : `<a href="javascript:void(0)" title="${localHint || '未設定'}" onmouseenter="loadHintOnHover(this,'${f.itemId}','${f.className || ''}','${f.powerType || ''}')" style="cursor:pointer" onclick="resolveAndGo('${f.itemId}','${f.itemName}','${f.superId || ''}','${f.className || ''}','${f.powerType || ''}')">${displayId} - ${f.itemName}</a>`;
+            li.innerHTML = `${linkHtml}
+                <button class="btn btn-outline-danger btn-sm" onclick="removeFavorite('${f.itemId}')">✕</button>`;
+            list.appendChild(li);
+        });
+        enableFavoriteSortable();
+    }
+
+        function enableFavoriteSortable() {
+            new Sortable(document.getElementById('favorite-list'), {
+                animation: 150,
+                onEnd: function (evt) {
+                    // 重新取得排序後的所有 itemId
+                    const ids = Array.from(document.querySelectorAll('#favorite-list li')).map(li => li.dataset.itemid);
+                    // 依照新排序存回 localStorage
+                    let favs = getFavorites();
+                    let newFavs = [];
+                    ids.forEach(id => {
+                        let found = favs.find(x => x.itemId === id);
+                        if (found) newFavs.push(found);
+                    });
+                    setFavorites(newFavs);
+                    renderFavorites(); // 重新 render 保證順序同步
+                }
+            });
+        }
+        document.addEventListener('DOMContentLoaded', function() {
+            renderFavorites();
+        });
+
+    // fallback: ensure dyn-link click is always handled (capture phase), even if earlier listeners failed
+    (function ensureDynLinkHandler() {
+        if (window.__dynLinkHandlerBound) return;
+        window.__dynLinkHandlerBound = true;
+        const handler = (ev) => {
+            const link = ev.target.closest('.dyn-link');
+            if (!link) return;
+            ev.preventDefault();
+            const itemId = link.dataset.itemid || link.getAttribute('data-itemid');
+            const itemName = link.dataset.itemname || link.getAttribute('data-itemname');
+            const superId = link.dataset.superid || link.getAttribute('data-superid');
+            const cls = link.dataset.classname || link.getAttribute('data-classname') || "";
+            const pt = link.dataset.powertype || link.getAttribute('data-powertype') || "";
+            console.debug('dyn-link click (fallback)', { itemId, itemName, superId });
+            resolveAndGo(itemId, itemName, superId, cls, pt);
+        };
+        document.addEventListener('click', handler, true);
+    })();
+
+</script>
