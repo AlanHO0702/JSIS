@@ -9,6 +9,10 @@ public class TableFieldViewModel
     public int? iFieldHeight { get; set; }
     public int? iFieldTop { get; set; }
     public int? iFieldLeft { get; set; }
+    public int? iLabWidth { get; set; }
+    public int? iLabHeight { get; set; }
+    public int? iLabTop { get; set; }
+    public int? iLabLeft { get; set; }
     public bool Visible { get; set; } = true;
     public int SerialNum { get; set; }
     public string? DataType { get; set; }

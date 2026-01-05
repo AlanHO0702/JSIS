@@ -484,6 +484,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         f.FieldNote,
 
         -- 標籤/欄位座標與尺寸
+        f.iLayRow, f.iLayColumn,
         f.iLabHeight,  f.iLabTop,   f.iLabLeft,   f.iLabWidth,
         f.iFieldHeight,f.iFieldTop, f.iFieldLeft, f.iFieldWidth,
         f.iShowWhere,
@@ -547,6 +548,9 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
                 ReadOnly        = (rd["ReadOnly"]?.ToString() ?? "0") == "1" ? 1 : 0,
                 FieldNote       = rd["FieldNote"]?.ToString() ?? "",
                 ComboStyle      = rd["ComboStyle"] as int?,
+
+                iLayRow         = rd["iLayRow"]     as int?,
+                iLayColumn      = rd["iLayColumn"]  as int?,
 
                 iLabHeight      = rd["iLabHeight"]  as int?,
                 iLabTop         = rd["iLabTop"]     as int?,

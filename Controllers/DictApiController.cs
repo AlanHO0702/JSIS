@@ -103,6 +103,8 @@ public class DictApiController : ControllerBase
                 }
 
                 AddInt("DisplaySize", input.DisplaySize);
+                AddInt("iLayRow", input.iLayRow);
+                AddInt("iLayColumn", input.iLayColumn);
                 AddInt("iLabHeight", input.iLabHeight);
                 AddInt("iLabTop", input.iLabTop);
                 AddInt("iLabLeft", input.iLabLeft);

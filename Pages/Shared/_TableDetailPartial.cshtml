@@ -169,8 +169,24 @@
                                     var width = field.iFieldWidth ?? 160;
                                     var height = field.iFieldHeight ?? 44;
 
+                                    var labTop = field.iLabTop ?? 0;
+                                    var labLeft = field.iLabLeft ?? 0;
+                                    var labWidth = field.iLabWidth;
+                                    var labHeight = field.iLabHeight;
+                                    var labStyle = $"top:{labTop}px; left:{labLeft}px;";
+                                    if (labWidth.HasValue) { labStyle += $" width:{labWidth.Value}px;"; }
+                                    if (labHeight.HasValue) { labStyle += $" height:{labHeight.Value}px;"; }
+
                                     var liClass = "draggable-field inline"; // 永遠橫排
 
+
+                                    <li class="header-label-item"
+                                        data-field="@field.FieldName"
+                                        data-tab="@tab.Key"
+                                        title="@field.FieldName"
+                                        style="@labStyle">
+                                        @field.DisplayLabel
+                                    </li>
 
                                      // 判斷有 lookup table 設定
                                     if (!string.IsNullOrWhiteSpace(field.LookupTable) &&
@@ -181,8 +197,9 @@
                                         <li class="@liClass"
                                             data-field="@field.FieldName"
                                             data-tab="@tab.Key"
+                                            title="@field.FieldName"
                                             style="top:@(field.iFieldTop ?? 0)px; left:@(field.iFieldLeft ?? 0)px; width:@(field.iFieldWidth ?? 160)px; height:@(field.iFieldHeight ?? 44)px;">
-                                            <label>@field.DisplayLabel</label>
+                                            <span class="field-drag-handle" aria-hidden="true"></span>
                                             <select class="form-select lookup-dropdown"
                                                     name="@field.FieldName"
                                                     data-table="@field.LookupTable"
@@ -198,8 +215,9 @@
                                         <li class="@liClass"
                                             data-field="@field.FieldName"
                                             data-tab="@tab.Key"
+                                            title="@field.FieldName"
                                             style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
-                                            <label>@field.DisplayLabel</label>
+                                            <span class="field-drag-handle" aria-hidden="true"></span>
                                             <textarea class="form-control resizable-input"
                                                     name="@field.FieldName">@displayText</textarea>
                                         </li>
@@ -955,9 +973,13 @@ if (editBtn) {
     }
   }, true);
   const getHeaderValueByLabel = (labelText) => {
-    const $li = $('.draggable-field').filter(function () {
-      return $(this).children('label').first().text().trim() === labelText;
+    const $label = $('.header-label-item').filter(function () {
+      return $(this).text().trim() === labelText;
     }).first();
+    if (!$label.length) return null;
+    const fieldName = $label.data('field');
+    if (!fieldName) return null;
+    const $li = $(`.draggable-field[data-field="${fieldName}"]`).first();
     if (!$li.length) return null;
     const $ctrl = $li.find('select, input, textarea').first();
     if (!$ctrl.length) return null;
@@ -1026,9 +1048,10 @@ $(function () {
   $(".draggable-field").each(function () {
     const $li = $(this);
     $li.draggable({
-      handle: "label",
+      handle: ".field-drag-handle",
       helper: function () {
-        return $("<div>").text($(this).find("label").text()).css({
+        const labelText = $('.header-label-item[data-field="' + $li.data('field') + '"]').text().trim();
+        return $("<div>").text(labelText).css({
           width: "80px", height: $li.outerHeight() + "px",
           background: "#eef", border: "1px dashed #999", padding: "4px", "font-size": "0.9em"
         });
@@ -1054,6 +1077,23 @@ $(function () {
       }
     });
     $li.resizable({ handles: "e, se", minWidth: 50, minHeight: 30, stop: debounceSave });
+  });
+
+  function setLayoutEditEnabled(enabled) {
+    const $body = $(document.body);
+    $body.toggleClass("layout-edit-enabled", !!enabled);
+    $(".draggable-field").each(function () {
+      try { $(this).draggable(enabled ? "enable" : "disable"); } catch {}
+      try { $(this).resizable(enabled ? "enable" : "disable"); } catch {}
+    });
+  }
+
+  setLayoutEditEnabled(false);
+  $(document).on("keydown", function (e) {
+    if (e.key === "Shift") setLayoutEditEnabled(true);
+  });
+  $(document).on("keyup", function (e) {
+    if (e.key === "Shift") setLayoutEditEnabled(false);
   });
 
   // ============================
@@ -1082,7 +1122,7 @@ $(function () {
   function selectOnly($el) { clearSelection(); $el.addClass(SELECTED_CLASS); }
 
   // 點選控制（用 mousedown，避免跟拖曳衝突）
-  $doc.on("mousedown", ".draggable-field label", function (e) {
+  $doc.on("mousedown", ".field-drag-handle", function (e) {
     if (window.__DICT_OPEN__) return;
     const $field = $(this).closest(".draggable-field");
     if (!$field.length) return;
@@ -1094,9 +1134,22 @@ $(function () {
       selectOnly($field);
     }
   });
+  $doc.on("mousedown", ".header-label-item", function (e) {
+    if (window.__DICT_OPEN__) return;
+    const fieldName = $(this).data("field");
+    if (!fieldName) return;
+    const $field = $(`.draggable-field[data-field="${fieldName}"]`).first();
+    if (!$field.length) return;
+
+    if (e.ctrlKey || e.metaKey) {
+      toggleSelection($field);
+    } else if (!$field.hasClass(SELECTED_CLASS)) {
+      selectOnly($field);
+    }
+  });
   $doc.on("mousedown", function (e) {
     if (window.__DICT_OPEN__) return;
-    if ($(e.target).closest(".draggable-field, .ui-resizable-handle, .modal").length) return;
+    if ($(e.target).closest(".draggable-field, .header-label-item, .ui-resizable-handle, .modal").length) return;
     clearSelection();
   });
 
@@ -1397,8 +1450,12 @@ initRowNavigation();
 // ============================
 localStorage.setItem("lastViewedPaperNum", window.selectedPaperNum);
 function getHeaderValueByLabel(labelText) {
-  const li = Array.from(document.querySelectorAll('.draggable-field'))
-    .find(el => (el.querySelector('label')?.textContent || '').trim() === labelText);
+  const labelEl = Array.from(document.querySelectorAll('.header-label-item'))
+    .find(el => (el.textContent || '').trim() === labelText);
+  if (!labelEl) return '';
+  const fieldName = labelEl.getAttribute('data-field') || '';
+  if (!fieldName) return '';
+  const li = document.querySelector(`.draggable-field[data-field="${CSS.escape(fieldName)}"]`);
   if (!li) return '';
   const ctrl = li.querySelector('select, input, textarea');
   if (!ctrl) return '';
@@ -1686,12 +1743,14 @@ body { background: #f7f9fb !important; }
 .draggable-field{ position:absolute; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; background:transparent; border:1px dashed transparent; }
 .draggable-field:hover{ border-color:#c7d3e1; }
 .draggable-field.inline{ display:flex; flex-direction:row; align-items: center; gap:4px; flex:0 0 auto; min-width:100px; max-width:100%; }
-.draggable-field label{ cursor:move; font-size:var(--field-label-size); margin:0 6px 0 0; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
+.header-label-item{ position:absolute; display:flex; align-items:center; justify-content:flex-end; text-align:right; font-size:var(--field-label-size); line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 4px 0 2px; z-index:2; }
+.field-drag-handle{ position:absolute; left:0; top:0; width:10px; height:100%; cursor:default; background:transparent; z-index:3; }
 .draggable-field.inline .field-control{ flex:1 1 auto; height:100%; display:flex; }
 .draggable-field.inline textarea,
 .draggable-field.inline input,
 .draggable-field.inline .form-select{
   flex:1 1 auto; width:100%; height:100%; min-height:32px; line-height:1.2; resize:none; padding:4px 6px; font-size:0.95em;
+  text-align: left;
 }
 .draggable-field.inline label{
   white-space: nowrap !important;
@@ -1730,6 +1789,19 @@ body { background: #f7f9fb !important; }
   right: 0; bottom: 0; width: 14px; height: 14px;
   cursor: se-resize; background: transparent;
   z-index: 5;
+}
+.field-drag-handle,
+.draggable-field.ui-resizable .ui-resizable-e,
+.draggable-field.ui-resizable .ui-resizable-se{
+  display: none;
+}
+.layout-edit-enabled .field-drag-handle,
+.layout-edit-enabled .draggable-field.ui-resizable .ui-resizable-e,
+.layout-edit-enabled .draggable-field.ui-resizable .ui-resizable-se{
+  display: block;
+}
+.layout-edit-enabled .field-drag-handle{
+  cursor: move;
 }
 
 /* =========================================
