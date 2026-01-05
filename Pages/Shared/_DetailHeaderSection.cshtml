@@ -149,13 +149,29 @@
                             var width = field.iFieldWidth ?? 160;
                             var height = field.iFieldHeight ?? 44;
 
+                            var labTop = field.iLabTop ?? 0;
+                            var labLeft = field.iLabLeft ?? 0;
+                            var labWidth = field.iLabWidth;
+                            var labHeight = field.iLabHeight;
+                            var labStyle = $"top:{labTop}px; left:{labLeft}px;";
+                            if (labWidth.HasValue) { labStyle += $" width:{labWidth.Value}px;"; }
+                            if (labHeight.HasValue) { labStyle += $" height:{labHeight.Value}px;"; }
+
                             var liClass = "draggable-field inline"; // 永遠橫排
 
 
                             var isCheckbox = (field.ComboStyle ?? 0) == 1;
                             var isReadOnly = (field.ReadOnly ?? 0) == 1;
-                            var readOnlyClass = isReadOnly ? " dict-readonly" : "";
+                            var readOnlyClass = isReadOnly ? "dict-readonly" : "";
                             var readOnlyAttr = isReadOnly ? " data-readonly=\"1\"" : " data-readonly=\"0\"";
+
+                            <li class="header-label-item"
+                                data-field="@field.FieldName"
+                                data-tab="@tab.Key"
+                                title="@field.FieldName"
+                                style="@labStyle">
+                                @field.DisplayLabel
+                            </li>
 
                             // 1) 勾選框
                             if (isCheckbox)
@@ -169,8 +185,9 @@
                                 <li class="@liClass"
                                     data-field="@field.FieldName"
                                     data-tab="@tab.Key"
+                                    title="@field.FieldName"
                                     style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
-                                    <label>@field.DisplayLabel</label>
+                                    <span class="field-drag-handle" aria-hidden="true"></span>
                                     <div class="form-check d-flex align-items-center" style="height:100%; margin:0; padding-left: 1.5rem;">
                                         <input type="hidden" name="@field.FieldName" value="0" />
                                         <input class="form-check-input"
@@ -188,13 +205,14 @@
                                 !string.IsNullOrWhiteSpace(field.LookupKeyField) &&
                                 !string.IsNullOrWhiteSpace(field.LookupResultField))
                             {
-                                // 下拉選單元件（用 select）
+                                // 下拉選單元件（原本 select）
                                 <li class="@liClass"
                                     data-field="@field.FieldName"
                                     data-tab="@tab.Key"
+                                    title="@field.FieldName"
                                     style="top:@(field.iFieldTop ?? 0)px; left:@(field.iFieldLeft ?? 0)px; width:@(field.iFieldWidth ?? 160)px; height:@(field.iFieldHeight ?? 44)px;">
-                                    <label>@field.DisplayLabel</label>
-                                    <select class="form-select lookup-dropdown@readOnlyClass"
+                                    <span class="field-drag-handle" aria-hidden="true"></span>
+                                    <select class="form-select lookup-dropdown @(readOnlyClass)"
                                             name="@field.FieldName"
                                             data-table="@field.LookupTable"
                                             data-key="@field.LookupKeyField"
@@ -210,9 +228,10 @@
                                 <li class="@liClass"
                                     data-field="@field.FieldName"
                                     data-tab="@tab.Key"
+                                    title="@field.FieldName"
                                     style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
-                                    <label>@field.DisplayLabel</label>
-                                    <textarea class="form-control resizable-input@readOnlyClass"
+                                    <span class="field-drag-handle" aria-hidden="true"></span>
+                                    <textarea class="form-control resizable-input @(readOnlyClass)"
                                             name="@field.FieldName"
                                             @(isReadOnly ? "readonly" : "")
                                             @Html.Raw(readOnlyAttr)>@displayText</textarea>
@@ -665,20 +684,31 @@ if (editBtn) {
     window.__headerIsEdit = true;
   }
 
-  function setLookupReadOnly(selectEl, readOnly) {
-    if (!selectEl) return;
+  function setLookupReadOnly(el, readOnly) {
+    if (!el) return;
+    const isSelect = el.tagName && el.tagName.toLowerCase() === 'select';
     if (readOnly) {
-      selectEl.disabled = false; // 必須可點，才能展開選項
-      selectEl.dataset.lockedValue = selectEl.value ?? '';
-      selectEl.classList.add('lookup-readonly');
-      selectEl.setAttribute('aria-readonly', 'true');
-      selectEl.title = '瀏覽模式：可查看下拉內容，不能修改';
+      el.dataset.lockedValue = el.value ?? '';
+      el.classList.add('lookup-readonly');
+      el.setAttribute('aria-readonly', 'true');
+      el.title = '瀏覽模式：可查看下拉內容，不能修改';
+      if (isSelect) {
+        el.disabled = false;
+      } else {
+        el.readOnly = true;
+        el.disabled = false;
+      }
     } else {
-      selectEl.classList.remove('lookup-readonly');
-      selectEl.removeAttribute('aria-readonly');
-      selectEl.title = '';
-      selectEl.dataset.lockedValue = selectEl.value ?? '';
-      selectEl.disabled = false;
+      el.classList.remove('lookup-readonly');
+      el.removeAttribute('aria-readonly');
+      el.title = '';
+      el.dataset.lockedValue = el.value ?? '';
+      if (isSelect) {
+        el.disabled = false;
+      } else {
+        el.readOnly = false;
+        el.disabled = false;
+      }
     }
   }
 
@@ -687,7 +717,7 @@ if (editBtn) {
       .forEach(el => {
         if (el.closest('.modal')) return;
         const isDictReadOnly = el.dataset.readonly === '1';
-        if (el.matches('select.lookup-dropdown')) {
+        if (el.matches('.lookup-dropdown')) {
           setLookupReadOnly(el, isDictReadOnly || !editing);
         } else {
           if (isDictReadOnly) {
@@ -733,8 +763,21 @@ if (editBtn) {
 
   document.addEventListener('change', (e) => {
     const sel = e.target;
-    if (!(sel instanceof HTMLSelectElement)) return;
-    if (!sel.matches('.erp-header-form select.lookup-dropdown')) return;
+    if (!(sel instanceof HTMLSelectElement || sel instanceof HTMLInputElement)) return;
+    if (!sel.matches('.erp-header-form .lookup-dropdown')) return;
+    if (sel.closest('.modal')) return;
+    if (isEdit && sel.dataset.readonly !== '1') return;
+
+    const locked = sel.dataset.lockedValue ?? '';
+    if ((sel.value ?? '') !== locked) {
+      sel.value = locked;
+    }
+    e.stopPropagation();
+  }, true);
+  document.addEventListener('input', (e) => {
+    const sel = e.target;
+    if (!(sel instanceof HTMLInputElement)) return;
+    if (!sel.matches('.erp-header-form .lookup-dropdown')) return;
     if (sel.closest('.modal')) return;
     if (isEdit && sel.dataset.readonly !== '1') return;
 
@@ -747,7 +790,7 @@ if (editBtn) {
   document.addEventListener('keydown', (e) => {
     const sel = e.target;
     if (!(sel instanceof HTMLSelectElement)) return;
-    if (!sel.matches('.erp-header-form select.lookup-dropdown')) return;
+    if (!sel.matches('.erp-header-form .lookup-dropdown')) return;
     if (sel.closest('.modal')) return;
     if (isEdit && sel.dataset.readonly !== '1') return;
 
@@ -758,9 +801,13 @@ if (editBtn) {
     }
   }, true);
   const getHeaderValueByLabel = (labelText) => {
-    const $li = $('.draggable-field').filter(function () {
-      return $(this).children('label').first().text().trim() === labelText;
+    const $label = $('.header-label-item').filter(function () {
+      return $(this).text().trim() === labelText;
     }).first();
+    if (!$label.length) return null;
+    const fieldName = $label.data('field');
+    if (!fieldName) return null;
+    const $li = $(`.draggable-field[data-field="${fieldName}"]`).first();
     if (!$li.length) return null;
     const $ctrl = $li.find('select, input, textarea').first();
     if (!$ctrl.length) return null;
@@ -793,10 +840,13 @@ if (editBtn) {
       .forEach(el => {
         if (el.closest('.modal')) return;
         const isDictReadOnly = el.dataset.readonly === '1';
+        if (el.matches('.lookup-dropdown')) {
+          setLookupReadOnly(el, isDictReadOnly || !isEdit);
+          if (isDictReadOnly) el.classList.add('dict-readonly');
+          return;
+        }
         if (isDictReadOnly) {
-          if (el.matches('select.lookup-dropdown')) {
-            setLookupReadOnly(el, true);
-          } else if (el.type === 'checkbox') {
+          if (el.type === 'checkbox') {
             el.disabled = true;
           } else {
             el.readOnly = true;
@@ -922,9 +972,10 @@ $(function () {
   $(".draggable-field").each(function () {
     const $li = $(this);
     $li.draggable({
-      handle: "label",
+      handle: ".field-drag-handle",
       helper: function () {
-        return $("<div>").text($(this).find("label").text()).css({
+        const labelText = $('.header-label-item[data-field="' + $li.data('field') + '"]').text().trim();
+        return $("<div>").text(labelText).css({
           width: "80px", height: $li.outerHeight() + "px",
           background: "#eef", border: "1px dashed #999", padding: "4px", "font-size": "0.9em"
         });
@@ -949,6 +1000,23 @@ $(function () {
       }
     });
     $li.resizable({ handles: "e, se", minWidth: 50, minHeight: 30, stop: debounceSave });
+  });
+
+  function setLayoutEditEnabled(enabled) {
+    const $body = $(document.body);
+    $body.toggleClass("layout-edit-enabled", !!enabled);
+    $(".draggable-field").each(function () {
+      try { $(this).draggable(enabled ? "enable" : "disable"); } catch {}
+      try { $(this).resizable(enabled ? "enable" : "disable"); } catch {}
+    });
+  }
+
+  setLayoutEditEnabled(false);
+  $(document).on("keydown", function (e) {
+    if (e.key === "Shift") setLayoutEditEnabled(true);
+  });
+  $(document).on("keyup", function (e) {
+    if (e.key === "Shift") setLayoutEditEnabled(false);
   });
 
   // ============================
@@ -976,7 +1044,7 @@ $(function () {
   function toggleSelection($el) { $el.toggleClass(SELECTED_CLASS); }
   function selectOnly($el) { clearSelection(); $el.addClass(SELECTED_CLASS); }
 
-  $doc.on("mousedown", ".draggable-field label", function (e) {
+  $doc.on("mousedown", ".field-drag-handle", function (e) {
     if (window.__DICT_OPEN__) return;
     const $field = $(this).closest(".draggable-field");
     if (!$field.length) return;
@@ -987,9 +1055,22 @@ $(function () {
       selectOnly($field);
     }
   });
+  $doc.on("mousedown", ".header-label-item", function (e) {
+    if (window.__DICT_OPEN__) return;
+    const fieldName = $(this).data("field");
+    if (!fieldName) return;
+    const $field = $(`.draggable-field[data-field="${fieldName}"]`).first();
+    if (!$field.length) return;
+
+    if (e.ctrlKey || e.metaKey) {
+      toggleSelection($field);
+    } else if (!$field.hasClass(SELECTED_CLASS)) {
+      selectOnly($field);
+    }
+  });
   $doc.on("mousedown", function (e) {
     if (window.__DICT_OPEN__) return;
-    if ($(e.target).closest(".draggable-field, .ui-resizable-handle, .modal").length) return;
+    if ($(e.target).closest(".draggable-field, .header-label-item, .ui-resizable-handle, .modal").length) return;
     clearSelection();
   });
 
@@ -1182,26 +1263,44 @@ $(function () {
     out:  function () { clearTimeout(dragTabSwitchTimer); }
   });
 
-  $('.lookup-dropdown').each(function() {
-    const $select = $(this);
-    const table = $select.data('table'), key = $select.data('key'),
-          result = $select.data('result'), selected = $select.data('selected');
-    $.getJSON(`/api/TableFieldLayout/LookupData?table=${table}&key=${key}&result=${result}`, function(data) {
-      $select.empty().append('<option value="">--請選擇--</option>');
-      (data || []).forEach(row => {
-        const val = row.key;
-        const label = Object.keys(row).filter(p => p.startsWith('result')).map(p => row[p]).join(' - ');
-        const $opt = $('<option>').val(val).text(label);
-        if (val == selected) $opt.attr('selected', true);
-        $select.append($opt);
-      });
-      $select.next('.lookup-label').text($select.find('option:selected').text());
-      // 若是瀏覽模式（readonly），在下拉資料載入後同步 lockedValue，避免變更時回復成空值
-      if ($select.hasClass('lookup-readonly') && $select[0]) {
-        $select[0].dataset.lockedValue = $select.val() ?? '';
-      }
+  function applyLookupData(el, data, selected) {
+    const $el = $(el);
+    $el.empty().append('<option value="">--請選擇--</option>');
+    (data || []).forEach(row => {
+      const val = row.key;
+      const label = Object.keys(row).filter(p => p.startsWith('result')).map(p => row[p]).join(' - ');
+      const $opt = $('<option>').val(val).text(label);
+      if (val == selected) $opt.attr('selected', true);
+      $el.append($opt);
     });
-    $select.on('change', function() {
+    $el.next('.lookup-label').text($el.find('option:selected').text());
+    if (el.classList.contains('lookup-readonly')) {
+      el.dataset.lockedValue = el.value ?? '';
+    }
+  }
+
+  function loadLookupOptions(el) {
+    if (!el || el.dataset.lookupLoading === '1' || el.dataset.lookupLoaded === '1') return;
+    const table = el.dataset.table || '';
+    const key = el.dataset.key || '';
+    const result = el.dataset.result || '';
+    if (!table || !key || !result) return;
+    el.dataset.lookupLoading = '1';
+    const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(table)}&key=${encodeURIComponent(key)}&result=${encodeURIComponent(result)}`;
+    fetch(url)
+      .then(r => r.ok ? r.json() : [])
+      .then(data => {
+        applyLookupData(el, data, el.dataset.selected);
+        el.dataset.lookupLoaded = '1';
+      })
+      .catch(() => {})
+      .finally(() => { delete el.dataset.lookupLoading; });
+  }
+
+  $('.lookup-dropdown').each(function() {
+    const el = this;
+    loadLookupOptions(el);
+    $(el).on('change', function() {
       $(this).next('.lookup-label').text($(this).find('option:selected').text());
     });
   });
@@ -1625,8 +1724,12 @@ window.__updateToolbarCounts = updateToolbarCounts;
 // ============================
 localStorage.setItem("lastViewedPaperNum", window.selectedPaperNum);
 function getHeaderValueByLabel(labelText) {
-  const li = Array.from(document.querySelectorAll('.draggable-field'))
-    .find(el => (el.querySelector('label')?.textContent || '').trim() === labelText);
+  const labelEl = Array.from(document.querySelectorAll('.header-label-item'))
+    .find(el => (el.textContent || '').trim() === labelText);
+  if (!labelEl) return '';
+  const fieldName = labelEl.getAttribute('data-field') || '';
+  if (!fieldName) return '';
+  const li = document.querySelector(`.draggable-field[data-field="${CSS.escape(fieldName)}"]`);
   if (!li) return '';
   const ctrl = li.querySelector('select, input, textarea');
   if (!ctrl) return '';
@@ -1867,12 +1970,14 @@ body { background: #f7f9fb !important; }
 .draggable-field{ position:absolute; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; background:transparent; border:1px dashed transparent; }
 .draggable-field:hover{ border-color:#c7d3e1; }
 .draggable-field.inline{ display:flex; flex-direction:row; align-items: center; gap:4px; flex:0 0 auto; min-width:100px; max-width:100%; }
-.draggable-field label{ cursor:move; font-size:var(--field-label-size); margin:0 6px 0 0; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
+.header-label-item{ position:absolute; display:flex; align-items:center; justify-content:flex-end; text-align:right; font-size:var(--field-label-size); line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 4px 0 2px; z-index:2; }
+.field-drag-handle{ position:absolute; left:0; top:0; width:10px; height:100%; cursor:default; background:transparent; z-index:3; }
 .draggable-field.inline .field-control{ flex:1 1 auto; height:100%; display:flex; }
 .draggable-field.inline textarea,
 .draggable-field.inline input,
 .draggable-field.inline .form-select{
   flex:1 1 auto; width:100%; height:100%; min-height:32px; line-height:1.2; resize:none; padding:4px 6px; font-size:var(--field-value-size);
+  text-align: left;
 }
 /* 明細表頭/欄位字體大小一致 */
 .erp-table th{ font-size: var(--field-label-size); }
@@ -1888,14 +1993,14 @@ body { background: #f7f9fb !important; }
   border-color:#5b8def;
   background:rgba(91,141,239,0.08);
 }
-.erp-header-form select.lookup-dropdown.lookup-readonly{
+.erp-header-form .lookup-dropdown.lookup-readonly{
   /* 瀏覽模式允許展開下拉，但不允許修改：外觀比照 disabled 的灰底 */
   background-color: var(--bs-secondary-bg, #e9ecef) !important;
   color: var(--bs-secondary-color, #6c757d) !important;
   opacity: 1; /* 避免像 disabled 一樣整體變淡 */
   cursor: default;
 }
-.erp-header-form select.lookup-dropdown.lookup-readonly:focus{
+.erp-header-form .lookup-dropdown.lookup-readonly:focus{
   border-color: #ced4da;
   box-shadow: none !important;
 }
@@ -1922,6 +2027,19 @@ body { background: #f7f9fb !important; }
   right: 0; bottom: 0; width: 14px; height: 14px;
   cursor: se-resize; background: transparent;
   z-index: 5;
+}
+.field-drag-handle,
+.draggable-field.ui-resizable .ui-resizable-e,
+.draggable-field.ui-resizable .ui-resizable-se{
+  display: none;
+}
+.layout-edit-enabled .field-drag-handle,
+.layout-edit-enabled .draggable-field.ui-resizable .ui-resizable-e,
+.layout-edit-enabled .draggable-field.ui-resizable .ui-resizable-se{
+  display: block;
+}
+.layout-edit-enabled .field-drag-handle{
+  cursor: move;
 }
 
 /* =========================================
