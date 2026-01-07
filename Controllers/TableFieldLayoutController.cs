@@ -441,6 +441,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         public string FormatStr { get; set; } = "";
         public int? SerialNum { get; set; }
         public bool Visible { get; set; }
+        public string? EditColor { get; set; }
     }
 
     [HttpGet("GetTableFields")]
@@ -475,6 +476,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         f.FieldName,
         COALESCE(l.DisplayLabel, f.DisplayLabel, f.FieldName) AS DisplayLabel,
         COALESCE(l.DisplaySize, f.DisplaySize) AS DisplaySize,
+        f.EditColor AS EditColor,
         f.DataType,
         f.FormatStr,
         f.SerialNum,
@@ -482,6 +484,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         ReadOnly  = CASE WHEN ISNULL(f.ReadOnly,0)=1 THEN 1 ELSE 0 END,
         f.ComboStyle,
         f.FieldNote,
+        f.EditColor,
 
         -- 標籤/欄位座標與尺寸
         f.iLayRow, f.iLayColumn,
@@ -548,6 +551,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
                 ReadOnly        = (rd["ReadOnly"]?.ToString() ?? "0") == "1" ? 1 : 0,
                 FieldNote       = rd["FieldNote"]?.ToString() ?? "",
                 ComboStyle      = rd["ComboStyle"] as int?,
+                EditColor       = rd["EditColor"]?.ToString() ?? "",
 
                 iLayRow         = rd["iLayRow"]     as int?,
                 iLayColumn      = rd["iLayColumn"]  as int?,

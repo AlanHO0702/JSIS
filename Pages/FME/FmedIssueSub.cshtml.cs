@@ -123,11 +123,13 @@ public class FMEdIssueSubModel : TableDetailModel<FmedIssuePo>
                 iLabTop = x.iLabTop,
                 iLabLeft = x.iLabLeft,
                 iShowWhere = x.iShowWhere ?? 0,
+                DisplaySize = x.DisplaySize,
                 DataType = x.DataType,
                 FormatStr = x.FormatStr,
                 LookupTable = x.LookupTable,
                 LookupKeyField = x.LookupKeyField,
-                LookupResultField = x.LookupResultField
+                LookupResultField = x.LookupResultField,
+                EditColor = x.EditColor
             }).ToList();
 
         // Step 3：呼叫樣板方法 FetchDataAsync 載入單身資料與 lookup map

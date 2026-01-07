@@ -69,8 +69,10 @@ public class TableDictionaryService : ITableDictionaryService
                 if (l.DisplaySize != null && l.DisplaySize > 0)
                     f.DisplaySize = l.DisplaySize;
 
-                if (l.IFieldWidth > 0)
+                if ((f.iFieldWidth ?? 0) <= 0 && l.IFieldWidth > 0)
                     f.iFieldWidth = l.IFieldWidth;
+                if (string.IsNullOrWhiteSpace(f.EditColor) && !string.IsNullOrWhiteSpace(l.EditColor))
+                    f.EditColor = l.EditColor;
             }
         }
 
@@ -139,6 +141,15 @@ public class TableDictionaryService : ITableDictionaryService
             if (HasInvalidLookupSetting(ocxTableName, keyField, ocxResultName))
                 continue;
 
+            var ocxTableClean = Clean(ocxTableName ?? "");
+            var resultType = _context.CURdTableFields
+                .Where(x => x.TableName != null
+                            && (x.TableName.ToLower() == ocxTableClean
+                                || x.TableName.ToLower().Replace("dbo.", "") == ocxTableClean)
+                            && x.FieldName == ocxResultName)
+                .Select(x => x.DataType)
+                .FirstOrDefault();
+
             // 用 raw SQL 動態查表（用固定 alias，避免欄名空白/重複/特殊字元造成 reader 取值失敗）
             var sql = $"SELECT {Q(keyField!)} AS [__k], {Q(ocxResultName!)} AS [__v] FROM {Q(ocxTableName!)}";
             var lookupDict = new Dictionary<string, string>();
@@ -173,7 +184,8 @@ public class TableDictionaryService : ITableDictionaryService
                 FieldName = field.FieldName,
                 KeySelfName = lkSetting.KeySelfName,
                 KeyFieldName = keyField,
-                LookupValues = lookupDict
+                LookupValues = lookupDict,
+                ResultDataType = resultType
             });
         }
 
@@ -204,5 +216,6 @@ public class TableDictionaryService : ITableDictionaryService
         public string KeySelfName { get; set; } = null!;
         public string KeyFieldName { get; set; } = null!;
         public Dictionary<string, string> LookupValues { get; set; } = new();
+        public string? ResultDataType { get; set; }
     }
 }

@@ -39,7 +39,7 @@ public static class FormatHelper
                 }
             }
             // 數字格式
-            else if (normalizedType == "number")
+            else if (normalizedType == "number" || normalizedType == "")
             {
                 try
                 {
@@ -55,7 +55,10 @@ public static class FormatHelper
                         number = Convert.ToDecimal(rawValue);
                     }
 
-                    return number.ToString(formatStr);
+                    var fmt = formatStr;
+                    if (fmt.StartsWith("."))
+                        fmt = "0" + fmt;
+                    return number.ToString(fmt);
                 }
                 catch
                 {

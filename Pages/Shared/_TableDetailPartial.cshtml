@@ -3,6 +3,7 @@
 @using System.Text.Json
 @using System.Collections.Generic
 @using System.Linq
+@using System.Globalization
 @{
     // 單頭欄位
     var headerFields = Model.HeaderTableFields; // 可視欄位
@@ -24,6 +25,35 @@
     {
         // 有些單據字典的 iShowWhere 會是 0（代表第一頁），若過濾會導致單頭整段消失
         return (v.HasValue && v.Value > 0) ? v.Value : 1;
+    }
+    static bool IsNumberType(string? dt)
+    {
+        var t = (dt ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(t)) return false;
+        return t == "number"
+            || t == "int" || t == "smallint" || t == "tinyint" || t == "bigint"
+            || t.StartsWith("decimal") || t.StartsWith("numeric")
+            || t.StartsWith("money") || t.StartsWith("smallmoney")
+            || t.StartsWith("float") || t.StartsWith("real");
+    }
+    static bool IsNumberValue(object? raw)
+    {
+        if (raw == null) return false;
+        if (raw is sbyte or byte or short or ushort or int or uint or long or ulong
+            or float or double or decimal) return true;
+        var s = raw.ToString();
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        s = s.Replace(",", "");
+        return decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out _)
+            || decimal.TryParse(s, NumberStyles.Any, CultureInfo.CurrentCulture, out _);
+    }
+    static string NormalizeEditColor(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+        var s = raw.Trim();
+        if (s.StartsWith("cl", StringComparison.OrdinalIgnoreCase))
+            s = s.Substring(2);
+        return s;
     }
 
     var groupedTabs = headerFieldsList
@@ -63,6 +93,8 @@
     var detailTotalWidth = (fields as IEnumerable<TableFieldViewModel>)?.Sum(c => GetDetailColWidth(c)) ?? 0;
 
     var lookupMap = ViewData["LookupDisplayMap"] as Dictionary<string, Dictionary<string, string>>;
+    var lookupTypeMap = ViewData["LookupResultTypes"] as Dictionary<string, string>;
+    var headerLookupTypeMap = ViewData["HeaderLookupResultTypes"] as Dictionary<string, string>;
 
     // 安全取單頭欄位值（容許大小寫不同）
     string GetHeaderVal(string key)
@@ -150,7 +182,7 @@
                                     // 1. lookup 優先顯示
                                     if (headerLookupMap != null && headerLookupMap.TryGetValue(field.FieldName, out var lookupVal))
                                     {
-                                        displayText = lookupVal;
+                                        displayText = FormatHelper.FormatValue(lookupVal, field.DataType, field.FormatStr);
                                     }
                                     else if (rawValue != null)
                                     {
@@ -164,12 +196,13 @@
                                         }
                                     }
 
-                                    var top = field.iFieldTop ?? 0;
+                                    const int headerTopPad = 6;
+                                    var top = (field.iFieldTop ?? 0) + headerTopPad;
                                     var left = field.iFieldLeft ?? 0;
                                     var width = field.iFieldWidth ?? 160;
                                     var height = field.iFieldHeight ?? 44;
 
-                                    var labTop = field.iLabTop ?? 0;
+                                    var labTop = (field.iLabTop ?? 0) + headerTopPad;
                                     var labLeft = field.iLabLeft ?? 0;
                                     var labWidth = field.iLabWidth;
                                     var labHeight = field.iLabHeight;
@@ -178,6 +211,22 @@
                                     if (labHeight.HasValue) { labStyle += $" height:{labHeight.Value}px;"; }
 
                                     var liClass = "draggable-field inline"; // 永遠橫排
+                                    var isNumber = IsNumberType(field.DataType) || IsNumberValue(rawValue);
+                                    var hasLookupSetting = !string.IsNullOrWhiteSpace(field.LookupTable)
+                                        && !string.IsNullOrWhiteSpace(field.LookupKeyField)
+                                        && !string.IsNullOrWhiteSpace(field.LookupResultField);
+                                    var hasLookupDisplay = headerLookupMap != null && headerLookupMap.ContainsKey(field.FieldName);
+                                    var lookupResultType = "";
+                                    if (headerLookupTypeMap != null && headerLookupTypeMap.TryGetValue(field.FieldName, out var rt))
+                                    {
+                                        lookupResultType = rt ?? "";
+                                    }
+                                    var lookupIsNumber = IsNumberType(lookupResultType) || (hasLookupDisplay && headerLookupMap != null && IsNumberValue(headerLookupMap[field.FieldName]));
+                                    var alignRight = lookupIsNumber || (isNumber && !hasLookupSetting && !hasLookupDisplay);
+                                    var alignCenter = hasLookupSetting;
+                                    var editColor = NormalizeEditColor(field.EditColor);
+                                    var editStyle = !string.IsNullOrWhiteSpace(editColor) ? $"background-color:{editColor} !important;" : "";
+                                    var editStyleForSelect = editStyle;
 
 
                                     <li class="header-label-item"
@@ -194,32 +243,35 @@
                                         !string.IsNullOrWhiteSpace(field.LookupResultField))
                                     {
                                         // 下拉選單元件（用 select）
-                                        <li class="@liClass"
+                                        <li class="@liClass @(alignRight ? "field-number" : "field-text")"
                                             data-field="@field.FieldName"
                                             data-tab="@tab.Key"
                                             title="@field.FieldName"
-                                            style="top:@(field.iFieldTop ?? 0)px; left:@(field.iFieldLeft ?? 0)px; width:@(field.iFieldWidth ?? 160)px; height:@(field.iFieldHeight ?? 44)px;">
+                                            style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
                                             <span class="field-drag-handle" aria-hidden="true"></span>
                                             <select class="form-select lookup-dropdown"
                                                     name="@field.FieldName"
                                                     data-table="@field.LookupTable"
                                                     data-key="@field.LookupKeyField"
                                                     data-result="@field.LookupResultField.Replace(" ", "")"
-                                                    data-selected="@rawValue"> 
+                                                    data-selected="@rawValue"
+                                                    style="@editStyleForSelect"> 
                                                 <option value="">--請選擇--</option>
                                             </select>
                                         </li>
                                     }
                                     else
                                     {
-                                        <li class="@liClass"
+                                        <li class="@liClass @(alignRight ? "field-number" : "field-text")"
                                             data-field="@field.FieldName"
                                             data-tab="@tab.Key"
                                             title="@field.FieldName"
                                             style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
                                             <span class="field-drag-handle" aria-hidden="true"></span>
-                                            <textarea class="form-control resizable-input"
-                                                    name="@field.FieldName">@displayText</textarea>
+                                        <textarea class="form-control resizable-input"
+                                                name="@field.FieldName"
+                                                data-align="@(alignRight ? "right" : (alignCenter ? "center" : null))"
+                                                style="@editStyle">@displayText</textarea>
                                         </li>
                                     }
                                 }
@@ -304,7 +356,7 @@
                                         string cellValue;
                                         if (!string.IsNullOrEmpty(display))
                                         {
-                                            cellValue = display;
+                                            cellValue = FormatHelper.FormatValue(display, col.DataType, col.FormatStr);
                                         }
                                         else
                                         {
@@ -314,7 +366,18 @@
                                         // 預先算好 name，避免 Razor 解析錯誤
                                         var inputName = $"Details[{index}].{col.FieldName}";
 
-                                        <td>                                        
+                                        var isNumberCell = IsNumberType(col.DataType);
+                                        string lookupCellType = "";
+                                        string dt = "";
+                                        if (lookupTypeMap != null && lookupTypeMap.TryGetValue(col.FieldName, out dt))
+                                        {
+                                            lookupCellType = dt ?? "";
+                                        }
+                                        var lookupCellIsNumber = IsNumberType(lookupCellType) || IsNumberValue(display);
+                                        var alignRightCell = lookupCellIsNumber || (isNumberCell && string.IsNullOrEmpty(display));
+                                        var cellColor = NormalizeEditColor(col.EditColor);
+                                        var cellStyle = !string.IsNullOrWhiteSpace(cellColor) ? $"background-color:{cellColor} !important;" : "";
+                                        <td class="detail-cell @(alignRightCell ? "detail-number" : "detail-text")" style="@cellStyle">
                                             <span class="cell-view">@cellValue</span>
 
                                             <input type="text"
@@ -1076,7 +1139,7 @@ $(function () {
         debounceSave();
       }
     });
-    $li.resizable({ handles: "e, se", minWidth: 50, minHeight: 30, stop: debounceSave });
+    $li.resizable({ handles: "e, se", minWidth: 50, minHeight: 22, stop: debounceSave });
   });
 
   function setLayoutEditEnabled(enabled) {
@@ -1657,13 +1720,14 @@ body { background: #f7f9fb !important; }
 }
 
 .erp-header-form select.form-select{
-  font-size: 1em !important; height: 32px !important; min-height: 32px !important; line-height: 1.15 !important;
+  font-size: 1em !important; height: 100% !important; min-height: 22px !important; line-height: 1.2 !important;
   padding: 2px 30px 2px 6px !important; appearance: none; -webkit-appearance: none; -moz-appearance: none;
   background-image: url('data:image/svg+xml;utf8,<svg width="11" height="11" fill="gray" xmlns="http://www.w3.org/2000/svg"><path d="M2 4.5l3.5 3.5L9 4.5" stroke="gray" stroke-width="2" fill="none" stroke-linecap="round"/></svg>');
-  background-repeat: no-repeat; background-position: right 10px center; background-size: 14px 14px; box-shadow: none !important; border-radius: 5px !important;
+  background-repeat: no-repeat; background-position: right 10px center; background-size: 14px 14px; box-shadow: none !important; border-radius: 0 !important;
+  margin: 0 !important;
 }
 .header-fields-tab{
-  position: relative; min-height: 120px; padding-bottom: 8px;
+  position: relative; min-height: 120px; padding-top: 6px; padding-bottom: 8px;
   width: 100%;
   box-sizing: border-box;
   background: #eef2f9 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.04);
@@ -1742,15 +1806,31 @@ body { background: #f7f9fb !important; }
 /* draggable 欄位（橫排 label + 控件） */
 .draggable-field{ position:absolute; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; background:transparent; border:1px dashed transparent; }
 .draggable-field:hover{ border-color:#c7d3e1; }
-.draggable-field.inline{ display:flex; flex-direction:row; align-items: center; gap:4px; flex:0 0 auto; min-width:100px; max-width:100%; }
+.draggable-field.inline{ display:flex; flex-direction:row; align-items: center; gap:4px; flex:0 0 auto; min-width:0; max-width:100%; box-sizing:border-box; }
 .header-label-item{ position:absolute; display:flex; align-items:center; justify-content:flex-end; text-align:right; font-size:var(--field-label-size); line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 4px 0 2px; z-index:2; }
 .field-drag-handle{ position:absolute; left:0; top:0; width:10px; height:100%; cursor:default; background:transparent; z-index:3; }
 .draggable-field.inline .field-control{ flex:1 1 auto; height:100%; display:flex; }
 .draggable-field.inline textarea,
 .draggable-field.inline input,
 .draggable-field.inline .form-select{
-  flex:1 1 auto; width:100%; height:100%; min-height:32px; line-height:1.2; resize:none; padding:4px 6px; font-size:0.95em;
+  flex:1 1 auto; width:100%; height:100%; min-height:22px; min-width:0; max-width:100%; line-height:1.2; resize:none; padding:4px 6px; font-size:0.95em; border-radius:0 !important; box-sizing:border-box;
   text-align: left;
+}
+.draggable-field.inline.field-number textarea,
+.draggable-field.inline.field-number input,
+.draggable-field.inline.field-number .form-select{
+  text-align: right !important;
+}
+.erp-header-form textarea[data-align="right"],
+.erp-header-form input[data-align="right"],
+.erp-header-form select[data-align="right"]{
+  text-align: right !important;
+}
+.erp-header-form .resizable-input{
+  padding: 2px 4px !important;
+  resize: none !important;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .draggable-field.inline label{
   white-space: nowrap !important;
@@ -1773,6 +1853,11 @@ body { background: #f7f9fb !important; }
 .erp-header-form select.lookup-dropdown.lookup-readonly:focus{
   border-color: #ced4da;
   box-shadow: none !important;
+}
+.erp-header-form select.lookup-dropdown option,
+.erp-header-form select.lookup-dropdown optgroup{
+  background-color: var(--bs-body-bg, #fff) !important;
+  color: var(--bs-body-color, #212529) !important;
 }
 /* jQuery UI resizable：讓右側拉寬把手更好抓 */
 .draggable-field.ui-resizable .ui-resizable-e{
@@ -1827,10 +1912,15 @@ body { background: #f7f9fb !important; }
 .erp-table th{ font-size: var(--field-label-size); }
 .erp-table td{ position:relative; padding:0; font-size: var(--field-value-size); }
 .erp-table td .cell-view{ display:inline-block; width:100%; text-align:inherit; }
+.erp-table td.detail-number{ text-align: right; }
+.erp-table td.detail-text{ text-align: left; }
 .erp-table td .cell-edit{
   width:100% !important; height:100% !important; box-sizing:border-box; margin:0; border:none; border-radius:0;
   background:#fff !important; font-size:inherit !important; font-weight:inherit !important; font-family:inherit !important;
   line-height:inherit !important; text-align:inherit !important; padding:0 4px;
+}
+.erp-table td[style*="background-color"] .cell-edit{
+  background-color: transparent !important;
 }
 
 /* 整列選取高亮＆左側藍條 */
@@ -1863,7 +1953,7 @@ body { background: #f7f9fb !important; }
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 2px;
   z-index: 900;
   overflow-y: auto;
   overflow-x: visible;
