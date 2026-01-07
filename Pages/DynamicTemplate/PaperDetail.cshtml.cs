@@ -162,13 +162,15 @@ namespace PcbErpApi.Pages.DynamicTemplate
                     iLabTop = x.iLabTop,
                     iLabLeft = x.iLabLeft,
                     iShowWhere = x.iShowWhere,
+                    DisplaySize = x.DisplaySize,
                     DataType = x.DataType,
                     FormatStr = x.FormatStr,
                     LookupTable = x.LookupTable,
                     LookupKeyField = x.LookupKeyField,
                     LookupResultField = x.LookupResultField,
                     ComboStyle = x.ComboStyle,
-                    ReadOnly = x.ReadOnly
+                    ReadOnly = x.ReadOnly,
+                    EditColor = x.EditColor
                 }).ToList();
 
             TableFields = FieldDictList
@@ -197,6 +199,9 @@ namespace PcbErpApi.Pages.DynamicTemplate
                 HeaderData.ToDictionary(k => k.Key, v => v.Value)
                 , headerLookup);
             ViewData["HeaderLookupMap"] = HeaderLookupMap;
+            ViewData["HeaderLookupResultTypes"] = headerLookup
+                .GroupBy(x => x.FieldName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First().ResultDataType ?? "", StringComparer.OrdinalIgnoreCase);
 
             // 5) Query fields (for search modal reuse)
             QueryFields = _ctx.CURdPaperSelected

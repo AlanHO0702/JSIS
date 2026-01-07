@@ -132,6 +132,7 @@
                 <input data-field="iFieldTop"    value="${x.iFieldTop    ?? ''}" />
                 <input data-field="iFieldLeft"   value="${x.iFieldLeft   ?? ''}" />
                 <input data-field="iFieldWidth"  value="${x.iFieldWidth  ?? ''}" />
+                <input data-field="iShowWhere"   value="${x.iShowWhere   ?? ''}" />
 
                 <input data-field="LookupTable"       value="${x.LookupTable       ?? ''}" />
                 <input data-field="LookupKeyField"    value="${x.LookupKeyField    ?? ''}" />
@@ -172,11 +173,6 @@
                     ${(+x.ComboStyle === 1 ? 'checked' : '')} />
             </td>
 
-            <td style="width:50px">
-              <input data-field="iShowWhere" value="${x.iShowWhere ?? ''}"
-                    class="form-control form-control-sm" />
-            </td>
-
             <td style="width:120px">
               <input data-field="DataType" value="${x.DataType ?? ''}"
                     class="form-control form-control-sm"
@@ -193,6 +189,11 @@
             <td style="width:160px">
               <input data-field="FieldNote" value="${x.FieldNote ?? ''}"
                     class="form-control form-control-sm" />
+            </td>
+
+            <td style="width:120px">
+              <input data-field="EditColor" value="${x.EditColor ?? ''}"
+                    class="form-control form-control-sm" placeholder="clYellow / Yellow" />
             </td>
 
             <!-- 第 10 欄：⚙ 設定按鈕 -->
@@ -372,7 +373,23 @@
         const v = getVal(name);
         return v === '' ? null : parseInt(v, 10);
       };
-      const getChk = name => tr.querySelector(`input[data-field="${name}"]`)?.checked ? 1 : 0;
+      const getChk = name => {
+        const box = tr.querySelector(`input[type="checkbox"][data-field="${name}"]`);
+        if (box) return box.checked ? 1 : 0;
+        const raw = tr.querySelector(`input[data-field="${name}"]`)?.value ?? '';
+        return raw === '' ? 0 : (parseInt(raw, 10) ? 1 : 0);
+      };
+      const prev = (() => {
+        const raw = tr.dataset.dictSnapshot;
+        if (!raw) return null;
+        try { return JSON.parse(raw); } catch { return null; }
+      })();
+      const sameVal = (name, cur) => String(cur ?? '') === String(prev?.[name] ?? '');
+      const getChangedInt = name => {
+        const v = getVal(name);
+        if (sameVal(name, v)) return null;
+        return v === '' ? null : parseInt(v, 10);
+      };
 
       return {
         // === 基本欄位 ===
@@ -386,20 +403,21 @@
         DataType: getVal('DataType'),
         FormatStr: getVal('FormatStr'),
         FieldNote: getVal('FieldNote'),
+        EditColor: getVal('EditColor'),
 
         // === 版面欄位 ===
-        DisplaySize: getInt('DisplaySize'),
-        iLayRow: getInt('iLayRow'),
-        iLayColumn: getInt('iLayColumn'),
-        iLabHeight: getInt('iLabHeight'),
-        iLabTop: getInt('iLabTop'),
-        iLabLeft: getInt('iLabLeft'),
-        iLabWidth: getInt('iLabWidth'),
-        iFieldHeight: getInt('iFieldHeight'),
-        iFieldTop: getInt('iFieldTop'),
-        iFieldLeft: getInt('iFieldLeft'),
-        iFieldWidth: getInt('iFieldWidth'),
-        iShowWhere: getInt('iShowWhere'),
+        DisplaySize: getChangedInt('DisplaySize'),
+        iLayRow: getChangedInt('iLayRow'),
+        iLayColumn: getChangedInt('iLayColumn'),
+        iLabHeight: getChangedInt('iLabHeight'),
+        iLabTop: getChangedInt('iLabTop'),
+        iLabLeft: getChangedInt('iLabLeft'),
+        iLabWidth: getChangedInt('iLabWidth'),
+        iFieldHeight: getChangedInt('iFieldHeight'),
+        iFieldTop: getChangedInt('iFieldTop'),
+        iFieldLeft: getChangedInt('iFieldLeft'),
+        iFieldWidth: getChangedInt('iFieldWidth'),
+        iShowWhere: getChangedInt('iShowWhere'),
 
         // === 查詢設定 ===
         LookupTable: getVal('LookupTable'),
@@ -613,6 +631,7 @@
       // 需同步的欄位（含 OCX）
       const DETAIL_FIELDS = [
           'DisplaySize',
+          'iShowWhere',
           'iLayRow', 'iLayColumn',
           'iLabTop', 'iLabLeft', 'iLabWidth', 'iLabHeight',
           'iFieldTop', 'iFieldLeft', 'iFieldWidth', 'iFieldHeight',

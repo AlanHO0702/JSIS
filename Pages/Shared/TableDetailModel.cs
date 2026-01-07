@@ -124,7 +124,8 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 DataType = x.DataType,
                 FormatStr = x.FormatStr,
                 ComboStyle = x.ComboStyle,
-                ReadOnly = x.ReadOnly
+                ReadOnly = x.ReadOnly,
+                EditColor = x.EditColor
             }).ToList();
 
         // 分頁資訊：根據 iShowWhere 分群
@@ -153,13 +154,15 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 iLabTop = x.iLabTop,
                 iLabLeft = x.iLabLeft,
                 iShowWhere = x.iShowWhere,
+                DisplaySize = x.DisplaySize,
                 DataType = x.DataType,
                 FormatStr = x.FormatStr,
                 LookupTable = x.LookupTable,
                 LookupKeyField = x.LookupKeyField,
                 LookupResultField = x.LookupResultField,
                 ComboStyle = x.ComboStyle,
-                ReadOnly = x.ReadOnly
+                ReadOnly = x.ReadOnly,
+                EditColor = x.EditColor
             }).ToList();
 
         // Lookup Map 資料 (單身 + 單頭)
@@ -173,10 +176,16 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
             item => $"{typeof(T).GetProperty("PaperNum")?.GetValue(item)}_{typeof(T).GetProperty("Item")?.GetValue(item)}"
         );
         ViewData["LookupDisplayMap"] = LookupDisplayMap;
+        ViewData["LookupResultTypes"] = lookupMaps
+            .GroupBy(x => x.FieldName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().ResultDataType ?? "", StringComparer.OrdinalIgnoreCase);
 
         // 單頭 lookup 值轉換
         var headerLookupDict = LookupDisplayHelper.BuildHeaderLookupMap(HeaderData, headerLookupMaps);
         ViewData["HeaderLookupMap"] = headerLookupDict;
+        ViewData["HeaderLookupResultTypes"] = headerLookupMaps
+            .GroupBy(x => x.FieldName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().ResultDataType ?? "", StringComparer.OrdinalIgnoreCase);
 
         var headerDisplayLabel = await _context.CurdTableNames
             .AsNoTracking()
