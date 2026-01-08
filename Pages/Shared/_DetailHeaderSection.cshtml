@@ -998,16 +998,25 @@ $(function () {
 
   function saveLayoutChanges() {
     const layout = [];
+    const headerTopPad = 6;
     const hiddenTabs = $(".tab-pane").not(".show");
     hiddenTabs.addClass("temporary-show").addClass("show").css("display", "block");
     $(".draggable-field").each(function () {
       const $li = $(this);
+      const $label = $(`.header-label-item[data-field="${$li.data("field")}"]`).first();
+      const labelPos = $label.length ? $label.position() : null;
+      const fieldTop = Math.max(0, Math.round($li.position().top) - headerTopPad);
+      const fieldLeft = Math.round($li.position().left);
+      const labTop = labelPos ? Math.max(0, Math.round(labelPos.top) - headerTopPad) : null;
+      const labLeft = labelPos ? Math.round(labelPos.left) : null;
       layout.push({
         fieldName: $li.data("field"),
-        top: Math.round($li.position().top),
-        left: Math.round($li.position().left),
+        top: fieldTop,
+        left: fieldLeft,
         width: Math.round($li.outerWidth()),
         height: Math.round($li.outerHeight()),
+        labTop: labTop,
+        labLeft: labLeft,
         ishowWhere: parseInt($li.attr("data-tab")) || 1
       });
     });
@@ -1055,19 +1064,32 @@ $(function () {
 
   function setLayoutEditEnabled(enabled) {
     const $body = $(document.body);
-    $body.toggleClass("layout-edit-enabled", !!enabled);
+    const uid = (localStorage.getItem('erpLoginUserId') || window._userId || '').toString().trim().toLowerCase();
+    const cachedAdmin = uid ? localStorage.getItem(`erpIsAdmin:${uid}`) === '1' : false;
+    const bodyAdmin = document.body?.dataset?.isAdmin === '1';
+    const canEnable = !!enabled && (window.__isAdmin === true || cachedAdmin || bodyAdmin);
+    $body.toggleClass("layout-edit-enabled", canEnable);
     $(".draggable-field").each(function () {
-      try { $(this).draggable(enabled ? "enable" : "disable"); } catch {}
-      try { $(this).resizable(enabled ? "enable" : "disable"); } catch {}
+      try { $(this).draggable(canEnable ? "enable" : "disable"); } catch {}
+      try { $(this).resizable(canEnable ? "enable" : "disable"); } catch {}
     });
   }
 
   setLayoutEditEnabled(false);
   $(document).on("keydown", function (e) {
-    if (e.key === "Shift") setLayoutEditEnabled(true);
+    if (e.key === "Shift" || e.shiftKey) {
+      window.__layoutShiftDown = true;
+      setLayoutEditEnabled(true);
+    }
   });
   $(document).on("keyup", function (e) {
-    if (e.key === "Shift") setLayoutEditEnabled(false);
+    if (e.key === "Shift" || !e.shiftKey) {
+      window.__layoutShiftDown = false;
+      setLayoutEditEnabled(false);
+    }
+  });
+  window.addEventListener('adminStateReady', () => {
+    if (window.__layoutShiftDown) setLayoutEditEnabled(true);
   });
 
   // ============================
@@ -1083,7 +1105,16 @@ $(function () {
   const SELECTED_CLASS = "md-selected";
   let dragGroupSnapshot = null;
 
-  function $allFields() { return $(".draggable-field"); }
+    function $allFields() { return $(".draggable-field"); }
+    function getLabelForField($field) {
+      const fieldName = $field?.data("field");
+      if (!fieldName) return $();
+      return $(`.header-label-item[data-field="${fieldName}"]`).first();
+    }
+    function moveLabel($label, top, left) {
+      if (!$label || !$label.length) return;
+      $label.css({ position: "absolute", top: Math.max(0, top), left: Math.max(0, left) });
+    }
   function $selected() { return $allFields().filter("." + SELECTED_CLASS); }
   function isTypingTarget(e) {
     const t = e?.target;
@@ -1135,21 +1166,46 @@ $(function () {
       baseLeft: Math.round($base.position().left),
       items: $group.toArray().map(el => {
         const $el = $(el);
-        return { el, top: Math.round($el.position().top), left: Math.round($el.position().left) };
+        const $label = getLabelForField($el);
+        const labelPos = $label.length ? $label.position() : null;
+        return {
+          el,
+          top: Math.round($el.position().top),
+          left: Math.round($el.position().left),
+          labelEl: $label.get(0) || null,
+          labelTop: labelPos ? Math.round(labelPos.top) : null,
+          labelLeft: labelPos ? Math.round(labelPos.left) : null
+        };
       })
     };
   }
 
-  $allFields().each(function () {
-    const $li = $(this);
-    $li.draggable("option", "start", function () {
-      if (window.__DICT_OPEN__) return;
-      ensureDragGroupSnapshot($(this));
-      $(this).hide();
-    });
-    $li.draggable("option", "stop", function (event, ui) {
-      const $item = $(this);
-      $item.show();
+    $allFields().each(function () {
+      const $li = $(this);
+      $li.draggable("option", "start", function () {
+        if (window.__DICT_OPEN__) return;
+        ensureDragGroupSnapshot($(this));
+        $(this).hide();
+      });
+      $li.draggable("option", "drag", function (event, ui) {
+        const $item = $(this);
+        if (!dragGroupSnapshot || dragGroupSnapshot.baseEl !== $item.get(0)) return;
+        const $parent = $item.parent();
+        const parentOff = $parent.offset();
+        if (!parentOff) return;
+        const newTop = Math.round(ui.offset.top - parentOff.top);
+        const newLeft = Math.round(ui.offset.left - parentOff.left);
+        const dy = newTop - dragGroupSnapshot.baseTop;
+        const dx = newLeft - dragGroupSnapshot.baseLeft;
+        dragGroupSnapshot.items.forEach(it => {
+          if (it.labelEl && it.labelTop != null && it.labelLeft != null) {
+            moveLabel($(it.labelEl), it.labelTop + dy, it.labelLeft + dx);
+          }
+        });
+      });
+      $li.draggable("option", "stop", function (event, ui) {
+        const $item = $(this);
+        $item.show();
 
       const $parent = $item.parent();
       const parentOff = $parent.offset();
@@ -1158,27 +1214,38 @@ $(function () {
       const newTop = Math.round(ui.offset.top - parentOff.top);
       const newLeft = Math.round(ui.offset.left - parentOff.left);
 
-      if (dragGroupSnapshot && dragGroupSnapshot.baseEl === $item.get(0)) {
-        const dy = newTop - dragGroupSnapshot.baseTop;
-        const dx = newLeft - dragGroupSnapshot.baseLeft;
-        dragGroupSnapshot.items.forEach(it => {
-          const $el = $(it.el);
-          $el.css({
-            position: "absolute",
-            top: Math.max(0, it.top + dy),
-            left: Math.max(0, it.left + dx)
+        if (dragGroupSnapshot && dragGroupSnapshot.baseEl === $item.get(0)) {
+          const dy = newTop - dragGroupSnapshot.baseTop;
+          const dx = newLeft - dragGroupSnapshot.baseLeft;
+          dragGroupSnapshot.items.forEach(it => {
+            const $el = $(it.el);
+            $el.css({
+              position: "absolute",
+              top: Math.max(0, it.top + dy),
+              left: Math.max(0, it.left + dx)
+            });
+            if (it.labelEl && it.labelTop != null && it.labelLeft != null) {
+              moveLabel($(it.labelEl), it.labelTop + dy, it.labelLeft + dx);
+            }
           });
-        });
+          dragGroupSnapshot = null;
+          debounceSave();
+          return;
+        }
+
+        const oldPos = $item.position();
+        const dy = newTop - Math.round(oldPos.top);
+        const dx = newLeft - Math.round(oldPos.left);
+        $item.css({ position: "absolute", top: newTop, left: newLeft });
+        const $label = getLabelForField($item);
+        if ($label.length) {
+          const labelPos = $label.position();
+          moveLabel($label, Math.round(labelPos.top) + dy, Math.round(labelPos.left) + dx);
+        }
         dragGroupSnapshot = null;
         debounceSave();
-        return;
-      }
-
-      $item.css({ position: "absolute", top: newTop, left: newLeft });
-      dragGroupSnapshot = null;
-      debounceSave();
+      });
     });
-  });
 
   function applyToSelected(mutator) {
     const $sel = $selected();
@@ -2221,15 +2288,22 @@ body.with-toolbar .action-rail{
   letter-spacing: 0;
   white-space: normal;
   word-break: break-word;
-  background:#ffc107;
-  color:#090101;
-  font-weight:700;
+  background:#f8f9fb;
+  color:#1f5fbf;
+  font-weight:600;
   border-radius:10px;
   cursor:pointer;
-  box-shadow:0 6px 16px rgba(0,0,0,.2);
-  border:0;
+  box-shadow:0 2px 8px rgba(20,40,80,.12);
+  border:1px solid #cfd7e6;
 }
-.fab:hover{ filter:brightness(0.95); }
+.fab:hover{
+  background:#e9f1ff;
+  border-color:#9fbaf0;
+}
+.fab:focus-visible{
+  outline:2px solid #9fbaf0;
+  outline-offset:2px;
+}
 .fab-red{ background:#dc3545; color:#fff; }
 .fab-blue{ background:#3583dc; color:#fff; }
 </style>
