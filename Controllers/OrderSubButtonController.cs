@@ -13,7 +13,7 @@ public class OrderSubButtonController : ControllerBase
     private readonly string _cs;
     public OrderSubButtonController(IConfiguration cfg, PcbErpContext db)
     {
-        _cs = cfg.GetConnectionString("Default")
+        _cs = cfg.GetConnectionString("DefaultConnection")
               ?? db.Database.GetDbConnection().ConnectionString;
     }
 

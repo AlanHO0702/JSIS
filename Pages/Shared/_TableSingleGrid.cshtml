@@ -4,6 +4,7 @@
 @using System.Linq
 @using System.Collections
 @using System.Collections.Generic
+@using PcbErpApi.Helpers
 @model dynamic
 
 @{
@@ -120,6 +121,44 @@
 
             return fallback;
         }
+    }
+
+    private static string GetFieldProp(object? field, string propName)
+    {
+        if (field == null || string.IsNullOrWhiteSpace(propName)) return "";
+        if (field is IDictionary dict)
+        {
+            foreach (var k in dict.Keys)
+            {
+                if (k is string ks && string.Equals(ks, propName, StringComparison.OrdinalIgnoreCase))
+                {
+                    var v = dict[k];
+                    return v?.ToString() ?? "";
+                }
+            }
+        }
+
+        var prop = field.GetType().GetProperty(propName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+        return prop?.GetValue(field)?.ToString() ?? "";
+    }
+
+    private static string FormatCell(object? value, object field)
+    {
+        var dataType = GetFieldProp(field, "DataType");
+        var formatStr = GetFieldProp(field, "FormatStr");
+        return FormatHelper.FormatValue(value, dataType, formatStr);
+    }
+
+    private static bool IsNumberDataType(object field)
+    {
+        var dt = GetFieldProp(field, "DataType").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(dt)) return false;
+        return dt == "number"
+            || dt.StartsWith("decimal") || dt.StartsWith("numeric")
+            || dt.StartsWith("money") || dt.StartsWith("smallmoney")
+            || dt.StartsWith("float") || dt.StartsWith("real")
+            || dt.StartsWith("int") || dt.StartsWith("smallint")
+            || dt.StartsWith("tinyint") || dt.StartsWith("bigint");
     }
 }
 
@@ -239,10 +278,12 @@
                 <tr>
                   @foreach (var f in fields)
                   {
+                      var dictField = dictFields.FirstOrDefault(df =>
+                          string.Equals(Convert.ToString(df.FieldName), Convert.ToString(f.FieldName), StringComparison.OrdinalIgnoreCase));
                       string? name = Convert.ToString(f.FieldName);
                       var value = GetValue(item, name);
                       var rawVal = value?.ToString() ?? "";
-                      var displayValue = value;
+                      var displayValue = FormatCell(value, dictField ?? f);
                       var lookupKey = rawVal;
                       var keyFieldVal = "";
                       var keySelfVal = "";
@@ -274,8 +315,9 @@
                               lookupKey = !string.IsNullOrWhiteSpace(keyFieldVal) ? keyFieldVal : keySelfVal;
                       }
 
-                      <td class="text-nowrap" data-field="@name" style="@hiddenStyle">
-                        <span class="cell-view" data-raw="@rawVal" data-lookupkey="@lookupKey">@Fmt(displayValue)</span>
+                      var cellClass = IsNumberDataType(dictField ?? f) ? "cell-number" : "cell-text";
+                      <td class="text-nowrap @cellClass" data-field="@name" style="@hiddenStyle">
+                        <span class="cell-view" data-raw="@rawVal" data-lookupkey="@lookupKey">@displayValue</span>
                         <input class="form-control form-control-sm cell-edit d-none @(isReadOnly ? "readonly-cell" : "")"
                                name="@name"
                                value="@rawVal"
@@ -349,10 +391,10 @@
 <style>
  .table-fix-wrapper{max-height:70vh;overflow:auto;background:#fff;border:1px solid #dee2e6;border-radius:.5rem;white-space:nowrap}
  table.table{table-layout:fixed!important;border-collapse:separate!important;border-spacing:0;font-size:.85rem;width:100%}
- table th,table td{vertical-align:middle!important;border:1px solid #dee2e6!important;padding:.28rem .4rem!important;white-space:nowrap}
+ table th,table td{vertical-align:middle!important;border:1px solid #dee2e6!important;padding:0 2px!important;white-space:nowrap}
  .table-hover tbody tr:hover{background:#f1f5ff!important}
-.cell-view,.cell-edit{display:inline-block;width:100%;font-size:.85rem;line-height:1.35;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:.28rem .4rem!important;vertical-align:middle}
-.cell-edit.form-control{height:calc(1.45em + .45rem + 2px)!important;padding:.28rem .4rem!important;font-size:.85rem!important;line-height:1.35!important;border-radius:0!important;box-sizing:border-box!important}
+.cell-view,.cell-edit{display:inline-block;width:100%;font-size:.85rem;line-height:1.35;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 2px!important;vertical-align:middle}
+.cell-edit.form-control{height:calc(1.45em + .45rem + 2px)!important;padding:0 2px!important;font-size:.85rem!important;line-height:1.35!important;border-radius:0!important;box-sizing:border-box!important}
 .edit-mode .cell-edit:not(.readonly-cell){border:1px solid #ccc!important;background:#fff!important}
 .readonly-cell{background:#f3f3f3!important;color:#555!important;border:1px solid #ddd!important;cursor:not-allowed!important;pointer-events:none!important;user-select:none!important}
 .table-fix-wrapper::-webkit-scrollbar{height:10px;width:10px}
@@ -380,6 +422,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const table   = document.getElementById("mainGrid");
   const ocxLookupMaps = @Html.Raw(JsonSerializer.Serialize(ocxLookupPayload));
   const customButtonsMeta = @Html.Raw(JsonSerializer.Serialize(customButtonMeta ?? new List<object>()));
+  const fieldFormatMap = @Html.Raw(JsonSerializer.Serialize(
+    dictFields.Select(f => new {
+      FieldName = f.FieldName,
+      DataType = f.DataType,
+      FormatStr = f.FormatStr
+    })
+  ));
   const customButtonBar = document.getElementById("customButtonBar");
   let lookupMaps = ocxLookupMaps || {};
   let isEdit = false;
@@ -477,14 +526,64 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   };
 
+    const formatByDict = (fieldName, rawVal) => {
+    if (rawVal == null) return "";
+    const meta = fieldFormatMap?.find?.(x => (x.FieldName || "").toLowerCase() === (fieldName || "").toLowerCase());
+    const fmt = (meta?.FormatStr || "").toString();
+    if (!fmt) return String(rawVal);
+    const fmtLower = fmt.toLowerCase();
+    const dt = (meta?.DataType || "").toString().toLowerCase();
+    const isDate = dt.includes("date") || fmtLower.includes("y");
+    const isNumber = dt.includes("decimal") || dt.includes("numeric") || dt.includes("money")
+      || dt.includes("float") || dt.includes("real") || dt.includes("int") || dt.includes("number");
+    if (isNumber) {
+      const rawText = String(rawVal);
+      const normalized = rawText.replace(/,/g, "");
+      if (/^-?\d+(\.\d+)?$/.test(normalized)) {
+        if (normalized.includes(".")) {
+          const trimmed = normalized.replace(/0+$/, "").replace(/\.$/, "");
+          return trimmed;
+        }
+        return normalized;
+      }
+      return rawText;
+    }
+    if (!isDate) return String(rawVal);
+
+    const hasTime = fmtLower.includes("hh") || fmtLower.includes("nn") || fmtLower.includes("ss");
+    const rawText = String(rawVal);
+    const normalized = rawText.replace("上午", "AM").replace("下午", "PM");
+    const date = new Date(normalized);
+    if (isNaN(date)) {
+      if (!hasTime) {
+        const m = rawText.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+        if (m) {
+          const y = m[1];
+          const mm = String(m[2]).padStart(2, '0');
+          const dd = String(m[3]).padStart(2, '0');
+          return `${y}/${mm}/${dd}`;
+        }
+      }
+      return rawText;
+    }
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    if (!hasTime) return `${y}/${m}/${d}`;
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mm = String(date.getMinutes()).padStart(2, '0');
+    const ss = String(date.getSeconds()).padStart(2, '0');
+    return `${y}/${m}/${d} ${hh}:${mm}:${ss}`;
+  };
+
   const lookupDisplay = (fieldName, rawVal, fallback, lookupKey) => {
     const key = String(lookupKey ?? rawVal ?? "");
-    if (!fieldName || key === "") return rawVal ?? fallback ?? "";
-    const map = lookupMaps[fieldName.toLowerCase()]?.map;
-    if (map && Object.prototype.hasOwnProperty.call(map, key)) {
+    const map = lookupMaps[fieldName?.toLowerCase?.()]?.map;
+    if (!fieldName || key === "" || !map) return formatByDict(fieldName, rawVal) || fallback || "";
+    if (Object.prototype.hasOwnProperty.call(map, key)) {
       return map[key] ?? fallback ?? key;
     }
-    return rawVal ?? fallback ?? "";
+    return formatByDict(fieldName, rawVal) || fallback || "";
   };
 
   const applyLookupToTable = () => {
@@ -798,9 +897,15 @@ document.addEventListener("DOMContentLoaded", () => {
       const newPageSize = pagerPageSize ? parseInt(pagerPageSize.value) : pageSize;
 
       // 呼叫 AJAX API
-      const url = window.location.pathname + '?handler=Data&pageIndex=' + p + '&pageSize=' + newPageSize +
-        (currentSortBy ? '&sortBy=' + encodeURIComponent(currentSortBy) : '') +
-        (currentSortDir ? '&sortDir=' + encodeURIComponent(currentSortDir) : '');
+      const urlObj = new URL(window.location.href);
+      urlObj.searchParams.set("handler", "Data");
+      urlObj.searchParams.set("pageIndex", String(p));
+      urlObj.searchParams.set("pageSize", String(newPageSize));
+      if (currentSortBy) urlObj.searchParams.set("sortBy", currentSortBy);
+      else urlObj.searchParams.delete("sortBy");
+      if (currentSortDir) urlObj.searchParams.set("sortDir", currentSortDir);
+      else urlObj.searchParams.delete("sortDir");
+      const url = urlObj.toString();
 
       console.log('[goPage] Fetching URL:', url);
       const response = await fetch(url);
@@ -1086,6 +1191,11 @@ document.addEventListener("DOMContentLoaded", () => {
         const isHidden = f.Visible == 0;
         const hiddenStyle = isHidden ? 'display:none;' : '';
         const isReadOnly = f.ReadOnly != null && f.ReadOnly != 0;
+        const dt = (f.DataType || '').toString().toLowerCase();
+        const isNumber = dt.includes('number') || dt.startsWith('decimal') || dt.startsWith('numeric')
+          || dt.startsWith('money') || dt.startsWith('smallmoney') || dt.startsWith('float') || dt.startsWith('real')
+          || dt.startsWith('int') || dt.startsWith('smallint') || dt.startsWith('tinyint') || dt.startsWith('bigint');
+        const cellClass = isNumber ? 'cell-number' : 'cell-text';
 
         // 計算 lookupKey（與初始渲染邏輯一致）
         let lookupKey = rawVal;
@@ -1119,10 +1229,43 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // 簡單格式化
         let displayVal = rawVal;
+        const dateFormatMode = window._singleGridDateFormat || '';
+        const formatDateValue = (val, dateOnly) => {
+          const date = new Date(val);
+          if (isNaN(date)) {
+            if (dateOnly) {
+              const m = String(val).match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+              if (m) {
+                const y = m[1];
+                const mm = String(m[2]).padStart(2, '0');
+                const dd = String(m[3]).padStart(2, '0');
+                return `${y}/${mm}/${dd}`;
+              }
+            }
+            return String(val);
+          }
+          const y = date.getFullYear();
+          const m = String(date.getMonth() + 1).padStart(2, '0');
+          const d = String(date.getDate()).padStart(2, '0');
+          if (dateOnly || dateFormatMode === 'date') return `${y}/${m}/${d}`;
+          const hh = String(date.getHours()).padStart(2, '0');
+          const mm = String(date.getMinutes()).padStart(2, '0');
+          const ss = String(date.getSeconds()).padStart(2, '0');
+          return `${y}/${m}/${d} ${hh}:${mm}:${ss}`;
+        };
+
         if (rawVal instanceof Date || (typeof rawVal === 'string' && rawVal.match(/^\d{4}-\d{2}-\d{2}/))) {
-          const date = new Date(rawVal);
-          if (!isNaN(date)) {
-            displayVal = date.toLocaleDateString('zh-TW') + ' ' + date.toLocaleTimeString('zh-TW', {hour: '2-digit', minute: '2-digit'});
+          const fmtMeta = fieldFormatMap?.find?.(x => (x.FieldName || "").toLowerCase() === (fieldName || "").toLowerCase());
+          const fmt = (fmtMeta?.FormatStr || "").toString();
+          const fmtLower = fmt.toLowerCase();
+          const hasTime = fmtLower.includes("hh") || fmtLower.includes("nn") || fmtLower.includes("ss");
+          if (fmt) displayVal = formatDateValue(rawVal, !hasTime);
+          else if (dateFormatMode) displayVal = formatDateValue(rawVal, true);
+          else {
+            const date = new Date(rawVal);
+            if (!isNaN(date)) {
+              displayVal = date.toLocaleDateString('zh-TW') + ' ' + date.toLocaleTimeString('zh-TW', {hour: '2-digit', minute: '2-digit'});
+            }
           }
         } else if (typeof rawVal === 'number') {
           displayVal = rawVal.toLocaleString('zh-TW');
@@ -1134,7 +1277,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const safeDisplayVal = (displayVal !== null && displayVal !== undefined) ? String(displayVal) : '';
 
         // 產生與初始渲染一致的結構，包含 data-field, cell-view, cell-edit
-        return '<td class="text-nowrap" data-field="' + fieldName + '" style="' + hiddenStyle + '">' +
+        return '<td class="text-nowrap ' + cellClass + '" data-field="' + fieldName + '" style="' + hiddenStyle + '">' +
           '<span class="cell-view" data-raw="' + safeRawVal + '" data-lookupkey="' + safeLookupKey + '">' + safeDisplayVal + '</span>' +
           '<input class="form-control form-control-sm cell-edit d-none ' + (isReadOnly ? 'readonly-cell' : '') + '" ' +
           'name="' + fieldName + '" ' +
@@ -1174,7 +1317,12 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       // 呼叫 AJAX API
-      const url = window.location.pathname + '?handler=Data&sortBy=' + encodeURIComponent(actualFieldName) + '&sortDir=' + newSortDir + '&pageIndex=1';
+      const urlObj = new URL(window.location.href);
+      urlObj.searchParams.set("handler", "Data");
+      urlObj.searchParams.set("sortBy", actualFieldName);
+      urlObj.searchParams.set("sortDir", newSortDir);
+      urlObj.searchParams.set("pageIndex", "1");
+      const url = urlObj.toString();
       const response = await fetch(url);
 
       if (!response.ok) {
