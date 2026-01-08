@@ -71,6 +71,37 @@
   const LOOKUP_META_CACHE = new Map(); // tn -> Map(fieldLower -> { table, key, result, keySelf, field })
   const LOOKUP_DATA_CACHE = new Map(); // tn -> Map(fieldLower -> Map(key -> label))
   const READONLY_META_CACHE = new Map(); // tn -> Map(fieldLower -> boolean)
+  const DICT_META_CACHE = new Map(); // tn -> Map(fieldLower -> { dataType, formatStr })
+
+  async function fetchDictMeta(dictTable) {
+    const tn = cleanTableName(dictTable);
+    if (!tn) return new Map();
+    if (DICT_META_CACHE.has(tn)) return DICT_META_CACHE.get(tn);
+    try {
+      const res = await fetch(`/api/TableFieldLayout/DictFields?table=${encodeURIComponent(tn)}&lang=TW`);
+      if (!res.ok) {
+        const empty = new Map();
+        DICT_META_CACHE.set(tn, empty);
+        return empty;
+      }
+      const rows = await res.json();
+      const map = new Map();
+      (rows || []).forEach(r => {
+        const field = (r.fieldName || r.FieldName || '').toString();
+        if (!field) return;
+        map.set(field.toLowerCase(), {
+          dataType: (r.dataType || r.DataType || '').toString(),
+          formatStr: (r.formatStr || r.FormatStr || '').toString()
+        });
+      });
+      DICT_META_CACHE.set(tn, map);
+      return map;
+    } catch {
+      const empty = new Map();
+      DICT_META_CACHE.set(tn, empty);
+      return empty;
+    }
+  }
 
   async function fetchLookupMeta(dictTable) {
     const tn = cleanTableName(dictTable);
@@ -372,6 +403,40 @@
     return s === '[object Object]' ? '' : v;
   }
 
+  function parseDecimalsFromFormat(fmt) {
+    const s = (fmt || '').toString();
+    const dot = s.lastIndexOf('.');
+    if (dot < 0) return null;
+    const tail = s.slice(dot + 1);
+    const min = (tail.match(/0/g) || []).length;
+    const max = min + (tail.match(/#/g) || []).length;
+    if (max === 0) return null;
+    return { min, max };
+  }
+
+  function formatNumberByFormat(raw, formatStr) {
+    const n = Number(String(raw).replace(/,/g, ''));
+    if (!Number.isFinite(n)) return String(raw ?? '');
+    const decimals = parseDecimalsFromFormat(formatStr);
+    if (decimals) {
+      return n.toLocaleString(undefined, {
+        minimumFractionDigits: decimals.min,
+        maximumFractionDigits: decimals.max
+      });
+    }
+    return n.toLocaleString();
+  }
+
+  function formatDisplayByMeta(raw, meta) {
+    const dataType = (meta?.dataType || '').toLowerCase();
+    if (!dataType) return String(raw ?? '');
+    if (dataType.includes('int') || dataType.includes('decimal') || dataType.includes('numeric')
+      || dataType.includes('money') || dataType.includes('float') || dataType.includes('real')) {
+      return formatNumberByFormat(raw, meta?.formatStr);
+    }
+    return String(raw ?? '');
+  }
+
   function applyEditMode(isEdit) {
     container?.querySelectorAll('.cell-view').forEach(el => el.classList.toggle('d-none', isEdit));
     container?.querySelectorAll('.cell-edit').forEach(el => el.classList.toggle('d-none', !isEdit));
@@ -550,6 +615,7 @@
     const lookupMeta = await fetchLookupMeta(cfg.DictTable);
     const lookupMaps = await fetchLookupMaps(cfg.DictTable);
     readOnlyMap = await fetchReadOnlyMeta(cfg.DictTable);
+    const metaMap = await fetchDictMeta(cfg.DictTable);
     const lookupResultMap = new Map();
     for (const [fieldLower, cfgMeta] of lookupMeta.entries()) {
       const resultLower = (cfgMeta?.result || '').toString().toLowerCase();
@@ -691,6 +757,7 @@
         const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
         let meta = lookupMeta.get(fieldLower);
         let lookupMap = lookupMaps.get(fieldLower);
+        const fieldMeta = metaMap.get(fieldLower);
         if (!meta) {
           const alt = lookupResultMap.get(fieldLower);
           if (alt) {
@@ -699,6 +766,7 @@
           }
         }
         let display = raw;
+        let displayIsLookup = false;
         const metaKeySelf = (meta?.keySelf || '').toString().toLowerCase();
         const metaKey = (meta?.key || '').toString().toLowerCase();
         const metaResult = (meta?.result || '').toString().toLowerCase();
@@ -732,6 +800,7 @@
             display = lookupMap.get(trimmed) ?? trimmed;
             matched = true;
           }
+          displayIsLookup = matched;
           if (!matched && meta?.source === 'ocx' && !hasField) display = '';
         } else if (typeof display === 'string' && display.includes(' - ')) {
           display = display.split(' - ')[0].trim();
@@ -739,13 +808,19 @@
         if (hasMultiKey && !hasField && fieldLower !== metaKeySelf && fieldLower !== metaKey) {
           display = '';
         }
-        const v = display == null || typeof display === 'object' ? '' : String(display);
+        let v = display == null || typeof display === 'object' ? '' : String(display);
+        if (!displayIsLookup) {
+          v = formatDisplayByMeta(v, fieldMeta);
+        }
+        const inputValue = (isReadOnly || !allowLookup) ? v : raw;
+        const viewText = (v == null ? '' : String(v)).trim();
+        const editText = (inputValue == null ? '' : String(inputValue)).trim();
         const keyFieldAttr = canDropdown ? ` data-lookup-key-field="${escapeHtml(meta?.key || '')}"` : "";
         const resultFieldAttr = canDropdown ? ` data-lookup-result-field="${escapeHtml(meta?.result || '')}"` : "";
         const lookupAttr = canDropdown
           ? ` class="lookup-cell" data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
           : "";
-        html += `<td${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(v)}</span><input class="cell-edit d-none${roClass}" data-field="${escapeHtml(fn)}" data-init="${escapeHtml(raw)}" value="${escapeHtml(raw)}"${roAttr}></td>`;
+        html += `<td${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span><input class="cell-edit d-none${roClass}" data-field="${escapeHtml(fn)}" data-init="${escapeHtml(editText)}" value="${escapeHtml(editText)}"${roAttr}></td>`;
       });
       html += '</tr>';
     });
@@ -1113,7 +1188,7 @@ body.resizing { cursor: col-resize !important; }
 
 .paper3l-subdetail .erp-table td.lookup-cell .cell-view,
 .paper3l-subdetail .erp-table td.lookup-cell .cell-edit{
-  background: #fff7e0;
+  background: #FFFACD;
 }
 
 .paper3l-subdetail .erp-table td .cell-view.readonly-cell,

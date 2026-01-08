@@ -47,6 +47,25 @@
         return decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out _)
             || decimal.TryParse(s, NumberStyles.Any, CultureInfo.CurrentCulture, out _);
     }
+    static string NormalizeNumberByFormat(string? raw, string? formatStr)
+    {
+        if (string.IsNullOrWhiteSpace(raw) || string.IsNullOrWhiteSpace(formatStr)) return raw ?? "";
+        var fmt = formatStr.Trim();
+        if (!fmt.Contains("#")) return raw ?? "";
+        var t = raw.Replace(",", "").Trim();
+        if (!decimal.TryParse(t, NumberStyles.Any, CultureInfo.InvariantCulture, out var n) &&
+            !decimal.TryParse(t, NumberStyles.Any, CultureInfo.CurrentCulture, out n))
+            return raw ?? "";
+        if (fmt.StartsWith(".")) fmt = "0" + fmt;
+        return n.ToString(fmt);
+    }
+    static bool IsZeroNumberString(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        var t = s.Replace(",", "").Trim();
+        if (decimal.TryParse(t, NumberStyles.Any, CultureInfo.InvariantCulture, out var n)) return n == 0m;
+        return decimal.TryParse(t, NumberStyles.Any, CultureInfo.CurrentCulture, out n) && n == 0m;
+    }
     static string NormalizeEditColor(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return "";
@@ -375,17 +394,32 @@
                                         }
                                         var lookupCellIsNumber = IsNumberType(lookupCellType) || IsNumberValue(display);
                                         var alignRightCell = lookupCellIsNumber || (isNumberCell && string.IsNullOrEmpty(display));
+                                        if ((isNumberCell || lookupCellIsNumber) && !string.IsNullOrWhiteSpace(col.FormatStr))
+                                        {
+                                            cellValue = NormalizeNumberByFormat(cellValue, col.FormatStr);
+                                        }
+                                        if ((isNumberCell || lookupCellIsNumber) && IsZeroNumberString(cellValue))
+                                        {
+                                            cellValue = "0";
+                                        }
                                         var cellColor = NormalizeEditColor(col.EditColor);
                                         var cellStyle = !string.IsNullOrWhiteSpace(cellColor) ? $"background-color:{cellColor} !important;" : "";
-                                        <td class="detail-cell @(alignRightCell ? "detail-number" : "detail-text")" style="@cellStyle">
-                                            <span class="cell-view">@cellValue</span>
+                                        var rawText = v?.ToString() ?? "";
+                                        var isReadOnly = (col.ReadOnly ?? 0) > 0;
+                                        if (!isReadOnly && !string.IsNullOrEmpty(display) && string.IsNullOrWhiteSpace(rawText))
+                                        {
+                                            isReadOnly = true;
+                                        }
+                                        <td class="detail-cell @(alignRightCell ? "detail-number" : "detail-text")" style="@cellStyle" data-readonly="@(isReadOnly ? "1" : "0")">
+                                            <span class="cell-view @(isReadOnly ? "readonly-cell" : "")">@cellValue</span>
 
                                             <input type="text"
-                                                class="form-control form-control-sm cell-edit d-none w-100"
+                                                class="form-control form-control-sm cell-edit d-none w-100 @(isReadOnly ? "readonly-cell" : "")"
                                                 name="@inputName"
-                                                data-field="@col.FieldName"         
-                                                data-init="@cellValue"             
-                                                value="@cellValue" />
+                                                data-field="@col.FieldName"
+                                                data-init="@cellValue"
+                                                value="@cellValue"
+                                                @(isReadOnly ? "readonly data-readonly=\"1\"" : "data-readonly=\"0\"") />
                                                 
                                         </td>
 
@@ -684,15 +718,18 @@ function appendEmptyDetailRow() {
     if ((col.FieldName || '').toLowerCase() === 'item') v = String(nextItem);
 
     const inputName = `Details[${tbody.rows.length + 1}].${col.FieldName}`;
+    const isReadOnly = (col.ReadOnly || 0) > 0;
+    const roClass = isReadOnly ? ' readonly-cell' : '';
+    const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
     tdsHtml += `
-      <td>
-        <span class="cell-view">${v}</span>
+      <td data-readonly="${isReadOnly ? '1' : '0'}">
+        <span class="cell-view${roClass}">${v}</span>
         <input type="text"
-          class="form-control form-control-sm cell-edit d-none w-100"
+          class="form-control form-control-sm cell-edit d-none w-100${roClass}"
           name="${inputName}"
           data-field="${col.FieldName}"
           data-init="${v}"
-          value="${v}">
+          value="${v}"${roAttr}>
       </td>`;
   });
   tr.innerHTML = tdsHtml;
@@ -897,9 +934,15 @@ function selectRow(tr) {
   tr.classList.add('row-selected');
 }
 function makeRowEditable(tr) {
-  tr.querySelectorAll('.cell-view').forEach(el => el.classList.add('d-none'));
-  tr.querySelectorAll('.cell-edit').forEach(el => el.classList.remove('d-none'));
-  const first = tr.querySelector('.cell-edit[data-field="PartNum"]') || tr.querySelector('.cell-edit');
+  tr.querySelectorAll('.cell-view').forEach(el => {
+    if (el.classList.contains('readonly-cell')) return;
+    el.classList.add('d-none');
+  });
+  tr.querySelectorAll('.cell-edit').forEach(el => {
+    if (el.classList.contains('readonly-cell')) return;
+    el.classList.remove('d-none');
+  });
+  const first = tr.querySelector('.cell-edit[data-field="PartNum"]:not(.readonly-cell)') || tr.querySelector('.cell-edit:not(.readonly-cell)');
   first?.focus(); first?.select?.();
 }
 tbodyEl.addEventListener('click',  e => {
@@ -1008,6 +1051,21 @@ if (editBtn) {
     });
   }
 
+  function syncDetailInputsFromView() {
+    document.querySelectorAll('.erp-table tbody tr').forEach(tr => {
+      tr.querySelectorAll('td').forEach(td => {
+        const span = td.querySelector('.cell-view');
+        const inp = td.querySelector('.cell-edit');
+        if (!span || !inp) return;
+        if (inp.classList.contains('readonly-cell')) return;
+        const viewText = (span.textContent ?? '').trim();
+        if (viewText === '') return;
+        if (inp.value !== viewText) inp.value = viewText;
+        inp.dataset.init = viewText;
+      });
+    });
+  }
+
   // 瀏覽模式：下拉可展開但不可變更
   document.addEventListener('change', (e) => {
     const sel = e.target;
@@ -1058,8 +1116,15 @@ if (editBtn) {
     isEdit = !isEdit; editBtn.textContent = isEdit ? '保留' : '修改';
     applyHeaderEditState(isEdit); // ★ 不影響 modal 裡的欄位
     applyToolbarEditState(isEdit);
-    document.querySelectorAll('.erp-table .cell-view').forEach(el => el.classList.toggle('d-none', isEdit));
-    document.querySelectorAll('.erp-table .cell-edit').forEach(el => el.classList.toggle('d-none', !isEdit));
+    if (isEdit) syncDetailInputsFromView();
+    document.querySelectorAll('.erp-table .cell-view').forEach(el => {
+      if (el.classList.contains('readonly-cell')) return;
+      el.classList.toggle('d-none', isEdit);
+    });
+    document.querySelectorAll('.erp-table .cell-edit').forEach(el => {
+      if (el.classList.contains('readonly-cell')) return;
+      el.classList.toggle('d-none', !isEdit);
+    });
     document.querySelectorAll('.erp-table .cell-edit').forEach(inp => {
       inp.addEventListener('input', () => {
         const tr = inp.closest('tr'); if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
@@ -1086,16 +1151,25 @@ $(function () {
 
   function saveLayoutChanges() {
     const layout = [];
+    const headerTopPad = 6;
     const hiddenTabs = $(".tab-pane").not(".show");
     hiddenTabs.addClass("temporary-show").addClass("show").css("display", "block");
     $(".draggable-field").each(function () {
       const $li = $(this);
+      const $label = $(`.header-label-item[data-field="${$li.data("field")}"]`).first();
+      const labelPos = $label.length ? $label.position() : null;
+      const fieldTop = Math.max(0, Math.round($li.position().top) - headerTopPad);
+      const fieldLeft = Math.round($li.position().left);
+      const labTop = labelPos ? Math.max(0, Math.round(labelPos.top) - headerTopPad) : null;
+      const labLeft = labelPos ? Math.round(labelPos.left) : null;
       layout.push({
         fieldName: $li.data("field"),
-        top: Math.round($li.position().top),
-        left: Math.round($li.position().left),
+        top: fieldTop,
+        left: fieldLeft,
         width: Math.round($li.outerWidth()),
         height: Math.round($li.outerHeight()),
+        labTop: labTop,
+        labLeft: labLeft,
         ishowWhere: parseInt($li.attr("data-tab")) || 1
       });
     });
@@ -1144,19 +1218,32 @@ $(function () {
 
   function setLayoutEditEnabled(enabled) {
     const $body = $(document.body);
-    $body.toggleClass("layout-edit-enabled", !!enabled);
+    const uid = (localStorage.getItem('erpLoginUserId') || window._userId || '').toString().trim().toLowerCase();
+    const cachedAdmin = uid ? localStorage.getItem(`erpIsAdmin:${uid}`) === '1' : false;
+    const bodyAdmin = document.body?.dataset?.isAdmin === '1';
+    const canEnable = !!enabled && (window.__isAdmin === true || cachedAdmin || bodyAdmin);
+    $body.toggleClass("layout-edit-enabled", canEnable);
     $(".draggable-field").each(function () {
-      try { $(this).draggable(enabled ? "enable" : "disable"); } catch {}
-      try { $(this).resizable(enabled ? "enable" : "disable"); } catch {}
+      try { $(this).draggable(canEnable ? "enable" : "disable"); } catch {}
+      try { $(this).resizable(canEnable ? "enable" : "disable"); } catch {}
     });
   }
 
   setLayoutEditEnabled(false);
   $(document).on("keydown", function (e) {
-    if (e.key === "Shift") setLayoutEditEnabled(true);
+    if (e.key === "Shift" || e.shiftKey) {
+      window.__layoutShiftDown = true;
+      setLayoutEditEnabled(true);
+    }
   });
   $(document).on("keyup", function (e) {
-    if (e.key === "Shift") setLayoutEditEnabled(false);
+    if (e.key === "Shift" || !e.shiftKey) {
+      window.__layoutShiftDown = false;
+      setLayoutEditEnabled(false);
+    }
+  });
+  window.addEventListener('adminStateReady', () => {
+    if (window.__layoutShiftDown) setLayoutEditEnabled(true);
   });
 
   // ============================
@@ -1173,6 +1260,15 @@ $(function () {
   let dragGroupSnapshot = null; // { baseEl, baseTop, baseLeft, items:[{el, top,left}] }
 
   function $allFields() { return $(".draggable-field"); }
+  function getLabelForField($field) {
+    const fieldName = $field?.data("field");
+    if (!fieldName) return $();
+    return $(`.header-label-item[data-field="${fieldName}"]`).first();
+  }
+  function moveLabel($label, top, left) {
+    if (!$label || !$label.length) return;
+    $label.css({ position: "absolute", top: Math.max(0, top), left: Math.max(0, left) });
+  }
   function $selected() { return $allFields().filter("." + SELECTED_CLASS); }
   function isTypingTarget(e) {
     const t = e?.target;
@@ -1226,24 +1322,49 @@ $(function () {
       baseLeft: Math.round($base.position().left),
       items: $group.toArray().map(el => {
         const $el = $(el);
-        return { el, top: Math.round($el.position().top), left: Math.round($el.position().left) };
+        const $label = getLabelForField($el);
+        const labelPos = $label.length ? $label.position() : null;
+        return {
+          el,
+          top: Math.round($el.position().top),
+          left: Math.round($el.position().left),
+          labelEl: $label.get(0) || null,
+          labelTop: labelPos ? Math.round(labelPos.top) : null,
+          labelLeft: labelPos ? Math.round(labelPos.left) : null
+        };
       })
     };
   }
 
   // 讓拖曳時能夠整組一起移動（用 draggable 的 start/stop hook）
   $doc.on("dragstart", ".draggable-field", function () { /* noop */ });
-  $allFields().each(function () {
-    const $li = $(this);
-    // jQuery UI draggable 已初始化，上面已設定 stop；這裡用 option 注入 start/stop2 行為
-    $li.draggable("option", "start", function (event) {
-      if (window.__DICT_OPEN__) return;
-      ensureDragGroupSnapshot($(this));
-      $(this).hide();
-    });
-    $li.draggable("option", "stop", function (event, ui) {
-      const $item = $(this);
-      $item.show();
+    $allFields().each(function () {
+      const $li = $(this);
+      // jQuery UI draggable 已初始化，上面已設定 stop；這裡用 option 注入 start/stop2 行為
+      $li.draggable("option", "start", function (event) {
+        if (window.__DICT_OPEN__) return;
+        ensureDragGroupSnapshot($(this));
+        $(this).hide();
+      });
+      $li.draggable("option", "drag", function (event, ui) {
+        const $item = $(this);
+        if (!dragGroupSnapshot || dragGroupSnapshot.baseEl !== $item.get(0)) return;
+        const $parent = $item.parent();
+        const parentOff = $parent.offset();
+        if (!parentOff) return;
+        const newTop = Math.round(ui.offset.top - parentOff.top);
+        const newLeft = Math.round(ui.offset.left - parentOff.left);
+        const dy = newTop - dragGroupSnapshot.baseTop;
+        const dx = newLeft - dragGroupSnapshot.baseLeft;
+        dragGroupSnapshot.items.forEach(it => {
+          if (it.labelEl && it.labelTop != null && it.labelLeft != null) {
+            moveLabel($(it.labelEl), it.labelTop + dy, it.labelLeft + dx);
+          }
+        });
+      });
+      $li.draggable("option", "stop", function (event, ui) {
+        const $item = $(this);
+        $item.show();
 
       const $parent = $item.parent();
       const parentOff = $parent.offset();
@@ -1263,6 +1384,9 @@ $(function () {
             top: Math.max(0, it.top + dy),
             left: Math.max(0, it.left + dx)
           });
+          if (it.labelEl && it.labelTop != null && it.labelLeft != null) {
+            moveLabel($(it.labelEl), it.labelTop + dy, it.labelLeft + dx);
+          }
         });
         dragGroupSnapshot = null;
         debounceSave();
@@ -1270,7 +1394,15 @@ $(function () {
       }
 
       // fallback（理論上走不到）
+      const oldPos = $item.position();
+      const dy = newTop - Math.round(oldPos.top);
+      const dx = newLeft - Math.round(oldPos.left);
       $item.css({ position: "absolute", top: newTop, left: newLeft });
+      const $label = getLabelForField($item);
+      if ($label.length) {
+        const labelPos = $label.position();
+        moveLabel($label, Math.round(labelPos.top) + dy, Math.round(labelPos.left) + dx);
+      }
       dragGroupSnapshot = null;
       debounceSave();
     });
@@ -1911,7 +2043,13 @@ body { background: #f7f9fb !important; }
 /* 顯示/編輯雙層：span 顯示、input 編輯（切換 display） */
 .erp-table th{ font-size: var(--field-label-size); }
 .erp-table td{ position:relative; padding:0; font-size: var(--field-value-size); }
-.erp-table td .cell-view{ display:inline-block; width:100%; text-align:inherit; }
+.erp-table td .cell-view{
+  display:inline-block;
+  width:100%;
+  text-align:inherit;
+  padding:0 4px;
+  box-sizing:border-box;
+}
 .erp-table td.detail-number{ text-align: right; }
 .erp-table td.detail-text{ text-align: left; }
 .erp-table td .cell-edit{
@@ -1977,15 +2115,22 @@ body.with-toolbar .action-rail{
   letter-spacing: 0;
   white-space: normal;
   word-break: break-word;
-  background:#ffc107;
-  color:#090101;
-  font-weight:700;
+  background:#f8f9fb;
+  color:#1f5fbf;
+  font-weight:600;
   border-radius:10px;
   cursor:pointer;
-  box-shadow:0 6px 16px rgba(0,0,0,.2);
-  border:0;
+  box-shadow:0 2px 8px rgba(20,40,80,.12);
+  border:1px solid #cfd7e6;
 }
-.fab:hover{ filter:brightness(0.95); }
+.fab:hover{
+  background:#e9f1ff;
+  border-color:#9fbaf0;
+}
+.fab:focus-visible{
+  outline:2px solid #9fbaf0;
+  outline-offset:2px;
+}
 .fab-red{ background:#dc3545; color:#fff; }
 .fab-blue{ background:#3583dc; color:#fff; }
 .erp-detail-container{ margin-left: var(--rail-reserve); margin-right: 3vw; padding: 12px 0; }
