@@ -1,11 +1,10 @@
-// /wwwroot/js/fieldDictModal.js
-// 載入 → 排序 → 綁定 → 儲存（支援伺服端已渲染 tbody、可配置 API）
+﻿// /wwwroot/js/fieldDictModal.js
 
 (function () {
 
     window.showDictModal = async function (modalId = 'fieldDictModal', tableName = window._dictTableName) {
       const el = document.getElementById(modalId);
-      if (!el) { console.warn('找不到辭典 Modal 元件:', modalId); return; }
+      if (!el) { console.warn('?曆??啗冪??Modal ?辣:', modalId); return; }
 
       await window.initFieldDictModal(tableName, modalId);
 
@@ -13,18 +12,17 @@
       md.show();
   };
 
-  // 記錄滑鼠位置，F3 時可用來判斷就近的卡片
   window.__lastMouse = window.__lastMouse || { x: 0, y: 0 };
   document.addEventListener('mousemove', (e) => {
     window.__lastMouse.x = e.clientX;
     window.__lastMouse.y = e.clientY;
   }, { passive: true });
 
-  // 可在頁面先設：window.FIELD_DICT_GET_API / window.FIELD_DICT_SAVE_API / window.SUPPRESS_DICT_FETCH_ALERT
   const GET_API   = window.FIELD_DICT_GET_API  || '/api/TableFieldLayout/GetTableFieldsFull';
   const QUERY_KEY = window.FIELD_DICT_QUERY_KEY || 'table';
   const SAVE_API  = window.FIELD_DICT_SAVE_API || '/api/DictApi/UpdateDictFields';
   const SAVE_OCXMAPS_API = window.FIELD_DICT_SAVE_OCXMAPS_API || '/api/DictOCX/SaveOCXMapsBatch';
+  const TYPE_API  = window.FIELD_DICT_TYPE_API || '/api/TableFieldLayout/ColumnTypes';
   const QUIET     = !!window.SUPPRESS_DICT_FETCH_ALERT;
   const GRID_DEFAULTS = {
     labHeight: 22,
@@ -54,13 +52,11 @@
     };
   }
 
-  // ===== 顯示（會先 init 再 show） =====
   window.showDictModal = async function (modalId = 'fieldDictModal', tableName = window._dictTableName) {
     const el = document.getElementById(modalId);
-    if (!el) { console.warn('找不到辭典 Modal 元件:', modalId); return; }
+    if (!el) { console.warn('?曆??啗冪??Modal ?辣:', modalId); return; }
     await window.initFieldDictModal(tableName, modalId);
 
-    // 更新標題顯示當前表名
     const displayEl = document.getElementById('dictTableNameDisplay');
     if (displayEl && tableName) {
       displayEl.textContent = `- ${tableName}`;
@@ -69,12 +65,10 @@
     new bootstrap.Modal(el).show();
   };
 
-  // ===== 初始化：撈資料（若 tbody 已有資料就不覆蓋）、排序、綁定 =====
   window.initFieldDictModal = async function (tableName, modalId = 'fieldDictModal') {
     const tname = (tableName || window._dictTableName || '').trim();
     if (!tname) { return; }
 
-    // ⭐ 記錄目前正在編輯的辭典表名，給儲存時統一使用
     window._dictTableName = tname;
 
     const scope = document.getElementById(modalId) || document;
@@ -83,9 +77,8 @@
       scope.querySelector('.dictTableBody') ||
       scope.querySelector('tbody[data-role="dict"]');
 
-    if (!tbody) { console.warn('找不到辭典 tbody'); return; }
+    if (!tbody) { console.warn('?曆??啗冪??tbody'); return; }
 
-    // ▶︎ 只要欲載入的表名與目前不一致，就先清空並強制重載
     const loadedFor  = (tbody.getAttribute('data-loaded-for') || '').toLowerCase();
     const want       = tname.toLowerCase();
     const needReload = loadedFor !== want;
@@ -106,15 +99,15 @@
         if (!res.ok) {
           if (!QUIET) alert('載入辭典欄位失敗');
         } else {
-          const rows = await res.json();
-          rows.sort((a, b) => (Number(a.SerialNum ?? 9999)) - (Number(b.SerialNum ?? 9999)));
+          const 筆 = await res.json();
+          筆.sort((a, b) => (Number(a.SerialNum ?? 9999)) - (Number(b.SerialNum ?? 9999)));
 
-          tbody.innerHTML = rows.map(x => `
+          tbody.innerHTML = 筆.map(x => `
           <tr data-tablename="${x.TableName || tname}"
               data-fieldname="${x.FieldName}"
               ondblclick="window.editFieldDetail && window.editFieldDetail('${x.FieldName}')">
 
-            <!-- 第 1 欄：序號 + 隱藏欄位 -->
+            <!-- 蝚?1 甈?摨? + ?梯?甈? -->
             <td style="width:72px">
               <input data-field="SerialNum" type="number"
                     value="${x.SerialNum ?? ''}" class="form-control form-control-sm"
@@ -150,7 +143,7 @@
               </span>
             </td>
 
-            <!-- 第 2 ~ 9 欄 -->
+            <!-- 蝚?2 ~ 9 甈?-->
             <td style="min-width:180px">${x.FieldName ?? ''}</td>
 
             <td style="min-width:150px">
@@ -196,17 +189,17 @@
                     class="form-control form-control-sm" placeholder="clYellow / Yellow" />
             </td>
 
-            <!-- 第 10 欄：⚙ 設定按鈕 -->
+            <!-- 蝚?10 甈???閮剖??? -->
             <td style="width:60px" class="text-center">
               <button type="button" class="btn btn-sm btn-outline-secondary"
+                      aria-label="設定"
                       onclick="window.editFieldDetail && window.editFieldDetail('${x.FieldName}')">
-                ⚙
+                <i class="bi bi-gear"></i>
               </button>
             </td>
           </tr>
         `).join('');
 
-          // 標記目前已載入哪一張辭典表
           tbody.setAttribute('data-loaded-for', tname);
         }
       } catch (err) {
@@ -215,13 +208,11 @@
       }
     }
 
-    // 穩定排序 + 綁保存
     sortDictTbody(tbody);
     bindSaveButton(tbody);
     initDirtyTracking(tbody);
   };
 
-  // ===== Dirty tracking：只儲存有變更的列 =====
   function rowSnapshot(tr) {
     const snap = {};
     tr.querySelectorAll('input[data-field]').forEach(inp => {
@@ -236,7 +227,7 @@
   }
   function isRowDirty(tr) {
     const prev = tr.dataset.dictSnapshot;
-    if (!prev) return true; // 沒有快照就視為 dirty（避免漏存）
+    if (!prev) return true; // 瘝?敹怎撠梯???dirty嚗??摮?
     let prevObj = null;
     try { prevObj = JSON.parse(prev); } catch { return true; }
     const cur = rowSnapshot(tr);
@@ -253,6 +244,49 @@
     tr.dataset.dirty = dirty ? '1' : '0';
     tr.classList.toggle('dict-row-dirty', dirty);
   }
+  async function syncDbDataTypes(tbody, dictTableName) {
+    if (!tbody || !dictTableName) return { updated: 0 };
+    try {
+      const cacheKey = String(dictTableName || '').toLowerCase();
+      window._dictColumnTypesCache = window._dictColumnTypesCache || {};
+      let cols = window._dictColumnTypesCache[cacheKey];
+      if (!Array.isArray(cols) || cols.length === 0) {
+        const u = new URL(TYPE_API, window.location.origin);
+        u.searchParams.set('table', dictTableName);
+        const res = await fetch(u.toString());
+        if (!res.ok) return { updated: 0 };
+        const payload = await res.json().catch(() => ({}));
+        cols = Array.isArray(payload?.columns) ? payload.columns : [];
+        window._dictColumnTypesCache[cacheKey] = cols;
+      }
+      const typeMap = new Map();
+      cols.forEach(c => {
+        const name = (c.ColumnName || c.columnName || c.name || '').toString().trim();
+        const type = (c.DataType || c.dataType || '').toString().trim();
+        if (name) typeMap.set(name.toLowerCase(), type);
+      });
+      if (!typeMap.size) return { updated: 0 };
+
+      let updated = 0;
+      tbody.querySelectorAll('tr').forEach(tr => {
+        const field = (tr.getAttribute('data-fieldname') || '').toString().trim().toLowerCase();
+        if (!field) return;
+        const dbType = typeMap.get(field);
+        if (!dbType) return;
+        const inp = tr.querySelector('input[data-field="DataType"]');
+        if (!inp) return;
+        const cur = (inp.value || '').toString().trim();
+        if (cur) return;
+        inp.value = dbType;
+        updated += 1;
+        syncRowDirtyUi(tr);
+      });
+      return { updated };
+    } catch (err) {
+      console.warn('[fieldDictModal] syncDbDataTypes failed:', err);
+      return { updated: 0 };
+    }
+  }
   function initDirtyTracking(tbody) {
     if (!tbody) return;
 
@@ -260,7 +294,6 @@
     if (!alreadyBound) {
       tbody.dataset.dirtyBound = '1';
 
-      // 監聽變更：只標記當列 dirty，不掃全表
       tbody.addEventListener('input', (e) => {
         const tr = e.target?.closest?.('tr');
         if (!tr) return;
@@ -273,7 +306,6 @@
       });
     }
 
-    // 每次 init 都重建快照（支援切換不同 dict table 時 tbody 會被清空重建）
     tbody.querySelectorAll('tr').forEach(tr => {
       setRowSnapshot(tr);
       syncRowDirtyUi(tr);
@@ -283,11 +315,11 @@
   window.applyGridLayoutByRowCol = function (tableSelector = '#fieldDictTable tbody') {
     const tbody = document.querySelector(tableSelector);
     if (!tbody) {
-      alert('找不到辭典 tbody');
+      alert('找不到辭典表格內容');
       return;
     }
+    if (!confirm('將全部欄位套用格線位置設定，是否繼續？')) return;
 
-    if (!confirm('將依列/欄批次重排欄位位置，是否繼續？')) return;
 
     const rows = Array.from(tbody.querySelectorAll('tr'));
     let applied = 0;
@@ -309,14 +341,13 @@
     });
 
     if (applied === 0) {
-      alert('沒有可套用的列/欄設定');
+      alert('沒有可套用的版面設定');
       return;
     }
-    alert(`已套用 ${applied} 筆欄位位置`);
+    alert('已套用 ' + applied + ' 筆');
   };
 
-  // ===== 排序（SerialNum → FieldName） =====
-  function sortDictTbody(tbody) {
+      function sortDictTbody(tbody) {
     if (!tbody) return;
     const rows = Array.from(tbody.querySelectorAll('tr'));
     rows.sort((a, b) => {
@@ -333,194 +364,174 @@
     rows.forEach(tr => tbody.appendChild(tr));
   }
 
-  // ===== 儲存（完整版本：含欄位位置 + 搜尋設定 + 備註等） =====
-  function saveAllDictFields(tableSelector = '#fieldDictTable tbody', apiUrl = SAVE_API) {
-    document.body.style.cursor = 'wait';
-
-    const tbody = document.querySelector(tableSelector);
-    if (!tbody) {
-      document.body.style.cursor = 'default';
-      alert('找不到辭典 tbody');
-      return;
-    }
-
-    // ⭐ 這裡統一決定「要存到哪一個辭典 TableName」
-    const dictTableName =
-      tbody.getAttribute('data-loaded-for') ||
-      tbody.dataset.dictTable ||
-      window._dictTableName ||
-      '';
-
-    if (!dictTableName) {
-      document.body.style.cursor = 'default';
-      alert('找不到要儲存的辭典表名');
-      return;
-    }
-
-    const allRows = Array.from(tbody.querySelectorAll('tr'));
-    const dirtyRows = allRows.filter(tr => tr.dataset.dirty === '1' || isRowDirty(tr));
-    console.log('[fieldDictModal] save changed rows:', dirtyRows.length, '/', allRows.length, 'table:', dictTableName);
-
-    if (dirtyRows.length === 0) {
-      document.body.style.cursor = 'default';
-      alert('沒有任何欄位變更，不需要儲存。');
-      return;
-    }
-
-    const data = dirtyRows.map(tr => {
+  function buildOcxMapsPayload(dirtyRows, dictTableName) {
+    const list = [];
+    dirtyRows.forEach(tr => {
       const getVal = name => tr.querySelector(`input[data-field="${name}"]`)?.value ?? '';
-      const getInt = name => {
-        const v = getVal(name);
-        return v === '' ? null : parseInt(v, 10);
-      };
-      const getChk = name => {
-        const box = tr.querySelector(`input[type="checkbox"][data-field="${name}"]`);
-        if (box) return box.checked ? 1 : 0;
-        const raw = tr.querySelector(`input[data-field="${name}"]`)?.value ?? '';
-        return raw === '' ? 0 : (parseInt(raw, 10) ? 1 : 0);
-      };
-      const prev = (() => {
-        const raw = tr.dataset.dictSnapshot;
-        if (!raw) return null;
-        try { return JSON.parse(raw); } catch { return null; }
-      })();
-      const sameVal = (name, cur) => String(cur ?? '') === String(prev?.[name] ?? '');
-      const getChangedInt = name => {
-        const v = getVal(name);
-        if (sameVal(name, v)) return null;
-        return v === '' ? null : parseInt(v, 10);
-      };
-
-      return {
-        // === 基本欄位 ===
-        TableName: dictTableName,  // ⭐ 一律用目前的辭典表名
-        FieldName: tr.getAttribute('data-fieldname') || '',
-
-        SerialNum: getInt('SerialNum'),
-        DisplayLabel: getVal('DisplayLabel'),
-        Visible: getChk('Visible'),
-        ReadOnly: getChk('ReadOnly'),
-        DataType: getVal('DataType'),
-        FormatStr: getVal('FormatStr'),
-        FieldNote: getVal('FieldNote'),
-        EditColor: getVal('EditColor'),
-
-        // === 版面欄位 ===
-        DisplaySize: getChangedInt('DisplaySize'),
-        iLayRow: getChangedInt('iLayRow'),
-        iLayColumn: getChangedInt('iLayColumn'),
-        iLabHeight: getChangedInt('iLabHeight'),
-        iLabTop: getChangedInt('iLabTop'),
-        iLabLeft: getChangedInt('iLabLeft'),
-        iLabWidth: getChangedInt('iLabWidth'),
-        iFieldHeight: getChangedInt('iFieldHeight'),
-        iFieldTop: getChangedInt('iFieldTop'),
-        iFieldLeft: getChangedInt('iFieldLeft'),
-        iFieldWidth: getChangedInt('iFieldWidth'),
-        iShowWhere: getChangedInt('iShowWhere'),
-
-        // === 查詢設定 ===
-        LookupTable: getVal('LookupTable'),
-        LookupKeyField: getVal('LookupKeyField'),
-        LookupResultField: getVal('LookupResultField'),
-
-        // === 其他欄位 ===
-        IsNotesField: getVal('IsNotesField'),
-        ComboStyle: getChk('ComboStyle'),
-
-        // === OCX Lookup（非實體顯示欄位）===
-        OCXLKTableName: getVal('OCXLKTableName'),
-        OCXLKResultName: getVal('OCXLKResultName')
-      };
-    });
-
-    function buildOcxMapsPayload() {
-      const list = [];
-      dirtyRows.forEach(tr => {
-        const getVal = name => tr.querySelector(`input[data-field="${name}"]`)?.value ?? '';
-        const enc = getVal('KeyMapsJson');
-        let maps = [];
-        try {
-          const raw = decodeURIComponent(enc || '');
-          maps = raw ? (JSON.parse(raw) || []) : [];
-        } catch { maps = []; }
-        if (!Array.isArray(maps)) maps = [];
-
-        list.push({
-          TableName: dictTableName,
-          FieldName: tr.getAttribute('data-fieldname') || '',
-          Maps: maps
-            .map(m => ({
-              KeyFieldName: (m?.KeyFieldName ?? m?.keyFieldName ?? '').toString().trim(),
-              KeySelfName: (m?.KeySelfName ?? m?.keySelfName ?? '').toString().trim()
-            }))
-            .filter(m => m.KeyFieldName || m.KeySelfName)
-        });
-      });
-      return list;
-    }
-
-    (async () => {
+      const enc = getVal('KeyMapsJson');
+      let maps = [];
       try {
-        // 1) 儲存 CURdTableField（含 OCX 表名/顯示欄位）
-        const res = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
-        });
-        const result = await res.json().catch(() => ({}));
-        if (!result?.success) {
-          document.body.style.cursor = 'default';
-          alert(result?.message || '儲存失敗！');
-          return;
-        }
+        const raw = decodeURIComponent(enc || '');
+        maps = raw ? (JSON.parse(raw) || []) : [];
+      } catch { maps = []; }
+      if (!Array.isArray(maps)) maps = [];
 
-        // 2) 儲存 CURdOCXTableFieldLK（多組 Key 對應）
-        const ocxPayload = buildOcxMapsPayload();
-        const res2 = await fetch(SAVE_OCXMAPS_API, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(ocxPayload)
-        });
-        const result2 = await res2.json().catch(() => ({}));
-        if (!result2?.success) {
-          document.body.style.cursor = 'default';
-          alert(result2?.message || 'OCX Key 對應儲存失敗！');
-          return;
-        }
-
-        document.body.style.cursor = 'default';
-
-        // 更新快照：僅更新已儲存的列，避免未改動列被誤判 dirty
-        dirtyRows.forEach(tr => {
-          setRowSnapshot(tr);
-          syncRowDirtyUi(tr);
-        });
-
-        alert(`儲存成功！已更新 ${dirtyRows.length} 筆欄位設定。`);
-        window.dispatchEvent(new Event('field-dict-saved'));
-        setTimeout(() => location.reload(), 300);
-      } catch (err) {
-        document.body.style.cursor = 'default';
-        alert('API 失敗: ' + err);
-      }
-    })();
+      list.push({
+        TableName: dictTableName,
+        FieldName: tr.getAttribute('data-fieldname') || '',
+        Maps: maps
+          .map(m => ({
+            KeyFieldName: (m?.KeyFieldName ?? m?.keyFieldName ?? '').toString().trim(),
+            KeySelfName: (m?.KeySelfName ?? m?.keySelfName ?? '').toString().trim()
+          }))
+          .filter(m => m.KeyFieldName || m.KeySelfName)
+      });
+    });
+    return list;
   }
 
-  // 讓外面 onclick="saveAllDictFields('#xxx .dictTableBody')" 可直接用
+  async function saveAllDictFields(tableSelector = "#fieldDictTable tbody", apiUrl = SAVE_API) {
+    if (saveAllDictFields.__busy) return;
+    saveAllDictFields.__busy = true;
+    document.body.style.cursor = "wait";
+
+    try {
+      const tbody = document.querySelector(tableSelector);
+      if (!tbody) {
+        alert("找不到辭典表格內容");
+        return;
+      }
+
+      const dictTableName =
+        tbody.getAttribute("data-loaded-for") ||
+        tbody.dataset.dictTable ||
+        window._dictTableName ||
+        "";
+
+      if (!dictTableName) {
+        alert("找不到辭典表名");
+        return;
+      }
+
+      await syncDbDataTypes(tbody, dictTableName);
+
+      const allRows = Array.from(tbody.querySelectorAll("tr"));
+      const dirtyRows = allRows.filter(tr => tr.dataset.dirty === "1" || isRowDirty(tr));
+      console.log("[fieldDictModal] save changed rows:", dirtyRows.length, "/", allRows.length, "table:", dictTableName);
+
+      if (dirtyRows.length === 0) {
+        alert("沒有要儲存的變更");
+        return;
+      }
+
+      const data = dirtyRows.map(tr => {
+        const getVal = name => tr.querySelector(`input[data-field="${name}"]`)?.value ?? "";
+        const getInt = name => {
+          const v = getVal(name);
+          return v === "" ? null : parseInt(v, 10);
+        };
+        const getChk = name => {
+          const box = tr.querySelector(`input[type="checkbox"][data-field="${name}"]`);
+          if (box) return box.checked ? 1 : 0;
+          const raw = tr.querySelector(`input[data-field="${name}"]`)?.value ?? "";
+          return raw === "" ? 0 : (parseInt(raw, 10) ? 1 : 0);
+        };
+        const prev = (() => {
+          const raw = tr.dataset.dictSnapshot;
+          if (!raw) return null;
+          try { return JSON.parse(raw); } catch { return null; }
+        })();
+        const sameVal = (name, cur) => String(cur ?? "") === String(prev?.[name] ?? "");
+        const getChangedInt = name => {
+          const v = getVal(name);
+          if (sameVal(name, v)) return null;
+          return v === "" ? null : parseInt(v, 10);
+        };
+
+        return {
+          TableName: dictTableName,
+          FieldName: tr.getAttribute("data-fieldname") || "",
+          SerialNum: getInt("SerialNum"),
+          DisplayLabel: getVal("DisplayLabel"),
+          Visible: getChk("Visible"),
+          ReadOnly: getChk("ReadOnly"),
+          DataType: getVal("DataType"),
+          FormatStr: getVal("FormatStr"),
+          FieldNote: getVal("FieldNote"),
+          EditColor: getVal("EditColor"),
+          DisplaySize: getChangedInt("DisplaySize"),
+          iLayRow: getChangedInt("iLayRow"),
+          iLayColumn: getChangedInt("iLayColumn"),
+          iLabHeight: getChangedInt("iLabHeight"),
+          iLabTop: getChangedInt("iLabTop"),
+          iLabLeft: getChangedInt("iLabLeft"),
+          iLabWidth: getChangedInt("iLabWidth"),
+          iFieldHeight: getChangedInt("iFieldHeight"),
+          iFieldTop: getChangedInt("iFieldTop"),
+          iFieldLeft: getChangedInt("iFieldLeft"),
+          iFieldWidth: getChangedInt("iFieldWidth"),
+          iShowWhere: getChangedInt("iShowWhere"),
+          LookupTable: getVal("LookupTable"),
+          LookupKeyField: getVal("LookupKeyField"),
+          LookupResultField: getVal("LookupResultField"),
+          IsNotesField: getVal("IsNotesField"),
+          ComboStyle: getChk("ComboStyle"),
+          OCXLKTableName: getVal("OCXLKTableName"),
+          OCXLKResultName: getVal("OCXLKResultName")
+        };
+      });
+
+      const ocxPayload = buildOcxMapsPayload(dirtyRows, dictTableName);
+
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!result?.success) {
+        alert(result?.message || "儲存失敗");
+        return;
+      }
+
+      const res2 = await fetch(SAVE_OCXMAPS_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ocxPayload)
+      });
+      const result2 = await res2.json().catch(() => ({}));
+      if (!result2?.success) {
+        alert(result2?.message || "OCX Key 儲存失敗");
+        return;
+      }
+
+      dirtyRows.forEach(tr => {
+        setRowSnapshot(tr);
+        syncRowDirtyUi(tr);
+      });
+
+      alert("儲存完成，已更新 " + dirtyRows.length + " 筆。");
+      window.dispatchEvent(new Event("field-dict-saved"));
+      setTimeout(() => location.reload(), 300);
+    } catch (err) {
+      alert("API 失敗：" + err);
+    } finally {
+      document.body.style.cursor = "default";
+      saveAllDictFields.__busy = false;
+    }
+  }
+
   window.saveAllDictFields = saveAllDictFields;
 
-  // ===== 綁「全部儲存」按鈕（若有固定 id） =====
   function bindSaveButton(tbody) {
     const btn = document.getElementById('btnDictSaveAll');
     if (!btn) return;
-    btn.onclick = () => {
+    btn.onclick = async () => {
       sortDictTbody(tbody);
-      saveAllDictFields('#fieldDictTable tbody', SAVE_API);
+      await saveAllDictFields('#fieldDictTable tbody', SAVE_API);
     };
   }
 
-  // 頁面載入就把現有 DOM 做一次排序（如果有的話）
   document.addEventListener('DOMContentLoaded', () => {
     const tbody =
       document.querySelector('#fieldDictTable tbody') ||
@@ -529,7 +540,6 @@
     if (tbody) sortDictTbody(tbody);
   });
 
-  // ===== 全域 F3 快捷鍵（自動找 modalId） =====
   (function bindGlobalF3Once() {
     if (window.__fieldDictF3Bound) return;
     window.__fieldDictF3Bound = true;
@@ -549,9 +559,8 @@
       e.preventDefault();
 
       const modalId = resolveModalId();
-      if (!modalId) { console.warn('找不到辭典 Modal 元件'); return; }
+      if (!modalId) { console.warn('?曆??啗冪??Modal ?辣'); return; }
 
-      // ✅ 優先使用：目前焦點 → 滑鼠底下 → ctx-current → 其他 fallback
       const focusEl = document.activeElement?.closest?.('[data-dict-table]');
       const pt      = window.__lastMouse || { x: 0, y: 0 };
       const hoverEl = document.elementFromPoint?.(pt.x, pt.y)?.closest?.('[data-dict-table]');
@@ -573,7 +582,6 @@
 
   })();
 
-  // ===== 全域情境橋接：不管點/聚焦/滑鼠，隨時更新目前表 =====
   if (!window.__dictCtxBound) {
     window.__dictCtxBound = true;
 
@@ -584,7 +592,6 @@
       window._dictTableName = el.dataset?.dictTable || window._dictTableName || '';
     };
 
-    // 任何點擊 / 聚焦到含 data-dict-table 的元素，都切情境
     document.addEventListener('pointerdown', (ev) => {
       const host = ev.target?.closest?.('[data-dict-table]');
       if (host) setCtxEl(host);
@@ -595,7 +602,6 @@
       if (host) setCtxEl(host);
     });
 
-    // 記錄滑鼠座標給 F3 使用
     document.addEventListener('mousemove', (e) => {
       window.__lastMouse = { x: e.clientX, y: e.clientY };
     }, { passive: true });
@@ -603,23 +609,20 @@
 
   document.addEventListener('hidden.bs.modal', e => {
     if (e.target.id === 'fieldDictModal') {
-      // 移除 backdrop
+      // 蝘駁 backdrop
       document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
       document.body.classList.remove('modal-open');
       document.body.style.overflow = '';
 
-      // ✅ 強制隱藏 overlay，不論 busy 狀態
       const overlay = document.getElementById('loadingOverlay');
       if (overlay) {
         overlay.classList.remove('show');
         overlay.style.display = 'none';
       }
-      // 移除 body 鎖定
       document.body.removeAttribute('aria-busy');
     }
   });
 
-    // ===== 欄位詳細設定：打開 modal 編輯隱藏欄位 =====
   (function setupFieldDetailModal() {
 
       const modalEl = document.getElementById('fieldDetailModal');
@@ -628,7 +631,6 @@
       const titleSpan = modalEl.querySelector('#fieldDetailTitle');
       const applyBtn = modalEl.querySelector('#btnFieldDetailApply');
 
-      // 需同步的欄位（含 OCX）
       const DETAIL_FIELDS = [
           'DisplaySize',
           'iShowWhere',
@@ -638,7 +640,6 @@
           'LookupTable', 'LookupKeyField', 'LookupResultField',
           'IsNotesField',
 
-          // ★ 第二層 OCX 設定
           'OCXLKTableName',
           'OCXLKResultName'
       ];
@@ -672,14 +673,14 @@
 
       function renderKeyMapGrid(maps) {
           if (!keyMapBody) return;
-          const rows = normalizeKeyMaps(maps);
-          const show = rows.length ? rows : [{ KeyFieldName: '', KeySelfName: '' }];
+          const 筆 = normalizeKeyMaps(maps);
+          const show = 筆.length ? 筆 : [{ KeyFieldName: '', KeySelfName: '' }];
           keyMapBody.innerHTML = show.map(m => `
               <tr>
                 <td><input type="text" class="form-control form-control-sm fdm-keyfield" value="${m.KeyFieldName ?? ''}"></td>
                 <td><input type="text" class="form-control form-control-sm fdm-keyself" value="${m.KeySelfName ?? ''}"></td>
                 <td class="text-center">
-                  <button type="button" class="btn btn-outline-danger btn-sm fdm-del-keymap" title="刪除">－</button>
+                  <button type="button" class="btn btn-outline-danger btn-sm fdm-del-keymap" title="?芷">嚗?/button>
                 </td>
               </tr>
           `).join('');
@@ -688,11 +689,11 @@
       function readKeyMapGrid(includeEmpty = false) {
           if (!keyMapBody) return [];
           const trs = Array.from(keyMapBody.querySelectorAll('tr'));
-          const rows = trs.map(tr => ({
+          const 筆 = trs.map(tr => ({
               KeyFieldName: (tr.querySelector('input.fdm-keyfield')?.value ?? '').toString().trim(),
               KeySelfName: (tr.querySelector('input.fdm-keyself')?.value ?? '').toString().trim()
           }));
-          return includeEmpty ? rows : rows.filter(m => m.KeyFieldName || m.KeySelfName);
+          return includeEmpty ? 筆 : 筆.filter(m => m.KeyFieldName || m.KeySelfName);
       }
 
       if (addKeyBtn && !addKeyBtn.dataset.bound) {
@@ -728,27 +729,23 @@
           colInp?.addEventListener('input', onGridChange);
       }
 
-      // ==================== 打開欄位設定 ====================
       window.editFieldDetail = function (fieldName) {
 
           const safeName = (window.CSS && CSS.escape)
               ? CSS.escape(fieldName)
               : fieldName.replace(/(["\\])/g, "\\$1");
 
-          // 找 TR
           const tr = document.querySelector(`.dictTableBody tr[data-fieldname="${safeName}"]`);
           if (!tr) {
-              alert("找不到欄位列：" + fieldName);
+              alert('找不到欄位： ' + fieldName);
               return;
           }
 
           currentTr = tr;
 
-          // 標題：欄位名稱 (顯示名稱)
           const displayLabel = tr.querySelector('input[data-field="DisplayLabel"]')?.value ?? '';
-          titleSpan.textContent = fieldName + (displayLabel ? `（${displayLabel}）` : '');
+          titleSpan.textContent = fieldName + (displayLabel ? ' (' + displayLabel + ')' : '');
 
-          // TR → Modal
           DETAIL_FIELDS.forEach(name => {
 
               const rowInput = tr.querySelector(`input[data-field="${name}"]`);
@@ -770,7 +767,6 @@
           gridAppliedRow = initRow;
           gridAppliedCol = initCol;
 
-          // KeyMapsJson (encoded) → Grid
           try {
               const enc = tr.querySelector('input[data-field="KeyMapsJson"]')?.value ?? '';
               const raw = decodeURIComponent(enc || '');
@@ -778,7 +774,6 @@
               if (Array.isArray(maps) && maps.length) {
                   renderKeyMapGrid(maps);
               } else {
-                  // fallback：用舊的單筆欄位
                   const kf = tr.querySelector('input[data-field="KeyFieldName"]')?.value ?? '';
                   const ks = tr.querySelector('input[data-field="KeySelfName"]')?.value ?? '';
                   renderKeyMapGrid([{ KeyFieldName: kf, KeySelfName: ks }]);
@@ -792,7 +787,7 @@
           bootstrap.Modal.getOrCreateInstance(modalEl).show();
       };
 
-      // ==================== 套用 ====================
+      // ==================== 憟 ====================
       if (applyBtn) {
           applyBtn.addEventListener("click", () => {
 
@@ -807,7 +802,6 @@
                   gridAppliedCol = curCol;
               }
 
-              // Modal → TR
               DETAIL_FIELDS.forEach(name => {
 
                   const rowInput = currentTr.querySelector(`input[data-field="${name}"]`);
@@ -822,7 +816,6 @@
                   }
               });
 
-              // Grid → TR（KeyMapsJson + 同步第一筆到舊欄位）
               const maps = readKeyMapGrid(false);
               const kmInp = currentTr.querySelector('input[data-field="KeyMapsJson"]');
               if (kmInp) kmInp.value = encodeURIComponent(JSON.stringify(maps));
@@ -841,3 +834,10 @@
 
 
 })();
+
+
+
+
+
+
+
