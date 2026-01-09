@@ -26,6 +26,39 @@ public class TableFieldLayoutController : ControllerBase
         return new DbInfo(csb.DataSource ?? "", csb.InitialCatalog ?? "");
     }
 
+    private static string CleanTableName(string s)
+    {
+        return (s ?? "")
+            .Trim()
+            .Trim('[', ']')
+            .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static (string Schema, string Name) SplitSchemaName(string tableName)
+    {
+        var raw = (tableName ?? "").Trim().Trim('[', ']');
+        if (string.IsNullOrWhiteSpace(raw)) return ("dbo", "");
+        var parts = raw.Split('.', 2, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 2)
+            return (parts[0].Trim('[', ']'), parts[1].Trim('[', ']'));
+        return ("dbo", raw);
+    }
+
+    private async Task<string?> ResolveRealTableNameAsync(string dictTableName)
+    {
+        const string sql = @"
+SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
+  FROM CURdTableName WITH (NOLOCK)
+ WHERE TableName = @tbl";
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@tbl", dictTableName ?? string.Empty);
+        var result = await cmd.ExecuteScalarAsync();
+        return result == null || result == DBNull.Value ? null : result.ToString();
+    }
+
     // =========================================
     // 儲存 Header Layout
     // =========================================
@@ -415,6 +448,47 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         }
 
         return Ok(list);
+    }
+
+    // =========================================
+    // 讀取資料表/檢視表欄位型態
+    // =========================================
+    [HttpGet("ColumnTypes")]
+    public async Task<IActionResult> GetColumnTypes([FromQuery] string table)
+    {
+        if (string.IsNullOrWhiteSpace(table))
+            return BadRequest("table is required.");
+
+        var dictName = CleanTableName(table);
+        var realName = await ResolveRealTableNameAsync(dictName) ?? dictName;
+        var (schema, name) = SplitSchemaName(realName);
+
+        if (string.IsNullOrWhiteSpace(name))
+            return Ok(new { table = dictName, actualTable = realName, schema, columns = Array.Empty<object>() });
+
+        const string sql = @"
+SELECT COLUMN_NAME, DATA_TYPE
+  FROM INFORMATION_SCHEMA.COLUMNS
+ WHERE TABLE_SCHEMA = @SCHEMA
+   AND TABLE_NAME = @TNAME";
+
+        var list = new List<object>();
+        await using var cn = new SqlConnection(_connStr);
+        await cn.OpenAsync();
+        await using var cmd = new SqlCommand(sql, cn);
+        cmd.Parameters.AddWithValue("@SCHEMA", schema);
+        cmd.Parameters.AddWithValue("@TNAME", name);
+        using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            list.Add(new
+            {
+                ColumnName = rd["COLUMN_NAME"]?.ToString() ?? "",
+                DataType = rd["DATA_TYPE"]?.ToString() ?? ""
+            });
+        }
+
+        return Ok(new { table = dictName, actualTable = realName, schema, columns = list });
     }
 
     // =========================================
