@@ -124,6 +124,772 @@
     @await Html.PartialAsync(actionLogicPartial, (object)Model)
 }
 
+<script>
+(() => {
+  const withJwtHeaders = (init = {}) => {
+    const jwt = localStorage.getItem('jwtId');
+    const headers = Object.assign({}, init.headers || {});
+    if (jwt) headers['X-JWTID'] = jwt;
+    return { ...init, headers };
+  };
+
+  const escapeHtml = (v) => String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  const readHeaderValue = (fieldName) => {
+    const target = (fieldName || '').toLowerCase();
+    if (!target) return '';
+    const fields = document.querySelectorAll('form.erp-header-form input[name], form.erp-header-form textarea[name], form.erp-header-form select[name]');
+    for (const el of fields) {
+      const name = (el.getAttribute('name') || '').toLowerCase();
+      if (name === target) return (el.value ?? '').toString().trim();
+    }
+    return '';
+  };
+
+  const readPaperNum = () => {
+    const v = (window._paperNum || '').toString().trim();
+    if (v) return v;
+    return readHeaderValue('PaperNum');
+  };
+
+  const readFinishedStatus = () => {
+    const raw = readHeaderValue('Finished');
+    if (raw) {
+      const n = parseInt(raw, 10);
+      return Number.isFinite(n) ? n : null;
+    }
+    const fallback = window._finishedStatus;
+    if (fallback == null) return null;
+    const n = parseInt(String(fallback), 10);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const pickFieldCI = (row, keys) => {
+    if (!row) return '';
+    const rowKeys = Object.keys(row);
+    for (const k of keys) {
+      const found = rowKeys.find(rk => rk.toLowerCase() === String(k).toLowerCase());
+      if (found) {
+        const v = row[found];
+        if (v != null) return String(v).trim();
+      }
+    }
+    return '';
+  };
+
+  const hasFieldCI = (row, field) => {
+    if (!row || !field) return false;
+    const key = String(field).toLowerCase();
+    return Object.keys(row).some(k => k.toLowerCase() === key);
+  };
+
+  const readSelectedDetailRow = () => {
+    const activeTable = document.querySelector('.multi-tab-detail .tab-pane.show.active .erp-table');
+    const table = activeTable || document.querySelector('.erp-table');
+    if (!table) return null;
+    let row = table.querySelector('tbody tr.row-selected');
+    if (!row) {
+      row = table.querySelector('tbody tr');
+      if (row) {
+        table.querySelectorAll('tbody tr.row-selected').forEach(tr => tr.classList.remove('row-selected'));
+        row.classList.add('row-selected');
+      }
+    }
+    if (!row) return null;
+    const obj = {};
+    row.querySelectorAll('input.cell-edit[data-field]').forEach(inp => {
+      const f = inp.dataset.field || '';
+      if (!f) return;
+      obj[f] = inp.type === 'checkbox' ? (inp.checked ? '1' : '0') : (inp.value ?? '');
+    });
+    if (row.dataset.paperNum && obj.PaperNum === undefined) obj.PaperNum = row.dataset.paperNum;
+    if (row.dataset.item && obj.Item === undefined) obj.Item = row.dataset.item;
+    return obj;
+  };
+
+  const getActiveDetailDictTable = () => {
+    const activeContainer = document.querySelector('.multi-tab-detail .tab-pane.show.active .table-container');
+    const dict = activeContainer?.dataset?.dictTable;
+    if (dict) return dict;
+    const wrapper = document.querySelector('.erp-table-wrapper');
+    return wrapper?.dataset?.dictTable || '';
+  };
+
+  const fetchDetailRowFull = async (paperNum, item) => {
+    const table = getActiveDetailDictTable();
+    if (!table || !paperNum || item == null) return null;
+    const qs = new URLSearchParams({
+      table,
+      paperNum: String(paperNum)
+    });
+    const resp = await fetch(`/api/DynamicTable/ByPaperNum?${qs.toString()}`, withJwtHeaders());
+    if (!resp.ok) return null;
+    const rows = await resp.json();
+    if (!Array.isArray(rows)) return null;
+    const targetItem = String(item).trim();
+    return rows.find(r => String(pickFieldCI(r, ['Item']) ?? '').trim() === targetItem) || null;
+  };
+
+  const linkTraceState = {
+    modalEl: null,
+    fromTable: null,
+    toTable: null,
+    fromDict: null,
+    toDict: null,
+    baseParams: null,
+    fromRows: [],
+    toRows: [],
+    selectedFromIdx: -1,
+    selectedToIdx: -1
+  };
+
+  const updateLogState = {
+    modalEl: null,
+    masterTable: null,
+    historyTable: null,
+    diffEl: null,
+    masterDict: null,
+    historyDict: null,
+    masterRows: [],
+    historyRows: [],
+    selectedMasterIdx: -1
+  };
+
+  const ensureLinkTraceModal = () => {
+    if (linkTraceState.modalEl) return linkTraceState.modalEl;
+    let modalEl = document.getElementById('linkTraceModal');
+    if (!modalEl) {
+      modalEl = document.createElement('div');
+      modalEl.className = 'modal fade';
+      modalEl.id = 'linkTraceModal';
+      modalEl.tabIndex = -1;
+      modalEl.setAttribute('aria-hidden', 'true');
+      modalEl.innerHTML = `
+        <div class="modal-dialog modal-xl link-trace-dialog">
+          <div class="modal-content link-trace-modal">
+            <div class="modal-header">
+              <h5 class="modal-title">單據追蹤</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary lt-refresh">重取</button>
+                <button type="button" class="btn btn-sm btn-outline-primary lt-open">開啟</button>
+              </div>
+              <div class="lt-grid">
+                <div class="lt-pane">
+                  <div class="lt-title">
+                    <span>來源單據</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary lt-dict" data-dict-table="CURdOCXLinkPaperGetByDtl">欄位說明</button>
+                  </div>
+                  <div class="table-responsive lt-scroll">
+                    <table class="table table-sm table-bordered mb-0 lt-from">
+                      <thead></thead>
+                      <tbody></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div class="lt-pane">
+                  <div class="lt-title">
+                    <span>去向單據</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary lt-dict" data-dict-table="CURdOCXLinkPaperGetFromTo">欄位說明</button>
+                  </div>
+                  <div class="table-responsive lt-scroll">
+                    <table class="table table-sm table-bordered mb-0 lt-to">
+                      <thead></thead>
+                      <tbody></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <style>
+          #linkTraceModal .link-trace-dialog { --bs-modal-width: 1200px; max-width: 1200px; width: 1200px; }
+          #linkTraceModal .link-trace-modal { max-width: 1200px; width: 1200px; }
+          #linkTraceModal .link-trace-modal { height: calc(86vh); display: flex; flex-direction: column; }
+          #linkTraceModal .modal-body { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+          #linkTraceModal .lt-grid { display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; min-height: 0; }
+          #linkTraceModal .lt-pane { display: flex; flex-direction: column; min-height: 0; flex: 1 1 0; }
+          #linkTraceModal .lt-title { font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+          #linkTraceModal .lt-scroll { flex: 1 1 auto; min-height: 0; border: 1px solid #dee2e6; border-radius: 6px; overflow: auto; }
+          #linkTraceModal table { font-size: var(--field-value-size); }
+          #linkTraceModal tbody tr.lt-row-selected td { background: #fff3cd !important; }
+        </style>`;
+      document.body.appendChild(modalEl);
+    }
+
+    linkTraceState.modalEl = modalEl;
+    linkTraceState.fromTable = modalEl.querySelector('.lt-from');
+    linkTraceState.toTable = modalEl.querySelector('.lt-to');
+
+    const refreshBtn = modalEl.querySelector('.lt-refresh');
+    if (refreshBtn && !refreshBtn.__ltBound) {
+      refreshBtn.__ltBound = true;
+      refreshBtn.addEventListener('click', async () => {
+        if (!linkTraceState.baseParams) return;
+        await loadLinkFrom(linkTraceState.baseParams);
+      });
+    }
+
+    const openBtn = modalEl.querySelector('.lt-open');
+    if (openBtn && !openBtn.__ltBound) {
+      openBtn.__ltBound = true;
+      openBtn.addEventListener('click', () => {
+        const row = linkTraceState.toRows[linkTraceState.selectedToIdx] || null;
+        if (!row) {
+          Swal.fire({ icon: 'info', title: '請先選取去向單據' });
+          return;
+        }
+        openLinkedPaper(row);
+      });
+    }
+
+    const dictButtons = modalEl.querySelectorAll('.lt-dict');
+    if (dictButtons.length && !modalEl.__ltDictBound) {
+      modalEl.__ltDictBound = true;
+      dictButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const tableName = btn.dataset.dictTable || '';
+          openFieldDictModal(tableName);
+        });
+      });
+    }
+
+    return modalEl;
+  };
+
+  const openFieldDictModal = (tableName) => {
+    const modalEl = document.getElementById('fieldDictModal');
+    if (!modalEl || !tableName) return;
+    const nameEl = modalEl.querySelector('#dictTableNameDisplay');
+    if (nameEl) nameEl.textContent = tableName ? `- ${tableName}` : '';
+    if (typeof window.initFieldDictModal === 'function') {
+      window.initFieldDictModal(tableName, 'fieldDictModal');
+    } else if (typeof window.loadFieldDict === 'function') {
+      window.loadFieldDict(tableName);
+    }
+    if (window.bootstrap) {
+      const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+      modal.show();
+      modalEl.style.zIndex = '2000';
+      const backdrops = document.querySelectorAll('.modal-backdrop');
+      backdrops.forEach(b => { b.style.zIndex = '1990'; });
+      const linkTraceEl = document.getElementById('linkTraceModal');
+      if (linkTraceEl) linkTraceEl.style.zIndex = '1050';
+    }
+  };
+
+  const ensureUpdateLogModal = () => {
+    if (updateLogState.modalEl) return updateLogState.modalEl;
+    let modalEl = document.getElementById('updateLogModal');
+    if (!modalEl) {
+      modalEl = document.createElement('div');
+      modalEl.className = 'modal fade';
+      modalEl.id = 'updateLogModal';
+      modalEl.tabIndex = -1;
+      modalEl.setAttribute('aria-hidden', 'true');
+      modalEl.innerHTML = `
+        <div class="modal-dialog modal-xl update-log-dialog">
+          <div class="modal-content update-log-modal">
+            <div class="modal-header">
+              <h5 class="modal-title">修改紀錄</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary ul-refresh">重取</button>
+              </div>
+              <div class="ul-grid">
+                <div class="ul-pane">
+                  <div class="ul-title">
+                    <span>歷史</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary ul-dict" data-dict-table="CURdTableUpdateLogHis">欄位說明</button>
+                  </div>
+                  <div class="table-responsive ul-scroll">
+                    <table class="table table-sm table-bordered mb-0 ul-history">
+                      <thead></thead>
+                      <tbody></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div class="ul-pane">
+                  <div class="ul-title">
+                    <span>明細</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary ul-dict" data-dict-table="CURdTableUpdateLog">欄位說明</button>
+                  </div>
+                  <div class="table-responsive ul-scroll ul-master-wrap">
+                    <table class="table table-sm table-bordered mb-0 ul-master">
+                      <thead></thead>
+                      <tbody></tbody>
+                    </table>
+                  </div>
+                  <textarea class="form-control ul-diff" rows="6" readonly></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <style>
+          #updateLogModal .update-log-dialog { --bs-modal-width: 1200px; max-width: 1200px; width: 1200px; }
+          #updateLogModal .update-log-modal { max-width: 1200px; width: 1200px; }
+          #updateLogModal .update-log-modal { height: calc(86vh); display: flex; flex-direction: column; }
+          #updateLogModal .modal-body { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+          #updateLogModal .ul-grid { display: grid; grid-template-rows: 1fr 1fr; gap: 10px; flex: 1 1 auto; min-height: 0; }
+          #updateLogModal .ul-pane { display: flex; flex-direction: column; min-height: 0; }
+          #updateLogModal .ul-title { font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+          #updateLogModal .ul-scroll { flex: 1 1 auto; min-height: 0; border: 1px solid #dee2e6; border-radius: 6px; overflow: auto; }
+          #updateLogModal .ul-master-wrap { margin-bottom: 8px; }
+          #updateLogModal table { font-size: var(--field-value-size); }
+          #updateLogModal tbody tr.ul-row-selected td { background: #fff3cd !important; }
+          #updateLogModal .ul-diff { font-size: var(--field-value-size); }
+        </style>`;
+      document.body.appendChild(modalEl);
+    }
+
+    updateLogState.modalEl = modalEl;
+    updateLogState.masterTable = modalEl.querySelector('.ul-master');
+    updateLogState.historyTable = modalEl.querySelector('.ul-history');
+    updateLogState.diffEl = modalEl.querySelector('.ul-diff');
+
+    const refreshBtn = modalEl.querySelector('.ul-refresh');
+    if (refreshBtn && !refreshBtn.__ulBound) {
+      refreshBtn.__ulBound = true;
+      refreshBtn.addEventListener('click', async () => {
+        try {
+          await loadUpdateLog();
+        } catch (err) {
+          Swal.fire({ icon: 'error', title: '載入失敗', text: err?.message || String(err) });
+        }
+      });
+    }
+
+    const dictButtons = modalEl.querySelectorAll('.ul-dict');
+    if (dictButtons.length && !modalEl.__ulDictBound) {
+      modalEl.__ulDictBound = true;
+      dictButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const tableName = btn.dataset.dictTable || '';
+          openFieldDictModal(tableName);
+        });
+      });
+    }
+
+    return modalEl;
+  };
+
+  const buildLogTable = (tableEl, rows, dict, onRowClick) => {
+    const thead = tableEl.querySelector('thead');
+    const tbody = tableEl.querySelector('tbody');
+    thead.innerHTML = '';
+    tbody.innerHTML = '';
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td class="text-muted small">（無資料）</td></tr>';
+      return;
+    }
+    const fallbackCols = Object.keys(list[0] || {});
+    const cols = (Array.isArray(dict) && dict.length)
+      ? dict
+      : fallbackCols.map(k => ({ FieldName: k, DisplayLabel: k, DataType: '', FormatStr: '' }));
+    thead.innerHTML = `<tr>${cols.map(c => `<th class="text-nowrap">${escapeHtml(c.DisplayLabel ?? c.FieldName)}</th>`).join('')}</tr>`;
+    list.forEach((row, idx) => {
+      const tr = document.createElement('tr');
+      tr.dataset.idx = String(idx);
+      cols.forEach(c => {
+        const field = c.FieldName || '';
+        const td = document.createElement('td');
+        td.className = 'text-nowrap';
+        td.textContent = formatLinkCellValue(row[field], c);
+        tr.appendChild(td);
+      });
+      if (onRowClick) tr.addEventListener('click', () => onRowClick(idx, tr));
+      tbody.appendChild(tr);
+    });
+  };
+
+  const selectLogRow = (tableEl, idx) => {
+    const tbody = tableEl.querySelector('tbody');
+    if (!tbody) return;
+    tbody.querySelectorAll('tr').forEach(tr => tr.classList.remove('ul-row-selected'));
+    const tr = tbody.querySelector(`tr[data-idx="${idx}"]`);
+    if (tr) tr.classList.add('ul-row-selected');
+  };
+
+  const updateDiffView = (row) => {
+    const diff = pickFieldCI(row, ['Difference']);
+    if (updateLogState.diffEl) updateLogState.diffEl.value = diff || '';
+  };
+
+  const loadUpdateLog = async () => {
+    const paperNum = readPaperNum();
+    if (!paperNum) {
+      Swal.fire({ icon: 'error', title: '沒有主檔資料' });
+      return;
+    }
+    const itemId = (window._itemId || window._singleItemId || '').toString().trim();
+    const headerTable = (window._headerTableName || window._tableName || '').toString().trim();
+    if (!itemId && !headerTable) {
+      Swal.fire({ icon: 'error', title: '找不到單據類別' });
+      return;
+    }
+    const paperId = itemId || headerTable;
+    const buildQs = (paperId) => new URLSearchParams({
+      paperId,
+      paperNum,
+      userId: ''
+    }).toString();
+
+    if (!updateLogState.masterDict) {
+      updateLogState.masterDict = await loadLinkDict('CURdTableUpdateLog');
+    }
+    if (!updateLogState.historyDict) {
+      updateLogState.historyDict = await loadLinkDict('CURdTableUpdateLogHis');
+    }
+
+    const [masterResp, historyResp] = await Promise.all([
+      fetch(`/api/UpdateLog/Master?${buildQs(paperId)}`, withJwtHeaders()),
+      fetch(`/api/UpdateLog/History?${buildQs(paperId)}`, withJwtHeaders())
+    ]);
+
+    if (!masterResp.ok || !historyResp.ok) {
+      const msg = !masterResp.ok
+        ? `HTTP ${masterResp.status}`
+        : `HTTP ${historyResp.status}`;
+      throw new Error(msg);
+    }
+
+    const masterData = await masterResp.json();
+    const historyData = await historyResp.json();
+
+    if (masterData?.ok === false || historyData?.ok === false) {
+      const msg = masterData?.error || historyData?.error || '載入失敗';
+      throw new Error(msg);
+    }
+    updateLogState.masterRows = Array.isArray(masterData?.rows) ? masterData.rows : [];
+    updateLogState.historyRows = Array.isArray(historyData?.rows) ? historyData.rows : [];
+
+
+    buildLogTable(updateLogState.historyTable, updateLogState.historyRows, updateLogState.historyDict);
+    buildLogTable(updateLogState.masterTable, updateLogState.masterRows, updateLogState.masterDict, (idx) => {
+      updateLogState.selectedMasterIdx = idx;
+      selectLogRow(updateLogState.masterTable, idx);
+      updateDiffView(updateLogState.masterRows[idx] || null);
+    });
+
+    if (updateLogState.masterRows.length) {
+      updateLogState.selectedMasterIdx = 0;
+      selectLogRow(updateLogState.masterTable, 0);
+      updateDiffView(updateLogState.masterRows[0]);
+    } else {
+      updateLogState.selectedMasterIdx = -1;
+      updateDiffView(null);
+    }
+  };
+
+  const openUpdateLog = async () => {
+    const modalEl = ensureUpdateLogModal();
+    try {
+      await loadUpdateLog();
+    } catch (err) {
+      Swal.fire({ icon: 'error', title: '載入失敗', text: err?.message || String(err) });
+      return;
+    }
+
+    if (window.bootstrap) {
+      const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+      modal.show();
+    }
+  };
+
+  const parseDateValue = (value) => {
+    if (!value) return null;
+    if (value instanceof Date && !isNaN(value)) return value;
+    const s = String(value).trim();
+    if (!s) return null;
+    const m = s.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+    if (m) {
+      const y = Number(m[1]);
+      const mo = Number(m[2]) - 1;
+      const d = Number(m[3]);
+      const hh = Number(m[4] || 0);
+      const nn = Number(m[5] || 0);
+      const ss = Number(m[6] || 0);
+      return new Date(y, mo, d, hh, nn, ss);
+    }
+    const dt = new Date(s);
+    return isNaN(dt) ? null : dt;
+  };
+
+  const formatDateByMask = (value, mask) => {
+    const dt = parseDateValue(value);
+    if (!dt) return value == null ? '' : String(value);
+    const fmt = (mask || '').toLowerCase();
+    const y = String(dt.getFullYear());
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const d = String(dt.getDate()).padStart(2, '0');
+    const hh = String(dt.getHours()).padStart(2, '0');
+    const nn = String(dt.getMinutes()).padStart(2, '0');
+    const ss = String(dt.getSeconds()).padStart(2, '0');
+    if (!fmt) return `${y}/${m}/${d}`;
+    return fmt
+      .replace(/yyyy/g, y)
+      .replace(/mm/g, m)
+      .replace(/dd/g, d)
+      .replace(/hh/g, hh)
+      .replace(/nn/g, nn)
+      .replace(/ss/g, ss);
+  };
+
+  const formatLinkCellValue = (raw, col) => {
+    if (raw == null) return '';
+    const text = String(raw);
+    if (!text) return '';
+    const dt = (col?.DataType || '').toString().toLowerCase();
+    const fmt = (col?.FormatStr || '').toString();
+    if (dt.includes('date') || (col?.FieldName || '').toString().toLowerCase().includes('date')) {
+      return formatDateByMask(text, fmt);
+    }
+    return text;
+  };
+
+  const buildLinkTable = (tableEl, rows, dict, onRowClick) => {
+    const thead = tableEl.querySelector('thead');
+    const tbody = tableEl.querySelector('tbody');
+    thead.innerHTML = '';
+    tbody.innerHTML = '';
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td class="text-muted small">（無資料）</td></tr>';
+      return;
+    }
+    const fallbackCols = Object.keys(list[0] || {});
+    const cols = (Array.isArray(dict) && dict.length)
+      ? dict
+      : fallbackCols.map(k => ({ FieldName: k, DisplayLabel: k, DataType: '', FormatStr: '' }));
+    thead.innerHTML = `<tr>${cols.map(c => `<th class="text-nowrap">${escapeHtml(c.DisplayLabel ?? c.FieldName)}</th>`).join('')}</tr>`;
+    list.forEach((row, idx) => {
+      const tr = document.createElement('tr');
+      tr.dataset.idx = String(idx);
+      cols.forEach(c => {
+        const field = c.FieldName || '';
+        const td = document.createElement('td');
+        td.className = 'text-nowrap';
+        td.textContent = formatLinkCellValue(row[field], c);
+        tr.appendChild(td);
+      });
+      tr.addEventListener('click', () => onRowClick(idx, tr));
+      tbody.appendChild(tr);
+    });
+  };
+
+  const selectLinkRow = (tableEl, idx) => {
+    const tbody = tableEl.querySelector('tbody');
+    if (!tbody) return;
+    tbody.querySelectorAll('tr').forEach(tr => tr.classList.remove('lt-row-selected'));
+    const tr = tbody.querySelector(`tr[data-idx="${idx}"]`);
+    if (tr) tr.classList.add('lt-row-selected');
+  };
+
+  const fetchLinkRows = async (url, params) => {
+    const qs = new URLSearchParams();
+    Object.entries(params || {}).forEach(([k, v]) => {
+      if (v == null || v === '') return;
+      qs.append(k, String(v));
+    });
+    const resp = await fetch(`${url}?${qs.toString()}`, withJwtHeaders());
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || '載入失敗');
+    return data.rows || [];
+  };
+
+  const loadLinkDict = async (tableName) => {
+    if (!tableName) return [];
+    try {
+      const res = await fetch(`/api/TableFieldLayout/DictFields?table=${encodeURIComponent(tableName)}&lang=TW`, withJwtHeaders());
+      if (!res.ok) return [];
+      const rows = await res.json();
+      if (!Array.isArray(rows)) return [];
+      return rows
+        .filter(x => (x.Visible ?? x.visible) === 1 || (x.Visible ?? x.visible) === true)
+        .sort((a, b) => (a.SerialNum ?? a.serialNum ?? 9999) - (b.SerialNum ?? b.serialNum ?? 9999))
+        .map(x => ({
+          FieldName: x.FieldName ?? x.fieldName,
+          DisplayLabel: x.DisplayLabel ?? x.displayLabel ?? x.FieldName ?? x.fieldName,
+          DataType: x.DataType ?? x.dataType ?? '',
+          FormatStr: x.FormatStr ?? x.formatStr ?? ''
+        }))
+        .filter(x => x.FieldName);
+    } catch {
+      return [];
+    }
+  };
+
+  const loadLinkTo = async (fromRow) => {
+    const nowPaperId = pickFieldCI(fromRow, ['PaperId']) || linkTraceState.baseParams?.nowPaperId || '';
+    const nowPaperNum = pickFieldCI(fromRow, ['PaperNum']) || linkTraceState.baseParams?.nowPaperNum || '';
+    const nowItem = pickFieldCI(fromRow, ['Item']) || linkTraceState.baseParams?.nowItem || '';
+    const sourPaperId = pickFieldCI(fromRow, ['SourPaperId']) || linkTraceState.baseParams?.sourPaperId || '';
+    const sourNum = pickFieldCI(fromRow, ['SourNum']) || linkTraceState.baseParams?.sourNum || '';
+    const sourItem = pickFieldCI(fromRow, ['SourItem']) || '';
+
+    linkTraceState.toRows = await fetchLinkRows('/api/LinkPaper/To', {
+      nowPaperId,
+      nowPaperNum,
+      nowItem,
+      sourPaperId,
+      sourNum,
+      sourItem
+    });
+    linkTraceState.selectedToIdx = -1;
+    buildLinkTable(linkTraceState.toTable, linkTraceState.toRows, linkTraceState.toDict, (idx, tr) => {
+      linkTraceState.selectedToIdx = idx;
+      selectLinkRow(linkTraceState.toTable, idx);
+    });
+    if (linkTraceState.toRows.length > 0) {
+      linkTraceState.selectedToIdx = 0;
+      selectLinkRow(linkTraceState.toTable, 0);
+    }
+  };
+
+  const loadLinkFrom = async (params) => {
+    linkTraceState.fromRows = await fetchLinkRows('/api/LinkPaper/From', params);
+    linkTraceState.selectedFromIdx = -1;
+    buildLinkTable(linkTraceState.fromTable, linkTraceState.fromRows, linkTraceState.fromDict, async (idx, tr) => {
+      linkTraceState.selectedFromIdx = idx;
+      selectLinkRow(linkTraceState.fromTable, idx);
+      try {
+        await loadLinkTo(linkTraceState.fromRows[idx]);
+      } catch (err) {
+        Swal.fire({ icon: 'error', title: '載入失敗', text: err?.message || String(err) });
+      }
+    });
+    if (linkTraceState.fromRows.length > 0) {
+      linkTraceState.selectedFromIdx = 0;
+      selectLinkRow(linkTraceState.fromTable, 0);
+      await loadLinkTo(linkTraceState.fromRows[0]);
+    } else {
+      linkTraceState.toRows = [];
+      buildLinkTable(linkTraceState.toTable, [], linkTraceState.toDict, () => {});
+    }
+  };
+
+  const openLinkedPaper = (row) => {
+    const itemId = pickFieldCI(row, ['ItemId', 'ItemID']);
+    const paperNum = pickFieldCI(row, ['PaperNum']);
+    if (!itemId || !paperNum) {
+      Swal.fire({ icon: 'error', title: '無法開啟單據', text: '缺少 ItemId 或 PaperNum' });
+      return;
+    }
+    const url = `/DynamicTemplate/Paper/${encodeURIComponent(itemId)}/${encodeURIComponent(paperNum)}`;
+    const win = window.open(url, '_blank');
+    if (win) {
+      try { win.opener = null; } catch {}
+    } else {
+      Swal.fire({ icon: 'warning', title: '瀏覽器阻擋新分頁', text: '請允許彈出視窗後再試一次。' });
+    }
+  };
+
+  const linkPaperTrace = async () => {
+    const paperNum = readPaperNum();
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const finished = readFinishedStatus();
+    if (finished === 2) return Swal.fire({ icon: 'warning', title: '此單據已作廢,不可追蹤' });
+
+    let row = readSelectedDetailRow();
+    if (!row) return Swal.fire({ icon: 'info', title: '請先選取一筆明細' });
+
+    let sourPaperId = pickFieldCI(row, ['SourPaperId', 'SourcePaperId', 'SourPaperID', 'SourcePaperID']);
+    let sourNum = pickFieldCI(row, ['SourNum', 'SourceNum', 'SourNUM', 'SourceNUM']);
+    const nowItem = pickFieldCI(row, ['Item']);
+    if (!nowItem) return Swal.fire({ icon: 'warning', title: '您點選的明細檔沒有「Item」欄位' });
+
+    const hasSourPaperId = hasFieldCI(row, 'SourPaperId') || hasFieldCI(row, 'SourcePaperId');
+    const hasSourNum = hasFieldCI(row, 'SourNum') || hasFieldCI(row, 'SourceNum');
+    if (!hasSourPaperId || !hasSourNum) {
+      const fullRow = await fetchDetailRowFull(paperNum, nowItem);
+      if (fullRow) {
+        row = fullRow;
+        sourPaperId = pickFieldCI(fullRow, ['SourPaperId', 'SourcePaperId', 'SourPaperID', 'SourcePaperID']);
+        sourNum = pickFieldCI(fullRow, ['SourNum', 'SourceNum', 'SourNUM', 'SourceNUM']);
+      }
+    }
+
+    const hasSourPaperIdAfter = hasFieldCI(row, 'SourPaperId') || hasFieldCI(row, 'SourcePaperId');
+    const hasSourNumAfter = hasFieldCI(row, 'SourNum') || hasFieldCI(row, 'SourceNum');
+    if (!hasSourPaperIdAfter) return Swal.fire({ icon: 'warning', title: '您點選的明細檔沒有「SourPaperId」欄位' });
+    if (!hasSourNumAfter) return Swal.fire({ icon: 'warning', title: '您點選的明細檔沒有「SourNum」欄位' });
+    const nowPaperId = (window._headerTableName || '').toString().trim();
+    if (!nowPaperId) return Swal.fire({ icon: 'warning', title: '沒有單別' });
+
+    if (!sourPaperId || !String(sourPaperId).trim()) {
+      sourPaperId = nowPaperId;
+    }
+    if (!sourNum || !String(sourNum).trim()) {
+      sourNum = paperNum;
+    }
+
+    const modalEl = ensureLinkTraceModal();
+    linkTraceState.baseParams = {
+      nowPaperId,
+      nowPaperNum: paperNum,
+      nowItem,
+      sourPaperId,
+      sourNum
+    };
+
+    try {
+      if (!linkTraceState.fromDict) {
+        linkTraceState.fromDict = await loadLinkDict('CURdOCXLinkPaperGetByDtl');
+      }
+      if (!linkTraceState.toDict) {
+        linkTraceState.toDict = await loadLinkDict('CURdOCXLinkPaperGetFromTo');
+      }
+      await loadLinkFrom(linkTraceState.baseParams);
+    } catch (err) {
+      Swal.fire({ icon: 'error', title: '載入失敗', text: err?.message || String(err) });
+      return;
+    }
+
+    if (window.bootstrap) {
+      const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+      modal.show();
+    }
+  };
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('btnPaperTrace');
+    if (btn) {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        linkPaperTrace();
+      });
+    }
+
+    const logBtn = document.getElementById('btnPaperLog');
+    if (logBtn) {
+      logBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openUpdateLog();
+      });
+    }
+  });
+})();
+</script>
+
 <!-- 單頭可編輯表單 -->
 <form id="orderHeaderForm" class="erp-header-form" data-dict-table="@headerTableName">
     <div class="row">
@@ -795,7 +1561,7 @@ if (editBtn) {
       el.classList.toggle('disabled', !editing);
     });
 
-    const viewOnlyIds = ['btnSubSearch', 'btnSwitch', 'btnSubAddNew', 'btnPrint', 'btnCancel', 'btnPrev', 'btnNext'];
+    const viewOnlyIds = ['btnSubSearch', 'btnSwitch', 'btnSubAddNew', 'btnPrint', 'btnPaperTrace', 'btnPaperLog', 'btnCancel', 'btnPrev', 'btnNext'];
     viewOnlyIds.forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -1547,7 +2313,19 @@ function updateToolbarCounts() {
     if (total > 0 && navIndex >= 0) {
       headerCountEl.textContent = `${navIndex + 1}/${total}`;
     } else {
-      headerCountEl.textContent = '--/--';
+      const tn = (PAGE.headerTable || '').toString().trim().toLowerCase();
+      let storedTotal = 0;
+      let storedIndex = 0;
+      try {
+        storedTotal = parseInt(localStorage.getItem(`orderListQueryTotal:${tn}`) || '0', 10);
+        storedIndex = parseInt(localStorage.getItem(`orderListQueryIndex:${tn}`) || '0', 10);
+      } catch {}
+      if (storedTotal > 0) {
+        const idxText = storedIndex > 0 ? String(storedIndex) : '--';
+        headerCountEl.textContent = `${idxText}/${storedTotal}`;
+      } else {
+        headerCountEl.textContent = '--/--';
+      }
     }
   }
   if (detailCountEl) {
