@@ -99,13 +99,36 @@
             el.disabled = true;
         });
 
+        // 執行 Inherited
+        const executeInherited = async (hookName, context) => {
+            const itemId = window._itemId || window._singleItemId || '';
+            if (!itemId) return { ok: true };
+
+            const hooks = window.InheritedActionHooks || {};
+            const hookFn = hooks[itemId]?.[hookName] || hooks[hookName];
+
+            if (typeof hookFn === 'function') {
+                try {
+                    const result = await hookFn(context);
+                    if (result === false) {
+                        return { ok: false, reason: 'hook-canceled' };
+                    }
+                    return { ok: true, data: result };
+                } catch (err) {
+                    console.error(`[Inherited] ${hookName} 執行失敗:`, err);
+                    return { ok: false, reason: 'hook-error', error: err };
+                }
+            }
+
+            return { ok: true };
+        };
+
         const btnConfirm = document.getElementById('btnConfirm');
         if (btnConfirm) {
             btnConfirm.addEventListener('click', async function () {
                 // 自動抓取正確的 tableName (從 HeaderTableName)
                 const tableName = window._headerTableName || window._tableName;
                 const paperNum = window.selectedPaperNum;
-                //const paperNum = document.querySelector('[name="PaperNum"]')?.value || window._paperNum;
                 const userId = window._userId || 'admin';  // TODO: 換成實際登入者
 
                 if (!tableName) {
@@ -127,7 +150,17 @@
                 });
                 if (!result.isConfirmed) return;
 
-                // 你可以讓 EOC/AtFinished 後端預設，也可以在這邊選
+                // Hook: beforeConfirm
+                const beforeHook = await executeInherited('beforeConfirm', { tableName, paperNum, userId });
+                if (!beforeHook.ok) {
+                    if (beforeHook.reason === 'hook-canceled') return;
+                    if (beforeHook.reason === 'hook-error') {
+                        Swal.fire({ icon: 'error', title: 'Hook 執行失敗', text: beforeHook.error?.message || String(beforeHook.error) });
+                        return;
+                    }
+                }
+
+                // DoAction: 確認
                 const resp = await fetcher('/api/PaperAction/DoAction', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -141,8 +174,12 @@
                 }, '確認中…');
                 if (resp.ok) {
                     const data = await resp.json();
+
+                    // Hook: afterConfirm
+                    await executeInherited('afterConfirm', { tableName, paperNum, userId, result: data });
+
                     Swal.fire({ icon: 'success', title: data.message || '確認成功' });
-                    location.reload(); // 確認成功後重新載入頁面
+                    location.reload();
                 } else {
                     const msg = await resp.text();
                     Swal.fire({ icon: 'error', title: msg || '確認失敗' });
@@ -178,7 +215,17 @@
                 });
                 if (!result.isConfirmed) return;
 
-                // 退審：將單據狀態改為審核中
+                // Hook: beforeCancel
+                const beforeHook = await executeInherited('beforeCancel', { tableName, paperNum, userId });
+                if (!beforeHook.ok) {
+                    if (beforeHook.reason === 'hook-canceled') return;
+                    if (beforeHook.reason === 'hook-error') {
+                        Swal.fire({ icon: 'error', title: 'Hook 執行失敗', text: beforeHook.error?.message || String(beforeHook.error) });
+                        return;
+                    }
+                }
+
+                // DoAction: 退審
                 const resp = await fetcher('/api/PaperAction/DoAction', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -192,8 +239,12 @@
                 }, '退審中…');
                 if (resp.ok) {
                     const data = await resp.json();
+
+                    // Hook: afterCancel
+                    await executeInherited('afterCancel', { tableName, paperNum, userId, result: data });
+
                     Swal.fire({ icon: 'success', title: data.message || '退審成功' });
-                    location.reload(); // 退審成功後重新載入頁面
+                    location.reload();
                 } else {
                     const msg = await resp.text();
                     Swal.fire({ icon: 'error', title: msg || '退審失敗' });
