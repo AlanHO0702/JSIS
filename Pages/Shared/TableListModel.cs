@@ -111,7 +111,8 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // æ³
                     FormatStr = x.FormatStr,
                     LookupResultField = x.LookupResultField,
                     ReadOnly = x.ReadOnly,
-                    DisplaySize = x.DisplaySize
+                    DisplaySize = x.DisplaySize,
+                    EditColor = x.EditColor
                 };
             }).ToList();
         ViewData["Fields"] = TableFields;

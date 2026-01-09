@@ -58,6 +58,11 @@ public class DictApiController : ControllerBase
                     setList.Add("FieldNote = @FieldNote");
                     cmd.Parameters.AddWithValue("@FieldNote", input.FieldNote);
                 }
+                if (input.EditColor != null)
+                {
+                    setList.Add("EditColor = @EditColor");
+                    cmd.Parameters.AddWithValue("@EditColor", input.EditColor ?? "");
+                }
                 if (input.SerialNum != null)
                 {
                     setList.Add("SerialNum = @SerialNum");
@@ -103,6 +108,8 @@ public class DictApiController : ControllerBase
                 }
 
                 AddInt("DisplaySize", input.DisplaySize);
+                AddInt("iLayRow", input.iLayRow);
+                AddInt("iLayColumn", input.iLayColumn);
                 AddInt("iLabHeight", input.iLabHeight);
                 AddInt("iLabTop", input.iLabTop);
                 AddInt("iLabLeft", input.iLabLeft);

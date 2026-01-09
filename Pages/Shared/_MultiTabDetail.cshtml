@@ -61,6 +61,7 @@
     const paperNum = '@paperNum';
     const allowEdit = @(allowEdit ? "true" : "false");
     const loadedTabs = new Set();
+    const loadingTabs = new Set();
     const fieldDicts = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(tabFieldDicts));
     const tabsData = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(tabs));
     window._multiTabTabs = tabsData;
@@ -298,9 +299,10 @@
         const dot = s.lastIndexOf('.');
         if (dot < 0) return null;
         const tail = s.slice(dot + 1);
-        const m = tail.match(/0+/);
-        if (!m) return Math.min(6, tail.length);
-        return Math.min(8, m[0].length);
+        const min = (tail.match(/0/g) || []).length;
+        const max = min + (tail.match(/#/g) || []).length;
+        if (max === 0) return null;
+        return { min, max };
     }
 
     function formatCellValue(raw, meta, lookupMap, row, lookupMeta, allowLookup, lookupKeyOverride) {
@@ -341,7 +343,12 @@
             const n = Number(String(raw).replace(/,/g, ''));
             if (!Number.isFinite(n)) return s;
             const decimals = parseDecimalsFromFormat(meta?.formatStr);
-            if (decimals != null) return n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+            if (decimals != null) {
+                return n.toLocaleString(undefined, {
+                    minimumFractionDigits: decimals.min,
+                    maximumFractionDigits: decimals.max
+                });
+            }
             return n.toLocaleString();
         }
 
@@ -652,14 +659,15 @@
                 window._dictTableName = container.dataset.dictTable;
             }
 
-            // 如果已經載入過,直接顯示
-            if (loadedTabs.has(tabId)) {
+            // 如果已經載入過或正在載入,直接返回
+            if (loadedTabs.has(tabId) || loadingTabs.has(tabId)) {
                 return;
             }
 
             // 顯示載入中
             const loading = contentPane.querySelector('.loading-indicator');
             loading.style.display = 'block';
+            loadingTabs.add(tabId);
 
             // 清除舊的表格（保留按鈕）
             const existingTable = container.querySelector('.erp-table-wrapper');
@@ -698,6 +706,7 @@
                 container.insertAdjacentHTML('beforeend', `<div class="alert alert-danger">載入失敗: ${error.message}</div>`);
             } finally {
                 loading.style.display = 'none';
+                loadingTabs.delete(tabId);
             }
         });
     });
@@ -833,6 +842,9 @@
                     const rawStr = rawValue == null ? '' : String(rawValue);
                     const canLookup = allowLookup && !canDropdown && !keySourceMissing && (rawStr !== '' || !keyIsEmpty);
                     const value = formatCellValue(rawValue, meta, lookupMap, row, metaLookup, canLookup, lookupKeyOverride);
+                    const inputValue = (isReadOnly || !allowLookup) ? value : rawValue;
+                    const viewText = (value == null ? '' : String(value)).trim();
+                    const editText = (inputValue == null ? '' : String(inputValue)).trim();
                   // ? 雙元素：顯示模式 + 編輯模式
                     const keyFieldAttr = canDropdown ? ` data-lookup-key-field="${escapeHtml(metaLookup?.key || '')}"` : "";
                     const resultFieldAttr = canDropdown ? ` data-lookup-result-field="${escapeHtml(metaLookup?.result || '')}"` : "";
@@ -841,12 +853,12 @@
                         : "";
                     const tdReadOnlyAttr = ` data-readonly="${isReadOnly ? '1' : '0'}"`;
                     html += `<td${lookupAttr}${tdReadOnlyAttr}>
-                        <span class="${viewClass}${roClass}" data-init-view="${escapeHtml(value)}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(value)}</span>
+                        <span class="${viewClass}${roClass}" data-init-view="${escapeHtml(viewText)}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span>
                         <input type="text"
                                class="${editClass}${roClass}"
                                data-field="${field}"
-                               data-init="${escapeHtml(rawValue)}"
-                               value="${escapeHtml(rawValue)}"${roAttr}>
+                               data-init="${escapeHtml(editText)}"
+                               value="${escapeHtml(editText)}"${roAttr}>
                     </td>`;
             });
             html += '</tr>';
@@ -1048,13 +1060,14 @@
             return;
         }
 
-        if (loadedTabs.has(tabId)) {
+        if (loadedTabs.has(tabId) || loadingTabs.has(tabId)) {
             return;
         }
 
         const loading = contentPane.querySelector('.loading-indicator');
         const container = contentPane.querySelector('.table-container');
         loading.style.display = 'block';
+        loadingTabs.add(tabId);
 
         // 清除舊的表格（保留按鈕）
         const existingTable = container.querySelector('.erp-table-wrapper');
@@ -1102,7 +1115,7 @@
                 </div>`);
         } finally {
             loading.style.display = 'none';
-    
+            loadingTabs.delete(tabId);
         }
     }
 
@@ -1234,7 +1247,7 @@
     text-align: center;
     font-weight: 500;
     border-right: 1px solid #dde4ed;
-    height: 34px;
+    height: auto;
 }
 
 .multi-tab-detail .erp-table th:last-child,
@@ -1283,9 +1296,9 @@ body.resizing { cursor: col-resize !important; }
 .multi-tab-detail .erp-table td .cell-view {
     display: block;  /* ← 改用 block，讓它填滿整個 td */
     width: 100%;
-    min-height: 34px;  /* ← 最小高度確保一致 */
+    min-height: 22px;  /* ← 最小高度確保一致 */
     text-align: inherit;
-    padding: 7px 12px;
+    padding: 2px 6px;
     box-sizing: border-box;
     white-space: nowrap;
     line-height: 20px;  /* ← 固定行高 */
@@ -1299,7 +1312,7 @@ body.resizing { cursor: col-resize !important; }
 .multi-tab-detail .erp-table .cell-edit {
     display: block;  /* ← 改用 block，與 .cell-view 一致 */
     width: 100% !important;
-    min-height: 34px;  /* ← 與 .cell-view 相同的最小高度 */
+    min-height: 22px;  /* ← 與 .cell-view 相同的最小高度 */
     box-sizing: border-box;
     margin: 0;
     border: none;
@@ -1310,7 +1323,7 @@ body.resizing { cursor: col-resize !important; }
     font-family: inherit !important;
     line-height: 20px !important;  /* ← 與 .cell-view 相同的行高 */
     text-align: inherit !important;
-    padding: 7px 12px;  /* ← 與 .cell-view 完全相同的 padding */
+    padding: 2px 6px;  /* ← 與 .cell-view 完全相同的 padding */
     white-space: nowrap;
 }
 
@@ -1322,7 +1335,7 @@ body.resizing { cursor: col-resize !important; }
 
 .multi-tab-detail .erp-table td.lookup-cell .cell-view,
 .multi-tab-detail .erp-table td.lookup-cell .cell-edit {
-    background: #fff7e0 !important;
+    background: #FFFACD !important;
 }
 
 .multi-tab-detail .erp-table td .cell-view.readonly-cell,

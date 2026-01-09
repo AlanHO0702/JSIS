@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Text.Json;
 
 public static class FormatHelper
@@ -33,13 +34,20 @@ public static class FormatHelper
                 {
                     return dt.ToString(formatStr.Replace("nn", "mm"));
                 }
-                if (DateTime.TryParse(rawValue.ToString(), out var parsedDt))
+                var rawText = rawValue.ToString() ?? "";
+                if (!string.IsNullOrWhiteSpace(rawText))
                 {
-                    return parsedDt.ToString(formatStr.Replace("nn", "mm"));
+                    var normalized = rawText.Replace("上午", "AM").Replace("下午", "PM");
+                    if (DateTime.TryParse(rawText, CultureInfo.GetCultureInfo("zh-TW"), DateTimeStyles.AllowWhiteSpaces, out var parsedTw)
+                        || DateTime.TryParse(normalized, CultureInfo.GetCultureInfo("en-US"), DateTimeStyles.AllowWhiteSpaces, out parsedTw)
+                        || DateTime.TryParse(rawText, out parsedTw))
+                    {
+                        return parsedTw.ToString(formatStr.Replace("nn", "mm"));
+                    }
                 }
             }
             // 數字格式
-            else if (normalizedType == "number")
+            else if (normalizedType == "number" || normalizedType == "")
             {
                 try
                 {
@@ -55,7 +63,11 @@ public static class FormatHelper
                         number = Convert.ToDecimal(rawValue);
                     }
 
-                    return number.ToString(formatStr);
+                    var fmt = formatStr;
+                    if (fmt.StartsWith("."))
+                        fmt = "0" + fmt;
+                    var formatted = number.ToString(fmt);
+                    return TrimZeroDecimal(formatted);
                 }
                 catch
                 {
@@ -66,6 +78,18 @@ public static class FormatHelper
 
         // 預設
         return rawValue?.ToString() ?? string.Empty;
+    }
+
+    private static string TrimZeroDecimal(string formatted)
+    {
+        if (string.IsNullOrWhiteSpace(formatted)) return formatted;
+        var sep = CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator;
+        var idx = formatted.IndexOf(sep, StringComparison.Ordinal);
+        if (idx < 0) return formatted;
+        var end = formatted.Length - 1;
+        while (end > idx && formatted[end] == '0') end--;
+        if (end == idx) return formatted.Substring(0, idx);
+        return formatted.Substring(0, end + 1);
     }
 
     private static string NormalizeDataType(string dataType, object rawValue)

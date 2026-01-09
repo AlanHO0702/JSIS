@@ -354,8 +354,15 @@
         const localUser = localStorage.getItem('erpLoginUserId');
         const userId = localUser || window._userId;
         if (!window._userId && localUser) window._userId = localUser;
+        if (window.__isAdmin == null) window.__isAdmin = false;
         if (userId) {
           userNameEl.textContent = userId;
+          const cacheKey = `erpIsAdmin:${userId.toString().trim().toLowerCase()}`;
+          const cached = localStorage.getItem(cacheKey);
+          if (cached === '1') {
+            window.__isAdmin = true;
+            document.body.dataset.isAdmin = '1';
+          }
           fetch(`/api/Login/UserInfo?userId=${encodeURIComponent(userId)}`)
             .then(r => r.ok ? r.json() : null)
             .then(data => {
@@ -363,6 +370,20 @@
               userNameEl.textContent = `${userId} ${data.userName}`;
             })
             .catch(() => { /* ignore */ });
+          fetch(`/api/Login/UserAdmin?userId=${encodeURIComponent(userId)}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+              const isAdmin = data && data.isAdmin === true;
+              window.__isAdmin = isAdmin;
+              document.body.dataset.isAdmin = isAdmin ? '1' : '0';
+              localStorage.setItem(cacheKey, isAdmin ? '1' : '0');
+              window.dispatchEvent(new CustomEvent('adminStateReady', { detail: { isAdmin } }));
+            })
+            .catch(() => {
+              window.__isAdmin = false;
+              document.body.dataset.isAdmin = '0';
+              window.dispatchEvent(new CustomEvent('adminStateReady', { detail: { isAdmin: false } }));
+            });
         } else {
           userNameEl.textContent = '未登入';
         }
@@ -539,6 +560,7 @@
           const isMouse = ev.pointerType === "mouse" || ev.pointerType === undefined;
           if (isMouse && ev.button !== 0) return;
           if (ev.target?.closest("button, input, select, textarea, a")) return;
+          if (ev.target?.closest(".no-modal-drag")) return;
           const rect = dialog.getBoundingClientRect();
           dialog.style.position = "fixed";
           dialog.style.margin = "0";
