@@ -350,7 +350,7 @@
         <div class="sh-price-label">單箱材積</div><input class="form-control form-control-sm sh-price-input" readonly value="${num(boxVol)}">
         <div class="sh-price-label"></div><div></div>
 
-        <div class="sh-price-label">訂單備註</div>
+        <div class="sh-price-label">備註</div>
         <input class="form-control form-control-sm sh-price-input sh-span-11" readonly value="${txt(notes)}">
       </div>`;
   };
@@ -398,46 +398,80 @@
     let modalEl = document.getElementById(modalId);
     if (!modalEl) {
       modalEl = document.createElement("div");
-      modalEl.className = "modal fade";
+      modalEl.className = "sale-history-panel";
       modalEl.id = modalId;
-      modalEl.tabIndex = -1;
-      modalEl.setAttribute("aria-hidden", "true");
       modalEl.innerHTML = `
-        <div class="modal-dialog modal-xl" style="max-width:1000px;">
-          <div class="modal-content">
-            <div class="modal-header py-2">
-              <h5 class="modal-title">成交價歷史</h5>
-              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <style>
+          .sale-history-panel{
+            position:fixed;
+            right:24px;
+            bottom:24px;
+            width:780px;
+            max-width:calc(100vw - 48px);
+            background:#fff;
+            border:1px solid #dee2e6;
+            border-radius:8px;
+            box-shadow:0 10px 30px rgba(0,0,0,.2);
+            z-index:1055;
+            display:none;
+          }
+          .sale-history-panel .sh-header{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            padding:8px 12px;
+            border-bottom:1px solid #e9ecef;
+            cursor:move;
+            user-select:none;
+          }
+          .sale-history-panel .sh-body{ padding:10px 12px 12px; }
+          .sale-history-panel .sh-close{
+            border:0;
+            background:transparent;
+            font-size:20px;
+            line-height:1;
+            cursor:pointer;
+          }
+          .sh-table tbody tr { cursor: pointer; }
+          .sh-table tbody tr.row-selected td { background: #fff3cd; }
+          .sh-price-grid{
+            display:grid;
+            grid-template-columns: 46px 56px 16px 56px 16px 56px 56px 56px 70px 70px 72px 72px;
+            gap:2px 4px;
+            align-items:center;
+            margin-bottom:3px;
+            max-width: 100%;
+          }
+          .sh-price-label{ font-size:.72rem; color:#333; text-align:left; white-space:nowrap; }
+          .sh-price-input{
+            height:22px !important;
+            min-height:22px !important;
+            padding:0 3px !important;
+            font-size:.72rem;
+            line-height:22px !important;
+            box-sizing:border-box !important;
+          }
+          .sh-span-5{ grid-column: span 5; }
+          .sh-span-11{ grid-column: span 11; }
+          .sh-history table{ font-size: var(--field-value-size); }
+          .sh-history table td,
+          .sh-history table th{ padding-top:0 !important; padding-bottom:0 !important; }
+        </style>
+        <div class="sh-header">
+          <div class="fw-semibold">成交價歷史</div>
+          <button type="button" class="sh-close" aria-label="Close">×</button>
+        </div>
+        <div class="sh-body">
+          <div class="sh-price mb-2"></div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <div class="btn-group btn-group-sm" role="group">
+              <button type="button" class="btn btn-outline-primary active" data-sh-tab="order">銷售訂單</button>
+              <button type="button" class="btn btn-outline-primary" data-sh-tab="out">銷貨單</button>
             </div>
-            <div class="modal-body">
-              <style>
-                .sh-table tbody tr { cursor: pointer; }
-                .sh-table tbody tr.row-selected td { background: #fff3cd; }
-                .sh-price-grid{
-                  display:grid;
-                  grid-template-columns: 52px 92px 18px 92px 18px 92px 68px 92px 96px 96px 100px 100px;
-                  gap:4px 6px;
-                  align-items:center;
-                  margin-bottom:4px;
-                  max-width: 100%;
-                }
-                .sh-price-label{ font-size:.8rem; color:#333; text-align:left; }
-                .sh-price-input{ height:24px; padding:1px 4px; font-size:.8rem; }
-                .sh-span-5{ grid-column: span 5; }
-                .sh-span-11{ grid-column: span 11; }
-              </style>
-              <div class="sh-price mb-2"></div>
-              <div class="d-flex align-items-center gap-2 mb-2">
-                <div class="btn-group btn-group-sm" role="group">
-                  <button type="button" class="btn btn-outline-primary active" data-sh-tab="order">銷售訂單</button>
-                  <button type="button" class="btn btn-outline-primary" data-sh-tab="out">銷貨單</button>
-                </div>
-                <button type="button" class="btn btn-sm btn-outline-secondary sh-dict-btn">欄位說明</button>
-                <div class="text-muted small sh-meta"></div>
-              </div>
-              <div class="sh-history" style="max-height:320px; overflow:auto;"></div>
-            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary sh-dict-btn">欄位說明</button>
+            <div class="text-muted small sh-meta"></div>
           </div>
+          <div class="sh-history" style="max-height:320px; overflow:auto;"></div>
         </div>`;
       document.body.appendChild(modalEl);
     }
@@ -446,6 +480,8 @@
     const histBox = modalEl.querySelector(".sh-history");
     const metaBox = modalEl.querySelector(".sh-meta");
     const tabs = modalEl.querySelectorAll("[data-sh-tab]");
+    const closeBtn = modalEl.querySelector(".sh-close");
+    const headerEl = modalEl.querySelector(".sh-header");
     if (metaBox) metaBox.textContent = `品號：${partNum}`;
 
     const loadDict = async (tableName) => {
@@ -621,9 +657,43 @@
       };
     }
 
-    if (window.bootstrap) {
-      const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
-      modal.show();
+    if (modalEl.style.display === "block") {
+      modalEl.style.display = "none";
+      return;
+    }
+    modalEl.style.display = "block";
+    if (closeBtn && !closeBtn.__shBound) {
+      closeBtn.__shBound = true;
+      closeBtn.addEventListener("click", () => {
+        modalEl.style.display = "none";
+      });
+    }
+    if (headerEl && !headerEl.__shDragBound) {
+      headerEl.__shDragBound = true;
+      headerEl.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const rect = modalEl.getBoundingClientRect();
+        const startLeft = rect.left;
+        const startTop = rect.top;
+        const onMove = (ev) => {
+          const dx = ev.clientX - startX;
+          const dy = ev.clientY - startY;
+          const nextLeft = Math.max(8, Math.min(window.innerWidth - rect.width - 8, startLeft + dx));
+          const nextTop = Math.max(8, Math.min(window.innerHeight - rect.height - 8, startTop + dy));
+          modalEl.style.left = `${nextLeft}px`;
+          modalEl.style.top = `${nextTop}px`;
+          modalEl.style.right = "auto";
+          modalEl.style.bottom = "auto";
+        };
+        const onUp = () => {
+          document.removeEventListener("mousemove", onMove);
+          document.removeEventListener("mouseup", onUp);
+        };
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
     }
   };
 
