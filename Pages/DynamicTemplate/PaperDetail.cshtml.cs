@@ -231,6 +231,11 @@ namespace PcbErpApi.Pages.DynamicTemplate
             if (!string.IsNullOrWhiteSpace(logicPartial))
                 ViewData["ActionRailLogicPartial"] = logicPartial;
 
+            // 載入 Inherited 資料夾下的自訂 Hook 邏輯（確認、退審、作廢等按鈕的前後處理）
+            var inheritedPartial = ResolveInheritedActionPartial(itemId);
+            if (!string.IsNullOrWhiteSpace(inheritedPartial))
+                ViewData["InheritedActionPartial"] = inheritedPartial;
+
             return Page();
         }
 
@@ -242,6 +247,18 @@ namespace PcbErpApi.Pages.DynamicTemplate
             var fullPath = Path.Combine(_env.ContentRootPath, "Pages", "CustomButton", fileName);
             if (System.IO.File.Exists(fullPath))
                 return $"~/Pages/CustomButton/{fileName}";
+
+            return null;
+        }
+
+        private string? ResolveInheritedActionPartial(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId)) return null;
+
+            var fileName = $"{itemId.Trim()}.cshtml";
+            var fullPath = Path.Combine(_env.ContentRootPath, "Pages", "Inherited", fileName);
+            if (System.IO.File.Exists(fullPath))
+                return $"~/Pages/Inherited/{fileName}";
 
             return null;
         }
