@@ -26,6 +26,33 @@
   const SAVE_API  = window.FIELD_DICT_SAVE_API || '/api/DictApi/UpdateDictFields';
   const SAVE_OCXMAPS_API = window.FIELD_DICT_SAVE_OCXMAPS_API || '/api/DictOCX/SaveOCXMapsBatch';
   const QUIET     = !!window.SUPPRESS_DICT_FETCH_ALERT;
+  const GRID_DEFAULTS = {
+    labHeight: 22,
+    labWidth: 90,
+    fieldHeight: 22,
+    fieldWidth: 140,
+    topOffset: 1,
+    leftOffset: 1
+  };
+
+  function calcGridLayout(row, col) {
+    const r = Number(row);
+    const c = Number(col);
+    if (!Number.isFinite(r) || !Number.isFinite(c) || r <= 0 || c <= 0) return null;
+    const top = ((r - 1) * GRID_DEFAULTS.labHeight) + GRID_DEFAULTS.topOffset;
+    const labLeft = ((c - 1) * (GRID_DEFAULTS.labWidth + GRID_DEFAULTS.fieldWidth)) + GRID_DEFAULTS.leftOffset;
+    const fieldLeft = labLeft + GRID_DEFAULTS.labWidth;
+    return {
+      iLabTop: top,
+      iLabLeft: labLeft,
+      iLabHeight: GRID_DEFAULTS.labHeight,
+      iLabWidth: GRID_DEFAULTS.labWidth,
+      iFieldTop: top,
+      iFieldLeft: fieldLeft,
+      iFieldHeight: GRID_DEFAULTS.fieldHeight,
+      iFieldWidth: GRID_DEFAULTS.fieldWidth
+    };
+  }
 
   // ===== 顯示（會先 init 再 show） =====
   window.showDictModal = async function (modalId = 'fieldDictModal', tableName = window._dictTableName) {
@@ -95,6 +122,8 @@
 
               <span class="d-none extra-fields">
                 <input data-field="DisplaySize"  value="${x.DisplaySize  ?? ''}" />
+                <input data-field="iLayRow"      value="${x.iLayRow      ?? ''}" />
+                <input data-field="iLayColumn"   value="${x.iLayColumn   ?? ''}" />
                 <input data-field="iLabHeight"   value="${x.iLabHeight   ?? ''}" />
                 <input data-field="iLabTop"      value="${x.iLabTop      ?? ''}" />
                 <input data-field="iLabLeft"     value="${x.iLabLeft     ?? ''}" />
@@ -103,6 +132,7 @@
                 <input data-field="iFieldTop"    value="${x.iFieldTop    ?? ''}" />
                 <input data-field="iFieldLeft"   value="${x.iFieldLeft   ?? ''}" />
                 <input data-field="iFieldWidth"  value="${x.iFieldWidth  ?? ''}" />
+                <input data-field="iShowWhere"   value="${x.iShowWhere   ?? ''}" />
 
                 <input data-field="LookupTable"       value="${x.LookupTable       ?? ''}" />
                 <input data-field="LookupKeyField"    value="${x.LookupKeyField    ?? ''}" />
@@ -143,11 +173,6 @@
                     ${(+x.ComboStyle === 1 ? 'checked' : '')} />
             </td>
 
-            <td style="width:50px">
-              <input data-field="iShowWhere" value="${x.iShowWhere ?? ''}"
-                    class="form-control form-control-sm" />
-            </td>
-
             <td style="width:120px">
               <input data-field="DataType" value="${x.DataType ?? ''}"
                     class="form-control form-control-sm"
@@ -164,6 +189,11 @@
             <td style="width:160px">
               <input data-field="FieldNote" value="${x.FieldNote ?? ''}"
                     class="form-control form-control-sm" />
+            </td>
+
+            <td style="width:120px">
+              <input data-field="EditColor" value="${x.EditColor ?? ''}"
+                    class="form-control form-control-sm" placeholder="clYellow / Yellow" />
             </td>
 
             <!-- 第 10 欄：⚙ 設定按鈕 -->
@@ -250,6 +280,41 @@
     });
   }
 
+  window.applyGridLayoutByRowCol = function (tableSelector = '#fieldDictTable tbody') {
+    const tbody = document.querySelector(tableSelector);
+    if (!tbody) {
+      alert('找不到辭典 tbody');
+      return;
+    }
+
+    if (!confirm('將依列/欄批次重排欄位位置，是否繼續？')) return;
+
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    let applied = 0;
+
+    rows.forEach(tr => {
+      const getVal = name => tr.querySelector(`input[data-field="${name}"]`)?.value ?? '';
+      const row = getVal('iLayRow');
+      const col = getVal('iLayColumn');
+      const layout = calcGridLayout(row, col);
+      if (!layout) return;
+
+      Object.keys(layout).forEach(key => {
+        const inp = tr.querySelector(`input[data-field="${key}"]`);
+        if (inp) inp.value = String(layout[key]);
+      });
+
+      applied += 1;
+      syncRowDirtyUi(tr);
+    });
+
+    if (applied === 0) {
+      alert('沒有可套用的列/欄設定');
+      return;
+    }
+    alert(`已套用 ${applied} 筆欄位位置`);
+  };
+
   // ===== 排序（SerialNum → FieldName） =====
   function sortDictTbody(tbody) {
     if (!tbody) return;
@@ -308,7 +373,23 @@
         const v = getVal(name);
         return v === '' ? null : parseInt(v, 10);
       };
-      const getChk = name => tr.querySelector(`input[data-field="${name}"]`)?.checked ? 1 : 0;
+      const getChk = name => {
+        const box = tr.querySelector(`input[type="checkbox"][data-field="${name}"]`);
+        if (box) return box.checked ? 1 : 0;
+        const raw = tr.querySelector(`input[data-field="${name}"]`)?.value ?? '';
+        return raw === '' ? 0 : (parseInt(raw, 10) ? 1 : 0);
+      };
+      const prev = (() => {
+        const raw = tr.dataset.dictSnapshot;
+        if (!raw) return null;
+        try { return JSON.parse(raw); } catch { return null; }
+      })();
+      const sameVal = (name, cur) => String(cur ?? '') === String(prev?.[name] ?? '');
+      const getChangedInt = name => {
+        const v = getVal(name);
+        if (sameVal(name, v)) return null;
+        return v === '' ? null : parseInt(v, 10);
+      };
 
       return {
         // === 基本欄位 ===
@@ -322,18 +403,21 @@
         DataType: getVal('DataType'),
         FormatStr: getVal('FormatStr'),
         FieldNote: getVal('FieldNote'),
+        EditColor: getVal('EditColor'),
 
         // === 版面欄位 ===
-        DisplaySize: getInt('DisplaySize'),
-        iLabHeight: getInt('iLabHeight'),
-        iLabTop: getInt('iLabTop'),
-        iLabLeft: getInt('iLabLeft'),
-        iLabWidth: getInt('iLabWidth'),
-        iFieldHeight: getInt('iFieldHeight'),
-        iFieldTop: getInt('iFieldTop'),
-        iFieldLeft: getInt('iFieldLeft'),
-        iFieldWidth: getInt('iFieldWidth'),
-        iShowWhere: getInt('iShowWhere'),
+        DisplaySize: getChangedInt('DisplaySize'),
+        iLayRow: getChangedInt('iLayRow'),
+        iLayColumn: getChangedInt('iLayColumn'),
+        iLabHeight: getChangedInt('iLabHeight'),
+        iLabTop: getChangedInt('iLabTop'),
+        iLabLeft: getChangedInt('iLabLeft'),
+        iLabWidth: getChangedInt('iLabWidth'),
+        iFieldHeight: getChangedInt('iFieldHeight'),
+        iFieldTop: getChangedInt('iFieldTop'),
+        iFieldLeft: getChangedInt('iFieldLeft'),
+        iFieldWidth: getChangedInt('iFieldWidth'),
+        iShowWhere: getChangedInt('iShowWhere'),
 
         // === 查詢設定 ===
         LookupTable: getVal('LookupTable'),
@@ -547,6 +631,8 @@
       // 需同步的欄位（含 OCX）
       const DETAIL_FIELDS = [
           'DisplaySize',
+          'iShowWhere',
+          'iLayRow', 'iLayColumn',
           'iLabTop', 'iLabLeft', 'iLabWidth', 'iLabHeight',
           'iFieldTop', 'iFieldLeft', 'iFieldWidth', 'iFieldHeight',
           'LookupTable', 'LookupKeyField', 'LookupResultField',
@@ -558,8 +644,22 @@
       ];
 
       let currentTr = null;
+      let gridAppliedRow = null;
+      let gridAppliedCol = null;
       const keyMapBody = modalEl.querySelector('#fdm_keyMapTable tbody');
       const addKeyBtn = modalEl.querySelector('#fdm_addKeyMap');
+
+      function applyGridDefaultsInModal() {
+          const rowInp = modalEl.querySelector('[data-detail-field="iLayRow"]');
+          const colInp = modalEl.querySelector('[data-detail-field="iLayColumn"]');
+          if (!rowInp || !colInp) return;
+          const layout = calcGridLayout(rowInp.value, colInp.value);
+          if (!layout) return;
+          Object.keys(layout).forEach(key => {
+              const el = modalEl.querySelector(`[data-detail-field="${key}"]`);
+              if (el) el.value = layout[key];
+          });
+      }
 
       function normalizeKeyMaps(list) {
           const arr = Array.isArray(list) ? list : [];
@@ -615,6 +715,19 @@
           });
       }
 
+      if (!modalEl.dataset.gridBound) {
+          modalEl.dataset.gridBound = '1';
+          const rowInp = modalEl.querySelector('[data-detail-field="iLayRow"]');
+          const colInp = modalEl.querySelector('[data-detail-field="iLayColumn"]');
+          const onGridChange = () => {
+              applyGridDefaultsInModal();
+              gridAppliedRow = rowInp?.value ?? null;
+              gridAppliedCol = colInp?.value ?? null;
+          };
+          rowInp?.addEventListener('input', onGridChange);
+          colInp?.addEventListener('input', onGridChange);
+      }
+
       // ==================== 打開欄位設定 ====================
       window.editFieldDetail = function (fieldName) {
 
@@ -650,6 +763,12 @@
                   dlgInput.value = rowInput?.value ?? "";
               }
           });
+          const initRow = tr.querySelector('input[data-field="iLayRow"]')?.value ?? '';
+          const initCol = tr.querySelector('input[data-field="iLayColumn"]')?.value ?? '';
+          modalEl.dataset.gridInitRow = initRow;
+          modalEl.dataset.gridInitCol = initCol;
+          gridAppliedRow = initRow;
+          gridAppliedCol = initCol;
 
           // KeyMapsJson (encoded) → Grid
           try {
@@ -678,6 +797,15 @@
           applyBtn.addEventListener("click", () => {
 
               if (!currentTr) return;
+              const rowInp = modalEl.querySelector('[data-detail-field="iLayRow"]');
+              const colInp = modalEl.querySelector('[data-detail-field="iLayColumn"]');
+              const curRow = rowInp?.value ?? null;
+              const curCol = colInp?.value ?? null;
+              if (curRow !== gridAppliedRow || curCol !== gridAppliedCol) {
+                  applyGridDefaultsInModal();
+                  gridAppliedRow = curRow;
+                  gridAppliedCol = curCol;
+              }
 
               // Modal → TR
               DETAIL_FIELDS.forEach(name => {

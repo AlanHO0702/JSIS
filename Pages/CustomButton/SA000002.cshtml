@@ -13,6 +13,13 @@
     return '';
   };
 
+  const withJwtHeaders = (init = {}) => {
+    const jwt = localStorage.getItem('jwtId');
+    const headers = Object.assign({}, init.headers || {});
+    if (jwt) headers['X-JWTID'] = jwt;
+    return { ...init, headers };
+  };
+
   const outAddr = async (ctx) => {
     const paperNum = readPaperNum(ctx);
     const paperId = 'SPOdOrderMain';
@@ -73,9 +80,686 @@
     });
   };
 
+  const orderTailCancel = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    const paperId = (ctx?.headerTable || 'SPOdOrderMain').toString().trim() || 'SPOdOrderMain';
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const showPlus = /^MPHdOrderMain$/i.test(paperId);
+    const readSelectedItem = () => {
+      const active = document.activeElement?.closest?.('.erp-table tbody tr');
+      const row = document.querySelector('.erp-table tbody tr.row-selected') || active;
+      if (!row) return '';
+      const dataItem = (row.dataset?.item || '').toString().trim();
+      if (dataItem) return dataItem;
+      const itemInput = row.querySelector('input[data-field="Item"], input[data-field="item"]');
+      return (itemInput?.value || itemInput?.getAttribute('value') || '').toString().trim();
+    };
+
+    const { value: form } = await Swal.fire({
+      title: '尾數取消',
+      html: `
+        <div class="swal2-tailcancel">
+          <style>
+            .swal2-tailcancel .tc-row{ display:flex; gap:8px; align-items:center; justify-content:center; margin-bottom:8px; }
+            .swal2-tailcancel .tc-label{ min-width:50px; text-align:right; }
+            .swal2-tailcancel .tc-input{ width:200px; margin:0; }
+          </style>
+          <div style="display:flex; gap:12px; justify-content:center; margin-bottom:8px;">
+            <label style="display:flex; gap:6px; align-items:center;">
+              <input type="radio" name="tcMode" value="all" checked>全部尾數取消
+            </label>
+            <label style="display:flex; gap:6px; align-items:center;">
+              <input type="radio" name="tcMode" value="single">單筆尾數取消
+            </label>
+          </div>
+          <div class="tc-row">
+            <label class="tc-label">項次</label>
+            <input id="tcItem" class="swal2-input tc-input" placeholder="項次" disabled>
+          </div>
+          <div class="tc-row">
+            <label class="tc-label">原因</label>
+            <input id="tcNotes" class="swal2-input tc-input" placeholder="取消原因(可空白)">
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; justify-content:center; margin-bottom:8px;">
+            <label style="display:flex; gap:6px; align-items:center;">
+              <input type="checkbox" id="tcRecompute" checked>重算金額
+            </label>
+          </div>
+          ${showPlus ? `
+          <div style="display:flex; gap:8px; align-items:center; justify-content:center;">
+            <label style="display:flex; gap:6px; align-items:center;">
+              <input type="checkbox" id="tcPlus">來源請購單一併尾數取消
+            </label>
+          </div>` : ''}
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: '確定',
+      cancelButtonText: '取消',
+      focusConfirm: false,
+      didOpen: () => {
+        const itemInput = document.getElementById('tcItem');
+        if (itemInput) {
+          const selectedItem = readSelectedItem();
+          if (selectedItem) itemInput.value = selectedItem;
+        }
+        document.querySelectorAll('input[name="tcMode"]').forEach(r => {
+          r.addEventListener('change', () => {
+            const mode = document.querySelector('input[name="tcMode"]:checked')?.value || 'all';
+            if (itemInput) {
+              itemInput.disabled = mode !== 'single';
+              if (mode === 'single' && !itemInput.value) {
+                const selectedItem = readSelectedItem();
+                if (selectedItem) itemInput.value = selectedItem;
+              }
+            }
+          });
+        });
+      },
+      preConfirm: () => {
+        const mode = document.querySelector('input[name="tcMode"]:checked')?.value || 'all';
+        const itemRaw = document.getElementById('tcItem')?.value || '';
+        const notes = document.getElementById('tcNotes')?.value || '';
+        const recompute = !!document.getElementById('tcRecompute')?.checked;
+        const plusCancel = !!document.getElementById('tcPlus')?.checked;
+
+        if (mode === 'single') {
+          const v = itemRaw.trim();
+          if (!v) {
+            Swal.showValidationMessage('項次必須輸入');
+            return false;
+          }
+          if (!/^\d+$/.test(v)) {
+            Swal.showValidationMessage('項次輸入不符');
+            return false;
+          }
+          return { mode, item: parseInt(v, 10), notes, recompute, plusCancel };
+        }
+
+        return { mode, item: 1, notes, recompute, plusCancel };
+      }
+    });
+    if (!form) return;
+
+    const modeLabel = form.mode === 'single' ? '單筆' : '全部';
+    const confirm = await Swal.fire({
+      icon: 'question',
+      title: `確定${modeLabel}尾數取消?`,
+      showCancelButton: true,
+      confirmButtonText: '確定',
+      cancelButtonText: '取消'
+    });
+    if (!confirm.isConfirmed) return;
+
+    const resp = await fetch('/api/OrderSubButton/OrderTailCancel', withJwtHeaders({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        paperId,
+        paperNum,
+        mode: form.mode,
+        item: form.item,
+        reCompute: form.recompute ? 1 : 0,
+        notes: form.notes || '',
+        plusCancel: form.plusCancel || false
+      })
+    }));
+    const data = await resp.json();
+    if (!data.ok) return Swal.fire({ icon: 'error', title: '執行失敗', text: data.error || '' });
+
+    const doneMsg = data.plusDone ? '尾數取消完成，來源請購項目已處理' : '尾數取消完成';
+    await Swal.fire({ icon: 'success', title: doneMsg, timer: 1200, showConfirmButton: false });
+  };
+
+  const ensureSaleHistoryButton = () => {
+    const rail = document.querySelector(".action-rail");
+    if (!rail) return;
+    if (rail.querySelector('[data-button-name="btnSaleHis"]')) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "fab";
+    btn.textContent = "成交價歷史";
+    btn.title = "成交價歷史";
+    btn.dataset.customBtn = "1";
+    btn.dataset.buttonName = "btnSaleHis";
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      await showSaleHistory({ headerTable: (window._headerTableName || "SPOdOrderMain") });
+    });
+    rail.appendChild(btn);
+  };
+
+  const readSelectedDetailRow = () => {
+    const row = document.querySelector(".erp-table tbody tr.row-selected")
+      || document.activeElement?.closest?.(".erp-table tbody tr");
+    if (!row) return null;
+    const obj = {};
+    row.querySelectorAll("input.cell-edit[data-field]").forEach(inp => {
+      const f = inp.dataset.field || "";
+      if (!f) return;
+      obj[f] = inp.value ?? "";
+    });
+    if (row.dataset.paperNum && obj.PaperNum === undefined) obj.PaperNum = row.dataset.paperNum;
+    if (row.dataset.item && obj.Item === undefined) obj.Item = row.dataset.item;
+    return obj;
+  };
+
+  const pickField = (row, keys) => {
+    if (!row) return "";
+    for (const k of keys) {
+      if (row[k] != null && String(row[k]).trim() !== "") return String(row[k]).trim();
+    }
+    return "";
+  };
+
+  const escapeHtml = (v) => String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+  const buildTable = (rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) return '<div class="text-muted small">（無資料）</div>';
+    const cols = Object.keys(list[0] || {});
+    const thead = cols.map(c => `<th class="text-nowrap">${escapeHtml(c)}</th>`).join("");
+    const tbody = list.map(r => {
+      const tds = cols.map(c => `<td class="text-nowrap">${escapeHtml(r[c])}</td>`).join("");
+      return `<tr>${tds}</tr>`;
+    }).join("");
+    return `<div class="table-responsive"><table class="table table-sm table-bordered mb-0"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
+  };
+
+  const formatDateByMask = (value, mask) => {
+    if (!value) return "";
+    const s = String(value).trim();
+    if (!s) return "";
+    const sep = (mask || "").includes("/") ? "/" : ((mask || "").includes(".") ? "." : "-");
+    const m = s.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+    if (!m) return s;
+    const y = m[1];
+    const mm = String(m[2]).padStart(2, "0");
+    const dd = String(m[3]).padStart(2, "0");
+    return `${y}${sep}${mm}${sep}${dd}`;
+  };
+
+  const trimDecimal = (value) => {
+    const raw = String(value ?? "").replace(/,/g, "");
+    if (!/^-?\d+(\.\d+)?$/.test(raw)) return String(value ?? "");
+    if (!raw.includes(".")) return raw;
+    return raw.replace(/0+$/, "").replace(/\.$/, "");
+  };
+
+  const pickFieldCI = (row, keys) => {
+    if (!row) return "";
+    const rowKeys = Object.keys(row);
+    for (const k of keys) {
+      const found = rowKeys.find(rk => rk.toLowerCase() === String(k).toLowerCase());
+      if (found) {
+        const v = row[found];
+        if (v != null && String(v).trim() !== "") return v;
+      }
+    }
+    return "";
+  };
+
+  const buildPriceHeader = (rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) return '<div class="text-muted small">（無資料）</div>';
+    const row = list[0] || {};
+    const num = (v) => escapeHtml(trimDecimal(v));
+    const txt = (v) => escapeHtml(v ?? "");
+
+    const priceA = pickFieldCI(row, ["PriceA", "APrice", "A_Price"]);
+    const priceB = pickFieldCI(row, ["PriceB", "BPrice", "B_Price"]);
+    const priceC = pickFieldCI(row, ["PriceC", "CPrice", "C_Price"]);
+    const unitVol = pickFieldCI(row, ["UnitVolume", "UnitVol", "UOMVolume", "UOMVol", "UnitCBM"]);
+    const maxPackQnty = pickFieldCI(row, ["MaxPackQnty", "MaxPackQty", "MaxPack", "PackQnty", "PackQty"]);
+    const maxPackVol = pickFieldCI(row, ["MaxPackVolume", "MaxPackVol", "PackVolume", "PackVol", "MaxPackCBM"]);
+    const partNum = pickFieldCI(row, ["PartNum", "PartNo", "PartNumber"]);
+    const matName = pickFieldCI(row, ["MatName", "ItemName", "PartName", "ProdName"]);
+    const qnty = pickFieldCI(row, ["Qnty", "Qty", "Quantity"]);
+    const listPrice = pickFieldCI(row, ["ListPrice", "StdPrice", "Price"]);
+    const discount = pickFieldCI(row, ["Discount"]);
+    const unitPrice = pickFieldCI(row, ["UnitPrice", "PriceNet", "NetPrice"]);
+    const boxVol = pickFieldCI(row, ["BoxVolume", "BoxVol", "CartonVol", "CartonVolume"]);
+    const notes = pickFieldCI(row, ["Notes", "OrderNotes", "Memo"]);
+
+    return `
+      <div class="sh-price-grid">
+        <div class="sh-price-label">A價格</div><input class="form-control form-control-sm sh-price-input" readonly value="${num(priceA)}">
+        <div class="sh-price-label">B</div><input class="form-control form-control-sm sh-price-input" readonly value="${num(priceB)}">
+        <div class="sh-price-label">C</div><input class="form-control form-control-sm sh-price-input" readonly value="${num(priceC)}">
+        <div class="sh-price-label">單位材積</div><input class="form-control form-control-sm sh-price-input" readonly value="${num(unitVol)}">
+        <div class="sh-price-label">最大包裝數</div><input class="form-control form-control-sm sh-price-input" readonly value="${num(maxPackQnty)}">
+        <div class="sh-price-label">最大包裝材積</div><input class="form-control form-control-sm sh-price-input" readonly value="${num(maxPackVol)}">
+
+        <div class="sh-price-label">料號</div>
+        <input class="form-control form-control-sm sh-price-input sh-span-5" readonly value="${txt(partNum)}">
+        <div class="sh-price-label">品名</div>
+        <input class="form-control form-control-sm sh-price-input sh-span-5" readonly value="${txt(matName)}">
+
+        <div class="sh-price-label">數量</div><input class="form-control form-control-sm sh-price-input" readonly value="${num(qnty)}">
+        <div class="sh-price-label">定價</div><input class="form-control form-control-sm sh-price-input" readonly value="${num(listPrice)}">
+        <div class="sh-price-label">折扣</div><input class="form-control form-control-sm sh-price-input" readonly value="${num(discount)}">
+        <div class="sh-price-label">單價</div><input class="form-control form-control-sm sh-price-input" readonly value="${num(unitPrice)}">
+
+        <div class="sh-price-label">單箱材積</div><input class="form-control form-control-sm sh-price-input" readonly value="${num(boxVol)}">
+        <div class="sh-price-label"></div><div></div>
+
+        <div class="sh-price-label">備註</div>
+        <input class="form-control form-control-sm sh-price-input sh-span-11" readonly value="${txt(notes)}">
+      </div>`;
+  };
+
+  const buildTableWithDict = (rows, dict) => {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) return '<div class="text-muted small">（無資料）</div>';
+    const cols = (Array.isArray(dict) && dict.length)
+      ? dict
+      : Object.keys(list[0] || {}).map(k => ({ FieldName: k, DisplayLabel: k, DataType: "", FormatStr: "" }));
+    const thead = cols.map(c => `<th class="text-nowrap">${escapeHtml(c.DisplayLabel ?? c.FieldName)}</th>`).join("");
+    const tbody = list.map(r => {
+      const tds = cols.map(c => {
+        const field = c.FieldName;
+        const raw = r[field];
+        const dt = (c.DataType || "").toString().toLowerCase();
+        const fmt = (c.FormatStr || "").toString();
+        let text = raw == null ? "" : String(raw);
+        if (dt.includes("date") || field?.toString().toLowerCase().includes("date")) {
+          if (fmt) text = formatDateByMask(text, fmt);
+        } else if (dt.includes("decimal") || dt.includes("numeric") || dt.includes("money")
+          || dt.includes("float") || dt.includes("real") || dt.includes("int") || dt.includes("number")) {
+          text = trimDecimal(text);
+        }
+        return `<td class="text-nowrap">${escapeHtml(text)}</td>`;
+      }).join("");
+      return `<tr>${tds}</tr>`;
+    }).join("");
+    return `<div class="table-responsive"><table class="table table-sm table-bordered mb-0 sh-table"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
+  };
+
+  const showSaleHistory = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const row = readSelectedDetailRow();
+    if (!row) return Swal.fire({ icon: 'info', title: '請先選取一筆明細' });
+
+    const partNum = pickField(row, ["PartNum", "PartNo", "PartNumber", "ProdNum", "ItemId"]);
+    const item = pickField(row, ["Item", "item", "SeqNum", "seqnum", "ItemNo", "itemno"]);
+    if (!partNum) return Swal.fire({ icon: 'info', title: '找不到品號' });
+    if (!item) return Swal.fire({ icon: 'info', title: '找不到項次' });
+
+    const modalId = "saleHistoryModal";
+    let modalEl = document.getElementById(modalId);
+    if (!modalEl) {
+      modalEl = document.createElement("div");
+      modalEl.className = "sale-history-panel";
+      modalEl.id = modalId;
+      modalEl.innerHTML = `
+        <style>
+          .sale-history-panel{
+            position:fixed;
+            right:24px;
+            bottom:24px;
+            width:780px;
+            max-width:calc(100vw - 48px);
+            background:#fff;
+            border:1px solid #dee2e6;
+            border-radius:8px;
+            box-shadow:0 10px 30px rgba(0,0,0,.2);
+            z-index:1055;
+            display:none;
+          }
+          .sale-history-panel .sh-header{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            padding:8px 12px;
+            border-bottom:1px solid #e9ecef;
+            cursor:move;
+            user-select:none;
+          }
+          .sale-history-panel .sh-body{ padding:10px 12px 12px; }
+          .sale-history-panel .sh-close{
+            border:0;
+            background:transparent;
+            font-size:20px;
+            line-height:1;
+            cursor:pointer;
+          }
+          .sh-table tbody tr { cursor: pointer; }
+          .sh-table tbody tr.row-selected td { background: #fff3cd; }
+          .sh-price-grid{
+            display:grid;
+            grid-template-columns: 46px 56px 16px 56px 16px 56px 56px 56px 70px 70px 72px 72px;
+            gap:2px 4px;
+            align-items:center;
+            margin-bottom:3px;
+            max-width: 100%;
+          }
+          .sh-price-label{ font-size:.72rem; color:#333; text-align:left; white-space:nowrap; }
+          .sh-price-input{
+            height:22px !important;
+            min-height:22px !important;
+            padding:0 3px !important;
+            font-size:.72rem;
+            line-height:22px !important;
+            box-sizing:border-box !important;
+          }
+          .sh-span-5{ grid-column: span 5; }
+          .sh-span-11{ grid-column: span 11; }
+          .sh-history table{ font-size: var(--field-value-size); }
+          .sh-history table td,
+          .sh-history table th{ padding-top:0 !important; padding-bottom:0 !important; }
+        </style>
+        <div class="sh-header">
+          <div class="fw-semibold">成交價歷史</div>
+          <button type="button" class="sh-close" aria-label="Close">×</button>
+        </div>
+        <div class="sh-body">
+          <div class="sh-price mb-2"></div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <div class="btn-group btn-group-sm" role="group">
+              <button type="button" class="btn btn-outline-primary active" data-sh-tab="order">銷售訂單</button>
+              <button type="button" class="btn btn-outline-primary" data-sh-tab="out">銷貨單</button>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary sh-dict-btn">欄位說明</button>
+            <div class="text-muted small sh-meta"></div>
+          </div>
+          <div class="sh-history" style="max-height:320px; overflow:auto;"></div>
+        </div>`;
+      document.body.appendChild(modalEl);
+    }
+
+    const priceBox = modalEl.querySelector(".sh-price");
+    const histBox = modalEl.querySelector(".sh-history");
+    const metaBox = modalEl.querySelector(".sh-meta");
+    const tabs = modalEl.querySelectorAll("[data-sh-tab]");
+    const closeBtn = modalEl.querySelector(".sh-close");
+    const headerEl = modalEl.querySelector(".sh-header");
+    if (metaBox) metaBox.textContent = `品號：${partNum}`;
+
+    const loadDict = async (tableName) => {
+      try {
+        const res = await fetch(`/api/TableFieldLayout/DictFields?table=${encodeURIComponent(tableName)}&lang=TW`, withJwtHeaders());
+        if (!res.ok) return [];
+        const rows = await res.json();
+        return Array.isArray(rows) ? rows.filter(x => (x.Visible ?? x.visible) === 1 || (x.Visible ?? x.visible) === true) : [];
+      } catch {
+        return [];
+      }
+    };
+
+    const orderDictRows = await loadDict("SPOdV_OrderSaleHis");
+    const outDictRows = await loadDict("SPOdV_OutSaleHis");
+
+    const loadPrice = async () => {
+      const res = await fetch(`/api/OrderSaleHistory/Price?paperNum=${encodeURIComponent(paperNum)}&item=${encodeURIComponent(item)}`, withJwtHeaders());
+      const data = await res.json();
+      if (!data.ok) return `<div class="text-danger small">${escapeHtml(data.error || "載入失敗")}</div>`;
+      return buildPriceHeader(data.rows);
+    };
+
+    const loadHistory = async (mode) => {
+      const url = mode === "out"
+        ? `/api/OrderSaleHistory/Out?paperNum=${encodeURIComponent(paperNum)}&partNum=${encodeURIComponent(partNum)}`
+        : `/api/OrderSaleHistory/Order?paperNum=${encodeURIComponent(paperNum)}&partNum=${encodeURIComponent(partNum)}`;
+      const res = await fetch(url, withJwtHeaders());
+      const data = await res.json();
+      if (!data.ok) return `<div class="text-danger small">${escapeHtml(data.error || "載入失敗")}</div>`;
+      const dict = mode === "out" ? outDictRows : orderDictRows;
+      return buildTableWithDict(data.rows, dict);
+    };
+
+    const setDictTableName = (mode) => {
+      const tname = mode === "out" ? "SPOdV_OutSaleHis" : "SPOdV_OrderSaleHis";
+      window._dictTableName = tname;
+      return tname;
+    };
+
+    const setHistoryContext = (mode) => {
+      if (!histBox) return;
+      const tname = setDictTableName(mode);
+      histBox.dataset.dictTable = tname;
+      const tableEl = histBox.querySelector(".sh-table");
+      if (tableEl) tableEl.setAttribute("data-dict-table", tname);
+      document.querySelectorAll(".ctx-current").forEach(el => el.classList.remove("ctx-current"));
+      histBox.classList.add("ctx-current");
+    };
+
+    const openDictModal = (tableName) => {
+      const modalEl = document.getElementById("fieldDictModal");
+      if (!modalEl) return;
+      const nameEl = modalEl.querySelector("#dictTableNameDisplay");
+      if (nameEl) nameEl.textContent = tableName ? `- ${tableName}` : "";
+      if (typeof window.initFieldDictModal === "function") {
+        window.initFieldDictModal(tableName, "fieldDictModal");
+      } else if (typeof window.loadFieldDict === "function") {
+        window.loadFieldDict(tableName);
+      }
+
+      const saleHistoryOpen = document.getElementById("saleHistoryModal")?.classList.contains("show");
+      if (saleHistoryOpen) {
+        const showFloating = () => {
+          let backdrop = document.querySelector(".sh-dict-backdrop");
+          if (!backdrop) {
+            backdrop = document.createElement("div");
+            backdrop.className = "modal-backdrop show sh-dict-backdrop";
+            backdrop.style.zIndex = "1990";
+            document.body.appendChild(backdrop);
+          }
+          const saleHistoryEl = document.getElementById("saleHistoryModal");
+          const saleHistoryModal = (window.bootstrap && saleHistoryEl)
+            ? bootstrap.Modal.getInstance(saleHistoryEl)
+            : null;
+          if (saleHistoryModal?._focustrap?.deactivate) {
+            saleHistoryModal._focustrap.deactivate();
+          }
+          modalEl.dataset.shFloat = "1";
+          modalEl.style.display = "block";
+          modalEl.style.zIndex = "2000";
+          modalEl.style.pointerEvents = "auto";
+          modalEl.classList.add("show");
+          modalEl.removeAttribute("aria-hidden");
+          modalEl.setAttribute("aria-modal", "true");
+
+          if (!modalEl.__shCloseBound) {
+            const close = () => {
+              modalEl.classList.remove("show");
+              modalEl.style.display = "none";
+              modalEl.setAttribute("aria-hidden", "true");
+              modalEl.removeAttribute("aria-modal");
+              modalEl.dataset.shFloat = "";
+              document.querySelectorAll(".sh-dict-backdrop").forEach(el => el.remove());
+              if (saleHistoryModal?._focustrap?.activate) {
+                saleHistoryModal._focustrap.activate();
+              }
+            };
+            modalEl.__shCloseBound = true;
+            modalEl.__shClose = close;
+            modalEl.querySelectorAll('[data-bs-dismiss="modal"]').forEach(btn => {
+              btn.addEventListener("click", (e) => {
+                if (modalEl.dataset.shFloat !== "1") return;
+                e.preventDefault();
+                e.stopPropagation();
+                close();
+              });
+            });
+            backdrop.addEventListener("click", (e) => {
+              if (modalEl.dataset.shFloat !== "1") return;
+              e.preventDefault();
+              e.stopPropagation();
+              close();
+            });
+          }
+        };
+        showFloating();
+        return;
+      }
+
+      if (window.bootstrap) {
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.show();
+      }
+    };
+
+    let historyActive = false;
+    const bindHistorySelection = () => {
+      if (!histBox) return;
+      const rows = histBox.querySelectorAll(".sh-table tbody tr");
+      if (!rows.length) return;
+      rows.forEach(tr => {
+        tr.addEventListener("click", () => {
+          histBox.querySelectorAll(".sh-table tbody tr.row-selected").forEach(r => r.classList.remove("row-selected"));
+          tr.classList.add("row-selected");
+          historyActive = true;
+          setHistoryContext(currentMode);
+        });
+      });
+    };
+
+    if (priceBox) priceBox.innerHTML = await loadPrice();
+    if (histBox) {
+      histBox.innerHTML = await loadHistory("order");
+      setHistoryContext("order");
+      bindHistorySelection();
+    }
+    let currentMode = "order";
+    setDictTableName(currentMode);
+
+    tabs.forEach(btn => {
+      btn.onclick = async () => {
+        tabs.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        const mode = btn.dataset.shTab || "order";
+        currentMode = mode;
+        historyActive = false;
+        setHistoryContext(mode);
+        if (histBox) {
+          histBox.innerHTML = await loadHistory(mode);
+          setHistoryContext(mode);
+          bindHistorySelection();
+        }
+      };
+    });
+
+    const dictBtn = modalEl.querySelector(".sh-dict-btn");
+    if (dictBtn) {
+      dictBtn.onclick = () => {
+        if (!historyActive) return;
+        const tableName = setDictTableName(currentMode);
+        openDictModal(tableName);
+      };
+    }
+
+    if (modalEl.style.display === "block") {
+      modalEl.style.display = "none";
+      return;
+    }
+    modalEl.style.display = "block";
+    if (closeBtn && !closeBtn.__shBound) {
+      closeBtn.__shBound = true;
+      closeBtn.addEventListener("click", () => {
+        modalEl.style.display = "none";
+      });
+    }
+    if (headerEl && !headerEl.__shDragBound) {
+      headerEl.__shDragBound = true;
+      headerEl.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const rect = modalEl.getBoundingClientRect();
+        const startLeft = rect.left;
+        const startTop = rect.top;
+        const onMove = (ev) => {
+          const dx = ev.clientX - startX;
+          const dy = ev.clientY - startY;
+          const nextLeft = Math.max(8, Math.min(window.innerWidth - rect.width - 8, startLeft + dx));
+          const nextTop = Math.max(8, Math.min(window.innerHeight - rect.height - 8, startTop + dy));
+          modalEl.style.left = `${nextLeft}px`;
+          modalEl.style.top = `${nextTop}px`;
+          modalEl.style.right = "auto";
+          modalEl.style.bottom = "auto";
+        };
+        const onUp = () => {
+          document.removeEventListener("mousemove", onMove);
+          document.removeEventListener("mouseup", onUp);
+        };
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
+    }
+  };
+
+  const viewPriceTable = async () => {
+    const readHeaderValue = (fieldName) => {
+      const target = (fieldName || "").toLowerCase();
+      if (!target) return "";
+      const fields = document.querySelectorAll('form.erp-header-form input[name], form.erp-header-form textarea[name], form.erp-header-form select[name]');
+      for (const el of fields) {
+        const name = (el.getAttribute('name') || '').toLowerCase();
+        if (name === target) return (el.value ?? '').toString().trim();
+      }
+      return "";
+    };
+
+    const candidates = ["CustomerId", "CustomerID", "CompanyId", "CustId", "Customer"];
+    let customerId = "";
+    for (const key of candidates) {
+      customerId = readHeaderValue(key);
+      if (customerId) break;
+    }
+
+    if (!customerId) {
+      return Swal.fire({ icon: 'info', title: '請先選取客戶' });
+    }
+
+    const url = `/SPO/SPOdPriceTable2?customerId=${encodeURIComponent(customerId)}&modal=1`;
+    const modalId = "priceTableModal";
+    let modalEl = document.getElementById(modalId);
+    if (!modalEl) {
+      modalEl = document.createElement("div");
+      modalEl.className = "modal fade";
+      modalEl.id = modalId;
+      modalEl.tabIndex = -1;
+      modalEl.setAttribute("aria-hidden", "true");
+      modalEl.innerHTML = `
+        <div class="modal-dialog modal-dialog-centered" style="max-width:980px; width:980px;">
+          <div class="modal-content">
+            <div class="modal-header py-2">
+              <h5 class="modal-title">檢視價格表</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0">
+              <iframe id="priceTableFrame" src="about:blank" style="width:100%; height:520px; border:0;"></iframe>
+            </div>
+          </div>
+        </div>`;
+      document.body.appendChild(modalEl);
+    }
+
+    const frame = modalEl.querySelector("#priceTableFrame");
+    if (frame) frame.setAttribute("src", url);
+    if (window.bootstrap) {
+      const bsModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+      bsModal.show();
+    }
+  };
+
   window.ActionRailCustomHandlers['SA000002'] = {
     // 依 CURdOCXItemCustButton.ButtonName 對應
-    btnC6: outAddr
+    btnC6: outAddr,
+    btnC8: orderTailCancel,
+    btnC12: viewPriceTable,
+    btnSaleHis: showSaleHistory
   };
+
+  document.addEventListener("DOMContentLoaded", ensureSaleHistoryButton);
 })();
 </script>

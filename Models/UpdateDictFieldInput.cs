@@ -10,8 +10,11 @@ public class UpdateDictFieldInput
     public string FormatStr { get; set; }
     public string FieldNote { get; set; }
     public int? ComboStyle { get; set; }
+    public string? EditColor { get; set; }
 
     public int? DisplaySize { get; set; }
+    public int? iLayRow { get; set; }
+    public int? iLayColumn { get; set; }
     public int? iLabHeight { get; set; }
     public int? iLabTop { get; set; }
     public int? iLabLeft { get; set; }

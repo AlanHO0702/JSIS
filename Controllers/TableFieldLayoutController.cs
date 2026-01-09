@@ -56,6 +56,8 @@ public class TableFieldLayoutController : ControllerBase
                 height = Math.Max(22, x.Height),
                 top = x.Top,
                 left = x.Left,
+                labTop = x.LabTop,
+                labLeft = x.LabLeft,
                 show = x.iShowWhere
             })
             .GroupBy(x => x.field)
@@ -66,6 +68,20 @@ public class TableFieldLayoutController : ControllerBase
  UPDATE dbo.CURdTableField
  SET  iFieldWidth  = @Width,
       iFieldHeight = @Height,
+      iLabTop      = CASE
+                       WHEN @LabTop IS NULL THEN iLabTop
+                       WHEN @LabTop = 0 AND @LabLeft = 0
+                            AND ISNULL(iLabTop,0) <> 0 AND ISNULL(iLabLeft,0) <> 0
+                      THEN iLabTop
+                      ELSE @LabTop
+                    END,
+      iLabLeft     = CASE
+                       WHEN @LabLeft IS NULL THEN iLabLeft
+                       WHEN @LabTop = 0 AND @LabLeft = 0
+                            AND ISNULL(iLabTop,0) <> 0 AND ISNULL(iLabLeft,0) <> 0
+                      THEN iLabLeft
+                      ELSE @LabLeft
+                    END,
       iFieldTop    = CASE
                        WHEN @Top = 0 AND @Left = 0
                             AND ISNULL(iFieldTop,0) <> 0 AND ISNULL(iFieldLeft,0) <> 0
@@ -89,6 +105,20 @@ public class TableFieldLayoutController : ControllerBase
  UPDATE dbo.CURdTableFieldLang
  SET  IFieldWidth  = @Width,
       IFieldHeight = @Height,
+      ILabTop      = CASE
+                       WHEN @LabTop IS NULL THEN ILabTop
+                       WHEN @LabTop = 0 AND @LabLeft = 0
+                            AND ISNULL(ILabTop,0) <> 0 AND ISNULL(ILabLeft,0) <> 0
+                      THEN ILabTop
+                      ELSE @LabTop
+                    END,
+      ILabLeft     = CASE
+                       WHEN @LabLeft IS NULL THEN ILabLeft
+                       WHEN @LabTop = 0 AND @LabLeft = 0
+                            AND ISNULL(ILabTop,0) <> 0 AND ISNULL(ILabLeft,0) <> 0
+                      THEN ILabLeft
+                      ELSE @LabLeft
+                    END,
       IFieldTop    = CASE
                        WHEN @Top = 0 AND @Left = 0
                             AND ISNULL(IFieldTop,0) <> 0 AND ISNULL(IFieldLeft,0) <> 0
@@ -116,6 +146,8 @@ public class TableFieldLayoutController : ControllerBase
                 sql,
                 new SqlParameter("@Width", it.width),
                 new SqlParameter("@Height", it.height),
+                new SqlParameter("@LabTop", (object?)it.labTop ?? DBNull.Value),
+                new SqlParameter("@LabLeft", (object?)it.labLeft ?? DBNull.Value),
                 new SqlParameter("@Top", it.top),
                 new SqlParameter("@Left", it.left),
                 new SqlParameter("@iShowWhere", it.show),
@@ -128,6 +160,8 @@ public class TableFieldLayoutController : ControllerBase
                 sqlLang,
                 new SqlParameter("@Width", it.width),
                 new SqlParameter("@Height", it.height),
+                new SqlParameter("@LabTop", (object?)it.labTop ?? DBNull.Value),
+                new SqlParameter("@LabLeft", (object?)it.labLeft ?? DBNull.Value),
                 new SqlParameter("@Top", it.top),
                 new SqlParameter("@Left", it.left),
                 new SqlParameter("@iShowWhere", it.show),
@@ -416,6 +450,8 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         public int Height { get; set; }
         public int Top { get; set; }
         public int Left { get; set; }
+        public int? LabTop { get; set; }
+        public int? LabLeft { get; set; }
         public int iShowWhere { get; set; }
     }
 
@@ -441,6 +477,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         public string FormatStr { get; set; } = "";
         public int? SerialNum { get; set; }
         public bool Visible { get; set; }
+        public string? EditColor { get; set; }
     }
 
     [HttpGet("GetTableFields")]
@@ -475,6 +512,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         f.FieldName,
         COALESCE(l.DisplayLabel, f.DisplayLabel, f.FieldName) AS DisplayLabel,
         COALESCE(l.DisplaySize, f.DisplaySize) AS DisplaySize,
+        f.EditColor AS EditColor,
         f.DataType,
         f.FormatStr,
         f.SerialNum,
@@ -482,8 +520,10 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         ReadOnly  = CASE WHEN ISNULL(f.ReadOnly,0)=1 THEN 1 ELSE 0 END,
         f.ComboStyle,
         f.FieldNote,
+        f.EditColor,
 
         -- 標籤/欄位座標與尺寸
+        f.iLayRow, f.iLayColumn,
         f.iLabHeight,  f.iLabTop,   f.iLabLeft,   f.iLabWidth,
         f.iFieldHeight,f.iFieldTop, f.iFieldLeft, f.iFieldWidth,
         f.iShowWhere,
@@ -547,6 +587,10 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
                 ReadOnly        = (rd["ReadOnly"]?.ToString() ?? "0") == "1" ? 1 : 0,
                 FieldNote       = rd["FieldNote"]?.ToString() ?? "",
                 ComboStyle      = rd["ComboStyle"] as int?,
+                EditColor       = rd["EditColor"]?.ToString() ?? "",
+
+                iLayRow         = rd["iLayRow"]     as int?,
+                iLayColumn      = rd["iLayColumn"]  as int?,
 
                 iLabHeight      = rd["iLabHeight"]  as int?,
                 iLabTop         = rd["iLabTop"]     as int?,

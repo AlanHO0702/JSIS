@@ -157,13 +157,20 @@ namespace PcbErpApi.Pages.DynamicTemplate
                     iFieldHeight = x.iFieldHeight,
                     iFieldTop = x.iFieldTop,
                     iFieldLeft = x.iFieldLeft,
+                    iLabWidth = x.iLabWidth,
+                    iLabHeight = x.iLabHeight,
+                    iLabTop = x.iLabTop,
+                    iLabLeft = x.iLabLeft,
                     iShowWhere = x.iShowWhere,
+                    DisplaySize = x.DisplaySize,
                     DataType = x.DataType,
                     FormatStr = x.FormatStr,
                     LookupTable = x.LookupTable,
                     LookupKeyField = x.LookupKeyField,
                     LookupResultField = x.LookupResultField,
-                    ComboStyle = x.ComboStyle
+                    ComboStyle = x.ComboStyle,
+                    ReadOnly = x.ReadOnly,
+                    EditColor = x.EditColor
                 }).ToList();
 
             TableFields = FieldDictList
@@ -180,7 +187,8 @@ namespace PcbErpApi.Pages.DynamicTemplate
                     FormatStr = x.FormatStr,
                     iFieldWidth = x.iFieldWidth,
                     DisplaySize = x.DisplaySize,
-                    ComboStyle = x.ComboStyle
+                    ComboStyle = x.ComboStyle,
+                    ReadOnly = x.ReadOnly
                 }).ToList();
 
             // 4) Lookup maps（MultiTab 明細採前端即時載入，這裡只保留單頭 lookup）
@@ -191,6 +199,9 @@ namespace PcbErpApi.Pages.DynamicTemplate
                 HeaderData.ToDictionary(k => k.Key, v => v.Value)
                 , headerLookup);
             ViewData["HeaderLookupMap"] = HeaderLookupMap;
+            ViewData["HeaderLookupResultTypes"] = headerLookup
+                .GroupBy(x => x.FieldName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First().ResultDataType ?? "", StringComparer.OrdinalIgnoreCase);
 
             // 5) Query fields (for search modal reuse)
             QueryFields = _ctx.CURdPaperSelected

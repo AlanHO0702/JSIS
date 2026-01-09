@@ -81,6 +81,39 @@
       padding: 6px 8px;
       gap: 0;
     }
+    .toolbar-help-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      border: 1px solid #cbd5f5;
+      border-radius: 8px;
+      background: #f8fafc;
+      color: #1f3a8a;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .toolbar-help-btn:hover {
+      background: #eef2ff;
+    }
+    .toolbar-help-btn.icon-only {
+      padding: 6px 8px;
+      gap: 0;
+    }
+    .toolbar-help-btn .bi {
+      font-size: 18px;
+      line-height: 1;
+      display: block;
+    }
+
+    #itemNotesModal .modal-dialog {
+      max-width: 820px;
+      width: 820px;
+    }
+    #itemNotesUserModal .modal-dialog {
+      max-width: 820px;
+      width: 820px;
+    }
     .toolbar-user {
       display: inline-flex;
       align-items: center;
@@ -219,6 +252,15 @@
             </svg>
           </button>
         }
+        @if (!isHome)
+        {
+          <button type="button" id="__btnItemNotes" class="toolbar-home-btn toolbar-help-btn icon-only" title="作業說明" aria-label="作業說明">
+            <i class="bi bi-info-circle"></i>
+          </button>
+          <button type="button" id="__btnItemNotesUser" class="toolbar-home-btn toolbar-help-btn icon-only" title="個人作業說明" aria-label="個人作業說明">
+            <i class="bi bi-person-lines-fill"></i>
+          </button>
+        }
         <div class="toolbar-user">
           <span class="label">公司別</span>
           <span id="toolbarBuName" class="value-box">未指定</span>
@@ -236,6 +278,41 @@
     <div class="box">
       <div class="spinner-border" role="status" aria-hidden="true"></div>
       <div class="msg" id="loadingMsg">處理中…</div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="itemNotesModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="itemNotesTitle">作業說明</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <textarea id="itemNotesText" class="form-control" rows="12"></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="itemNotesSave" class="btn btn-primary">儲存</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">關閉</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal fade" id="itemNotesUserModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="itemNotesUserTitle">個人作業說明</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <textarea id="itemNotesUserText" class="form-control" rows="12"></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="itemNotesUserSave" class="btn btn-primary">儲存</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">關閉</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -277,8 +354,15 @@
         const localUser = localStorage.getItem('erpLoginUserId');
         const userId = localUser || window._userId;
         if (!window._userId && localUser) window._userId = localUser;
+        if (window.__isAdmin == null) window.__isAdmin = false;
         if (userId) {
           userNameEl.textContent = userId;
+          const cacheKey = `erpIsAdmin:${userId.toString().trim().toLowerCase()}`;
+          const cached = localStorage.getItem(cacheKey);
+          if (cached === '1') {
+            window.__isAdmin = true;
+            document.body.dataset.isAdmin = '1';
+          }
           fetch(`/api/Login/UserInfo?userId=${encodeURIComponent(userId)}`)
             .then(r => r.ok ? r.json() : null)
             .then(data => {
@@ -286,6 +370,20 @@
               userNameEl.textContent = `${userId} ${data.userName}`;
             })
             .catch(() => { /* ignore */ });
+          fetch(`/api/Login/UserAdmin?userId=${encodeURIComponent(userId)}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+              const isAdmin = data && data.isAdmin === true;
+              window.__isAdmin = isAdmin;
+              document.body.dataset.isAdmin = isAdmin ? '1' : '0';
+              localStorage.setItem(cacheKey, isAdmin ? '1' : '0');
+              window.dispatchEvent(new CustomEvent('adminStateReady', { detail: { isAdmin } }));
+            })
+            .catch(() => {
+              window.__isAdmin = false;
+              document.body.dataset.isAdmin = '0';
+              window.dispatchEvent(new CustomEvent('adminStateReady', { detail: { isAdmin: false } }));
+            });
         } else {
           userNameEl.textContent = '未登入';
         }
@@ -295,6 +393,143 @@
       if (buNameEl) {
         const buName = localStorage.getItem('erpLoginBUName');
         buNameEl.textContent = buName || '未指定';
+      }
+
+      const getItemIdFromUrl = () => {
+        const path = (location.pathname || '').toString();
+        const m1 = path.match(/\/DynamicTemplate\/Paper3L\/([^\/]+)/i);
+        if (m1 && m1[1]) return decodeURIComponent(m1[1]);
+        const m2 = path.match(/\/DynamicTemplate\/Paper\/([^\/]+)/i);
+        if (m2 && m2[1]) return decodeURIComponent(m2[1]);
+        const m3 = path.match(/\/CUR\/[^\/]+\/([^\/]+)/i);
+        if (m3 && m3[1]) return decodeURIComponent(m3[1]);
+        const last = path.split('/').filter(Boolean).pop() || '';
+        if (/^[A-Za-z]{2,}\d{3,}$/i.test(last)) return decodeURIComponent(last);
+        return '';
+      };
+
+      const btnNotes = document.getElementById('__btnItemNotes');
+      const btnSave = document.getElementById('itemNotesSave');
+      const btnNotesUser = document.getElementById('__btnItemNotesUser');
+      const btnSaveUser = document.getElementById('itemNotesUserSave');
+      if (btnNotes) {
+        btnNotes.addEventListener('click', async () => {
+          const itemId = (window._itemId || getItemIdFromUrl() || '').toString().trim();
+          if (!itemId) {
+            const titleEl = document.getElementById('itemNotesTitle');
+            const textEl = document.getElementById('itemNotesText');
+            if (titleEl) titleEl.textContent = '功能說明';
+            if (textEl) textEl.value = '';
+            const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('itemNotesModal'));
+            modal.show();
+            return;
+          }
+
+          const fetcher = window.busyFetch || fetch.bind(window);
+          const resp = await fetcher(`/api/ItemNotes?itemId=${encodeURIComponent(itemId)}`);
+          if (!resp.ok) {
+            if (window.Swal) Swal.fire({ icon: 'error', title: '載入失敗' });
+            return;
+          }
+          const data = await resp.json().catch(() => ({}));
+          const notes = (data?.notes ?? '').toString();
+
+          const titleEl = document.getElementById('itemNotesTitle');
+          const textEl = document.getElementById('itemNotesText');
+          if (titleEl) titleEl.textContent = `${itemId} 功能說明`;
+          if (textEl) textEl.value = notes || '（無說明）';
+
+          const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('itemNotesModal'));
+          modal.show();
+        });
+      }
+
+      if (btnSave) {
+        btnSave.addEventListener('click', async () => {
+          const itemId = (window._itemId || getItemIdFromUrl() || '').toString().trim();
+          if (!itemId) {
+            if (window.Swal) Swal.fire({ icon: 'info', title: '找不到作業代號' });
+            return;
+          }
+          const textEl = document.getElementById('itemNotesText');
+          const notes = (textEl?.value ?? '').toString();
+          const fetcher = window.busyFetch || fetch.bind(window);
+          const resp = await fetcher('/api/ItemNotes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ itemId, notes })
+          }, '儲存中…');
+          if (!resp.ok) {
+            if (window.Swal) Swal.fire({ icon: 'error', title: '儲存失敗' });
+            return;
+          }
+          if (window.Swal) Swal.fire({ icon: 'success', title: '儲存完成', timer: 1000, showConfirmButton: false });
+        });
+      }
+
+      if (btnNotesUser) {
+        btnNotesUser.addEventListener('click', async () => {
+          const itemId = (window._itemId || getItemIdFromUrl() || '').toString().trim();
+          const userId = (localStorage.getItem('erpLoginUserId') || window._userId || '').toString().trim();
+          if (!userId) {
+            if (window.Swal) Swal.fire({ icon: 'info', title: '找不到使用者' });
+            return;
+          }
+          if (!itemId) {
+            const titleEl = document.getElementById('itemNotesUserTitle');
+            const textEl = document.getElementById('itemNotesUserText');
+            if (titleEl) titleEl.textContent = '個人作業說明';
+            if (textEl) textEl.value = '';
+            const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('itemNotesUserModal'));
+            modal.show();
+            return;
+          }
+
+          const fetcher = window.busyFetch || fetch.bind(window);
+          const resp = await fetcher(`/api/ItemNotesUser?itemId=${encodeURIComponent(itemId)}&userId=${encodeURIComponent(userId)}`);
+          if (!resp.ok) {
+            if (window.Swal) Swal.fire({ icon: 'error', title: '載入失敗' });
+            return;
+          }
+          const data = await resp.json().catch(() => ({}));
+          const notes = (data?.notes ?? '').toString();
+
+          const titleEl = document.getElementById('itemNotesUserTitle');
+          const textEl = document.getElementById('itemNotesUserText');
+          if (titleEl) titleEl.textContent = `${itemId} 個人作業說明`;
+          if (textEl) textEl.value = notes || '（無說明）';
+
+          const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('itemNotesUserModal'));
+          modal.show();
+        });
+      }
+
+      if (btnSaveUser) {
+        btnSaveUser.addEventListener('click', async () => {
+          const itemId = (window._itemId || getItemIdFromUrl() || '').toString().trim();
+          const userId = (localStorage.getItem('erpLoginUserId') || window._userId || '').toString().trim();
+          if (!userId) {
+            if (window.Swal) Swal.fire({ icon: 'info', title: '找不到使用者' });
+            return;
+          }
+          if (!itemId) {
+            if (window.Swal) Swal.fire({ icon: 'info', title: '找不到作業代號' });
+            return;
+          }
+          const textEl = document.getElementById('itemNotesUserText');
+          const notes = (textEl?.value ?? '').toString();
+          const fetcher = window.busyFetch || fetch.bind(window);
+          const resp = await fetcher('/api/ItemNotesUser', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ itemId, userId, notes })
+          }, '儲存中…');
+          if (!resp.ok) {
+            if (window.Swal) Swal.fire({ icon: 'error', title: '儲存失敗' });
+            return;
+          }
+          if (window.Swal) Swal.fire({ icon: 'success', title: '儲存完成', timer: 1000, showConfirmButton: false });
+        });
       }
     })();
   </script>
@@ -325,6 +560,7 @@
           const isMouse = ev.pointerType === "mouse" || ev.pointerType === undefined;
           if (isMouse && ev.button !== 0) return;
           if (ev.target?.closest("button, input, select, textarea, a")) return;
+          if (ev.target?.closest(".no-modal-drag")) return;
           const rect = dialog.getBoundingClientRect();
           dialog.style.position = "fixed";
           dialog.style.margin = "0";

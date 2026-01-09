@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
 using System;
+using System.Data;
 
 [ApiController]
 [Route("api/[controller]")]
@@ -122,6 +124,35 @@ public class LoginController : ControllerBase
             return NotFound(new { error = "user not found" });
 
         return Ok(user);
+    }
+
+    [HttpGet("UserAdmin")]
+    public async Task<IActionResult> UserAdmin([FromQuery] string userId)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+            return BadRequest(new { error = "userId is required" });
+
+        try
+        {
+            var cs = _context.Database.GetDbConnection().ConnectionString;
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(@"
+                IF COL_LENGTH('CURdUsers','IsAdmin') IS NULL
+                    SELECT 0
+                ELSE
+                    SELECT ISNULL(IsAdmin, 0)
+                    FROM CURdUsers WITH (NOLOCK)
+                    WHERE UPPER(UserId) = UPPER(@userId)", conn);
+            cmd.Parameters.Add(new SqlParameter("@userId", SqlDbType.VarChar, 50) { Value = userId });
+            var raw = await cmd.ExecuteScalarAsync();
+            var isAdmin = raw != null && raw != DBNull.Value && Convert.ToInt32(raw) == 1;
+            return Ok(new { userId, isAdmin });
+        }
+        catch
+        {
+            return Ok(new { userId, isAdmin = false });
+        }
     }
 
     [HttpGet("UserList")]

@@ -126,4 +126,14 @@ public partial class CurdSysItem
     public string? FlowTotalField { get; set; }
 
     public string? FlowCondField3 { get; set; }
+
+    public string? SWebMenuId { get; set; }
+
+    public string? SWebSuperMenuId { get; set; }
+
+    public long? IWebMenuOrderSeq { get; set; }
+
+    public int? IWebMenuLevel { get; set; }
+
+    public int? IWebEnable { get; set; }
 }
