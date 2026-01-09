@@ -183,12 +183,12 @@ namespace PcbErpApi.Pages.EMOdProdInfo
                     "EMOdProdMixedDtl",
                     new [] { "PartNum", "Revision" }
                 ),
-                // 暫停記錄
+                // 暫停記錄（暫停發料備註）
                 new DetailTab(
                     "haltlog",
                     "暫停記錄",
-                    "EMOdProdLog",
-                    "EMOdProdLog",
+                    "EMOdVProdHoldMemo",
+                    "EMOdVProdHoldMemo",
                     new [] { "PartNum", "Revision" }
                 ),
                 // 修改記錄

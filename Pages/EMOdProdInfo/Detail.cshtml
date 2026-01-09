@@ -47,13 +47,28 @@ else
                 </div>
             </div>
 
-            <!-- 內部資料 -->
+            <!-- 內部資料 (暫停記錄) -->
             <div class="card shadow-sm border-0 rounded" style="height: 250px; display: flex; flex-direction: column;">
                 <div class="card-header text-white fw-bold py-2" style="background-color: #17a2b8; flex-shrink: 0;">
                     內部資料
                 </div>
-                <div class="card-body p-2" id="submit-history-container" style="flex: 1; overflow-y: auto; font-size: 12px;">
-                    <div class="text-center text-muted py-2">載入中...</div>
+                <div class="card-body p-0" style="flex: 1; overflow: auto;">
+                    <div class="table-responsive" style="height: 100%;">
+                        <table class="table table-sm table-hover align-middle mb-0"
+                               id="grid-haltlog-sidebar"
+                               data-table-name="EMOdProdLog"
+                               data-dict-name="EMOdProdLog"
+                               data-dict-table="EMOdProdLog"
+                               data-key-fields="PartNum,Revision,SerialNum"
+                               style="font-size: 11px;">
+                            <thead class="table-light">
+                                <tr><th class="text-center text-muted">載入中...</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td class="text-center text-muted py-2">載入中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -566,125 +581,38 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 載入送審歷史資料
-  async function loadSubmitHistory(row) {
-    const container = document.getElementById('submit-history-container');
-    if (!container) return;
+  // 載入左下角內部資料 (暫停記錄) - 使用與右側相同的表格渲染邏輯
+  async function loadSidebarHaltLog() {
+    const table = document.getElementById('grid-haltlog-sidebar');
+    if (!table) return;
 
-    // 查詢歷史記錄資料（EMOdProdLog）
+    const tableName = 'EMOdProdLog';
+    const dictName = 'EMOdProdLog';
+
+    // 建立查詢參數
     const qs = new URLSearchParams();
     qs.append('keyNames', 'PartNum');
     qs.append('keyValues', currentMasterKeys.PartNum || currentMasterKeys.partnum || '');
     qs.append('keyNames', 'Revision');
     qs.append('keyValues', currentMasterKeys.Revision || currentMasterKeys.revision || '');
 
-    const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent('EMOdProdLog')}&${qs.toString()}`;
+    const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&${qs.toString()}`;
 
     try {
-      // 同時載入資料和字典（用於 LOOKUP 轉換）
-      const [dataResponse, dictResponse] = await Promise.all([
-        fetch(url).then(r => r.json()),
-        fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent('EMOdProdLog')}`).then(r => r.json())
+      // 同時載入字典和資料
+      const [dict, rows] = await Promise.all([
+        getDict(dictName),
+        fetch(url).then(r => r.json())
       ]);
 
-      const rows = dataResponse || [];
-      const dict = dictResponse || [];
-
-      console.log('=== EMOdProdLog Dictionary ===');
-      console.log('All fields:', dict.map(f => ({ FieldName: f.FieldName, LookupTable: f.LookupTable, LookupKey: f.LookupKey, LookupValue: f.LookupValue })));
-      console.log('IOType field:', dict.find(f => f.FieldName === 'IOType'));
-      console.log('AftStatus field:', dict.find(f => f.FieldName === 'AftStatus'));
-
-      if (!rows || rows.length === 0) {
-        container.innerHTML = '<div class="text-center text-muted py-2">無歷史資料</div>';
-        return;
-      }
-
-      // 建立 LOOKUP 快取：{ FieldName: { LookupTable, LookupKey, LookupValue } }
-      const lookupFields = {};
-      dict.forEach(field => {
-        if (field.LookupTable && field.LookupKey && field.LookupValue) {
-          lookupFields[field.FieldName] = {
-            table: field.LookupTable,
-            key: field.LookupKey,
-            value: field.LookupValue
-          };
-        }
-      });
-
-      // 需要展開的欄位
-      const fieldsToExpand = ['IOType', 'AftStatus'];
-      const lookupCache = {};
-
-      // 載入所有需要的 LOOKUP 資料
-      const lookupPromises = fieldsToExpand
-        .filter(fieldName => lookupFields[fieldName])
-        .map(async fieldName => {
-          const lookup = lookupFields[fieldName];
-          try {
-            const response = await fetch(`/api/CommonTable/All?table=${encodeURIComponent(lookup.table)}`);
-            const data = await response.json();
-            lookupCache[fieldName] = data || [];
-          } catch (err) {
-            console.error(`Failed to load lookup for ${fieldName}:`, err);
-            lookupCache[fieldName] = [];
-          }
-        });
-
-      await Promise.all(lookupPromises);
-
-      // 轉換函數：根據 LOOKUP 配置將代碼轉換為名稱
-      function getLookupValue(fieldName, code) {
-        if (!lookupFields[fieldName] || !lookupCache[fieldName]) return code;
-
-        const lookup = lookupFields[fieldName];
-        const lookupData = lookupCache[fieldName];
-        const record = lookupData.find(item => {
-          const keyValue = item[lookup.key] ?? item[lookup.key.toLowerCase()];
-          return String(keyValue) === String(code);
-        });
-
-        if (record) {
-          return record[lookup.value] ?? record[lookup.value.toLowerCase()] ?? code;
-        }
-        return code;
-      }
-
-      // 根據舊系統格式顯示多筆歷史記錄
-      container.innerHTML = '<table style="width: 100%; font-size: 11px; border-collapse: collapse;">' +
-        '<thead style="background-color: #17a2b8; color: white;">' +
-        '<tr>' +
-        '<th style="padding: 4px 6px; text-align: left; border: 1px solid #dee2e6;">作業</th>' +
-        '<th style="padding: 4px 6px; text-align: left; border: 1px solid #dee2e6;">狀態</th>' +
-        '<th style="padding: 4px 6px; text-align: left; border: 1px solid #dee2e6;">異動日期</th>' +
-        '<th style="padding: 4px 6px; text-align: left; border: 1px solid #dee2e6;">使用者</th>' +
-        '</tr>' +
-        '</thead>' +
-        '<tbody>' +
-        rows.map((record, index) => {
-          // 使用 LOOKUP 轉換
-          const ioType = record.IOType || record.iotype || '';
-          const aftStatus = record.AftStatus || record.aftstatus || '';
-          const ioTypeName = getLookupValue('IOType', ioType);
-          const aftStatusName = getLookupValue('AftStatus', aftStatus);
-          const buildDate = formatDateOnly(record.BuildDate || record.builddate);
-          const userId = record.UserId || record.userid || '';
-          const bgColor = index % 2 === 0 ? '#ffffff' : '#f8f9fa';
-
-          return `
-            <tr style="background-color: ${bgColor};">
-              <td style="padding: 4px 6px; border: 1px solid #dee2e6;">${ioTypeName}</td>
-              <td style="padding: 4px 6px; border: 1px solid #dee2e6;">${aftStatusName}</td>
-              <td style="padding: 4px 6px; border: 1px solid #dee2e6;">${buildDate}</td>
-              <td style="padding: 4px 6px; border: 1px solid #dee2e6;">${userId}</td>
-            </tr>
-          `;
-        }).join('') +
-        '</tbody>' +
-        '</table>';
+      // 使用與右側相同的 buildTable 函數來建立表格（自動處理 lookup）
+      await buildTable('haltlog-sidebar', dict, rows);
     } catch (err) {
-      console.error('Load submit history error:', err);
-      container.innerHTML = '<div class="text-center text-muted py-2">載入失敗</div>';
+      console.error('Load sidebar halt log error:', err);
+      const tbody = table.querySelector('tbody');
+      if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="100" class="text-center text-danger py-2">載入失敗</td></tr>';
+      }
     }
   }
 
@@ -740,10 +668,23 @@ document.addEventListener('DOMContentLoaded', () => {
     '3': '已核准'
   };
 
-  function renderHeaderFields(dict, row) {
+  async function renderHeaderFields(dict, row) {
     const row1Container = document.getElementById('header-row-1');
     const row2Container = document.getElementById('header-row-2');
     if (!row1Container || !row2Container) return;
+
+    // 載入所有欄位的 Lookup Maps
+    const headerFields = [...headerRow1Fields, ...headerRow2Fields]
+      .map(fn => dict.find(f => f.FieldName === fn))
+      .filter(f => f);
+
+    const lookupMaps = {};
+    const ocxMaps = {};
+
+    for (const field of headerFields) {
+      lookupMaps[field.FieldName] = await loadLookup(field);
+      ocxMaps[field.FieldName] = await loadOCXLookup(field);
+    }
 
     // === 第一行 ===
     let row1Html = '';
@@ -751,11 +692,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // 第一行的一般欄位
     const row1Fields = headerRow1Fields.map(fn => dict.find(f => f.FieldName === fn)).filter(f => f);
     row1Fields.forEach(f => {
-      const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+      let rawValue = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+      let displayValue = rawValue;
+
+      // 套用 Lookup
+      if (ocxMaps[f.FieldName] && rawValue) {
+        displayValue = ocxMaps[f.FieldName][rawValue] ?? rawValue;
+      } else if (lookupMaps[f.FieldName] && rawValue) {
+        displayValue = lookupMaps[f.FieldName][rawValue] ?? rawValue;
+      }
+
       row1Html += `
         <div class="d-flex align-items-center" style="margin-right: 1rem;">
           <label class="mb-0 me-2" style="white-space: nowrap; font-size: 13px; font-weight: 600; color: #0066cc;">${f.DisplayLabel || f.FieldName}</label>
-          <input type="text" class="form-control form-control-sm bg-white" style="width: 150px; font-size: 13px; padding: 0.25rem 0.5rem; height: 28px;" value="${val}" readonly>
+          <input type="text" class="form-control form-control-sm bg-white" style="width: 150px; font-size: 13px; padding: 0.25rem 0.5rem; height: 28px;" value="${displayValue}" readonly>
         </div>
       `;
     });
@@ -781,27 +731,36 @@ document.addEventListener('DOMContentLoaded', () => {
     let row2Html = '';
 
     const row2Fields = headerRow2Fields.map(fn => dict.find(f => f.FieldName === fn)).filter(f => f);
-    row2Fields.forEach(f => {
-      let val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+    for (const f of row2Fields) {
+      let rawValue = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+      let displayValue = rawValue;
 
       // 特殊處理：StatusName 需要從 Status 欄位 lookup
       if (f.FieldName === 'StatusName') {
         const statusCode = row['Status'] ?? row['status'] ?? '';
-        val = statusLookupMap[statusCode.toString()] || statusCode.toString();
+        displayValue = statusLookupMap[statusCode.toString()] || statusCode.toString();
+      }
+      // 套用 Lookup（除了 StatusName，因為已特殊處理）
+      else {
+        if (ocxMaps[f.FieldName] && rawValue) {
+          displayValue = ocxMaps[f.FieldName][rawValue] ?? rawValue;
+        } else if (lookupMaps[f.FieldName] && rawValue) {
+          displayValue = lookupMaps[f.FieldName][rawValue] ?? rawValue;
+        }
       }
 
       // 特殊處理：DesignDate 只顯示年月日
-      if (f.FieldName === 'DesignDate' && val) {
-        val = formatDateOnly(val);
+      if (f.FieldName === 'DesignDate' && displayValue) {
+        displayValue = formatDateOnly(displayValue);
       }
 
       row2Html += `
         <div class="d-flex align-items-center" style="margin-right: 1rem;">
           <label class="mb-0 me-2" style="white-space: nowrap; font-size: 13px; font-weight: 600; color: #0066cc;">${f.DisplayLabel || f.FieldName}</label>
-          <input type="text" class="form-control form-control-sm bg-white" style="width: 150px; font-size: 13px; padding: 0.25rem 0.5rem; height: 28px;" value="${val}" readonly>
+          <input type="text" class="form-control form-control-sm bg-white" style="width: 150px; font-size: 13px; padding: 0.25rem 0.5rem; height: 28px;" value="${displayValue}" readonly>
         </div>
       `;
-    });
+    }
 
     row2Container.innerHTML = row2Html;
   }
@@ -996,16 +955,137 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function buildTable(tabKey, dict, rows) {
+  // ========== 通用 Lookup 功能 ==========
+  const LOOKUP_CACHE = {};
+  const OCX_CACHE = {};
+
+  // 載入一般 Lookup（實體欄位）
+  async function loadLookup(field) {
+    if (!field.LookupTable || !field.LookupKeyField || !field.LookupResultField) {
+      return null;
+    }
+
+    const key = `${field.LookupTable}|${field.LookupKeyField}|${field.LookupResultField}`;
+    if (LOOKUP_CACHE[key]) return LOOKUP_CACHE[key];
+
+    try {
+      const url = `/api/TableFieldLayout/LookupData`
+        + `?table=${encodeURIComponent(field.LookupTable)}`
+        + `&key=${encodeURIComponent(field.LookupKeyField)}`
+        + `&result=${encodeURIComponent(field.LookupResultField)}`;
+
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const rows = await response.json();
+      const map = {};
+      rows.forEach(r => {
+        map[r.key] = r.result0;
+      });
+
+      LOOKUP_CACHE[key] = map;
+      return map;
+    } catch (err) {
+      console.error(`Failed to load lookup for ${field.FieldName}:`, err);
+      LOOKUP_CACHE[key] = null;
+      return null;
+    }
+  }
+
+  // 載入 OCX Lookup（虛擬欄位）
+  async function loadOCXLookup(field) {
+    if (!field.OCXLKTableName || !field.KeyFieldName || !field.OCXLKResultName) {
+      return null;
+    }
+
+    const key = `${field.OCXLKTableName}|${field.KeyFieldName}|${field.OCXLKResultName}`;
+    if (OCX_CACHE[key]) return OCX_CACHE[key];
+
+    try {
+      const url = `/api/TableFieldLayout/LookupData`
+        + `?table=${encodeURIComponent(field.OCXLKTableName)}`
+        + `&key=${encodeURIComponent(field.KeyFieldName)}`
+        + `&result=${encodeURIComponent(field.OCXLKResultName)}`;
+
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const rows = await response.json();
+      const map = {};
+      rows.forEach(r => {
+        map[r.key] = r.result0;
+      });
+
+      OCX_CACHE[key] = map;
+      return map;
+    } catch (err) {
+      console.error(`Failed to load OCX lookup for ${field.FieldName}:`, err);
+      OCX_CACHE[key] = null;
+      return null;
+    }
+  }
+
+  // 格式化顯示值
+  function formatCellValue(value, field) {
+    if (value == null || value === '') return '';
+
+    const dataType = (field.DataType || '').toLowerCase();
+
+    // 日期格式化
+    if (dataType.includes('date') || dataType.includes('time')) {
+      try {
+        const date = new Date(value);
+        if (!isNaN(date.getTime())) {
+          return date.toLocaleDateString('zh-TW', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+          }).replace(/\//g, '/');
+        }
+      } catch {}
+    }
+
+    // 數字格式化
+    if (dataType.includes('int') || dataType.includes('decimal') || dataType.includes('numeric')) {
+      const num = Number(value);
+      if (!isNaN(num)) {
+        return num.toLocaleString();
+      }
+    }
+
+    return String(value);
+  }
+
+  // 建立表格（支援自動 Lookup）
+  async function buildTable(tabKey, dict, rows) {
     const table = document.getElementById(`grid-${tabKey}`);
     if (!table) return;
     const thead = table.querySelector('thead');
     const tbody = table.querySelector('tbody');
     if (!thead || !tbody) return;
 
-    // Build header
-    const visibleFields = dict.filter(f => f.Visible === 1).sort((a, b) => (a.SerialNum || 0) - (b.SerialNum || 0));
-    thead.innerHTML = '<tr>' + visibleFields.map(f => `<th>${f.DisplayLabel || f.FieldName}</th>`).join('') + '</tr>';
+    // Debug: 查看字典中每个字段的 Visible 值和类型
+    console.log(`[${tabKey}] 字段 Visible 状态:`, dict.map(f => ({
+      FieldName: f.FieldName,
+      Visible: f.Visible,
+      VisibleType: typeof f.Visible,
+      DisplayLabel: f.DisplayLabel
+    })));
+
+    // Build header - 使用宽松比较 (==) 而不是严格比较 (===)
+    // 因为 API 可能返回字符串 "1" 或数字 1
+    const visibleFields = dict.filter(f => (f.Visible ?? 1) == 1).sort((a, b) => (a.SerialNum || 0) - (b.SerialNum || 0));
+
+    console.log(`[${tabKey}] 过滤后的可见字段:`, visibleFields.map(f => f.FieldName));
+
+    // 构建表头，设置列宽
+    thead.innerHTML = '<tr>' + visibleFields.map(f => {
+      // 计算列宽：DisplaySize 或 iFieldWidth，一字宽 10px
+      const width = Number(f.DisplaySize || f.iFieldWidth || 0);
+      const widthPx = width > 0 ? width * 10 : 100; // 默认 100px
+      const widthStyle = `style="width: ${widthPx}px; min-width: ${widthPx}px;"`;
+      return `<th ${widthStyle} data-field="${f.FieldName}">${f.DisplayLabel || f.FieldName}</th>`;
+    }).join('') + '</tr>';
 
     // Build body
     if (!rows || rows.length === 0) {
@@ -1013,10 +1093,48 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    // 載入所有欄位的 Lookup Maps
+    const lookupMaps = {};
+    const ocxMaps = {};
+
+    console.log(`[${tabKey}] 開始載入 Lookup 資料...`);
+    for (const field of visibleFields) {
+      lookupMaps[field.FieldName] = await loadLookup(field);
+      ocxMaps[field.FieldName] = await loadOCXLookup(field);
+
+      if (lookupMaps[field.FieldName]) {
+        console.log(`[${tabKey}] ${field.FieldName}: 一般 Lookup 已載入 (${Object.keys(lookupMaps[field.FieldName]).length} 筆)`);
+      }
+      if (ocxMaps[field.FieldName]) {
+        console.log(`[${tabKey}] ${field.FieldName}: OCX Lookup 已載入 (${Object.keys(ocxMaps[field.FieldName]).length} 筆)`);
+      }
+    }
+
+    // 渲染表格資料（套用 Lookup）
     tbody.innerHTML = rows.map(row => {
       const cells = visibleFields.map(f => {
-        const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
-        return `<td>${val}</td>`;
+        let rawValue = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+        let displayValue = rawValue;
+
+        // 優先使用 OCX Lookup（虛擬欄位）
+        if (ocxMaps[f.FieldName] && rawValue) {
+          const lookupResult = ocxMaps[f.FieldName][rawValue];
+          if (lookupResult != null) {
+            displayValue = lookupResult;
+          }
+        }
+        // 其次使用一般 Lookup（實體欄位）
+        else if (lookupMaps[f.FieldName] && rawValue) {
+          const lookupResult = lookupMaps[f.FieldName][rawValue];
+          if (lookupResult != null) {
+            displayValue = lookupResult;
+          }
+        }
+
+        // 格式化顯示
+        displayValue = formatCellValue(displayValue, f);
+
+        return `<td data-field="${f.FieldName}" data-raw="${rawValue}">${displayValue}</td>`;
       }).join('');
       return `<tr>${cells}</tr>`;
     }).join('');
@@ -1044,6 +1162,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Show controls
     const controls = wrapper?.parentElement?.querySelector('.tab-local-controls');
     if (controls) controls.classList.remove('d-none');
+
+    console.log(`[${tabKey}] 表格建立完成，共 ${rows.length} 筆資料`);
   }
 
   function loadDetailTab(tabBtn) {
@@ -1134,8 +1254,8 @@ document.addEventListener('DOMContentLoaded', () => {
       // 載入層別資料
       loadLayerPress();
 
-      // 載入送審歷史
-      loadSubmitHistory(masterData);
+      // 載入左下角內部資料 (暫停記錄) - 使用與右側相同的表格渲染邏輯
+      loadSidebarHaltLog();
 
       // Render all master tabs
       const masterTabs = document.querySelectorAll('#master-tabs [data-tab-key]');
@@ -1352,6 +1472,26 @@ document.addEventListener('DOMContentLoaded', () => {
 .header-checkbox:disabled + label {
   color: #000000 !important;
   opacity: 1 !important;
+}
+
+/* 表格表頭不換行 */
+.table thead th {
+  white-space: nowrap !important;
+}
+
+/* 表格內容不換行（可選，如果也希望表格內容不換行）*/
+.table tbody td {
+  white-space: nowrap !important;
+}
+
+/* 表格使用固定布局，根据列宽设置显示 */
+.table-responsive table {
+  table-layout: auto !important;
+}
+
+/* 确保表格不会自动拉伸填满容器 */
+.table-responsive {
+  overflow-x: auto !important;
 }
 </style>
 
