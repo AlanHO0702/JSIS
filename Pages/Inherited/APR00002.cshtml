@@ -1,0 +1,111 @@
+@*
+    APR00002 單據的確認、退審、作廢前後處理 Hook
+
+    這個檔案會在 PaperDetail.cshtml 中自動載入（如果 ItemId = APR00002）
+    可以在確認、退審、作廢等按鈕執行前後執行自訂邏輯
+*@
+
+<script>
+// 初始化 InheritedActionHooks 物件
+window.InheritedActionHooks = window.InheritedActionHooks || {};
+
+// 為 APR00002 註冊 Hooks
+window.InheritedActionHooks['APR00002'] = {
+
+    /**
+     * 確認前執行 SPOdEInvTypeChk
+     * @@param {object} context - { tableName, paperNum, userId }
+     * @@returns {boolean|Promise<boolean>} - 回傳 false 會中止確認操作
+     */
+    beforeConfirm: async (context) => {
+        console.log('[APR00002] beforeConfirm - 執行 SPOdEInvTypeChk', context);
+
+        try {
+            // 執行 SP：SPOdEInvTypeChk
+            const response = await fetch('/api/StoredProc/exec', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    Key: 'SPOdEInvTypeChk',
+                    Args: {
+                        PaperId: context.tableName,
+                        PaperNum: context.paperNum,
+                        Action: 1
+                    }
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                await Swal.fire({
+                    icon: 'error',
+                    title: 'SP 執行失敗',
+                    text: errorText
+                });
+                return false; // 中止確認
+            }
+
+            const result = await response.json();
+            console.log('[APR00002] SPOdEInvTypeChk 執行成功', result);
+
+            // SP 執行成功，繼續確認流程
+            return true;
+
+        } catch (err) {
+            console.error('[APR00002] SPOdEInvTypeChk 執行錯誤:', err);
+            await Swal.fire({
+                icon: 'error',
+                title: 'SP 執行錯誤',
+                text: err.message
+            });
+            return false; // 中止確認
+        }
+    },
+
+    /**
+     * 確認後執行
+     * @@param {object} context - { tableName, paperNum, userId, result }
+     */
+    afterConfirm: async (context) => {
+        console.log('[APR00002] afterConfirm', context);
+    },
+
+    /**
+     * 退審前執行
+     * @@param {object} context - { tableName, paperNum, userId }
+     * @@returns {boolean|Promise<boolean>} - 回傳 false 會中止退審操作
+     */
+    beforeCancel: async (context) => {
+        console.log('[APR00002] beforeCancel', context);
+        return true;
+    },
+
+    /**
+     * 退審後執行
+     * @@param {object} context - { tableName, paperNum, userId, result }
+     */
+    afterCancel: async (context) => {
+        console.log('[APR00002] afterCancel', context);
+    },
+
+    /**
+     * 作廢前執行
+     * @@param {object} context - { tableName, paperNum, userId }
+     * @@returns {boolean|Promise<boolean>} - 回傳 false 會中止作廢操作
+     */
+    beforeDelete: async (context) => {
+        console.log('[APR00002] beforeDelete', context);
+        return true;
+    },
+
+    /**
+     * 作廢後執行
+     * @@param {object} context - { tableName, paperNum, userId, result }
+     */
+    afterDelete: async (context) => {
+        console.log('[APR00002] afterDelete', context);
+    }
+};
+
+console.log('[APR00002] Inherited Hooks 已註冊');
+</script>
