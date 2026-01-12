@@ -1,4 +1,4 @@
-﻿// /wwwroot/js/fieldDictModal.js
+// /wwwroot/js/fieldDictModal.js
 
 (function () {
 
@@ -638,7 +638,7 @@
           'iLabTop', 'iLabLeft', 'iLabWidth', 'iLabHeight',
           'iFieldTop', 'iFieldLeft', 'iFieldWidth', 'iFieldHeight',
           'LookupTable', 'LookupKeyField', 'LookupResultField',
-          'IsNotesField',
+          'IsNotesField', 'IsMoneyField',
 
           'OCXLKTableName',
           'OCXLKResultName'
@@ -680,7 +680,7 @@
                 <td><input type="text" class="form-control form-control-sm fdm-keyfield" value="${m.KeyFieldName ?? ''}"></td>
                 <td><input type="text" class="form-control form-control-sm fdm-keyself" value="${m.KeySelfName ?? ''}"></td>
                 <td class="text-center">
-                  <button type="button" class="btn btn-outline-danger btn-sm fdm-del-keymap" title="?芷">嚗?/button>
+                  <button type="button" class="btn btn-outline-danger btn-sm fdm-del-keymap" title="刪除">刪除</button>
                 </td>
               </tr>
           `).join('');

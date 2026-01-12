@@ -607,6 +607,7 @@ SELECT COLUMN_NAME, DATA_TYPE
 
         -- 其他（若你的表裡有）
         f.IsNotesField,
+        f.IsMoneyField,
 
         -- ★ 第二層 OCX Lookup（新增）
         f.OCXLKTableName,
@@ -681,6 +682,7 @@ SELECT COLUMN_NAME, DATA_TYPE
                 LookupKeyField  = rd["LookupKeyField"]?.ToString() ?? "",
                 LookupResultField = rd["LookupResultField"]?.ToString() ?? "",
                 IsNotesField    = rd["IsNotesField"]?.ToString() ?? "",
+                IsMoneyField    = rd["IsMoneyField"]?.ToString() ?? "",
 
                 OCXLKTableName  = rd["OCXLKTableName"]?.ToString() ?? "",
                 OCXLKResultName = rd["OCXLKResultName"]?.ToString() ?? "",
