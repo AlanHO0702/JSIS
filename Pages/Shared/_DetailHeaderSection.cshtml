@@ -112,6 +112,36 @@
             ReportSpName = ViewData["ReportSpName"]?.ToString() ?? ""   // 👈 從外層再傳進來
         })
     </div>
+    <div class="toolbar-right">
+        <div class="btn-group">
+            <button id="btnToolbarActions" type="button" class="btn toolbar-btn dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                功能
+            </button>
+            <ul class="dropdown-menu">
+                <li><button id="btnEditNotes" class="dropdown-item" type="button">改備註</button></li>
+                <li><button id="btnEditMoney" class="dropdown-item" type="button">改金流</button></li>
+            </ul>
+        </div>
+    </div>
+    </div>
+</div>
+
+<div class="modal fade" id="editNotesMoneyModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editNotesMoneyTitle">修改</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="edit-notesmoney-body" id="editNotesMoneyBody"></div>
+                <div class="text-muted small mt-2" id="editNotesMoneyHint"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" id="btnEditNotesMoneySave">儲存</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -140,16 +170,48 @@
     .replace(/\"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-  const readHeaderValue = (fieldName) => {
+  const findHeaderFieldControl = (fieldName) => {
     const target = (fieldName || '').toLowerCase();
-    if (!target) return '';
+    if (!target) return null;
     const fields = document.querySelectorAll('form.erp-header-form input[name], form.erp-header-form textarea[name], form.erp-header-form select[name]');
     for (const el of fields) {
       const name = (el.getAttribute('name') || '').toLowerCase();
-      if (name === target) return (el.value ?? '').toString().trim();
+      if (name === target) return el;
     }
-    return '';
+    const nodes = document.querySelectorAll('form.erp-header-form .draggable-field[data-field]');
+    for (const node of nodes) {
+      const key = (node.getAttribute('data-field') || '').toLowerCase();
+      if (key !== target) continue;
+      const el = node.querySelector('input, textarea, select');
+      if (el) return el;
+    }
+    return null;
   };
+
+  const readHeaderFieldInfo = (fieldName) => {
+    const el = findHeaderFieldControl(fieldName);
+    if (!el) return { value: '', isCheckbox: false };
+    if (el.type === 'checkbox') return { value: el.checked ? '1' : '0', isCheckbox: true };
+    return { value: (el.value ?? '').toString().trim(), isCheckbox: false };
+  };
+
+  const readHeaderValue = (fieldName) => {
+    return readHeaderFieldInfo(fieldName).value;
+  };
+
+  async function fetchHeaderRow(dictTable, paperNum) {
+    const tn = cleanTableName(dictTable);
+    if (!tn || !paperNum) return null;
+    try {
+      const url = `/api/DynamicTable/ByPaperNum?table=${encodeURIComponent(tn)}&paperNum=${encodeURIComponent(paperNum)}&top=1`;
+      const res = await fetch(url, withJwtHeaders());
+      if (!res.ok) return null;
+      const rows = await res.json();
+      return (rows && rows.length) ? rows[0] : null;
+    } catch {
+      return null;
+    }
+  }
 
   const readPaperNum = () => {
     const v = (window._paperNum || '').toString().trim();
@@ -868,6 +930,460 @@
     }
   };
 
+  const editFieldMetaCache = new Map();
+  const HEADER_KEY_FIELD = 'PaperNum';
+
+  function cleanTableName(t) {
+    return (t || '').toString().replace(/^dbo\./i, '').trim().toLowerCase();
+  }
+
+  const columnTypesCache = new Map();
+  const finishedCache = new Map();
+
+  async function fetchColumnTypes(dictTable) {
+    const tn = cleanTableName(dictTable);
+    if (!tn) return new Set();
+    if (columnTypesCache.has(tn)) return columnTypesCache.get(tn);
+    try {
+      const res = await fetch(`/api/TableFieldLayout/ColumnTypes?table=${encodeURIComponent(tn)}`, withJwtHeaders());
+      if (!res.ok) {
+        const empty = new Set();
+        columnTypesCache.set(tn, empty);
+        return empty;
+      }
+      const data = await res.json();
+      const cols = new Set();
+      (data?.columns || []).forEach(c => {
+        const name = (c?.ColumnName || c?.columnName || '').toString().trim().toLowerCase();
+        if (name) cols.add(name);
+      });
+      columnTypesCache.set(tn, cols);
+      return cols;
+    } catch {
+      const empty = new Set();
+      columnTypesCache.set(tn, empty);
+      return empty;
+    }
+  }
+
+  async function fetchFinishedMap(dictTable, paperNum) {
+    const tn = cleanTableName(dictTable);
+    const key = `${tn}::${paperNum || ''}`;
+    if (finishedCache.has(key)) return finishedCache.get(key);
+    const map = new Map();
+    if (!tn || !paperNum) {
+      finishedCache.set(key, map);
+      return map;
+    }
+    try {
+      const url = `/api/DynamicTable/ByPaperNum?table=${encodeURIComponent(tn)}&paperNum=${encodeURIComponent(paperNum)}`;
+      const res = await fetch(url, withJwtHeaders());
+      if (!res.ok) {
+        finishedCache.set(key, map);
+        return map;
+      }
+      const rows = await res.json();
+      (rows || []).forEach(r => {
+        const item = (r.Item ?? r.item ?? '').toString();
+        const fin = r.Finished ?? r.finished;
+        map.set(item, fin);
+      });
+      finishedCache.set(key, map);
+      return map;
+    } catch {
+      finishedCache.set(key, map);
+      return map;
+    }
+  }
+
+  function getUserId() {
+    return (localStorage.getItem('erpLoginUserId') || window._userId || '').toString().trim();
+  }
+
+  function getItemId() {
+    return (window._itemId || window._singleItemId || '').toString().trim();
+  }
+
+  function getHeaderValueByLabel(labelText) {
+    const $label = $('.header-label-item').filter(function () {
+      return $(this).text().trim() === labelText;
+    }).first();
+    if (!$label.length) return '';
+    const fieldName = $label.data('field');
+    if (!fieldName) return '';
+    const $li = $(`.draggable-field[data-field="${fieldName}"]`).first();
+    if (!$li.length) return '';
+    const $ctrl = $li.find('select, input, textarea').first();
+    if (!$ctrl.length) return '';
+    if ($ctrl.is('select')) return $ctrl.find('option:selected').text().trim();
+    return ($ctrl.val() || '').toString().trim();
+  }
+
+  function isConfirmedPaper() {
+    const finished = readFinishedStatus();
+    if (finished !== null) return finished === 1;
+    const status = getHeaderValueByLabel('單據狀態');
+    if (!status) return false;
+    return status === '已確認';
+  }
+
+  async function fetchItemAccess() {
+    const userId = getUserId();
+    const itemId = getItemId();
+    if (!userId || !itemId) return null;
+    try {
+      const url = `/api/Permission/ItemAccess?userId=${encodeURIComponent(userId)}&itemId=${encodeURIComponent(itemId)}`;
+      const resp = await fetch(url, withJwtHeaders());
+      if (!resp.ok) return null;
+      return await resp.json();
+    } catch {
+      return null;
+    }
+  }
+
+  async function fetchFieldMeta(dictTable) {
+    const tn = cleanTableName(dictTable);
+    if (!tn) return [];
+    if (editFieldMetaCache.has(tn)) return editFieldMetaCache.get(tn);
+    try {
+      const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(tn)}&lang=TW`, withJwtHeaders());
+      if (!res.ok) {
+        editFieldMetaCache.set(tn, []);
+        return [];
+      }
+      const rows = await res.json();
+      editFieldMetaCache.set(tn, rows || []);
+      return rows || [];
+    } catch {
+      editFieldMetaCache.set(tn, []);
+      return [];
+    }
+  }
+
+  function pickEditFields(metaRows, mode) {
+    const flagName = mode === 'money' ? 'IsMoneyField' : 'IsNotesField';
+    return (metaRows || []).filter(r => {
+      const raw = r?.[flagName] ?? r?.[flagName?.toLowerCase?.()] ?? r?.[flagName?.toUpperCase?.()];
+      return String(raw ?? '').trim() === '1';
+    }).map(r => ({
+      name: (r.FieldName || r.fieldName || '').toString(),
+      label: (r.DisplayLabel || r.displayLabel || r.FieldName || r.fieldName || '').toString(),
+      readOnly: String(r.ReadOnly ?? r.readOnly ?? '0') === '1',
+      comboStyle: Number(r.ComboStyle ?? r.comboStyle ?? 0)
+    })).filter(r => r.name);
+  }
+
+  function isCheckedValue(val) {
+    const s = (val ?? '').toString().trim().toLowerCase();
+    return s === '1' || s === 'true' || s === 'y' || s === 'yes' || s === 'on';
+  }
+
+  function renderEditInput(tableName, rowInfo, field, value) {
+    const baseAttrs = `data-table="${escapeHtml(tableName)}" data-paper-num="${escapeHtml(rowInfo.paperNum || '')}"` +
+      (rowInfo.item != null ? ` data-item="${escapeHtml(rowInfo.item)}"` : '') +
+      ` data-field="${escapeHtml(field.name)}"`;
+    const useCheckbox = field.comboStyle === 1 || field.forceCheckbox === true;
+    if (useCheckbox) {
+      const checked = isCheckedValue(value) ? 'checked' : '';
+      const initVal = isCheckedValue(value) ? '1' : '0';
+      const disabled = field.readOnly ? 'disabled' : '';
+      return `<input type="checkbox" class="form-check-input edit-notesmoney-input edit-notesmoney-checkbox"
+        ${baseAttrs} data-init="${initVal}" ${checked} ${disabled}>`;
+    }
+    const val = value ?? '';
+    const ro = field.readOnly ? 'readonly' : '';
+    return `<input type="text" class="form-control form-control-sm edit-notesmoney-input"
+        ${baseAttrs} data-init="${escapeHtml(val)}" value="${escapeHtml(val)}" ${ro}>`;
+  }
+
+  function collectDictTables() {
+    const tables = new Map();
+    const headerTable = (window._headerTableName || '').toString().trim();
+    if (headerTable) tables.set(cleanTableName(headerTable), { name: headerTable, kind: 'header' });
+
+    document.querySelectorAll('.multi-tab-detail .table-container[data-dict-table]').forEach(el => {
+      const t = el.dataset.dictTable || '';
+      if (!t) return;
+      const key = cleanTableName(t);
+      if (!tables.has(key)) tables.set(key, { name: t, kind: 'detail' });
+    });
+
+    const sub = document.getElementById('paper3l-subdetail-container');
+    if (sub && sub.dataset?.dictTable) {
+      const t = sub.dataset.dictTable;
+      const key = cleanTableName(t);
+      if (!tables.has(key)) tables.set(key, { name: t, kind: 'detail' });
+    }
+
+    return Array.from(tables.values());
+  }
+
+  function escapeSelector(s) {
+    if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(s);
+    return (s || '').replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+  }
+
+  function readDetailRows(tableName, fields) {
+    const containers = Array.from(document.querySelectorAll('.multi-tab-detail .table-container[data-dict-table], #paper3l-subdetail-container'))
+      .filter(el => cleanTableName(el.dataset?.dictTable) === cleanTableName(tableName));
+    if (!containers.length) return [];
+    const rows = [];
+    containers.forEach(container => {
+      const table = container.querySelector('table.erp-table');
+      if (!table) return;
+      table.querySelectorAll('tbody tr').forEach(tr => {
+        const paperNum = tr.dataset.paperNum || readPaperNum();
+        const item = tr.dataset.item || '';
+        if (!paperNum || !item) return;
+        const values = {};
+        fields.forEach(f => {
+          const sel = `.cell-edit[data-field="${escapeSelector(f.name)}"]`;
+          const input = tr.querySelector(sel);
+          if (!input) return;
+          let val = '';
+          if (input.type === 'checkbox') {
+            val = input.checked ? '1' : '0';
+          } else {
+            val = (input.value ?? '').toString();
+          }
+          values[f.name] = val;
+        });
+        rows.push({ paperNum, item, values });
+      });
+    });
+    return rows;
+  }
+
+  async function readHeaderFields(fields, tableName) {
+    const paperNum = readPaperNum();
+    const values = {};
+    const checkboxMap = {};
+    fields.forEach(f => {
+      const info = readHeaderFieldInfo(f.name);
+      values[f.name] = info.value;
+      checkboxMap[f.name] = info.isCheckbox;
+    });
+
+    const row = await fetchHeaderRow(tableName, paperNum);
+    if (row) {
+      fields.forEach(f => {
+        const rowKey = Object.keys(row || {}).find(k => k.toLowerCase() === String(f.name).toLowerCase());
+        if (rowKey && row[rowKey] !== undefined && row[rowKey] !== null) {
+          values[f.name] = String(row[rowKey]);
+        }
+      });
+    }
+
+    return { paperNum, values, checkboxMap };
+  }
+
+  async function buildHeaderBlock(tableName, fields) {
+    const data = await readHeaderFields(fields, tableName);
+    const rowsHtml = fields.map(f => {
+      const val = data.values[f.name] ?? '';
+      const fieldMeta = Object.assign({}, f, { forceCheckbox: data.checkboxMap[f.name] === true });
+      return `<tr>
+        <th>${escapeHtml(f.label || f.name)}</th>
+        <td>
+          ${renderEditInput(tableName, { paperNum: data.paperNum }, fieldMeta, val)}
+        </td>
+      </tr>`;
+    }).join('');
+    return `
+<div class="edit-notesmoney-block" data-table="${escapeHtml(tableName)}" data-key-fields="${escapeHtml(HEADER_KEY_FIELD)}">
+  <div class="edit-notesmoney-title">單頭：${escapeHtml(tableName)}</div>
+  <table class="edit-notesmoney-table">
+    <thead><tr><th style="width:220px;">欄位</th><th>值</th></tr></thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+</div>`;
+  }
+
+  function buildDetailBlock(tableName, fields) {
+    const rows = readDetailRows(tableName, fields);
+    if (!rows.length) {
+      return `
+<div class="edit-notesmoney-block" data-table="${escapeHtml(tableName)}" data-key-fields="PaperNum,Item">
+  <div class="edit-notesmoney-title">單身：${escapeHtml(tableName)}</div>
+  <div class="text-muted small">沒有可編輯的明細資料</div>
+</div>`;
+    }
+    const headCols = fields.map(f => `<th>${escapeHtml(f.label || f.name)}</th>`).join('');
+    const bodyRows = rows.map((r, idx) => {
+      const cols = fields.map(f => {
+        const val = r.values[f.name] ?? '';
+        return `<td>
+          ${renderEditInput(tableName, { paperNum: r.paperNum, item: r.item }, f, val)}
+        </td>`;
+      }).join('');
+      return `<tr data-paper-num="${escapeHtml(r.paperNum)}" data-item="${escapeHtml(r.item)}">
+        <td>${escapeHtml(r.item || (idx + 1))}</td>${cols}
+      </tr>`;
+    }).join('');
+    return `
+<div class="edit-notesmoney-block" data-table="${escapeHtml(tableName)}" data-key-fields="PaperNum,Item">
+  <div class="edit-notesmoney-title">單身：${escapeHtml(tableName)}</div>
+  <table class="edit-notesmoney-table">
+    <thead><tr><th style="width:80px;">項次</th>${headCols}</tr></thead>
+    <tbody>${bodyRows}</tbody>
+  </table>
+</div>`;
+  }
+
+  async function openEditNotesMoney(mode) {
+    const titleEl = document.getElementById('editNotesMoneyTitle');
+    const bodyEl = document.getElementById('editNotesMoneyBody');
+    const hintEl = document.getElementById('editNotesMoneyHint');
+    if (!titleEl || !bodyEl || !hintEl) return;
+
+    if (!isConfirmedPaper()) {
+      Swal.fire({ icon: 'warning', title: '只有已確認的單據才可使用此功能' });
+      return;
+    }
+
+    const perm = await fetchItemAccess();
+    if (!perm) {
+      Swal.fire({ icon: 'warning', title: '無法取得權限' });
+      return;
+    }
+
+    if (mode === 'money' && Number(perm?.bUpdateMoney || 0) !== 1) {
+      Swal.fire({ icon: 'warning', title: '您沒有「修改金流」的權限' });
+      return;
+    }
+    if (mode === 'notes' && Number(perm?.bUpdateNotes || 0) !== 1) {
+      Swal.fire({ icon: 'warning', title: '您沒有「修改備註」的權限' });
+      return;
+    }
+
+    const tables = collectDictTables();
+    const blocks = [];
+
+    for (const t of tables) {
+      const meta = await fetchFieldMeta(t.name);
+      const fields = pickEditFields(meta, mode).map(f => {
+        if (String(f.name).toLowerCase() === 'usetaxprice') {
+          return Object.assign({}, f, { forceCheckbox: true });
+        }
+        return f;
+      });
+      if (!fields.length) continue;
+      if (t.kind === 'header') {
+        blocks.push(await buildHeaderBlock(t.name, fields));
+      } else {
+        blocks.push(buildDetailBlock(t.name, fields));
+      }
+    }
+
+    if (!blocks.length) {
+      Swal.fire({ icon: 'info', title: `此單據沒有${mode === 'money' ? '金流' : '備註'}欄位` });
+      return;
+    }
+
+    titleEl.textContent = mode === 'money' ? '修改金流' : '修改備註';
+    bodyEl.innerHTML = blocks.join('');
+    hintEl.textContent = '僅允許已確認單據，儲存後將直接寫入，不需退審。';
+
+    if (window.bootstrap) {
+      const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('editNotesMoneyModal'));
+      modal.show();
+    }
+  }
+
+  async function saveEditNotesMoney() {
+    const bodyEl = document.getElementById('editNotesMoneyBody');
+    if (!bodyEl) return;
+    const inputs = Array.from(bodyEl.querySelectorAll('.edit-notesmoney-input'));
+    const changesByTable = new Map();
+
+    inputs.forEach(inp => {
+      const table = inp.dataset.table || '';
+      const field = inp.dataset.field || '';
+      const paperNum = inp.dataset.paperNum || '';
+      const item = inp.dataset.item || '';
+      const init = inp.dataset.init ?? '';
+      let val = '';
+      if (inp.type === 'checkbox') {
+        val = inp.checked ? '1' : '0';
+      } else {
+        val = (inp.value ?? '').toString();
+      }
+      if (!table || !field) return;
+      if (val === init) return;
+
+      if (!changesByTable.has(table)) {
+        changesByTable.set(table, new Map());
+      }
+      const rowKey = `${paperNum}::${item}`;
+      const rowMap = changesByTable.get(table);
+      if (!rowMap.has(rowKey)) {
+        const rowObj = {};
+        if (paperNum) rowObj.PaperNum = paperNum;
+        if (item) rowObj.Item = Number.isNaN(Number(item)) ? item : Number(item);
+        rowMap.set(rowKey, rowObj);
+      }
+      const rowObj = rowMap.get(rowKey);
+      rowObj[field] = val;
+    });
+
+    if (changesByTable.size === 0) {
+      Swal.fire({ icon: 'info', title: '沒有資料異動' });
+      return;
+    }
+
+    const currentPaperNum = readPaperNum();
+    const finishedTables = new Map();
+    for (const table of changesByTable.keys()) {
+      const cols = await fetchColumnTypes(table);
+      if (cols.has('finished')) {
+        const map = await fetchFinishedMap(table, currentPaperNum);
+        finishedTables.set(table, map);
+      }
+    }
+
+    for (const [table, rowMap] of changesByTable.entries()) {
+      const finMap = finishedTables.get(table);
+      if (!finMap) continue;
+      const fallback = finMap.size ? Array.from(finMap.values())[0] : 0;
+      for (const rowObj of rowMap.values()) {
+        if (rowObj.Finished !== undefined) continue;
+        const itemKey = rowObj.Item != null ? String(rowObj.Item) : '';
+        const finVal = finMap.has(itemKey) ? finMap.get(itemKey) : (finMap.has('') ? finMap.get('') : fallback);
+        rowObj.Finished = finVal ?? 0;
+      }
+    }
+
+    const saveBtn = document.getElementById('btnEditNotesMoneySave');
+    if (saveBtn) saveBtn.disabled = true;
+
+    try {
+      for (const [table, rowMap] of changesByTable.entries()) {
+        const rows = Array.from(rowMap.values());
+        const keyFields = rows.some(r => r.Item !== undefined) ? ['PaperNum', 'Item'] : [HEADER_KEY_FIELD];
+        const payload = { TableName: table, Data: rows, KeyFields: keyFields };
+        const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!resp.ok) {
+          const msg = await resp.text();
+          throw new Error(msg || '儲存失敗');
+        }
+      }
+      if (window.bootstrap) {
+        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('editNotesMoneyModal'));
+        modal.hide();
+      }
+      await Swal.fire({ icon: 'success', title: '儲存成功', timer: 1200, showConfirmButton: false });
+      location.reload();
+    } catch (err) {
+      Swal.fire({ icon: 'error', title: err?.message || '儲存失敗' });
+    } finally {
+      if (saveBtn) saveBtn.disabled = false;
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const btn = document.getElementById('btnPaperTrace');
     if (btn) {
@@ -884,6 +1400,33 @@
         e.preventDefault();
         e.stopPropagation();
         openUpdateLog();
+      });
+    }
+
+    const editNotesBtn = document.getElementById('btnEditNotes');
+    if (editNotesBtn) {
+      editNotesBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openEditNotesMoney('notes');
+      });
+    }
+
+    const editMoneyBtn = document.getElementById('btnEditMoney');
+    if (editMoneyBtn) {
+      editMoneyBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openEditNotesMoney('money');
+      });
+    }
+
+    const saveBtn = document.getElementById('btnEditNotesMoneySave');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        saveEditNotesMoney();
       });
     }
   });
@@ -966,7 +1509,7 @@
 
 
                             var isCheckbox = (field.ComboStyle ?? 0) == 1;
-                            var isNumber = IsNumberType(field.DataType) || IsNumberValue(rawValue);
+                            var isNumber = IsNumberType(field.DataType);
                             var hasLookupSetting = !string.IsNullOrWhiteSpace(field.LookupTable)
                                 && !string.IsNullOrWhiteSpace(field.LookupKeyField)
                                 && !string.IsNullOrWhiteSpace(field.LookupResultField);
@@ -976,7 +1519,7 @@
                             {
                                 lookupResultType = rt ?? "";
                             }
-                            var lookupIsNumber = IsNumberType(lookupResultType) || (hasLookupDisplay && headerLookupMap != null && IsNumberValue(headerLookupMap[field.FieldName]));
+                            var lookupIsNumber = IsNumberType(lookupResultType);
                             var alignRight = lookupIsNumber || (isNumber && !hasLookupSetting && !hasLookupDisplay);
                             var alignCenter = hasLookupSetting;
                             var editColor = NormalizeEditColor(field.EditColor);
@@ -1568,7 +2111,7 @@ if (editBtn) {
       el.classList.toggle('disabled', !editing);
     });
 
-    const viewOnlyIds = ['btnSubSearch', 'btnSwitch', 'btnSubAddNew', 'btnPrint', 'btnPaperTrace', 'btnPaperLog', 'btnCancel', 'btnPrev', 'btnNext'];
+    const viewOnlyIds = ['btnSubSearch', 'btnSwitch', 'btnSubAddNew', 'btnPrint', 'btnPaperTrace', 'btnPaperLog', 'btnCancel', 'btnPrev', 'btnNext', 'btnEditNotes', 'btnEditMoney'];
     viewOnlyIds.forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -2427,10 +2970,16 @@ window.__updateToolbarCounts = updateToolbarCounts;
     if (!ctx || !ctx.tbody) return { ok: false, reason: 'no-multitab' };
     const { activePane, tbody } = ctx;
     const table = activePane.querySelector('table.erp-table');
-    const fields = Array.from(table?.querySelectorAll('thead th') || [])
+    const headerCells = Array.from(table?.querySelectorAll('thead th') || []);
+    const fields = headerCells
       .map(th => (th.dataset.field || '').toString())
       .filter(Boolean);
     if (!fields.length) return { ok: false, reason: 'no-fields' };
+    const alignMap = new Map(headerCells.map(th => {
+      const key = (th.dataset.field || '').toString().toLowerCase();
+      const alignClass = th.classList.contains('align-right') ? 'align-right' : 'align-left';
+      return [key, alignClass];
+    }));
 
     const dictTable = activePane?.querySelector?.('.table-container')?.dataset?.dictTable || '';
     const safeTable = (dictTable || '').toString().replace(/^dbo\./i, '').trim();
@@ -2468,13 +3017,15 @@ window.__updateToolbarCounts = updateToolbarCounts;
     }
     let html = `<tr data-paper-num="${pn}" data-item="${newItem}" data-state="added" class="row-selected">`;
       fields.forEach(field => {
-        const isReadOnly = !!readOnlyMap[(field || '').toString().toLowerCase()];
+        const fieldKey = (field || '').toString().toLowerCase();
+        const isReadOnly = !!readOnlyMap[fieldKey];
         const roClass = isReadOnly ? ' readonly-cell' : '';
         const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
         const defVal = (defaults && Object.prototype.hasOwnProperty.call(defaults, field)) ? defaults[field] : '';
         const value = defVal == null ? '' : String(defVal);
         const safeValue = escAttr(value);
-        html += `<td data-readonly="${isReadOnly ? '1' : '0'}">
+        const alignClass = alignMap.get(fieldKey) || 'align-left';
+        html += `<td class="${alignClass}" data-readonly="${isReadOnly ? '1' : '0'}">
           <span class="${viewClass}${roClass}" data-init-view="${safeValue}" data-readonly="${isReadOnly ? '1' : '0'}">${safeValue}</span>
           <input type="text" class="${editClass}${roClass}" data-field="${field}" data-init="${safeValue}" value="${safeValue}"${roAttr}>
         </td>`;
@@ -2786,9 +3337,13 @@ body { background: #f7f9fb !important; }
 }
 .drop-hover{ background-color:#cce5ff !important; border-radius:4px; }
 
-.erp-header-form .nav-tabs .nav-link{ border-radius:8px 8px 0 0 !important; padding:var(--tab-pad-y) var(--tab-pad-x); font-size:var(--field-label-size); font-weight:500; color:#235eb8; }
+.erp-header-form .nav-tabs .nav-link{ border-radius:8px 8px 0 0 !important; padding:var(--tab-pad-y) var(--tab-pad-x); font-size:var(--field-label-size); font-weight:500; color:#4a6fa8; background:#dde7f7; border:1px solid #bccdea; border-bottom-color:#aabedd; }
 .erp-header-form .nav-tabs .nav-link.active{
-  background:#fff; color:#124d8b; border-color:#bdd2f7 #bdd2f7 #fff #bdd2f7 !important; box-shadow:0 2px 6px 0 #e4ecf7; font-weight:bold;
+  background:#ffffff; color:#1b3f8a; border-color:#7da3df #7da3df #fff #7da3df !important; box-shadow:0 3px 10px 0 rgba(14,53,95,0.18); font-weight:750;
+}
+.erp-header-form .nav-tabs .nav-link:not(.active):hover{
+  background:#d0dcf2;
+  color:#3b5d92;
 }
 
 .top-toolbar{
@@ -2821,6 +3376,15 @@ body { background: #f7f9fb !important; }
 .top-toolbar .toolbar-main > div{
   flex: 1 1 auto;
   min-width: 0;
+}
+.top-toolbar .toolbar-right{
+  display: flex;
+  gap: 4px;
+  margin-left: 2px;
+  flex: 0 0 auto;
+}
+.top-toolbar .toolbar-main > div:first-child{
+  flex: 0 1 auto;
 }
 .top-toolbar .toolbar-btn{
   font-size: var(--top-toolbar-font-size);
@@ -2872,6 +3436,26 @@ body { background: #f7f9fb !important; }
 .top-toolbar.mode-edit{
   background: transparent;
 }
+.top-toolbar .dropdown-menu{
+  min-width: 10rem;
+  padding: .5rem 0;
+  border: 1px solid rgba(0,0,0,0.15);
+  border-radius: .5rem;
+  box-shadow: 0 .5rem 1rem rgba(0,0,0,.175);
+}
+.top-toolbar .dropdown-item{
+  padding: .35rem 1rem;
+  font-weight: 500;
+  color: #212529;
+}
+.top-toolbar .dropdown-item:hover,
+.top-toolbar .dropdown-item:active{
+  background: #2d5fa8;
+  color: #fff;
+}
+.top-toolbar .dropdown-toggle::after{
+  display: none;
+}
 
 .toolbar-count-box{
   display: inline-flex;
@@ -2895,6 +3479,46 @@ body { background: #f7f9fb !important; }
 }
 .toolbar-count-box.mode-edit{
   background: #f00000;
+}
+
+.edit-notesmoney-body{
+  display: grid;
+  gap: 16px;
+}
+.edit-notesmoney-block{
+  border: 1px solid #e3e7ef;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fafbff;
+}
+.edit-notesmoney-title{
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.edit-notesmoney-table{
+  width: 100%;
+  border-collapse: collapse;
+}
+.edit-notesmoney-table th,
+.edit-notesmoney-table td{
+  border: 1px solid #e6e9f2;
+  padding: 6px 8px;
+  font-size: 0.95rem;
+  vertical-align: middle;
+}
+.edit-notesmoney-table th{
+  background: #f2f5fb;
+  font-weight: 600;
+}
+.edit-notesmoney-input{
+  width: 100%;
+  min-width: 80px;
+}
+.edit-notesmoney-checkbox{
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  margin: 0;
 }
 
 /* draggable 欄位（橫排 label + 控件） */

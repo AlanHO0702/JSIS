@@ -355,6 +355,29 @@
         return s;
     }
 
+    function isNumberType(dt) {
+        const t = (dt || '').toString().trim().toLowerCase();
+        if (!t) return false;
+        return t === 'number'
+            || t === 'int' || t === 'smallint' || t === 'tinyint' || t === 'bigint'
+            || t.startsWith('decimal') || t.startsWith('numeric')
+            || t.startsWith('money') || t.startsWith('smallmoney')
+            || t.startsWith('float') || t.startsWith('real');
+    }
+
+    function isNumberValue(raw) {
+        if (raw == null) return false;
+        if (typeof raw === 'number') return Number.isFinite(raw);
+        const s = String(raw).replace(/,/g, '').trim();
+        if (!s) return false;
+        return Number.isFinite(Number(s));
+    }
+
+    function getAlignClass(meta, raw) {
+        if (isNumberType(meta?.dataType)) return 'align-right';
+        return 'align-left';
+    }
+
     const LOOKUP_EMPTY_LABEL = '--請選擇--';
 
     function buildLookupList(field, lookupMap, currentKey) {
@@ -771,7 +794,7 @@
         // 表頭 - 使用字典取得中文名稱
         fields.forEach(field => {
             const displayName = dict[field] || field;
-            html += `<th data-field="${field}" style="position:relative;"><span class="th-text">${displayName}</span><span class="col-resizer" draggable="false"></span></th>`;
+            html += `<th class="align-left" data-field="${field}" style="position:relative;"><span class="th-text">${displayName}</span><span class="col-resizer" draggable="false"></span></th>`;
         });
         html += '</tr></thead><tbody>';
 
@@ -846,13 +869,17 @@
                     const viewText = (value == null ? '' : String(value)).trim();
                     const editText = (inputValue == null ? '' : String(inputValue)).trim();
                   // ? 雙元素：顯示模式 + 編輯模式
+                    const alignClass = getAlignClass(meta, rawValue);
+                    const tdClasses = [alignClass];
+                    if (canDropdown) tdClasses.push('lookup-cell');
+                    const classAttr = tdClasses.length ? ` class="${tdClasses.join(' ')}"` : '';
                     const keyFieldAttr = canDropdown ? ` data-lookup-key-field="${escapeHtml(metaLookup?.key || '')}"` : "";
                     const resultFieldAttr = canDropdown ? ` data-lookup-result-field="${escapeHtml(metaLookup?.result || '')}"` : "";
                     const lookupAttr = canDropdown
-                        ? ` class="lookup-cell" data-lookup-field="${escapeHtml(field)}"${keyFieldAttr}${resultFieldAttr}`
+                        ? ` data-lookup-field="${escapeHtml(field)}"${keyFieldAttr}${resultFieldAttr}`
                         : "";
                     const tdReadOnlyAttr = ` data-readonly="${isReadOnly ? '1' : '0'}"`;
-                    html += `<td${lookupAttr}${tdReadOnlyAttr}>
+                    html += `<td${classAttr}${lookupAttr}${tdReadOnlyAttr}>
                         <span class="${viewClass}${roClass}" data-init-view="${escapeHtml(viewText)}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span>
                         <input type="text"
                                class="${editClass}${roClass}"
@@ -1183,27 +1210,28 @@
 }
 
 .multi-tab-detail .nav-link {
-    color: #235eb8;
-    border: 1px solid transparent;
+    color: #4a6fa8;
+    border: 1px solid #bccdea;
     border-radius: 8px 8px 0 0;
     padding: var(--tab-pad-y) var(--tab-pad-x);
-    background: transparent;
+    background: #dde7f7;
     transition: color 0.2s ease-in-out, background 0.2s ease-in-out, border-color 0.2s ease-in-out;
     font-size: var(--field-label-size);
     font-weight: 500;
 }
 
 .multi-tab-detail .nav-link:hover {
-    background-color: #f5f7fb;
-    border-color: #dee2e6 #dee2e6 #fff #dee2e6;
+    background-color: #d0dcf2;
+    border-color: #adbfdf #adbfdf #fff #adbfdf;
+    color: #3b5d92;
 }
 
 .multi-tab-detail .nav-link.active {
-    color: #124d8b;
+    color: #1b3f8a;
     background-color: #ffffff;
-    border-color: #bdd2f7 #bdd2f7 #fff #bdd2f7;
-    box-shadow: 0 2px 6px 0 #e4ecf7;
-    font-weight: 700;
+    border-color: #7da3df #7da3df #fff #7da3df;
+    box-shadow: 0 3px 10px 0 rgba(14, 53, 95, 0.18);
+    font-weight: 750;
 }
 
 .multi-tab-detail .table-container {
@@ -1242,17 +1270,30 @@
 .multi-tab-detail .erp-table td {
     background: #f1f5fb;
     padding: 0;  /* ← 改為 0，由內部元素控制 padding */
-    border-bottom: 1px solid #c5d1e4;
+    border-bottom: 1px solid #9fb1d0;
     white-space: nowrap;
     text-align: center;
     font-weight: 500;
-    border-right: 1px solid #dde4ed;
+    border-right: 1px solid #9fb1d0;
     height: auto;
+}
+
+.multi-tab-detail .erp-table th.align-left,
+.multi-tab-detail .erp-table td.align-left {
+    text-align: left;
+}
+.multi-tab-detail .erp-table th.align-right,
+.multi-tab-detail .erp-table td.align-right {
+    text-align: right;
 }
 
 .multi-tab-detail .erp-table th:last-child,
 .multi-tab-detail .erp-table td:last-child {
-    border-right: none;
+    border-right: 1px solid #9fb1d0;
+}
+.multi-tab-detail .erp-table th:first-child,
+.multi-tab-detail .erp-table td:first-child {
+    border-left: 1px solid #9fb1d0;
 }
 
 .multi-tab-detail .erp-table th {
@@ -1264,6 +1305,11 @@
     position: sticky;
     top: 0;
     z-index: 10;
+    border-top: 1px solid #9fb1d0;
+}
+.multi-tab-detail .erp-table th .th-text{
+    display: inline-block;
+    padding-left: 4px;
 }
 
 .multi-tab-detail .erp-table th { position: relative; }
