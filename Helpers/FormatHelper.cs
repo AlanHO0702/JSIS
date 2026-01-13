@@ -30,9 +30,10 @@ public static class FormatHelper
             // 日期格式
             if (normalizedType == "date")
             {
+                var dateFormat = NormalizeDateFormatMask(formatStr);
                 if (rawValue is DateTime dt)
                 {
-                    return dt.ToString(formatStr.Replace("nn", "mm"));
+                    return dt.ToString(dateFormat);
                 }
                 var rawText = rawValue.ToString() ?? "";
                 if (!string.IsNullOrWhiteSpace(rawText))
@@ -42,7 +43,7 @@ public static class FormatHelper
                         || DateTime.TryParse(normalized, CultureInfo.GetCultureInfo("en-US"), DateTimeStyles.AllowWhiteSpaces, out parsedTw)
                         || DateTime.TryParse(rawText, out parsedTw))
                     {
-                        return parsedTw.ToString(formatStr.Replace("nn", "mm"));
+                        return parsedTw.ToString(dateFormat);
                     }
                 }
             }
@@ -78,6 +79,54 @@ public static class FormatHelper
 
         // 預設
         return rawValue?.ToString() ?? string.Empty;
+    }
+
+    private static string NormalizeDateFormatMask(string formatStr)
+    {
+        if (string.IsNullOrWhiteSpace(formatStr)) return formatStr;
+
+        var fmt = formatStr;
+        var timeIdx = IndexOfTimeToken(fmt);
+        var datePart = timeIdx >= 0 ? fmt.Substring(0, timeIdx) : fmt;
+        var timePart = timeIdx >= 0 ? fmt.Substring(timeIdx) : string.Empty;
+
+        datePart = NormalizeMonthToken(datePart);
+        timePart = NormalizeMinuteToken(timePart);
+
+        return datePart + timePart;
+    }
+
+    private static int IndexOfTimeToken(string fmt)
+    {
+        if (string.IsNullOrEmpty(fmt)) return -1;
+        for (var i = 0; i < fmt.Length; i++)
+        {
+            var c = fmt[i];
+            if (c == 'h' || c == 'H') return i;
+        }
+        return -1;
+    }
+
+    private static string NormalizeMonthToken(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return input;
+        var chars = input.ToCharArray();
+        for (var i = 0; i < chars.Length; i++)
+        {
+            if (chars[i] == 'm') chars[i] = 'M';
+        }
+        return new string(chars);
+    }
+
+    private static string NormalizeMinuteToken(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return input;
+        var chars = input.ToCharArray();
+        for (var i = 0; i < chars.Length; i++)
+        {
+            if (chars[i] == 'n' || chars[i] == 'N') chars[i] = 'm';
+        }
+        return new string(chars);
     }
 
     private static string TrimZeroDecimal(string formatted)

@@ -137,8 +137,18 @@ SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, c.COLUMN_DEFAULT
                 insertParams.Add(new SqlParameter("@" + meta.name, val));
             }
 
+            string ResolveUseId()
+            {
+                var claim = User?.Claims?.FirstOrDefault(c => string.Equals(c.Type, "UseId", StringComparison.OrdinalIgnoreCase));
+                if (claim != null && !string.IsNullOrWhiteSpace(claim.Value)) return claim.Value.Trim();
+                var header = Request?.Headers?["X-USEID"].ToString();
+                if (!string.IsNullOrWhiteSpace(header)) return header.Trim();
+                return "A001";
+            }
+
             AddDefaultIfNeeded("PaperDate", DateTime.Now);
             AddDefaultIfNeeded("BuildDate", DateTime.Now);
+            AddDefaultIfNeeded("UseId", ResolveUseId());
 
             foreach (var c in cols)
             {
