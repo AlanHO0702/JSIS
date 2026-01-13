@@ -423,9 +423,6 @@ SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, c.COLUMN_DEFAULT
                 values["dllHeadFirst"] = defaultHeadFirst;
             }
 
-            if (!colMap.ContainsKey("PaperNum"))
-                return BadRequest($"無法新增：[{realTable}] 沒有 PaperNum 欄位");
-
             foreach (var kvp in values)
             {
                 if (!colMap.TryGetValue(kvp.Key, out var meta)) continue;
