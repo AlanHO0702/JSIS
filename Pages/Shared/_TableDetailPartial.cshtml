@@ -1615,6 +1615,37 @@ $(function () {
   }
   if (!window.readHeaderValue) window.readHeaderValue = readHeaderFieldValue;
 
+  function normalizeLookupKey(value) {
+    return (value ?? '').toString().trim().toLowerCase();
+  }
+
+  function getLookupLabel(key, keyToLabel) {
+    if (!key || !keyToLabel) return '';
+    if (keyToLabel[key] != null) return keyToLabel[key];
+    const lower = normalizeLookupKey(key);
+    return lower && keyToLabel[lower] != null ? keyToLabel[lower] : '';
+  }
+
+  function mapLookupKey(raw, labelToKey) {
+    if (!raw || !labelToKey) return raw ?? '';
+    if (labelToKey[raw] != null) return labelToKey[raw];
+    const lower = normalizeLookupKey(raw);
+    return lower && labelToKey[lower] != null ? labelToKey[lower] : raw;
+  }
+
+  function formatLookupDisplay(code, label) {
+    if (!code) return '';
+    const c = String(code);
+    const l = label == null ? '' : String(label);
+    if (!l) return c;
+    if (l === c) return c;
+    const cLower = c.toLowerCase();
+    const lLower = l.toLowerCase();
+    if (lLower === cLower) return l;
+    if (lLower.startsWith(cLower + ' - ') || lLower.startsWith(cLower + '-') || lLower.startsWith(cLower + ' ')) return l;
+    return `${c} - ${l}`;
+  }
+
   $('.lookup-dropdown').each(function() {
     const $ctrl = $(this);
     const el = $ctrl[0];
@@ -1676,11 +1707,19 @@ $(function () {
         rows.forEach(row => {
           const val = row.key;
           const label = Object.keys(row).filter(p => p.startsWith('result')).map(p => row[p]).join(' - ');
-          keyToLabel[val] = label;
-          if (label) labelToKey[label] = val;
-          labelToKey[String(val)] = val;
+          const keyStr = val == null ? '' : String(val);
+          keyToLabel[keyStr] = label;
+          const normKey = normalizeLookupKey(keyStr);
+          if (normKey && keyToLabel[normKey] == null) keyToLabel[normKey] = label;
+          if (label) {
+            labelToKey[label] = keyStr;
+            const dispLower = normalizeLookupKey(label);
+            if (dispLower && labelToKey[dispLower] == null) labelToKey[dispLower] = keyStr;
+          }
+          labelToKey[keyStr] = keyStr;
+          if (normKey && labelToKey[normKey] == null) labelToKey[normKey] = keyStr;
           const opt = document.createElement('option');
-          opt.value = String(val ?? '');
+          opt.value = keyStr;
           if (label) opt.label = label;
           listEl.appendChild(opt);
         });
@@ -1918,8 +1957,8 @@ function syncLookupLabel(selectEl) {
     const keyToLabel = selectEl._lookupKeyToLabel || {};
     const labelToKey = selectEl._lookupLabelToKey || {};
     const raw = selectEl.value ?? '';
-    const key = labelToKey[raw] ?? raw;
-    const display = keyToLabel[key] ?? raw;
+    const key = mapLookupKey(raw, labelToKey) ?? raw;
+    const display = formatLookupDisplay(key, getLookupLabel(key, keyToLabel)) || raw;
     if (raw !== '' && raw !== key) {
       selectEl.value = key;
     }

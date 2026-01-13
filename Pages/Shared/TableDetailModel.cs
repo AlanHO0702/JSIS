@@ -190,6 +190,15 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
 
         // 單頭 lookup 值轉換
         var headerLookupDict = LookupDisplayHelper.BuildHeaderLookupMap(HeaderData, headerLookupMaps);
+        var headerStdLookupDict = LookupDisplayHelper.BuildHeaderLookupMapFromStandard(
+            HeaderData,
+            HeaderTableFields ?? new List<TableFieldViewModel>(),
+            _context.Database.GetDbConnection());
+        foreach (var kv in headerStdLookupDict)
+        {
+            if (!headerLookupDict.ContainsKey(kv.Key))
+                headerLookupDict[kv.Key] = kv.Value;
+        }
         ViewData["HeaderLookupMap"] = headerLookupDict;
         ViewData["HeaderLookupResultTypes"] = headerLookupMaps
             .GroupBy(x => x.FieldName, StringComparer.OrdinalIgnoreCase)
