@@ -197,8 +197,10 @@
       if (hidden) return { value: (hidden.value ?? '').toString().trim(), isCheckbox: false };
       const raw = (el.value ?? '').toString().trim();
       const map = el._lookupLabelToKey || {};
-      const key = map[raw] || raw.split(' - ')[0] || raw;
-      return { value: key.toString().trim(), isCheckbox: false };
+      const mapped = mapLookupKey(raw, map);
+      const fallback = raw.split(' - ')[0] || raw;
+      const key = mapped && mapped !== raw ? mapped : fallback;
+      return { value: (key ?? '').toString().trim(), isCheckbox: false };
     }
     return { value: (el.value ?? '').toString().trim(), isCheckbox: false };
   };
@@ -2823,9 +2825,16 @@ $(function () {
       const label = Object.keys(row).filter(p => p.startsWith('result')).map(p => row[p]).join(' - ');
       const keyStr = val == null ? '' : String(val);
       keyToLabel[keyStr] = label;
+      const normKey = normalizeLookupKey(keyStr);
+      if (normKey && keyToLabel[normKey] == null) keyToLabel[normKey] = label;
       const display = formatLookupDisplay(keyStr, label);
-      if (display) labelToKey[display] = keyStr;
+      if (display) {
+        labelToKey[display] = keyStr;
+        const dispLower = normalizeLookupKey(display);
+        if (dispLower && labelToKey[dispLower] == null) labelToKey[dispLower] = keyStr;
+      }
       labelToKey[keyStr] = keyStr;
+      if (normKey && labelToKey[normKey] == null) labelToKey[normKey] = keyStr;
       items.push({ key: keyStr, label });
     });
 
@@ -2833,7 +2842,7 @@ $(function () {
     inputEl._lookupLabelToKey = labelToKey;
     inputEl._lookupItems = items;
     const initKey = selected ?? '';
-    if (initKey !== '') inputEl.value = formatLookupDisplay(initKey, keyToLabel[initKey]);
+    if (initKey !== '') inputEl.value = formatLookupDisplay(initKey, getLookupLabel(initKey, keyToLabel));
     const hidden = inputEl.closest('li')?.querySelector('input.lookup-key[name]');
     if (hidden) hidden.value = initKey;
     syncLookupLabel(inputEl);
@@ -2883,6 +2892,24 @@ $(function () {
 
   function normalizeLookupText(value) {
     return (value ?? '').toString().trim().toLowerCase();
+  }
+
+  function normalizeLookupKey(value) {
+    return (value ?? '').toString().trim().toLowerCase();
+  }
+
+  function getLookupLabel(key, keyToLabel) {
+    if (!key || !keyToLabel) return '';
+    if (keyToLabel[key] != null) return keyToLabel[key];
+    const lower = normalizeLookupKey(key);
+    return lower && keyToLabel[lower] != null ? keyToLabel[lower] : '';
+  }
+
+  function mapLookupKey(raw, labelToKey) {
+    if (!raw || !labelToKey) return raw ?? '';
+    if (labelToKey[raw] != null) return labelToKey[raw];
+    const lower = normalizeLookupKey(raw);
+    return lower && labelToKey[lower] != null ? labelToKey[lower] : raw;
   }
 
   function getLookupKeyFromInput(input) {
@@ -2991,7 +3018,7 @@ $(function () {
       e.stopPropagation();
       if (!allowApply) { closeLookupDropdown(); return; }
       const key = item.dataset.key ?? '';
-      const label = input._lookupKeyToLabel?.[key] ?? '';
+      const label = getLookupLabel(key, input._lookupKeyToLabel || {});
       input.value = key ? formatLookupDisplay(key, label) : '';
       const hidden = input.closest('li')?.querySelector('input.lookup-key[name]');
       if (hidden) hidden.value = key;
@@ -3039,7 +3066,7 @@ $(function () {
         loadLookupOptions(this);
         try {
           const map = this._lookupLabelToKey || {};
-          const key = map[this.value];
+          const key = mapLookupKey(this.value, map);
           if (key) this.value = key;
           const len = (this.value || '').length;
           if (len) this.setSelectionRange(0, len);
@@ -3047,11 +3074,13 @@ $(function () {
         } catch { }
       });
       $(el).on('blur', function() {
-        const map = this._lookupKeyToLabel || {};
+        const keyToLabel = this._lookupKeyToLabel || {};
         const raw = (this.value || '').trim();
         if (!raw) return;
-        if (map[raw]) {
-          this.value = formatLookupDisplay(raw, map[raw]);
+        const key = mapLookupKey(raw, this._lookupLabelToKey || {});
+        const label = getLookupLabel(key, keyToLabel);
+        if (label) {
+          this.value = formatLookupDisplay(key, label);
           syncLookupLabel(this);
         }
         setTimeout(() => {
@@ -3600,7 +3629,10 @@ function getHeaderValueByLabel(labelText) {
     const l = label == null ? "" : String(label);
     if (!l) return c;
     if (l === c) return c;
-    if (l.startsWith(c + " - ") || l.startsWith(c + "-") || l.startsWith(c + " ")) return l;
+    const cLower = c.toLowerCase();
+    const lLower = l.toLowerCase();
+    if (lLower === cLower) return l;
+    if (lLower.startsWith(cLower + " - ") || lLower.startsWith(cLower + "-") || lLower.startsWith(cLower + " ")) return l;
     return `${c} - ${l}`;
   }
 
@@ -3618,8 +3650,8 @@ function getHeaderValueByLabel(labelText) {
       const keyToLabel = selectEl._lookupKeyToLabel || {};
       const labelToKey = selectEl._lookupLabelToKey || {};
       const raw = selectEl.value ?? '';
-      const key = labelToKey[raw] ?? raw;
-      const display = formatLookupDisplay(key, keyToLabel[key]);
+      const key = mapLookupKey(raw, labelToKey) ?? raw;
+      const display = formatLookupDisplay(key, getLookupLabel(key, keyToLabel));
       if (label && label.classList.contains('lookup-label')) {
         label.textContent = display || raw;
       }

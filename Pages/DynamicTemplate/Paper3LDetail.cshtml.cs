@@ -194,6 +194,15 @@ namespace PcbErpApi.Pages.DynamicTemplate
             HeaderLookupMap = LookupDisplayHelper.BuildHeaderLookupMap(
                 HeaderData.ToDictionary(k => k.Key, v => v.Value),
                 headerLookup);
+            var headerStdLookup = LookupDisplayHelper.BuildHeaderLookupMapFromStandard(
+                HeaderData.ToDictionary(k => k.Key, v => v.Value),
+                HeaderTableFields ?? new List<TableFieldViewModel>(),
+                _ctx.Database.GetDbConnection());
+            foreach (var kv in headerStdLookup)
+            {
+                if (!HeaderLookupMap.ContainsKey(kv.Key))
+                    HeaderLookupMap[kv.Key] = kv.Value;
+            }
             ViewData["HeaderLookupMap"] = HeaderLookupMap;
             ViewData["HeaderLookupResultTypes"] = headerLookup
                 .GroupBy(x => x.FieldName, StringComparer.OrdinalIgnoreCase)
