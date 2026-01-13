@@ -280,6 +280,69 @@
     return String(val);
   };
 
+  const isDateType = (dataType) => {
+    return !!(dataType && String(dataType).toLowerCase().includes("date"));
+  };
+
+  const toDateInputValue = (val) => {
+    if (!val) return "";
+    const s = String(val).trim();
+    if (!s) return "";
+    const d = new Date(s.replace(/\//g, "-"));
+    if (!isNaN(d)) return d.toISOString().slice(0, 10);
+    return "";
+  };
+
+  const toDisplayDate = (val) => {
+    if (!val) return "";
+    const s = String(val).trim();
+    if (!s) return "";
+    const d = new Date(s.replace(/\//g, "-"));
+    if (!isNaN(d)) return d.toISOString().slice(0, 10).replace(/-/g, "/");
+    return s;
+  };
+
+  const attachDatePicker = (td, inp) => {
+    if (!td || !inp || inp.readOnly) return;
+    td.style.position = "relative";
+    inp.style.paddingRight = "22px";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-outline-secondary btn-sm date-picker-btn cell-edit d-none";
+    btn.innerHTML = "&#9662;";
+    btn.style.position = "absolute";
+    btn.style.right = "4px";
+    btn.style.top = "50%";
+    btn.style.transform = "translateY(-50%)";
+    btn.tabIndex = -1;
+
+    const picker = document.createElement("input");
+    picker.type = "date";
+    picker.className = "date-picker-input";
+    picker.style.position = "absolute";
+    picker.style.opacity = "0";
+    picker.style.pointerEvents = "none";
+    picker.style.width = "1px";
+    picker.style.height = "1px";
+
+    btn.addEventListener("click", () => {
+      if (inp.readOnly) return;
+      picker.value = toDateInputValue(inp.value);
+      if (picker.showPicker) picker.showPicker();
+      else picker.focus();
+    });
+
+    picker.addEventListener("change", () => {
+      const v = toDisplayDate(picker.value);
+      inp.value = v;
+      inp.dataset.raw = v;
+    });
+
+    td.appendChild(btn);
+    td.appendChild(picker);
+  };
+
   // ==============================================================================
   //  建表頭
   // ==============================================================================
@@ -304,7 +367,7 @@
     // ======================================================================
 //  建表身（正確版 PK / FK 儲存格式）
 // ======================================================================
-const buildBody = async (tbody, dict, rows, onRowClick) => {
+const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
   tbody.innerHTML = "";
 
   const getRowValue = (row, fieldName) => {
@@ -390,6 +453,9 @@ const buildBody = async (tbody, dict, rows, onRowClick) => {
 
       td.append(span);
       td.append(inp);
+      if (isDetail && isDateType(DICT.type(f))) {
+        attachDatePicker(td, inp);
+      }
       tr.appendChild(td);
     });
 
@@ -521,7 +587,7 @@ const loadAllDetails = async (row) => {
           loadNextDetailFromFocus(i, row);
         }
       }
-    });
+    }, true);
 
     // if (window._mmdEditing && tbody._editorInstance) {
     //   tbody._editorInstance.rebind();
@@ -581,7 +647,7 @@ const loadAllDetails = async (row) => {
         if (cfg.EnableDetailFocusCascade) {
           loadNextDetailFromFocus(nextIndex, row);
         }
-      });
+      }, true);
 
       // 編輯模式處理
       if (window._mmdEditing && tbody._editorInstance) {
@@ -627,7 +693,7 @@ const loadAllDetails = async (row) => {
           activeTarget.type = "detail";
           activeTarget.index = nextIndex;
           // ★ 不再遞迴聯動，避免串聯式連動
-        });
+        }, true);
 
         // 編輯模式處理
         if (window._mmdEditing && tbody._editorInstance) {
@@ -652,7 +718,7 @@ const loadAllDetails = async (row) => {
       activeTarget.index = -1;
       lastMasterRow = row;
       await loadAllDetails(row);
-    });
+    }, false);
 
     // ==============================================================================
     //   EditableGrid 初始化（含自動偵測 PK）
@@ -876,6 +942,9 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
 
         td.append(span);
         td.append(inp);
+        if (isDetail && isDateType(DICT.type(f))) {
+          attachDatePicker(td, inp);
+        }
         tr.appendChild(td);
       });
 

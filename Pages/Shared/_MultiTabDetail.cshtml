@@ -81,6 +81,8 @@
             .forEach(el => el.classList.toggle('d-none', canEdit));
         document.querySelectorAll('.multi-tab-detail .erp-table .cell-edit')
             .forEach(el => el.classList.toggle('d-none', !canEdit));
+        document.querySelectorAll('.multi-tab-detail .erp-table')
+            .forEach(el => el.classList.toggle('date-edit', canEdit));
     }
 
     window.addEventListener('headerEditModeChanged', (e) => {
@@ -285,6 +287,7 @@
 
     function pad2(n) { return String(n).padStart(2, '0'); }
 
+
     function tryParseDate(raw) {
         if (raw == null || raw === '') return null;
         if (raw instanceof Date && !isNaN(raw)) return raw;
@@ -292,6 +295,22 @@
         if (!s) return null;
         const d = new Date(s);
         return isNaN(d) ? null : d;
+    }
+
+    function normalizeDateForPicker(value) {
+        const s = String(value ?? '').trim();
+        if (!s) return '';
+        const m = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+        if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+        const d = new Date(s);
+        if (isNaN(d)) return '';
+        return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    }
+
+    function formatDateForDisplay(ymd) {
+        const m = String(ymd ?? '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return '';
+        return `${m[1]}/${m[2]}/${m[3]}`;
     }
 
     function parseDecimalsFromFormat(fmt) {
@@ -376,6 +395,12 @@
     function getAlignClass(meta, raw) {
         if (isNumberType(meta?.dataType)) return 'align-right';
         return 'align-left';
+    }
+
+    function isDateType(meta) {
+        const dt = (meta?.dataType || '').toString().toLowerCase();
+        const fmt = (meta?.formatStr || '').toString().toLowerCase();
+        return dt.includes('date') || fmt.includes('yyyy/mm/dd') || fmt.includes('yyyy-mm-dd');
     }
 
     const LOOKUP_EMPTY_LABEL = '--請選擇--';
@@ -515,6 +540,64 @@
         positionDropdown(list, td);
         document.addEventListener('mousedown', onDocDown, true);
         window.addEventListener('resize', onResize, true);
+    }
+
+    function initDatePickers(scope, tabId) {
+        if (!scope) return;
+        const inputs = scope.querySelectorAll('input.cell-edit.date-dropdown');
+        inputs.forEach(textInput => {
+            const td = textInput.closest('td');
+            const dateInput = td?.querySelector('input.cell-date-input');
+            const toggle = td?.querySelector('.date-toggle');
+            if (!dateInput || !toggle) return;
+
+            const syncDateInput = () => {
+                const v = normalizeDateForPicker(textInput.value);
+                dateInput.value = v || '';
+            };
+            syncDateInput();
+
+            const updateRowState = () => {
+                const tr = td?.closest('tr');
+                if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
+                window.__unsavedChanges = true;
+                if (tabId && window._multiTabSelectedRows?.[tabId]) {
+                    const fieldName = textInput.dataset.field || '';
+                    if (fieldName) window._multiTabSelectedRows[tabId][fieldName] = textInput.value ?? '';
+                }
+            };
+
+            dateInput.addEventListener('change', () => {
+                const isReadOnly = td?.dataset?.readonly === '1' || textInput.dataset.readonly === '1' || textInput.readOnly;
+                if (!allowEdit || !getHeaderEditState() || isReadOnly) return;
+                const formatted = formatDateForDisplay(dateInput.value) || dateInput.value;
+                if (!formatted) return;
+                textInput.value = formatted;
+                const view = td?.querySelector('.cell-view');
+                if (view) view.textContent = formatted;
+                updateRowState();
+                try {
+                    textInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    textInput.dispatchEvent(new Event('change', { bubbles: true }));
+                } catch {}
+            });
+
+            textInput.addEventListener('input', () => syncDateInput());
+            textInput.addEventListener('change', () => syncDateInput());
+
+            toggle.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const isReadOnly = td?.dataset?.readonly === '1' || textInput.dataset.readonly === '1' || textInput.readOnly;
+                if (!allowEdit || !getHeaderEditState() || isReadOnly) return;
+                if (typeof dateInput.showPicker === 'function') {
+                    dateInput.showPicker();
+                } else {
+                    dateInput.focus();
+                    dateInput.click();
+                }
+            });
+        });
     }
 
     async function fetchFieldWidths(dictTable) {
@@ -870,6 +953,7 @@
                     const editText = (inputValue == null ? '' : String(inputValue)).trim();
                   // ? 雙元素：顯示模式 + 編輯模式
                     const alignClass = getAlignClass(meta, rawValue);
+                    const isDate = isDateType(meta);
                     const tdClasses = [alignClass];
                     if (canDropdown) tdClasses.push('lookup-cell');
                     const classAttr = tdClasses.length ? ` class="${tdClasses.join(' ')}"` : '';
@@ -879,13 +963,20 @@
                         ? ` data-lookup-field="${escapeHtml(field)}"${keyFieldAttr}${resultFieldAttr}`
                         : "";
                     const tdReadOnlyAttr = ` data-readonly="${isReadOnly ? '1' : '0'}"`;
+                    const dateEditClass = isDate ? ' date-dropdown' : '';
+                    const dateValue = isDate ? normalizeDateForPicker(editText) : '';
+                    const dateAddon = isDate
+                        ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
+                           <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
+                        : '';
                     html += `<td${classAttr}${lookupAttr}${tdReadOnlyAttr}>
                         <span class="${viewClass}${roClass}" data-init-view="${escapeHtml(viewText)}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span>
                         <input type="text"
-                               class="${editClass}${roClass}"
+                               class="${editClass}${roClass}${dateEditClass}"
                                data-field="${field}"
                                data-init="${escapeHtml(editText)}"
                                value="${escapeHtml(editText)}"${roAttr}>
+                        ${dateAddon}
                     </td>`;
             });
             html += '</tr>';
@@ -906,6 +997,8 @@
 
         html += '</tbody></table></div>';
         container.insertAdjacentHTML('beforeend', html);
+        const wrapper = container.querySelector('.erp-table-wrapper');
+        initDatePickers(wrapper, tabId);
         window._multiTabLookupFields = window._multiTabLookupFields || {};
         window._multiTabLookupFields[tabId] = Array.from(lookupFieldSet);
         window._multiTabLookupMeta = window._multiTabLookupMeta || {};
@@ -1336,6 +1429,7 @@ body.resizing { cursor: col-resize !important; }
 .multi-tab-detail .erp-table td {
     position: relative;
     padding: 0;
+    overflow: hidden;
 }
 
 /* ✅ 檢視模式的 span 樣式 */
@@ -1371,6 +1465,62 @@ body.resizing { cursor: col-resize !important; }
     text-align: inherit !important;
     padding: 2px 6px;  /* ← 與 .cell-view 完全相同的 padding */
     white-space: nowrap;
+}
+
+.multi-tab-detail .erp-table .cell-edit.date-dropdown{
+    padding-right: 14px;
+}
+
+.multi-tab-detail .erp-table .date-toggle{
+    position: absolute;
+    right: 3px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 14px !important;
+    height: 14px !important;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    z-index: 3;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    line-height: 1 !important;
+}
+
+.multi-tab-detail .erp-table .date-toggle,
+.multi-tab-detail .erp-table .cell-date-input{
+    display: none !important;
+}
+.multi-tab-detail .erp-table.date-edit .date-toggle,
+.multi-tab-detail .erp-table.date-edit .cell-date-input{
+    display: inline-flex !important;
+}
+
+.multi-tab-detail .erp-table .date-toggle::before{
+    content: "";
+    display: block;
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #6b7280;
+    margin: 0 auto;
+}
+
+.multi-tab-detail .erp-table .cell-date-input{
+    position: absolute;
+    right: 3px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 14px !important;
+    height: 14px !important;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 2;
+    padding: 0 !important;
+    margin: 0 !important;
 }
 
 .multi-tab-detail .erp-table .cell-edit:focus {

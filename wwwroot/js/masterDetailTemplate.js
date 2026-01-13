@@ -196,6 +196,69 @@
     return String(val);
   };
 
+  const isDateType = (dataType) => {
+    return !!(dataType && String(dataType).toLowerCase().includes("date"));
+  };
+
+  const toDateInputValue = (val) => {
+    if (!val) return "";
+    const s = String(val).trim();
+    if (!s) return "";
+    const d = new Date(s.replace(/\//g, "-"));
+    if (!isNaN(d)) return d.toISOString().slice(0, 10);
+    return "";
+  };
+
+  const toDisplayDate = (val) => {
+    if (!val) return "";
+    const s = String(val).trim();
+    if (!s) return "";
+    const d = new Date(s.replace(/\//g, "-"));
+    if (!isNaN(d)) return d.toISOString().slice(0, 10).replace(/-/g, "/");
+    return s;
+  };
+
+  const attachDatePicker = (td, inp) => {
+    if (!td || !inp || inp.readOnly) return;
+    td.style.position = "relative";
+    inp.style.paddingRight = "22px";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-outline-secondary btn-sm date-picker-btn cell-edit d-none";
+    btn.innerHTML = "&#9662;";
+    btn.style.position = "absolute";
+    btn.style.right = "4px";
+    btn.style.top = "50%";
+    btn.style.transform = "translateY(-50%)";
+    btn.tabIndex = -1;
+
+    const picker = document.createElement("input");
+    picker.type = "date";
+    picker.className = "date-picker-input";
+    picker.style.position = "absolute";
+    picker.style.opacity = "0";
+    picker.style.pointerEvents = "none";
+    picker.style.width = "1px";
+    picker.style.height = "1px";
+
+    btn.addEventListener("click", () => {
+      if (inp.readOnly) return;
+      picker.value = toDateInputValue(inp.value);
+      if (picker.showPicker) picker.showPicker();
+      else picker.focus();
+    });
+
+    picker.addEventListener("change", () => {
+      const v = toDisplayDate(picker.value);
+      inp.value = v;
+      inp.dataset.raw = v;
+    });
+
+    td.appendChild(btn);
+    td.appendChild(picker);
+  };
+
   // -----------------------------
   // 🧩 建立表頭
   // -----------------------------
@@ -225,7 +288,7 @@
   // -----------------------------
   // 🧩 建立表身 (含 Lookup + OCX)
   // -----------------------------
-  const buildBody = async (tbody, dict, rows, showRowNo, onRowClick, cfg, keyFields = [], isEditMode = false) => {
+  const buildBody = async (tbody, dict, rows, showRowNo, onRowClick, cfg, keyFields = [], isEditMode = false, isDetail = false) => {
     tbody.innerHTML = "";
 
     const fields = dict
@@ -344,6 +407,9 @@
           }
 
           td.append(span, inp);
+          if (isDetail && isDateType(DICT_MAP.dataType(f))) {
+            attachDatePicker(td, inp);
+          }
           tr.appendChild(td);
       });
 
@@ -526,7 +592,8 @@
         onMasterClick,
         cfg,
         [], // master key 由 editableGrid 處理
-        window._mdEditing || addMode
+        window._mdEditing || addMode,
+        false
       );
       if (!currentMasterRow) {
         const first = mBody.querySelector("tr");
@@ -552,7 +619,8 @@
         () => {},
         cfg,
         cfg.DetailKeyFields || [],
-        window._mdEditing || addMode
+        window._mdEditing || addMode,
+        true
       );
       if (window._detailEditor && (window._mdEditing || addMode)) {
         window._detailEditor.toggleEdit(false);

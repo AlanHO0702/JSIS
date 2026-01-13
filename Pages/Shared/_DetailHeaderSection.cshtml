@@ -192,12 +192,21 @@
     const el = findHeaderFieldControl(fieldName);
     if (!el) return { value: '', isCheckbox: false };
     if (el.type === 'checkbox') return { value: el.checked ? '1' : '0', isCheckbox: true };
+    if (el.classList?.contains('lookup-dropdown')) {
+      const hidden = el.closest('li')?.querySelector('input.lookup-key[name]');
+      if (hidden) return { value: (hidden.value ?? '').toString().trim(), isCheckbox: false };
+      const raw = (el.value ?? '').toString().trim();
+      const map = el._lookupLabelToKey || {};
+      const key = map[raw] || raw.split(' - ')[0] || raw;
+      return { value: key.toString().trim(), isCheckbox: false };
+    }
     return { value: (el.value ?? '').toString().trim(), isCheckbox: false };
   };
 
   const readHeaderValue = (fieldName) => {
     return readHeaderFieldInfo(fieldName).value;
   };
+  if (!window.readHeaderValue) window.readHeaderValue = readHeaderValue;
 
   async function fetchHeaderRow(dictTable, paperNum) {
     const tn = cleanTableName(dictTable);
@@ -1528,6 +1537,7 @@
                             var isReadOnly = (field.ReadOnly ?? 0) == 1;
                             var readOnlyClass = isReadOnly ? "dict-readonly" : "";
                             var readOnlyAttr = isReadOnly ? " data-readonly=\"1\"" : " data-readonly=\"0\"";
+                            var isDateType = (field.DataType ?? "").IndexOf("date", StringComparison.OrdinalIgnoreCase) >= 0;
 
                             <li class="header-label-item"
                                 data-field="@field.FieldName"
@@ -1569,23 +1579,63 @@
                                 !string.IsNullOrWhiteSpace(field.LookupKeyField) &&
                                 !string.IsNullOrWhiteSpace(field.LookupResultField))
                             {
-                                // 下拉選單元件（原本 select）
+                                // 下拉選單元件（可輸入）
                                 <li class="@liClass @(alignRight ? "field-number" : "field-text")"
                                     data-field="@field.FieldName"
                                     data-tab="@tab.Key"
                                     title="@field.FieldName"
                                     style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
                                     <span class="field-drag-handle" aria-hidden="true"></span>
-                                    <select class="form-select lookup-dropdown @(readOnlyClass)"
-                                            name="@field.FieldName"
-                                            data-table="@field.LookupTable"
-                                            data-key="@field.LookupKeyField"
-                                            data-result="@field.LookupResultField.Replace(" ", "")"
-                                            data-selected="@rawValue"
-                                            style="@editStyleForSelect"
-                                            @Html.Raw(readOnlyAttr)>
-                                        <option value="">--請選擇--</option>
-                                    </select>
+                                    <input type="hidden"
+                                           name="@field.FieldName"
+                                           value="@rawValue"
+                                           class="lookup-key"
+                                           data-field="@field.FieldName" />
+                                    <input type="text"
+                                           class="form-control lookup-dropdown @(readOnlyClass)"
+                                           value="@rawValue"
+                                           data-field="@field.FieldName"
+                                           data-table="@field.LookupTable"
+                                           data-key="@field.LookupKeyField"
+                                           data-result="@field.LookupResultField.Replace(" ", "")"
+                                           data-cond1-field="@field.LookupCond1Field"
+                                           data-cond1-source="@field.LookupCond1ResultField"
+                                           data-cond2-field="@field.LookupCond2Field"
+                                           data-cond2-source="@field.LookupCond2ResultField"
+                                           data-selected="@rawValue"
+                                           autocomplete="off"
+                                           style="@editStyleForSelect"
+                                           @Html.Raw(readOnlyAttr) />
+                                    <button type="button" class="lookup-toggle" aria-label="展開下拉" tabindex="-1"></button>
+                                </li>
+                            }
+                            else if (isDateType)
+                            {
+                                var datePickerValue = "";
+                                if (rawValue != null && DateTime.TryParse(rawValue.ToString(), out var dt))
+                                {
+                                    datePickerValue = dt.ToString("yyyy-MM-dd");
+                                }
+                                <li class="@liClass @(alignRight ? "field-number" : "field-text")"
+                                    data-field="@field.FieldName"
+                                    data-tab="@tab.Key"
+                                    title="@field.FieldName"
+                                    style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
+                                    <span class="field-drag-handle" aria-hidden="true"></span>
+                                    <input type="text"
+                                           class="form-control resizable-input date-dropdown @(readOnlyClass)"
+                                           name="@field.FieldName"
+                                           value="@displayText"
+                                           @(isReadOnly ? "readonly" : "")
+                                           data-align="@(alignRight ? "right" : (alignCenter ? "center" : null))"
+                                           style="@editStyle"
+                                           @Html.Raw(readOnlyAttr) />
+                                    <input type="date"
+                                           class="date-picker-input"
+                                           tabindex="-1"
+                                           aria-hidden="true"
+                                           value="@datePickerValue" />
+                                    <button type="button" class="lookup-toggle date-toggle" aria-label="選擇日期" tabindex="-1"></button>
                                 </li>
                             }
                             else
@@ -2138,6 +2188,7 @@ if (editBtn) {
     const locked = sel.dataset.lockedValue ?? '';
     if ((sel.value ?? '') !== locked) {
       sel.value = locked;
+      syncLookupLabel(sel);
     }
     e.stopPropagation();
   }, true);
@@ -2151,6 +2202,7 @@ if (editBtn) {
     const locked = sel.dataset.lockedValue ?? '';
     if ((sel.value ?? '') !== locked) {
       sel.value = locked;
+      syncLookupLabel(sel);
     }
     e.stopPropagation();
   }, true);
@@ -2163,6 +2215,36 @@ if (editBtn) {
 
     const blockKeys = ['ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', ' ', 'Enter'];
     if (blockKeys.includes(e.key)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+
+  function getHeaderEditState() {
+    if (typeof window.__headerIsEdit === 'boolean') return window.__headerIsEdit;
+    const btn = document.getElementById('btnViewEditToggle');
+    return !!btn && (btn.textContent || '').trim() === '保留';
+  }
+
+  // 編輯模式：lookup input 用 Backspace/Delete 直接清空
+  document.addEventListener('keydown', (e) => {
+    const inp = e.target;
+    if (!(inp instanceof HTMLInputElement)) return;
+    if (!inp.matches('.erp-header-form .lookup-dropdown')) return;
+    if (inp.closest('.modal')) return;
+    if (!getHeaderEditState() || inp.dataset.readonly === '1') return;
+    if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+    if (inp.readOnly) return;
+    if (!inp.value) return;
+    const init = inp.dataset.init ?? inp.dataset.selected ?? '';
+    const start = inp.selectionStart ?? 0;
+    const end = inp.selectionEnd ?? 0;
+    const allSelected = start === 0 && end === inp.value.length;
+    const rawKey = String(inp.value ?? '').split(' - ')[0];
+    const unchanged = rawKey === String(init ?? '');
+    if (allSelected || unchanged) {
+      inp.value = '';
+      syncLookupLabel(inp);
       e.preventDefault();
       e.stopPropagation();
     }
@@ -2697,7 +2779,7 @@ $(function () {
     out:  function () { clearTimeout(dragTabSwitchTimer); }
   });
 
-  function applyLookupData(el, data, selected) {
+  function applyLookupDataLegacy(el, data, selected) {
     const $el = $(el);
     $el.empty().append('<option value="">--請選擇--</option>');
     (data || []).forEach(row => {
@@ -2713,14 +2795,78 @@ $(function () {
     }
   }
 
+  function applyLookupData(el, data, selected) {
+    const rows = data || [];
+    const $el = $(el);
+    if ($el.is('select')) {
+      $el.empty().append('<option value="">--出随詳--</option>');
+      rows.forEach(row => {
+        const val = row.key;
+        const label = Object.keys(row).filter(p => p.startsWith('result')).map(p => row[p]).join(' - ');
+        const $opt = $('<option>').val(val).text(label);
+        if (val == selected) $opt.attr('selected', true);
+        $el.append($opt);
+      });
+      $el.next('.lookup-label').text($el.find('option:selected').text());
+      if (el.classList.contains('lookup-readonly')) {
+        el.dataset.lockedValue = el.value ?? '';
+      }
+      return;
+    }
+
+    const inputEl = el;
+    const keyToLabel = {};
+    const labelToKey = {};
+    const items = [];
+    rows.forEach(row => {
+      const val = row.key;
+      const label = Object.keys(row).filter(p => p.startsWith('result')).map(p => row[p]).join(' - ');
+      const keyStr = val == null ? '' : String(val);
+      keyToLabel[keyStr] = label;
+      const display = formatLookupDisplay(keyStr, label);
+      if (display) labelToKey[display] = keyStr;
+      labelToKey[keyStr] = keyStr;
+      items.push({ key: keyStr, label });
+    });
+
+    inputEl._lookupKeyToLabel = keyToLabel;
+    inputEl._lookupLabelToKey = labelToKey;
+    inputEl._lookupItems = items;
+    const initKey = selected ?? '';
+    if (initKey !== '') inputEl.value = formatLookupDisplay(initKey, keyToLabel[initKey]);
+    const hidden = inputEl.closest('li')?.querySelector('input.lookup-key[name]');
+    if (hidden) hidden.value = initKey;
+    syncLookupLabel(inputEl);
+    if (inputEl.classList.contains('lookup-readonly')) {
+      inputEl.dataset.lockedValue = inputEl.value ?? '';
+    }
+    if (document.activeElement === inputEl) {
+      const allowApply = !!(getHeaderEditState() && inputEl.dataset.readonly !== '1' && !inputEl.readOnly);
+      openLookupDropdownForInput(inputEl, true, allowApply);
+    }
+  }
+
   function loadLookupOptions(el) {
-    if (!el || el.dataset.lookupLoading === '1' || el.dataset.lookupLoaded === '1') return;
-    const table = el.dataset.table || '';
-    const key = el.dataset.key || '';
-    const result = el.dataset.result || '';
+    if (!el || el.dataset.lookupLoading === '1') return;
+    const table = (el.dataset.table || '').trim();
+    const key = (el.dataset.key || '').trim();
+    const result = (el.dataset.result || '').trim();
     if (!table || !key || !result) return;
+
+    const cond1Field = (el.dataset.cond1Field || '').trim();
+    const cond1Source = (el.dataset.cond1Source || '').trim();
+    const cond2Field = (el.dataset.cond2Field || '').trim();
+    const cond2Source = (el.dataset.cond2Source || '').trim();
+    const cond1Value = cond1Source ? readHeaderValue(cond1Source) : '';
+    const cond2Value = cond2Source ? readHeaderValue(cond2Source) : '';
+    const condKey = `${cond1Field}:${cond1Value}|${cond2Field}:${cond2Value}`;
+    if (el.dataset.lookupLoaded === '1' && el.dataset.lookupCondKey === condKey) return;
+
+    el.dataset.lookupCondKey = condKey;
     el.dataset.lookupLoading = '1';
-    const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(table)}&key=${encodeURIComponent(key)}&result=${encodeURIComponent(result)}`;
+    const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(table)}&key=${encodeURIComponent(key)}&result=${encodeURIComponent(result)}`
+      + (cond1Field && cond1Value ? `&cond1Field=${encodeURIComponent(cond1Field)}&cond1Value=${encodeURIComponent(cond1Value)}` : '')
+      + (cond2Field && cond2Value ? `&cond2Field=${encodeURIComponent(cond2Field)}&cond2Value=${encodeURIComponent(cond2Value)}` : '');
     fetch(url)
       .then(r => r.ok ? r.json() : [])
       .then(data => {
@@ -2731,11 +2877,262 @@ $(function () {
       .finally(() => { delete el.dataset.lookupLoading; });
   }
 
+  const LOOKUP_EMPTY_LABEL = '--請選擇--';
+  let activeLookupList = null;
+  let activeLookupInput = null;
+
+  function normalizeLookupText(value) {
+    return (value ?? '').toString().trim().toLowerCase();
+  }
+
+  function getLookupKeyFromInput(input) {
+    const raw = (input?.value ?? '').toString().trim();
+    if (!raw) return '';
+    return raw.split(' - ')[0];
+  }
+
+  function buildLookupListForInput(input, showAll = false) {
+    const list = document.createElement('div');
+    list.className = 'lookup-dropdown-list';
+    const items = Array.isArray(input?._lookupItems) ? input._lookupItems : [];
+    const currentKey =
+      input?.closest('li')?.querySelector('input.lookup-key[name]')?.value ??
+      getLookupKeyFromInput(input);
+    const filter = showAll ? '' : normalizeLookupText(input?.value ?? '');
+
+    const addItem = (key, label) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'lookup-dropdown-item';
+      item.dataset.key = key == null ? '' : String(key);
+      item.textContent = formatLookupDisplay(key, label) || String(key ?? '');
+      if ((currentKey ?? '') === (key ?? '')) item.classList.add('is-selected');
+      list.appendChild(item);
+    };
+
+    addItem('', LOOKUP_EMPTY_LABEL);
+    items.forEach(it => {
+      const key = it?.key ?? '';
+      const label = it?.label ?? '';
+      const display = formatLookupDisplay(key, label);
+      if (filter) {
+        const f = normalizeLookupText(filter);
+        const match =
+          normalizeLookupText(key).includes(f) ||
+          normalizeLookupText(label).includes(f) ||
+          normalizeLookupText(display).includes(f);
+        if (!match) return;
+      }
+      addItem(key, label);
+    });
+    return list;
+  }
+
+  function positionDropdown(list, anchor) {
+    if (!list || !anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const maxHeight = Math.max(140, Math.min(260, spaceBelow - 8));
+    const placeBelow = spaceBelow >= 140;
+    list.style.position = 'fixed';
+    list.style.left = `${Math.max(6, rect.left)}px`;
+    list.style.top = placeBelow ? `${rect.bottom}px` : `${Math.max(6, rect.top - maxHeight)}px`;
+    list.style.minWidth = `${Math.max(120, rect.width)}px`;
+    list.style.maxHeight = `${maxHeight}px`;
+  }
+
+  function closeLookupDropdown() {
+    if (activeLookupList) activeLookupList.remove();
+    activeLookupList = null;
+    activeLookupInput = null;
+    document.removeEventListener('mousedown', onLookupDocDown, true);
+    document.removeEventListener('pointerdown', onLookupDocDown, true);
+    document.removeEventListener('click', onLookupDocDown, true);
+    document.removeEventListener('focusin', onLookupFocusIn, true);
+    document.removeEventListener('keydown', onLookupKeydown, true);
+    window.removeEventListener('resize', onLookupResize, true);
+  }
+
+  function onLookupDocDown(e) {
+    if (activeLookupList && activeLookupList.contains(e.target)) return;
+    if (activeLookupInput && activeLookupInput.contains(e.target)) return;
+    closeLookupDropdown();
+  }
+
+  function onLookupFocusIn(e) {
+    if (activeLookupList && activeLookupList.contains(e.target)) return;
+    if (activeLookupInput && activeLookupInput.contains(e.target)) return;
+    closeLookupDropdown();
+  }
+
+  function onLookupKeydown(e) {
+    if (e.key !== 'Escape') return;
+    closeLookupDropdown();
+  }
+
+  function onLookupResize() {
+    closeLookupDropdown();
+  }
+
+  function openLookupDropdownForInput(input, showAll = false, allowApply = true) {
+    if (!input) return;
+    const items = Array.isArray(input._lookupItems) ? input._lookupItems : [];
+
+    closeLookupDropdown();
+
+    const list = buildLookupListForInput(input, showAll);
+    activeLookupList = list;
+    activeLookupInput = input;
+
+    const onPick = (e) => {
+      const item = e.target.closest('.lookup-dropdown-item');
+      if (!item) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!allowApply) { closeLookupDropdown(); return; }
+      const key = item.dataset.key ?? '';
+      const label = input._lookupKeyToLabel?.[key] ?? '';
+      input.value = key ? formatLookupDisplay(key, label) : '';
+      const hidden = input.closest('li')?.querySelector('input.lookup-key[name]');
+      if (hidden) hidden.value = key;
+      syncLookupLabel(input);
+      try {
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch {}
+      closeLookupDropdown();
+    };
+
+    list.addEventListener('pointerdown', onPick);
+    list.addEventListener('mousedown', onPick);
+    list.addEventListener('click', onPick);
+
+    document.body.appendChild(list);
+    positionDropdown(list, input);
+    document.addEventListener('mousedown', onLookupDocDown, true);
+    document.addEventListener('pointerdown', onLookupDocDown, true);
+    document.addEventListener('click', onLookupDocDown, true);
+    document.addEventListener('focusin', onLookupFocusIn, true);
+    document.addEventListener('keydown', onLookupKeydown, true);
+    window.addEventListener('resize', onLookupResize, true);
+  }
+
   $('.lookup-dropdown').each(function() {
     const el = this;
     loadLookupOptions(el);
-    $(el).on('change', function() {
-      $(this).next('.lookup-label').text($(this).find('option:selected').text());
+    if (el.tagName && el.tagName.toLowerCase() === 'select') {
+      $(el).on('change', function() {
+        $(this).next('.lookup-label').text($(this).find('option:selected').text());
+      });
+      $(el).on('focus', function() {
+        loadLookupOptions(this);
+      });
+    } else {
+      $(el).on('input change', function() {
+        syncLookupLabel(this);
+        if (activeLookupInput === this) {
+          const allowApply = !!(getHeaderEditState() && this.dataset.readonly !== '1' && !this.readOnly);
+          openLookupDropdownForInput(this, false, allowApply);
+        }
+      });
+      $(el).on('focus', function() {
+        loadLookupOptions(this);
+        try {
+          const map = this._lookupLabelToKey || {};
+          const key = map[this.value];
+          if (key) this.value = key;
+          const len = (this.value || '').length;
+          if (len) this.setSelectionRange(0, len);
+          else this.select();
+        } catch { }
+      });
+      $(el).on('blur', function() {
+        const map = this._lookupKeyToLabel || {};
+        const raw = (this.value || '').trim();
+        if (!raw) return;
+        if (map[raw]) {
+          this.value = formatLookupDisplay(raw, map[raw]);
+          syncLookupLabel(this);
+        }
+        setTimeout(() => {
+          if (activeLookupInput === this) closeLookupDropdown();
+        }, 0);
+      });
+      $(el).siblings('.lookup-toggle').on('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const inputEl = $(this).siblings('input.lookup-dropdown')[0];
+        if (!inputEl) return;
+        loadLookupOptions(inputEl);
+        const allowApply = !!(getHeaderEditState() && inputEl.dataset.readonly !== '1' && !inputEl.readOnly);
+        openLookupDropdownForInput(inputEl, true, allowApply);
+      });
+      $(el).on('keydown', function(e) {
+        if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+        if (this.readOnly) return;
+        if (!this.value) return;
+        const init = this.dataset.init ?? this.dataset.selected ?? '';
+        const start = this.selectionStart ?? 0;
+        const end = this.selectionEnd ?? 0;
+        const allSelected = start === 0 && end === this.value.length;
+        const rawKey = String(this.value ?? '').split(' - ')[0];
+        const unchanged = rawKey === String(init ?? '');
+        if (allSelected || unchanged) {
+          this.value = '';
+          syncLookupLabel(this);
+          e.preventDefault();
+        }
+      });
+    }
+  });
+
+  const normalizeDateForPicker = (value) => {
+    const s = String(value ?? '').trim();
+    if (!s) return '';
+    const m = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+    if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+    const d = new Date(s);
+    if (isNaN(d)) return '';
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  const formatDateForDisplay = (ymd) => {
+    const m = String(ymd ?? '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return '';
+    return `${m[1]}/${m[2]}/${m[3]}`;
+  };
+
+  $('.date-dropdown').each(function() {
+    const textInput = this;
+    const dateInput = $(this).siblings('input.date-picker-input')[0];
+    if (!dateInput) return;
+    const normalized = normalizeDateForPicker(textInput.value);
+    if (normalized) dateInput.value = normalized;
+
+    $(dateInput).on('change', function() {
+      if (!this.value) return;
+      textInput.value = formatDateForDisplay(this.value) || this.value;
+      try {
+        textInput.dispatchEvent(new Event('input', { bubbles: true }));
+        textInput.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch { }
+    });
+
+    $(textInput).on('input change', function() {
+      const v = normalizeDateForPicker(this.value);
+      if (v) dateInput.value = v;
+    });
+
+    $(textInput).siblings('.date-toggle').on('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!getHeaderEditState() || textInput.dataset.readonly === '1' || textInput.readOnly) return;
+      if (typeof dateInput.showPicker === 'function') {
+        dateInput.showPicker();
+      } else {
+        dateInput.focus();
+        dateInput.click();
+      }
     });
   });
 
@@ -2753,6 +3150,16 @@ $(function () {
     hiddenTabs.removeClass("show tmp-show").css("display", "");
   }
   requestAnimationFrame(() => setInitialTabHeights(4));
+});
+
+// SHIFT 顯示縮放把手
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Shift') return;
+  document.body.classList.add('shift-resize');
+});
+document.addEventListener('keyup', (e) => {
+  if (e.key !== 'Shift') return;
+  document.body.classList.remove('shift-resize');
 });
 
 // ============================
@@ -3187,11 +3594,37 @@ function getHeaderValueByLabel(labelText) {
 }
 
 // 未儲存旗標
+  function formatLookupDisplay(code, label) {
+    if (!code) return "";
+    const c = String(code);
+    const l = label == null ? "" : String(label);
+    if (!l) return c;
+    if (l === c) return c;
+    if (l.startsWith(c + " - ") || l.startsWith(c + "-") || l.startsWith(c + " ")) return l;
+    return `${c} - ${l}`;
+  }
+
   function syncLookupLabel(selectEl) {
-    const label = selectEl?.nextElementSibling;
-    if (label && label.classList.contains('lookup-label')) {
-      const text = selectEl.options[selectEl.selectedIndex]?.text ?? '';
-      label.textContent = text;
+    if (!selectEl) return;
+    const label = selectEl.nextElementSibling;
+    if (selectEl instanceof HTMLSelectElement) {
+      if (label && label.classList.contains('lookup-label')) {
+        const text = selectEl.options[selectEl.selectedIndex]?.text ?? '';
+        label.textContent = text;
+      }
+      return;
+    }
+    if (selectEl instanceof HTMLInputElement) {
+      const keyToLabel = selectEl._lookupKeyToLabel || {};
+      const labelToKey = selectEl._lookupLabelToKey || {};
+      const raw = selectEl.value ?? '';
+      const key = labelToKey[raw] ?? raw;
+      const display = formatLookupDisplay(key, keyToLabel[key]);
+      if (label && label.classList.contains('lookup-label')) {
+        label.textContent = display || raw;
+      }
+      const hidden = selectEl.closest('li')?.querySelector('input.lookup-key[name]');
+      if (hidden) hidden.value = raw === '' ? '' : key;
     }
   }
 
@@ -3218,7 +3651,7 @@ function getHeaderValueByLabel(labelText) {
         } else {
           el.value = init;
         }
-        if (el.matches('select.lookup-dropdown')) syncLookupLabel(el);
+        if (el.matches('.lookup-dropdown')) syncLookupLabel(el);
       });
   }
 
@@ -3525,7 +3958,7 @@ body { background: #f7f9fb !important; }
 .draggable-field{ position:absolute; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; background:transparent; border:1px dashed transparent; }
 .draggable-field:hover{ border-color:#c7d3e1; }
 .draggable-field.inline{ display:flex; flex-direction:row; align-items: center; gap:4px; flex:0 0 auto; min-width:0; max-width:100%; box-sizing:border-box; }
-.header-label-item{ position:absolute; display:flex; align-items:center; justify-content:flex-end; text-align:right; font-size:var(--field-label-size); line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 4px 0 2px; z-index:2; }
+.header-label-item{ position:absolute; display:flex; align-items:center; justify-content:flex-end; text-align:right; font-size:var(--field-label-size); line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 4px 0 2px; z-index:2; pointer-events:none; }
 .field-drag-handle{ position:absolute; left:0; top:0; width:10px; height:100%; cursor:default; background:transparent; z-index:3; }
 .draggable-field.inline .field-control{ flex:1 1 auto; height:100%; display:flex; }
 .draggable-field.inline textarea,
@@ -3580,6 +4013,70 @@ body { background: #f7f9fb !important; }
   border-color: #ced4da;
   box-shadow: none !important;
 }
+.erp-header-form .lookup-dropdown{
+  padding-right: 24px !important;
+}
+.erp-header-form .date-dropdown{
+  padding-right: 24px !important;
+}
+.erp-header-form .lookup-toggle{
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  z-index: 6;
+}
+.erp-header-form .lookup-toggle::before{
+  content: "";
+  display: block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #6b7280;
+  margin: 0 auto;
+}
+.erp-header-form .date-picker-input{
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  opacity: 0;
+  pointer-events: none;
+}
+.lookup-dropdown-list{
+  z-index: 2000;
+  background: #fff;
+  border: 1px solid #b6c2d9;
+  border-radius: 6px;
+  box-shadow: 0 8px 20px rgba(30, 41, 59, 0.18);
+  overflow: auto;
+}
+.lookup-dropdown-item{
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 6px 10px;
+  font-size: var(--field-value-size);
+  cursor: pointer;
+}
+.lookup-dropdown-item:hover,
+.lookup-dropdown-item:focus{
+  background: #e2e8f0;
+  outline: none;
+}
+.lookup-dropdown-item.is-selected{
+  background: #dbeafe;
+}
 .erp-header-form .lookup-dropdown option,
 .erp-header-form .lookup-dropdown optgroup{
   background-color: var(--bs-body-bg, #fff) !important;
@@ -3612,15 +4109,18 @@ body { background: #f7f9fb !important; }
 .field-drag-handle,
 .draggable-field.ui-resizable .ui-resizable-e,
 .draggable-field.ui-resizable .ui-resizable-se{
-  display: none;
-}
-.layout-edit-enabled .field-drag-handle,
-.layout-edit-enabled .draggable-field.ui-resizable .ui-resizable-e,
-.layout-edit-enabled .draggable-field.ui-resizable .ui-resizable-se{
-  display: block;
+  display: none !important;
 }
 .layout-edit-enabled .field-drag-handle{
+  display: block !important;
   cursor: move;
+}
+.layout-edit-enabled .header-label-item{
+  pointer-events: auto;
+}
+body.shift-resize .draggable-field.ui-resizable .ui-resizable-e,
+body.shift-resize .draggable-field.ui-resizable .ui-resizable-se{
+  display: block !important;
 }
 
 /* =========================================
