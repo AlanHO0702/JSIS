@@ -261,22 +261,35 @@
                                         !string.IsNullOrWhiteSpace(field.LookupKeyField) &&
                                         !string.IsNullOrWhiteSpace(field.LookupResultField))
                                     {
-                                        // 下拉選單元件（用 select）
+                                        // 下拉選單元件（可輸入）
+                                        var lookupListId = $"lk_{tab.Key}_{field.FieldName}".Replace(" ", "_");
                                         <li class="@liClass @(alignRight ? "field-number" : "field-text")"
                                             data-field="@field.FieldName"
                                             data-tab="@tab.Key"
                                             title="@field.FieldName"
                                             style="top:@(top)px; left:@(left)px; width:@(width)px; height:@(height)px;">
                                             <span class="field-drag-handle" aria-hidden="true"></span>
-                                            <select class="form-select lookup-dropdown"
-                                                    name="@field.FieldName"
-                                                    data-table="@field.LookupTable"
-                                                    data-key="@field.LookupKeyField"
-                                                    data-result="@field.LookupResultField.Replace(" ", "")"
-                                                    data-selected="@rawValue"
-                                                    style="@editStyleForSelect"> 
-                                                <option value="">--請選擇--</option>
-                                            </select>
+                                            <input type="hidden"
+                                                   name="@field.FieldName"
+                                                   value="@rawValue"
+                                                   class="lookup-key"
+                                                   data-field="@field.FieldName" />
+                                            <input type="text"
+                                                   class="form-control lookup-dropdown"
+                                                   value="@rawValue"
+                                                   data-field="@field.FieldName"
+                                                   data-table="@field.LookupTable"
+                                                   data-key="@field.LookupKeyField"
+                                                   data-result="@field.LookupResultField.Replace(" ", "")"
+                                                   data-cond1-field="@field.LookupCond1Field"
+                                                   data-cond1-source="@field.LookupCond1ResultField"
+                                                   data-cond2-field="@field.LookupCond2Field"
+                                                   data-cond2-source="@field.LookupCond2ResultField"
+                                                   data-selected="@rawValue"
+                                                   autocomplete="off"
+                                                   list="@lookupListId"
+                                                   style="@editStyleForSelect" />
+                                            <datalist id="@lookupListId"></datalist>
                                         </li>
                                     }
                                     else
@@ -998,18 +1011,36 @@ if (editBtn) {
 
   function setLookupReadOnly(selectEl, readOnly) {
     if (!selectEl) return;
-    if (readOnly) {
-      selectEl.disabled = false; // 必須可點，才能展開選項
-      selectEl.dataset.lockedValue = selectEl.value ?? '';
-      selectEl.classList.add('lookup-readonly');
-      selectEl.setAttribute('aria-readonly', 'true');
-      selectEl.title = '瀏覽模式：可查看下拉內容，不能修改';
-    } else {
-      selectEl.classList.remove('lookup-readonly');
-      selectEl.removeAttribute('aria-readonly');
-      selectEl.title = '';
-      selectEl.dataset.lockedValue = selectEl.value ?? '';
-      selectEl.disabled = false;
+    if (selectEl instanceof HTMLSelectElement) {
+      if (readOnly) {
+        selectEl.disabled = false; // 必須可點，才能展開選項
+        selectEl.dataset.lockedValue = selectEl.value ?? '';
+        selectEl.classList.add('lookup-readonly');
+        selectEl.setAttribute('aria-readonly', 'true');
+        selectEl.title = '瀏覽模式：可查看下拉內容，不能修改';
+      } else {
+        selectEl.classList.remove('lookup-readonly');
+        selectEl.removeAttribute('aria-readonly');
+        selectEl.title = '';
+        selectEl.dataset.lockedValue = selectEl.value ?? '';
+        selectEl.disabled = false;
+      }
+      return;
+    }
+    if (selectEl instanceof HTMLInputElement) {
+      if (readOnly) {
+        selectEl.readOnly = true;
+        selectEl.dataset.lockedValue = selectEl.value ?? '';
+        selectEl.classList.add('lookup-readonly');
+        selectEl.setAttribute('aria-readonly', 'true');
+        selectEl.title = '瀏覽模式：可查看內容，不能修改';
+      } else {
+        selectEl.readOnly = false;
+        selectEl.classList.remove('lookup-readonly');
+        selectEl.removeAttribute('aria-readonly');
+        selectEl.title = '';
+        selectEl.dataset.lockedValue = selectEl.value ?? '';
+      }
     }
   }
 
@@ -1017,8 +1048,10 @@ if (editBtn) {
     document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
       .forEach(el => {
         if (el.closest('.modal')) return;
-        if (el.matches('select.lookup-dropdown')) {
+        if (el.matches('.lookup-dropdown')) {
           setLookupReadOnly(el, !editing);
+        } else if (el.matches('input[type="hidden"]')) {
+          el.disabled = false;
         } else {
           el.disabled = !editing;
         }
@@ -1089,6 +1122,29 @@ if (editBtn) {
 
     const blockKeys = ['ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', ' ', 'Enter'];
     if (blockKeys.includes(e.key)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+
+  // 編輯模式：lookup input 用 Backspace/Delete 直接清空（避免被其他 keydown 攔截）
+  document.addEventListener('keydown', (e) => {
+    const inp = e.target;
+    if (!(inp instanceof HTMLInputElement)) return;
+    if (!inp.matches('.erp-header-form input.lookup-dropdown')) return;
+    if (inp.closest('.modal')) return;
+    if (!isEdit) return;
+    if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+    if (inp.readOnly) return;
+    if (!inp.value) return;
+    const init = inp.dataset.init ?? inp.dataset.selected ?? '';
+    const start = inp.selectionStart ?? 0;
+    const end = inp.selectionEnd ?? 0;
+    const allSelected = start === 0 && end === inp.value.length;
+    const unchanged = String(inp.value ?? '') === String(init ?? '');
+    if (allSelected || unchanged) {
+      inp.value = '';
+      syncLookupLabel(inp);
       e.preventDefault();
       e.stopPropagation();
     }
@@ -1545,28 +1601,143 @@ $(function () {
     out:  function () { clearTimeout(dragTabSwitchTimer); }
   });
 
+  function readHeaderFieldValue(fieldName) {
+    const target = (fieldName || '').toLowerCase();
+    if (!target) return '';
+    const fields = document.querySelectorAll('form.erp-header-form input[name], form.erp-header-form textarea[name], form.erp-header-form select[name]');
+    for (const el of fields) {
+      const name = (el.getAttribute('name') || '').toLowerCase();
+      if (name !== target) continue;
+      if (el.type === 'checkbox') return el.checked ? '1' : '0';
+      return (el.value ?? '').toString().trim();
+    }
+    return '';
+  }
+  if (!window.readHeaderValue) window.readHeaderValue = readHeaderFieldValue;
+
   $('.lookup-dropdown').each(function() {
-    const $select = $(this);
-    const table = $select.data('table'), key = $select.data('key'),
-          result = $select.data('result'), selected = $select.data('selected');
-    $.getJSON(`/api/TableFieldLayout/LookupData?table=${table}&key=${key}&result=${result}`, function(data) {
-      $select.empty().append('<option value="">--請選擇--</option>');
-      (data || []).forEach(row => {
-        const val = row.key;
-        const label = Object.keys(row).filter(p => p.startsWith('result')).map(p => row[p]).join(' - ');
-        const $opt = $('<option>').val(val).text(label);
-        if (val == selected) $opt.attr('selected', true);
-        $select.append($opt);
+    const $ctrl = $(this);
+    const el = $ctrl[0];
+
+    function loadLookupOptions() {
+      if (!el || el.dataset.lookupLoading === '1') return;
+      const table = (el.dataset.table || '').trim();
+      const key = (el.dataset.key || '').trim();
+      const result = (el.dataset.result || '').trim();
+      const selected = el.dataset.selected ?? '';
+      if (!table || !key || !result) return;
+
+      const cond1Field = (el.dataset.cond1Field || '').trim();
+      const cond1Source = (el.dataset.cond1Source || '').trim();
+      const cond2Field = (el.dataset.cond2Field || '').trim();
+      const cond2Source = (el.dataset.cond2Source || '').trim();
+      const cond1Value = cond1Source ? readHeaderFieldValue(cond1Source) : '';
+      const cond2Value = cond2Source ? readHeaderFieldValue(cond2Source) : '';
+      const condKey = `${cond1Field}:${cond1Value}|${cond2Field}:${cond2Value}`;
+      if (el.dataset.lookupLoaded === '1' && el.dataset.lookupCondKey === condKey) return;
+
+      el.dataset.lookupCondKey = condKey;
+      el.dataset.lookupLoading = '1';
+      const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(table)}&key=${encodeURIComponent(key)}&result=${encodeURIComponent(result)}`
+        + (cond1Field && cond1Value ? `&cond1Field=${encodeURIComponent(cond1Field)}&cond1Value=${encodeURIComponent(cond1Value)}` : '')
+        + (cond2Field && cond2Value ? `&cond2Field=${encodeURIComponent(cond2Field)}&cond2Value=${encodeURIComponent(cond2Value)}` : '');
+
+      const req = $.getJSON(url, function(data) {
+        const rows = data || [];
+        if ($ctrl.is('select')) {
+          $ctrl.empty().append('<option value="">--請選擇--</option>');
+          rows.forEach(row => {
+            const val = row.key;
+            const label = Object.keys(row).filter(p => p.startsWith('result')).map(p => row[p]).join(' - ');
+            const $opt = $('<option>').val(val).text(label);
+            if (val == selected) $opt.attr('selected', true);
+            $ctrl.append($opt);
+          });
+          $ctrl.next('.lookup-label').text($ctrl.find('option:selected').text());
+          if ($ctrl.hasClass('lookup-readonly') && $ctrl[0]) {
+            $ctrl[0].dataset.lockedValue = $ctrl.val() ?? '';
+          }
+          el.dataset.lookupLoaded = '1';
+          return;
+        }
+
+        const inputEl = $ctrl[0];
+        const listId = $ctrl.attr('list');
+        let listEl = listId ? document.getElementById(listId) : null;
+        if (!listEl) {
+          listEl = document.createElement('datalist');
+          if (listId) listEl.id = listId;
+          inputEl.after(listEl);
+        }
+        listEl.innerHTML = '';
+
+        const keyToLabel = {};
+        const labelToKey = {};
+        rows.forEach(row => {
+          const val = row.key;
+          const label = Object.keys(row).filter(p => p.startsWith('result')).map(p => row[p]).join(' - ');
+          keyToLabel[val] = label;
+          if (label) labelToKey[label] = val;
+          labelToKey[String(val)] = val;
+          const opt = document.createElement('option');
+          opt.value = String(val ?? '');
+          if (label) opt.label = label;
+          listEl.appendChild(opt);
+        });
+
+        inputEl._lookupKeyToLabel = keyToLabel;
+        inputEl._lookupLabelToKey = labelToKey;
+        const initKey = selected ?? '';
+        if (initKey !== '') inputEl.value = initKey;
+        const hidden = inputEl.closest('li')?.querySelector('input.lookup-key[name]');
+        if (hidden) hidden.value = initKey;
+        syncLookupLabel(inputEl);
+        el.dataset.lookupLoaded = '1';
       });
-      $select.next('.lookup-label').text($select.find('option:selected').text());
-      // 若是瀏覽模式（readonly），在下拉資料載入後同步 lockedValue，避免變更時回復成空值
-      if ($select.hasClass('lookup-readonly') && $select[0]) {
-        $select[0].dataset.lockedValue = $select.val() ?? '';
-      }
-    });
-    $select.on('change', function() {
-      $(this).next('.lookup-label').text($(this).find('option:selected').text());
-    });
+
+      req.always(() => { delete el.dataset.lookupLoading; });
+    }
+
+    loadLookupOptions();
+
+    if ($ctrl.is('select')) {
+      $ctrl.on('change', function() {
+        $(this).next('.lookup-label').text($(this).find('option:selected').text());
+      });
+      $ctrl.on('focus', function() {
+        loadLookupOptions();
+      });
+    } else {
+      $ctrl.on('input change', function() {
+        syncLookupLabel(this);
+      });
+      $ctrl.on('focus', function() {
+        loadLookupOptions();
+        try {
+          const len = (this.value || '').length;
+          if (len) {
+            this.setSelectionRange(0, len);
+          } else {
+            this.select();
+          }
+        } catch { }
+      });
+      $ctrl.on('keydown', function(e) {
+        if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+        if (this.readOnly) return;
+        if (!this.value) return;
+        const init = this.dataset.init ?? this.dataset.selected ?? '';
+        const start = this.selectionStart ?? 0;
+        const end = this.selectionEnd ?? 0;
+        const allSelected = start === 0 && end === this.value.length;
+        const unchanged = String(this.value ?? '') === String(init ?? '');
+        if (allSelected || unchanged) {
+          this.value = '';
+          syncLookupLabel(this);
+          e.preventDefault();
+        }
+      });
+    }
   });
 
   function setInitialTabHeights(offsetPx = 10) {
@@ -1734,10 +1905,29 @@ function normalizeBool(val) {
 }
 
 function syncLookupLabel(selectEl) {
-  const label = selectEl?.nextElementSibling;
-  if (label && label.classList.contains('lookup-label')) {
-    const text = selectEl.options[selectEl.selectedIndex]?.text ?? '';
-    label.textContent = text;
+  if (!selectEl) return;
+  const label = selectEl.nextElementSibling;
+  if (selectEl instanceof HTMLSelectElement) {
+    if (label && label.classList.contains('lookup-label')) {
+      const text = selectEl.options[selectEl.selectedIndex]?.text ?? '';
+      label.textContent = text;
+    }
+    return;
+  }
+  if (selectEl instanceof HTMLInputElement) {
+    const keyToLabel = selectEl._lookupKeyToLabel || {};
+    const labelToKey = selectEl._lookupLabelToKey || {};
+    const raw = selectEl.value ?? '';
+    const key = labelToKey[raw] ?? raw;
+    const display = keyToLabel[key] ?? raw;
+    if (raw !== '' && raw !== key) {
+      selectEl.value = key;
+    }
+    if (label && label.classList.contains('lookup-label')) {
+      label.textContent = display;
+    }
+    const hidden = selectEl.closest('li')?.querySelector('input.lookup-key[name]');
+    if (hidden) hidden.value = raw === '' ? '' : key;
   }
 }
 
@@ -1764,7 +1954,7 @@ function resetHeaderForm() {
       } else {
         el.value = init;
       }
-      if (el.matches('select.lookup-dropdown')) syncLookupLabel(el);
+      if (el.matches('.lookup-dropdown')) syncLookupLabel(el);
     });
 }
 
@@ -1939,7 +2129,7 @@ body { background: #f7f9fb !important; }
 .draggable-field{ position:absolute; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; background:transparent; border:1px dashed transparent; }
 .draggable-field:hover{ border-color:#c7d3e1; }
 .draggable-field.inline{ display:flex; flex-direction:row; align-items: center; gap:4px; flex:0 0 auto; min-width:0; max-width:100%; box-sizing:border-box; }
-.header-label-item{ position:absolute; display:flex; align-items:center; justify-content:flex-end; text-align:right; font-size:var(--field-label-size); line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 4px 0 2px; z-index:2; }
+.header-label-item{ position:absolute; display:flex; align-items:center; justify-content:flex-end; text-align:right; font-size:var(--field-label-size); line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 4px 0 2px; z-index:2; pointer-events:none; }
 .field-drag-handle{ position:absolute; left:0; top:0; width:10px; height:100%; cursor:default; background:transparent; z-index:3; }
 .draggable-field.inline .field-control{ flex:1 1 auto; height:100%; display:flex; }
 .draggable-field.inline textarea,
@@ -1975,14 +2165,16 @@ body { background: #f7f9fb !important; }
   border-color:#5b8def;
   background:rgba(91,141,239,0.08);
 }
-.erp-header-form select.lookup-dropdown.lookup-readonly{
+.erp-header-form select.lookup-dropdown.lookup-readonly,
+.erp-header-form input.lookup-dropdown.lookup-readonly{
   /* 瀏覽模式允許展開下拉，但不允許修改：外觀比照 disabled 的灰底 */
   background-color: var(--bs-secondary-bg, #e9ecef) !important;
   color: var(--bs-secondary-color, #6c757d) !important;
   opacity: 1; /* 避免像 disabled 一樣整體變淡 */
   cursor: default;
 }
-.erp-header-form select.lookup-dropdown.lookup-readonly:focus{
+.erp-header-form select.lookup-dropdown.lookup-readonly:focus,
+.erp-header-form input.lookup-dropdown.lookup-readonly:focus{
   border-color: #ced4da;
   box-shadow: none !important;
 }
@@ -2019,6 +2211,9 @@ body { background: #f7f9fb !important; }
 }
 .layout-edit-enabled .field-drag-handle{
   cursor: move;
+}
+.layout-edit-enabled .header-label-item{
+  pointer-events: auto;
 }
 
 /* =========================================

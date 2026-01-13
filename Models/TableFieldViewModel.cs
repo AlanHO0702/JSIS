@@ -20,6 +20,10 @@ public class TableFieldViewModel
     public string? LookupTable { get; set; }
     public string? LookupKeyField { get; set; }
     public string? LookupResultField { get; set; }
+    public string? LookupCond1Field { get; set; }
+    public string? LookupCond1ResultField { get; set; }
+    public string? LookupCond2Field { get; set; }
+    public string? LookupCond2ResultField { get; set; }
     public int? ReadOnly { get; set; }
     public int? DisplaySize { get; set; }
     public int? ComboStyle { get; set; } // 辭典「勾選框」(CURdTableField.ComboStyle)

@@ -178,6 +178,10 @@ namespace PcbErpApi.Pages.DynamicTemplate
                     LookupTable = x.LookupTable,
                     LookupKeyField = x.LookupKeyField,
                     LookupResultField = x.LookupResultField,
+                    LookupCond1Field = x.LookupCond1Field,
+                    LookupCond1ResultField = x.LookupCond1ResultField,
+                    LookupCond2Field = x.LookupCond2Field,
+                    LookupCond2ResultField = x.LookupCond2ResultField,
                     ComboStyle = x.ComboStyle,
                     ReadOnly = x.ReadOnly,
                     EditColor = x.EditColor

@@ -88,6 +88,26 @@ public class DictApiController : ControllerBase
                     setList.Add("LookupResultField = @LookupResultField");
                     cmd.Parameters.AddWithValue("@LookupResultField", input.LookupResultField);
                 }
+                if (input.LookupCond1Field != null)
+                {
+                    setList.Add("LookupCond1Field = @LookupCond1Field");
+                    cmd.Parameters.AddWithValue("@LookupCond1Field", input.LookupCond1Field ?? "");
+                }
+                if (input.LookupCond1ResultField != null)
+                {
+                    setList.Add("LookupCond1ResultField = @LookupCond1ResultField");
+                    cmd.Parameters.AddWithValue("@LookupCond1ResultField", input.LookupCond1ResultField ?? "");
+                }
+                if (input.LookupCond2Field != null)
+                {
+                    setList.Add("LookupCond2Field = @LookupCond2Field");
+                    cmd.Parameters.AddWithValue("@LookupCond2Field", input.LookupCond2Field ?? "");
+                }
+                if (input.LookupCond2ResultField != null)
+                {
+                    setList.Add("LookupCond2ResultField = @LookupCond2ResultField");
+                    cmd.Parameters.AddWithValue("@LookupCond2ResultField", input.LookupCond2ResultField ?? "");
+                }
 
                 // ===== Layout / Size 欄位 =====
                 void AddInt(string name, int? value)

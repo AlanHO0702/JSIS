@@ -37,8 +37,184 @@ namespace PcbErpApi.Controllers
             public List<FilterItem> Filters { get; set; } = new();
         }
 
+        public class PaperTypeOption
+        {
+            public int PaperType { get; set; }
+            public string? PaperTypeName { get; set; }
+            public string? HeadFirst { get; set; }
+            public int? PowerType { get; set; }
+            public string? UpdateFieldName { get; set; }
+            public string? UpdateValue { get; set; }
+            public string? TradeId { get; set; }
+        }
+
+        public class AddPaperRequest
+        {
+            public string? ItemId { get; set; }
+            public string? UserId { get; set; }
+            public string? UseId { get; set; }
+            public int? PaperType { get; set; }
+            public string? PaperTypeName { get; set; }
+            public string? HeadFirst { get; set; }
+            public int? PowerType { get; set; }
+            public string? UpdateFieldName { get; set; }
+            public string? UpdateValue { get; set; }
+            public string? TradeId { get; set; }
+        }
+
+        private static async Task<string?> ResolveRealTableNameAsync(SqlConnection conn, string? dictTableName)
+        {
+            if (string.IsNullOrWhiteSpace(dictTableName)) return null;
+            await using var cmd = new SqlCommand(@"
+SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
+  FROM CURdTableName WITH (NOLOCK)
+ WHERE TableName = @tbl;", conn);
+            cmd.Parameters.AddWithValue("@tbl", dictTableName);
+            var obj = await cmd.ExecuteScalarAsync();
+            if (obj == null || obj == DBNull.Value) return dictTableName;
+            return obj.ToString();
+        }
+
+        private static async Task<bool> HasColumnAsync(SqlConnection conn, string tableName, string columnName)
+        {
+            const string sql = @"
+SELECT COUNT(1)
+  FROM sys.columns c
+  JOIN sys.objects o ON c.object_id = o.object_id
+ WHERE o.type = 'U' AND o.name = @table AND c.name = @col;";
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@table", tableName);
+            cmd.Parameters.AddWithValue("@col", columnName);
+            var obj = await cmd.ExecuteScalarAsync();
+            return obj != null && obj != DBNull.Value && Convert.ToInt32(obj) > 0;
+        }
+
+        private static async Task<string?> ResolvePaperIdAsync(SqlConnection conn, string? itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId)) return null;
+
+            await using (var cmdMaster = new SqlCommand(@"
+SELECT TOP 1 TableName
+  FROM CURdOCXTableSetUp WITH (NOLOCK)
+ WHERE ItemId = @itemId
+   AND (TableKind = 'Master1' OR TableKind LIKE 'Master%')
+ ORDER BY TableKind;", conn))
+            {
+                cmdMaster.Parameters.AddWithValue("@itemId", itemId);
+                var masterObj = await cmdMaster.ExecuteScalarAsync();
+                if (masterObj != null && masterObj != DBNull.Value)
+                {
+                    var dictTable = masterObj.ToString();
+                    var real = await ResolveRealTableNameAsync(conn, dictTable);
+                    if (!string.IsNullOrWhiteSpace(real)) return real;
+                }
+            }
+
+            await using var cmd = new SqlCommand(@"
+SELECT TOP 1 PaperId
+  FROM CURdSysItems WITH (NOLOCK)
+ WHERE ItemId = @itemId;", conn);
+            cmd.Parameters.AddWithValue("@itemId", itemId);
+            var paperIdObj = await cmd.ExecuteScalarAsync();
+            if (paperIdObj == null || paperIdObj == DBNull.Value) return null;
+            return paperIdObj.ToString();
+        }
+
+        [HttpGet("PaperTypes/{table}")]
+        public async Task<IActionResult> GetPaperTypes(string table, [FromQuery] string? itemId = null)
+        {
+            if (string.IsNullOrWhiteSpace(table))
+                return BadRequest("Table 必須指定");
+            if (!Regex.IsMatch(table, @"^[A-Za-z0-9_]+$"))
+                return BadRequest("Table 名稱不合法");
+
+            var dictTable = table.Trim();
+            var realTable = await _ctx.CurdTableNames
+                .AsNoTracking()
+                .Where(x => x.TableName.ToLower() == dictTable.ToLower())
+                .Select(x => string.IsNullOrWhiteSpace(x.RealTableName) ? x.TableName : x.RealTableName)
+                .FirstOrDefaultAsync();
+            if (string.IsNullOrWhiteSpace(realTable))
+                realTable = dictTable;
+
+            var cs = _ctx.Database.GetConnectionString();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            var resolvedPaperId = await ResolvePaperIdAsync(conn, itemId);
+            var effectivePaperId = string.IsNullOrWhiteSpace(resolvedPaperId) ? realTable : resolvedPaperId;
+
+            int selectType = 0;
+            string? headFirst = null;
+            await using (var cmdInfo = new SqlCommand(@"
+SELECT TOP 1 SelectType, HeadFirst
+  FROM CURdPaperInfo WITH (NOLOCK)
+ WHERE LOWER(PaperId) = LOWER(@paperId) OR LOWER(PaperId) = LOWER(@dictTable);", conn))
+            {
+                cmdInfo.Parameters.AddWithValue("@paperId", effectivePaperId);
+                cmdInfo.Parameters.AddWithValue("@dictTable", dictTable);
+                await using var rd = await cmdInfo.ExecuteReaderAsync();
+                if (await rd.ReadAsync())
+                {
+                    selectType = rd["SelectType"] == DBNull.Value ? 0 : Convert.ToInt32(rd["SelectType"]);
+                    headFirst = rd["HeadFirst"]?.ToString();
+                }
+            }
+
+            int? powerType = null;
+            if (!string.IsNullOrWhiteSpace(itemId))
+            {
+                await using var cmdPower = new SqlCommand(@"
+SELECT TOP 1 PowerType
+  FROM CURdSysItems WITH (NOLOCK)
+ WHERE ItemId = @itemId;", conn);
+                cmdPower.Parameters.AddWithValue("@itemId", itemId);
+                var obj = await cmdPower.ExecuteScalarAsync();
+                if (obj != null && obj != DBNull.Value && int.TryParse(obj.ToString(), out var p))
+                    powerType = p;
+            }
+
+            var list = new List<PaperTypeOption>();
+            if (selectType == 1)
+            {
+                var hasTradeId = await HasColumnAsync(conn, "CURdPaperType", "TradeId");
+                var sql = @"
+SELECT PaperType, PaperTypeName, HeadFirst, PowerType, UpdateFieldName, UpdateValue, ";
+                sql += hasTradeId ? "TradeId" : "CAST(NULL AS NVARCHAR(50)) AS TradeId";
+                sql += @"
+  FROM CURdPaperType WITH (NOLOCK)
+ WHERE LOWER(PaperId) = LOWER(@paperId) OR LOWER(PaperId) = LOWER(@dictTable)";
+                if (powerType.HasValue)
+                    sql += " AND (PowerType = @powerType OR PowerType = -1)";
+                sql += " ORDER BY PaperType;";
+
+                await using var cmdTypes = new SqlCommand(sql, conn);
+                cmdTypes.Parameters.AddWithValue("@paperId", effectivePaperId);
+                cmdTypes.Parameters.AddWithValue("@dictTable", dictTable);
+                if (powerType.HasValue)
+                    cmdTypes.Parameters.AddWithValue("@powerType", powerType.Value);
+
+                await using var rd = await cmdTypes.ExecuteReaderAsync();
+                while (await rd.ReadAsync())
+                {
+                    list.Add(new PaperTypeOption
+                    {
+                        PaperType = rd["PaperType"] == DBNull.Value ? 0 : Convert.ToInt32(rd["PaperType"]),
+                        PaperTypeName = rd["PaperTypeName"]?.ToString(),
+                        HeadFirst = rd["HeadFirst"]?.ToString(),
+                        PowerType = rd["PowerType"] == DBNull.Value ? null : Convert.ToInt32(rd["PowerType"]),
+                        UpdateFieldName = rd["UpdateFieldName"]?.ToString(),
+                        UpdateValue = rd["UpdateValue"]?.ToString(),
+                        TradeId = rd["TradeId"]?.ToString()
+                    });
+                }
+            }
+
+            return Ok(new { selectType, types = list, headFirst, powerType, paperId = effectivePaperId });
+        }
+
         [HttpPost("AddPaper/{table}")]
-        public async Task<IActionResult> AddPaper(string table)
+        public async Task<IActionResult> AddPaper(string table, [FromBody] AddPaperRequest? req)
         {
             if (string.IsNullOrWhiteSpace(table))
                 return BadRequest("Table 必須指定");
@@ -59,46 +235,138 @@ namespace PcbErpApi.Controllers
             await using var conn = new SqlConnection(cs);
             await conn.OpenAsync();
 
-            // 1) 推導 PaperNum 規則：prefix + yymm(4) + seq
-            string? lastPaperNum;
-            await using (var cmd = new SqlCommand(
-                $"SELECT TOP 1 [PaperNum] FROM [{realTable}] WITH (NOLOCK) WHERE [PaperNum] IS NOT NULL ORDER BY [PaperNum] DESC",
-                conn))
+            var itemId = req?.ItemId?.Trim();
+            var userId = string.IsNullOrWhiteSpace(req?.UserId) ? "admin" : req!.UserId!.Trim();
+            var useId = string.IsNullOrWhiteSpace(req?.UseId) ? "A001" : req!.UseId!.Trim();
+            var resolvedPaperId = await ResolvePaperIdAsync(conn, itemId);
+            var effectivePaperId = string.IsNullOrWhiteSpace(resolvedPaperId) ? realTable : resolvedPaperId;
+
+            int selectType = 0;
+            string? defaultHeadFirst = null;
+            await using (var cmdInfo = new SqlCommand(@"
+SELECT TOP 1 SelectType, HeadFirst
+  FROM CURdPaperInfo WITH (NOLOCK)
+ WHERE LOWER(PaperId) = LOWER(@paperId) OR LOWER(PaperId) = LOWER(@dictTable);", conn))
             {
-                var obj = await cmd.ExecuteScalarAsync();
-                lastPaperNum = obj == null || obj == DBNull.Value ? null : obj.ToString();
+                cmdInfo.Parameters.AddWithValue("@paperId", effectivePaperId);
+                cmdInfo.Parameters.AddWithValue("@dictTable", dictTable);
+                await using var rd = await cmdInfo.ExecuteReaderAsync();
+                if (await rd.ReadAsync())
+                {
+                    selectType = rd["SelectType"] == DBNull.Value ? 0 : Convert.ToInt32(rd["SelectType"]);
+                    defaultHeadFirst = rd["HeadFirst"]?.ToString();
+                }
             }
 
-            if (string.IsNullOrWhiteSpace(lastPaperNum))
-                return BadRequest($"無法新增：[{realTable}] 找不到既有 PaperNum 以推導單號規則");
-
-            var m = Regex.Match(lastPaperNum.Trim(), @"^(?<prefix>.*?)(?<yymm>\d{4})(?<seq>\d+)$");
-            if (!m.Success)
-                return BadRequest($"無法新增：PaperNum 格式不支援 ({lastPaperNum})");
-
-            var prefix = m.Groups["prefix"].Value;
-            var seqLen = m.Groups["seq"].Value.Length;
-            var yymm = DateTime.Now.ToString("yyMM");
-            var monthPrefix = prefix + yymm;
-
-            string? lastThisMonth;
-            await using (var cmd = new SqlCommand(
-                $"SELECT TOP 1 [PaperNum] FROM [{realTable}] WITH (NOLOCK) WHERE [PaperNum] LIKE @p + '%' ORDER BY [PaperNum] DESC",
-                conn))
+            PaperTypeOption? selectedType = null;
+            if (selectType == 1)
             {
-                cmd.Parameters.AddWithValue("@p", monthPrefix);
-                var obj = await cmd.ExecuteScalarAsync();
-                lastThisMonth = obj == null || obj == DBNull.Value ? null : obj.ToString();
+                if (req?.PaperType == null)
+                    return BadRequest("需要選擇單據類別");
+
+                var hasTradeId = await HasColumnAsync(conn, "CURdPaperType", "TradeId");
+                await using var cmdType = new SqlCommand(@"
+SELECT TOP 1 PaperType, PaperTypeName, HeadFirst, PowerType, UpdateFieldName, UpdateValue, " +
+                    (hasTradeId ? "TradeId" : "CAST(NULL AS NVARCHAR(50)) AS TradeId") + @"
+  FROM CURdPaperType WITH (NOLOCK)
+ WHERE (LOWER(PaperId) = LOWER(@paperId) OR LOWER(PaperId) = LOWER(@dictTable))
+   AND PaperType = @paperType;", conn);
+                cmdType.Parameters.AddWithValue("@paperId", effectivePaperId);
+                cmdType.Parameters.AddWithValue("@dictTable", dictTable);
+                cmdType.Parameters.AddWithValue("@paperType", req.PaperType.Value);
+                await using var rd = await cmdType.ExecuteReaderAsync();
+                if (await rd.ReadAsync())
+                {
+                    selectedType = new PaperTypeOption
+                    {
+                        PaperType = rd["PaperType"] == DBNull.Value ? 0 : Convert.ToInt32(rd["PaperType"]),
+                        PaperTypeName = rd["PaperTypeName"]?.ToString(),
+                        HeadFirst = rd["HeadFirst"]?.ToString(),
+                        PowerType = rd["PowerType"] == DBNull.Value ? null : Convert.ToInt32(rd["PowerType"]),
+                        UpdateFieldName = rd["UpdateFieldName"]?.ToString(),
+                        UpdateValue = rd["UpdateValue"]?.ToString(),
+                        TradeId = rd["TradeId"]?.ToString()
+                    };
+                }
+                else
+                {
+                    return BadRequest("找不到對應的單據類別設定");
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(itemId))
+            {
+                int? defaultPaperType = null;
+                await using (var cmdItem = new SqlCommand(@"
+SELECT TOP 1 PaperType
+  FROM CURdSysItems WITH (NOLOCK)
+ WHERE ItemId = @itemId;", conn))
+                {
+                    cmdItem.Parameters.AddWithValue("@itemId", itemId);
+                    var obj = await cmdItem.ExecuteScalarAsync();
+                    if (obj != null && obj != DBNull.Value && int.TryParse(obj.ToString(), out var p))
+                        defaultPaperType = p;
+                }
+
+                if (defaultPaperType.HasValue)
+                {
+                    await using var cmdType = new SqlCommand(@"
+SELECT TOP 1 PaperType, PaperTypeName, HeadFirst, PowerType, UpdateFieldName, UpdateValue, TradeId
+  FROM CURdPaperType WITH (NOLOCK)
+ WHERE (LOWER(PaperId) = LOWER(@paperId) OR LOWER(PaperId) = LOWER(@dictTable))
+   AND PaperType = @paperType;", conn);
+                    cmdType.Parameters.AddWithValue("@paperId", effectivePaperId);
+                    cmdType.Parameters.AddWithValue("@dictTable", dictTable);
+                    cmdType.Parameters.AddWithValue("@paperType", defaultPaperType.Value);
+                    await using var rd = await cmdType.ExecuteReaderAsync();
+                    if (await rd.ReadAsync())
+                    {
+                        selectedType = new PaperTypeOption
+                        {
+                            PaperType = rd["PaperType"] == DBNull.Value ? 0 : Convert.ToInt32(rd["PaperType"]),
+                            PaperTypeName = rd["PaperTypeName"]?.ToString(),
+                            HeadFirst = rd["HeadFirst"]?.ToString(),
+                            PowerType = rd["PowerType"] == DBNull.Value ? null : Convert.ToInt32(rd["PowerType"]),
+                            UpdateFieldName = rd["UpdateFieldName"]?.ToString(),
+                            UpdateValue = rd["UpdateValue"]?.ToString(),
+                            TradeId = rd["TradeId"]?.ToString()
+                        };
+                    }
+                }
             }
 
-            var nextSeq = 1;
-            if (!string.IsNullOrWhiteSpace(lastThisMonth))
+            var headFirst = selectedType?.HeadFirst ?? defaultHeadFirst ?? string.Empty;
+
+            string? sDate = null;
+            string? sNow = null;
+            await using (var cmdDate = new SqlCommand("exec CURdGetServerDateTimeStr", conn))
             {
-                var m2 = Regex.Match(lastThisMonth.Trim(), @"^(?<prefix>.*?)(?<yymm>\d{4})(?<seq>\d+)$");
-                if (m2.Success && int.TryParse(m2.Groups["seq"].Value, out var s))
-                    nextSeq = s + 1;
+                await using var rd = await cmdDate.ExecuteReaderAsync();
+                if (await rd.ReadAsync())
+                {
+                    sDate = rd["sDate"]?.ToString();
+                    sNow = rd["sNow"]?.ToString();
+                }
             }
-            var newPaperNum = monthPrefix + nextSeq.ToString("D" + seqLen);
+
+            if (string.IsNullOrWhiteSpace(sDate) || string.IsNullOrWhiteSpace(sNow))
+                return BadRequest("無法取得 Server 的日期時間");
+
+            var useIdPrefix = string.IsNullOrWhiteSpace(useId) ? string.Empty : useId.Substring(0, 1);
+            string? newPaperNum;
+            await using (var cmdNum = new SqlCommand("exec CURdGetPaperNum @p0,@p1,@p2,@p3,@p4,@p5", conn))
+            {
+                cmdNum.Parameters.AddWithValue("@p0", realTable);
+                cmdNum.Parameters.AddWithValue("@p1", string.Empty);
+                cmdNum.Parameters.AddWithValue("@p2", useIdPrefix);
+                cmdNum.Parameters.AddWithValue("@p3", sDate);
+                cmdNum.Parameters.AddWithValue("@p4", headFirst);
+                cmdNum.Parameters.AddWithValue("@p5", useId);
+                var obj = await cmdNum.ExecuteScalarAsync();
+                newPaperNum = obj == null || obj == DBNull.Value ? null : obj.ToString();
+            }
+
+            if (string.IsNullOrWhiteSpace(newPaperNum))
+                return BadRequest("取單號失敗");
 
             // 2) 取欄位中哪些是必填（NOT NULL 且無預設值）
             var cols = new List<(string name, string dataType, bool isNullable, bool hasDefault)>();
@@ -125,20 +393,46 @@ SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, c.COLUMN_DEFAULT
             if (!colMap.ContainsKey("PaperNum"))
                 return BadRequest($"無法新增：[{realTable}] 沒有 PaperNum 欄位");
 
-            var insertCols = new List<string> { "PaperNum" };
-            var insertParams = new List<SqlParameter> { new SqlParameter("@PaperNum", newPaperNum) };
-
-            void AddDefaultIfNeeded(string name, object val)
+            var insertCols = new List<string>();
+            var insertParams = new List<SqlParameter>();
+            var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {
-                if (!colMap.TryGetValue(name, out var meta)) return;
-                if (meta.isNullable || meta.hasDefault) return;
-                if (insertCols.Contains(meta.name, StringComparer.OrdinalIgnoreCase)) return;
-                insertCols.Add(meta.name);
-                insertParams.Add(new SqlParameter("@" + meta.name, val));
+                ["PaperNum"] = newPaperNum,
+                ["PaperDate"] = DateTime.TryParse(sDate, out var pd) ? pd : DateTime.Now,
+                ["BuildDate"] = DateTime.TryParse(sNow, out var bd) ? bd : DateTime.Now,
+                ["UserId"] = userId,
+                ["UseId"] = useId,
+                ["Status"] = 0,
+                ["Finished"] = 0
+            };
+
+            if (selectedType != null)
+            {
+                values["dllPaperType"] = selectedType.PaperType;
+                values["dllPaperTypeName"] = selectedType.PaperTypeName ?? string.Empty;
+                values["dllHeadFirst"] = selectedType.HeadFirst ?? string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(selectedType.UpdateFieldName))
+                    values[selectedType.UpdateFieldName] = selectedType.UpdateValue ?? string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(selectedType.TradeId))
+                    values["TradeId"] = selectedType.TradeId;
+            }
+            else if (!string.IsNullOrWhiteSpace(defaultHeadFirst))
+            {
+                values["dllHeadFirst"] = defaultHeadFirst;
             }
 
-            AddDefaultIfNeeded("PaperDate", DateTime.Now);
-            AddDefaultIfNeeded("BuildDate", DateTime.Now);
+            if (!colMap.ContainsKey("PaperNum"))
+                return BadRequest($"無法新增：[{realTable}] 沒有 PaperNum 欄位");
+
+            foreach (var kvp in values)
+            {
+                if (!colMap.TryGetValue(kvp.Key, out var meta)) continue;
+                if (insertCols.Contains(meta.name, StringComparer.OrdinalIgnoreCase)) continue;
+                insertCols.Add(meta.name);
+                insertParams.Add(new SqlParameter("@" + meta.name, kvp.Value ?? DBNull.Value));
+            }
 
             foreach (var c in cols)
             {
@@ -167,6 +461,40 @@ SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, c.COLUMN_DEFAULT
                 await using var cmd = new SqlCommand(insertSql, conn);
                 cmd.Parameters.AddRange(CloneParams(insertParams).ToArray());
                 await cmd.ExecuteNonQueryAsync();
+
+                var runSql = string.Empty;
+                if (!string.IsNullOrWhiteSpace(itemId))
+                {
+                    await using var cmdRun = new SqlCommand(@"
+SELECT TOP 1 RunSQLAfterAdd
+  FROM CURdOCXTableSetUp WITH (NOLOCK)
+ WHERE ItemId = @itemId AND TableName = @table;", conn);
+                    cmdRun.Parameters.AddWithValue("@itemId", itemId);
+                    cmdRun.Parameters.AddWithValue("@table", dictTable);
+                    var obj = await cmdRun.ExecuteScalarAsync();
+                    runSql = obj == null || obj == DBNull.Value ? string.Empty : obj.ToString() ?? string.Empty;
+                }
+                if (string.IsNullOrWhiteSpace(runSql))
+                {
+                    await using var cmdRun = new SqlCommand(@"
+SELECT TOP 1 RunSQLAfterAdd
+  FROM CURdOCXTableSetUp WITH (NOLOCK)
+ WHERE TableName = @table;", conn);
+                    cmdRun.Parameters.AddWithValue("@table", dictTable);
+                    var obj = await cmdRun.ExecuteScalarAsync();
+                    runSql = obj == null || obj == DBNull.Value ? string.Empty : obj.ToString() ?? string.Empty;
+                }
+
+                if (!string.IsNullOrWhiteSpace(runSql))
+                {
+                    if (runSql.Contains("@PaperNum", StringComparison.OrdinalIgnoreCase))
+                        runSql = runSql.Replace("@PaperNum", $"'{newPaperNum}'", StringComparison.OrdinalIgnoreCase);
+
+                    var finalSql = $"{runSql} and t0.PaperNum='{newPaperNum}'";
+                    await using var cmdAfter = new SqlCommand(finalSql, conn);
+                    await cmdAfter.ExecuteNonQueryAsync();
+                }
+
                 return Ok(new { paperNum = newPaperNum });
             }
             catch (Exception ex)

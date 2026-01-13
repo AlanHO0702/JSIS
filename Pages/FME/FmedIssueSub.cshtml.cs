@@ -129,6 +129,10 @@ public class FMEdIssueSubModel : TableDetailModel<FmedIssuePo>
                 LookupTable = x.LookupTable,
                 LookupKeyField = x.LookupKeyField,
                 LookupResultField = x.LookupResultField,
+                LookupCond1Field = x.LookupCond1Field,
+                LookupCond1ResultField = x.LookupCond1ResultField,
+                LookupCond2Field = x.LookupCond2Field,
+                LookupCond2ResultField = x.LookupCond2ResultField,
                 EditColor = x.EditColor
             }).ToList();
 
