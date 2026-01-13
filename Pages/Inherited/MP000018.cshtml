@@ -9,6 +9,142 @@
 // 初始化 InheritedActionHooks 物件
 window.InheritedActionHooks = window.InheritedActionHooks || {};
 
+/**
+ * RejReason - 輸入作廢原因和專案作廢核准文號
+ * Delphi Lines 795-874
+ *
+ * @@param {string} tableName - 資料表名稱
+ * @@param {string} paperNum - 單據號碼
+ * @@returns {Promise<boolean>} - 成功返回 true，失敗或取消返回 false
+ */
+async function rejReason(tableName, paperNum) {
+    try {
+        // 呼叫 EInvController 的 RejReason API
+        const response = await fetch('/api/EInv/RejReason', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                TableName: tableName,
+                PaperNum: paperNum
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            await Swal.fire({
+                icon: 'error',
+                title: '執行失敗',
+                text: errorText
+            });
+            return false;
+        }
+
+        const data = await response.json();
+
+        // 如果沒有啟用電子發票，直接返回成功
+        if (!data.hasEInv) {
+            return true;
+        }
+
+        // 如果需要提示輸入作廢原因
+        if (data.needPromptNotes) {
+            const { value: reason } = await Swal.fire({
+                title: '請輸入作廢原因',
+                input: 'text',
+                inputLabel: '作廢原因',
+                inputPlaceholder: '請輸入作廢原因',
+                showCancelButton: true,
+                confirmButtonText: '確定',
+                cancelButtonText: '取消',
+                inputValidator: (value) => {
+                    if (!value || value.trim() === '') {
+                        return '作廢原因不能為空'
+                    }
+                }
+            });
+
+            if (!reason) {
+                return false; // 使用者取消
+            }
+
+            // 更新 Notes
+            const updateNotesResponse = await fetch('/api/EInv/UpdatePaperNotes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    TableName: tableName,
+                    PaperNum: paperNum,
+                    Notes: reason.trim()
+                })
+            });
+
+            if (!updateNotesResponse.ok) {
+                const errorText = await updateNotesResponse.text();
+                await Swal.fire({
+                    icon: 'error',
+                    title: '更新失敗',
+                    text: errorText
+                });
+                return false;
+            }
+        }
+
+        // 如果需要提示輸入專案作廢核准文號
+        if (data.needPromptReturnNumber) {
+            const { value: returnNum } = await Swal.fire({
+                title: '請輸入專案作廢核准文號',
+                input: 'text',
+                inputLabel: '專案作廢核准文號',
+                inputPlaceholder: '請輸入專案作廢核准文號',
+                showCancelButton: true,
+                confirmButtonText: '確定',
+                cancelButtonText: '取消',
+                inputValidator: (value) => {
+                    if (!value || value.trim() === '') {
+                        return '專案作廢核准文號不能為空'
+                    }
+                }
+            });
+
+            if (!returnNum) {
+                return false; // 使用者取消
+            }
+
+            // 更新 ReturnNumber
+            const updateReturnNumberResponse = await fetch('/api/EInv/UpdatePaperReturnNumber', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    TableName: tableName,
+                    PaperNum: paperNum,
+                    ReturnNumber: returnNum.trim()
+                })
+            });
+
+            if (!updateReturnNumberResponse.ok) {
+                const errorText = await updateReturnNumberResponse.text();
+                await Swal.fire({
+                    icon: 'error',
+                    title: '更新失敗',
+                    text: errorText
+                });
+                return false;
+            }
+        }
+
+        return true;
+
+    } catch (err) {
+        console.error('RejReason 執行錯誤:', err);
+        await Swal.fire({
+            icon: 'error',
+            title: '執行錯誤',
+            text: err.message
+        });
+        return false;
+    }
+}
+
 // 為 MP000018 註冊 Hooks
 window.InheritedActionHooks['MP000018'] = {
 
@@ -20,8 +156,6 @@ window.InheritedActionHooks['MP000018'] = {
      * 回傳: Promise<boolean> - 回傳 false 會中止確認操作
      */
     beforeConfirm: async (context) => {
-        console.log('[MP000018] beforeConfirm', context);
-
         try {
             // 執行 SPOdEInvTypeChk (Action=1)
             const typeChkResponse = await fetch('/api/StoredProc/exec', {
@@ -68,8 +202,6 @@ window.InheritedActionHooks['MP000018'] = {
      * 參數 context: { tableName, paperNum, userId, result }
      */
     afterConfirm: async (context) => {
-        console.log('[MP000018] afterConfirm', context);
-
         try {
             // 1. 檢查折讓金額是否超過發票金額 (MPHdDebitMain特定)
             const debitAmountResponse = await fetch('/api/StoredProc/query', {
@@ -117,8 +249,15 @@ window.InheritedActionHooks['MP000018'] = {
 
                     // 如果 Finished=1 或 4，執行 SendEInv(1)
                     if (finished === 1 || finished === 4) {
-                        console.log('[MP000018] 執行 SendEInv(1)');
-                        // TODO: 實作 SendEInv 的 API 呼叫
+                        await fetch('/api/EInv/SendEInv', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                TableName: context.tableName,
+                                PaperNum: context.paperNum,
+                                IPass: 1
+                            })
+                        });
                     }
                 }
             }
@@ -141,27 +280,28 @@ window.InheritedActionHooks['MP000018'] = {
      * 回傳: Promise<boolean> - 回傳 false 會中止退審操作
      */
     beforeCancel: async (context) => {
-        console.log('[MP000018] beforeCancel', context);
-
         try {
             // 檢查空窗期 - 2025.09.15
-            const paperStatusResponse = await fetch('/api/StoredProc/query', {
+            // 如果是空窗期禁止User退審，空窗期是指xml檔上傳平台到系統回勾已上傳的這段時間
+            const paperStatusResponse = await fetch('/api/StoredProc/queryDirect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    Key: 'GetPaperStatus',
-                    Args: {
-                        TableName: context.tableName,
-                        PaperNum: context.paperNum
-                    }
+                    TableName: context.tableName,
+                    WhereClause: "PaperNum = @@paperNum",
+                    Parameters: {
+                        paperNum: context.paperNum
+                    },
+                    Columns: ['Finished', 'EInvStatus', 'Uploaded']
                 })
             });
 
             if (paperStatusResponse.ok) {
-                const paperStatus = await paperStatusResponse.json();
-                if (paperStatus && paperStatus.length > 0) {
-                    const { Finished, EInvStatus, Uploaded } = paperStatus[0];
+                const paperStatusData = await paperStatusResponse.json();
+                if (paperStatusData && paperStatusData.length > 0) {
+                    const { Finished, EInvStatus, Uploaded } = paperStatusData[0];
 
+                    // 檢查XML檔案是否存在
                     const xmlCheckResponse = await fetch('/api/EInv/CheckXMLExists', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -174,6 +314,7 @@ window.InheritedActionHooks['MP000018'] = {
                     if (xmlCheckResponse.ok) {
                         const xmlExists = await xmlCheckResponse.json();
 
+                        // 空窗期判斷：已確認 + 已開電子發票 + 未上傳 + XML檔案不存在
                         if (Finished === 1 && EInvStatus === 1 && Uploaded === 0 && !xmlExists) {
                             await Swal.fire({
                                 icon: 'error',
@@ -316,15 +457,21 @@ window.InheritedActionHooks['MP000018'] = {
      * 參數 context: { tableName, paperNum, userId, result }
      */
     afterCancel: async (context) => {
-        console.log('[MP000018] afterCancel', context);
-
         try {
             const useEInv = context._useEInv || false;
             const isTrade = context._isTrade || false;
             let autoVoid = false;
 
             if (useEInv) {
-                console.log('[MP000018] 執行 SendEInv(0)');
+                await fetch('/api/EInv/SendEInv', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        TableName: context.tableName,
+                        PaperNum: context.paperNum,
+                        IPass: 0
+                    })
+                });
             }
 
             if (isTrade) {
@@ -365,7 +512,16 @@ window.InheritedActionHooks['MP000018'] = {
                                 })
                             });
 
-                            console.log('[MP000018] 執行 SendEInv(2)');
+                            // 執行 SendEInv(2)
+                            await fetch('/api/EInv/SendEInv', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    TableName: context.tableName,
+                                    PaperNum: context.paperNum,
+                                    IPass: 2
+                                })
+                            });
 
                             if (typeof window.prcDoReOpen === 'function') {
                                 window.prcDoReOpen();
@@ -388,8 +544,6 @@ window.InheritedActionHooks['MP000018'] = {
      * 回傳: Promise<boolean> - 回傳 false 會中止作廢操作
      */
     beforeDelete: async (context) => {
-        console.log('[MP000018] beforeDelete', context);
-
         try {
             // 執行 SPOdEInvTypeChk (Action=2)
             const typeChkResponse = await fetch('/api/StoredProc/exec', {
@@ -516,14 +670,25 @@ window.InheritedActionHooks['MP000018'] = {
      * 參數 context: { tableName, paperNum, userId, result }
      */
     afterDelete: async (context) => {
-        console.log('[MP000018] afterDelete', context);
-
         try {
             const finished = context._finished || 0;
             const eInvStatus = context._eInvStatus || 0;
 
             if (finished === 2) {
-                console.log('[MP000018] 執行 SendEInv(2)');
+                const rejReasonResult = await rejReason(context.tableName, context.paperNum);
+                if (!rejReasonResult) {
+                    return; // 使用者取消或執行失敗
+                }
+
+                await fetch('/api/EInv/SendEInv', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        TableName: context.tableName,
+                        PaperNum: context.paperNum,
+                        IPass: 2
+                    })
+                });
             }
 
             await fetch('/api/StoredProc/exec', {
@@ -553,29 +718,30 @@ window.InheritedActionHooks['MP000018'] = {
      * 回傳: Promise<boolean> - 回傳 false 會中止修改操作
      */
     beforeUpdate: async (context) => {
-        console.log('[MP000018] beforeUpdate', context);
-
         try {
             // 檢查空窗期 - 2025.09.16
-            const paperStatusResponse = await fetch('/api/StoredProc/query', {
+            // 如果是空窗期禁止User修改，空窗期是指xml檔上傳平台到系統回勾已上傳的這段時間
+            const paperStatusResponse = await fetch('/api/StoredProc/queryDirect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    Key: 'GetPaperStatus',
-                    Args: {
-                        TableName: context.tableName,
-                        PaperNum: context.paperNum
-                    }
+                    TableName: context.tableName,
+                    WhereClause: "PaperNum = @@paperNum",
+                    Parameters: {
+                        paperNum: context.paperNum
+                    },
+                    Columns: ['Finished', 'EInvStatus', 'Uploaded']
                 })
             });
 
             let finishedBefore = 0;
             if (paperStatusResponse.ok) {
-                const paperStatus = await paperStatusResponse.json();
-                if (paperStatus && paperStatus.length > 0) {
-                    const { Finished, EInvStatus, Uploaded } = paperStatus[0];
+                const paperStatusData = await paperStatusResponse.json();
+                if (paperStatusData && paperStatusData.length > 0) {
+                    const { Finished, EInvStatus, Uploaded } = paperStatusData[0];
                     finishedBefore = Finished;
 
+                    // 檢查XML檔案是否存在
                     const xmlCheckResponse = await fetch('/api/EInv/CheckXMLExists', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -588,6 +754,7 @@ window.InheritedActionHooks['MP000018'] = {
                     if (xmlCheckResponse.ok) {
                         const xmlExists = await xmlCheckResponse.json();
 
+                        // 空窗期判斷：已確認 + 已開電子發票 + 未上傳 + XML檔案不存在
                         if (Finished === 1 && EInvStatus === 1 && Uploaded === 0 && !xmlExists) {
                             await Swal.fire({
                                 icon: 'error',
@@ -730,8 +897,6 @@ window.InheritedActionHooks['MP000018'] = {
      * 參數 context: { tableName, paperNum, userId, result }
      */
     afterUpdate: async (context) => {
-        console.log('[MP000018] afterUpdate', context);
-
         try {
             const finishedBefore = context._finishedBefore || 0;
             const useEInv = context._useEInv || false;
@@ -741,7 +906,15 @@ window.InheritedActionHooks['MP000018'] = {
                 let autoVoid = false;
 
                 if (useEInv) {
-                    console.log('[MP000018] 執行 SendEInv(0)');
+                    await fetch('/api/EInv/SendEInv', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            TableName: context.tableName,
+                            PaperNum: context.paperNum,
+                            IPass: 0
+                        })
+                    });
                 }
 
                 if (isTrade) {
@@ -782,7 +955,16 @@ window.InheritedActionHooks['MP000018'] = {
                                     })
                                 });
 
-                                console.log('[MP000018] 執行 SendEInv(2)');
+                                // 執行 SendEInv(2)
+                                await fetch('/api/EInv/SendEInv', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        TableName: context.tableName,
+                                        PaperNum: context.paperNum,
+                                        IPass: 2
+                                    })
+                                });
 
                                 if (typeof window.prcDoReOpen === 'function') {
                                     window.prcDoReOpen();
@@ -798,6 +980,4 @@ window.InheritedActionHooks['MP000018'] = {
         }
     }
 };
-
-console.log('[MP000018] Inherited Hooks 已註冊');
 </script>
