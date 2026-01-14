@@ -255,6 +255,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
 
             // 7) Action rail：先不套用 DB 動態按鈕（Paper3L 以顯示為主）
             CustomButtons = await LoadCustomButtonsAsync(itemId);
+            ViewData["CustomButtonMeta"] = CustomButtons;
             ActionRailPartial = (CustomButtons?.Count ?? 0) > 0
                 ? "~/Pages/Shared/_ActionRail.DynamicButtons.cshtml"
                 : "~/Pages/Shared/_ActionRail.Empty.cshtml";
@@ -400,6 +401,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             public int? bNeedNum { get; set; }
             public int? bNeedInEdit { get; set; }
             public int? DesignType { get; set; }
+            public int? IsUpdateMoney { get; set; }
         }
 
         private async Task<List<ItemCustButtonRow>> LoadCustomButtonsAsync(string itemId)
@@ -409,12 +411,15 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             await using var conn = new SqlConnection(cs);
             await conn.OpenAsync();
 
-            const string sql = @"
+            var hasIsUpdateMoney = await HasCustButtonColumnAsync(conn, "IsUpdateMoney");
+
+            var sql = $@"
 SELECT ItemId, SerialNum, ButtonName,
        CustCaption, CustHint,
        bVisible, bNeedNum, bNeedInEdit, DesignType,
        OCXName, CoClassName, SpName, ExecSpName,
-       SearchTemplate, MultiSelectDD, ReplaceExists, DialogCaption, AllowSelCount
+       SearchTemplate, MultiSelectDD, ReplaceExists, DialogCaption, AllowSelCount,
+       {(hasIsUpdateMoney ? "IsUpdateMoney" : "CAST(0 AS int) AS IsUpdateMoney")}
   FROM CURdOCXItemCustButton WITH (NOLOCK)
  WHERE ItemId = @itemId
  ORDER BY SerialNum, ButtonName;";
@@ -446,7 +451,8 @@ SELECT ItemId, SerialNum, ButtonName,
                     AllowSelCount = TryToInt(rd["AllowSelCount"]),
                     bNeedNum = TryToInt(rd["bNeedNum"]),
                     bNeedInEdit = TryToInt(rd["bNeedInEdit"]),
-                    DesignType = TryToInt(rd["DesignType"])
+                    DesignType = TryToInt(rd["DesignType"]),
+                    IsUpdateMoney = TryToInt(rd["IsUpdateMoney"])
                 });
             }
 
@@ -457,6 +463,19 @@ SELECT ItemId, SerialNum, ButtonName,
         {
             if (o == null || o == DBNull.Value) return null;
             return int.TryParse(o.ToString(), out var n) ? n : null;
+        }
+
+        private static async Task<bool> HasCustButtonColumnAsync(SqlConnection conn, string columnName)
+        {
+            const string sql = @"
+SELECT 1
+  FROM sys.columns
+ WHERE object_id = OBJECT_ID('dbo.CURdOCXItemCustButton')
+   AND name = @col";
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@col", columnName ?? string.Empty);
+            var obj = await cmd.ExecuteScalarAsync();
+            return obj != null && obj != DBNull.Value;
         }
     }
 }

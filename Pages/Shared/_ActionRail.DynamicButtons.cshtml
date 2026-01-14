@@ -22,6 +22,7 @@
     var replaceExists = (b?.ReplaceExists ?? "").ToString();
     var dialogCaption = (b?.DialogCaption ?? "").ToString();
     var allowSelCount = (b?.AllowSelCount ?? "").ToString();
+    var needInEdit = (b?.bNeedInEdit ?? "").ToString();
 
     <button type="button"
             class="fab"
@@ -35,7 +36,8 @@
             data-multi-select-dd="@multiSelectDd"
             data-replace-exists="@replaceExists"
             data-dialog-caption="@dialogCaption"
-            data-allow-sel-count="@allowSelCount">
+            data-allow-sel-count="@allowSelCount"
+            data-b-need-in-edit="@needInEdit">
         @caption
     </button>
 }
@@ -397,6 +399,12 @@
       try { return (window.getPaperNum() || "").toString().trim(); } catch { /* ignore */ }
     }
     return "";
+  };
+
+  const isHeaderEditMode = () => {
+    if (typeof window.__headerIsEdit === "boolean") return window.__headerIsEdit;
+    const btn = document.getElementById("btnViewEditToggle");
+    return !!btn && (btn.textContent || "").trim() === "保留";
   };
 
   const withJwtHeaders = (init = {}) => {
@@ -1941,6 +1949,121 @@
     return { open };
   })();
 
+  const buildCustomButtonContext = (btn, ctxOverride = null) => {
+    const designType = parseInt(btn.dataset.designType || "0", 10);
+    const searchTemplate = (btn.dataset.searchTemplate || "").toLowerCase();
+    const meta = {
+      designType,
+      searchTemplate,
+      spName: btn.dataset.spName || "",
+      execSpName: btn.dataset.execSpName || "",
+      multiSelectDd: btn.dataset.multiSelectDd || "",
+      replaceExists: btn.dataset.replaceExists || "",
+      dialogCaption: btn.dataset.dialogCaption || "",
+      allowSelCount: btn.dataset.allowSelCount || ""
+    };
+    const ctx = {
+      buttonName: btn.getAttribute('data-button-name') || '',
+      itemId: (ctxOverride?.itemId ?? window._itemId ?? '@(Model?.ItemId ?? "")').toString(),
+      paperNum: (ctxOverride?.paperNum ?? readPaperNum()).toString(),
+      headerTable: (ctxOverride?.headerTable ?? window._headerTableName ?? '@(Model?.HeaderTableName ?? "")').toString(),
+      dictTableName: (ctxOverride?.dictTableName ?? window._dictTableName ?? '').toString(),
+      caption: (btn.textContent || '').trim()
+    };
+    return { meta, ctx };
+  };
+
+  const runCustomButton = async (btn, ctxOverride = null) => {
+    if (!btn) return;
+    const needInEdit = (btn.dataset.bNeedInEdit || "").toString();
+    if (needInEdit === "1" && !isHeaderEditMode()) {
+      alert("此按鈕僅能在編輯模式使用，請先點「修改」切換到編輯模式。");
+      return;
+    }
+    const { meta, ctx } = buildCustomButtonContext(btn, ctxOverride);
+    if (!ctx.buttonName) return;
+
+    const handler = resolveCustomHandler(ctx.buttonName);
+    const designType = meta.designType;
+    const searchTemplate = meta.searchTemplate;
+
+    if (handler) {
+      try {
+        await handler(ctx);
+      } catch (err) {
+        console.error("action-rail custom button handler error", err);
+        alert(`執行失敗: ${err?.message || err}`);
+      }
+      return;
+    }
+
+    if (searchTemplate === "jsdpapersearchdll.dll") {
+      if (designType !== 1) {
+        alert("此按鈕 SearchTemplate=JSdPaperSearchDLL.dll，但 DesignType 不是 1，請調整按鈕設定。");
+        return;
+      }
+      try {
+        await paperSearch.open(ctx, meta);
+      } catch (err) {
+        console.error("paper search template error", err);
+        alert(`執行失敗: ${err?.message || err}`);
+      }
+      return;
+    }
+
+    if (searchTemplate === "jsdcondrunspdll.dll") {
+      if (designType !== 1) {
+        alert("此按鈕 SearchTemplate=JSdCondRunSpDLL.dll，但 DesignType 不是 1，請調整按鈕設定。");
+        return;
+      }
+      try {
+        await condRunSp.open(ctx, meta);
+      } catch (err) {
+        console.error("cond-run-sp template error", err);
+        alert(`執行失敗: ${err?.message || err}`);
+      }
+      return;
+    }
+
+    if (searchTemplate === "minduomgetlot.dll") {
+      if (designType !== 1) {
+        alert("此按鈕 SearchTemplate=MINdUOMGetLot.dll，但 DesignType 不是 1，請調整按鈕設定。");
+        return;
+      }
+      try {
+        await uomGetLot.open(ctx, meta);
+      } catch (err) {
+        console.error("uom-get-lot template error", err);
+        alert(`執行失敗: ${err?.message || err}`);
+      }
+      return;
+    }
+
+    // 無自訂 handler → 嘗試依 DB 設定呼叫 SP (DesignType=3)
+    try {
+      const resp = await fetch('/api/StoredProc/execByButton', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemId: ctx.itemId,
+          buttonName: ctx.buttonName,
+          paperNum: ctx.paperNum
+        })
+      });
+      const raw = await resp.text();
+      let data; try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
+      if (resp.ok && data.ok) {
+        alert('執行完成');
+        location.reload();
+        return;
+      }
+      alert(`執行失敗: ${data.error || `HTTP ${resp.status}`}`);
+    } catch (err) {
+      console.error("action-rail execByButton error", err);
+      alert(`執行失敗: ${err?.message || err}`);
+    }
+  };
+
   const wireActionRailButtons = () => {
     document.querySelectorAll('.action-rail [data-custom-btn="1"]').forEach(btn => {
       if (btn.dataset.cbBound === "1") return;
@@ -1948,111 +2071,12 @@
 
       btn.addEventListener('click', async (e) => {
         e.preventDefault(); e.stopPropagation();
-
-        const buttonName = btn.getAttribute('data-button-name') || '';
-        if (!buttonName) return;
-
-        const handler = resolveCustomHandler(buttonName);
-        const designType = parseInt(btn.dataset.designType || "0", 10);
-        const searchTemplate = (btn.dataset.searchTemplate || "").toLowerCase();
-        const meta = {
-          designType,
-          searchTemplate,
-          spName: btn.dataset.spName || "",
-          execSpName: btn.dataset.execSpName || "",
-          multiSelectDd: btn.dataset.multiSelectDd || "",
-          replaceExists: btn.dataset.replaceExists || "",
-          dialogCaption: btn.dataset.dialogCaption || "",
-          allowSelCount: btn.dataset.allowSelCount || ""
-        };
-        const ctx = {
-          buttonName,
-          itemId: (window._itemId || '@(Model?.ItemId ?? "")').toString(),
-          paperNum: readPaperNum(),
-          headerTable: (window._headerTableName || '@(Model?.HeaderTableName ?? "")').toString(),
-          dictTableName: (window._dictTableName || '').toString(),
-          caption: (btn.textContent || '').trim()
-        };
-
-        if (handler) {
-          try {
-            await handler(ctx);
-          } catch (err) {
-            console.error("action-rail custom button handler error", err);
-            alert(`執行失敗: ${err?.message || err}`);
-          }
-          return;
-        }
-
-        if (searchTemplate === "jsdpapersearchdll.dll") {
-          if (designType !== 1) {
-            alert("此按鈕 SearchTemplate=JSdPaperSearchDLL.dll，但 DesignType 不是 1，請調整按鈕設定。");
-            return;
-          }
-          try {
-            await paperSearch.open(ctx, meta);
-          } catch (err) {
-            console.error("paper search template error", err);
-            alert(`執行失敗: ${err?.message || err}`);
-          }
-          return;
-        }
-
-        if (searchTemplate === "jsdcondrunspdll.dll") {
-          if (designType !== 1) {
-            alert("此按鈕 SearchTemplate=JSdCondRunSpDLL.dll，但 DesignType 不是 1，請調整按鈕設定。");
-            return;
-          }
-          try {
-            await condRunSp.open(ctx, meta);
-          } catch (err) {
-            console.error("cond-run-sp template error", err);
-            alert(`執行失敗: ${err?.message || err}`);
-          }
-          return;
-        }
-
-        if (searchTemplate === "minduomgetlot.dll") {
-          if (designType !== 1) {
-            alert("此按鈕 SearchTemplate=MINdUOMGetLot.dll，但 DesignType 不是 1，請調整按鈕設定。");
-            return;
-          }
-          try {
-            await uomGetLot.open(ctx, meta);
-          } catch (err) {
-            console.error("uom-get-lot template error", err);
-            alert(`執行失敗: ${err?.message || err}`);
-          }
-          return;
-        }
-
-        // 無自訂 handler → 嘗試依 DB 設定呼叫 SP (DesignType=3)
-        try {
-          const resp = await fetch('/api/StoredProc/execByButton', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              itemId: ctx.itemId,
-              buttonName: ctx.buttonName,
-              paperNum: ctx.paperNum
-            })
-          });
-          const raw = await resp.text();
-          let data; try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
-          if (resp.ok && data.ok) {
-            alert('執行完成');
-            location.reload();
-            return;
-          }
-          alert(`執行失敗: ${data.error || `HTTP ${resp.status}`}`);
-        } catch (err) {
-          console.error("action-rail execByButton error", err);
-          alert(`執行失敗: ${err?.message || err}`);
-        }
+        await runCustomButton(btn);
       });
     });
   };
 
+  window.ActionRailRunButton = runCustomButton;
   wireActionRailButtons();
 })();
 </script>
