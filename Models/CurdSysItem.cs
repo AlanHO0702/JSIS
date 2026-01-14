@@ -136,4 +136,8 @@ public partial class CurdSysItem
     public int? IWebMenuLevel { get; set; }
 
     public int? IWebEnable { get; set; }
+
+    public string? SpecialUIType { get; set; }
+
+    public string? SpecialUIConfig { get; set; }
 }
