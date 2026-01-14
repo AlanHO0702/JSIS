@@ -45,6 +45,8 @@ namespace PcbErpApi.Pages.DynamicTemplate
         public string PageTitle { get; private set; } = "單據動態樣板";
         public string? ReportSpName { get; private set; }
         public string? ActionRailPartial { get; private set; }
+        public string? SpecialUIType { get; private set; }
+        public string? SpecialUIConfig { get; private set; }
 
         public List<Dictionary<string, object?>> Items { get; private set; } = new();
         public List<TableFieldViewModel> TableFields { get; private set; } = new();
@@ -70,9 +72,11 @@ namespace PcbErpApi.Pages.DynamicTemplate
 
             var sysItem = await _ctx.CurdSysItems.AsNoTracking()
                 .Where(x => x.ItemId == itemId)
-                .Select(x => new { x.ItemId, x.ItemName })
+                .Select(x => new { x.ItemId, x.ItemName, x.SpecialUIType, x.SpecialUIConfig })
                 .FirstOrDefaultAsync();
             ItemName = sysItem?.ItemName ?? string.Empty;
+            SpecialUIType = sysItem?.SpecialUIType;
+            SpecialUIConfig = sysItem?.SpecialUIConfig;
 
             var setupList = await _ctx.CurdOcxtableSetUp.AsNoTracking()
                 .Where(x => x.ItemId == itemId)
@@ -240,6 +244,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
 
             // 6) Custom buttons (left action rail)
             CustomButtons = await LoadCustomButtonsAsync(itemId);
+            ViewData["CustomButtonMeta"] = CustomButtons;
             ActionRailPartial = (CustomButtons?.Count ?? 0) > 0
                 ? "~/Pages/Shared/_ActionRail.DynamicButtons.cshtml"
                 : "~/Pages/Shared/_ActionRail.Empty.cshtml";
@@ -311,12 +316,15 @@ SELECT TOP 1 ISNULL(NULLIF(DisplayLabel,''), TableName) AS DisplayLabel
             await using var conn = new SqlConnection(cs);
             await conn.OpenAsync();
 
-            var sql = @"
+            var hasIsUpdateMoney = await HasCustButtonColumnAsync(conn, "IsUpdateMoney");
+
+            var sql = $@"
 SELECT ItemId, SerialNum, ButtonName,
        CustCaption, CustHint,
        bVisible, bNeedNum, bNeedInEdit, DesignType,
        OCXName, CoClassName, SpName, ExecSpName,
-       SearchTemplate, MultiSelectDD, ReplaceExists, DialogCaption, AllowSelCount
+       SearchTemplate, MultiSelectDD, ReplaceExists, DialogCaption, AllowSelCount,
+       {(hasIsUpdateMoney ? "IsUpdateMoney" : "CAST(0 AS int) AS IsUpdateMoney")}
   FROM CURdOCXItemCustButton WITH (NOLOCK)
  WHERE ItemId = @itemId
  ORDER BY SerialNum, ButtonName;";
@@ -354,7 +362,8 @@ SELECT ItemId, SerialNum, ButtonName,
                     AllowSelCount = TryToInt(rd["AllowSelCount"]),
                     bNeedNum = TryToInt(rd["bNeedNum"]),
                     bNeedInEdit = TryToInt(rd["bNeedInEdit"]),
-                    DesignType = TryToInt(rd["DesignType"])
+                    DesignType = TryToInt(rd["DesignType"]),
+                    IsUpdateMoney = TryToInt(rd["IsUpdateMoney"])
                 });
             }
 
@@ -380,6 +389,7 @@ SELECT ItemId, SerialNum, ButtonName,
             public int? bNeedNum { get; set; }
             public int? bNeedInEdit { get; set; }
             public int? DesignType { get; set; }
+            public int? IsUpdateMoney { get; set; }
         }
 
         private async Task<Dictionary<string, object>> LoadHeaderAsync(string tableName, string paperNum)
@@ -476,6 +486,19 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         {
             if (o == null || o == DBNull.Value) return null;
             return int.TryParse(o.ToString(), out var n) ? n : null;
+        }
+
+        private static async Task<bool> HasCustButtonColumnAsync(SqlConnection conn, string columnName)
+        {
+            const string sql = @"
+SELECT 1
+  FROM sys.columns
+ WHERE object_id = OBJECT_ID('dbo.CURdOCXItemCustButton')
+   AND name = @col";
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@col", columnName ?? string.Empty);
+            var obj = await cmd.ExecuteScalarAsync();
+            return obj != null && obj != DBNull.Value;
         }
     }
 }

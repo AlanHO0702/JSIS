@@ -320,5 +320,208 @@ namespace PcbErpApi.Controllers
             public string TableName { get; set; } = "";
             public string PaperNum { get; set; } = "";
         }
+
+        /// <summary>
+        /// 取得作廢原因相關資訊 (對應 Delphi 的 RejReason function)
+        /// </summary>
+        [HttpPost("RejReason")]
+        public async Task<IActionResult> RejReason([FromBody] RejReasonRequest req)
+        {
+            if (string.IsNullOrEmpty(req.TableName) || string.IsNullOrEmpty(req.PaperNum))
+                return BadRequest("TableName 和 PaperNum 為必填");
+
+            var connStr = _config.GetConnectionString("DefaultConnection");
+            await using var conn = new SqlConnection(connStr);
+            await conn.OpenAsync();
+
+            try
+            {
+                // 1. 檢查是否有電子發票參數 (EInvXMLRev 或 EInvTradeVan)
+                bool hasEInv = false;
+                await using (var cmd = new SqlCommand(@"
+                    SELECT COUNT(*) FROM CURdSysParams(NOLOCK)
+                    WHERE SystemId = 'SPO'
+                    AND ParamId IN ('EInvXMLRev', 'EInvTradeVan')
+                    AND ISNULL(Value, '') <> ''", conn))
+                {
+                    var count = (int?)await cmd.ExecuteScalarAsync() ?? 0;
+                    hasEInv = count > 0;
+                }
+
+                if (!hasEInv)
+                {
+                    return Ok(new RejReasonResponse
+                    {
+                        HasEInv = false,
+                        NeedPromptNotes = false,
+                        NeedPromptReturnNumber = false
+                    });
+                }
+
+                // 2. 取得 Uploaded 狀態
+                int uploaded = 0;
+                await using (var cmd = new SqlCommand($@"
+                    SELECT ISNULL(Uploaded, 0) AS Uploaded
+                    FROM {req.TableName}(NOLOCK)
+                    WHERE PaperNum = @PaperNum", conn))
+                {
+                    cmd.Parameters.AddWithValue("@PaperNum", req.PaperNum);
+                    var result = await cmd.ExecuteScalarAsync();
+                    if (result != null && result != DBNull.Value)
+                    {
+                        uploaded = Convert.ToInt32(result);
+                    }
+                }
+
+                // 3. 呼叫 SPOdVoidEInvCheck 取得 Notes、ReturnNumber、NeedReturnNumber
+                string notes = "";
+                string returnNumber = "";
+                bool needReturnNumber = false;
+
+                await using (var cmd = new SqlCommand("SPOdVoidEInvCheck", conn))
+                {
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@PaperId", req.TableName);
+                    cmd.Parameters.AddWithValue("@PaperNum", req.PaperNum);
+
+                    await using var reader = await cmd.ExecuteReaderAsync();
+                    if (await reader.ReadAsync())
+                    {
+                        notes = reader["Notes"]?.ToString() ?? "";
+                        returnNumber = reader["ReturnNumber"]?.ToString() ?? "";
+
+                        var needReturnNumberValue = reader["NeedReturnNumber"];
+                        if (needReturnNumberValue != null && needReturnNumberValue != DBNull.Value)
+                        {
+                            needReturnNumber = Convert.ToInt32(needReturnNumberValue) == 1;
+                        }
+                    }
+                }
+
+                // 4. 判斷是否需要提示輸入 (只有在 uploaded=1 時才提示，符合 2025.09.12 新邏輯)
+                bool needPromptNotes = string.IsNullOrWhiteSpace(notes) && uploaded == 1;
+                bool needPromptReturnNumber = string.IsNullOrWhiteSpace(returnNumber) && needReturnNumber && uploaded == 1;
+
+                return Ok(new RejReasonResponse
+                {
+                    HasEInv = true,
+                    Uploaded = uploaded,
+                    Notes = notes,
+                    ReturnNumber = returnNumber,
+                    NeedReturnNumber = needReturnNumber,
+                    NeedPromptNotes = needPromptNotes,
+                    NeedPromptReturnNumber = needPromptReturnNumber
+                });
+            }
+            catch (SqlException sqlEx)
+            {
+                return StatusCode(500, $"SQL 錯誤: {sqlEx.Message}");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"錯誤: {ex.Message}");
+            }
+        }
+
+        public class RejReasonRequest
+        {
+            public string TableName { get; set; } = "";
+            public string PaperNum { get; set; } = "";
+        }
+
+        public class RejReasonResponse
+        {
+            public bool HasEInv { get; set; }
+            public int Uploaded { get; set; }
+            public string Notes { get; set; } = "";
+            public string ReturnNumber { get; set; } = "";
+            public bool NeedReturnNumber { get; set; }
+            public bool NeedPromptNotes { get; set; }
+            public bool NeedPromptReturnNumber { get; set; }
+        }
+
+        /// <summary>
+        /// 更新作廢原因 (對應 Delphi 的 UpdatePaperNotes)
+        /// </summary>
+        [HttpPost("UpdatePaperNotes")]
+        public async Task<IActionResult> UpdatePaperNotes([FromBody] UpdatePaperNotesRequest req)
+        {
+            if (string.IsNullOrEmpty(req.TableName) || string.IsNullOrEmpty(req.PaperNum))
+                return BadRequest("TableName 和 PaperNum 為必填");
+
+            var connStr = _config.GetConnectionString("DefaultConnection");
+            await using var conn = new SqlConnection(connStr);
+            await conn.OpenAsync();
+
+            try
+            {
+                await using var cmd = new SqlCommand("UpdatePaperNotes", conn);
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@PaperId", req.TableName);
+                cmd.Parameters.AddWithValue("@PaperNum", req.PaperNum);
+                cmd.Parameters.AddWithValue("@Notes", req.Notes ?? "");
+
+                await cmd.ExecuteNonQueryAsync();
+
+                return Ok(new { ok = true, message = "作廢原因已更新" });
+            }
+            catch (SqlException sqlEx)
+            {
+                return StatusCode(500, $"SQL 錯誤: {sqlEx.Message}");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"錯誤: {ex.Message}");
+            }
+        }
+
+        public class UpdatePaperNotesRequest
+        {
+            public string TableName { get; set; } = "";
+            public string PaperNum { get; set; } = "";
+            public string Notes { get; set; } = "";
+        }
+
+        /// <summary>
+        /// 更新專案作廢核准文號 (對應 Delphi 的 UpdatePaperReturnNumber)
+        /// </summary>
+        [HttpPost("UpdatePaperReturnNumber")]
+        public async Task<IActionResult> UpdatePaperReturnNumber([FromBody] UpdatePaperReturnNumberRequest req)
+        {
+            if (string.IsNullOrEmpty(req.TableName) || string.IsNullOrEmpty(req.PaperNum))
+                return BadRequest("TableName 和 PaperNum 為必填");
+
+            var connStr = _config.GetConnectionString("DefaultConnection");
+            await using var conn = new SqlConnection(connStr);
+            await conn.OpenAsync();
+
+            try
+            {
+                await using var cmd = new SqlCommand("UpdatePaperReturnNumber", conn);
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@PaperId", req.TableName);
+                cmd.Parameters.AddWithValue("@PaperNum", req.PaperNum);
+                cmd.Parameters.AddWithValue("@ReturnNumber", req.ReturnNumber ?? "");
+
+                await cmd.ExecuteNonQueryAsync();
+
+                return Ok(new { ok = true, message = "專案作廢核准文號已更新" });
+            }
+            catch (SqlException sqlEx)
+            {
+                return StatusCode(500, $"SQL 錯誤: {sqlEx.Message}");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"錯誤: {ex.Message}");
+            }
+        }
+
+        public class UpdatePaperReturnNumberRequest
+        {
+            public string TableName { get; set; } = "";
+            public string PaperNum { get; set; } = "";
+            public string ReturnNumber { get; set; } = "";
+        }
     }
 }
