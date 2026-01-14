@@ -318,21 +318,55 @@ function openPaperTypeModal(types) {
 
         // 動態單據：走 PaperAction（CURdPaperAction）
         if (this.paperAction?.url) {
-          const payload = {
+          const buildPayload = (reason) => ({
             paperId: this.paperAction.paperId || this.tableName,
             paperNum: selectedId,
             userId: this.paperAction.userId || window._userId || 'admin',
             eoc: Number(this.paperAction.eoc ?? 0),
-            aftFinished: Number(this.paperAction.aftFinished ?? 2)
-          };
-          const resp = await fetchWithBusy(this.paperAction.url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          }, '作廢中');
+            aftFinished: Number(this.paperAction.aftFinished ?? 2),
+            itemId,
+            useId: (window._useId || window.DEFAULT_USEID || 'A001'),
+            voidReason: (reason || '').toString().trim()
+          });
 
-          if (resp.ok) {
-            const data = await resp.json().catch(() => ({}));
+          const sendVoid = async (reason) => {
+            const resp = await fetchWithBusy(this.paperAction.url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(buildPayload(reason))
+            }, '作廢中');
+
+            if (resp.ok) {
+              const data = await resp.json().catch(() => ({}));
+              return { ok: true, data };
+            }
+
+            let err = null;
+            try { err = await resp.json(); }
+            catch {
+              const text = await resp.text().catch(() => '');
+              err = { message: text };
+            }
+            return { ok: false, err, status: resp.status };
+          };
+
+          let result = await sendVoid('');
+          if (!result.ok && result.err?.code === 'NEED_VOID_REASON') {
+            const ask = await Swal.fire({
+              title: '請輸入作廢原因',
+              input: 'textarea',
+              inputPlaceholder: '作廢原因',
+              showCancelButton: true,
+              confirmButtonText: '確定',
+              cancelButtonText: '取消',
+              inputValidator: (value) => (!value || !value.trim()) ? '請輸入作廢原因' : null
+            });
+            if (!ask.isConfirmed) return;
+            result = await sendVoid(ask.value || '');
+          }
+
+          if (result.ok) {
+            const data = result.data || {};
 
             // ========== Hook: afterDelete (Inherited) ==========
             if (itemId) {
@@ -354,8 +388,8 @@ function openPaperTypeModal(types) {
             return;
           }
 
-          const msg = await resp.text().catch(() => '');
-          await Swal.fire({ icon: 'error', title: msg || '作廢失敗！' });
+          const msg = result.err?.message || '作廢失敗！';
+          await Swal.fire({ icon: 'error', title: msg });
           return;
         }
 
