@@ -27,6 +27,10 @@ public class UpdateDictFieldInput
     public string LookupTable { get; set; }
     public string LookupKeyField { get; set; }
     public string LookupResultField { get; set; }
+    public string? LookupCond1Field { get; set; }
+    public string? LookupCond1ResultField { get; set; }
+    public string? LookupCond2Field { get; set; }
+    public string? LookupCond2ResultField { get; set; }
     public string IsNotesField { get; set; }
     public int? iShowWhere { get; set; }
 

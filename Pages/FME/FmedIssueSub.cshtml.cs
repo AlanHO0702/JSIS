@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
+using PcbErpApi.Helpers;
 using PcbErpApi.Models;
 
 /// <summary>
@@ -28,9 +30,14 @@ public class FMEdIssueSubModel : TableDetailModel<FmedIssuePo>
         IHttpClientFactory httpClientFactory,
         PcbErpContext context,
         ITableDictionaryService dictService
-    ) : base(httpClientFactory, context, dictService) { }
+    ) : base(httpClientFactory, context, dictService)
+    {
+        _ctx = context;
+    }
 
     #endregion
+
+    private readonly PcbErpContext _ctx;
 
     #region 覆寫樣板所需屬性
 
@@ -129,6 +136,10 @@ public class FMEdIssueSubModel : TableDetailModel<FmedIssuePo>
                 LookupTable = x.LookupTable,
                 LookupKeyField = x.LookupKeyField,
                 LookupResultField = x.LookupResultField,
+                LookupCond1Field = x.LookupCond1Field,
+                LookupCond1ResultField = x.LookupCond1ResultField,
+                LookupCond2Field = x.LookupCond2Field,
+                LookupCond2ResultField = x.LookupCond2ResultField,
                 EditColor = x.EditColor
             }).ToList();
 
@@ -151,6 +162,18 @@ public class FMEdIssueSubModel : TableDetailModel<FmedIssuePo>
                 {
                     HeaderLookupDisplayMap[headerKey][map.FieldName] = display;
                 }
+            }
+        }
+        if (HeaderData != null)
+        {
+            var headerStdLookup = LookupDisplayHelper.BuildHeaderLookupMapFromStandard(
+                HeaderData,
+                HeaderTableFields ?? new List<TableFieldViewModel>(),
+                _ctx.Database.GetDbConnection());
+            foreach (var kv in headerStdLookup)
+            {
+                if (!HeaderLookupDisplayMap[headerKey].ContainsKey(kv.Key))
+                    HeaderLookupDisplayMap[headerKey][kv.Key] = kv.Value;
             }
         }
 

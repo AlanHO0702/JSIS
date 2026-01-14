@@ -284,22 +284,43 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
     // LookupData
     // =========================================
     [HttpGet("LookupData")]
-    public async Task<IActionResult> GetLookupData(string table, string key, string result)
+    public async Task<IActionResult> GetLookupData(
+        string table,
+        string key,
+        string result,
+        string? cond1Field = null,
+        string? cond1Value = null,
+        string? cond2Field = null,
+        string? cond2Value = null)
     {
         bool IsValidCol(string s)
             => s.Split(',').All(part => System.Text.RegularExpressions.Regex.IsMatch(part.Trim(), @"^[A-Za-z0-9_]+$"));
 
         if (!IsValidCol(key) || !IsValidCol(result))
             return BadRequest("Invalid column!");
+        if (!string.IsNullOrWhiteSpace(cond1Field) && (!IsValidCol(cond1Field) || cond1Field.Contains(',')))
+            return BadRequest("Invalid column!");
+        if (!string.IsNullOrWhiteSpace(cond2Field) && (!IsValidCol(cond2Field) || cond2Field.Contains(',')))
+            return BadRequest("Invalid column!");
 
         var resultFields = result.Split(',').Select(x => $"[{x.Trim()}]").ToArray();
         string selectResult = string.Join(", ", resultFields.Select((col, idx) => $"{col} as [result{idx}]"));
-        var sql = $"SELECT [{key.Trim()}] as [key], {selectResult} FROM [{table.Trim()}]";
+        var whereList = new List<string>();
+        if (!string.IsNullOrWhiteSpace(cond1Field) && !string.IsNullOrWhiteSpace(cond1Value))
+            whereList.Add($"[{cond1Field.Trim()}] = @cond1Value");
+        if (!string.IsNullOrWhiteSpace(cond2Field) && !string.IsNullOrWhiteSpace(cond2Value))
+            whereList.Add($"[{cond2Field.Trim()}] = @cond2Value");
+        var whereSql = whereList.Count > 0 ? $" WHERE {string.Join(" AND ", whereList)}" : "";
+        var sql = $"SELECT [{key.Trim()}] as [key], {selectResult} FROM [{table.Trim()}]{whereSql}";
 
         var list = new List<Dictionary<string, object>>();
         using (var conn = new SqlConnection(_connStr))
         using (var cmd = new SqlCommand(sql, conn))
         {
+            if (!string.IsNullOrWhiteSpace(cond1Field) && !string.IsNullOrWhiteSpace(cond1Value))
+                cmd.Parameters.AddWithValue("@cond1Value", cond1Value);
+            if (!string.IsNullOrWhiteSpace(cond2Field) && !string.IsNullOrWhiteSpace(cond2Value))
+                cmd.Parameters.AddWithValue("@cond2Value", cond2Value);
             await conn.OpenAsync();
             using (var reader = await cmd.ExecuteReaderAsync())
             {
@@ -604,9 +625,12 @@ SELECT COLUMN_NAME, DATA_TYPE
 
         -- 查詢/Lookup
         f.LookupTable, f.LookupKeyField, f.LookupResultField,
+        f.LookupCond1Field, f.LookupCond1ResultField,
+        f.LookupCond2Field, f.LookupCond2ResultField,
 
         -- 其他（若你的表裡有）
         f.IsNotesField,
+        f.IsMoneyField,
 
         -- ★ 第二層 OCX Lookup（新增）
         f.OCXLKTableName,
@@ -680,7 +704,12 @@ SELECT COLUMN_NAME, DATA_TYPE
                 LookupTable     = rd["LookupTable"]?.ToString() ?? "",
                 LookupKeyField  = rd["LookupKeyField"]?.ToString() ?? "",
                 LookupResultField = rd["LookupResultField"]?.ToString() ?? "",
+                LookupCond1Field = rd["LookupCond1Field"]?.ToString() ?? "",
+                LookupCond1ResultField = rd["LookupCond1ResultField"]?.ToString() ?? "",
+                LookupCond2Field = rd["LookupCond2Field"]?.ToString() ?? "",
+                LookupCond2ResultField = rd["LookupCond2ResultField"]?.ToString() ?? "",
                 IsNotesField    = rd["IsNotesField"]?.ToString() ?? "",
+                IsMoneyField    = rd["IsMoneyField"]?.ToString() ?? "",
 
                 OCXLKTableName  = rd["OCXLKTableName"]?.ToString() ?? "",
                 OCXLKResultName = rd["OCXLKResultName"]?.ToString() ?? "",

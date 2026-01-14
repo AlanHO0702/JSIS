@@ -82,11 +82,6 @@ app.MapControllers();
 
 
 
-app.MapControllerRoute(
-    name: "default",
-    pattern: "{controller=Home}/{action=Index}/{id?}"
-);
-
 // 將 Razor Pages 頁面路由映射（.cshtml）
 app.MapRazorPages();
 

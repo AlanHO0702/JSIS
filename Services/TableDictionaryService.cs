@@ -152,7 +152,7 @@ public class TableDictionaryService : ITableDictionaryService
 
             // 用 raw SQL 動態查表（用固定 alias，避免欄名空白/重複/特殊字元造成 reader 取值失敗）
             var sql = $"SELECT {Q(keyField!)} AS [__k], {Q(ocxResultName!)} AS [__v] FROM {Q(ocxTableName!)}";
-            var lookupDict = new Dictionary<string, string>();
+            var lookupDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             try
             {

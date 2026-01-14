@@ -1,0 +1,458 @@
+@model dynamic
+
+<style>
+  .spo-outaddr-popup { max-width: 520px !important; }
+  .spo-outaddr-popup .swal2-title { font-size: 18px; }
+  .spo-outaddr-popup .swal2-select.spo-outaddr-select {
+    min-height: 32px;
+    height: 32px;
+    font-size: 14px;
+    max-width: 460px;
+  }
+  .spo-outaddr-popup .swal2-actions .swal2-styled {
+    padding: 6px 14px;
+    font-size: 14px;
+  }
+</style>
+
+<script>
+(() => {
+  window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+  const MSG_NO_DATA = "\u6c92\u6709\u8cc7\u6599";
+  const MSG_LOAD_FAIL = "\u8f09\u5165\u5931\u6557";
+  const MSG_UPDATE_FAIL = "\u66f4\u65b0\u5931\u6557";
+  const MSG_UPDATED = "\u66f4\u65b0\u5b8c\u6210";
+  const MSG_OK = "\u78ba\u5b9a";
+  const MSG_CANCEL = "\u53d6\u6d88";
+  const DEFAULT_TITLE = "\u51fa\u8ca8\u5730\u5740";
+
+  const readPaperNum = (ctx) => {
+    const v = (ctx?.paperNum || window._paperNum || "").toString().trim();
+    if (v) return v;
+    if (typeof window.getPaperNum === "function") {
+      try { return (window.getPaperNum() || "").toString().trim(); } catch { /* ignore */ }
+    }
+    return "";
+  };
+
+  const readPaperId = (ctx) => {
+    const v = (ctx?.headerTable || window._headerTableName || "SPOdOrderMain").toString().trim();
+    return v || "SPOdOrderMain";
+  };
+
+  const getDefaultUseId = () => {
+    return (localStorage.getItem("erpLoginBUId") || window.DEFAULT_USEID || window._useId || "A001").toString().trim();
+  };
+
+  const findHeaderFieldControl = (fieldName) => {
+    const target = (fieldName || "").toLowerCase();
+    if (!target) return null;
+    const fields = document.querySelectorAll("form.erp-header-form input[name], form.erp-header-form textarea[name], form.erp-header-form select[name]");
+    for (const el of fields) {
+      const name = (el.getAttribute("name") || "").toLowerCase();
+      if (name === target) return el;
+    }
+    const nodes = document.querySelectorAll("form.erp-header-form .draggable-field[data-field]");
+    for (const node of nodes) {
+      const key = (node.getAttribute("data-field") || "").toLowerCase();
+      if (key !== target) continue;
+      const el = node.querySelector("input, textarea, select");
+      if (el) return el;
+    }
+    return null;
+  };
+
+  const readHeaderValue = (fieldName) => {
+    const el = findHeaderFieldControl(fieldName);
+    if (!el) return "";
+    if (el.type === "checkbox") return el.checked ? "1" : "0";
+    return (el.value ?? "").toString().trim();
+  };
+
+  const setHeaderValue = (fieldName, value) => {
+    const el = findHeaderFieldControl(fieldName);
+    if (!el) return;
+    if (el.type === "checkbox") {
+      el.checked = value === "1" || value === "true";
+    } else {
+      el.value = value ?? "";
+    }
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+
+  const pickExistingField = (names) => {
+    for (const name of names) {
+      if (findHeaderFieldControl(name)) return name;
+    }
+    return "";
+  };
+
+  const ensureUseId = async (ctx) => {
+    const paperId = readPaperId(ctx);
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return "";
+
+    const current = readHeaderValue("UseId");
+    if (current) return current;
+
+    const useId = getDefaultUseId();
+    if (!useId) return "";
+
+    const resp = await fetch("/api/OrderHeaderApi/SaveOrderHeader", withJwtHeaders({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ __headerTable: paperId, PaperNum: paperNum, UseId: useId })
+    }));
+    if (!resp.ok) return "";
+    setHeaderValue("UseId", useId);
+    return useId;
+  };
+
+  const ensureWorkDate = async () => {
+    const paperNum = readPaperNum({});
+    if (!paperNum) return;
+    const paperId = readPaperId({});
+
+    const workField = pickExistingField(["BuildDate", "WorkDate", "OpDate", "OperateDate", "CreateDate", "CreateTime"]);
+    if (!workField) return;
+    if (readHeaderValue(workField)) return;
+
+    const fallbackField = pickExistingField(["UpdateDate", "PaperDate", "FinishDate"]);
+    const fallbackValue = fallbackField ? readHeaderValue(fallbackField) : "";
+    if (!fallbackValue) return;
+
+    const body = { __headerTable: paperId, PaperNum: paperNum };
+    body[workField] = fallbackValue;
+    const resp = await fetch("/api/OrderHeaderApi/SaveOrderHeader", withJwtHeaders({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }));
+    if (!resp.ok) return;
+    setHeaderValue(workField, fallbackValue);
+  };
+
+  const withJwtHeaders = (init = {}) => {
+    const jwt = localStorage.getItem("jwtId");
+    const headers = Object.assign({}, init.headers || {});
+    if (jwt) headers["X-JWTID"] = jwt;
+    return { ...init, headers };
+  };
+
+  const updateFormFields = (paperId, addr, title) => {
+    const isOrderMain = paperId === "SPOdOrderMain" || paperId === "SPOdOrderChangeMain";
+    const addrFieldName = isOrderMain ? "TransPlace" : "OutAddr";
+    const titleFieldName = isOrderMain ? "PkgTitle" : "ShipTo";
+    const addrField = document.querySelector(`input[name="${addrFieldName}"], textarea[name="${addrFieldName}"]`);
+    const titleField = document.querySelector(`input[name="${titleFieldName}"], textarea[name="${titleFieldName}"]`);
+    if (addrField) addrField.value = addr;
+    if (titleField) titleField.value = title;
+
+    const addrValueEl = document.querySelector(`[data-field="${addrFieldName}"] span`);
+    const titleValueEl = document.querySelector(`[data-field="${titleFieldName}"] span`);
+    if (addrValueEl) addrValueEl.textContent = addr;
+    if (titleValueEl) titleValueEl.textContent = title;
+
+    [addrField, titleField, addrValueEl, titleValueEl].forEach(el => {
+      if (!el) return;
+      el.style.transition = "background-color 0.5s";
+      el.style.backgroundColor = "#fff8c4";
+      setTimeout(() => { el.style.backgroundColor = ""; }, 800);
+    });
+  };
+
+  const normalizeDateText = (raw) => {
+    if (!raw) return "";
+    if (raw instanceof Date && !isNaN(raw)) {
+      const y = raw.getFullYear();
+      const m = String(raw.getMonth() + 1).padStart(2, "0");
+      const d = String(raw.getDate()).padStart(2, "0");
+      return `${y}/${m}/${d}`;
+    }
+    const s = String(raw).trim();
+    if (!s) return "";
+    const m1 = s.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (m1) return `${m1[1]}/${m1[2].padStart(2, "0")}/${m1[3].padStart(2, "0")}`;
+    return s;
+  };
+
+  const updateInvoiceHeaderFields = (vals) => {
+    const map = {
+      InvoiceNum: vals.invoiceNum,
+      InvoiceType: vals.invoiceType,
+      InvoiceDate: vals.invoiceDate,
+      ExpectDate: vals.expectDate
+    };
+    Object.keys(map).forEach(k => {
+      if (map[k] == null) return;
+      setHeaderValue(k, map[k]);
+      const span = document.querySelector(`[data-field="${k}"] span`);
+      if (span) span.textContent = String(map[k] ?? "");
+    });
+  };
+
+  const openMpsOutInvoice = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: "info", title: MSG_NO_DATA });
+
+    const initResp = await fetch(`/api/SPOdMPSOutInvoice/Init?paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
+    const init = await initResp.json();
+    if (!init.ok) return Swal.fire({ icon: "warning", title: init.error || "載入失敗" });
+
+    const data = init.data || {};
+    const invoiceTypes = Array.isArray(init.invoiceTypes) ? init.invoiceTypes : [];
+    const invWords = Array.isArray(init.invWords) ? init.invWords : [];
+    const selectInvWord = !!init.selectInvWord;
+    const useSameInvWord = !!init.useSameInvWord;
+    const lockExpectDate = !!init.lockExpectDate;
+    const outInvAct = !!init.outInvAct;
+
+    const invTypeId = (data.invoiceType || invoiceTypes[0]?.InvoiceTypeId || "").toString();
+    const invTypeLabel = (invoiceTypes.find(x => String(x.InvoiceTypeId) === invTypeId)?.InvoiceTypeName || invTypeId || "").toString();
+
+    const buildInvWordOptions = (list) => {
+      const rows = Array.isArray(list) ? list : [];
+      return rows.map(x => `<option value="${x.Item}">${x.ItemName || x.Item}</option>`).join("");
+    };
+
+    const html = `
+      <div class="spo-inv-form">
+        <div class="spo-inv-row">
+          <label>發票日期</label>
+          <div class="spo-inv-field">
+            <input id="invDate" type="date" class="swal2-input spo-inv-input" value="${normalizeDateText(data.invoiceDate).replaceAll('/', '-')}">
+          </div>
+        </div>
+        ${selectInvWord ? `
+        <div class="spo-inv-row">
+          <label>發票字軌</label>
+          <div class="spo-inv-field">
+            <select id="invWord" class="swal2-select spo-inv-input">${buildInvWordOptions(invWords)}</select>
+          </div>
+        </div>` : ""}
+        <div class="spo-inv-row">
+          <label>發票號碼</label>
+          <div class="spo-inv-field spo-inv-inline">
+            <input id="invNum" class="swal2-input spo-inv-input" value="${data.invoiceNum || ""}">
+            <button id="invGet" type="button" class="btn btn-sm btn-outline-secondary">取號</button>
+          </div>
+        </div>
+        <div class="spo-inv-row">
+          <label>發票種類</label>
+          <div class="spo-inv-field">
+            <input id="invType" class="swal2-input spo-inv-input" value="${invTypeLabel}" readonly>
+          </div>
+        </div>
+        <div class="spo-inv-row">
+          <label>付款日期</label>
+          <div class="spo-inv-field">
+            <input id="expDate" class="swal2-input spo-inv-input" value="${normalizeDateText(data.expectDate)}" ${lockExpectDate ? "readonly" : ""}>
+          </div>
+        </div>
+      </div>
+      <style>
+        .spo-inv-popup{ max-width: 520px !important; }
+        .spo-inv-form{ display:flex; flex-direction:column; gap:16px; align-items:center; }
+        .spo-inv-row{ display:flex; align-items:center; gap:18px; justify-content:center; }
+        .spo-inv-row label{ width:80px; text-align:right; font-size:14px; }
+        .spo-inv-field{ width:240px; text-align:left; }
+        .spo-inv-input{ height:32px; font-size:14px; width:100%; box-sizing:border-box; margin:0 !important; }
+        .spo-inv-row select.spo-inv-input{ padding:4px 8px; }
+        .spo-inv-inline{ display:flex; align-items:center; gap:8px; width:240px; flex-wrap:nowrap; }
+        .spo-inv-inline .spo-inv-input{ flex:1 1 auto; min-width:0; }
+        .spo-inv-inline .btn{ height:32px; min-width:52px; white-space:nowrap; }
+      </style>
+    `;
+
+    const { isConfirmed, value } = await Swal.fire({
+      title: "請輸入欲開立發票之號碼及稅別",
+      html,
+      customClass: { popup: "spo-inv-popup" },
+      focusConfirm: false,
+      showCancelButton: true,
+      confirmButtonText: MSG_OK,
+      cancelButtonText: MSG_CANCEL,
+      didOpen: () => {
+        const invDateEl = document.getElementById("invDate");
+        const invWordEl = document.getElementById("invWord");
+        const invNumEl = document.getElementById("invNum");
+        const invGetBtn = document.getElementById("invGet");
+        const expDateEl = document.getElementById("expDate");
+
+        const refreshInvWords = async () => {
+          if (!selectInvWord || !invWordEl) return;
+          const dateVal = normalizeDateText(invDateEl?.value || "");
+          const resp = await fetch(`/api/SPOdMPSOutInvoice/InvWords?invoiceDate=${encodeURIComponent(dateVal)}&useSame=${useSameInvWord ? 1 : 0}`, withJwtHeaders());
+          const data = await resp.json();
+          if (!data.ok) return;
+          invWordEl.innerHTML = buildInvWordOptions(data.list || []);
+        };
+
+        const refreshExpectDate = async () => {
+          if (!expDateEl || lockExpectDate) return;
+          const useId = readHeaderValue("UseId") || "";
+          const dateVal = normalizeDateText(invDateEl?.value || "");
+          const resp = await fetch(`/api/SPOdMPSOutInvoice/ExpectDate?useId=${encodeURIComponent(useId)}&invoiceDate=${encodeURIComponent(dateVal)}&payWayCode=${encodeURIComponent(data.payWayCode || "")}&customerId=${encodeURIComponent(data.customerId || "")}`, withJwtHeaders());
+          const dataResp = await resp.json();
+          if (dataResp.ok) expDateEl.value = dataResp.expectDate || "";
+        };
+
+        invGetBtn?.addEventListener("click", async () => {
+          const dateVal = invDateEl?.value || "";
+          const wordVal = invWordEl ? (invWordEl.value || "") : "";
+          if (!dateVal) return Swal.fire({ icon: "info", title: "請輸入發票日期" });
+          const resp = await fetch(`/api/SPOdMPSOutInvoice/GetNum?invoiceDate=${encodeURIComponent(dateVal)}&invWord=${encodeURIComponent(wordVal)}&paperNum=${encodeURIComponent(paperNum)}&invoiceType=${encodeURIComponent(invTypeId)}`, withJwtHeaders());
+          const dataResp = await resp.json();
+          if (dataResp.ok && invNumEl) invNumEl.value = dataResp.invoiceNum || "";
+          if (!dataResp.ok) Swal.fire({ icon: "error", title: dataResp.error || "取得發票號碼失敗" });
+        });
+
+        invDateEl?.addEventListener("change", async () => {
+          await refreshExpectDate();
+          await refreshInvWords();
+        });
+      },
+      preConfirm: () => {
+        const invDate = normalizeDateText((document.getElementById("invDate")?.value || "").trim());
+        const invNum = (document.getElementById("invNum")?.value || "").trim();
+        const expDate = (document.getElementById("expDate")?.value || "").trim();
+        if (!invDate) {
+          Swal.showValidationMessage("請輸入發票日期");
+          return false;
+        }
+        if (!invNum) {
+          Swal.showValidationMessage("請輸入發票號碼");
+          return false;
+        }
+        return { invDate, invNum, expDate };
+      }
+    });
+
+    if (!isConfirmed || !value) return;
+
+    const userId = (localStorage.getItem("erpLoginUserId") || window._userId || "").toString();
+    const saveResp = await fetch("/api/SPOdMPSOutInvoice/Save", withJwtHeaders({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        paperNum,
+        invoiceNum: value.invNum,
+        invoiceType: invTypeId,
+        invoiceDate: value.invDate,
+        expectDate: value.expDate,
+        userId
+      })
+    }));
+    const saveData = await saveResp.json();
+    if (!saveData.ok) return Swal.fire({ icon: "error", title: saveData.error || "儲存失敗" });
+
+    updateInvoiceHeaderFields({
+      invoiceNum: value.invNum,
+      invoiceType: invTypeId,
+      invoiceDate: value.invDate,
+      expectDate: value.expDate
+    });
+
+    const msg = outInvAct ? `已產生發票號碼:${value.invNum} 狀態:作業中` : `已產生發票號碼:${value.invNum}`;
+    await Swal.fire({ icon: "success", title: msg });
+  };
+
+  const outAddr = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    const paperId = readPaperId(ctx);
+    if (!paperNum) return Swal.fire({ icon: "info", title: MSG_NO_DATA });
+
+    const resp = await fetch(
+      `/api/OrderSubButton/GetOutAddrOptions?paperId=${encodeURIComponent(paperId)}&paperNum=${encodeURIComponent(paperNum)}`,
+      withJwtHeaders()
+    );
+    const data = await resp.json();
+    if (!data.ok) return Swal.fire({ icon: "error", title: MSG_LOAD_FAIL, text: data.error });
+
+    const list = Array.isArray(data.list) ? data.list : [];
+    if (!list.length) return Swal.fire({ icon: "info", title: MSG_NO_DATA });
+
+    const options = list.map(x => {
+      const addrText = (x.Addr || "").toString();
+      const titleText = (x.Title || "").toString();
+      const label = [titleText, addrText].filter(v => v).join(" / ");
+      return `<option value="${addrText}" data-title="${titleText}">${label || addrText}</option>`;
+    }).join("");
+
+    const labelText = (data.label || DEFAULT_TITLE || "").toString();
+    const swapLabel = () => {
+      const parts = labelText.split("/").map(s => s.trim()).filter(Boolean);
+      if (parts.length === 2) return `${parts[1]}/${parts[0]}`;
+      return labelText;
+    };
+
+    const { value: addr } = await Swal.fire({
+      title: swapLabel(),
+      html: `<select id="addrSel" class="swal2-select spo-outaddr-select">${options}</select>`,
+      customClass: { popup: "spo-outaddr-popup" },
+      showCancelButton: true,
+      confirmButtonText: MSG_OK,
+      cancelButtonText: MSG_CANCEL,
+      preConfirm: () => {
+        const sel = document.getElementById("addrSel");
+        return sel ? {
+          addr: sel.value,
+          title: sel.options[sel.selectedIndex]?.dataset?.title || ""
+        } : null;
+      }
+    });
+    if (!addr) return;
+
+    const updateResp = await fetch("/api/OrderSubButton/UpdateOutAddr", withJwtHeaders({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paperId, paperNum, addr: addr.addr, title: addr.title })
+    }));
+    const updateData = await updateResp.json();
+    if (!updateData.ok) return Swal.fire({ icon: "error", title: MSG_UPDATE_FAIL, text: updateData.error });
+
+    await Swal.fire({ icon: "success", title: MSG_UPDATED, timer: 1000, showConfirmButton: false });
+    updateFormFields(paperId, addr.addr, addr.title);
+  };
+
+  const turnSalesOut = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: "info", title: MSG_NO_DATA });
+
+    await ensureUseId(ctx);
+
+    try {
+      const resp = await fetch("/api/StoredProc/execByButton", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemId: (window._itemId || ctx?.itemId || "").toString(),
+          buttonName: ctx?.buttonName || "btnC13",
+          paperNum
+        })
+      });
+      const raw = await resp.text();
+      let data; try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
+      if (resp.ok && data.ok) {
+        await Swal.fire({ icon: "success", title: "完成", timer: 1000, showConfirmButton: false });
+        location.reload();
+        return;
+      }
+      Swal.fire({ icon: "error", title: data.error || `HTTP ${resp.status}` });
+    } catch (err) {
+      Swal.fire({ icon: "error", title: String(err?.message || err) });
+    }
+  };
+
+  window.ActionRailCustomHandlers["SPO00010"] = {
+    btnC4: outAddr,
+    btnC6: openMpsOutInvoice,
+    btnC13: turnSalesOut
+  };
+
+  document.addEventListener("DOMContentLoaded", () => {
+    ensureWorkDate();
+  });
+})();
+</script>

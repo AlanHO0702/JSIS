@@ -1,4 +1,9 @@
+using System.Collections.Generic;
+using System.Data.Common;
+using System.Linq;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
+using PcbErpApi.Models;
 
 namespace PcbErpApi.Helpers
 {
@@ -57,18 +62,143 @@ public static Dictionary<string, string> BuildHeaderLookupMap(
             keyValueObj = headerData.GetType().GetProperty(map.KeySelfName)?.GetValue(headerData);
         }
 
-            var keyValue = keyValueObj?.ToString();
-            string display = null; // ★★★ 先宣告
+        var keyValue = keyValueObj?.ToString();
+        if (string.IsNullOrWhiteSpace(keyValue))
+            continue;
 
-            if (!string.IsNullOrEmpty(keyValue) && map.LookupValues.TryGetValue(keyValue, out display))
+        var lookupValues = map.LookupValues as IDictionary<string, string>;
+        if (lookupValues == null || lookupValues.Count == 0)
+            continue;
+
+        if (lookupValues.TryGetValue(keyValue, out var display))
+        {
+            dict[map.FieldName] = display;
+        }
+        else
+        {
+            foreach (var kv in lookupValues)
             {
-                dict[map.FieldName] = display;
+                if (string.Equals(kv.Key, keyValue, StringComparison.OrdinalIgnoreCase))
+                {
+                    dict[map.FieldName] = kv.Value;
+                    break;
+                }
             }
+        }
 
     }
 
     return dict;
 }
+
+    public static Dictionary<string, string> BuildHeaderLookupMapFromStandard(
+        object headerData,
+        IEnumerable<TableFieldViewModel> fields,
+        DbConnection conn)
+    {
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (headerData == null || fields == null || conn == null)
+            return dict;
+
+        IDictionary<string, object> dataDict = headerData as IDictionary<string, object>;
+
+        static bool IsSafeName(string name)
+            => Regex.IsMatch(name ?? "", @"^[A-Za-z0-9_]+$");
+
+        static bool IsSafeTable(string table)
+            => (table ?? "").Split('.', StringSplitOptions.RemoveEmptyEntries)
+                .All(part => IsSafeName(part.Trim('[', ']')));
+
+        static string Esc(string ident) => $"[{ident.Replace("]", "]]")}]";
+
+        static string EscTable(string raw)
+        {
+            var parts = (raw ?? "").Split('.', StringSplitOptions.RemoveEmptyEntries);
+            return string.Join(".", parts.Select(p => Esc(p.Trim('[', ']'))));
+        }
+
+        static bool TryGetValueIgnoreCase(IDictionary<string, object> dict, string key, out object value)
+        {
+            if (dict.TryGetValue(key, out value)) return true;
+            var hit = dict.Keys.FirstOrDefault(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
+            if (hit == null) { value = null; return false; }
+            value = dict[hit];
+            return true;
+        }
+
+        var shouldClose = conn.State != System.Data.ConnectionState.Open;
+        if (shouldClose)
+            conn.Open();
+
+        try
+        {
+            foreach (var field in fields)
+            {
+                if (field == null) continue;
+                var lookupTable = field.LookupTable;
+                var lookupKey = field.LookupKeyField;
+                var lookupResult = field.LookupResultField;
+                if (string.IsNullOrWhiteSpace(lookupTable)
+                    || string.IsNullOrWhiteSpace(lookupKey)
+                    || string.IsNullOrWhiteSpace(lookupResult))
+                    continue;
+
+                if (!IsSafeTable(lookupTable) || !IsSafeName(lookupKey))
+                    continue;
+
+                object keyValueObj = null;
+                if (dataDict != null)
+                {
+                    if (!TryGetValueIgnoreCase(dataDict, field.FieldName, out keyValueObj))
+                        continue;
+                }
+                else
+                {
+                    keyValueObj = headerData.GetType().GetProperty(field.FieldName)?.GetValue(headerData);
+                }
+
+                var keyValue = keyValueObj?.ToString();
+                if (string.IsNullOrWhiteSpace(keyValue))
+                    continue;
+
+                var resultFields = lookupResult.Split(',')
+                    .Select(x => x.Trim())
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .ToArray();
+                if (resultFields.Length == 0 || resultFields.Any(r => !IsSafeName(r)))
+                    continue;
+
+                var select = string.Join(", ", resultFields.Select((r, i) => $"{Esc(r)} AS [r{i}]"));
+                var sql = $"SELECT TOP 1 {select} FROM {EscTable(lookupTable)} WHERE {Esc(lookupKey)} = @key";
+
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = sql;
+                var p = cmd.CreateParameter();
+                p.ParameterName = "@key";
+                p.Value = keyValue;
+                cmd.Parameters.Add(p);
+
+                using var reader = cmd.ExecuteReader();
+                if (!reader.Read()) continue;
+
+                var parts = new List<string>();
+                for (var i = 0; i < resultFields.Length; i++)
+                {
+                    var val = reader[$"r{i}"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(val))
+                        parts.Add(val);
+                }
+                if (parts.Count == 0) continue;
+                dict[field.FieldName] = string.Join(" - ", parts);
+            }
+        }
+        finally
+        {
+            if (shouldClose) conn.Close();
+        }
+
+        return dict;
+    }
 
         /// <summary>
         /// 多筆資料通用 lookup display map 建立

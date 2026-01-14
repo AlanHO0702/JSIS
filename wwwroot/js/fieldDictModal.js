@@ -1,11 +1,10 @@
-﻿// /wwwroot/js/fieldDictModal.js
+// /wwwroot/js/fieldDictModal.js
 
 (function () {
 
     window.showDictModal = async function (modalId = 'fieldDictModal', tableName = window._dictTableName) {
       const el = document.getElementById(modalId);
-      if (!el) { console.warn('?曆??啗冪??Modal ?辣:', modalId); return; }
-
+      if (!el) { console.warn("[fieldDictModal] 找不到 modal:", modalId); return; }
       await window.initFieldDictModal(tableName, modalId);
 
       const md = bootstrap.Modal.getOrCreateInstance(el);
@@ -54,7 +53,7 @@
 
   window.showDictModal = async function (modalId = 'fieldDictModal', tableName = window._dictTableName) {
     const el = document.getElementById(modalId);
-    if (!el) { console.warn('?曆??啗冪??Modal ?辣:', modalId); return; }
+    if (!el) { console.warn("[fieldDictModal] 找不到 modal:", modalId); return; }
     await window.initFieldDictModal(tableName, modalId);
 
     const displayEl = document.getElementById('dictTableNameDisplay');
@@ -77,8 +76,7 @@
       scope.querySelector('.dictTableBody') ||
       scope.querySelector('tbody[data-role="dict"]');
 
-    if (!tbody) { console.warn('?曆??啗冪??tbody'); return; }
-
+    if (!tbody) { console.warn("[fieldDictModal] 找不到 tbody"); return; }
     const loadedFor  = (tbody.getAttribute('data-loaded-for') || '').toLowerCase();
     const want       = tname.toLowerCase();
     const needReload = loadedFor !== want;
@@ -97,17 +95,15 @@
 
         const res  = await fetch(u.toString());
         if (!res.ok) {
-          if (!QUIET) alert('載入辭典欄位失敗');
+          if (!QUIET) alert("欄位清單載入失敗。");
         } else {
-          const 筆 = await res.json();
-          筆.sort((a, b) => (Number(a.SerialNum ?? 9999)) - (Number(b.SerialNum ?? 9999)));
+          const rows = await res.json();
+          rows.sort((a, b) => (Number(a.SerialNum ?? 9999)) - (Number(b.SerialNum ?? 9999)));
 
-          tbody.innerHTML = 筆.map(x => `
+          tbody.innerHTML = rows.map(x => `
           <tr data-tablename="${x.TableName || tname}"
               data-fieldname="${x.FieldName}"
               ondblclick="window.editFieldDetail && window.editFieldDetail('${x.FieldName}')">
-
-            <!-- 蝚?1 甈?摨? + ?梯?甈? -->
             <td style="width:72px">
               <input data-field="SerialNum" type="number"
                     value="${x.SerialNum ?? ''}" class="form-control form-control-sm"
@@ -130,6 +126,10 @@
                 <input data-field="LookupTable"       value="${x.LookupTable       ?? ''}" />
                 <input data-field="LookupKeyField"    value="${x.LookupKeyField    ?? ''}" />
                 <input data-field="LookupResultField" value="${x.LookupResultField ?? ''}" />
+                <input data-field="LookupCond1Field" value="${x.LookupCond1Field ?? ''}" />
+                <input data-field="LookupCond1ResultField" value="${x.LookupCond1ResultField ?? ''}" />
+                <input data-field="LookupCond2Field" value="${x.LookupCond2Field ?? ''}" />
+                <input data-field="LookupCond2ResultField" value="${x.LookupCond2ResultField ?? ''}" />
 
                 <input data-field="IsNotesField" value="${x.IsNotesField ?? ''}" />
                 <input data-field="ComboStyle" value="${x.ComboStyle ?? ''}" />
@@ -142,8 +142,6 @@
 
               </span>
             </td>
-
-            <!-- 蝚?2 ~ 9 甈?-->
             <td style="min-width:180px">${x.FieldName ?? ''}</td>
 
             <td style="min-width:150px">
@@ -188,8 +186,6 @@
               <input data-field="EditColor" value="${x.EditColor ?? ''}"
                     class="form-control form-control-sm" placeholder="clYellow / Yellow" />
             </td>
-
-            <!-- 蝚?10 甈???閮剖??? -->
             <td style="width:60px" class="text-center">
               <button type="button" class="btn btn-sm btn-outline-secondary"
                       aria-label="設定"
@@ -203,8 +199,8 @@
           tbody.setAttribute('data-loaded-for', tname);
         }
       } catch (err) {
-        if (!QUIET) alert('載入辭典欄位失敗');
-        console.warn('[fieldDictModal] fetch error:', err);
+        if (!QUIET) alert("欄位清單載入失敗。");
+        console.warn('[fieldDictModal] 載入失敗:', err);
       }
     }
 
@@ -227,7 +223,7 @@
   }
   function isRowDirty(tr) {
     const prev = tr.dataset.dictSnapshot;
-    if (!prev) return true; // 瘝?敹怎撠梯???dirty嚗??摮?
+    if (!prev) return true; // no snapshot, treat as dirty
     let prevObj = null;
     try { prevObj = JSON.parse(prev); } catch { return true; }
     const cur = rowSnapshot(tr);
@@ -283,7 +279,7 @@
       });
       return { updated };
     } catch (err) {
-      console.warn('[fieldDictModal] syncDbDataTypes failed:', err);
+      console.warn('[fieldDictModal] 同步資料型態失敗:', err);
       return { updated: 0 };
     }
   }
@@ -314,13 +310,8 @@
 
   window.applyGridLayoutByRowCol = function (tableSelector = '#fieldDictTable tbody') {
     const tbody = document.querySelector(tableSelector);
-    if (!tbody) {
-      alert('找不到辭典表格內容');
-      return;
-    }
-    if (!confirm('將全部欄位套用格線位置設定，是否繼續？')) return;
-
-
+    if (!tbody) { alert("找不到表格內容。"); return; }
+    if (!confirm("要套用所有欄位的格線位置設定嗎？")) return;
     const rows = Array.from(tbody.querySelectorAll('tr'));
     let applied = 0;
 
@@ -340,11 +331,8 @@
       syncRowDirtyUi(tr);
     });
 
-    if (applied === 0) {
-      alert('沒有可套用的版面設定');
-      return;
-    }
-    alert('已套用 ' + applied + ' 筆');
+    if (applied === 0) { alert("沒有可套用的列。"); return; }
+    alert("已套用 " + applied + " 筆。");
   };
 
       function sortDictTbody(tbody) {
@@ -397,33 +385,19 @@
 
     try {
       const tbody = document.querySelector(tableSelector);
-      if (!tbody) {
-        alert("找不到辭典表格內容");
-        return;
-      }
-
+      if (!tbody) { alert("找不到表格內容。"); return; }
       const dictTableName =
         tbody.getAttribute("data-loaded-for") ||
         tbody.dataset.dictTable ||
         window._dictTableName ||
         "";
 
-      if (!dictTableName) {
-        alert("找不到辭典表名");
-        return;
-      }
-
+      if (!dictTableName) { alert("找不到資料表名稱。"); return; }
       await syncDbDataTypes(tbody, dictTableName);
 
       const allRows = Array.from(tbody.querySelectorAll("tr"));
       const dirtyRows = allRows.filter(tr => tr.dataset.dirty === "1" || isRowDirty(tr));
-      console.log("[fieldDictModal] save changed rows:", dirtyRows.length, "/", allRows.length, "table:", dictTableName);
-
-      if (dirtyRows.length === 0) {
-        alert("沒有要儲存的變更");
-        return;
-      }
-
+      if (dirtyRows.length === 0) { alert("沒有變更需要儲存。"); return; }
       const data = dirtyRows.map(tr => {
         const getVal = name => tr.querySelector(`input[data-field="${name}"]`)?.value ?? "";
         const getInt = name => {
@@ -474,6 +448,10 @@
           LookupTable: getVal("LookupTable"),
           LookupKeyField: getVal("LookupKeyField"),
           LookupResultField: getVal("LookupResultField"),
+          LookupCond1Field: getVal("LookupCond1Field"),
+          LookupCond1ResultField: getVal("LookupCond1ResultField"),
+          LookupCond2Field: getVal("LookupCond2Field"),
+          LookupCond2ResultField: getVal("LookupCond2ResultField"),
           IsNotesField: getVal("IsNotesField"),
           ComboStyle: getChk("ComboStyle"),
           OCXLKTableName: getVal("OCXLKTableName"),
@@ -490,7 +468,7 @@
       });
       const result = await res.json().catch(() => ({}));
       if (!result?.success) {
-        alert(result?.message || "儲存失敗");
+        alert(result?.message || "儲存失敗。");
         return;
       }
 
@@ -501,7 +479,7 @@
       });
       const result2 = await res2.json().catch(() => ({}));
       if (!result2?.success) {
-        alert(result2?.message || "OCX Key 儲存失敗");
+        alert(result2?.message || "OCX Key 儲存失敗。");
         return;
       }
 
@@ -510,11 +488,11 @@
         syncRowDirtyUi(tr);
       });
 
-      alert("儲存完成，已更新 " + dirtyRows.length + " 筆。");
+      alert("儲存完成，更新 " + dirtyRows.length + " 筆。");
       window.dispatchEvent(new Event("field-dict-saved"));
       setTimeout(() => location.reload(), 300);
     } catch (err) {
-      alert("API 失敗：" + err);
+      alert("API 錯誤: " + err);
     } finally {
       document.body.style.cursor = "default";
       saveAllDictFields.__busy = false;
@@ -559,8 +537,7 @@
       e.preventDefault();
 
       const modalId = resolveModalId();
-      if (!modalId) { console.warn('?曆??啗冪??Modal ?辣'); return; }
-
+      if (!modalId) { console.warn("[fieldDictModal] 找不到 modal"); return; }
       const focusEl = document.activeElement?.closest?.('[data-dict-table]');
       const pt      = window.__lastMouse || { x: 0, y: 0 };
       const hoverEl = document.elementFromPoint?.(pt.x, pt.y)?.closest?.('[data-dict-table]');
@@ -609,7 +586,7 @@
 
   document.addEventListener('hidden.bs.modal', e => {
     if (e.target.id === 'fieldDictModal') {
-      // 蝘駁 backdrop
+      // remove backdrop
       document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
       document.body.classList.remove('modal-open');
       document.body.style.overflow = '';
@@ -638,7 +615,9 @@
           'iLabTop', 'iLabLeft', 'iLabWidth', 'iLabHeight',
           'iFieldTop', 'iFieldLeft', 'iFieldWidth', 'iFieldHeight',
           'LookupTable', 'LookupKeyField', 'LookupResultField',
-          'IsNotesField',
+          'LookupCond1Field', 'LookupCond1ResultField',
+          'LookupCond2Field', 'LookupCond2ResultField',
+          'IsNotesField', 'IsMoneyField',
 
           'OCXLKTableName',
           'OCXLKResultName'
@@ -673,14 +652,14 @@
 
       function renderKeyMapGrid(maps) {
           if (!keyMapBody) return;
-          const 筆 = normalizeKeyMaps(maps);
-          const show = 筆.length ? 筆 : [{ KeyFieldName: '', KeySelfName: '' }];
+          const mapsList = normalizeKeyMaps(maps);
+          const show = mapsList.length ? mapsList : [{ KeyFieldName: '', KeySelfName: '' }];
           keyMapBody.innerHTML = show.map(m => `
               <tr>
                 <td><input type="text" class="form-control form-control-sm fdm-keyfield" value="${m.KeyFieldName ?? ''}"></td>
                 <td><input type="text" class="form-control form-control-sm fdm-keyself" value="${m.KeySelfName ?? ''}"></td>
                 <td class="text-center">
-                  <button type="button" class="btn btn-outline-danger btn-sm fdm-del-keymap" title="?芷">嚗?/button>
+                  <button type="button" class="btn btn-outline-danger btn-sm fdm-del-keymap" title="移除">移除</button>
                 </td>
               </tr>
           `).join('');
@@ -689,11 +668,11 @@
       function readKeyMapGrid(includeEmpty = false) {
           if (!keyMapBody) return [];
           const trs = Array.from(keyMapBody.querySelectorAll('tr'));
-          const 筆 = trs.map(tr => ({
+          const mapsList = trs.map(tr => ({
               KeyFieldName: (tr.querySelector('input.fdm-keyfield')?.value ?? '').toString().trim(),
               KeySelfName: (tr.querySelector('input.fdm-keyself')?.value ?? '').toString().trim()
           }));
-          return includeEmpty ? 筆 : 筆.filter(m => m.KeyFieldName || m.KeySelfName);
+          return includeEmpty ? mapsList : mapsList.filter(m => m.KeyFieldName || m.KeySelfName);
       }
 
       if (addKeyBtn && !addKeyBtn.dataset.bound) {
@@ -737,7 +716,7 @@
 
           const tr = document.querySelector(`.dictTableBody tr[data-fieldname="${safeName}"]`);
           if (!tr) {
-              alert('找不到欄位： ' + fieldName);
+              alert("找不到欄位: " + fieldName);
               return;
           }
 
@@ -787,7 +766,7 @@
           bootstrap.Modal.getOrCreateInstance(modalEl).show();
       };
 
-      // ==================== 憟 ====================
+      // ==================== apply ====================
       if (applyBtn) {
           applyBtn.addEventListener("click", () => {
 
