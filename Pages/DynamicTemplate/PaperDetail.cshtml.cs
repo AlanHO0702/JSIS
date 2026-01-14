@@ -45,6 +45,8 @@ namespace PcbErpApi.Pages.DynamicTemplate
         public string PageTitle { get; private set; } = "單據動態樣板";
         public string? ReportSpName { get; private set; }
         public string? ActionRailPartial { get; private set; }
+        public string? SpecialUIType { get; private set; }
+        public string? SpecialUIConfig { get; private set; }
 
         public List<Dictionary<string, object?>> Items { get; private set; } = new();
         public List<TableFieldViewModel> TableFields { get; private set; } = new();
@@ -70,9 +72,11 @@ namespace PcbErpApi.Pages.DynamicTemplate
 
             var sysItem = await _ctx.CurdSysItems.AsNoTracking()
                 .Where(x => x.ItemId == itemId)
-                .Select(x => new { x.ItemId, x.ItemName })
+                .Select(x => new { x.ItemId, x.ItemName, x.SpecialUIType, x.SpecialUIConfig })
                 .FirstOrDefaultAsync();
             ItemName = sysItem?.ItemName ?? string.Empty;
+            SpecialUIType = sysItem?.SpecialUIType;
+            SpecialUIConfig = sysItem?.SpecialUIConfig;
 
             var setupList = await _ctx.CurdOcxtableSetUp.AsNoTracking()
                 .Where(x => x.ItemId == itemId)
