@@ -67,6 +67,7 @@
                            ?? "~/Pages/Shared/_ActionRail.Empty.cshtml";
 
     string? actionLogicPartial = (ViewData["ActionRailLogicPartial"] as string);
+    var customButtonMeta = ViewData["CustomButtonMeta"] ?? Array.Empty<object>();
 
     // ✅ 取得單頭表名稱和 Finished 狀態（針對 FmedIssueMain）
     string headerTableName = Model.HeaderTableName ?? "";
@@ -90,6 +91,7 @@
     window._headerTableName = '@headerTableName';
     window._finishedStatus = @(finishedValue?.ToString() ?? "null");
     window._paperNum = '@PaperNum';
+    window._customButtons = @Html.Raw(JsonSerializer.Serialize(customButtonMeta));
 </script>
 
 <div id="topToolbar" class="top-toolbar" data-dict-table="@headerTableName">
@@ -134,6 +136,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
+                <div class="edit-notesmoney-actions d-none" id="editNotesMoneyActions"></div>
                 <div class="edit-notesmoney-body" id="editNotesMoneyBody"></div>
                 <div class="text-muted small mt-2" id="editNotesMoneyHint"></div>
             </div>
@@ -1213,11 +1216,7 @@
   function buildDetailBlock(tableName, fields) {
     const rows = readDetailRows(tableName, fields);
     if (!rows.length) {
-      return `
-<div class="edit-notesmoney-block" data-table="${escapeHtml(tableName)}" data-key-fields="PaperNum,Item">
-  <div class="edit-notesmoney-title">單身：${escapeHtml(tableName)}</div>
-  <div class="text-muted small">沒有可編輯的明細資料</div>
-</div>`;
+      return '';
     }
     const headCols = fields.map(f => `<th>${escapeHtml(f.label || f.name)}</th>`).join('');
     const bodyRows = rows.map((r, idx) => {
@@ -1240,6 +1239,126 @@
   </table>
 </div>`;
   }
+
+  const getUpdateMoneyButtons = () => {
+    const raw = window._customButtons;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(b => Number(b?.IsUpdateMoney ?? b?.isUpdateMoney ?? 0) === 1);
+  };
+
+  const normalizeCustomButton = (b) => {
+    const buttonName = (b?.ButtonName || b?.buttonName || '').toString().trim();
+    const caption = (b?.Caption || b?.CustCaption || b?.caption || b?.custCaption || buttonName).toString().trim();
+    const hint = (b?.Hint || b?.CustHint || b?.hint || b?.custHint || '').toString();
+    return {
+      buttonName,
+      caption: caption || buttonName,
+      hint,
+      designType: b?.DesignType ?? b?.designType,
+      searchTemplate: b?.SearchTemplate ?? b?.searchTemplate,
+      spName: b?.SpName ?? b?.spName,
+      execSpName: b?.ExecSpName ?? b?.execSpName,
+      multiSelectDd: b?.MultiSelectDD ?? b?.multiSelectDD,
+      replaceExists: b?.ReplaceExists ?? b?.replaceExists,
+      dialogCaption: b?.DialogCaption ?? b?.dialogCaption,
+      allowSelCount: b?.AllowSelCount ?? b?.allowSelCount
+    };
+  };
+
+  const renderEditMoneyButtons = (mode) => {
+    const actionsEl = document.getElementById('editNotesMoneyActions');
+    if (!actionsEl) return;
+    actionsEl.innerHTML = '';
+    if (mode !== 'money') {
+      actionsEl.classList.add('d-none');
+      return;
+    }
+
+    const rows = getUpdateMoneyButtons().map(normalizeCustomButton).filter(b => b.buttonName);
+    if (!rows.length) {
+      actionsEl.classList.add('d-none');
+      return;
+    }
+
+    actionsEl.classList.remove('d-none');
+    const frag = document.createDocumentFragment();
+    rows.forEach(meta => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-outline-primary btn-sm edit-notesmoney-btn';
+      btn.textContent = meta.caption;
+      if (meta.hint) btn.title = meta.hint;
+      btn.dataset.customBtn = '1';
+      btn.dataset.buttonName = meta.buttonName;
+      btn.dataset.designType = meta.designType ?? '';
+      btn.dataset.searchTemplate = meta.searchTemplate ?? '';
+      btn.dataset.spName = meta.spName ?? '';
+      btn.dataset.execSpName = meta.execSpName ?? '';
+      btn.dataset.multiSelectDd = meta.multiSelectDd ?? '';
+      btn.dataset.replaceExists = meta.replaceExists ?? '';
+      btn.dataset.dialogCaption = meta.dialogCaption ?? '';
+      btn.dataset.allowSelCount = meta.allowSelCount ?? '';
+
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.ActionRailRunButton === 'function') {
+          await window.ActionRailRunButton(btn);
+          return;
+        }
+
+        const itemId = (window._itemId || window._singleItemId || '').toString();
+        const ctx = {
+          buttonName: meta.buttonName,
+          itemId,
+          paperNum: readPaperNum(),
+          headerTable: (window._headerTableName || '').toString(),
+          dictTableName: (window._dictTableName || '').toString(),
+          caption: meta.caption
+        };
+
+        const map = window.ActionRailCustomHandlers || {};
+        const handler = (map[itemId] && typeof map[itemId][meta.buttonName] === 'function')
+          ? map[itemId][meta.buttonName]
+          : (typeof map[meta.buttonName] === 'function' ? map[meta.buttonName] : null);
+        if (handler) {
+          try {
+            await handler(ctx);
+          } catch (err) {
+            console.error("edit-money custom button handler error", err);
+            alert(`執行失敗: ${err?.message || err}`);
+          }
+          return;
+        }
+
+        try {
+          const resp = await fetch('/api/StoredProc/execByButton', withJwtHeaders({
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              itemId: ctx.itemId,
+              buttonName: ctx.buttonName,
+              paperNum: ctx.paperNum
+            })
+          }));
+          const raw = await resp.text();
+          let data; try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
+          if (resp.ok && data.ok) {
+            alert('執行完成');
+            location.reload();
+            return;
+          }
+          alert(`執行失敗: ${data.error || `HTTP ${resp.status}`}`);
+        } catch (err) {
+          console.error("edit-money execByButton error", err);
+          alert(`執行失敗: ${err?.message || err}`);
+        }
+      });
+
+      frag.appendChild(btn);
+    });
+    actionsEl.appendChild(frag);
+  };
 
   async function openEditNotesMoney(mode) {
     const titleEl = document.getElementById('editNotesMoneyTitle');
@@ -1293,6 +1412,7 @@
 
     titleEl.textContent = mode === 'money' ? '修改金流' : '修改備註';
     bodyEl.innerHTML = blocks.join('');
+    renderEditMoneyButtons(mode);
     hintEl.textContent = '僅允許已確認單據，儲存後將直接寫入，不需退審。';
 
     if (window.bootstrap) {
@@ -3949,6 +4069,25 @@ body { background: #f7f9fb !important; }
 .edit-notesmoney-body{
   display: grid;
   gap: 16px;
+}
+.edit-notesmoney-actions{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.modal#editNotesMoneyModal .modal-header{
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.modal#editNotesMoneyModal .modal-title{
+  margin: 0;
+}
+.modal#editNotesMoneyModal .modal-dialog{
+  margin-top: 10vh;
+}
+.edit-notesmoney-actions .edit-notesmoney-btn{
+  border-radius: 8px;
+  font-weight: 600;
 }
 .edit-notesmoney-block{
   border: 1px solid #e3e7ef;
