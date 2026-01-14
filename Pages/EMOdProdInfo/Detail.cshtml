@@ -4,10 +4,101 @@
 @{
     Layout = "_Layout";
     var cfg = Model.Config;
+    ViewData["DictTableName"] = cfg?.MasterDict;
+    ViewData["ActionRailPartial"] = Model.ActionRailPartial;
 }
 
 @await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", null, ViewData)
 <script src="~/js/editableGrid.js"></script>
+
+<script>
+    // 設定全域變數供 ActionRail 使用
+    window._itemId = '@(Model.IsViewOnly ? "EMO00018" : "EMO00004")';
+    window._headerTableName = '@Model.HeaderTableName';
+</script>
+
+@* 左侧按钮条样式调整 *@
+@if ((Model.CustomButtons?.Count > 0))
+{
+    <style>
+    /* EMOdProdInfo 使用 Action Rail（左側自訂按鈕）時，需預留左側空間，避免單頭/頁籤被擋住 */
+    :root{
+      --fab-left: 12px;
+      --fab-width: 120px;
+      --fab-gap: 14px;
+      --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap));
+    }
+
+    .content-wrapper {
+        margin-left: var(--rail-reserve) !important;
+    }
+
+    /* toolbar 往回補，維持視覺對齊 */
+    .d-flex.align-items-center.gap-2.mb-2.mt-1 {
+        margin-left: calc(-1 * var(--rail-reserve)) !important;
+    }
+
+    /* Action Rail 容器樣式 */
+    .action-rail{
+      position: fixed;
+      left: var(--fab-left);
+      top: 80px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      z-index: 900;
+      overflow-y: auto;
+      overflow-x: visible;
+      max-height: calc(100vh - 100px);
+    }
+
+    body.with-toolbar .action-rail{
+      top: calc(80px + var(--app-toolbar-height, 0px));
+    }
+
+    /* 按鈕的共同外觀 */
+    .fab{
+      position: relative;
+      width: var(--fab-width);
+      min-width: 0;
+      padding: 6px 8px;
+      font-size: .92rem;
+      letter-spacing: 0;
+      white-space: normal;
+      word-break: break-word;
+      background:#f8f9fb;
+      color:#1f5fbf;
+      font-weight:600;
+      border-radius:10px;
+      cursor:pointer;
+      box-shadow:0 2px 8px rgba(20,40,80,.12);
+      border:1px solid #cfd7e6;
+    }
+    .fab:hover{
+      background:#e9f1ff;
+      border-color:#9fbaf0;
+    }
+    .fab:focus-visible{
+      outline:2px solid #9fbaf0;
+      outline-offset:2px;
+    }
+    </style>
+}
+
+@* 左側自訂按鈕區（Action Rail） *@
+@if (!string.IsNullOrWhiteSpace(Model.ActionRailPartial))
+{
+    <div class="action-rail">
+        @await Html.PartialAsync(Model.ActionRailPartial, Model)
+    </div>
+}
+
+@* 自訂按鈕邏輯腳本（如果存在） *@
+@if (ViewData["ActionRailLogicPartial"] is string logicPartial && !string.IsNullOrWhiteSpace(logicPartial))
+{
+    @await Html.PartialAsync(logicPartial)
+}
 
 @if (cfg == null)
 {
@@ -15,11 +106,30 @@
 }
 else
 {
-    <div class="d-flex align-items-center gap-2 mb-2 mt-1">
-        <a class="btn btn-link btn-sm" href="@Url.Page("Index")">回列表</a>
-        <button type="button" class="btn btn-primary btn-sm" id="btnGenerateImages">
-            <i class="bi bi-images"></i> 產生圖檔
-        </button>
+    <div class="content-wrapper">
+    <div id="topToolbar" class="top-toolbar mb-2" data-dict-table="@cfg?.MasterTable">
+        <div class="toolbar-icon-row" role="group" aria-label="row-nav-and-sub-detail">
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnPrev" title="上一筆" aria-label="上一筆"><span class="toolbar-icon">&laquo;</span></button>
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnNext" title="下一筆" aria-label="下一筆"><span class="toolbar-icon">&raquo;</span></button>
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add" id="btnSubDetailAdd" title="新增" aria-label="新增"><span class="toolbar-icon">+</span></button>
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-del" id="btnSubDetailDelete" title="刪除" aria-label="刪除"><span class="toolbar-icon">-</span></button>
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add toolbar-btn-check" id="btnSaveHeader" title="儲存" aria-label="儲存"><span class="toolbar-icon">✓</span></button>
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-cancel toolbar-btn-check" id="btnCancelChanges" title="取消變更" aria-label="取消變更"><span class="toolbar-icon">&times;</span></button>
+        </div>
+        <div class="toolbar-main">
+            @await Html.PartialAsync("~/Pages/Shared/_TableToolbar.cshtml", new TableToolbarModel {
+                SearchBtnId = "btnSubSearch",
+                AddBtnId = "btnSubAddNew",
+                DeleteBtnId = "btnSubBatchDelete",
+                SearchText = "查詢",
+                AddText = "新增",
+                DeleteText = "作廢",
+                ModalId = "searchModal",
+                ReportSpName = ""
+            })
+            <!-- 產生圖檔按鈕（工程資料特有） -->
+            <button id="btnGenerateImages" class="btn toolbar-btn" type="button" @(Model.IsViewOnly ? "disabled" : "")>產生圖檔</button>
+        </div>
     </div>
 
     <!-- 頂部基本資訊區（全寬度）-->
@@ -269,11 +379,11 @@ else
                                         </table>
                                     </div>
                                     <div class="mt-2 d-flex gap-2 tab-local-controls d-none">
-                                        <button type="button" class="btn btn-outline-primary btn-sm" data-btn="edit" data-tab="@tab.Key">編輯</button>
-                                        <button type="button" class="btn btn-success btn-sm d-none" data-btn="save" data-tab="@tab.Key">儲存</button>
-                                        <button type="button" class="btn btn-outline-primary btn-sm" data-btn="add" data-tab="@tab.Key">新增</button>
-                                        <button type="button" class="btn btn-outline-success btn-sm d-none" data-btn="confirm" data-tab="@tab.Key">確認</button>
-                                        <button type="button" class="btn btn-outline-danger btn-sm d-none" data-btn="cancel" data-tab="@tab.Key">取消</button>
+                                        <button type="button" class="btn btn-outline-primary btn-sm" data-btn="edit" data-tab="@tab.Key" @(Model.IsViewOnly ? "disabled" : "")>編輯</button>
+                                        <button type="button" class="btn btn-success btn-sm d-none" data-btn="save" data-tab="@tab.Key" @(Model.IsViewOnly ? "disabled" : "")>儲存</button>
+                                        <button type="button" class="btn btn-outline-primary btn-sm" data-btn="add" data-tab="@tab.Key" @(Model.IsViewOnly ? "disabled" : "")>新增</button>
+                                        <button type="button" class="btn btn-outline-success btn-sm d-none" data-btn="confirm" data-tab="@tab.Key" @(Model.IsViewOnly ? "disabled" : "")>確認</button>
+                                        <button type="button" class="btn btn-outline-danger btn-sm d-none" data-btn="cancel" data-tab="@tab.Key" @(Model.IsViewOnly ? "disabled" : "")>取消</button>
                                     </div>
                                 }
                             </div>
@@ -285,6 +395,7 @@ else
     </div>
         </div>
     </div>
+    </div>
 }
 
 <script>
@@ -294,6 +405,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const tabState = {};
   let masterData = null;
   let masterDict = null;
+  const isViewOnly = @(Model.IsViewOnly ? "true" : "false"); // 查詢模式標記
 
   // 第一行欄位：料號、版次、客戶料號、預鑄列印(checkbox)、預設不料本(checkbox)、暫停發料(checkbox)、混款(checkbox)
   const headerRow1Fields = ['PartNum', 'Revision', 'CustomerPartNum'];
@@ -461,7 +573,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       })
       .catch(err => {
-        console.error('Load layer press error:', err);
         layerListEl.innerHTML = '<div class="text-center text-danger py-3">載入失敗</div>';
       });
   }
@@ -571,7 +682,6 @@ document.addEventListener('DOMContentLoaded', () => {
       ]).then(([dict, rows]) => {
         buildTable(tab.key, dict, rows);
       }).catch(err => {
-        console.error(`Load ${tab.title} error:`, err);
         const table = document.getElementById(`grid-${tab.key}`);
         if (table) {
           const tbody = table.querySelector('tbody');
@@ -608,7 +718,6 @@ document.addEventListener('DOMContentLoaded', () => {
       // 使用與右側相同的 buildTable 函數來建立表格（自動處理 lookup）
       await buildTable('haltlog-sidebar', dict, rows);
     } catch (err) {
-      console.error('Load sidebar halt log error:', err);
       const tbody = table.querySelector('tbody');
       if (tbody) {
         tbody.innerHTML = '<tr><td colspan="100" class="text-center text-danger py-2">載入失敗</td></tr>';
@@ -799,11 +908,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnContainer && !btnContainer.querySelector('.master-tab-controls')) {
       const controlsDiv = document.createElement('div');
       controlsDiv.className = 'mt-3 d-flex gap-2 master-tab-controls';
+      const disabledAttr = isViewOnly ? 'disabled' : '';
       controlsDiv.innerHTML = `
-        <button type="button" class="btn btn-warning btn-sm" data-btn="master-edit" data-tab="${tabKey}">
+        <button type="button" class="btn btn-warning btn-sm" data-btn="master-edit" data-tab="${tabKey}" ${disabledAttr}>
           <i class="bi bi-pencil-square me-1"></i> 編輯
         </button>
-        <button type="button" class="btn btn-success btn-sm d-none" data-btn="master-save" data-tab="${tabKey}">
+        <button type="button" class="btn btn-success btn-sm d-none" data-btn="master-save" data-tab="${tabKey}" ${disabledAttr}>
           <i class="bi bi-save me-1"></i> 儲存
         </button>
       `;
@@ -827,6 +937,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const inputs = container.querySelectorAll('.master-field');
 
       if (!isEdit) {
+        // 查詢模式下不允許編輯
+        if (isViewOnly) {
+          alert('查詢模式下無法編輯資料');
+          return;
+        }
+
         // 準備進入編輯模式 - 先檢查權限
         if (!checkEditPermission()) return;
 
@@ -986,7 +1102,6 @@ document.addEventListener('DOMContentLoaded', () => {
       LOOKUP_CACHE[key] = map;
       return map;
     } catch (err) {
-      console.error(`Failed to load lookup for ${field.FieldName}:`, err);
       LOOKUP_CACHE[key] = null;
       return null;
     }
@@ -1019,7 +1134,6 @@ document.addEventListener('DOMContentLoaded', () => {
       OCX_CACHE[key] = map;
       return map;
     } catch (err) {
-      console.error(`Failed to load OCX lookup for ${field.FieldName}:`, err);
       OCX_CACHE[key] = null;
       return null;
     }
@@ -1064,19 +1178,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const tbody = table.querySelector('tbody');
     if (!thead || !tbody) return;
 
-    // Debug: 查看字典中每个字段的 Visible 值和类型
-    console.log(`[${tabKey}] 字段 Visible 状态:`, dict.map(f => ({
-      FieldName: f.FieldName,
-      Visible: f.Visible,
-      VisibleType: typeof f.Visible,
-      DisplayLabel: f.DisplayLabel
-    })));
-
     // Build header - 使用宽松比较 (==) 而不是严格比较 (===)
     // 因为 API 可能返回字符串 "1" 或数字 1
     const visibleFields = dict.filter(f => (f.Visible ?? 1) == 1).sort((a, b) => (a.SerialNum || 0) - (b.SerialNum || 0));
-
-    console.log(`[${tabKey}] 过滤后的可见字段:`, visibleFields.map(f => f.FieldName));
 
     // 构建表头，设置列宽
     thead.innerHTML = '<tr>' + visibleFields.map(f => {
@@ -1097,17 +1201,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const lookupMaps = {};
     const ocxMaps = {};
 
-    console.log(`[${tabKey}] 開始載入 Lookup 資料...`);
     for (const field of visibleFields) {
       lookupMaps[field.FieldName] = await loadLookup(field);
       ocxMaps[field.FieldName] = await loadOCXLookup(field);
-
-      if (lookupMaps[field.FieldName]) {
-        console.log(`[${tabKey}] ${field.FieldName}: 一般 Lookup 已載入 (${Object.keys(lookupMaps[field.FieldName]).length} 筆)`);
-      }
-      if (ocxMaps[field.FieldName]) {
-        console.log(`[${tabKey}] ${field.FieldName}: OCX Lookup 已載入 (${Object.keys(ocxMaps[field.FieldName]).length} 筆)`);
-      }
     }
 
     // 渲染表格資料（套用 Lookup）
@@ -1162,8 +1258,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Show controls
     const controls = wrapper?.parentElement?.querySelector('.tab-local-controls');
     if (controls) controls.classList.remove('d-none');
-
-    console.log(`[${tabKey}] 表格建立完成，共 ${rows.length} 筆資料`);
   }
 
   function loadDetailTab(tabBtn) {
@@ -1227,7 +1321,6 @@ document.addEventListener('DOMContentLoaded', () => {
     ]).then(([dict, rows]) => {
       buildTable(tabKey, dict, rows);
     }).catch(err => {
-      console.error('Load tab data error:', err);
       const table = document.getElementById(`grid-${tabKey}`);
       if (table) {
         const tbody = table.querySelector('tbody');
@@ -1263,7 +1356,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderMasterTab(tab.dataset.tabKey, dict, masterData);
       });
     }).catch(err => {
-      console.error('Load master form error:', err);
+      // Load error handled silently
     });
   }
 
@@ -1290,6 +1383,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnGenerateImages = document.getElementById('btnGenerateImages');
   if (btnGenerateImages) {
     btnGenerateImages.addEventListener('click', async () => {
+      // 查詢模式下不允許產生圖檔
+      if (isViewOnly) {
+        alert('查詢模式下無法產生圖檔');
+        return;
+      }
+
       const partNum = currentMasterKeys.PartNum || currentMasterKeys.partnum;
       const revision = currentMasterKeys.Revision || currentMasterKeys.revision;
 
@@ -1319,9 +1418,7 @@ document.addEventListener('DOMContentLoaded', () => {
           })
         });
 
-        // 先取得文字內容以便除錯
         const text = await response.text();
-        console.log('Response text:', text);
 
         // 檢查回應狀態
         if (!response.ok) {
@@ -1349,7 +1446,6 @@ document.addEventListener('DOMContentLoaded', () => {
           alert('產生圖檔失敗：\n' + (result.message || '未知錯誤'));
         }
       } catch (err) {
-        console.error('Generate images error:', err);
         alert('產生圖檔時發生錯誤：\n' + err.message);
       } finally {
         // 恢復按鈕狀態
@@ -1362,6 +1458,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // Tab local controls
   document.querySelectorAll('[data-btn="edit"]').forEach(btn => {
     btn.addEventListener('click', () => {
+      // 查詢模式下不允許編輯
+      if (isViewOnly) {
+        alert('查詢模式下無法編輯資料');
+        return;
+      }
+
       // 先檢查權限
       if (!checkEditPermission()) return;
 
@@ -1392,10 +1494,77 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   });
+
+  // ========== 新增：工具列按鈕功能 ==========
+
+  // 查詢按鈕 - 返回列表頁（查詢模式）
+  const btnOpenQuery = document.getElementById('btnOpenQuery');
+  if (btnOpenQuery) {
+    btnOpenQuery.addEventListener('click', function() {
+      window.location.href = '@Url.Page("Index", new { mode = "view", itemId = "EMO00018" })';
+    });
+  }
+
+  // 切換按鈕 - 返回列表頁（根據當前模式決定）
+  const btnSwitch = document.getElementById('btnSwitch');
+  if (btnSwitch) {
+    btnSwitch.addEventListener('click', function() {
+      // 如果當前是查詢模式，返回查詢列表頁；否則返回維護列表頁
+      const isViewOnly = @(Model.IsViewOnly ? "true" : "false");
+      if (isViewOnly) {
+        window.location.href = '@Url.Page("Index", new { mode = "view", itemId = "EMO00018" })';
+      } else {
+        window.location.href = '@Url.Page("Index")';
+      }
+    });
+  }
+
+  // 修改按鈕 - 檢查狀態後切換到編輯模式
+  const btnEditToggle = document.getElementById('btnEditToggle');
+  if (btnEditToggle) {
+    btnEditToggle.addEventListener('click', function() {
+      // 檢查狀態
+      const statusValue = (masterData?.Status ?? masterData?.status ?? '').toString();
+      if (statusValue !== '0') {
+        alert('只有「設計中」狀態才能修改！\n\n目前狀態：' +
+              (statusValue === '1' ? '設計完成' :
+               statusValue === '2' ? '已審核' :
+               statusValue === '3' ? '已核准' : statusValue));
+        return;
+      }
+
+      // TODO: 這裡可以加入切換編輯模式的邏輯
+      alert('編輯模式（此功能待實作）');
+    });
+  }
 });
 </script>
 
 <style>
+/* 資料數量顯示框 */
+.toolbar-count-box {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  height: 31px;
+  min-width: 74px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-weight: 700;
+  line-height: 1.05;
+  color: #fff;
+  background: #1e4db7;
+  user-select: none;
+  font-size: 14px;
+}
+.toolbar-count-box.mode-edit,
+.toolbar-count-box.mode-view {
+  background: #1e4db7;
+}
+.count-line {
+  text-align: center;
+}
+
 /* 規格頁籤欄位樣式 */
 .readonly-field {
   background-color: #e9ecef !important;
@@ -1492,6 +1661,147 @@ document.addEventListener('DOMContentLoaded', () => {
 /* 确保表格不会自动拉伸填满容器 */
 .table-responsive {
   overflow-x: auto !important;
+}
+
+/* ========== 工具列樣式（從 _TableDetailPartial.cshtml 複製） ========== */
+.top-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.top-toolbar .toolbar-icon-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.top-toolbar .toolbar-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.top-toolbar .toolbar-btn {
+  font-size: var(--top-toolbar-font-size);
+  height: var(--top-toolbar-btn-height);
+  min-height: var(--top-toolbar-btn-height);
+  padding: 0 12px;
+  line-height: 1;
+}
+
+.top-toolbar .toolbar-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--top-toolbar-btn-height);
+  min-height: var(--top-toolbar-btn-height);
+  padding: 0;
+  width: 30px;
+  border-radius: 8px;
+  font-size: var(--top-toolbar-icon-font-size);
+  line-height: 1;
+}
+
+.top-toolbar .toolbar-btn-icon .toolbar-icon {
+  display: inline-block;
+}
+
+.top-toolbar #btnPrev .toolbar-icon,
+.top-toolbar #btnNext .toolbar-icon,
+.top-toolbar #btnSubDetailDelete .toolbar-icon {
+  transform: translateY(-3px);
+}
+
+.top-toolbar .toolbar-btn:disabled {
+  background: #9aa7bb;
+  cursor: not-allowed;
+  box-shadow: none;
+  opacity: 0.7;
+}
+
+.top-toolbar .toolbar-btn-add {
+  background: #0e9f4b;
+}
+
+.top-toolbar .toolbar-btn-del {
+  background: #e04848;
+}
+
+.top-toolbar .toolbar-btn-cancel {
+  background: #e04848;
+}
+
+.top-toolbar .toolbar-btn-check,
+.top-toolbar .toolbar-btn-cancel {
+  font-size: 18px;
+}
+
+.toolbar-count-box {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 31px;
+  min-width: 74px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-weight: 700;
+  line-height: 1.05;
+  color: #fff;
+  background: #1e4db7;
+  user-select: none;
+  font-size: 14px;
+}
+
+.count-line {
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.btn-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.print-panel-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.print-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  display: inline-block;
+  width: max-content;
+  min-width: 0;
+  max-width: 360px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #e3e6ee;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+  z-index: 1000;
+}
+
+.print-panel.d-none {
+  display: none !important;
+}
+
+/* 調整 topToolbar 的左邊距以對齊內容 */
+#topToolbar {
+  margin-left: calc(-1 * var(--rail-reserve)) !important;
+  padding-left: 0 !important;
+  justify-content: flex-start !important;
+}
+
+#topToolbar > .ms-2, #topToolbar .btn-toolbar {
+  margin-left: 0 !important;
 }
 </style>
 

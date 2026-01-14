@@ -1,9 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
@@ -17,6 +22,7 @@ namespace PcbErpApi.Pages.EMOdProdInfo
         private readonly ITableDictionaryService _dictService;
         private readonly ILogger<DetailModel> _logger;
         private readonly Services.AuditImageService _auditImageService;
+        private readonly IWebHostEnvironment? _env;
 
         private const string MasterDict = "EMOdProdInfo";
         private const string MasterTable = "EMOdProdInfo";
@@ -25,12 +31,14 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             PcbErpContext ctx,
             ITableDictionaryService dictService,
             ILogger<DetailModel> logger,
-            Services.AuditImageService auditImageService)
+            Services.AuditImageService auditImageService,
+            IWebHostEnvironment? env = null)
         {
             _ctx = ctx;
             _dictService = dictService;
             _logger = logger;
             _auditImageService = auditImageService;
+            _env = env;
         }
 
         public MasterDetailConfig? Config { get; private set; }
@@ -39,10 +47,39 @@ namespace PcbErpApi.Pages.EMOdProdInfo
         public List<MasterTab> MasterTabs { get; private set; } = new();
         public string? LayerPressApi { get; private set; }
         public string? SubmitHistoryApi { get; private set; }
+        public List<ItemCustButtonRow> CustomButtons { get; private set; } = new();
+        public string? ActionRailPartial { get; private set; }
+        public string HeaderTableName => MasterTable;
+
+        [FromQuery(Name = "mode")]
+        public string? Mode { get; set; }
+
+        [FromQuery(Name = "itemId")]
+        public string? ItemId { get; set; }
+
+        // 判斷是否為查詢模式
+        public bool IsViewOnly
+        {
+            get
+            {
+                // 優先順序1: 明確的 mode 參數
+                if (!string.IsNullOrEmpty(Mode))
+                    return string.Equals(Mode, "view", StringComparison.OrdinalIgnoreCase);
+
+                // 優先順序2: 根據 ItemId 判斷（查詢作業代碼）
+                if (ItemId == "EMO00018")
+                    return true;
+
+                // 預設為維護模式
+                return false;
+            }
+        }
+
+        public string PageTitle => IsViewOnly ? "EMO00018 工程資料查詢" : "EMO00004 工程資料維護";
 
         public async Task<IActionResult> OnGetAsync()
         {
-            ViewData["Title"] = "EMO00004 工程資料維護";
+            ViewData["Title"] = PageTitle;
 
             try
             {
@@ -84,6 +121,26 @@ namespace PcbErpApi.Pages.EMOdProdInfo
                 // 送審歷史資料（使用 CURdTableField 的記錄）
                 // 暫時使用內部資料欄位：作業、使用者、時間
                 SubmitHistoryApi = null; // 將在前端從 masterData 取得
+
+                // 加載自定义按钮（左侧 Action Rail）
+                try
+                {
+                    var itemId = IsViewOnly ? "EMO00018" : "EMO00004";
+                    CustomButtons = await LoadCustomButtonsAsync(itemId);
+                    ActionRailPartial = (CustomButtons?.Count ?? 0) > 0
+                        ? "~/Pages/Shared/_ActionRail.DynamicButtons.cshtml"
+                        : "~/Pages/Shared/_ActionRail.Empty.cshtml";
+
+                    var logicPartial = ResolveActionRailLogicPartial(itemId);
+                    if (!string.IsNullOrWhiteSpace(logicPartial))
+                        ViewData["ActionRailLogicPartial"] = logicPartial;
+                }
+                catch (Exception btnEx)
+                {
+                    _logger.LogWarning(btnEx, "Failed to load custom buttons");
+                    CustomButtons = new List<ItemCustButtonRow>();
+                    ActionRailPartial = "~/Pages/Shared/_ActionRail.Empty.cshtml";
+                }
             }
             catch (Exception ex)
             {
@@ -318,6 +375,109 @@ namespace PcbErpApi.Pages.EMOdProdInfo
         public record DetailTab(string Key, string Title, string TableName, string DictName, IEnumerable<string> KeyFields, bool IsForm = false, Dictionary<string, string>? ExtraKeys = null);
         public record MasterTab(string Key, string Title, IEnumerable<string> FieldNames);
 
+        public class ItemCustButtonRow
+        {
+            public string ItemId { get; set; } = string.Empty;
+            public int? SerialNum { get; set; }
+            public string ButtonName { get; set; } = string.Empty;
+            public string Caption { get; set; } = string.Empty;
+            public string Hint { get; set; } = string.Empty;
+            public string OCXName { get; set; } = string.Empty;
+            public string CoClassName { get; set; } = string.Empty;
+            public string SpName { get; set; } = string.Empty;
+            public string ExecSpName { get; set; } = string.Empty;
+            public string SearchTemplate { get; set; } = string.Empty;
+            public string MultiSelectDD { get; set; } = string.Empty;
+            public int? ReplaceExists { get; set; }
+            public string DialogCaption { get; set; } = string.Empty;
+            public int? AllowSelCount { get; set; }
+            public int? bNeedNum { get; set; }
+            public int? bNeedInEdit { get; set; }
+            public int? DesignType { get; set; }
+        }
+
+        private string? ResolveActionRailLogicPartial(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId) || _env == null) return null;
+
+            try
+            {
+                var fileName = $"{itemId.Trim()}.cshtml";
+                var fullPath = Path.Combine(_env.ContentRootPath, "Pages", "CustomButton", fileName);
+                if (System.IO.File.Exists(fullPath))
+                    return $"~/Pages/CustomButton/{fileName}";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to resolve action rail logic partial for {ItemId}", itemId);
+            }
+
+            return null;
+        }
+
+        private async Task<List<ItemCustButtonRow>> LoadCustomButtonsAsync(string itemId)
+        {
+            var list = new List<ItemCustButtonRow>();
+            var cs = _ctx.Database.GetConnectionString();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            var sql = @"
+SELECT ItemId, SerialNum, ButtonName,
+       CustCaption, CustHint,
+       bVisible, bNeedNum, bNeedInEdit, DesignType,
+       OCXName, CoClassName, SpName, ExecSpName,
+       SearchTemplate, MultiSelectDD, ReplaceExists, DialogCaption, AllowSelCount
+  FROM CURdOCXItemCustButton WITH (NOLOCK)
+ WHERE ItemId = @itemId
+ ORDER BY SerialNum, ButtonName;";
+
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@itemId", itemId ?? string.Empty);
+
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var visible = TryToInt(rd["bVisible"]);
+                if (visible.HasValue && visible.Value != 1) continue;
+
+                var buttonName = rd["ButtonName"]?.ToString() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(buttonName)) continue;
+
+                var caption = rd["CustCaption"]?.ToString() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(caption)) caption = buttonName;
+
+                list.Add(new ItemCustButtonRow
+                {
+                    ItemId = rd["ItemId"]?.ToString() ?? string.Empty,
+                    SerialNum = TryToInt(rd["SerialNum"]),
+                    ButtonName = buttonName,
+                    Caption = caption,
+                    Hint = rd["CustHint"]?.ToString() ?? string.Empty,
+                    OCXName = rd["OCXName"]?.ToString() ?? string.Empty,
+                    CoClassName = rd["CoClassName"]?.ToString() ?? string.Empty,
+                    SpName = rd["SpName"]?.ToString() ?? string.Empty,
+                    ExecSpName = rd["ExecSpName"]?.ToString() ?? string.Empty,
+                    SearchTemplate = rd["SearchTemplate"]?.ToString() ?? string.Empty,
+                    MultiSelectDD = rd["MultiSelectDD"]?.ToString() ?? string.Empty,
+                    ReplaceExists = TryToInt(rd["ReplaceExists"]),
+                    DialogCaption = rd["DialogCaption"]?.ToString() ?? string.Empty,
+                    AllowSelCount = TryToInt(rd["AllowSelCount"]),
+                    bNeedNum = TryToInt(rd["bNeedNum"]),
+                    bNeedInEdit = TryToInt(rd["bNeedInEdit"]),
+                    DesignType = TryToInt(rd["DesignType"])
+                });
+            }
+
+            return list;
+        }
+
+        private static int? TryToInt(object? o)
+        {
+            if (o == null || o == DBNull.Value) return null;
+            return int.TryParse(o.ToString(), out var n) ? n : null;
+        }
+
         /// <summary>
         /// 產生圖檔 POST Handler
         /// </summary>
@@ -362,12 +522,6 @@ namespace PcbErpApi.Pages.EMOdProdInfo
                     message = $"產生圖檔失敗: {ex.Message}"
                 });
             }
-        }
-
-        public class GenerateImagesRequest
-        {
-            public string PartNum { get; set; } = string.Empty;
-            public string Revision { get; set; } = string.Empty;
         }
     }
 }

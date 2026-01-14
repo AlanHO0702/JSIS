@@ -4,47 +4,184 @@
 @{
     Layout = "_Layout";
     ViewData["Title"] = Model.PageTitle;
+    ViewData["TableTitle"] = Model.PageTitle;
+    ViewData["SubRouteTemplate"] = "/EMOdProdInfo/Detail";
+    ViewData["KeyFieldName"] = "PartNum";
 }
 
-<partial name="~/Pages/Shared/_TableSingleGrid.cshtml" model="Model" />
+<partial name="~/Pages/Shared/_TableListPartial.cshtml" model="Model" view-data="ViewData" />
 
-@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", ViewData["FieldDictList"], ViewData)
-@if (!string.IsNullOrWhiteSpace(Model.DictTableName))
-{
-    <script>window._dictTableName = '@Model.DictTableName';</script>
-}
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", Model.FieldDictList, ViewData)
 @if (ViewData["LoadError"] is string loadErr && !string.IsNullOrWhiteSpace(loadErr))
 {
     <div class="alert alert-danger mt-2">資料載入錯誤：@loadErr</div>
 }
 <script>
+  window._tableName = "@Model.DictTableName";
+  window._dictTableName = "@Model.DictTableName";
+  window._tableFields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+  window._lookupMapData = @Html.Raw(JsonSerializer.Serialize(ViewData["LookupDisplayMap"] ?? new Dictionary<string, Dictionary<string, string>>()));
+  window._keyFieldName = "@(ViewData["KeyFieldName"]?.ToString() ?? "PartNum")";
+  window._detailRouteTemplate = "/EMOdProdInfo/Detail";
+  window._isViewOnlyMode = @(Model.IsViewOnly ? "true" : "false");
   window._singleItemId = '@Model.ItemId';
   window._singleRealTable = '@Model.TableName';
   window._emodProdInfoDetailUrl = '@Url.Page("Detail")';
   window._emodProdInfoKeyFields = @Html.Raw(JsonSerializer.Serialize((Model.KeyFields != null && Model.KeyFields.Count > 0) ? Model.KeyFields : new List<string> { "PartNum", "Revision" }));
 </script>
-<script>
-  window.SingleGridCustomHandlers = window.SingleGridCustomHandlers || {};
-  window.SingleGridCustomHandlers.openDetail = function(ctx) {
-    const keys = Array.isArray(window._emodProdInfoKeyFields) ? window._emodProdInfoKeyFields : [];
-    const row = ctx && ctx.selectedRow;
-    if (!row) {
-      alert('請先選擇一筆工程資料');
-      return;
-    }
-    const qs = new URLSearchParams();
-    keys.forEach(k => {
-      const v = row[k] ?? row[k?.toLowerCase()] ?? '';
-      if (v !== undefined && v !== null && v !== '') {
-        qs.append(k, v);
-      }
-    });
-    if (!qs.toString()) {
-      alert('找不到工程資料主鍵，請先在辭典標記主鍵欄位');
-      return;
-    }
-    const url = window._emodProdInfoDetailUrl + '?' + qs.toString();
-    window.location.href = url;
-  };
-</script>
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
+<script>
+// 自定义 renderTable 函数以支持复合主键
+(function() {
+  const originalRenderTable = window.renderTable;
+
+  window.renderTable = function(data) {
+    const tbody = document.getElementById('dataTbody');
+    if (!tbody) return;
+
+    tbody.innerHTML = "";
+
+    const fields = window._tableFields;
+    const lookupMapData = window._lookupMapData;
+    const keyFields = window._emodProdInfoKeyFields || ['PartNum', 'Revision'];
+
+    if (!fields || !Array.isArray(data)) return;
+
+    data.forEach(item => {
+      const tr = document.createElement('tr');
+      tr.className = "row-link";
+
+      // 储存所有主键字段的值
+      keyFields.forEach(kf => {
+        const val = item[kf] || item[kf?.toLowerCase()] || "";
+        tr.setAttribute(`data-${kf.toLowerCase()}`, val);
+      });
+
+      // 使用 PartNum 作为主要识别
+      const partNum = item.PartNum || item.partnum || "";
+      tr.setAttribute('data-paper-num', partNum);
+
+      fields.forEach(field => {
+        const fieldName = field.FieldName;
+        let raw = item[fieldName] || item[fieldName?.toLowerCase()];
+        let valStr = "";
+
+        // 检查 lookup
+        if (partNum && lookupMapData?.[partNum]?.[fieldName]) {
+          valStr = lookupMapData[partNum][fieldName];
+        } else {
+          // 格式化显示
+          if (raw == null) {
+            valStr = "";
+          } else if (field.DataType?.toLowerCase().includes('date')) {
+            const dt = new Date(raw);
+            if (!isNaN(dt.getTime())) {
+              valStr = dt.toLocaleDateString('zh-TW');
+            } else {
+              valStr = String(raw);
+            }
+          } else if (typeof raw === 'number') {
+            valStr = raw.toLocaleString();
+          } else {
+            valStr = String(raw);
+          }
+        }
+
+        const td = document.createElement('td');
+        td.innerHTML = valStr;
+        td.setAttribute('data-field', fieldName);
+        tr.appendChild(td);
+      });
+
+      tbody.appendChild(tr);
+    });
+
+    // 绑定点击事件
+    document.querySelectorAll("#dataTbody .row-link").forEach(row => {
+      row.addEventListener("click", () => {
+        document.querySelectorAll(".row-link.selected").forEach(r => r.classList.remove("selected"));
+        row.classList.add("selected");
+        window.selectedRow = row;
+      });
+
+      row.addEventListener("dblclick", () => {
+        const qs = new URLSearchParams();
+        keyFields.forEach(kf => {
+          const val = row.getAttribute(`data-${kf.toLowerCase()}`);
+          if (val) qs.append(kf, val);
+        });
+
+        const isViewOnly = window._isViewOnlyMode === true || window._isViewOnlyMode === 'true';
+        if (isViewOnly) {
+          qs.append('mode', 'view');
+          qs.append('itemId', 'EMO00018');
+        }
+
+        window.location.href = '/EMOdProdInfo/Detail?' + qs.toString();
+      });
+    });
+
+    if (window.refreshHScrollWidth) window.refreshHScrollWidth();
+  };
+
+  // 如果已经有数据，重新渲染
+  document.addEventListener('DOMContentLoaded', function() {
+    // 等待原始脚本执行完成后再执行
+    setTimeout(function() {
+      const tbody = document.getElementById('dataTbody');
+      if (tbody && tbody.children.length === 0) {
+        const initialData = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Items));
+        if (initialData && initialData.length > 0) {
+          window.renderTable(initialData);
+          if (window.renderOrderCount) {
+            window.renderOrderCount(@Model.TotalCount, @Model.PageSize, @Model.PageNumber);
+          }
+        }
+      }
+    }, 100);
+  });
+})();
+
+// 修复"切换"按钮
+document.addEventListener('DOMContentLoaded', function() {
+  const btnViewEditToggle = document.getElementById('btnViewEditToggle');
+  if (btnViewEditToggle) {
+    // 移除原有事件
+    const newBtn = btnViewEditToggle.cloneNode(true);
+    btnViewEditToggle.parentNode.replaceChild(newBtn, btnViewEditToggle);
+
+    // 添加新的切换逻辑
+    newBtn.addEventListener('click', function() {
+      const selectedRow = document.querySelector('#dataTbody .row-link.selected');
+      if (!selectedRow) {
+        alert('請先選擇一筆工程資料');
+        return;
+      }
+
+      const keyFields = window._emodProdInfoKeyFields || ['PartNum', 'Revision'];
+      const qs = new URLSearchParams();
+
+      keyFields.forEach(kf => {
+        const val = selectedRow.getAttribute(`data-${kf.toLowerCase()}`);
+        if (val) {
+          qs.append(kf, val);
+        }
+      });
+
+      if (!qs.toString()) {
+        alert('找不到工程資料主鍵');
+        return;
+      }
+
+      const isViewOnly = window._isViewOnlyMode === true || window._isViewOnlyMode === 'true';
+      if (isViewOnly) {
+        qs.append('mode', 'view');
+        qs.append('itemId', 'EMO00018');
+      }
+
+      window.location.href = '/EMOdProdInfo/Detail?' + qs.toString();
+    });
+  }
+});
+</script>
