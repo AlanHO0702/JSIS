@@ -268,6 +268,7 @@ function openPaperTypeModal(types) {
         // 支援兩種格式的佔位符：{PaperNum} 和 {0}
         console.log('[ToolbarHandler] detailRouteTemplate:', this.detailRouteTemplate);
         console.log('[ToolbarHandler] paperNum:', paperNum);
+        try { localStorage.setItem("afterSave", "1"); } catch {}
         let url = this.detailRouteTemplate.replace(/\{PaperNum\}/gi, paperNum);
         url = url.replace(/\{0\}/g, paperNum);
         console.log('[ToolbarHandler] final URL:', url);

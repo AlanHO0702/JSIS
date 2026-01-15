@@ -514,6 +514,9 @@
                 edit.dispatchEvent(new Event('input', { bubbles: true }));
                 edit.dispatchEvent(new Event('change', { bubbles: true }));
             } catch {}
+            if (typeof window.__autoSaveDetail === 'function') {
+                window.__autoSaveDetail();
+            }
             cleanup();
         };
 
@@ -776,8 +779,7 @@
             loadingTabs.add(tabId);
 
             // 清除舊的表格（保留按鈕）
-            const existingTable = container.querySelector('.erp-table-wrapper');
-            if (existingTable) existingTable.remove();
+            container.querySelectorAll('.erp-table-wrapper').forEach(t => t.remove());
             const existingAlert = container.querySelector('.alert');
             if (existingAlert) existingAlert.remove();
 
@@ -817,11 +819,70 @@
         });
     });
 
+    async function reloadTabById(tabId) {
+        if (!tabId) return;
+        const tabInfo = tabsData?.find(x => x?.Id === tabId);
+        if (!tabInfo) return;
+        const apiUrl = tabInfo.ApiUrl || '';
+        const contentPane = document.getElementById(`content-${tabId}`);
+        if (!contentPane) return;
+        const container = contentPane.querySelector('.table-container');
+        if (!container) return;
+
+        if (container.dataset.dictTable) {
+            window._dictTableName = container.dataset.dictTable;
+        }
+
+        const loading = contentPane.querySelector('.loading-indicator');
+        if (loading) loading.style.display = 'block';
+        loadingTabs.add(tabId);
+
+        container.querySelectorAll('.erp-table-wrapper').forEach(t => t.remove());
+        const existingAlert = container.querySelector('.alert');
+        if (existingAlert) existingAlert.remove();
+
+        try {
+            const response = await fetch(withPaperNum(apiUrl));
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`API 錯誤 (${response.status}):`, errorText);
+                throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
+            }
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await response.text();
+                console.error('回應不是 JSON:', text.substring(0, 200));
+                throw new Error('API 回應格式錯誤，請檢查 API 是否正常運作');
+            }
+            const data = await response.json();
+            await renderTable(container, data, tabId);
+            loadedTabs.add(tabId);
+        } catch (error) {
+            console.error(`載入分頁 ${tabId} 失敗:`, error);
+            container.insertAdjacentHTML('beforeend', `<div class="alert alert-danger">載入失敗: ${error.message}</div>`);
+        } finally {
+            if (loading) loading.style.display = 'none';
+            loadingTabs.delete(tabId);
+        }
+    }
+
+    window.__refreshMultiTab = async (opts = {}) => {
+        const allTabs = Array.isArray(tabsData) ? tabsData : [];
+        if (!allTabs.length) return;
+        for (const t of allTabs) {
+            const tabId = (t?.Id || '').toString();
+            if (!tabId) continue;
+            loadedTabs.delete(tabId);
+            await reloadTabById(tabId);
+        }
+    };
+
     // 渲染表格函式
     async function renderTable(container, data, tabId) {
         // ✅ 先清除舊的 alert，避免重複顯示「無資料」
         const existingAlerts = container.querySelectorAll('.alert');
         existingAlerts.forEach(a => a.remove());
+        container.querySelectorAll('.erp-table-wrapper').forEach(t => t.remove());
 
         const rows = Array.isArray(data) ? data : [];
 
@@ -1190,8 +1251,7 @@
         loadingTabs.add(tabId);
 
         // 清除舊的表格（保留按鈕）
-        const existingTable = container.querySelector('.erp-table-wrapper');
-        if (existingTable) existingTable.remove();
+        container.querySelectorAll('.erp-table-wrapper').forEach(t => t.remove());
         const existingAlert = container.querySelector('.alert');
         if (existingAlert) existingAlert.remove();
 
