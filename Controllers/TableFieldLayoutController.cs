@@ -26,6 +26,39 @@ public class TableFieldLayoutController : ControllerBase
         return new DbInfo(csb.DataSource ?? "", csb.InitialCatalog ?? "");
     }
 
+    private static string CleanTableName(string s)
+    {
+        return (s ?? "")
+            .Trim()
+            .Trim('[', ']')
+            .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static (string Schema, string Name) SplitSchemaName(string tableName)
+    {
+        var raw = (tableName ?? "").Trim().Trim('[', ']');
+        if (string.IsNullOrWhiteSpace(raw)) return ("dbo", "");
+        var parts = raw.Split('.', 2, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 2)
+            return (parts[0].Trim('[', ']'), parts[1].Trim('[', ']'));
+        return ("dbo", raw);
+    }
+
+    private async Task<string?> ResolveRealTableNameAsync(string dictTableName)
+    {
+        const string sql = @"
+SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
+  FROM CURdTableName WITH (NOLOCK)
+ WHERE TableName = @tbl";
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@tbl", dictTableName ?? string.Empty);
+        var result = await cmd.ExecuteScalarAsync();
+        return result == null || result == DBNull.Value ? null : result.ToString();
+    }
+
     // =========================================
     // 儲存 Header Layout
     // =========================================
@@ -251,22 +284,43 @@ public class TableFieldLayoutController : ControllerBase
     // LookupData
     // =========================================
     [HttpGet("LookupData")]
-    public async Task<IActionResult> GetLookupData(string table, string key, string result)
+    public async Task<IActionResult> GetLookupData(
+        string table,
+        string key,
+        string result,
+        string? cond1Field = null,
+        string? cond1Value = null,
+        string? cond2Field = null,
+        string? cond2Value = null)
     {
         bool IsValidCol(string s)
             => s.Split(',').All(part => System.Text.RegularExpressions.Regex.IsMatch(part.Trim(), @"^[A-Za-z0-9_]+$"));
 
         if (!IsValidCol(key) || !IsValidCol(result))
             return BadRequest("Invalid column!");
+        if (!string.IsNullOrWhiteSpace(cond1Field) && (!IsValidCol(cond1Field) || cond1Field.Contains(',')))
+            return BadRequest("Invalid column!");
+        if (!string.IsNullOrWhiteSpace(cond2Field) && (!IsValidCol(cond2Field) || cond2Field.Contains(',')))
+            return BadRequest("Invalid column!");
 
         var resultFields = result.Split(',').Select(x => $"[{x.Trim()}]").ToArray();
         string selectResult = string.Join(", ", resultFields.Select((col, idx) => $"{col} as [result{idx}]"));
-        var sql = $"SELECT [{key.Trim()}] as [key], {selectResult} FROM [{table.Trim()}]";
+        var whereList = new List<string>();
+        if (!string.IsNullOrWhiteSpace(cond1Field) && !string.IsNullOrWhiteSpace(cond1Value))
+            whereList.Add($"[{cond1Field.Trim()}] = @cond1Value");
+        if (!string.IsNullOrWhiteSpace(cond2Field) && !string.IsNullOrWhiteSpace(cond2Value))
+            whereList.Add($"[{cond2Field.Trim()}] = @cond2Value");
+        var whereSql = whereList.Count > 0 ? $" WHERE {string.Join(" AND ", whereList)}" : "";
+        var sql = $"SELECT [{key.Trim()}] as [key], {selectResult} FROM [{table.Trim()}]{whereSql}";
 
         var list = new List<Dictionary<string, object>>();
         using (var conn = new SqlConnection(_connStr))
         using (var cmd = new SqlCommand(sql, conn))
         {
+            if (!string.IsNullOrWhiteSpace(cond1Field) && !string.IsNullOrWhiteSpace(cond1Value))
+                cmd.Parameters.AddWithValue("@cond1Value", cond1Value);
+            if (!string.IsNullOrWhiteSpace(cond2Field) && !string.IsNullOrWhiteSpace(cond2Value))
+                cmd.Parameters.AddWithValue("@cond2Value", cond2Value);
             await conn.OpenAsync();
             using (var reader = await cmd.ExecuteReaderAsync())
             {
@@ -418,6 +472,47 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
     }
 
     // =========================================
+    // 讀取資料表/檢視表欄位型態
+    // =========================================
+    [HttpGet("ColumnTypes")]
+    public async Task<IActionResult> GetColumnTypes([FromQuery] string table)
+    {
+        if (string.IsNullOrWhiteSpace(table))
+            return BadRequest("table is required.");
+
+        var dictName = CleanTableName(table);
+        var realName = await ResolveRealTableNameAsync(dictName) ?? dictName;
+        var (schema, name) = SplitSchemaName(realName);
+
+        if (string.IsNullOrWhiteSpace(name))
+            return Ok(new { table = dictName, actualTable = realName, schema, columns = Array.Empty<object>() });
+
+        const string sql = @"
+SELECT COLUMN_NAME, DATA_TYPE
+  FROM INFORMATION_SCHEMA.COLUMNS
+ WHERE TABLE_SCHEMA = @SCHEMA
+   AND TABLE_NAME = @TNAME";
+
+        var list = new List<object>();
+        await using var cn = new SqlConnection(_connStr);
+        await cn.OpenAsync();
+        await using var cmd = new SqlCommand(sql, cn);
+        cmd.Parameters.AddWithValue("@SCHEMA", schema);
+        cmd.Parameters.AddWithValue("@TNAME", name);
+        using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            list.Add(new
+            {
+                ColumnName = rd["COLUMN_NAME"]?.ToString() ?? "",
+                DataType = rd["DATA_TYPE"]?.ToString() ?? ""
+            });
+        }
+
+        return Ok(new { table = dictName, actualTable = realName, schema, columns = list });
+    }
+
+    // =========================================
     // DTOs
     // =========================================
     public class DetailColWidthDto
@@ -530,9 +625,12 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
 
         -- 查詢/Lookup
         f.LookupTable, f.LookupKeyField, f.LookupResultField,
+        f.LookupCond1Field, f.LookupCond1ResultField,
+        f.LookupCond2Field, f.LookupCond2ResultField,
 
         -- 其他（若你的表裡有）
         f.IsNotesField,
+        f.IsMoneyField,
 
         -- ★ 第二層 OCX Lookup（新增）
         f.OCXLKTableName,
@@ -606,7 +704,12 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
                 LookupTable     = rd["LookupTable"]?.ToString() ?? "",
                 LookupKeyField  = rd["LookupKeyField"]?.ToString() ?? "",
                 LookupResultField = rd["LookupResultField"]?.ToString() ?? "",
+                LookupCond1Field = rd["LookupCond1Field"]?.ToString() ?? "",
+                LookupCond1ResultField = rd["LookupCond1ResultField"]?.ToString() ?? "",
+                LookupCond2Field = rd["LookupCond2Field"]?.ToString() ?? "",
+                LookupCond2ResultField = rd["LookupCond2ResultField"]?.ToString() ?? "",
                 IsNotesField    = rd["IsNotesField"]?.ToString() ?? "",
+                IsMoneyField    = rd["IsMoneyField"]?.ToString() ?? "",
 
                 OCXLKTableName  = rd["OCXLKTableName"]?.ToString() ?? "",
                 OCXLKResultName = rd["OCXLKResultName"]?.ToString() ?? "",

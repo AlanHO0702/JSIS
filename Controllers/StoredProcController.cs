@@ -61,6 +61,60 @@ public class StoredProcController : ControllerBase
             ["FMEdIssueUnLock"] = new StoredProcDef(
             ProcName: "dbo.FMEdIssueUnLock",
             RequiredParams: new[] { "PaperNum" }
+        ),
+
+            // APR00002 確認前檢查
+            ["SPOdEInvTypeChk"] = new StoredProcDef(
+            ProcName: "dbo.SPOdEInvTypeChk",
+            RequiredParams: new[] { "PaperId", "PaperNum", "Action" }
+        ),
+
+            // SA000006 電子發票相關 SP
+            ["SPOdHintMessage"] = new StoredProcDef(
+            ProcName: "dbo.SPOdHintMessage",
+            RequiredParams: new[] { "PaperNum", "UserId" }
+        ),
+
+            ["SPOdEInvPaperStatusGet"] = new StoredProcDef(
+            ProcName: "dbo.SPOdEInvPaperStatusGet",
+            RequiredParams: new[] { "PaperId", "PaperNum" },
+            OptionalParams: new[] { "EInvStatus" }
+        ),
+
+            ["GetPaperStatus"] = new StoredProcDef(
+            ProcName: "dbo.GetPaperStatus",
+            RequiredParams: new[] { "TableName", "PaperNum" }
+        ),
+
+            ["SPOdEInvStatusChk"] = new StoredProcDef(
+            ProcName: "dbo.SPOdEInvStatusChk",
+            RequiredParams: new[] { "PaperId", "PaperNum" }
+        ),
+
+            ["CheckEInvTradeVan"] = new StoredProcDef(
+            ProcName: "dbo.CheckEInvTradeVan",
+            RequiredParams: new string[] { }
+        ),
+
+            ["CheckEInvStatus"] = new StoredProcDef(
+            ProcName: "dbo.CheckEInvStatus",
+            RequiredParams: new[] { "TableName", "PaperNum" }
+        ),
+
+            ["SPOdBackEInvField"] = new StoredProcDef(
+            ProcName: "dbo.SPOdBackEInvField",
+            RequiredParams: new[] { "PaperId", "PaperNum" }
+        ),
+
+            ["SPOdEInvVoidFix"] = new StoredProcDef(
+            ProcName: "dbo.SPOdEInvVoidFix",
+            RequiredParams: new[] { "Step", "PaperId", "PaperNum", "EInvStatus" }
+        ),
+
+        // SA000005, MP000018 折讓單金額檢查
+        ["SPOdDebitExamTotalAmount"] = new StoredProcDef(
+            ProcName: "dbo.SPOdDebitExamTotalAmount",
+            RequiredParams: new[] { "PaperId", "PaperNum", "UserId" }
         )
 
         };
@@ -74,6 +128,7 @@ public class StoredProcController : ControllerBase
 
     public record ExecSpRequest(string Key, Dictionary<string, object>? Args);
     public record ExecByButtonRequest(string ItemId, string ButtonName, string PaperNum, Dictionary<string, object>? Args);
+    public record QueryDirectRequest(string TableName, string? WhereClause, Dictionary<string, object>? Parameters, string[]? Columns);
     private record StoredProcDef(string ProcName, string[] RequiredParams, string[]? OptionalParams = null);
 
     [HttpPost("exec")]
@@ -136,6 +191,97 @@ public class StoredProcController : ControllerBase
             var affected = await cmd.ExecuteNonQueryAsync();
             await tx.CommitAsync();
             return Ok(new { ok = true, rowsAffected = affected });
+        }
+        catch (Exception ex)
+        {
+            if (tx != null) { try { await tx.RollbackAsync(); } catch { } }
+            return StatusCode(500, new { ok = false, error = ex.GetBaseException().Message });
+        }
+    }
+
+    [HttpPost("query")]
+    public async Task<IActionResult> Query([FromBody] ExecSpRequest req)
+    {
+        Console.WriteLine($"[StoredProc.Query] Key={req?.Key}, Args={JsonSerializer.Serialize(req?.Args)}");
+
+        if (string.IsNullOrWhiteSpace(req?.Key) || !_registry.TryGetValue(req.Key, out var def))
+            return BadRequest(new { ok = false, error = "未知的作業代碼" });
+
+        var args = req.Args ?? new();
+        foreach (var p in def.RequiredParams)
+            if (!args.ContainsKey(p))
+                return BadRequest(new { ok = false, error = $"缺少參數: {p}" });
+
+        await using var conn = new SqlConnection(_cs);
+        SqlTransaction? tx = null;
+
+        try
+        {
+            await conn.OpenAsync();
+            tx = (SqlTransaction)await conn.BeginTransactionAsync();
+
+            await using var cmd = new SqlCommand(def.ProcName, conn, tx)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = 120
+            };
+
+            // 👇 這個 helper 把 JsonElement 轉成 .NET 基本型別
+            static object? ToClr(object? v)
+            {
+                if (v is null) return DBNull.Value;
+                if (v is not JsonElement je) return v;
+
+                return je.ValueKind switch
+                {
+                    JsonValueKind.Null or JsonValueKind.Undefined => DBNull.Value,
+                    JsonValueKind.String   => je.GetString(),
+                    JsonValueKind.Number   => je.TryGetInt64(out var l) ? l :
+                                            je.TryGetDecimal(out var d) ? d :
+                                            je.GetDouble(),
+                    JsonValueKind.True     => true,
+                    JsonValueKind.False    => false,
+                    // 參數不會用到 Object/Array；保險：回原字串
+                    _ => je.GetRawText()
+                };
+            }
+
+            // 白名單必填參數
+            foreach (var p in def.RequiredParams)
+                cmd.Parameters.AddWithValue("@" + p, ToClr(args[p]) ?? DBNull.Value);
+
+            // 白名單可選參數
+            if (def.OptionalParams is { Length: > 0 })
+                foreach (var p in def.OptionalParams)
+                    if (args.TryGetValue(p, out var v))
+                        cmd.Parameters.AddWithValue("@" + p, ToClr(v) ?? DBNull.Value);
+
+            // 使用 ExecuteReaderAsync 讀取結果集
+            var results = new List<Dictionary<string, object>>();
+            await using var reader = await cmd.ExecuteReaderAsync();
+
+            // 讀取第一個結果集的所有行
+            while (await reader.ReadAsync())
+            {
+                var row = new Dictionary<string, object>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    var name = reader.GetName(i);
+                    var value = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                    row[name] = value;
+                }
+                results.Add(row);
+            }
+
+            // 確保讀取完所有結果集，避免 DataReader 保持打開狀態
+            while (await reader.NextResultAsync())
+            {
+                // 消耗其他結果集，但不處理它們
+                while (await reader.ReadAsync()) { }
+            }
+
+            await tx.CommitAsync();
+            return Ok(results); // 直接返回結果陣列
         }
         catch (Exception ex)
         {
@@ -402,5 +548,115 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         var obj = await cmd.ExecuteScalarAsync();
         if (obj == null || obj == DBNull.Value) return null;
         return obj.ToString();
+    }
+
+    /// <summary>
+    /// 直接查詢資料表
+    /// POST /api/StoredProc/queryDirect
+    /// Body: { TableName, WhereClause?, Parameters?, Columns? }
+    /// </summary>
+    [HttpPost("queryDirect")]
+    public async Task<IActionResult> QueryDirect([FromBody] QueryDirectRequest req)
+    {
+        Console.WriteLine($"[StoredProc.QueryDirect] Table={req?.TableName}, Where={req?.WhereClause}");
+
+        if (string.IsNullOrWhiteSpace(req?.TableName))
+            return BadRequest(new { ok = false, error = "TableName 為必填" });
+
+        await using var conn = new SqlConnection(_cs);
+        SqlTransaction? tx = null;
+
+        try
+        {
+            await conn.OpenAsync();
+            tx = (SqlTransaction)await conn.BeginTransactionAsync();
+
+            // 安全處理表名（防止 SQL Injection）
+            var safeTable = QuoteIdentifier(req.TableName);
+            if (string.IsNullOrWhiteSpace(safeTable))
+                return BadRequest(new { ok = false, error = "無效的表名" });
+
+            // 處理要查詢的欄位
+            var columns = "*";
+            if (req.Columns != null && req.Columns.Length > 0)
+            {
+                var safeColumns = req.Columns.Select(c => QuoteIdentifier(c)).Where(c => !string.IsNullOrWhiteSpace(c));
+                columns = string.Join(", ", safeColumns);
+                if (string.IsNullOrWhiteSpace(columns))
+                    columns = "*";
+            }
+
+            // 構建 SQL
+            var sql = $"SELECT {columns} FROM {safeTable} WITH (NOLOCK)";
+
+            // 加上 WHERE 條件
+            if (!string.IsNullOrWhiteSpace(req.WhereClause))
+            {
+                sql += $" WHERE {req.WhereClause}";
+            }
+
+            await using var cmd = new SqlCommand(sql, conn, tx)
+            {
+                CommandType = CommandType.Text,
+                CommandTimeout = 120
+            };
+
+            // 添加參數（防止 SQL Injection）
+            if (req.Parameters != null)
+            {
+                foreach (var param in req.Parameters)
+                {
+                    var paramName = param.Key.StartsWith("@") ? param.Key : "@" + param.Key;
+                    var paramValue = ToClr(param.Value) ?? DBNull.Value;
+                    cmd.Parameters.AddWithValue(paramName, paramValue);
+                }
+            }
+
+            // 執行查詢
+            var results = new List<Dictionary<string, object>>();
+
+            // 使用 using 塊確保 reader 在提交事務前完全釋放
+            await using (var reader = await cmd.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    var row = new Dictionary<string, object>();
+                    for (int i = 0; i < reader.FieldCount; i++)
+                    {
+                        var name = reader.GetName(i);
+                        var value = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        row[name] = value;
+                    }
+                    results.Add(row);
+                }
+            }  // reader 在此處被釋放
+
+            await tx.CommitAsync();
+            return Ok(results);
+        }
+        catch (Exception ex)
+        {
+            if (tx != null) { try { await tx.RollbackAsync(); } catch { } }
+            return StatusCode(500, new { ok = false, error = ex.GetBaseException().Message });
+        }
+    }
+
+    // Helper: 將 JsonElement 轉成 CLR 類型
+    private static object? ToClr(object? v)
+    {
+        if (v is null) return DBNull.Value;
+        if (v is not JsonElement je) return v;
+
+        return je.ValueKind switch
+        {
+            JsonValueKind.Null or JsonValueKind.Undefined => DBNull.Value,
+            JsonValueKind.String => je.GetString(),
+            JsonValueKind.Number => je.TryGetInt64(out var l) ? l :
+                                    je.TryGetDecimal(out var d) ? d :
+                                    je.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => je.GetRawText()
+        };
     }
 }

@@ -121,6 +121,10 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 SerialNum = x.SerialNum ?? 0,
                 Visible = true,
                 LookupResultField = x.LookupResultField,
+                LookupCond1Field = x.LookupCond1Field,
+                LookupCond1ResultField = x.LookupCond1ResultField,
+                LookupCond2Field = x.LookupCond2Field,
+                LookupCond2ResultField = x.LookupCond2ResultField,
                 DataType = x.DataType,
                 FormatStr = x.FormatStr,
                 ComboStyle = x.ComboStyle,
@@ -160,6 +164,10 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 LookupTable = x.LookupTable,
                 LookupKeyField = x.LookupKeyField,
                 LookupResultField = x.LookupResultField,
+                LookupCond1Field = x.LookupCond1Field,
+                LookupCond1ResultField = x.LookupCond1ResultField,
+                LookupCond2Field = x.LookupCond2Field,
+                LookupCond2ResultField = x.LookupCond2ResultField,
                 ComboStyle = x.ComboStyle,
                 ReadOnly = x.ReadOnly,
                 EditColor = x.EditColor
@@ -182,6 +190,15 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
 
         // 單頭 lookup 值轉換
         var headerLookupDict = LookupDisplayHelper.BuildHeaderLookupMap(HeaderData, headerLookupMaps);
+        var headerStdLookupDict = LookupDisplayHelper.BuildHeaderLookupMapFromStandard(
+            HeaderData,
+            HeaderTableFields ?? new List<TableFieldViewModel>(),
+            _context.Database.GetDbConnection());
+        foreach (var kv in headerStdLookupDict)
+        {
+            if (!headerLookupDict.ContainsKey(kv.Key))
+                headerLookupDict[kv.Key] = kv.Value;
+        }
         ViewData["HeaderLookupMap"] = headerLookupDict;
         ViewData["HeaderLookupResultTypes"] = headerLookupMaps
             .GroupBy(x => x.FieldName, StringComparer.OrdinalIgnoreCase)

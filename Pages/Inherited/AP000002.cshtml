@@ -1,0 +1,1087 @@
+@*
+    AP000002 單據的確認、退審、作廢前後處理 Hook
+
+    這個檔案會在 PaperDetail.cshtml 中自動載入（如果 ItemId = AP000002）
+    可以在確認、退審、作廢等按鈕執行前後執行自訂邏輯
+*@
+
+<script>
+// 初始化 InheritedActionHooks 物件
+window.InheritedActionHooks = window.InheritedActionHooks || {};
+
+/**
+ * RejReason - 輸入作廢原因和專案作廢核准文號
+ * Delphi Lines 795-874
+ *
+ * @@param {string} tableName - 資料表名稱
+ * @@param {string} paperNum - 單據號碼
+ * @@returns {Promise<boolean>} - 成功返回 true，失敗或取消返回 false
+ */
+async function rejReason(tableName, paperNum) {
+    try {
+        // 呼叫 EInvController 的 RejReason API
+        const response = await fetch('/api/EInv/RejReason', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                TableName: tableName,
+                PaperNum: paperNum
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            await Swal.fire({
+                icon: 'error',
+                title: '執行失敗',
+                text: errorText
+            });
+            return false;
+        }
+
+        const data = await response.json();
+
+        // 如果沒有啟用電子發票，直接返回成功
+        if (!data.hasEInv) {
+            return true;
+        }
+
+        // 如果需要提示輸入作廢原因
+        if (data.needPromptNotes) {
+            const { value: reason } = await Swal.fire({
+                title: '請輸入作廢原因',
+                input: 'text',
+                inputLabel: '作廢原因',
+                inputPlaceholder: '請輸入作廢原因',
+                showCancelButton: true,
+                confirmButtonText: '確定',
+                cancelButtonText: '取消',
+                inputValidator: (value) => {
+                    if (!value || value.trim() === '') {
+                        return '作廢原因不能為空'
+                    }
+                }
+            });
+
+            if (!reason) {
+                return false; // 使用者取消
+            }
+
+            // 更新 Notes
+            const updateNotesResponse = await fetch('/api/EInv/UpdatePaperNotes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    TableName: tableName,
+                    PaperNum: paperNum,
+                    Notes: reason.trim()
+                })
+            });
+
+            if (!updateNotesResponse.ok) {
+                const errorText = await updateNotesResponse.text();
+                await Swal.fire({
+                    icon: 'error',
+                    title: '更新失敗',
+                    text: errorText
+                });
+                return false;
+            }
+        }
+
+        // 如果需要提示輸入專案作廢核准文號
+        if (data.needPromptReturnNumber) {
+            const { value: returnNum } = await Swal.fire({
+                title: '請輸入專案作廢核准文號',
+                input: 'text',
+                inputLabel: '專案作廢核准文號',
+                inputPlaceholder: '請輸入專案作廢核准文號',
+                showCancelButton: true,
+                confirmButtonText: '確定',
+                cancelButtonText: '取消',
+                inputValidator: (value) => {
+                    if (!value || value.trim() === '') {
+                        return '專案作廢核准文號不能為空'
+                    }
+                }
+            });
+
+            if (!returnNum) {
+                return false; // 使用者取消
+            }
+
+            // 更新 ReturnNumber
+            const updateReturnNumberResponse = await fetch('/api/EInv/UpdatePaperReturnNumber', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    TableName: tableName,
+                    PaperNum: paperNum,
+                    ReturnNumber: returnNum.trim()
+                })
+            });
+
+            if (!updateReturnNumberResponse.ok) {
+                const errorText = await updateReturnNumberResponse.text();
+                await Swal.fire({
+                    icon: 'error',
+                    title: '更新失敗',
+                    text: errorText
+                });
+                return false;
+            }
+        }
+
+        return true;
+
+    } catch (err) {
+        console.error('RejReason 執行錯誤:', err);
+        await Swal.fire({
+            icon: 'error',
+            title: '執行錯誤',
+            text: err.message
+        });
+        return false;
+    }
+}
+
+// 為 AP000002 註冊 Hooks
+window.InheritedActionHooks['AP000002'] = {
+
+    /**
+     * 確認前執行 SPOdEInvTypeChk
+     * @@param {object} context - { tableName, paperNum, userId }
+     * @@returns {boolean|Promise<boolean>} - 回傳 false 會中止確認操作
+     */
+    beforeConfirm: async (context) => {
+        try {
+            // 執行 SP：SPOdEInvTypeChk
+            const response = await fetch('/api/StoredProc/exec', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    Key: 'SPOdEInvTypeChk',
+                    Args: {
+                        PaperId: context.tableName,
+                        PaperNum: context.paperNum,
+                        Action: 1
+                    }
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                await Swal.fire({
+                    icon: 'error',
+                    title: 'SP 執行失敗',
+                    text: errorText
+                });
+                return false; // 中止確認
+            }
+
+            const result = await response.json();
+
+            // SP 執行成功，繼續確認流程
+            return true;
+
+        } catch (err) {
+            console.error('[AP000002] SPOdEInvTypeChk 執行錯誤:', err);
+            await Swal.fire({
+                icon: 'error',
+                title: 'SP 執行錯誤',
+                text: err.message
+            });
+            return false; // 中止確認
+        }
+    },
+
+    /**
+     * 確認後執行
+     * 1. 取得單據狀態 (SPOdEInvPaperStatusGet)
+     * 2. 如果 Finished=1 或 4，執行 SendEInv(1)
+     *
+     * @@param {object} context - { tableName, paperNum, userId, result }
+     */
+    afterConfirm: async (context) => {
+        try {
+            // 取得單據狀態
+            const statusResponse = await fetch('/api/StoredProc/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    Key: 'SPOdEInvPaperStatusGet',
+                    Args: {
+                        PaperId: context.tableName,
+                        PaperNum: context.paperNum,
+                        EInvStatus: 1
+                    }
+                })
+            });
+
+            if (statusResponse.ok) {
+                const statusResult = await statusResponse.json();
+                if (statusResult && statusResult.length > 0) {
+                    const finished = statusResult[0].Finished;
+
+                    // 如果 Finished=1 或 4，執行 SendEInv(1)
+                    if (finished === 1 || finished === 4) {
+                        await fetch('/api/EInv/SendEInv', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                TableName: context.tableName,
+                                PaperNum: context.paperNum,
+                                IPass: 1
+                            })
+                        });
+                    }
+                }
+            }
+
+            // 重新整理頁面資料
+            if (typeof window.prcDoReOpen === 'function') {
+                window.prcDoReOpen();
+            }
+
+        } catch (err) {
+            console.error('[AP000002] afterConfirm 執行錯誤:', err);
+        }
+    },
+
+    /**
+     * 退審前執行
+     * 1. 檢查空窗期 - 2025.09.15
+     * 2. 執行 SPOdEInvTypeChk (Action=2)
+     * 3. 檢查是否使用電子發票 (SPOdEInvStatusChk)
+     * 4. 檢查 EInvStatus=1
+     * 5. 檢查是否已上傳關貿
+     *
+     * @@param {object} context - { tableName, paperNum, userId }
+     * @@returns {boolean|Promise<boolean>} - 回傳 false 會中止退審操作
+     */
+    beforeCancel: async (context) => {
+        try {
+            // 1. 檢查空窗期 - 2025.09.15
+            // 如果是空窗期禁止User退審，空窗期是指xml檔上傳平台到系統回勾已上傳的這段時間
+            const paperStatusResponse = await fetch('/api/StoredProc/queryDirect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    TableName: context.tableName,
+                    WhereClause: "PaperNum = @@paperNum",
+                    Parameters: {
+                        paperNum: context.paperNum
+                    },
+                    Columns: ['Finished', 'EInvStatus', 'Uploaded']
+                })
+            });
+
+            if (paperStatusResponse.ok) {
+                const paperStatusData = await paperStatusResponse.json();
+                if (paperStatusData && paperStatusData.length > 0) {
+                    const { Finished, EInvStatus, Uploaded } = paperStatusData[0];
+
+                    // 檢查XML檔案是否存在
+                    const xmlCheckResponse = await fetch('/api/EInv/CheckXMLExists', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            TableName: context.tableName,
+                            PaperNum: context.paperNum
+                        })
+                    });
+
+                    if (xmlCheckResponse.ok) {
+                        const xmlExists = await xmlCheckResponse.json();
+
+                        // 空窗期判斷：已確認 + 已開電子發票 + 未上傳 + XML檔案不存在
+                        if (Finished === 1 && EInvStatus === 1 && Uploaded === 0 && !xmlExists) {
+                            await Swal.fire({
+                                icon: 'error',
+                                title: '無法退審',
+                                text: '此單據正在檢查是否上傳成功，請5分鐘後再執行!!'
+                            });
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            // 2. 執行 SPOdEInvTypeChk (Action=2) - 2019.04.02
+            const typeChkResponse = await fetch('/api/StoredProc/exec', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    Key: 'SPOdEInvTypeChk',
+                    Args: {
+                        PaperId: context.tableName,
+                        PaperNum: context.paperNum,
+                        Action: 2
+                    }
+                })
+            });
+
+            if (!typeChkResponse.ok) {
+                const errorText = await typeChkResponse.text();
+                await Swal.fire({
+                    icon: 'warning',
+                    title: '檢查失敗',
+                    text: errorText
+                });
+                return false;
+            }
+
+            // 3. 檢查是否使用電子發票 (SPOdEInvStatusChk) - 2018.05.24
+            const einvStatusResponse = await fetch('/api/StoredProc/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    Key: 'SPOdEInvStatusChk',
+                    Args: {
+                        PaperId: context.tableName,
+                        PaperNum: context.paperNum
+                    }
+                })
+            });
+
+            let useEInv = false;
+            if (einvStatusResponse.ok) {
+                const einvStatus = await einvStatusResponse.json();
+                if (einvStatus && einvStatus.length > 0 && einvStatus[0].EInvStatus) {
+                    useEInv = (einvStatus[0].EInvStatus === 1);
+                }
+            }
+
+            // 4. 檢查 EInvStatus=1 - 2023.06.27
+            const einvStatusCheckResponse = await fetch('/api/StoredProc/queryDirect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    TableName: context.tableName,
+                    WhereClause: "PaperNum = @@paperNum AND EInvStatus = 1",
+                    Parameters: {
+                        paperNum: context.paperNum
+                    }
+                })
+            });
+
+            let isEInvStatus = 0;
+            if (einvStatusCheckResponse.ok) {
+                const result = await einvStatusCheckResponse.json();
+                if (result && result.length > 0) {
+                    isEInvStatus = 1;
+                }
+            }
+
+            // 5. 檢查是否已上傳關貿 - 2023.06.26
+            const tradeVanResponse = await fetch('/api/StoredProc/queryDirect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    TableName: 'CURdSysParams',
+                    WhereClause: "SystemId = 'SPO' AND ParamId = 'EInvTradeVan' AND ISNULL(Value, '') <> ''",
+                    Columns: ['Value']
+                })
+            });
+
+            let isTrade = false;
+            if (tradeVanResponse.ok) {
+                const tradeVan = await tradeVanResponse.json();
+                if (tradeVan && tradeVan.length > 0) {
+                    // 如果有關貿 && EInvStatus=1
+                    if (isEInvStatus === 1) {
+                        // 需要取得 Finished 狀態來判斷
+                        const statusResponse = await fetch('/api/StoredProc/query', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                Key: 'SPOdEInvPaperStatusGet',
+                                Args: {
+                                    PaperId: context.tableName,
+                                    PaperNum: context.paperNum
+                                }
+                            })
+                        });
+
+                        if (statusResponse.ok) {
+                            const statusResult = await statusResponse.json();
+                            if (statusResult && statusResult.length > 0) {
+                                const finished = statusResult[0].Finished;
+
+                                // 如果 Finished=0 or 3，提示確認作廢
+                                if (finished === 0 || finished === 3) {
+                                    const confirmResult = await Swal.fire({
+                                        icon: 'warning',
+                                        title: '確認作廢',
+                                        text: '電子發票已上傳關貿，確定要作廢?',
+                                        showCancelButton: true,
+                                        confirmButtonText: '是',
+                                        cancelButtonText: '否'
+                                    });
+
+                                    if (!confirmResult.isConfirmed) {
+                                        // 使用者選擇「否」，執行 SPOdBackEInvField
+                                        await fetch('/api/StoredProc/exec', {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                                Key: 'SPOdBackEInvField',
+                                                Args: {
+                                                    PaperId: context.tableName,
+                                                    PaperNum: context.paperNum
+                                                }
+                                            })
+                                        });
+
+                                        // 重新整理頁面
+                                        if (typeof window.prcDoReOpen === 'function') {
+                                            window.prcDoReOpen();
+                                        }
+
+                                        return false; // 中止後續處理
+                                    } else {
+                                        // 使用者選擇「是」
+                                        isTrade = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 儲存狀態供 afterCancel 使用
+            context._useEInv = useEInv;
+            context._isEInvStatus = isEInvStatus;
+            context._isTrade = isTrade;
+
+            return true;
+
+        } catch (err) {
+            console.error('[AP000002] beforeCancel 執行錯誤:', err);
+            await Swal.fire({
+                icon: 'error',
+                title: '執行錯誤',
+                text: err.message
+            });
+            return false;
+        }
+    },
+
+    /**
+     * 退審後執行
+     * 1. 取得單據狀態 (SPOdEInvPaperStatusGet)
+     * 2. 如果使用電子發票，執行 SendEInv(0)
+     * 3. 如果有關貿且確認作廢，執行自動作廢流程
+     *
+     * @@param {object} context - { tableName, paperNum, userId, result }
+     */
+    afterCancel: async (context) => {
+        try {
+            // 從 beforeCancel 取得儲存的資料
+            const useEInv = context._useEInv;
+            const isEInvStatus = context._isEInvStatus;
+            const isTrade = context._isTrade;
+
+            // 1. 取得單據狀態
+            const statusResponse = await fetch('/api/StoredProc/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    Key: 'SPOdEInvPaperStatusGet',
+                    Args: {
+                        PaperId: context.tableName,
+                        PaperNum: context.paperNum
+                    }
+                })
+            });
+
+            let finished = 0;
+            if (statusResponse.ok) {
+                const statusResult = await statusResponse.json();
+                if (statusResult && statusResult.length > 0) {
+                    finished = statusResult[0].Finished;
+                }
+            }
+
+            // 2. 如果使用電子發票，執行 SendEInv(0)
+            let autoVoid = false;
+            if (useEInv) {
+                await fetch('/api/EInv/SendEInv', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        TableName: context.tableName,
+                        PaperNum: context.paperNum,
+                        IPass: 0
+                    })
+                });
+            }
+
+            // 3. 如果 isTrade=1，設置 autoVoid=1
+            if (isTrade) {
+                autoVoid = true;
+            }
+
+            // 4. 如果 autoVoid=1 && (Finished=0 or 3)，執行自動作廢流程
+            if (autoVoid) {
+                if (finished === 0 || finished === 3) {
+                    // 執行 RejReason (輸入作廢原因和專案作廢核准文號)
+                    const rejReasonResult = await rejReason(context.tableName, context.paperNum);
+                    if (!rejReasonResult) {
+                        return; // 使用者取消或執行失敗
+                    }
+
+                    // 執行 CURdPaperAction (Action=2, Step=2)
+                    await fetch('/api/StoredProc/exec', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            Key: 'CURdPaperAction',
+                            Args: {
+                                PaperId: context.tableName,
+                                PaperNum: context.paperNum,
+                                UserId: context.userId,
+                                Action: 2,
+                                Step: 2
+                            }
+                        })
+                    });
+
+                    // 執行 SendEInv(2)
+                    await fetch('/api/EInv/SendEInv', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            TableName: context.tableName,
+                            PaperNum: context.paperNum,
+                            IPass: 2
+                        })
+                    });
+
+                    // 重新整理頁面
+                    if (typeof window.prcDoReOpen === 'function') {
+                        window.prcDoReOpen();
+                    }
+                }
+            }
+
+        } catch (err) {
+            console.error('[AP000002] afterCancel 執行錯誤:', err);
+        }
+    },
+
+    /**
+     * 作廢前執行
+     * 1. 執行 SPOdEInvTypeChk (Action=2)
+     * 2. 檢查是否使用電子發票 (SPOdEInvStatusChk)
+     * 3. 取得單據狀態 (SPOdEInvPaperStatusGet)
+     * 4. 檢查已確認不可直接作廢 (APRdCertifMain特定 - FromType檢查)
+     * 5. 執行 SPOdEInvVoidFix (Step=1)
+     *
+     * @@param {object} context - { tableName, paperNum, userId }
+     * @@returns {boolean|Promise<boolean>} - 回傳 false 會中止作廢操作
+     */
+    beforeDelete: async (context) => {
+        try {
+            // 1. 執行 SPOdEInvTypeChk (Action=2)
+            const typeChkResponse = await fetch('/api/StoredProc/exec', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    Key: 'SPOdEInvTypeChk',
+                    Args: {
+                        PaperId: context.tableName,
+                        PaperNum: context.paperNum,
+                        Action: 2
+                    }
+                })
+            });
+
+            if (!typeChkResponse.ok) {
+                const errorText = await typeChkResponse.text();
+                await Swal.fire({
+                    icon: 'warning',
+                    title: '檢查失敗',
+                    text: errorText
+                });
+                return false;
+            }
+
+            // 2. 檢查是否使用電子發票 (SPOdEInvStatusChk)
+            const einvStatusResponse = await fetch('/api/StoredProc/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    Key: 'SPOdEInvStatusChk',
+                    Args: {
+                        PaperId: context.tableName,
+                        PaperNum: context.paperNum
+                    }
+                })
+            });
+
+            let eInvStatus = 0;
+            if (einvStatusResponse.ok) {
+                const einvStatus = await einvStatusResponse.json();
+                if (einvStatus && einvStatus.length > 0) {
+                    eInvStatus = einvStatus[0].EInvStatus || 0;
+                }
+            }
+
+            // 3. 取得單據狀態 (SPOdEInvPaperStatusGet)
+            const statusResponse = await fetch('/api/StoredProc/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    Key: 'SPOdEInvPaperStatusGet',
+                    Args: {
+                        PaperId: context.tableName,
+                        PaperNum: context.paperNum,
+                        EInvStatus: eInvStatus
+                    }
+                })
+            });
+
+            let finished = 0;
+            if (statusResponse.ok) {
+                const statusResult = await statusResponse.json();
+                if (statusResult && statusResult.length > 0) {
+                    finished = statusResult[0].Finished || 0;
+                }
+            }
+
+            // 4. 檢查已確認不可直接作廢 (APRdCertifMain特定) - 2025.09.16
+            // Delphi Lines 674-687: 如果 Finished=1 且 FromType in [0,2]，不可直接作廢
+            if (finished === 1) {
+                // 查詢 FromType
+                const fromTypeResponse = await fetch('/api/StoredProc/queryDirect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        TableName: context.tableName,
+                        WhereClause: "PaperNum = @@paperNum",
+                        Parameters: {
+                            paperNum: context.paperNum
+                        },
+                        Columns: ['FromType']
+                    })
+                });
+
+                if (fromTypeResponse.ok) {
+                    const fromTypeData = await fromTypeResponse.json();
+                    if (fromTypeData && fromTypeData.length > 0) {
+                        const fromType = fromTypeData[0].FromType || 0;
+
+                        // 如果 FromType in [0,2]，不可直接作廢
+                        if (fromType === 0 || fromType === 2) {
+                            await Swal.fire({
+                                icon: 'error',
+                                title: '無法作廢',
+                                text: '此單據「已確認」，不可直接作廢\n請先退審後再作廢!!'
+                            });
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            // 5. 執行 SPOdEInvVoidFix (Step=1)
+            const voidFixResponse = await fetch('/api/StoredProc/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    Key: 'SPOdEInvVoidFix',
+                    Args: {
+                        Step: 1,
+                        PaperId: context.tableName,
+                        PaperNum: context.paperNum,
+                        EInvStatus: eInvStatus
+                    }
+                })
+            });
+
+            if (voidFixResponse.ok) {
+                const voidFixResult = await voidFixResponse.json();
+                if (voidFixResult && voidFixResult.length > 0 && voidFixResult[0].SendMessage) {
+                    const confirmResult = await Swal.fire({
+                        icon: 'warning',
+                        title: '確認作廢',
+                        text: voidFixResult[0].SendMessage,
+                        showCancelButton: true,
+                        confirmButtonText: '是',
+                        cancelButtonText: '否'
+                    });
+
+                    if (!confirmResult.isConfirmed) {
+                        return false;
+                    }
+                }
+            }
+
+            // 儲存狀態供 afterDelete 使用
+            context._finished = finished;
+            context._eInvStatus = eInvStatus;
+
+            return true;
+
+        } catch (err) {
+            console.error('[AP000002] beforeDelete 執行錯誤:', err);
+            await Swal.fire({
+                icon: 'error',
+                title: '執行錯誤',
+                text: err.message
+            });
+            return false;
+        }
+    },
+
+    /**
+     * 作廢後執行
+     * 1. 如果 Finished=2，執行 RejReason + SendEInv(2)
+     * 2. 執行 SPOdEInvVoidFix (Step=2)
+     *
+     * @@param {object} context - { tableName, paperNum, userId, result }
+     */
+    afterDelete: async (context) => {
+        try {
+            const finished = context._finished;
+            const eInvStatus = context._eInvStatus;
+
+            // 如果 Finished=2，執行 RejReason + SendEInv(2)
+            if (finished === 2) {
+                const rejReasonResult = await rejReason(context.tableName, context.paperNum);
+                if (!rejReasonResult) {
+                    return; // 使用者取消或執行失敗
+                }
+
+                await fetch('/api/EInv/SendEInv', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        TableName: context.tableName,
+                        PaperNum: context.paperNum,
+                        IPass: 2
+                    })
+                });
+            }
+
+            // 執行 SPOdEInvVoidFix (Step=2)
+            await fetch('/api/StoredProc/exec', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    Key: 'SPOdEInvVoidFix',
+                    Args: {
+                        Step: 2,
+                        PaperId: context.tableName,
+                        PaperNum: context.paperNum,
+                        EInvStatus: eInvStatus
+                    }
+                })
+            });
+
+        } catch (err) {
+            console.error('[AP000002] afterDelete 執行錯誤:', err);
+        }
+    },
+
+    /**
+     * 修改前執行
+     * 1. 檢查空窗期 - 2025.09.16
+     * 2. 如果從 Finished=1 修改，執行 SPOdEInvTypeChk (Action=2)
+     * 3. 檢查是否使用電子發票
+     * 4. 檢查是否已上傳關貿
+     *
+     * @@param {object} context - { tableName, paperNum, userId }
+     * @@returns {boolean|Promise<boolean>} - 回傳 false 會中止修改操作
+     */
+    beforeUpdate: async (context) => {
+        try {
+            // 1. 檢查空窗期 - 2025.09.16
+            const paperStatusResponse = await fetch('/api/StoredProc/queryDirect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    TableName: context.tableName,
+                    WhereClause: "PaperNum = @@paperNum",
+                    Parameters: {
+                        paperNum: context.paperNum
+                    },
+                    Columns: ['Finished', 'EInvStatus', 'Uploaded']
+                })
+            });
+
+            let finishedBefore = 0;
+            if (paperStatusResponse.ok) {
+                const paperStatusData = await paperStatusResponse.json();
+                if (paperStatusData && paperStatusData.length > 0) {
+                    const { Finished, EInvStatus, Uploaded } = paperStatusData[0];
+                    finishedBefore = Finished;
+
+                    // 檢查XML檔案是否存在
+                    const xmlCheckResponse = await fetch('/api/EInv/CheckXMLExists', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            TableName: context.tableName,
+                            PaperNum: context.paperNum
+                        })
+                    });
+
+                    if (xmlCheckResponse.ok) {
+                        const xmlExists = await xmlCheckResponse.json();
+
+                        // 空窗期判斷：已確認 + 已開電子發票 + 未上傳 + XML檔案不存在
+                        if (Finished === 1 && EInvStatus === 1 && Uploaded === 0 && !xmlExists) {
+                            await Swal.fire({
+                                icon: 'error',
+                                title: '無法修改',
+                                text: '此單據正在檢查是否上傳成功，請5分鐘後再執行!!'
+                            });
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            // 2. 如果從 Finished=1 修改，執行 SPOdEInvTypeChk (Action=2)
+            if (finishedBefore === 1) {
+                const typeChkResponse = await fetch('/api/StoredProc/exec', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        Key: 'SPOdEInvTypeChk',
+                        Args: {
+                            PaperId: context.tableName,
+                            PaperNum: context.paperNum,
+                            Action: 2
+                        }
+                    })
+                });
+
+                if (!typeChkResponse.ok) {
+                    const errorText = await typeChkResponse.text();
+                    await Swal.fire({
+                        icon: 'warning',
+                        title: '檢查失敗',
+                        text: errorText
+                    });
+                    return false;
+                }
+            }
+
+            // 3. 檢查是否使用電子發票
+            const einvStatusResponse = await fetch('/api/StoredProc/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    Key: 'SPOdEInvStatusChk',
+                    Args: {
+                        PaperId: context.tableName,
+                        PaperNum: context.paperNum
+                    }
+                })
+            });
+
+            let useEInv = false;
+            if (einvStatusResponse.ok) {
+                const einvStatus = await einvStatusResponse.json();
+                if (einvStatus && einvStatus.length > 0 && einvStatus[0].EInvStatus) {
+                    useEInv = (einvStatus[0].EInvStatus === 1);
+                }
+            }
+
+            // 4. 檢查是否已上傳關貿 - 2023.06.26
+            let isTrade = false;
+            const tradeVanResponse = await fetch('/api/StoredProc/queryDirect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    TableName: 'CURdSysParams',
+                    WhereClause: "SystemId = 'SPO' AND ParamId = 'EInvTradeVan' AND ISNULL(Value, '') <> ''",
+                    Columns: ['Value']
+                })
+            });
+
+            if (tradeVanResponse.ok) {
+                const tradeVan = await tradeVanResponse.json();
+                if (tradeVan && tradeVan.length > 0) {
+                    // 檢查 EInvStatus=1
+                    const einvStatusCheckResponse = await fetch('/api/StoredProc/queryDirect', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            TableName: context.tableName,
+                            WhereClause: "PaperNum = @@paperNum AND EInvStatus = 1",
+                            Parameters: {
+                                paperNum: context.paperNum
+                            }
+                        })
+                    });
+
+                    if (einvStatusCheckResponse.ok) {
+                        const einvStatusCheck = await einvStatusCheckResponse.json();
+                        if (einvStatusCheck && einvStatusCheck.length > 0) {
+                            const confirmResult = await Swal.fire({
+                                icon: 'warning',
+                                title: '確認作廢',
+                                text: '電子發票已上傳關貿，確定要作廢?',
+                                showCancelButton: true,
+                                confirmButtonText: '是',
+                                cancelButtonText: '否'
+                            });
+
+                            if (!confirmResult.isConfirmed) {
+                                await fetch('/api/StoredProc/exec', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        Key: 'SPOdBackEInvField',
+                                        Args: {
+                                            PaperId: context.tableName,
+                                            PaperNum: context.paperNum
+                                        }
+                                    })
+                                });
+
+                                if (typeof window.prcDoReOpen === 'function') {
+                                    window.prcDoReOpen();
+                                }
+
+                                return false;
+                            } else {
+                                isTrade = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 儲存狀態供 afterUpdate 使用
+            context._finishedBefore = finishedBefore;
+            context._useEInv = useEInv;
+            context._isTrade = isTrade;
+
+            return true;
+
+        } catch (err) {
+            console.error('[AP000002] beforeUpdate 執行錯誤:', err);
+            await Swal.fire({
+                icon: 'error',
+                title: '執行錯誤',
+                text: err.message
+            });
+            return false;
+        }
+    },
+
+    /**
+     * 修改後執行
+     * 如果從 Finished=1 修改，執行自動作廢邏輯
+     *
+     * @@param {object} context - { tableName, paperNum, userId, result }
+     */
+    afterUpdate: async (context) => {
+        try {
+            const finishedBefore = context._finishedBefore;
+            const useEInv = context._useEInv;
+            const isTrade = context._isTrade;
+
+            // 如果從 Finished=1 修改
+            if (finishedBefore === 1) {
+                let autoVoid = false;
+
+                if (useEInv) {
+                    await fetch('/api/EInv/SendEInv', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            TableName: context.tableName,
+                            PaperNum: context.paperNum,
+                            IPass: 0
+                        })
+                    });
+                }
+
+                if (isTrade) {
+                    autoVoid = true;
+                }
+
+                if (autoVoid) {
+                    // 取得單據狀態
+                    const statusResponse = await fetch('/api/StoredProc/query', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            Key: 'SPOdEInvPaperStatusGet',
+                            Args: {
+                                PaperId: context.tableName,
+                                PaperNum: context.paperNum
+                            }
+                        })
+                    });
+
+                    if (statusResponse.ok) {
+                        const statusResult = await statusResponse.json();
+                        if (statusResult && statusResult.length > 0) {
+                            const finished = statusResult[0].Finished;
+
+                            if (finished === 0 || finished === 3) {
+                                // 執行 RejReason
+                                const rejReasonResult = await rejReason(context.tableName, context.paperNum);
+                                if (!rejReasonResult) {
+                                    return; // 使用者取消或執行失敗
+                                }
+
+                                // 執行 CURdPaperAction (Action=2, Step=2)
+                                await fetch('/api/StoredProc/exec', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        Key: 'CURdPaperAction',
+                                        Args: {
+                                            PaperId: context.tableName,
+                                            PaperNum: context.paperNum,
+                                            UserId: context.userId,
+                                            Action: 2,
+                                            Step: 2
+                                        }
+                                    })
+                                });
+
+                                // 執行 SendEInv(2)
+                                await fetch('/api/EInv/SendEInv', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        TableName: context.tableName,
+                                        PaperNum: context.paperNum,
+                                        IPass: 2
+                                    })
+                                });
+
+                                // 重新整理頁面
+                                if (typeof window.prcDoReOpen === 'function') {
+                                    window.prcDoReOpen();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+        } catch (err) {
+            console.error('[AP000002] afterUpdate 執行錯誤:', err);
+        }
+    }
+};
+
+// 為其他需要使用相同邏輯的作業註冊相同的 hooks
+// 使用方式：當新增作業需要此 inherited 邏輯時，在下方加入一行註冊即可
+const sharedHooks = window.InheritedActionHooks['AP000002'];
+window.InheritedActionHooks['APR00002'] = sharedHooks;
+window.InheritedActionHooks['PR000002'] = sharedHooks;
+window.InheritedActionHooks['APR00032'] = sharedHooks;
+window.InheritedActionHooks['APR00003'] = sharedHooks;
+</script>

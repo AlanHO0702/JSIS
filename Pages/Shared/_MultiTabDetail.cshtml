@@ -81,6 +81,8 @@
             .forEach(el => el.classList.toggle('d-none', canEdit));
         document.querySelectorAll('.multi-tab-detail .erp-table .cell-edit')
             .forEach(el => el.classList.toggle('d-none', !canEdit));
+        document.querySelectorAll('.multi-tab-detail .erp-table')
+            .forEach(el => el.classList.toggle('date-edit', canEdit));
     }
 
     window.addEventListener('headerEditModeChanged', (e) => {
@@ -285,6 +287,7 @@
 
     function pad2(n) { return String(n).padStart(2, '0'); }
 
+
     function tryParseDate(raw) {
         if (raw == null || raw === '') return null;
         if (raw instanceof Date && !isNaN(raw)) return raw;
@@ -292,6 +295,22 @@
         if (!s) return null;
         const d = new Date(s);
         return isNaN(d) ? null : d;
+    }
+
+    function normalizeDateForPicker(value) {
+        const s = String(value ?? '').trim();
+        if (!s) return '';
+        const m = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+        if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+        const d = new Date(s);
+        if (isNaN(d)) return '';
+        return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    }
+
+    function formatDateForDisplay(ymd) {
+        const m = String(ymd ?? '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return '';
+        return `${m[1]}/${m[2]}/${m[3]}`;
     }
 
     function parseDecimalsFromFormat(fmt) {
@@ -353,6 +372,35 @@
         }
 
         return s;
+    }
+
+    function isNumberType(dt) {
+        const t = (dt || '').toString().trim().toLowerCase();
+        if (!t) return false;
+        return t === 'number'
+            || t === 'int' || t === 'smallint' || t === 'tinyint' || t === 'bigint'
+            || t.startsWith('decimal') || t.startsWith('numeric')
+            || t.startsWith('money') || t.startsWith('smallmoney')
+            || t.startsWith('float') || t.startsWith('real');
+    }
+
+    function isNumberValue(raw) {
+        if (raw == null) return false;
+        if (typeof raw === 'number') return Number.isFinite(raw);
+        const s = String(raw).replace(/,/g, '').trim();
+        if (!s) return false;
+        return Number.isFinite(Number(s));
+    }
+
+    function getAlignClass(meta, raw) {
+        if (isNumberType(meta?.dataType)) return 'align-right';
+        return 'align-left';
+    }
+
+    function isDateType(meta) {
+        const dt = (meta?.dataType || '').toString().toLowerCase();
+        const fmt = (meta?.formatStr || '').toString().toLowerCase();
+        return dt.includes('date') || fmt.includes('yyyy/mm/dd') || fmt.includes('yyyy-mm-dd');
     }
 
     const LOOKUP_EMPTY_LABEL = '--請選擇--';
@@ -492,6 +540,64 @@
         positionDropdown(list, td);
         document.addEventListener('mousedown', onDocDown, true);
         window.addEventListener('resize', onResize, true);
+    }
+
+    function initDatePickers(scope, tabId) {
+        if (!scope) return;
+        const inputs = scope.querySelectorAll('input.cell-edit.date-dropdown');
+        inputs.forEach(textInput => {
+            const td = textInput.closest('td');
+            const dateInput = td?.querySelector('input.cell-date-input');
+            const toggle = td?.querySelector('.date-toggle');
+            if (!dateInput || !toggle) return;
+
+            const syncDateInput = () => {
+                const v = normalizeDateForPicker(textInput.value);
+                dateInput.value = v || '';
+            };
+            syncDateInput();
+
+            const updateRowState = () => {
+                const tr = td?.closest('tr');
+                if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
+                window.__unsavedChanges = true;
+                if (tabId && window._multiTabSelectedRows?.[tabId]) {
+                    const fieldName = textInput.dataset.field || '';
+                    if (fieldName) window._multiTabSelectedRows[tabId][fieldName] = textInput.value ?? '';
+                }
+            };
+
+            dateInput.addEventListener('change', () => {
+                const isReadOnly = td?.dataset?.readonly === '1' || textInput.dataset.readonly === '1' || textInput.readOnly;
+                if (!allowEdit || !getHeaderEditState() || isReadOnly) return;
+                const formatted = formatDateForDisplay(dateInput.value) || dateInput.value;
+                if (!formatted) return;
+                textInput.value = formatted;
+                const view = td?.querySelector('.cell-view');
+                if (view) view.textContent = formatted;
+                updateRowState();
+                try {
+                    textInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    textInput.dispatchEvent(new Event('change', { bubbles: true }));
+                } catch {}
+            });
+
+            textInput.addEventListener('input', () => syncDateInput());
+            textInput.addEventListener('change', () => syncDateInput());
+
+            toggle.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const isReadOnly = td?.dataset?.readonly === '1' || textInput.dataset.readonly === '1' || textInput.readOnly;
+                if (!allowEdit || !getHeaderEditState() || isReadOnly) return;
+                if (typeof dateInput.showPicker === 'function') {
+                    dateInput.showPicker();
+                } else {
+                    dateInput.focus();
+                    dateInput.click();
+                }
+            });
+        });
     }
 
     async function fetchFieldWidths(dictTable) {
@@ -771,7 +877,7 @@
         // 表頭 - 使用字典取得中文名稱
         fields.forEach(field => {
             const displayName = dict[field] || field;
-            html += `<th data-field="${field}" style="position:relative;"><span class="th-text">${displayName}</span><span class="col-resizer" draggable="false"></span></th>`;
+            html += `<th class="align-left" data-field="${field}" style="position:relative;"><span class="th-text">${displayName}</span><span class="col-resizer" draggable="false"></span></th>`;
         });
         html += '</tr></thead><tbody>';
 
@@ -846,19 +952,31 @@
                     const viewText = (value == null ? '' : String(value)).trim();
                     const editText = (inputValue == null ? '' : String(inputValue)).trim();
                   // ? 雙元素：顯示模式 + 編輯模式
+                    const alignClass = getAlignClass(meta, rawValue);
+                    const isDate = isDateType(meta);
+                    const tdClasses = [alignClass];
+                    if (canDropdown) tdClasses.push('lookup-cell');
+                    const classAttr = tdClasses.length ? ` class="${tdClasses.join(' ')}"` : '';
                     const keyFieldAttr = canDropdown ? ` data-lookup-key-field="${escapeHtml(metaLookup?.key || '')}"` : "";
                     const resultFieldAttr = canDropdown ? ` data-lookup-result-field="${escapeHtml(metaLookup?.result || '')}"` : "";
                     const lookupAttr = canDropdown
-                        ? ` class="lookup-cell" data-lookup-field="${escapeHtml(field)}"${keyFieldAttr}${resultFieldAttr}`
+                        ? ` data-lookup-field="${escapeHtml(field)}"${keyFieldAttr}${resultFieldAttr}`
                         : "";
                     const tdReadOnlyAttr = ` data-readonly="${isReadOnly ? '1' : '0'}"`;
-                    html += `<td${lookupAttr}${tdReadOnlyAttr}>
+                    const dateEditClass = isDate ? ' date-dropdown' : '';
+                    const dateValue = isDate ? normalizeDateForPicker(editText) : '';
+                    const dateAddon = isDate
+                        ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
+                           <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
+                        : '';
+                    html += `<td${classAttr}${lookupAttr}${tdReadOnlyAttr}>
                         <span class="${viewClass}${roClass}" data-init-view="${escapeHtml(viewText)}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span>
                         <input type="text"
-                               class="${editClass}${roClass}"
+                               class="${editClass}${roClass}${dateEditClass}"
                                data-field="${field}"
                                data-init="${escapeHtml(editText)}"
                                value="${escapeHtml(editText)}"${roAttr}>
+                        ${dateAddon}
                     </td>`;
             });
             html += '</tr>';
@@ -879,6 +997,8 @@
 
         html += '</tbody></table></div>';
         container.insertAdjacentHTML('beforeend', html);
+        const wrapper = container.querySelector('.erp-table-wrapper');
+        initDatePickers(wrapper, tabId);
         window._multiTabLookupFields = window._multiTabLookupFields || {};
         window._multiTabLookupFields[tabId] = Array.from(lookupFieldSet);
         window._multiTabLookupMeta = window._multiTabLookupMeta || {};
@@ -1183,27 +1303,28 @@
 }
 
 .multi-tab-detail .nav-link {
-    color: #235eb8;
-    border: 1px solid transparent;
+    color: #4a6fa8;
+    border: 1px solid #bccdea;
     border-radius: 8px 8px 0 0;
     padding: var(--tab-pad-y) var(--tab-pad-x);
-    background: transparent;
+    background: #dde7f7;
     transition: color 0.2s ease-in-out, background 0.2s ease-in-out, border-color 0.2s ease-in-out;
     font-size: var(--field-label-size);
     font-weight: 500;
 }
 
 .multi-tab-detail .nav-link:hover {
-    background-color: #f5f7fb;
-    border-color: #dee2e6 #dee2e6 #fff #dee2e6;
+    background-color: #d0dcf2;
+    border-color: #adbfdf #adbfdf #fff #adbfdf;
+    color: #3b5d92;
 }
 
 .multi-tab-detail .nav-link.active {
-    color: #124d8b;
+    color: #1b3f8a;
     background-color: #ffffff;
-    border-color: #bdd2f7 #bdd2f7 #fff #bdd2f7;
-    box-shadow: 0 2px 6px 0 #e4ecf7;
-    font-weight: 700;
+    border-color: #7da3df #7da3df #fff #7da3df;
+    box-shadow: 0 3px 10px 0 rgba(14, 53, 95, 0.18);
+    font-weight: 750;
 }
 
 .multi-tab-detail .table-container {
@@ -1242,17 +1363,30 @@
 .multi-tab-detail .erp-table td {
     background: #f1f5fb;
     padding: 0;  /* ← 改為 0，由內部元素控制 padding */
-    border-bottom: 1px solid #c5d1e4;
+    border-bottom: 1px solid #9fb1d0;
     white-space: nowrap;
     text-align: center;
     font-weight: 500;
-    border-right: 1px solid #dde4ed;
+    border-right: 1px solid #9fb1d0;
     height: auto;
+}
+
+.multi-tab-detail .erp-table th.align-left,
+.multi-tab-detail .erp-table td.align-left {
+    text-align: left;
+}
+.multi-tab-detail .erp-table th.align-right,
+.multi-tab-detail .erp-table td.align-right {
+    text-align: right;
 }
 
 .multi-tab-detail .erp-table th:last-child,
 .multi-tab-detail .erp-table td:last-child {
-    border-right: none;
+    border-right: 1px solid #9fb1d0;
+}
+.multi-tab-detail .erp-table th:first-child,
+.multi-tab-detail .erp-table td:first-child {
+    border-left: 1px solid #9fb1d0;
 }
 
 .multi-tab-detail .erp-table th {
@@ -1264,6 +1398,11 @@
     position: sticky;
     top: 0;
     z-index: 10;
+    border-top: 1px solid #9fb1d0;
+}
+.multi-tab-detail .erp-table th .th-text{
+    display: inline-block;
+    padding-left: 4px;
 }
 
 .multi-tab-detail .erp-table th { position: relative; }
@@ -1290,6 +1429,7 @@ body.resizing { cursor: col-resize !important; }
 .multi-tab-detail .erp-table td {
     position: relative;
     padding: 0;
+    overflow: hidden;
 }
 
 /* ✅ 檢視模式的 span 樣式 */
@@ -1325,6 +1465,62 @@ body.resizing { cursor: col-resize !important; }
     text-align: inherit !important;
     padding: 2px 6px;  /* ← 與 .cell-view 完全相同的 padding */
     white-space: nowrap;
+}
+
+.multi-tab-detail .erp-table .cell-edit.date-dropdown{
+    padding-right: 14px;
+}
+
+.multi-tab-detail .erp-table .date-toggle{
+    position: absolute;
+    right: 3px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 14px !important;
+    height: 14px !important;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    z-index: 3;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    line-height: 1 !important;
+}
+
+.multi-tab-detail .erp-table .date-toggle,
+.multi-tab-detail .erp-table .cell-date-input{
+    display: none !important;
+}
+.multi-tab-detail .erp-table.date-edit .date-toggle,
+.multi-tab-detail .erp-table.date-edit .cell-date-input{
+    display: inline-flex !important;
+}
+
+.multi-tab-detail .erp-table .date-toggle::before{
+    content: "";
+    display: block;
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #6b7280;
+    margin: 0 auto;
+}
+
+.multi-tab-detail .erp-table .cell-date-input{
+    position: absolute;
+    right: 3px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 14px !important;
+    height: 14px !important;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 2;
+    padding: 0 !important;
+    margin: 0 !important;
 }
 
 .multi-tab-detail .erp-table .cell-edit:focus {

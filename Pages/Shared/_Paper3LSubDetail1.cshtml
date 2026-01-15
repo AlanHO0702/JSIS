@@ -31,6 +31,7 @@
   const countEl = document.getElementById('paper3l-subdetail-count');
   let lastRows = null;
   let readOnlyMap = new Map();
+  let dictMetaMap = new Map();
   if (container) {
     container.addEventListener('pointerdown', () => {
       window.__activeDetailGrid = 'paper3l';
@@ -427,9 +428,39 @@
     return n.toLocaleString();
   }
 
+  function tryParseDate(raw) {
+    if (raw == null || raw === '') return null;
+    if (raw instanceof Date && !isNaN(raw)) return raw;
+    const s = String(raw).trim();
+    if (!s) return null;
+    const d = new Date(s);
+    return isNaN(d) ? null : d;
+  }
+
+  function normalizeDateForPicker(value) {
+    const s = String(value ?? '').trim();
+    if (!s) return '';
+    const m = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+    if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+    const d = new Date(s);
+    if (isNaN(d)) return '';
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  function formatDateForDisplay(ymd) {
+    const m = String(ymd ?? '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return '';
+    return `${m[1]}/${m[2]}/${m[3]}`;
+  }
+
   function formatDisplayByMeta(raw, meta) {
     const dataType = (meta?.dataType || '').toLowerCase();
     if (!dataType) return String(raw ?? '');
+    if (dataType.includes('date')) {
+      const d = tryParseDate(raw);
+      if (!d) return String(raw ?? '');
+      return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+    }
     if (dataType.includes('int') || dataType.includes('decimal') || dataType.includes('numeric')
       || dataType.includes('money') || dataType.includes('float') || dataType.includes('real')) {
       return formatNumberByFormat(raw, meta?.formatStr);
@@ -437,9 +468,40 @@
     return String(raw ?? '');
   }
 
+  function isNumberType(dt) {
+    const t = (dt || '').toString().trim().toLowerCase();
+    if (!t) return false;
+    return t === 'number'
+      || t === 'int' || t === 'smallint' || t === 'tinyint' || t === 'bigint'
+      || t.startsWith('decimal') || t.startsWith('numeric')
+      || t.startsWith('money') || t.startsWith('smallmoney')
+      || t.startsWith('float') || t.startsWith('real');
+  }
+
+  function isNumberValue(raw) {
+    if (raw == null) return false;
+    if (typeof raw === 'number') return Number.isFinite(raw);
+    const s = String(raw).replace(/,/g, '').trim();
+    if (!s) return false;
+    return Number.isFinite(Number(s));
+  }
+
+  function getAlignClass(meta, raw) {
+    if (isNumberType(meta?.dataType)) return 'align-right';
+    return 'align-left';
+  }
+
+  function isDateType(meta) {
+    const dt = (meta?.dataType || '').toString().toLowerCase();
+    const fmt = (meta?.formatStr || '').toString().toLowerCase();
+    return dt.includes('date') || fmt.includes('yyyy/mm/dd') || fmt.includes('yyyy-mm-dd');
+  }
+
   function applyEditMode(isEdit) {
     container?.querySelectorAll('.cell-view').forEach(el => el.classList.toggle('d-none', isEdit));
     container?.querySelectorAll('.cell-edit').forEach(el => el.classList.toggle('d-none', !isEdit));
+    const table = container?.querySelector('.erp-table');
+    if (table) table.classList.toggle('date-edit', !!isEdit);
   }
 
   function getHeaderEditState() {
@@ -584,6 +646,60 @@
     window.addEventListener('resize', onResize, true);
   }
 
+  function initDatePickers(scope) {
+    if (!scope) return;
+    const inputs = scope.querySelectorAll('input.cell-edit.date-dropdown');
+    inputs.forEach(textInput => {
+      const td = textInput.closest('td');
+      const dateInput = td?.querySelector('input.cell-date-input');
+      const toggle = td?.querySelector('.date-toggle');
+      if (!dateInput || !toggle) return;
+
+      const syncDateInput = () => {
+        const v = normalizeDateForPicker(textInput.value);
+        dateInput.value = v || '';
+      };
+      syncDateInput();
+
+      const updateRowState = () => {
+        const tr = td?.closest('tr');
+        if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
+        window.__unsavedChanges = true;
+      };
+
+      dateInput.addEventListener('change', () => {
+        const isReadOnly = td?.dataset?.readonly === '1' || textInput.dataset.readonly === '1' || textInput.readOnly;
+        if (!getHeaderEditState() || isReadOnly) return;
+        const formatted = formatDateForDisplay(dateInput.value) || dateInput.value;
+        if (!formatted) return;
+        textInput.value = formatted;
+        const view = td?.querySelector('.cell-view');
+        if (view) view.textContent = formatted;
+        updateRowState();
+        try {
+          textInput.dispatchEvent(new Event('input', { bubbles: true }));
+          textInput.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch { }
+      });
+
+      textInput.addEventListener('input', () => syncDateInput());
+      textInput.addEventListener('change', () => syncDateInput());
+
+      toggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const isReadOnly = td?.dataset?.readonly === '1' || textInput.dataset.readonly === '1' || textInput.readOnly;
+        if (!getHeaderEditState() || isReadOnly) return;
+        if (typeof dateInput.showPicker === 'function') {
+          dateInput.showPicker();
+        } else {
+          dateInput.focus();
+          dateInput.click();
+        }
+      });
+    });
+  }
+
   function buildKeyFieldsFromRow(row) {
     const candidates = ['PaperNum', 'Item', 'SeqNum', 'Seq', 'SerialNum', 'LineNum', 'LineId', 'RowNo'];
     return candidates.filter(k => row && row[k] !== undefined);
@@ -616,6 +732,7 @@
     const lookupMaps = await fetchLookupMaps(cfg.DictTable);
     readOnlyMap = await fetchReadOnlyMeta(cfg.DictTable);
     const metaMap = await fetchDictMeta(cfg.DictTable);
+    dictMetaMap = metaMap;
     const lookupResultMap = new Map();
     for (const [fieldLower, cfgMeta] of lookupMeta.entries()) {
       const resultLower = (cfgMeta?.result || '').toString().toLowerCase();
@@ -640,7 +757,7 @@
         const fn = f.FieldName || f.fieldName;
         if (!fn) return;
         const lbl = f.DisplayLabel || f.displayLabel || fn;
-        html += `<th data-field="${escapeHtml(fn)}" style="position:relative;"><span class="th-text">${escapeHtml(lbl)}</span><span class="col-resizer" draggable="false"></span></th>`;
+        html += `<th class="align-left" data-field="${escapeHtml(fn)}" style="position:relative;"><span class="th-text">${escapeHtml(lbl)}</span><span class="col-resizer" draggable="false"></span></th>`;
       });
       html += '</tr></thead><tbody>';
       html += '<tr data-idx="0">';
@@ -653,15 +770,28 @@
         const lookupMap = lookupMaps.get(fieldLower);
         const metaFieldLower = (meta?.field || '').toString().toLowerCase();
         const canDropdown = !!(meta?.source === 'lookup' && metaFieldLower && metaFieldLower === fieldLower && lookupMap && lookupMap.size);
+        const fieldMeta = metaMap.get(fieldLower);
+        const alignClass = getAlignClass(fieldMeta, null);
+        const isDate = isDateType(fieldMeta);
         const keyFieldAttr = canDropdown ? ` data-lookup-key-field="${escapeHtml(meta?.key || '')}"` : "";
         const resultFieldAttr = canDropdown ? ` data-lookup-result-field="${escapeHtml(meta?.result || '')}"` : "";
+        const tdClasses = [alignClass];
+        if (canDropdown) tdClasses.push('lookup-cell');
+        const classAttr = tdClasses.length ? ` class="${tdClasses.join(' ')}"` : '';
         const lookupAttr = canDropdown
-          ? ` class="lookup-cell" data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
+          ? ` data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
           : "";
-        html += `<td${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="cell-edit d-none${roClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}></td>`;
+        const dateEditClass = isDate ? ' date-dropdown' : '';
+        const dateValue = isDate ? normalizeDateForPicker('') : '';
+        const dateAddon = isDate
+          ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
+             <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
+          : '';
+        html += `<td${classAttr}${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}>${dateAddon}</td>`;
       });
       html += '</tr></tbody></table></div>';
       container.innerHTML = html;
+      initDatePickers(container);
       if (countEl) countEl.textContent = '0 / 0';
       window._paper3lSubDetailSelectedRows = window._paper3lSubDetailSelectedRows || {};
       window._paper3lSubDetailSelectedRows["1"] = null;
@@ -735,7 +865,7 @@
       const fn = f.FieldName || f.fieldName;
       if (!fn) return;
       const lbl = f.DisplayLabel || f.displayLabel || fn;
-      html += `<th data-field="${escapeHtml(fn)}" style="position:relative;"><span class="th-text">${escapeHtml(lbl)}</span><span class="col-resizer" draggable="false"></span></th>`;
+      html += `<th class="align-left" data-field="${escapeHtml(fn)}" style="position:relative;"><span class="th-text">${escapeHtml(lbl)}</span><span class="col-resizer" draggable="false"></span></th>`;
     });
     html += '</tr></thead><tbody>';
 
@@ -745,10 +875,20 @@
         const raw = getCellValue(r, fn);
         const hasField = hasFieldCaseInsensitive(r, fn);
         if (typeof raw === 'object') {
-          const isReadOnly = readOnlyMap.get(fn.toLowerCase()) === true;
+          const fieldLower = fn.toLowerCase();
+          const isReadOnly = readOnlyMap.get(fieldLower) === true;
           const roClass = isReadOnly ? ' readonly-cell' : '';
           const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
-          html += `<td data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}"></span><input class="cell-edit d-none${roClass}" data-field="${escapeHtml(fn)}" value=""${roAttr}></td>`;
+          const fieldMeta = metaMap.get(fieldLower);
+          const alignClass = getAlignClass(fieldMeta, raw);
+          const isDate = isDateType(fieldMeta);
+          const dateEditClass = isDate ? ' date-dropdown' : '';
+          const dateValue = isDate ? normalizeDateForPicker('') : '';
+          const dateAddon = isDate
+            ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
+               <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
+            : '';
+          html += `<td class="${alignClass}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}"></span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" value=""${roAttr}>${dateAddon}</td>`;
           return;
         }
         const fieldLower = fn.toLowerCase();
@@ -815,18 +955,30 @@
         const inputValue = (isReadOnly || !allowLookup) ? v : raw;
         const viewText = (v == null ? '' : String(v)).trim();
         const editText = (inputValue == null ? '' : String(inputValue)).trim();
+        const alignClass = getAlignClass(fieldMeta, raw);
+        const isDate = isDateType(fieldMeta);
+        const tdClasses = [alignClass];
+        if (canDropdown) tdClasses.push('lookup-cell');
+        const classAttr = tdClasses.length ? ` class="${tdClasses.join(' ')}"` : '';
         const keyFieldAttr = canDropdown ? ` data-lookup-key-field="${escapeHtml(meta?.key || '')}"` : "";
         const resultFieldAttr = canDropdown ? ` data-lookup-result-field="${escapeHtml(meta?.result || '')}"` : "";
         const lookupAttr = canDropdown
-          ? ` class="lookup-cell" data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
+          ? ` data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
           : "";
-        html += `<td${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span><input class="cell-edit d-none${roClass}" data-field="${escapeHtml(fn)}" data-init="${escapeHtml(editText)}" value="${escapeHtml(editText)}"${roAttr}></td>`;
+        const dateEditClass = isDate ? ' date-dropdown' : '';
+        const dateValue = isDate ? normalizeDateForPicker(editText) : '';
+        const dateAddon = isDate
+          ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
+             <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
+          : '';
+        html += `<td${classAttr}${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" data-init="${escapeHtml(editText)}" value="${escapeHtml(editText)}"${roAttr}>${dateAddon}</td>`;
       });
       html += '</tr>';
     });
 
     html += '</tbody></table></div>';
     container.innerHTML = html;
+    initDatePickers(container);
     if (countEl) countEl.textContent = `0 / ${rows.length}`;
     window._paper3lSubDetailSelectedRows["1"] = rows[0] || null;
 
@@ -965,12 +1117,17 @@
         const canDropdown = !!(meta?.source === 'lookup'
           && lookupMap && lookupMap.size
           && ((metaFieldLower && metaFieldLower === fieldLower) || (meta?.result || '').toString().toLowerCase() === fieldLower));
+        const fieldMeta = dictMetaMap.get(fieldLower);
+        const alignClass = getAlignClass(fieldMeta, null);
+        const tdClasses = [alignClass];
+        if (canDropdown) tdClasses.push('lookup-cell');
+        const classAttr = tdClasses.length ? ` class="${tdClasses.join(' ')}"` : '';
         const keyFieldAttr = canDropdown ? ` data-lookup-key-field="${escapeHtml(meta?.key || '')}"` : "";
         const resultFieldAttr = canDropdown ? ` data-lookup-result-field="${escapeHtml(meta?.result || '')}"` : "";
         const lookupAttr = canDropdown
-          ? ` class="lookup-cell" data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
+          ? ` data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
           : "";
-        html += `<td${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="${viewClass}${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="${editClass}${roClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}></td>`;
+        html += `<td${classAttr}${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="${viewClass}${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="${editClass}${roClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}></td>`;
       });
       html += '</tr>';
 
@@ -1104,16 +1261,27 @@
 .paper3l-subdetail .erp-table td{
   background: #f1f5fb;
   padding: 0;
-  border-bottom: 1px solid #c5d1e4;
+  border-bottom: 1px solid #9fb1d0;
   white-space: nowrap;
   text-align: center;
   font-weight: 500;
-  border-right: 1px solid #dde4ed;
+  border-right: 1px solid #9fb1d0;
   height: auto;
   position: relative;
 }
+
+.paper3l-subdetail .erp-table th.align-left,
+.paper3l-subdetail .erp-table td.align-left{
+  text-align: left;
+}
+.paper3l-subdetail .erp-table th.align-right,
+.paper3l-subdetail .erp-table td.align-right{
+  text-align: right;
+}
 .paper3l-subdetail .erp-table th:last-child,
-.paper3l-subdetail .erp-table td:last-child{ border-right: none; }
+.paper3l-subdetail .erp-table td:last-child{ border-right: 1px solid #9fb1d0; }
+.paper3l-subdetail .erp-table th:first-child,
+.paper3l-subdetail .erp-table td:first-child{ border-left: 1px solid #9fb1d0; }
 .paper3l-subdetail .erp-table th{
   color: #124d8b;
   font-weight: 700;
@@ -1123,6 +1291,11 @@
   position: sticky;
   top: 0;
   z-index: 10;
+  border-top: 1px solid #9fb1d0;
+}
+.paper3l-subdetail .erp-table th .th-text{
+  display: inline-block;
+  padding-left: 4px;
 }
 
 .paper3l-subdetail .subdetail-title{
@@ -1179,6 +1352,57 @@ body.resizing { cursor: col-resize !important; }
   text-align: inherit;
   padding: 2px 6px;
   white-space: nowrap;
+}
+.paper3l-subdetail .erp-table td .cell-edit.date-dropdown{
+  padding-right: 14px;
+}
+.paper3l-subdetail .erp-table td .date-toggle{
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px !important;
+  height: 14px !important;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  z-index: 3;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  line-height: 1 !important;
+}
+.paper3l-subdetail .erp-table td .date-toggle,
+.paper3l-subdetail .erp-table td .cell-date-input{
+  display: none !important;
+}
+.paper3l-subdetail .erp-table.date-edit td .date-toggle,
+.paper3l-subdetail .erp-table.date-edit td .cell-date-input{
+  display: inline-flex !important;
+}
+.paper3l-subdetail .erp-table td .date-toggle::before{
+  content: "";
+  display: block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #6b7280;
+  margin: 0 auto;
+}
+.paper3l-subdetail .erp-table td .cell-date-input{
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px !important;
+  height: 14px !important;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 2;
+  padding: 0 !important;
+  margin: 0 !important;
 }
 .paper3l-subdetail .erp-table td .cell-edit:focus{
   outline: 2px solid #0d6efd;

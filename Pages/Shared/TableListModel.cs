@@ -110,6 +110,10 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // æ³
                     DataType = x.DataType,
                     FormatStr = x.FormatStr,
                     LookupResultField = x.LookupResultField,
+                    LookupCond1Field = x.LookupCond1Field,
+                    LookupCond1ResultField = x.LookupCond1ResultField,
+                    LookupCond2Field = x.LookupCond2Field,
+                    LookupCond2ResultField = x.LookupCond2ResultField,
                     ReadOnly = x.ReadOnly,
                     DisplaySize = x.DisplaySize,
                     EditColor = x.EditColor
