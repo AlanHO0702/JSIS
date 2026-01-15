@@ -1609,6 +1609,12 @@ $(function () {
       const name = (el.getAttribute('name') || '').toLowerCase();
       if (name !== target) continue;
       if (el.type === 'checkbox') return el.checked ? '1' : '0';
+      if (el.classList?.contains('lookup-dropdown')) {
+        const hidden = el.closest('li')?.querySelector('input.lookup-key[name]');
+        if (hidden) return (hidden.value ?? '').toString().trim();
+        const raw = (el.value ?? '').toString().trim();
+        return (raw.split(' - ')[0] || raw).trim();
+      }
       return (el.value ?? '').toString().trim();
     }
     return '';
@@ -1617,6 +1623,18 @@ $(function () {
 
   function normalizeLookupKey(value) {
     return (value ?? '').toString().trim().toLowerCase();
+  }
+
+  function resolveCondValue(fieldOrLabel) {
+    const key = (fieldOrLabel || '').toString().trim();
+    if (!key) return '';
+    const direct = readHeaderFieldValue(key);
+    if (direct) return direct;
+    const labelEl = Array.from(document.querySelectorAll('.header-label-item'))
+      .find(el => (el.textContent || '').trim() === key);
+    const field = labelEl?.getAttribute('data-field') || '';
+    if (!field) return '';
+    return readHeaderFieldValue(field);
   }
 
   function getLookupLabel(key, keyToLabel) {
@@ -1662,8 +1680,10 @@ $(function () {
       const cond1Source = (el.dataset.cond1Source || '').trim();
       const cond2Field = (el.dataset.cond2Field || '').trim();
       const cond2Source = (el.dataset.cond2Source || '').trim();
-      const cond1Value = cond1Source ? readHeaderFieldValue(cond1Source) : '';
-      const cond2Value = cond2Source ? readHeaderFieldValue(cond2Source) : '';
+      const cond1ValueField = cond1Field || cond1Source;
+      const cond2ValueField = cond2Field || cond2Source;
+      const cond1Value = cond1ValueField ? resolveCondValue(cond1ValueField) : '';
+      const cond2Value = cond2ValueField ? resolveCondValue(cond2ValueField) : '';
       const condKey = `${cond1Field}:${cond1Value}|${cond2Field}:${cond2Value}`;
       if (el.dataset.lookupLoaded === '1' && el.dataset.lookupCondKey === condKey) return;
 
@@ -1704,6 +1724,13 @@ $(function () {
 
         const keyToLabel = {};
         const labelToKey = {};
+        const addListOption = (value, label) => {
+          if (!value) return;
+          const opt = document.createElement('option');
+          opt.value = value;
+          if (label) opt.label = label;
+          listEl.appendChild(opt);
+        };
         rows.forEach(row => {
           const val = row.key;
           const label = Object.keys(row).filter(p => p.startsWith('result')).map(p => row[p]).join(' - ');
@@ -1714,20 +1741,27 @@ $(function () {
           if (label) {
             labelToKey[label] = keyStr;
             const dispLower = normalizeLookupKey(label);
+          if (dispLower && labelToKey[dispLower] == null) labelToKey[dispLower] = keyStr;
+          }
+          const display = formatLookupDisplay(keyStr, label);
+          if (display) {
+            labelToKey[display] = keyStr;
+            const dispLower = normalizeLookupKey(display);
             if (dispLower && labelToKey[dispLower] == null) labelToKey[dispLower] = keyStr;
           }
           labelToKey[keyStr] = keyStr;
           if (normKey && labelToKey[normKey] == null) labelToKey[normKey] = keyStr;
-          const opt = document.createElement('option');
-          opt.value = keyStr;
-          if (label) opt.label = label;
-          listEl.appendChild(opt);
+          const displayVal = display || keyStr;
+          addListOption(displayVal, keyStr);
+          if (keyStr && displayVal !== keyStr) {
+            addListOption(keyStr, displayVal);
+          }
         });
 
         inputEl._lookupKeyToLabel = keyToLabel;
         inputEl._lookupLabelToKey = labelToKey;
         const initKey = selected ?? '';
-        if (initKey !== '') inputEl.value = initKey;
+        if (initKey !== '') inputEl.value = formatLookupDisplay(initKey, getLookupLabel(initKey, keyToLabel));
         const hidden = inputEl.closest('li')?.querySelector('input.lookup-key[name]');
         if (hidden) hidden.value = initKey;
         syncLookupLabel(inputEl);
@@ -1747,7 +1781,17 @@ $(function () {
         loadLookupOptions();
       });
     } else {
-      $ctrl.on('input change', function() {
+      $ctrl.on('input', function() {
+        syncLookupLabel(this);
+      });
+      $ctrl.on('change', function() {
+        const keyToLabel = this._lookupKeyToLabel || {};
+        const labelToKey = this._lookupLabelToKey || {};
+        const raw = (this.value ?? '').toString().trim();
+        const key = mapLookupKey(raw, labelToKey) ?? raw;
+        const label = getLookupLabel(key, keyToLabel);
+        const display = formatLookupDisplay(key, label);
+        if (display) this.value = display;
         syncLookupLabel(this);
       });
       $ctrl.on('focus', function() {
@@ -1958,9 +2002,10 @@ function syncLookupLabel(selectEl) {
     const labelToKey = selectEl._lookupLabelToKey || {};
     const raw = selectEl.value ?? '';
     const key = mapLookupKey(raw, labelToKey) ?? raw;
-    const display = formatLookupDisplay(key, getLookupLabel(key, keyToLabel)) || raw;
-    if (raw !== '' && raw !== key) {
-      selectEl.value = key;
+    const labelText = getLookupLabel(key, keyToLabel);
+    const display = formatLookupDisplay(key, labelText) || raw;
+    if (labelText && raw !== display) {
+      selectEl.value = display;
     }
     if (label && label.classList.contains('lookup-label')) {
       label.textContent = display;
@@ -2121,7 +2166,7 @@ body { background: #f7f9fb !important; }
   font-size: var(--top-toolbar-font-size);
   height: var(--top-toolbar-btn-height);
   min-height: var(--top-toolbar-btn-height);
-  padding: 0 12px;
+  padding: 0 6px;
   line-height: 1;
 }
 .top-toolbar .toolbar-btn-icon{
