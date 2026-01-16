@@ -1863,50 +1863,121 @@ document.addEventListener('DOMContentLoaded', () => {
     return `${partNum}|${revision}`;
   }
 
-  // [修正版] 建立計數器 (加入自動清除重複項目的功能)
-  async function setupDetailCounter() {
-    const toolbar = document.querySelector('.toolbar-icon-row');
-    if (!toolbar) return;
+  // ============================
+  // 上一筆 / 下一筆 導航邏輯
+  // ============================
+  const NAV_BTN_PREV = document.getElementById('btnPrev');
+  const NAV_BTN_NEXT = document.getElementById('btnNext');
+  let navKeys = [];  // 儲存所有 { PartNum, Revision } 的清單
+  let navIndex = -1; // 目前在清單中的位置
 
-    // 1. 【大掃除】先移除畫面上所有已存在的計數器 (無論是舊的、壞的、還是重複的)
-    // 這樣能保證畫面上永遠只有我們即將建立的這一個
-    document.querySelectorAll('#toolbarHeaderCount').forEach(el => el.remove());
-    document.querySelectorAll('.toolbar-count-box').forEach(el => el.remove());
+  // 目前這筆的主鍵
+  const CURRENT_PARTNUM = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "PartNum").Value ?? "")';
+  const CURRENT_REVISION = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "Revision").Value ?? "")';
 
-    // 2. 建立全新的計數器
-    const countBox = document.createElement('div');
-    countBox.id = 'toolbarHeaderCount';
-    countBox.className = 'toolbar-count-box';
-    // 預設顯示載入圈圈
-    countBox.innerHTML = '<div class="count-line"><span class="spinner-border spinner-border-sm" style="width:10px;height:10px;"></span></div>';
-    
-    // 插入到工具列
-    toolbar.appendChild(countBox);
-
+  // 讀取 Index 頁面儲存的查詢條件
+  function loadLastFilters() {
     try {
-      // 3. 讀取 Index 頁面傳來的 "目前第幾筆"
       const tableName = (window._headerTableName || 'EMOdProdInfo').toLowerCase();
-      const savedIndex = localStorage.getItem(`orderListQueryIndex:${tableName}`);
-      const currentIndex = savedIndex ? parseInt(savedIndex, 10) : 1;
-
-      // 4. 呼叫 API 取得 "總筆數"
-      const resp = await fetch('/EMOdProdInfo?handler=Data&pageIndex=1&pageSize=1');
-      
-      if (resp.ok) {
-        const data = await resp.json();
-        const total = data.totalCount || 0;
-        // 顯示: 1 / 24040
-        countBox.innerHTML = `<div class="count-line">${currentIndex} / ${total}</div>`;
-      } else {
-        countBox.innerHTML = `<div class="count-line">${currentIndex} / -</div>`;
-      }
-    } catch (e) {
-      console.error('取得總筆數失敗', e);
-      const savedIndex = localStorage.getItem('orderListQueryIndex:emodprodinfo');
-      const currentIndex = savedIndex ? parseInt(savedIndex, 10) : 1;
-      countBox.innerHTML = `<div class="count-line">${currentIndex} / ?</div>`;
+      const filterKey = `orderListQueryFilters:${tableName}`;
+      const saved = localStorage.getItem(filterKey);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
     }
   }
+
+  // 跳轉到指定的資料
+  function gotoRecord(key) {
+    if (!key || !key.PartNum) return;
+    const url = `/EMOdProdInfo/Detail?PartNum=${encodeURIComponent(key.PartNum)}&Revision=${encodeURIComponent(key.Revision || '0')}`;
+    window.location.href = url;
+  }
+
+  // 更新按鈕狀態與計數器
+  function updateNavButtons() {
+    const hasPrev = navIndex > 0;
+    const hasNext = navIndex >= 0 && navIndex < navKeys.length - 1;
+
+    if (NAV_BTN_PREV) {
+      NAV_BTN_PREV.disabled = !hasPrev;
+      NAV_BTN_PREV.onclick = () => hasPrev && gotoRecord(navKeys[navIndex - 1]);
+    }
+    if (NAV_BTN_NEXT) {
+      NAV_BTN_NEXT.disabled = !hasNext;
+      NAV_BTN_NEXT.onclick = () => hasNext && gotoRecord(navKeys[navIndex + 1]);
+    }
+
+    // 更新計數器顯示
+    updateToolbarCount();
+  }
+
+  // 更新工具列計數器
+  function updateToolbarCount() {
+    const countEl = document.getElementById('toolbarHeaderCount');
+    if (!countEl) return;
+
+    // 隱藏單身計數（EMOdProdInfo 不需要）
+    const detailCountEl = document.getElementById('toolbarDetailCount');
+    if (detailCountEl) detailCountEl.style.display = 'none';
+
+    const total = navKeys.length;
+    if (total > 0 && navIndex >= 0) {
+      countEl.textContent = `${navIndex + 1} / ${total}`;
+    } else {
+      // fallback: 使用 localStorage 的資料
+      const tableName = (window._headerTableName || 'EMOdProdInfo').toLowerCase();
+      const storedIndex = parseInt(localStorage.getItem(`orderListQueryIndex:${tableName}`) || '0', 10);
+      const storedTotal = parseInt(localStorage.getItem(`orderListQueryTotal:${tableName}`) || '0', 10);
+      if (storedTotal > 0) {
+        countEl.textContent = `${storedIndex || '--'} / ${storedTotal}`;
+      } else {
+        countEl.textContent = '-- / --';
+      }
+    }
+  }
+
+  // 呼叫 API 取得所有主鍵清單
+  async function fetchKeyList(filters) {
+    // 使用 EMOdProdInfo 的 handler=Data API，支援大量資料
+    const res = await fetch('/EMOdProdInfo?handler=Data&pageIndex=1&pageSize=999999');
+    if (!res.ok) throw new Error('API 呼叫失敗');
+    const json = await res.json();
+    const rows = Array.isArray(json.items) ? json.items : [];
+    // 回傳 { PartNum, Revision } 物件陣列
+    return rows.map(r => ({
+      PartNum: (r.PartNum || r.partNum || '').toString().trim(),
+      Revision: (r.Revision || r.revision || '0').toString().trim()
+    })).filter(k => k.PartNum);
+  }
+
+  // 初始化導航
+  async function initRowNavigation() {
+    // 顯示載入中
+    const countEl = document.getElementById('toolbarHeaderCount');
+    if (countEl) countEl.textContent = '載入中...';
+
+    try {
+      const filters = loadLastFilters();
+      navKeys = await fetchKeyList(filters);
+
+      // 找出目前這筆在清單中的位置
+      navIndex = navKeys.findIndex(k =>
+        k.PartNum.toLowerCase() === CURRENT_PARTNUM.toLowerCase() &&
+        k.Revision.toLowerCase() === CURRENT_REVISION.toLowerCase()
+      );
+
+      updateNavButtons();
+    } catch (e) {
+      console.error('初始化導航失敗', e);
+      if (NAV_BTN_PREV) NAV_BTN_PREV.disabled = true;
+      if (NAV_BTN_NEXT) NAV_BTN_NEXT.disabled = true;
+      updateToolbarCount();
+    }
+  }
+
+  // 執行初始化
+  initRowNavigation();
 
   document.addEventListener('DOMContentLoaded', function() {
     // ============================
@@ -1918,11 +1989,6 @@ document.addEventListener('DOMContentLoaded', () => {
     disableButton('btnPaperTrace');     
     disableButton('btnSubDetailAdd');   
     disableButton('btnSubDetailDelete'); 
-
-    // ============================
-    // [新增] 執行計數器設定
-    // ============================
-    setupDetailCounter();
 
     // ============================
     // 3. 按鈕邏輯 (送審、審核、退審...)
