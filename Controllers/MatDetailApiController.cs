@@ -355,31 +355,74 @@ public class MatDetailApiController : ControllerBase
     }
 
     // =========================================
-    // 8. 取得倉庫進出歷程 (查詢 MINdStockHIOGet 或類似視圖)
+    // 8. 取得製程現帳 (呼叫 MINdWIPDetail)
     // =========================================
-    [HttpGet("GetStockHistory")]
-    public async Task<IActionResult> GetStockHistory(
-        [FromQuery] string partNum,
-        [FromQuery] string stockId)
+    [HttpGet("GetWipDetail")]
+    public async Task<IActionResult> GetWipDetail([FromQuery] string partNum)
     {
-        if (string.IsNullOrWhiteSpace(partNum) || string.IsNullOrWhiteSpace(stockId))
-            return BadRequest("PartNum and StockId are required");
+        if (string.IsNullOrWhiteSpace(partNum))
+            return BadRequest("PartNum is required");
 
         try
         {
             await using var conn = new SqlConnection(_connStr);
             await conn.OpenAsync();
 
-            // 假設有類似的視圖或表，根據實際資料庫結構調整
-            var sql = @"
-                SELECT TOP 100 *
-                FROM MINdStockHIOGet (NOLOCK)
-                WHERE PartNum = @PartNum AND StockId = @StockId
-                ORDER BY IODate DESC";
+            await using var cmd = new SqlCommand("MINdWIPDetail", conn)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
 
-            await using var cmd = new SqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@PartNum", partNum);
-            cmd.Parameters.AddWithValue("@StockId", stockId);
+
+            var list = new List<Dictionary<string, object>>();
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var row = new Dictionary<string, object>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    var name = reader.GetName(i);
+                    var value = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                    row[name] = value ?? DBNull.Value;
+                }
+                list.Add(row);
+            }
+
+            return Ok(list);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting WIP detail for PartNum: {PartNum}", partNum);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    // =========================================
+    // 8. 取得倉庫進出歷程 (呼叫 MINdStockHIOGet SP)
+    // =========================================
+    [HttpGet("GetStockHistory")]
+    public async Task<IActionResult> GetStockHistory(
+        [FromQuery] string partNum,
+        [FromQuery] string? stockId = "")
+    {
+        if (string.IsNullOrWhiteSpace(partNum))
+            return BadRequest("PartNum is required");
+
+        try
+        {
+            await using var conn = new SqlConnection(_connStr);
+            await conn.OpenAsync();
+
+            // 呼叫 SP: exec MINdStockHIOGet @PartNum, @StockId, 1
+            await using var cmd = new SqlCommand("MINdStockHIOGet", conn)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+
+            cmd.Parameters.AddWithValue("@PartNum", partNum);
+            cmd.Parameters.AddWithValue("@StockId", string.IsNullOrWhiteSpace(stockId) ? "" : stockId);
 
             var list = new List<Dictionary<string, object>>();
 
@@ -460,7 +503,28 @@ public class MatDetailApiController : ControllerBase
                 return NotFound(new { error = "Material not found or SPId not generated" });
             }
 
-            // 2. 並行取得其他資料
+            // 2. 從 MINdLookMatDtl 取得 Unit、CanUseQnty、NeedQnty
+            await using (var conn = new SqlConnection(_connStr))
+            {
+                await conn.OpenAsync();
+                var sql = "SELECT TOP 1 Unit, CanUseQnty, NeedQnty FROM MINdLookMatDtl WITH(NOLOCK) WHERE SPId = @SPId";
+                await using var cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@SPId", spId.Value);
+
+                await using var reader = await cmd.ExecuteReaderAsync();
+                if (await reader.ReadAsync())
+                {
+                    var baseData = result["baseData"] as Dictionary<string, object>;
+                    if (baseData != null)
+                    {
+                        baseData["Unit"] = reader.IsDBNull(0) ? "" : reader.GetString(0);
+                        baseData["CanUseQnty"] = reader.IsDBNull(1) ? 0m : reader.GetDecimal(1);
+                        baseData["NeedQnty"] = reader.IsDBNull(2) ? 0m : reader.GetDecimal(2);
+                    }
+                }
+            }
+
+            // 3. 並行取得其他資料
             var stockTask = GetStockSummaryInternal(partNum, useId);
             var incomingTask = GetIncomingSupplyInternal(spId.Value);
             var outgoingTask = GetOutgoingDemandInternal(spId.Value);
@@ -589,7 +653,64 @@ public class MatDetailApiController : ControllerBase
     }
 
     // =========================================
-    // 10. 取得辭典標題名稱
+    // 10. 取得辭典欄位定義
+    // =========================================
+    [HttpGet("GetTableFields/{tableName}")]
+    public async Task<IActionResult> GetTableFields(string tableName)
+    {
+        try
+        {
+            var fields = await _context.CURdTableFields
+                .Where(x => x.TableName != null &&
+                           (x.TableName.ToLower() == tableName.ToLower() ||
+                            x.TableName.ToLower().Replace("dbo.", "") == tableName.ToLower()))
+                .OrderBy(x => x.SerialNum)
+                .Select(x => new
+                {
+                    x.FieldName,
+                    x.DisplayLabel,
+                    x.DisplaySize,
+                    x.Visible,
+                    x.SerialNum,
+                    x.DataType
+                })
+                .ToListAsync();
+
+            // 檢查語系表
+            var langFields = await _context.CurdTableFieldLangs
+                .Where(x => x.LanguageId == "TW" &&
+                           x.TableName != null &&
+                           (x.TableName.ToLower() == tableName.ToLower() ||
+                            x.TableName.ToLower().Replace("dbo.", "") == tableName.ToLower()))
+                .ToListAsync();
+
+            var result = fields.Select(f =>
+            {
+                var lang = langFields.FirstOrDefault(l =>
+                    l.FieldName?.Equals(f.FieldName, StringComparison.OrdinalIgnoreCase) == true);
+
+                return new
+                {
+                    f.FieldName,
+                    DisplayLabel = !string.IsNullOrWhiteSpace(lang?.DisplayLabel) ? lang.DisplayLabel : f.DisplayLabel,
+                    f.DisplaySize,
+                    f.Visible,
+                    f.SerialNum,
+                    f.DataType
+                };
+            }).ToList();
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting table fields for: {TableName}", tableName);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    // =========================================
+    // 11. 取得辭典標題名稱
     // =========================================
     [HttpGet("GetDictTitles")]
     public async Task<IActionResult> GetDictTitles()

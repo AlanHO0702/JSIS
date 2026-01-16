@@ -112,7 +112,6 @@
         grid-template-columns: 1fr 1fr 1fr;
         gap: 6px;
         margin-bottom: 6px;
-        height: 340px;
     }
 
     .grid-panel {
@@ -123,6 +122,14 @@
         flex-direction: column;
         overflow: hidden;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+        outline: none;
+        transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+    }
+
+    .grid-panel:focus,
+    .grid-panel.focused {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
     }
 
     .grid-header {
@@ -143,6 +150,7 @@
         width: 100%;
         font-size: 13px;
         border-collapse: collapse;
+        table-layout: fixed;
     }
 
     .grid-body table thead {
@@ -153,8 +161,9 @@
     }
 
     .grid-body table th {
-        border-bottom: 2px solid #e5e7eb;
-        padding: 6px 8px;
+        border: 1px solid #e5e7eb;
+        padding: 0 8px;
+        height: 28px;
         font-weight: 600;
         font-size: 12px;
         text-align: left;
@@ -164,8 +173,9 @@
     }
 
     .grid-body table td {
-        border-bottom: 1px solid #f3f4f6;
-        padding: 6px 8px;
+        border: 1px solid #e5e7eb;
+        padding: 0 8px;
+        height: 28px;
         white-space: nowrap;
         color: #1f2937;
     }
@@ -177,6 +187,11 @@
     .grid-body table tbody tr.selected {
         background: #3b82f6;
         color: white;
+    }
+
+    /* 固定 8 列的空白列樣式 */
+    .grid-body table tbody tr.empty-row td {
+        color: transparent;
     }
 
     .detail-panel {
@@ -235,8 +250,9 @@
 
     .detail-content table th {
         background: #f9fafb;
-        border-bottom: 2px solid #e5e7eb;
-        padding: 6px 8px;
+        border: 1px solid #e5e7eb;
+        padding: 2px 8px;
+        height: 24px;
         font-weight: 600;
         font-size: 12px;
         text-align: left;
@@ -244,8 +260,9 @@
     }
 
     .detail-content table td {
-        border-bottom: 1px solid #f3f4f6;
-        padding: 6px 8px;
+        border: 1px solid #e5e7eb;
+        padding: 2px 8px;
+        height: 22px;
         color: #1f2937;
     }
 
@@ -321,20 +338,16 @@
             {
                 <div style="display: flex; gap: 16px; margin-left: 20px; padding-left: 20px; border-left: 1px solid #e5e7eb;">
                     <div class="info-item">
-                        <label>基準單位</label>
+                        <label>基礎單位</label>
                         <span class="value">@Model.GetValue(Model.BaseData, "Unit")</span>
                     </div>
                     <div class="info-item">
-                        <label>可扣抵數</label>
+                        <label>可承諾數</label>
                         <span class="value">@Model.FormatDecimal(Model.BaseData.ContainsKey("CanUseQnty") ? Model.BaseData["CanUseQnty"] : 0)</span>
                     </div>
                     <div class="info-item">
                         <label style="color: #dc2626;">缺料量</label>
                         <span class="value text-red">@Model.FormatDecimal(Model.BaseData.ContainsKey("NeedQnty") ? Model.BaseData["NeedQnty"] : 0)</span>
-                    </div>
-                    <div class="info-item">
-                        <label>現有庫存</label>
-                        <span class="value">@Model.FormatDecimal(Model.BaseData.ContainsKey("StockQnty") ? Model.BaseData["StockQnty"] : 0)</span>
                     </div>
                 </div>
             }
@@ -353,24 +366,31 @@
 
         <!-- 主要三欄網格 -->
         <div class="main-grid">
-            <!-- 左側：MRP可用/倉別/數量 -->
-            <div class="grid-panel">
+            <!-- 左側：現有庫存 -->
+            <div class="grid-panel" data-dict-table="MINdLookMatStockQnty" tabindex="0">
                 <div class="grid-header">@Model.GetDictTitle("MINdLookMatStockQnty", "現有庫存")</div>
                 <div class="grid-body">
                     <table>
-                        <thead>
+                        <thead id="thead-stock">
                             <tr>
-                                <th style="width: 30px;"></th>
-                                <th>倉別</th>
-                                <th class="text-end">數量</th>
+                                <th data-field="IsMRP" style="width: 60px;">MRP可用</th>
+                                <th data-field="StockId">倉別</th>
+                                <th data-field="Qnty" class="text-end">數量</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            @if (Model.StockSummary != null && Model.StockSummary.Any())
+                        <tbody id="tbody-stock">
+                            @{
+                                var stockData = Model.StockSummary ?? new List<Dictionary<string, object>>();
+                                var stockCount = stockData.Count;
+                                const int fixedRows = 8;
+                            }
+                            @for (int i = 0; i < fixedRows; i++)
                             {
-                                foreach (var row in Model.StockSummary)
+                                if (i < stockCount)
                                 {
-                                    <tr>
+                                    var row = stockData[i];
+                                    var stockId = Model.GetValue(row, "StockId");
+                                    <tr class="stock-row" data-stock-id="@stockId" data-row-index="@i">
                                         <td style="text-align: center;">
                                             @if (Model.GetValue(row, "IsMRP") == "1")
                                             {
@@ -381,82 +401,98 @@
                                                 <span>☐</span>
                                             }
                                         </td>
-                                        <td>@Model.GetValue(row, "StockId")</td>
+                                        <td>@stockId</td>
                                         <td class="text-end">@Model.FormatDecimal(row.ContainsKey("Qnty") ? row["Qnty"] : 0)</td>
                                     </tr>
                                 }
-                            }
-                            else
-                            {
-                                <tr>
-                                    <td colspan="3" style="text-align: center; color: #999;">無庫存資料</td>
-                                </tr>
+                                else
+                                {
+                                    <tr class="empty-row">
+                                        <td>&nbsp;</td>
+                                        <td>&nbsp;</td>
+                                        <td>&nbsp;</td>
+                                    </tr>
+                                }
                             }
                         </tbody>
                     </table>
                 </div>
             </div>
 
-            <!-- 中間：供給別/數量 -->
-            <div class="grid-panel">
+            <!-- 中間：預計供給 -->
+            <div class="grid-panel" data-dict-table="MINdLookMatIn" tabindex="0">
                 <div class="grid-header">@Model.GetDictTitle("MINdLookMatIn", "預計供給")</div>
                 <div class="grid-body">
                     <table>
-                        <thead>
+                        <thead id="thead-supply">
                             <tr>
-                                <th>供給別</th>
-                                <th class="text-end">數量</th>
+                                <th data-field="ColTitle">供給別</th>
+                                <th data-field="Qnty" class="text-end">數量</th>
                             </tr>
                         </thead>
                         <tbody>
-                            @if (Model.IncomingSupply != null && Model.IncomingSupply.Any())
+                            @{
+                                var supplyData = Model.IncomingSupply ?? new List<Dictionary<string, object>>();
+                                var supplyCount = supplyData.Count;
+                            }
+                            @for (int i = 0; i < fixedRows; i++)
                             {
-                                foreach (var row in Model.IncomingSupply)
+                                if (i < supplyCount)
                                 {
-                                    <tr>
+                                    var row = supplyData[i];
+                                    var filterNum = Model.GetValue(row, "FilterNum");
+                                    <tr class="supply-row" data-filter-num="@filterNum">
                                         <td>@Model.GetValue(row, "ColTitle")</td>
                                         <td class="text-end">@Model.FormatDecimal(row.ContainsKey("Qnty") ? row["Qnty"] : 0)</td>
                                     </tr>
                                 }
-                            }
-                            else
-                            {
-                                <tr>
-                                    <td colspan="2" style="text-align: center; color: #999;">無供應資料</td>
-                                </tr>
+                                else
+                                {
+                                    <tr class="empty-row">
+                                        <td>&nbsp;</td>
+                                        <td>&nbsp;</td>
+                                    </tr>
+                                }
                             }
                         </tbody>
                     </table>
                 </div>
             </div>
 
-            <!-- 右側：需求別/數量 -->
-            <div class="grid-panel">
+            <!-- 右側：需求 -->
+            <div class="grid-panel" data-dict-table="MINdLookMatOut" tabindex="0">
                 <div class="grid-header">@Model.GetDictTitle("MINdLookMatOut", "需求")</div>
                 <div class="grid-body">
                     <table>
-                        <thead>
+                        <thead id="thead-demand">
                             <tr>
-                                <th>需求別</th>
-                                <th class="text-end">數量</th>
+                                <th data-field="ColTitle">需求別</th>
+                                <th data-field="Qnty" class="text-end">數量</th>
                             </tr>
                         </thead>
                         <tbody>
-                            @if (Model.OutgoingDemand != null && Model.OutgoingDemand.Any())
+                            @{
+                                var demandData = Model.OutgoingDemand ?? new List<Dictionary<string, object>>();
+                                var demandCount = demandData.Count;
+                            }
+                            @for (int i = 0; i < fixedRows; i++)
                             {
-                                foreach (var row in Model.OutgoingDemand)
+                                if (i < demandCount)
                                 {
-                                    <tr>
+                                    var row = demandData[i];
+                                    var demandFilterNum = Model.GetValue(row, "FilterNum");
+                                    <tr class="demand-row" data-filter-num="@demandFilterNum">
                                         <td>@Model.GetValue(row, "ColTitle")</td>
                                         <td class="text-end">@Model.FormatDecimal(row.ContainsKey("Qnty") ? row["Qnty"] : 0)</td>
                                     </tr>
                                 }
-                            }
-                            else
-                            {
-                                <tr>
-                                    <td colspan="2" style="text-align: center; color: #999;">無需求資料</td>
-                                </tr>
+                                else
+                                {
+                                    <tr class="empty-row">
+                                        <td>&nbsp;</td>
+                                        <td>&nbsp;</td>
+                                    </tr>
+                                }
                             }
                         </tbody>
                     </table>
@@ -465,71 +501,71 @@
         </div>
 
         <!-- 下方分頁詳細資料 -->
-        <div class="detail-panel">
+        <div class="detail-panel" tabindex="0">
             <div class="detail-tabs">
-                <button class="tab-btn active" data-tab="tab-summary">@Model.GetDictTitle("MINdLookMatStockQntyDtl", "庫存一覽")</button>
-                <button class="tab-btn" data-tab="tab-detail">@Model.GetDictTitle("MINdLookMatDtl", "單據明細")</button>
-                <button class="tab-btn" data-tab="tab-precount">@Model.GetDictTitle("MINdLookMatPreCount", "預估存量")</button>
-                <button class="tab-btn" data-tab="tab-history">@Model.GetDictTitle("MINdStockHIOGet", "倉庫進出歷史")</button>
-                <button class="tab-btn" data-tab="tab-process">@Model.GetDictTitle("MINdWIPDetail", "製程現帳")</button>
+                <button class="tab-btn active" data-tab="tab-summary" data-dict-table="MINdLookMatStockQntyDtl">@Model.GetDictTitle("MINdLookMatStockQntyDtl", "庫存一覽")</button>
+                <button class="tab-btn" data-tab="tab-detail" data-dict-table="MINdLookMatDtl">@Model.GetDictTitle("MINdLookMatDtl", "單據明細")</button>
+                <button class="tab-btn" data-tab="tab-precount" data-dict-table="MINdLookMatPreCount">@Model.GetDictTitle("MINdLookMatPreCount", "預估存量")</button>
+                <button class="tab-btn" data-tab="tab-history" data-dict-table="MINdStockHIOGet">@Model.GetDictTitle("MINdStockHIOGet", "倉庫進出歷史")</button>
+                <button class="tab-btn" data-tab="tab-process" data-dict-table="MINdWIPDetail">@Model.GetDictTitle("MINdWIPDetail", "製程現帳")</button>
             </div>
 
             <div class="detail-content">
                 <!-- Tab: 庫存一覽 -->
                 <div class="tab-pane active" id="tab-summary">
                     <table>
-                        <thead>
+                        <thead id="thead-tab-summary">
                             <tr>
-                                <th>倉別</th>
-                                <th>庫位</th>
-                                <th>批號</th>
-                                <th class="text-end">數量</th>
-                                <th>入庫日期</th>
+                                <th data-field="LocId">庫位</th>
+                                <th data-field="Qnty">單位數量</th>
+                                <th data-field="Unit">單位</th>
+                                <th data-field="ExchangeRate">換算比率</th>
+                                <th data-field="BaseQnty">基礎單位數量</th>
+                                <th data-field="LotNum">批號</th>
+                                <th data-field="DateCode">DateCode</th>
+                                <th data-field="ExpireDate">過期日</th>
+                                <th data-field="VerNum">工程版序</th>
+                                <th data-field="Width">寬度</th>
+                                <th data-field="QCCode">QCCode</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            @if (Model.StockSummary != null && Model.StockSummary.Any())
-                            {
-                                foreach (var row in Model.StockSummary)
-                                {
-                                    <tr>
-                                        <td>@Model.GetValue(row, "StockId")</td>
-                                        <td>-</td>
-                                        <td>-</td>
-                                        <td class="text-end">@Model.FormatDecimal(row.ContainsKey("Qnty") ? row["Qnty"] : 0)</td>
-                                        <td>-</td>
-                                    </tr>
-                                }
-                            }
+                        <tbody id="tbody-tab-summary">
+                            <tr>
+                                <td colspan="11" style="text-align: center; color: #999;">請點選左側現有庫存的倉別查看明細</td>
+                            </tr>
                         </tbody>
+                        <tfoot id="tfoot-tab-summary" style="background: #f9fafb; font-weight: 600;">
+                        </tfoot>
                     </table>
                 </div>
 
                 <!-- Tab: 單據明細 -->
                 <div class="tab-pane" id="tab-detail">
                     <table>
-                        <thead>
+                        <thead id="thead-tab-detail">
                             <tr>
-                                <th>單據號碼</th>
-                                <th>項次</th>
-                                <th>單據日期</th>
-                                <th>需求日</th>
-                                <th>請購部門</th>
-                                <th class="text-end">數量</th>
-                                <th class="text-end">已領/交量</th>
+                                <th data-field="PaperNum">單據號碼</th>
+                                <th data-field="Item">項次</th>
+                                <th data-field="PaperDate">單據日期</th>
+                                <th data-field="RequireDate">需求日</th>
+                                <th data-field="DeptId">請購部門</th>
+                                <th data-field="Qnty">數量</th>
+                                <th data-field="DeliveredQnty">已領/交量</th>
+                                <th data-field="POTypeName">銷售訂單類別</th>
+                                <th data-field="OutNotInName">銷售訂單製造別</th>
                             </tr>
                         </thead>
                         <tbody>
                             @if (Model.IncomingSupply != null && Model.IncomingSupply.Any())
                             {
                                 <tr>
-                                    <td colspan="7" style="text-align: center; color: #999;">請點選左側供給別或需求別查看明細</td>
+                                    <td colspan="9" style="text-align: center; color: #999;">請點選左側供給別或需求別查看明細</td>
                                 </tr>
                             }
                             else
                             {
                                 <tr>
-                                    <td colspan="7" style="text-align: center; color: #999;">無單據資料</td>
+                                    <td colspan="9" style="text-align: center; color: #999;">無單據資料</td>
                                 </tr>
                             }
                         </tbody>
@@ -539,14 +575,14 @@
                 <!-- Tab: 預估庫存 -->
                 <div class="tab-pane" id="tab-precount">
                     <table>
-                        <thead>
+                        <thead id="thead-tab-precount">
                             <tr>
-                                <th>作業名稱</th>
-                                <th>單據號碼</th>
-                                <th>單據日期</th>
-                                <th>需求日</th>
-                                <th class="text-end">進出量</th>
-                                <th class="text-end">預計庫存</th>
+                                <th data-field="IOSource">作業名稱</th>
+                                <th data-field="PaperNum">單據號碼</th>
+                                <th data-field="PaperDate">單據日期</th>
+                                <th data-field="RequireDate">需求日</th>
+                                <th data-field="IOQnty">進出量</th>
+                                <th data-field="StockQnty">預計庫存</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -577,38 +613,47 @@
                 <!-- Tab: 倉庫進出歷史 -->
                 <div class="tab-pane" id="tab-history">
                     <table>
-                        <thead>
+                        <thead id="thead-tab-history">
                             <tr>
-                                <th>單據日期</th>
-                                <th>單據號碼</th>
-                                <th>項次</th>
-                                <th>料號</th>
-                                <th>品名</th>
-                                <th class="text-end">數量</th>
+                                <th data-field="PaperName">來源單據</th>
+                                <th data-field="PaperNum">項次</th>
+                                <th data-field="StockId">倉庫代碼</th>
+                                <th data-field="PosId">庫位</th>
+                                <th data-field="IOTime">過帳日期</th>
+                                <th data-field="Notes">備註</th>
+                                <th data-field="PaperDate">單據日期</th>
+                                <th data-field="BatchNum">單據號碼</th>
+                                <th data-field="IOQnty">基礎單位數量</th>
+                                <th data-field="UserName">審核者</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="tbody-tab-history">
                             <tr>
-                                <td colspan="6" style="text-align: center; color: #999;">此功能尚未實作</td>
+                                <td colspan="10" style="text-align: center; color: #999;">請點選倉別查看進出歷史</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
 
-                <!-- Tab: 製程預排 -->
+                <!-- Tab: 製程現帳 -->
                 <div class="tab-pane" id="tab-process">
                     <table>
-                        <thead>
+                        <thead id="thead-tab-process">
                             <tr>
-                                <th>製令單號</th>
-                                <th>工單數量</th>
-                                <th>已投入量</th>
-                                <th>預計完工日</th>
+                                <th data-field="PaperNum">製令單號</th>
+                                <th data-field="PartNum">品號</th>
+                                <th data-field="Revision">版序</th>
+                                <th data-field="ProcCode">製程代號</th>
+                                <th data-field="ProcName">製程名稱</th>
+                                <th data-field="LotNum">批號</th>
+                                <th data-field="EqualFGPCS">可供給數</th>
+                                <th data-field="LotStatus">批量狀態</th>
+                                <th data-field="PaperId">單據種類</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="tbody-tab-process">
                             <tr>
-                                <td colspan="4" style="text-align: center; color: #999;">無製程預排資料</td>
+                                <td colspan="9" style="text-align: center; color: #999;">無製程現帳資料</td>
                             </tr>
                         </tbody>
                     </table>
@@ -624,7 +669,18 @@
     }
 </div>
 
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", new List<PcbErpApi.Models.CURdTableField>(), new ViewDataDictionary(ViewData) { ["DictTableName"] = "MINdLookMatStockQnty" })
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
 <script>
+    // 目前聚焦的 grid panel
+    let currentFocusedPanel = null;
+    // 當前料號
+    const currentPartNum = '@Model.PartNum';
+    const currentSPId = parseInt('@(Model.SPId ?? 0)', 10) || 0;
+
     // 分頁切換功能
     document.addEventListener('DOMContentLoaded', function() {
         const tabButtons = document.querySelectorAll('.tab-btn');
@@ -640,7 +696,605 @@
                 this.classList.add('active');
                 const tabId = this.getAttribute('data-tab');
                 document.getElementById(tabId).classList.add('active');
+
+                // 如果點擊倉庫進出歷史頁籤，自動載入全部資料
+                if (tabId === 'tab-history' && currentPartNum) {
+                    loadStockHistory(currentPartNum, '');
+                }
             });
         });
+
+        // 載入辭典欄位並更新表頭
+        loadDictFields();
+
+        // 設定 grid panel 的 focus 追蹤
+        document.querySelectorAll('.grid-panel[data-dict-table]').forEach(panel => {
+            panel.addEventListener('focus', () => { currentFocusedPanel = panel; currentFocusedTab = null; });
+            panel.addEventListener('click', () => { currentFocusedPanel = panel; currentFocusedTab = null; panel.focus(); });
+        });
+
+        // 設定底部頁籤的 focus 追蹤
+        document.querySelectorAll('.tab-btn[data-dict-table]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentFocusedTab = btn;
+                currentFocusedPanel = null;
+            });
+        });
+
+        // 設定現有庫存區塊列的點擊事件
+        setupStockRowClick();
+        // 設定預計供給列的點擊事件
+        setupSupplyRowClick();
+        // 設定需求列的點擊事件
+        setupDemandRowClick();
     });
+
+    // 目前聚焦的頁籤
+    let currentFocusedTab = null;
+
+    // 載入辭典欄位定義
+    async function loadDictFields() {
+        // 上方三個區塊
+        const topTables = ['MINdLookMatStockQnty', 'MINdLookMatIn', 'MINdLookMatOut'];
+        const topTheadIds = ['thead-stock', 'thead-supply', 'thead-demand'];
+
+        // 底下五個頁籤
+        const tabTables = ['MINdLookMatStockQntyDtl', 'MINdLookMatDtl', 'MINdLookMatPreCount', 'MINdStockHIOGet', 'MINdWIPDetail'];
+        const tabTheadIds = ['thead-tab-summary', 'thead-tab-detail', 'thead-tab-precount', 'thead-tab-history', 'thead-tab-process'];
+
+        // 載入上方三個區塊
+        for (let i = 0; i < topTables.length; i++) {
+            try {
+                const resp = await fetch(`/api/MatDetailApi/GetTableFields/${topTables[i]}`);
+                if (resp.ok) {
+                    const fields = await resp.json();
+                    updateTableHeaders(topTheadIds[i], fields);
+                }
+            } catch (e) {
+                console.warn(`載入辭典 ${topTables[i]} 失敗:`, e);
+            }
+        }
+
+        // 載入底下五個頁籤
+        for (let i = 0; i < tabTables.length; i++) {
+            try {
+                const resp = await fetch(`/api/MatDetailApi/GetTableFields/${tabTables[i]}`);
+                if (resp.ok) {
+                    const fields = await resp.json();
+                    updateTableHeaders(tabTheadIds[i], fields);
+                }
+            } catch (e) {
+                console.warn(`載入辭典 ${tabTables[i]} 失敗:`, e);
+            }
+        }
+    }
+
+    // 更新表頭
+    function updateTableHeaders(theadId, fields) {
+        const thead = document.getElementById(theadId);
+        if (!thead) return;
+
+        const ths = thead.querySelectorAll('th[data-field]');
+        ths.forEach(th => {
+            const fieldName = th.getAttribute('data-field');
+            const field = fields.find(f => f.fieldName?.toLowerCase() === fieldName?.toLowerCase());
+            if (field && field.displayLabel) {
+                th.textContent = field.displayLabel;
+            }
+        });
+    }
+
+    // F3 開啟辭典功能
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'F3') {
+            e.preventDefault();
+
+            let tableName = null;
+
+            // 優先檢查底部頁籤
+            if (currentFocusedTab) {
+                tableName = currentFocusedTab.getAttribute('data-dict-table');
+            }
+            // 其次檢查上方 grid panel
+            else if (currentFocusedPanel) {
+                tableName = currentFocusedPanel.getAttribute('data-dict-table');
+            }
+
+            if (tableName && window.showDictModal) {
+                window._dictTableName = tableName;
+                window.showDictModal('fieldDictModal', tableName);
+            } else {
+                // 如果沒有聚焦，顯示提示
+                if (window.Swal) {
+                    Swal.fire({
+                        icon: 'info',
+                        title: '請先點選要編輯的區塊',
+                        text: '請點選上方區塊或底部頁籤後再按 F3',
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                } else {
+                    alert('請先點選要編輯的區塊或頁籤');
+                }
+            }
+        }
+    });
+
+    // 設定現有庫存區塊列的點擊事件
+    function setupStockRowClick() {
+        const stockRows = document.querySelectorAll('#tbody-stock tr.stock-row');
+        stockRows.forEach(row => {
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', function(e) {
+                // 移除其他列的選中狀態
+                stockRows.forEach(r => r.classList.remove('selected'));
+                // 選中當前列
+                this.classList.add('selected');
+
+                const stockId = this.getAttribute('data-stock-id');
+                if (!stockId || !currentPartNum) return;
+
+                // 判斷點擊的是哪個欄位
+                const clickedCell = e.target.closest('td');
+                if (!clickedCell) return;
+
+                const cellIndex = clickedCell.cellIndex;
+
+                // cellIndex 0 = MRP可用, 1 = 倉別, 2 = 數量
+                if (cellIndex === 1) {
+                    // 點擊倉別 -> 切換到倉庫進出歷史
+                    switchToTab('tab-history');
+                    loadStockHistory(currentPartNum, stockId);
+                } else {
+                    // 點擊其他欄位(MRP可用/數量) -> 切換到庫存一覽
+                    switchToTab('tab-summary');
+                    loadStockDetail(currentPartNum, stockId);
+                }
+            });
+        });
+    }
+
+    // 設定預計供給列的點擊事件
+    function setupSupplyRowClick() {
+        const supplyRows = document.querySelectorAll('.grid-panel[data-dict-table=\"MINdLookMatIn\"] tbody tr.supply-row');
+        supplyRows.forEach(row => {
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', function() {
+                supplyRows.forEach(r => r.classList.remove('selected'));
+                this.classList.add('selected');
+
+                const filterNum = parseInt(this.getAttribute('data-filter-num'), 10);
+
+                // 製程現帳(PCB) filterNum = 82
+                if (filterNum == 82) {
+                    if (!currentPartNum) return;
+                    switchToTab('tab-process');
+                    loadWipDetail(currentPartNum);
+                    return;
+                }
+
+                // 切換到單據明細頁籤
+                switchToTab('tab-detail');
+
+                // 預計供給、總供給等無實際單據的項目，顯示空白
+                // filterNum 為 0 或無效時顯示空白
+                if (!filterNum || filterNum <= 0) {
+                    showEmptyPaperDetail();
+                    return;
+                }
+
+                if (!currentSPId) {
+                    showEmptyPaperDetail();
+                    return;
+                }
+
+                loadPaperDetails(currentSPId, filterNum);
+            });
+        });
+    }
+
+    // 顯示空白的單據明細
+    function showEmptyPaperDetail() {
+        const tbody = document.querySelector('#tab-detail tbody');
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #999;">無單據資料</td></tr>';
+    }
+
+    // 設定需求列的點擊事件
+    function setupDemandRowClick() {
+        const demandRows = document.querySelectorAll('.grid-panel[data-dict-table=\"MINdLookMatOut\"] tbody tr.demand-row');
+        demandRows.forEach(row => {
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', function() {
+                demandRows.forEach(r => r.classList.remove('selected'));
+                this.classList.add('selected');
+
+                const filterNum = parseInt(this.getAttribute('data-filter-num'), 10);
+
+                // 切換到單據明細頁籤
+                switchToTab('tab-detail');
+
+                // 安全庫存、總需求等無實際單據的項目，顯示空白
+                // filterNum 為 0 或無效時顯示空白
+                if (!filterNum || filterNum <= 0) {
+                    showEmptyPaperDetail();
+                    return;
+                }
+
+                if (!currentSPId) {
+                    showEmptyPaperDetail();
+                    return;
+                }
+
+                loadPaperDetails(currentSPId, filterNum);
+            });
+        });
+    }
+
+    // 切換頁籤
+    function switchToTab(tabId) {
+        const tabButtons = document.querySelectorAll('.tab-btn');
+        const tabPanes = document.querySelectorAll('.tab-pane');
+
+        tabButtons.forEach(btn => btn.classList.remove('active'));
+        tabPanes.forEach(pane => pane.classList.remove('active'));
+
+        const targetBtn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+        const targetPane = document.getElementById(tabId);
+
+        if (targetBtn) targetBtn.classList.add('active');
+        if (targetPane) targetPane.classList.add('active');
+
+        // 更新 focus 追蹤
+        currentFocusedTab = targetBtn;
+        currentFocusedPanel = null;
+    }
+
+    // 載入庫存明細
+    async function loadStockDetail(partNum, stockId) {
+        const tbody = document.getElementById('tbody-tab-summary');
+        const tfoot = document.getElementById('tfoot-tab-summary');
+
+        // 顯示載入中
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: #999;">載入中...</td></tr>';
+        tfoot.innerHTML = '';
+
+        try {
+            const resp = await fetch(`/api/MatDetailApi/GetStockDetail?partNum=${encodeURIComponent(partNum)}&stockId=${encodeURIComponent(stockId)}`);
+            if (!resp.ok) {
+                throw new Error('載入失敗');
+            }
+
+            const data = await resp.json();
+
+            if (!data || data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: #999;">無庫存明細資料</td></tr>';
+                return;
+            }
+
+            // 過濾掉合計列 (PosId 為 '庫存單位合計' 的資料)
+            const filteredData = data.filter(row => {
+                const posId = safeStr(row.PosId || row.posId);
+                return posId !== '庫存單位合計';
+            });
+
+            // 如果過濾後沒有資料，則使用原始資料
+            const processData = filteredData.length > 0 ? filteredData : data;
+
+            // 建立分組 key 函數：庫位、單位、換算比率、批號、DateCode、過期日、工程版序、寬度
+            function getGroupKey(row) {
+                const posId = safeStr(row.PosId || row.posId);
+                const uom = safeStr(row.UOM || row.uom);
+                const ratio = safeStr(row.Ratio || row.ratio || '1');
+                const batchNum = safeStr(row.BatchNum || row.batchNum);
+                const volumeNum = safeStr(row.VolumeNum || row.volumeNum);
+                const expiredDate = safeStr(row.ExpiredDate || row.expiredDate);
+                const sizeLenth = safeStr(row.SizeLenth || row.sizeLenth);
+                const sizeWidth = safeStr(row.SizeWidth || row.sizeWidth);
+                return `${posId}|${uom}|${ratio}|${batchNum}|${volumeNum}|${expiredDate}|${sizeLenth}|${sizeWidth}`;
+            }
+
+            // 按多欄位分組
+            const grouped = {};
+            processData.forEach(row => {
+                const key = getGroupKey(row);
+                if (!grouped[key]) {
+                    grouped[key] = [];
+                }
+                grouped[key].push(row);
+            });
+
+            // 生成表格內容
+            let html = '';
+            let totalUOMQnty = 0;
+            let totalQnty = 0;
+
+            for (const key in grouped) {
+                const rows = grouped[key];
+                let groupUOMQnty = 0;
+                let groupQnty = 0;
+
+                // 計算該組的合計
+                rows.forEach(row => {
+                    const uomQnty = parseFloat(row.UOMQnty || row.uomQnty || 0);
+                    const qnty = parseFloat(row.Qnty || row.qnty || 0);
+                    groupUOMQnty += uomQnty;
+                    groupQnty += qnty;
+                });
+
+                // 累加總計
+                totalUOMQnty += groupUOMQnty;
+                totalQnty += groupQnty;
+
+                // 取第一筆的欄位資料
+                const firstRow = rows[0];
+                const posId = safeStr(firstRow.PosId || firstRow.posId);
+                const uom = safeStr(firstRow.UOM || firstRow.uom);
+                const ratio = parseFloat(firstRow.Ratio || firstRow.ratio || 1);
+                const batchNum = safeStr(firstRow.BatchNum || firstRow.batchNum);
+                const volumeNum = safeStr(firstRow.VolumeNum || firstRow.volumeNum);
+                const expiredDate = formatDate(firstRow.ExpiredDate || firstRow.expiredDate);
+                const sizeLenth = safeStr(firstRow.SizeLenth || firstRow.sizeLenth);
+                const sizeWidth = safeStr(firstRow.SizeWidth || firstRow.sizeWidth);
+                const qcCode = safeStr(firstRow.QCCode || firstRow.qcCode);
+
+                // 資料列
+                html += `<tr>
+                    <td>${posId}</td>
+                    <td class="text-end">${formatNumber(groupUOMQnty)}</td>
+                    <td>${uom}</td>
+                    <td class="text-end">${ratio}</td>
+                    <td class="text-end">${formatNumber(groupQnty)}</td>
+                    <td>${batchNum}</td>
+                    <td>${volumeNum}</td>
+                    <td>${expiredDate}</td>
+                    <td>${sizeLenth}</td>
+                    <td>${sizeWidth}</td>
+                    <td>${qcCode}</td>
+                </tr>`;
+            }
+
+            // 庫存單位合計列
+            html += `<tr style="background: #f9fafb; font-weight: 600;">
+                <td>庫存單位合計</td>
+                <td class="text-end">${formatNumber(totalUOMQnty)}</td>
+                <td></td>
+                <td></td>
+                <td class="text-end">${formatNumber(totalQnty)}</td>
+                <td colspan="6"></td>
+            </tr>`;
+
+            tbody.innerHTML = html;
+            tfoot.innerHTML = '';
+
+        } catch (e) {
+            console.error('載入庫存明細失敗:', e);
+            tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: #dc2626;">載入失敗</td></tr>';
+        }
+    }
+
+    // 載入單據明細
+    async function loadPaperDetails(spId, filterNum) {
+        const tbody = document.querySelector('#tab-detail tbody');
+        const headers = document.querySelectorAll('#thead-tab-detail th[data-field]');
+        const fields = Array.from(headers).map(th => th.getAttribute('data-field'));
+
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #999;">載入中...</td></tr>';
+
+        try {
+            const resp = await fetch(`/api/MatDetailApi/GetPaperDetails?spId=${encodeURIComponent(spId)}&filterNum=${encodeURIComponent(filterNum)}`);
+            if (!resp.ok) {
+                throw new Error('載入失敗');
+            }
+
+            const data = await resp.json();
+            if (!data || data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #999;">無單據資料</td></tr>';
+                return;
+            }
+
+            let html = '';
+            data.forEach(row => {
+                const cells = fields.map(fieldName => {
+                    const value = getRowValue(row, fieldName);
+                    const alignClass = isNumericField(fieldName) ? ' class="text-end"' : '';
+                    return `<td${alignClass}>${formatPaperCell(fieldName, value)}</td>`;
+                }).join('');
+                html += `<tr>${cells}</tr>`;
+            });
+
+            tbody.innerHTML = html;
+        } catch (e) {
+            console.error('載入單據明細失敗:', e);
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #dc2626;">載入失敗</td></tr>';
+        }
+    }
+
+    // 載入倉庫進出歷史
+    async function loadStockHistory(partNum, stockId) {
+        const tbody = document.getElementById('tbody-tab-history');
+        const headers = document.querySelectorAll('#thead-tab-history th[data-field]');
+        const fields = Array.from(headers).map(th => th.getAttribute('data-field'));
+        const colCount = fields.length || 10;
+
+        tbody.innerHTML = `<tr><td colspan="${colCount}" style="text-align: center; color: #999;">載入中...</td></tr>`;
+
+        try {
+            const stockParam = stockId ? `&stockId=${encodeURIComponent(stockId)}` : '';
+            const resp = await fetch(`/api/MatDetailApi/GetStockHistory?partNum=${encodeURIComponent(partNum)}${stockParam}`);
+            if (!resp.ok) {
+                throw new Error('載入失敗');
+            }
+
+            const data = await resp.json();
+            if (!data || data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="${colCount}" style="text-align: center; color: #999;">無進出歷史資料</td></tr>`;
+                return;
+            }
+
+            let html = '';
+            data.forEach(row => {
+                const cells = fields.map(fieldName => {
+                    const value = getRowValue(row, fieldName);
+                    const alignClass = isNumericField(fieldName) ? ' class="text-end"' : '';
+                    return `<td${alignClass}>${formatHistoryCell(fieldName, value, row)}</td>`;
+                }).join('');
+                html += `<tr>${cells}</tr>`;
+            });
+
+            tbody.innerHTML = html;
+        } catch (e) {
+            console.error('載入倉庫進出歷史失敗:', e);
+            tbody.innerHTML = `<tr><td colspan="${colCount}" style="text-align: center; color: #dc2626;">載入失敗</td></tr>`;
+        }
+    }
+
+    // 格式化歷史欄位
+    function formatHistoryCell(fieldName, value, row) {
+        const lower = fieldName?.toLowerCase() || '';
+        // 項次欄位：組合 PaperNum + Item
+        if (lower === 'papernum') {
+            const paperNum = safeStr(row.PaperNum || row.paperNum);
+            const item = safeStr(row.Item || row.item);
+            return item ? `${paperNum} / ${item}` : paperNum;
+        }
+        // 時間欄位
+        if (lower === 'iotime' || lower.includes('date')) {
+            return formatDate(value);
+        }
+        // 數量欄位
+        if (lower === 'ioqnty') {
+            return formatNumber(value);
+        }
+        return safeStr(value);
+    }
+
+    // 判斷是否為數值欄位
+    function isNumericField(fieldName) {
+        const lower = fieldName?.toLowerCase() || '';
+        // 數量相關欄位
+        if (lower === 'qnty' || lower.endsWith('qnty')) return true;
+        if (lower.includes('qty')) return true;
+        // 金額、數量、比率相關
+        if (lower === 'ratio' || lower === 'exchangerate') return true;
+        if (lower === 'equalfgpcs') return true;
+        if (lower === 'item') return true;
+        return false;
+    }
+
+    function formatPaperCell(fieldName, value) {
+        const lower = fieldName?.toLowerCase() || '';
+        if (lower.includes('date')) {
+            return formatDate(value);
+        }
+        if (isNumericField(fieldName)) {
+            return formatNumber(value);
+        }
+        return safeStr(value);
+    }
+
+    function getRowValue(row, fieldName) {
+        if (!row || !fieldName) return '';
+        const keys = Object.keys(row);
+        const matchKey = keys.find(k => k.toLowerCase() === fieldName.toLowerCase());
+        if (matchKey) return row[matchKey];
+
+        const lower = fieldName.toLowerCase();
+        const fallbackMap = {
+            qnty: ['PriQnty'],
+            deliveredqnty: ['SubQnty'],
+            deptid: ['StrCol_2']
+        };
+        const fallbacks = fallbackMap[lower] || [];
+        const fallbackKey = keys.find(k => fallbacks.some(f => f.toLowerCase() === k.toLowerCase()));
+        return fallbackKey ? row[fallbackKey] : '';
+    }
+
+    // 載入製程現帳
+    async function loadWipDetail(partNum) {
+        const tbody = document.getElementById('tbody-tab-process');
+        const headers = document.querySelectorAll('#thead-tab-process th[data-field]');
+        const fields = Array.from(headers).map(th => th.getAttribute('data-field'));
+        const colCount = fields.length || 9;
+
+        tbody.innerHTML = `<tr><td colspan="${colCount}" style="text-align: center; color: #999;">載入中...</td></tr>`;
+
+        try {
+            const resp = await fetch(`/api/MatDetailApi/GetWipDetail?partNum=${encodeURIComponent(partNum)}`);
+            if (!resp.ok) {
+                throw new Error('載入失敗');
+            }
+
+            const data = await resp.json();
+            if (!data || data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="${colCount}" style="text-align: center; color: #999;">無製程現帳資料</td></tr>`;
+                return;
+            }
+
+            let html = '';
+            data.forEach(row => {
+                const cells = fields.map(fieldName => {
+                    const value = getRowValue(row, fieldName);
+                    const alignClass = isNumericField(fieldName) ? ' class="text-end"' : '';
+                    return `<td${alignClass}>${formatWipCell(fieldName, value)}</td>`;
+                }).join('');
+                html += `<tr>${cells}</tr>`;
+            });
+
+            tbody.innerHTML = html;
+        } catch (e) {
+            console.error('載入製程現帳失敗:', e);
+            tbody.innerHTML = `<tr><td colspan="${colCount}" style="text-align: center; color: #dc2626;">載入失敗</td></tr>`;
+        }
+    }
+
+    // 格式化製程現帳欄位
+    function formatWipCell(fieldName, value) {
+        const lower = fieldName?.toLowerCase() || '';
+        // 數量欄位
+        if (lower === 'equalfgpcs') {
+            return formatNumber(value);
+        }
+        // 批量狀態 - 可能需要轉換代碼
+        if (lower === 'lotstatus') {
+            const statusVal = parseInt(value, 10);
+            if (isNaN(statusVal)) return safeStr(value);
+            // 根據實際業務邏輯轉換狀態代碼
+            return statusVal === 0 ? '正常' : safeStr(value);
+        }
+        return safeStr(value);
+    }
+
+    // 格式化數字
+    function formatNumber(num) {
+        if (num === null || num === undefined) return '';
+        const normalized = safeStr(num).trim();
+        if (!normalized) return '';
+        const parsed = Number(normalized);
+        if (!Number.isFinite(parsed)) return '';
+        return parsed.toFixed(2);
+    }
+
+    // 格式化日期
+    function formatDate(dateStr) {
+        if (dateStr === null || dateStr === undefined) return '';
+        const normalized = safeStr(dateStr);
+        if (!normalized) return '';
+        try {
+            const date = new Date(normalized);
+            if (isNaN(date.getTime())) return normalized;
+            return `${date.getFullYear()}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getDate().toString().padStart(2, '0')}`;
+        } catch {
+            return normalized;
+        }
+    }
+
+    // 安全取得字串值 (處理 null, undefined, object 等情況)
+    function safeStr(val) {
+        if (val === null || val === undefined) return '';
+        if (typeof val === 'object') {
+            // 如果是物件，嘗試取得常見屬性或轉成空字串
+            return val.value || val.Value || '';
+        }
+        return String(val);
+    }
 </script>
