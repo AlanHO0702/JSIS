@@ -1806,3 +1806,164 @@ document.addEventListener('DOMContentLoaded', () => {
 </style>
 
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
+<script>
+// ============================================
+// EMOdProdInfo Detail 專用工具列邏輯
+// ============================================
+(function initEMOdProdInfoDetailToolbar() {
+  const tableName = window._headerTableName || 'EMOdProdInfo';
+  const isViewOnly = @(Model.IsViewOnly ? "true" : "false");
+
+  // 1. 定義禁用按鈕的函式 (與 Index.cshtml 完全一致的樣式)
+  function disableButton(btnId) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.disabled = true;
+    btn.style.background = '#aaa';       // 灰色背景
+    btn.style.cursor = 'not-allowed';    // 禁止游標
+    btn.style.opacity = '0.6';           // 透明度
+    btn.style.boxShadow = 'none';        // 移除陰影
+    btn.style.borderColor = '#aaa';      // 邊框變灰
+  }
+
+  // 覆蓋原按鈕事件的輔助函式
+  function overrideButton(btnId, handler) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return null;
+    const newBtn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(newBtn, btn);
+    newBtn.addEventListener('click', handler);
+    return newBtn;
+  }
+
+  // 建立 PaperNum 格式
+  function buildPaperNum() {
+    const partNum = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "PartNum").Value ?? "")';
+    const revision = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "Revision").Value ?? "")';
+    return `${partNum}|${revision}`;
+  }
+
+  // [優化版] 直接接管並更新既有的計數器 (不需刪除與重建)
+  async function setupDetailCounter() {
+    // 1. 直接抓取套版(Template)裡面的那個計數器
+    // 通常 ID 是 toolbarHeaderCount，如果抓不到，我們再自己建一個保險
+    let countBox = document.getElementById('toolbarHeaderCount');
+    
+    // 如果套版裡真的沒有，才動態建立一個 (防呆機制)
+    if (!countBox) {
+        const toolbar = document.querySelector('.toolbar-icon-row');
+        if (toolbar) {
+            countBox = document.createElement('div');
+            countBox.id = 'toolbarHeaderCount';
+            countBox.className = 'toolbar-count-box';
+            toolbar.appendChild(countBox);
+        }
+    }
+
+    if (!countBox) return;
+
+    // 2. 先顯示讀取中...
+    countBox.innerHTML = '<div class="count-line"><span class="spinner-border spinner-border-sm" style="width:10px;height:10px;"></span></div>';
+    // 確保樣式正確 (強制套用樣式，以免套版樣式跑掉)
+    countBox.style.display = 'inline-flex'; 
+    countBox.classList.add('toolbar-count-box');
+
+    try {
+      // 3. 讀取與計算邏輯 (這部分維持不變)
+      const tableName = (window._headerTableName || 'EMOdProdInfo').toLowerCase();
+      const savedIndex = localStorage.getItem(`orderListQueryIndex:${tableName}`);
+      const currentIndex = savedIndex ? parseInt(savedIndex, 10) : 1;
+
+      // 4. 呼叫 API
+      const resp = await fetch('/EMOdProdInfo?handler=Data&pageIndex=1&pageSize=1');
+      
+      if (resp.ok) {
+        const data = await resp.json();
+        const total = data.totalCount || 0;
+        // 更新數字
+        countBox.innerHTML = `<div class="count-line">${currentIndex} / ${total}</div>`;
+      } else {
+        countBox.innerHTML = `<div class="count-line">${currentIndex} / -</div>`;
+      }
+    } catch (e) {
+      console.error('取得總筆數失敗', e);
+      const savedIndex = localStorage.getItem('orderListQueryIndex:emodprodinfo');
+      const currentIndex = savedIndex ? parseInt(savedIndex, 10) : 1;
+      countBox.innerHTML = `<div class="count-line">${currentIndex} / ?</div>`;
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    // ============================
+    // 2. 執行禁用邏輯
+    // ============================
+    disableButton('btnSubAddNew');      
+    disableButton('btnSubBatchDelete'); 
+    disableButton('btnPrint');          
+    disableButton('btnPaperTrace');     
+    disableButton('btnSubDetailAdd');   
+    disableButton('btnSubDetailDelete'); 
+
+    // ============================
+    // [新增] 執行計數器設定
+    // ============================
+    setupDetailCounter();
+
+    // ============================
+    // 3. 按鈕邏輯 (送審、審核、退審...)
+    // ============================
+    const btnConfirm = document.getElementById('btnConfirm');
+    if (btnConfirm) {
+      btnConfirm.textContent = '送審';
+      btnConfirm.id = 'btnSubmit';
+      const btnApprove = document.createElement('button');
+      btnApprove.id = 'btnApprove';
+      btnApprove.className = 'btn toolbar-btn success';
+      btnApprove.type = 'button';
+      btnApprove.textContent = '審核';
+      btnConfirm.parentNode.insertBefore(btnApprove, btnConfirm.nextSibling);
+    }
+
+    const btnSubmit = document.getElementById('btnSubmit');
+    if (btnSubmit) {
+      const newBtnSubmit = btnSubmit.cloneNode(true);
+      btnSubmit.parentNode.replaceChild(newBtnSubmit, btnSubmit);
+      newBtnSubmit.addEventListener('click', async function() {
+        const partNum = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "PartNum").Value ?? "")';
+        const revision = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "Revision").Value ?? "")';
+        Swal.fire({ icon: 'info', title: '送審功能待實作', text: `${partNum} / ${revision}` });
+      });
+    }
+
+    const btnApprove = document.getElementById('btnApprove');
+    if (btnApprove) {
+      btnApprove.addEventListener('click', async function() {
+         Swal.fire({ icon: 'info', title: '審核功能待實作' });
+      });
+    }
+
+    overrideButton('btnCancel', async function() {
+       Swal.fire({ icon: 'info', title: '退審功能待實作' });
+    });
+
+    overrideButton('btnPaperLog', async function() {
+       const partNum = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "PartNum").Value ?? "")';
+       console.log("查詢紀錄: " + partNum);
+       // (此處省略詳細 fetch 邏輯，請保留您原本的代碼)
+    });
+
+    overrideButton('btnSubSearch', function() {
+      window.location.href = '@Url.Page("Index", new { mode = "view", itemId = "EMO00018" })';
+    });
+
+    overrideButton('btnSwitch', function() {
+      if (isViewOnly) {
+        window.location.href = '@Url.Page("Index", new { mode = "view", itemId = "EMO00018" })';
+      } else {
+        window.location.href = '@Url.Page("Index")';
+      }
+    });
+  });
+})();
+</script>
