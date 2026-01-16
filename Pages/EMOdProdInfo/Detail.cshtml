@@ -1741,7 +1741,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 .toolbar-count-box {
   display: inline-flex;
-  flex-direction: column;
+  /* flex-direction: column; */
   justify-content: center;
   align-items: center;
   height: 31px;
@@ -1844,44 +1844,39 @@ document.addEventListener('DOMContentLoaded', () => {
     return `${partNum}|${revision}`;
   }
 
-  // [優化版] 直接接管並更新既有的計數器 (不需刪除與重建)
+  // [修正版] 建立計數器 (加入自動清除重複項目的功能)
   async function setupDetailCounter() {
-    // 1. 直接抓取套版(Template)裡面的那個計數器
-    // 通常 ID 是 toolbarHeaderCount，如果抓不到，我們再自己建一個保險
-    let countBox = document.getElementById('toolbarHeaderCount');
-    
-    // 如果套版裡真的沒有，才動態建立一個 (防呆機制)
-    if (!countBox) {
-        const toolbar = document.querySelector('.toolbar-icon-row');
-        if (toolbar) {
-            countBox = document.createElement('div');
-            countBox.id = 'toolbarHeaderCount';
-            countBox.className = 'toolbar-count-box';
-            toolbar.appendChild(countBox);
-        }
-    }
+    const toolbar = document.querySelector('.toolbar-icon-row');
+    if (!toolbar) return;
 
-    if (!countBox) return;
+    // 1. 【大掃除】先移除畫面上所有已存在的計數器 (無論是舊的、壞的、還是重複的)
+    // 這樣能保證畫面上永遠只有我們即將建立的這一個
+    document.querySelectorAll('#toolbarHeaderCount').forEach(el => el.remove());
+    document.querySelectorAll('.toolbar-count-box').forEach(el => el.remove());
 
-    // 2. 先顯示讀取中...
+    // 2. 建立全新的計數器
+    const countBox = document.createElement('div');
+    countBox.id = 'toolbarHeaderCount';
+    countBox.className = 'toolbar-count-box';
+    // 預設顯示載入圈圈
     countBox.innerHTML = '<div class="count-line"><span class="spinner-border spinner-border-sm" style="width:10px;height:10px;"></span></div>';
-    // 確保樣式正確 (強制套用樣式，以免套版樣式跑掉)
-    countBox.style.display = 'inline-flex'; 
-    countBox.classList.add('toolbar-count-box');
+    
+    // 插入到工具列
+    toolbar.appendChild(countBox);
 
     try {
-      // 3. 讀取與計算邏輯 (這部分維持不變)
+      // 3. 讀取 Index 頁面傳來的 "目前第幾筆"
       const tableName = (window._headerTableName || 'EMOdProdInfo').toLowerCase();
       const savedIndex = localStorage.getItem(`orderListQueryIndex:${tableName}`);
       const currentIndex = savedIndex ? parseInt(savedIndex, 10) : 1;
 
-      // 4. 呼叫 API
+      // 4. 呼叫 API 取得 "總筆數"
       const resp = await fetch('/EMOdProdInfo?handler=Data&pageIndex=1&pageSize=1');
       
       if (resp.ok) {
         const data = await resp.json();
         const total = data.totalCount || 0;
-        // 更新數字
+        // 顯示: 1 / 24040
         countBox.innerHTML = `<div class="count-line">${currentIndex} / ${total}</div>`;
       } else {
         countBox.innerHTML = `<div class="count-line">${currentIndex} / -</div>`;
