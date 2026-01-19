@@ -168,7 +168,8 @@ where SetClass = @SetClass and NumId = @NumId", conn);
     [HttpPost("Search")]
     public async Task<IActionResult> Search([FromBody] MatInfoSearchRequest req)
     {
-        var limit = req.Limit.HasValue ? Math.Clamp(req.Limit.Value, 1, 500) : 200;
+        var limit = req.Limit ?? 200;
+        var useLimit = limit > 0;
 
         var where = new List<string>();
         await using var conn = new SqlConnection(_connStr);
@@ -176,8 +177,13 @@ where SetClass = @SetClass and NumId = @NumId", conn);
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 180;
 
-        cmd.CommandText = "select top (@Limit) * from MINdMatInfo (nolock) where 1=1";
-        AddParam((SqlCommand)cmd, "@Limit", limit);
+        cmd.CommandText = useLimit
+            ? "select top (@Limit) * from MINdMatInfo (nolock) where 1=1"
+            : "select * from MINdMatInfo (nolock) where 1=1";
+        if (useLimit)
+        {
+            AddParam((SqlCommand)cmd, "@Limit", limit);
+        }
 
         void AddLike(string column, string? value, string param)
         {
@@ -235,6 +241,47 @@ where SetClass = @SetClass and NumId = @NumId", conn);
         AddEq("TranFacType", req.TranFacType, "TranFacType");
         AddEq("IsTranToC", req.IsTranToC, "IsTranToC");
         AddEq("IsTranFrom", req.IsTranFrom, "IsTranFrom");
+
+        if (req.AddData != null && req.AddData.Count > 0)
+        {
+            var idx = 0;
+            foreach (var row in req.AddData)
+            {
+                var numId = row.NumId?.Trim();
+                var dtlB = row.DtlNumId_B?.Trim();
+                var dtlE = row.DtlNumId_E?.Trim();
+                if (string.IsNullOrWhiteSpace(numId))
+                    continue;
+                if (string.IsNullOrWhiteSpace(dtlB) && string.IsNullOrWhiteSpace(dtlE))
+                    continue;
+
+                idx += 1;
+                var paramNum = $"@AddNumId{idx}";
+                var paramB = $"@AddDtlB{idx}";
+                var paramE = $"@AddDtlE{idx}";
+                var rangeParts = new List<string>();
+                if (!string.IsNullOrWhiteSpace(dtlB))
+                {
+                    rangeParts.Add($"d.DtlNumId >= {paramB}");
+                    AddParam((SqlCommand)cmd, paramB, dtlB);
+                }
+                if (!string.IsNullOrWhiteSpace(dtlE))
+                {
+                    rangeParts.Add($"d.DtlNumId <= {paramE}");
+                    AddParam((SqlCommand)cmd, paramE, dtlE);
+                }
+
+                AddParam((SqlCommand)cmd, paramNum, numId);
+                where.Add($@"and exists (
+select 1
+from MGNdMatInfoDtl d (nolock)
+where d.PartNum = MINdMatInfo.PartNum
+  and d.Revision = MINdMatInfo.Revision
+  and d.NumId = {paramNum}
+  {(rangeParts.Count > 0 ? "and " + string.Join(" and ", rangeParts) : "")}
+)");
+            }
+        }
 
         if (req.BuildDateStart.HasValue)
         {
