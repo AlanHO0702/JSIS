@@ -34,6 +34,7 @@ namespace PcbErpApi.Controllers
         public class QueryRequest
         {
             public string Table { get; set; } = "";
+            public string? ItemId { get; set; }
             public List<FilterItem> Filters { get; set; } = new();
         }
 
@@ -236,6 +237,23 @@ SELECT PaperType, PaperTypeName, HeadFirst, PowerType, UpdateFieldName, UpdateVa
             await conn.OpenAsync();
 
             var itemId = req?.ItemId?.Trim();
+            if (string.IsNullOrWhiteSpace(itemId))
+            {
+                var itemIds = await _ctx.CurdOcxtableSetUp
+                    .AsNoTracking()
+                    .Where(x =>
+                        x.TableName == dictTable &&
+                        !string.IsNullOrWhiteSpace(x.ItemId) &&
+                        (x.TableKind == "Master1" ||
+                         (x.TableKind ?? "").StartsWith("Master", StringComparison.OrdinalIgnoreCase)))
+                    .Select(x => x.ItemId)
+                    .Distinct()
+                    .Take(2)
+                    .ToListAsync();
+
+                if (itemIds.Count == 1)
+                    itemId = itemIds[0]?.Trim();
+            }
             var userId = string.IsNullOrWhiteSpace(req?.UserId) ? "admin" : req!.UserId!.Trim();
             var useId = string.IsNullOrWhiteSpace(req?.UseId) ? "A001" : req!.UseId!.Trim();
             var resolvedPaperId = await ResolvePaperIdAsync(conn, itemId);
@@ -309,8 +327,10 @@ SELECT TOP 1 PaperType
 
                 if (defaultPaperType.HasValue)
                 {
+                    var hasTradeId = await HasColumnAsync(conn, "CURdPaperType", "TradeId");
                     await using var cmdType = new SqlCommand(@"
-SELECT TOP 1 PaperType, PaperTypeName, HeadFirst, PowerType, UpdateFieldName, UpdateValue, TradeId
+SELECT TOP 1 PaperType, PaperTypeName, HeadFirst, PowerType, UpdateFieldName, UpdateValue, " +
+                        (hasTradeId ? "TradeId" : "CAST(NULL AS NVARCHAR(50)) AS TradeId") + @"
   FROM CURdPaperType WITH (NOLOCK)
  WHERE (LOWER(PaperId) = LOWER(@paperId) OR LOWER(PaperId) = LOWER(@dictTable))
    AND PaperType = @paperType;", conn);
@@ -599,6 +619,29 @@ SELECT TOP 1 RunSQLAfterAdd
             if (pageSize <= 0 || pageSize > 1000) pageSize = 50;
 
             var whereSql = conditions.Count > 0 ? $"WHERE {string.Join(" AND ", conditions)}" : "";
+            string? filterSql = null;
+            if (!string.IsNullOrWhiteSpace(req.ItemId))
+            {
+                filterSql = await _ctx.CurdOcxtableSetUp
+                    .AsNoTracking()
+                    .Where(x => x.ItemId == req.ItemId && x.TableName == dictTable)
+                    .Select(x => x.FilterSql)
+                    .FirstOrDefaultAsync();
+            }
+            if (!string.IsNullOrWhiteSpace(filterSql))
+            {
+                var extra = filterSql.Trim();
+                if (extra.StartsWith("where ", StringComparison.OrdinalIgnoreCase))
+                    extra = extra.Substring(5).Trim();
+                if (!string.IsNullOrWhiteSpace(extra))
+                {
+                    var startsWithAndOr = Regex.IsMatch(extra, @"^(and|or)\b", RegexOptions.IgnoreCase);
+                    if (string.IsNullOrWhiteSpace(whereSql))
+                        whereSql = startsWithAndOr ? $"WHERE 1=1 {extra}" : $"WHERE {extra}";
+                    else
+                        whereSql = startsWithAndOr ? $"{whereSql} {extra}" : $"{whereSql} AND {extra}";
+                }
+            }
             var orderSql =
                 fieldSet.Contains("PaperDate")
                     ? (fieldSet.Contains("PaperNum")
@@ -613,11 +656,11 @@ SELECT TOP 1 RunSQLAfterAdd
             try
             {
                 var sqlPaged = new StringBuilder();
-                sqlPaged.Append($"SELECT * FROM [{realTable}] WITH (NOLOCK) {whereSql} ");
+                sqlPaged.Append($"SELECT * FROM [{realTable}] t0 WITH (NOLOCK) {whereSql} ");
                 sqlPaged.Append($"ORDER BY {orderSql} ");
                 sqlPaged.Append($"OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY;");
 
-                var sqlCount = $"SELECT COUNT(1) FROM [{realTable}] WITH (NOLOCK) {whereSql};";
+                var sqlCount = $"SELECT COUNT(1) FROM [{realTable}] t0 WITH (NOLOCK) {whereSql};";
 
                 var result = new List<Dictionary<string, object?>>();
                 int totalCount = 0;

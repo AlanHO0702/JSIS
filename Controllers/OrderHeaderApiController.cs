@@ -178,6 +178,10 @@ public class OrderHeaderApiController : ControllerBase
         const string detailFk = "PaperNum";
         const string detailPk = "Item";   // int 自動遞增
 
+        headerTable = await ResolveRealTableNameAsync(headerTable);
+        if (!string.IsNullOrWhiteSpace(detailTable))
+            detailTable = await ResolveRealTableNameAsync(detailTable);
+
         // 取出 Details（若有）
         List<Dictionary<string, object>> details = new List<Dictionary<string, object>>();
         if (body.TryGetValue("Details", out var detailsObj) && detailsObj is JsonElement je && je.ValueKind == JsonValueKind.Array)
