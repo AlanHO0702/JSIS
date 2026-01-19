@@ -2892,52 +2892,149 @@ if (editBtn) {
   window.__setHeaderEditMode = setHeaderEditMode;
 
   editBtn.addEventListener('click', async function () {
-    // ✅ 針對 FMEdIssueMain 使用 Finished 欄位檢查（數字）
     const headerTableName = window._headerTableName;
-    console.log('🔍 [修改按鈕] headerTableName:', headerTableName);
-    console.log('🔍 [修改按鈕] finishedStatus:', window._finishedStatus);
+    const paperNum = window._paperNum || (typeof PAGE !== 'undefined' ? PAGE.paperNum : null);
+    console.log('[修改按鈕] headerTableName:', headerTableName, 'paperNum:', paperNum);
 
-    // ? 如果是從「編輯模式」切回「檢視模式」（保留），則儲存單身資料
+    // 如果是從「編輯模式」切回「檢視模式」（保留），則儲存單身資料
     if (isEdit) {
-      console.log('?? [保留按鈕] 開始儲存單身資料...');
+      console.log('[保留按鈕] 開始儲存單身資料...');
       const detailSave = await saveMultiTabChanges();
       if (!detailSave.ok) return;
+      setHeaderEditMode(false);
+      return;
     }
 
-    // ⭐ 如果是從「檢視模式」切到「編輯模式」（修改），先檢查狀態
-    if (!isEdit) {
-      if (headerTableName === 'FMEdIssueMain') {
-        // 使用後端傳遞的 Finished 狀態
-        const finished = window._finishedStatus;
+    // 從「檢視模式」切到「編輯模式」（修改），呼叫後端 API 檢查
+    if (!paperNum || !headerTableName) {
+      console.warn('[修改按鈕] 缺少 paperNum 或 headerTableName');
+      setHeaderEditMode(true);
+      return;
+    }
 
-        // 狀態對照表
-        const statusMap = {0:'作業中', 1:'已確認', 2:'作廢中', 3:'審核中', 4:'已結案'};
-        const statusName = statusMap[finished] || `代碼:${finished}`;
+    try {
+      const checkResp = await fetch('/api/PaperAction/CheckCanEdit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paperId: headerTableName,
+          paperNum: paperNum,
+          itemId: window._itemId || '',
+          userId: window._userId || localStorage.getItem('erpLoginUserId') || 'admin',
+          useId: window._useId || 'A001'
+        })
+      });
 
-        // 允許修改的狀態：作業中(0) 和 審核中(3)
-        const allowedStatuses = [0, 3];
-        if (finished !== null && !allowedStatuses.includes(finished)) {
-          console.log('🚫 [修改按鈕] 狀態不允許修改，阻止修改');
-          Swal.fire({
-            icon: 'warning',
-            title: '無法修改',
-            html: `單據狀態：<b>${statusName}</b><br>只有「作業中」或「審核中」的單據才能進行修改。`
-          });
-          return;
-        }
-        console.log('✅ [修改按鈕] 狀態允許修改');
-      } else {
-        // 一般單據使用原本的「單據狀態」文字檢查
-        const status = getHeaderValueByLabel('單據狀態') || '';
-        if (window.BLOCK_STATUSES && window.BLOCK_STATUSES.includes(status)) {
-          Swal.fire({ icon: 'warning', title: '無法修改', text: `此單據狀態為「${status}」，不可進行修改。`});
-          return;
-        }
+      if (!checkResp.ok) {
+        const errData = await checkResp.json().catch(() => ({}));
+        await Swal.fire({ icon: 'error', title: '檢查失敗', text: errData.message || '無法驗證編輯權限' });
+        return;
       }
-    }
 
-    setHeaderEditMode(!isEdit);
+      const result = await checkResp.json();
+      console.log('[修改按鈕] CheckCanEdit 結果:', result);
+
+      // 支援 PascalCase (C# 預設) 和 camelCase
+      const canEdit = result.CanEdit ?? result.canEdit;
+      const message = result.Message ?? result.message;
+      const requiresRejection = result.RequiresRejection ?? result.requiresRejection;
+      const canAutoReject = result.CanAutoReject ?? result.canAutoReject;
+      const rejectRequiresNotes = result.RejectRequiresNotes ?? result.rejectRequiresNotes;
+      const rejectMessage = result.RejectMessage ?? result.rejectMessage;
+      const latestData = result.LatestData ?? result.latestData;
+
+      // 更新前端狀態 (從後端取得最新資料)
+      if (latestData) {
+        window._finishedStatus = latestData.Finished;
+      }
+
+      if (canEdit) {
+        setHeaderEditMode(true);
+        return;
+      }
+
+      // 不能直接編輯
+      if (!requiresRejection) {
+        await Swal.fire({ icon: 'warning', title: '無法修改', text: message });
+        return;
+      }
+
+      // 需要退審但沒有權限
+      if (!canAutoReject) {
+        await Swal.fire({ icon: 'warning', title: '無法修改', text: message });
+        return;
+      }
+
+      // 有權限可自動退審，顯示確認對話框
+      const shouldReject = await showRejectConfirmDialog({ message, rejectRequiresNotes, rejectMessage });
+      if (!shouldReject.confirmed) return;
+
+      // 執行退審
+      const rejectResp = await fetch('/api/PaperAction/RejectForEdit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paperId: headerTableName,
+          paperNum: paperNum,
+          itemId: window._itemId || '',
+          userId: window._userId || localStorage.getItem('erpLoginUserId') || 'admin',
+          useId: window._useId || 'A001',
+          rejectNotes: shouldReject.notes || ''
+        })
+      });
+
+      if (!rejectResp.ok) {
+        const errData = await rejectResp.json().catch(() => ({}));
+        await Swal.fire({ icon: 'error', title: '退審失敗', text: errData.message || '無法完成退審操作' });
+        return;
+      }
+
+      // 退審成功，重新載入頁面並自動進入編輯模式
+      await Swal.fire({
+        icon: 'success',
+        title: '退審成功',
+        text: '頁面將重新載入以取得最新狀態',
+        timer: 1500,
+        showConfirmButton: false
+      });
+      localStorage.setItem('afterSave', '1');
+      location.reload();
+
+    } catch (err) {
+      console.error('[修改按鈕] 錯誤:', err);
+      await Swal.fire({ icon: 'error', title: '系統錯誤', text: '無法驗證編輯權限，請稍後再試' });
+    }
   });
+
+  // 退審確認對話框
+  async function showRejectConfirmDialog(checkResult) {
+    if (checkResult.rejectRequiresNotes) {
+      const result = await Swal.fire({
+        icon: 'question',
+        title: '確認退審',
+        html: `${checkResult.rejectMessage || checkResult.message}<br><br>請輸入退審原因：`,
+        input: 'textarea',
+        inputPlaceholder: '請輸入退審原因',
+        showCancelButton: true,
+        confirmButtonText: '確定退審',
+        cancelButtonText: '取消',
+        inputValidator: (value) => {
+          if (!value || !value.trim()) return '請輸入退審原因';
+        }
+      });
+      return { confirmed: result.isConfirmed, notes: result.value || '' };
+    } else {
+      const result = await Swal.fire({
+        icon: 'question',
+        title: '確認退審',
+        text: checkResult.rejectMessage || checkResult.message,
+        showCancelButton: true,
+        confirmButtonText: '確定退審',
+        cancelButtonText: '取消'
+      });
+      return { confirmed: result.isConfirmed, notes: '' };
+    }
+  }
 
   window.addEventListener('load', () => {
     captureHeaderInitValues();
@@ -3827,9 +3924,10 @@ async function fetchIdListByPagedQuery(filters) {
 }
 async function fetchIdListByDynamicTable(filters) {
   const fs = [...(filters || []), { Field: "page", Op: "", Value: "1" }, { Field: "pageSize", Op: "", Value: "999999" }];
+  const itemId = (window._itemId || window._singleItemId || '').toString().trim();
   const res = await fetch('/api/DynamicTable/PagedQuery', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table: PAGE.headerTable, filters: fs })
+    body: JSON.stringify({ table: PAGE.headerTable, itemId, filters: fs })
   });
   if (!res.ok) throw new Error('DynamicTable/PagedQuery failed');
   const json = await res.json();

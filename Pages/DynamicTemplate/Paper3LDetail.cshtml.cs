@@ -349,6 +349,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             var payload = new
             {
                 table = tableName,
+                itemId = ItemId,
                 filters = new[]
                 {
                     new { Field = "PaperNum", Op = "=", Value = paperNum },
