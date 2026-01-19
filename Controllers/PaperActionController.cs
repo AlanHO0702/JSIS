@@ -49,7 +49,10 @@ namespace PcbErpApi.Controllers
             try
             {
                 await conn.OpenAsync();
-                var safePaperId = req.PaperId.Trim();
+                var dictPaperId = req.PaperId.Trim();
+
+                // 從 CURdTableName 取得實際的資料表名稱
+                var safePaperId = await ResolveRealTableNameAsync(conn, dictPaperId);
                 if (!IsSafeIdentifier(safePaperId))
                     return BadRequest("PaperId 不合法");
 

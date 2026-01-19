@@ -52,8 +52,11 @@ namespace PcbErpApi.Controllers
 
             try
             {
-                var (columns, updatable, pkCols) = await LoadTableSchemaAsync(conn, tx, req.TableName);
-                var uniqueIndexSets = await LoadUniqueIndexSetsAsync(conn, tx, req.TableName);
+                // ★ 將辭典表名轉換為實際資料表名（查詢 CURdTableName.RealTableName）
+                var realTableName = await ResolveRealTableNameAsync(conn, tx, req.TableName) ?? req.TableName;
+
+                var (columns, updatable, pkCols) = await LoadTableSchemaAsync(conn, tx, realTableName);
+                var uniqueIndexSets = await LoadUniqueIndexSetsAsync(conn, tx, realTableName);
 
                 var hintedKeys = new HashSet<string>(
                     (req.KeyFields ?? Enumerable.Empty<string>())
@@ -135,7 +138,7 @@ namespace PcbErpApi.Controllers
                     if (isDelete)
                     {
                         var delWhereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Col.Name}] = @K_{p.Col.Name}"));
-                        var delSql = $"DELETE FROM [{req.TableName}] WHERE {delWhereSql}";
+                        var delSql = $"DELETE FROM [{realTableName}] WHERE {delWhereSql}";
                         using var delCmd = conn.CreateCommand();
                         delCmd.Transaction = (System.Data.Common.DbTransaction)tx;
                         delCmd.CommandText = delSql;
@@ -161,7 +164,7 @@ namespace PcbErpApi.Controllers
                         {
                             var colsSql0 = string.Join(", ", insertPairs0.Select(p => $"[{p.Col.Name}]"));
                             var valsSql0 = string.Join(", ", insertPairs0.Select(p => $"@I_{p.Col.Name}"));
-                            var insertSql0 = $"INSERT INTO [{req.TableName}] ({colsSql0}) VALUES ({valsSql0})";
+                            var insertSql0 = $"INSERT INTO [{realTableName}] ({colsSql0}) VALUES ({valsSql0})";
                             using var insertCmd0 = conn.CreateCommand();
                             insertCmd0.Transaction = (System.Data.Common.DbTransaction)tx;
                             insertCmd0.CommandText = insertSql0;
@@ -180,7 +183,7 @@ namespace PcbErpApi.Controllers
 
                     var setSql   = string.Join(", ", setPairs.Select(p => $"[{p.Col.Name}] = @{p.Col.Name}"));
                     var whereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Col.Name}] = @K_{p.Col.Name}"));
-                    var sql      = $"UPDATE [{req.TableName}] SET {setSql} WHERE {whereSql}";
+                    var sql      = $"UPDATE [{realTableName}] SET {setSql} WHERE {whereSql}";
 
                     using var cmd = conn.CreateCommand();
                     cmd.Transaction = (System.Data.Common.DbTransaction)tx;
@@ -215,7 +218,7 @@ namespace PcbErpApi.Controllers
                         {
                             var colsSql = string.Join(", ", insertPairs.Select(p => $"[{p.Col.Name}]"));
                             var valsSql = string.Join(", ", insertPairs.Select(p => $"@I_{p.Col.Name}"));
-                            var insertSql = $"INSERT INTO [{req.TableName}] ({colsSql}) VALUES ({valsSql})";
+                            var insertSql = $"INSERT INTO [{realTableName}] ({colsSql}) VALUES ({valsSql})";
                             using var insertCmd = conn.CreateCommand();
                             insertCmd.Transaction = (System.Data.Common.DbTransaction)tx;
                             insertCmd.CommandText = insertSql;
@@ -350,6 +353,29 @@ ORDER BY idx.index_id, ic.key_ordinal";
             if (bucket != null && bucket.Count > 0) result.Add(bucket);
 
             return result;
+        }
+
+        /// <summary>
+        /// 將辭典表名轉換為實際資料表名（查詢 CURdTableName.RealTableName）
+        /// 若無對應或 RealTableName 為空，則回傳 null（由呼叫端 fallback 使用原 TableName）
+        /// </summary>
+        private async Task<string?> ResolveRealTableNameAsync(DbConnection conn, IDbTransaction tx, string dictTableName)
+        {
+            if (string.IsNullOrWhiteSpace(dictTableName)) return null;
+
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = (System.Data.Common.DbTransaction)tx;
+            cmd.CommandText = @"
+SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
+  FROM CURdTableName WITH (NOLOCK)
+ WHERE TableName = @tbl";
+            var p = cmd.CreateParameter();
+            p.ParameterName = "@tbl";
+            p.Value = dictTableName;
+            cmd.Parameters.Add(p);
+
+            var result = await cmd.ExecuteScalarAsync();
+            return result == null || result == DBNull.Value ? null : result.ToString();
         }
 
         // ===== 參數與轉型 =====
