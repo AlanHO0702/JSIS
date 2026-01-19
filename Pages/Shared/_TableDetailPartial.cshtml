@@ -74,6 +74,12 @@
             s = s.Substring(2);
         return s;
     }
+    static bool IsPartNumField(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        var normalized = name.Replace("_", "").Trim().ToLowerInvariant();
+        return normalized.Contains("partnum");
+    }
 
     var groupedTabs = headerFieldsList
         .GroupBy(f => NormalizeShowWhere(f.iShowWhere))
@@ -246,6 +252,7 @@
                                     var editColor = NormalizeEditColor(field.EditColor);
                                     var editStyle = !string.IsNullOrWhiteSpace(editColor) ? $"background-color:{editColor} !important;" : "";
                                     var editStyleForSelect = editStyle;
+                                    var isPartNumField = IsPartNumField(field.FieldName);
 
 
                                     <li class="header-label-item"
@@ -263,7 +270,7 @@
                                     {
                                         // 下拉選單元件（可輸入）
                                         var lookupListId = $"lk_{tab.Key}_{field.FieldName}".Replace(" ", "_");
-                                        <li class="@liClass @(alignRight ? "field-number" : "field-text")"
+                                        <li class="@liClass @(alignRight ? "field-number" : "field-text") @(isPartNumField ? "partnum-field" : "")"
                                             data-field="@field.FieldName"
                                             data-tab="@tab.Key"
                                             title="@field.FieldName"
@@ -290,11 +297,15 @@
                                                    list="@lookupListId"
                                                    style="@editStyleForSelect" />
                                             <datalist id="@lookupListId"></datalist>
+                                            @if (isPartNumField)
+                                            {
+                                                <button type="button" class="partnum-lookup-btn" data-field="@field.FieldName" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>
+                                            }
                                         </li>
                                     }
                                     else
                                     {
-                                        <li class="@liClass @(alignRight ? "field-number" : "field-text")"
+                                        <li class="@liClass @(alignRight ? "field-number" : "field-text") @(isPartNumField ? "partnum-field" : "")"
                                             data-field="@field.FieldName"
                                             data-tab="@tab.Key"
                                             title="@field.FieldName"
@@ -304,6 +315,10 @@
                                                 name="@field.FieldName"
                                                 data-align="@(alignRight ? "right" : (alignCenter ? "center" : null))"
                                                 style="@editStyle">@displayText</textarea>
+                                            @if (isPartNumField)
+                                            {
+                                                <button type="button" class="partnum-lookup-btn" data-field="@field.FieldName" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>
+                                            }
                                         </li>
                                     }
                                 }
@@ -397,6 +412,7 @@
 
                                         // 預先算好 name，避免 Razor 解析錯誤
                                         var inputName = $"Details[{index}].{col.FieldName}";
+                                        var isPartNumCol = IsPartNumField(col.FieldName);
 
                                         var isNumberCell = IsNumberType(col.DataType);
                                         string lookupCellType = "";
@@ -423,7 +439,7 @@
                                         {
                                             isReadOnly = true;
                                         }
-                                        <td class="detail-cell @(alignRightCell ? "detail-number" : "detail-text")" style="@cellStyle" data-readonly="@(isReadOnly ? "1" : "0")">
+                                        <td class="detail-cell @(alignRightCell ? "detail-number" : "detail-text") @(isPartNumCol ? "partnum-field" : "")" style="@cellStyle" data-readonly="@(isReadOnly ? "1" : "0")" data-field="@col.FieldName">
                                             <span class="cell-view @(isReadOnly ? "readonly-cell" : "")">@cellValue</span>
 
                                             <input type="text"
@@ -433,6 +449,10 @@
                                                 data-init="@cellValue"
                                                 value="@cellValue"
                                                 @(isReadOnly ? "readonly data-readonly=\"1\"" : "data-readonly=\"0\"") />
+                                            @if (isPartNumCol)
+                                            {
+                                                <button type="button" class="partnum-lookup-btn" data-field="@col.FieldName" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>
+                                            }
                                                 
                                         </td>
 
@@ -490,6 +510,35 @@ const PAGE = {
   headerFields: @Html.Raw(JsonSerializer.Serialize(headerFieldsList)),
   detailFields: @Html.Raw(JsonSerializer.Serialize(fields))
 };
+
+function getPartNumFromContainer(container) {
+  if (!container) return '';
+  const keyInput = container.querySelector('input.lookup-key[name]');
+  if (keyInput && keyInput.value) return keyInput.value.trim();
+  const input = container.querySelector('input.cell-edit, input[type="text"], textarea, select');
+  if (input) {
+    if (input.tagName && input.tagName.toLowerCase() === 'select') {
+      return (input.value || input.options?.[input.selectedIndex]?.value || '').trim();
+    }
+    return (input.value || '').trim();
+  }
+  const view = container.querySelector('.cell-view');
+  return view ? (view.textContent || '').trim() : '';
+}
+
+document.addEventListener('click', (e) => {
+  if (e.__partnumHandled) return;
+  const btn = e.target.closest('.partnum-lookup-btn');
+  if (!btn) return;
+  e.__partnumHandled = true;
+  e.preventDefault();
+  e.stopPropagation();
+  const container = btn.closest('td, li');
+  const partNum = getPartNumFromContainer(container);
+  if (!partNum) return;
+  const url = `/MIN/MatDetail?PartNum=${encodeURIComponent(partNum)}`;
+  window.open(url, '_blank');
+});
 
 // 放在最前面（辭典開關）
 window.__DICT_OPEN__ = false;
@@ -734,8 +783,10 @@ function appendEmptyDetailRow() {
     const isReadOnly = (col.ReadOnly || 0) > 0;
     const roClass = isReadOnly ? ' readonly-cell' : '';
     const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
+    const isPartNum = /partnum/i.test((col.FieldName || '').replace(/_/g, ''));
+    const partNumBtn = isPartNum ? '<button type="button" class="partnum-lookup-btn" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>' : '';
     tdsHtml += `
-      <td data-readonly="${isReadOnly ? '1' : '0'}">
+      <td data-readonly="${isReadOnly ? '1' : '0'}" data-field="${col.FieldName}" class="${isPartNum ? 'partnum-field' : ''}">
         <span class="cell-view${roClass}">${v}</span>
         <input type="text"
           class="form-control form-control-sm cell-edit d-none w-100${roClass}"
@@ -743,6 +794,7 @@ function appendEmptyDetailRow() {
           data-field="${col.FieldName}"
           data-init="${v}"
           value="${v}"${roAttr}>
+        ${partNumBtn}
       </td>`;
   });
   tr.innerHTML = tdsHtml;
@@ -1609,6 +1661,12 @@ $(function () {
       const name = (el.getAttribute('name') || '').toLowerCase();
       if (name !== target) continue;
       if (el.type === 'checkbox') return el.checked ? '1' : '0';
+      if (el.classList?.contains('lookup-dropdown')) {
+        const hidden = el.closest('li')?.querySelector('input.lookup-key[name]');
+        if (hidden) return (hidden.value ?? '').toString().trim();
+        const raw = (el.value ?? '').toString().trim();
+        return (raw.split(' - ')[0] || raw).trim();
+      }
       return (el.value ?? '').toString().trim();
     }
     return '';
@@ -1617,6 +1675,18 @@ $(function () {
 
   function normalizeLookupKey(value) {
     return (value ?? '').toString().trim().toLowerCase();
+  }
+
+  function resolveCondValue(fieldOrLabel) {
+    const key = (fieldOrLabel || '').toString().trim();
+    if (!key) return '';
+    const direct = readHeaderFieldValue(key);
+    if (direct) return direct;
+    const labelEl = Array.from(document.querySelectorAll('.header-label-item'))
+      .find(el => (el.textContent || '').trim() === key);
+    const field = labelEl?.getAttribute('data-field') || '';
+    if (!field) return '';
+    return readHeaderFieldValue(field);
   }
 
   function getLookupLabel(key, keyToLabel) {
@@ -1662,8 +1732,10 @@ $(function () {
       const cond1Source = (el.dataset.cond1Source || '').trim();
       const cond2Field = (el.dataset.cond2Field || '').trim();
       const cond2Source = (el.dataset.cond2Source || '').trim();
-      const cond1Value = cond1Source ? readHeaderFieldValue(cond1Source) : '';
-      const cond2Value = cond2Source ? readHeaderFieldValue(cond2Source) : '';
+      const cond1ValueField = cond1Field || cond1Source;
+      const cond2ValueField = cond2Field || cond2Source;
+      const cond1Value = cond1ValueField ? resolveCondValue(cond1ValueField) : '';
+      const cond2Value = cond2ValueField ? resolveCondValue(cond2ValueField) : '';
       const condKey = `${cond1Field}:${cond1Value}|${cond2Field}:${cond2Value}`;
       if (el.dataset.lookupLoaded === '1' && el.dataset.lookupCondKey === condKey) return;
 
@@ -1704,6 +1776,13 @@ $(function () {
 
         const keyToLabel = {};
         const labelToKey = {};
+        const addListOption = (value, label) => {
+          if (!value) return;
+          const opt = document.createElement('option');
+          opt.value = value;
+          if (label) opt.label = label;
+          listEl.appendChild(opt);
+        };
         rows.forEach(row => {
           const val = row.key;
           const label = Object.keys(row).filter(p => p.startsWith('result')).map(p => row[p]).join(' - ');
@@ -1714,20 +1793,27 @@ $(function () {
           if (label) {
             labelToKey[label] = keyStr;
             const dispLower = normalizeLookupKey(label);
+          if (dispLower && labelToKey[dispLower] == null) labelToKey[dispLower] = keyStr;
+          }
+          const display = formatLookupDisplay(keyStr, label);
+          if (display) {
+            labelToKey[display] = keyStr;
+            const dispLower = normalizeLookupKey(display);
             if (dispLower && labelToKey[dispLower] == null) labelToKey[dispLower] = keyStr;
           }
           labelToKey[keyStr] = keyStr;
           if (normKey && labelToKey[normKey] == null) labelToKey[normKey] = keyStr;
-          const opt = document.createElement('option');
-          opt.value = keyStr;
-          if (label) opt.label = label;
-          listEl.appendChild(opt);
+          const displayVal = display || keyStr;
+          addListOption(displayVal, keyStr);
+          if (keyStr && displayVal !== keyStr) {
+            addListOption(keyStr, displayVal);
+          }
         });
 
         inputEl._lookupKeyToLabel = keyToLabel;
         inputEl._lookupLabelToKey = labelToKey;
         const initKey = selected ?? '';
-        if (initKey !== '') inputEl.value = initKey;
+        if (initKey !== '') inputEl.value = formatLookupDisplay(initKey, getLookupLabel(initKey, keyToLabel));
         const hidden = inputEl.closest('li')?.querySelector('input.lookup-key[name]');
         if (hidden) hidden.value = initKey;
         syncLookupLabel(inputEl);
@@ -1747,7 +1833,17 @@ $(function () {
         loadLookupOptions();
       });
     } else {
-      $ctrl.on('input change', function() {
+      $ctrl.on('input', function() {
+        syncLookupLabel(this);
+      });
+      $ctrl.on('change', function() {
+        const keyToLabel = this._lookupKeyToLabel || {};
+        const labelToKey = this._lookupLabelToKey || {};
+        const raw = (this.value ?? '').toString().trim();
+        const key = mapLookupKey(raw, labelToKey) ?? raw;
+        const label = getLookupLabel(key, keyToLabel);
+        const display = formatLookupDisplay(key, label);
+        if (display) this.value = display;
         syncLookupLabel(this);
       });
       $ctrl.on('focus', function() {
@@ -1818,9 +1914,10 @@ function updateNavButtons() {
 }
 async function fetchIdListByApi(filters) {
   // 取得所有 id 列表，走通用 DynamicTable API
+  const itemId = (window._itemId || window._singleItemId || '').toString().trim();
   const res = await fetch('/api/DynamicTable/PagedQuery', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table: PAGE.headerTable, filters: [...(filters || []), {Field:"page",Op:"",Value:"1"}, {Field:"pageSize",Op:"",Value:"999999"}] })
+    body: JSON.stringify({ table: PAGE.headerTable, itemId, filters: [...(filters || []), {Field:"page",Op:"",Value:"1"}, {Field:"pageSize",Op:"",Value:"999999"}] })
   });
   const json = await res.json();
   const rows = Array.isArray(json.data) ? json.data : [];
@@ -1828,10 +1925,11 @@ async function fetchIdListByApi(filters) {
 }
 async function fetchIdListByPagedQuery(filters) {
   // 同上，直接用 DynamicTable 取得大筆數據
+  const itemId = (window._itemId || window._singleItemId || '').toString().trim();
   const fs = [...(filters || []), {Field:"page",Op:"",Value:"1"}, {Field:"pageSize",Op:"",Value:"999999"}];
   const res = await busyFetch('/api/DynamicTable/PagedQuery', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table: PAGE.headerTable, filters: fs })
+    body: JSON.stringify({ table: PAGE.headerTable, itemId, filters: fs })
   },'切換中…');
   const json = await res.json();
   const rows = Array.isArray(json.data) ? json.data : [];
@@ -1958,9 +2056,10 @@ function syncLookupLabel(selectEl) {
     const labelToKey = selectEl._lookupLabelToKey || {};
     const raw = selectEl.value ?? '';
     const key = mapLookupKey(raw, labelToKey) ?? raw;
-    const display = formatLookupDisplay(key, getLookupLabel(key, keyToLabel)) || raw;
-    if (raw !== '' && raw !== key) {
-      selectEl.value = key;
+    const labelText = getLookupLabel(key, keyToLabel);
+    const display = formatLookupDisplay(key, labelText) || raw;
+    if (labelText && raw !== display) {
+      selectEl.value = display;
     }
     if (label && label.classList.contains('lookup-label')) {
       label.textContent = display;
@@ -2121,7 +2220,7 @@ body { background: #f7f9fb !important; }
   font-size: var(--top-toolbar-font-size);
   height: var(--top-toolbar-btn-height);
   min-height: var(--top-toolbar-btn-height);
-  padding: 0 12px;
+  padding: 0 6px;
   line-height: 1;
 }
 .top-toolbar .toolbar-btn-icon{
@@ -2198,6 +2297,32 @@ body { background: #f7f9fb !important; }
   overflow: visible !important;
   text-overflow: clip !important;
   max-width: none !important;
+}
+.partnum-field{ position: relative; }
+.partnum-lookup-btn{
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 22px;
+  border: 0;
+  border-left: 1px solid #cfd7e6;
+  background: #e9f1ff;
+  color: #1f5fbf;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+.partnum-lookup-btn:hover{ background: #dbe9ff; }
+.partnum-field textarea,
+.partnum-field input,
+.partnum-field select{
+  padding-right: 26px !important;
+}
+.erp-table td.partnum-field .cell-view,
+.erp-table td.partnum-field .cell-edit{
+  padding-right: 26px !important;
 }
 .draggable-field.md-selected{
   border-radius: 8px;

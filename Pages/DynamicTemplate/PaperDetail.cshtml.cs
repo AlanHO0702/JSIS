@@ -399,6 +399,7 @@ SELECT ItemId, SerialNum, ButtonName,
             var payload = new
             {
                 table = tableName,
+                itemId = ItemId,
                 filters = new[]
                 {
                     new { Field = "PaperNum", Op = "=", Value = paperNum },
@@ -425,6 +426,7 @@ SELECT ItemId, SerialNum, ButtonName,
             var payload = new
             {
                 table = tableName,
+                itemId = ItemId,
                 filters = new[]
                 {
                     new { Field = "PaperNum", Op = "=", Value = paperNum },

@@ -163,7 +163,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
             filters.Add(new FilterItem { Field = "pageSize", Op = "", Value = PageSize.ToString() });
 
             // 送「字典表名」給 DynamicTable API 才能正確套用 CURdTableField 的欄位白名單/查詢欄位別名
-            var payload = new { table = DictTableName, filters };
+            var payload = new { table = DictTableName, itemId = ItemId, filters };
             var json = JsonSerializer.Serialize(payload);
             var req = new HttpRequestMessage(HttpMethod.Post, url)
             {

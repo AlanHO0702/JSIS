@@ -155,7 +155,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
             filters.Add(new FilterItem { Field = "page", Op = "", Value = PageNumber.ToString() });
             filters.Add(new FilterItem { Field = "pageSize", Op = "", Value = PageSize.ToString() });
 
-            var payload = new { table = DictTableName, filters };
+            var payload = new { table = DictTableName, itemId = ItemId, filters };
             var json = JsonSerializer.Serialize(payload);
             var req = new HttpRequestMessage(HttpMethod.Post, url)
             {

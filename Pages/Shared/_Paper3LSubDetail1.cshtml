@@ -22,6 +22,27 @@
 <style>
   .paper3l-subdetail table th{ font-size: var(--field-label-size); }
   .paper3l-subdetail table td{ font-size: var(--field-value-size); }
+  .paper3l-subdetail .partnum-field{ position: relative; }
+  .paper3l-subdetail .partnum-lookup-btn{
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: 22px;
+    border: 0;
+    border-left: 1px solid #9fb1d0;
+    background: #e9f1ff;
+    color: #1f5fbf;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+  }
+  .paper3l-subdetail .partnum-lookup-btn:hover{ background: #dbe9ff; }
+  .paper3l-subdetail .partnum-field .cell-view,
+  .paper3l-subdetail .partnum-field .cell-edit{
+    padding-right: 26px !important;
+  }
 </style>
 
 <script>
@@ -53,6 +74,33 @@
       .replace(/\"/g, '&quot;')
       .replace(/'/g, '&#39;');
   }
+
+  function isPartNumField(name) {
+    return !!name && String(name).replace(/_/g, '').toLowerCase().includes('partnum');
+  }
+
+  function getPartNumFromCell(cell) {
+    if (!cell) return '';
+    const input = cell.querySelector('.cell-edit');
+    if (input) return (input.value || '').trim();
+    const view = cell.querySelector('.cell-view');
+    return (view?.textContent || '').trim();
+  }
+
+  document.addEventListener('click', (e) => {
+    if (e.__partnumHandled) return;
+    const btn = e.target.closest('.partnum-lookup-btn');
+    if (!btn) return;
+    e.__partnumHandled = true;
+    e.preventDefault();
+    e.stopPropagation();
+    const cell = btn.closest('td');
+    const partNum = getPartNumFromCell(cell);
+    if (!partNum) return;
+    const url = `/MIN/MatDetail?PartNum=${encodeURIComponent(partNum)}`;
+    window.open(url, '_blank');
+  });
+
 
   function normalizeFieldKey(k) { return (k || '').toString().trim().toLowerCase(); }
 
@@ -377,10 +425,11 @@
     container.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
 
     try {
+      const itemId = (window._itemId || window._singleItemId || '').toString().trim();
       const resp = await fetch('/api/DynamicTable/PagedQuery', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ table: cfg.DictTable, filters })
+        body: JSON.stringify({ table: cfg.DictTable, itemId, filters })
       });
       if (!resp.ok) {
         const text = await resp.text();
@@ -777,7 +826,10 @@
         const resultFieldAttr = canDropdown ? ` data-lookup-result-field="${escapeHtml(meta?.result || '')}"` : "";
         const tdClasses = [alignClass];
         if (canDropdown) tdClasses.push('lookup-cell');
+        const isPartNum = isPartNumField(fn);
+        if (isPartNum) tdClasses.push('partnum-field');
         const classAttr = tdClasses.length ? ` class="${tdClasses.join(' ')}"` : '';
+        const partNumBtn = isPartNum ? '<button type="button" class="partnum-lookup-btn" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>' : '';
         const lookupAttr = canDropdown
           ? ` data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
           : "";
@@ -787,7 +839,7 @@
           ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
              <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
           : '';
-        html += `<td${classAttr}${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}>${dateAddon}</td>`;
+        html += `<td${classAttr}${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}>${dateAddon}${partNumBtn}</td>`;
       });
       html += '</tr></tbody></table></div>';
       container.innerHTML = html;
@@ -888,7 +940,7 @@
             ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
                <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
             : '';
-          html += `<td class="${alignClass}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}"></span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" value=""${roAttr}>${dateAddon}</td>`;
+          html += `<td class="${alignClass}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}"></span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" value=""${roAttr}>${dateAddon}${partNumBtn}</td>`;
           return;
         }
         const fieldLower = fn.toLowerCase();
@@ -959,7 +1011,10 @@
         const isDate = isDateType(fieldMeta);
         const tdClasses = [alignClass];
         if (canDropdown) tdClasses.push('lookup-cell');
+        const isPartNum = isPartNumField(fn);
+        if (isPartNum) tdClasses.push('partnum-field');
         const classAttr = tdClasses.length ? ` class="${tdClasses.join(' ')}"` : '';
+        const partNumBtn = isPartNum ? '<button type="button" class="partnum-lookup-btn" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>' : '';
         const keyFieldAttr = canDropdown ? ` data-lookup-key-field="${escapeHtml(meta?.key || '')}"` : "";
         const resultFieldAttr = canDropdown ? ` data-lookup-result-field="${escapeHtml(meta?.result || '')}"` : "";
         const lookupAttr = canDropdown
@@ -971,7 +1026,7 @@
           ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
              <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
           : '';
-        html += `<td${classAttr}${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" data-init="${escapeHtml(editText)}" value="${escapeHtml(editText)}"${roAttr}>${dateAddon}</td>`;
+        html += `<td${classAttr}${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" data-init="${escapeHtml(editText)}" value="${escapeHtml(editText)}"${roAttr}>${dateAddon}${partNumBtn}</td>`;
       });
       html += '</tr>';
     });
@@ -1121,13 +1176,16 @@
         const alignClass = getAlignClass(fieldMeta, null);
         const tdClasses = [alignClass];
         if (canDropdown) tdClasses.push('lookup-cell');
+        const isPartNum = isPartNumField(fn);
+        if (isPartNum) tdClasses.push('partnum-field');
         const classAttr = tdClasses.length ? ` class="${tdClasses.join(' ')}"` : '';
+        const partNumBtn = isPartNum ? '<button type="button" class="partnum-lookup-btn" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>' : '';
         const keyFieldAttr = canDropdown ? ` data-lookup-key-field="${escapeHtml(meta?.key || '')}"` : "";
         const resultFieldAttr = canDropdown ? ` data-lookup-result-field="${escapeHtml(meta?.result || '')}"` : "";
         const lookupAttr = canDropdown
           ? ` data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
           : "";
-        html += `<td${classAttr}${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="${viewClass}${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="${editClass}${roClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}></td>`;
+        html += `<td${classAttr}${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="${viewClass}${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="${editClass}${roClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}>${partNumBtn}</td>`;
       });
       html += '</tr>';
 
@@ -1221,6 +1279,12 @@
     }
     await renderTable(rows);
     if (keepEdit) applyEditMode(true);
+  };
+
+  window.__paper3lSubDetailRefresh = async () => {
+    const parentTabId = (cfg.ParentTabId || '').toString();
+    const rowData = window._multiTabSelectedRows?.[parentTabId] || null;
+    await loadSubDetail(rowData || null);
   };
 
   window.addEventListener('multiTabRowSelected', function(ev) {
