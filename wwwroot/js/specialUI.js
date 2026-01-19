@@ -392,12 +392,14 @@
                                 <div class="row">
                                     <div class="col-md-7">
                                         <div class="table-responsive strike-table-wrapper">
-                                            <table class="table table-sm table-bordered table-striped" id="gridOtherAccDtl">
+                                            <table class="table table-sm table-bordered table-striped" id="gridOtherAccDtl" data-dict-table="APRdAdvanceOtherAccDtl">
                                                 <thead class="table-light">
                                                     <tr>
-                                                        <th style="width: 50px;">項目</th>
+                                                        <th style="width: 40px;">項目</th>
                                                         <th>科目</th>
+                                                        <th>科目名稱</th>
                                                         <th>子科目</th>
+                                                        <th>子科目名稱</th>
                                                         <th>金額</th>
                                                         <th>外幣金額</th>
                                                     </tr>
@@ -411,15 +413,18 @@
                                             <div class="card-header py-1">手續費(台幣)</div>
                                             <div class="card-body p-2">
                                                 <div class="table-responsive strike-table-wrapper">
-                                                    <table class="table table-sm table-bordered table-striped" id="gridStrikePost">
+                                                    <table class="table table-sm table-bordered table-striped" id="gridStrikePost" data-dict-table="APRdStrikePost">
                                                         <thead class="table-light">
                                                             <tr>
                                                                 <th style="width: 40px;">項目</th>
                                                                 <th>金額</th>
                                                                 <th>銀行</th>
+                                                                <th>銀行名稱</th>
                                                                 <th>帳號</th>
                                                                 <th>科目</th>
+                                                                <th>科目名稱</th>
                                                                 <th>明細科目</th>
+                                                                <th>明細科目名稱</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody></tbody>
@@ -501,12 +506,36 @@
                     return;
                 }
 
-                // 使用通用 API 同時載入所有資料
+                // 使用通用 API 載入來源和票據資料
                 this.loadTableData('APRdAdvanceSource', paperNum, this.renderSourceGrids.bind(this));
                 this.loadTableData('APRdAdvanceBill', paperNum, this.renderBillGrid.bind(this));
-                this.loadTableData('APRdAdvanceOtherAccDtl', paperNum, this.renderOtherAccDtlGrid.bind(this));
-                this.loadTableData('APRdStrikePost', paperNum, this.renderStrikePostGrid.bind(this));
+                // 使用 AdvanceDtl API 載入其他預收付和手續費（直接抓資料庫）
+                this.loadAdvanceDtlData('GetOtherAcc', 'advance', paperNum, this.renderOtherAccDtlGrid.bind(this));
+                this.loadAdvanceDtlData('GetStrikePost', 'advance', paperNum, this.renderStrikePostGrid.bind(this));
                 this.loadBankInfo(paperNum);
+            },
+
+            // 使用 AdvanceDtl API 載入資料（直接抓資料庫，不需資料辭典）
+            loadAdvanceDtlData: function(apiMethod, moduleType, paperNum, callback) {
+                $.ajax({
+                    url: '/api/AdvanceDtl/' + apiMethod,
+                    method: 'GET',
+                    data: {
+                        moduleType: moduleType,
+                        paperNum: paperNum
+                    },
+                    success: function(resp) {
+                        if (resp && resp.ok && resp.rows) {
+                            callback(resp.rows);
+                        } else {
+                            callback([]);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('載入 ' + apiMethod + ' 資料失敗:', error);
+                        callback([]);
+                    }
+                });
             },
 
             clearAllGrids: function() {
@@ -646,14 +675,16 @@
                 const tbody = $('#gridOtherAccDtl tbody');
                 tbody.empty();
                 if (!data || data.length === 0) {
-                    tbody.append('<tr><td colspan="5" class="text-center text-muted">無資料</td></tr>');
+                    tbody.append('<tr><td colspan="7" class="text-center text-muted">無資料</td></tr>');
                     return;
                 }
                 data.forEach(function(row) {
                     const tr = $('<tr>');
                     tr.append($('<td>').text(self.getField(row, 'Item') || ''));
                     tr.append($('<td>').text(self.getField(row, 'AccId') || ''));
+                    tr.append($('<td>').text(self.getField(row, 'AccIdName') || ''));
                     tr.append($('<td>').text(self.getField(row, 'SubAccId') || ''));
+                    tr.append($('<td>').text(self.getField(row, 'SubAccName') || ''));
                     tr.append($('<td>').text(self.formatNumber(self.getField(row, 'Amount'))));
                     tr.append($('<td>').text(self.formatNumber(self.getField(row, 'AmountOg'))));
                     tbody.append(tr);
@@ -665,7 +696,7 @@
                 const tbody = $('#gridStrikePost tbody');
                 tbody.empty();
                 if (!data || data.length === 0) {
-                    tbody.append('<tr><td colspan="6" class="text-center text-muted">無資料</td></tr>');
+                    tbody.append('<tr><td colspan="9" class="text-center text-muted">無資料</td></tr>');
                     return;
                 }
                 data.forEach(function(row) {
@@ -673,9 +704,12 @@
                     tr.append($('<td>').text(self.getField(row, 'Item') || ''));
                     tr.append($('<td>').text(self.formatNumber(self.getField(row, 'PostAmount'))));
                     tr.append($('<td>').text(self.getField(row, 'PostBankId') || ''));
+                    tr.append($('<td>').text(self.getField(row, 'PostBankName') || ''));
                     tr.append($('<td>').text(self.getField(row, 'PostAccountId') || ''));
                     tr.append($('<td>').text(self.getField(row, 'PostAccId') || ''));
+                    tr.append($('<td>').text(self.getField(row, 'AccIdName') || ''));
                     tr.append($('<td>').text(self.getField(row, 'PostSubAccId') || ''));
+                    tr.append($('<td>').text(self.getField(row, 'SubAccName') || ''));
                     tbody.append(tr);
                 });
             },
