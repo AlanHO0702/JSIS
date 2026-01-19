@@ -150,6 +150,19 @@ public class StoredProcController : ControllerBase
         try
         {
             await conn.OpenAsync();
+
+            // 如果參數中有 PaperId，嘗試解析為 RealTableName
+            if (args.TryGetValue("PaperId", out var paperIdObj) && paperIdObj != null)
+            {
+                var dictPaperId = paperIdObj is JsonElement je ? je.GetString() : paperIdObj.ToString();
+                if (!string.IsNullOrWhiteSpace(dictPaperId))
+                {
+                    var realPaperId = await ResolveRealTableNameAsync(conn, dictPaperId);
+                    if (!string.IsNullOrWhiteSpace(realPaperId))
+                        args["PaperId"] = realPaperId;
+                }
+            }
+
             tx = (SqlTransaction)await conn.BeginTransactionAsync();
 
             await using var cmd = new SqlCommand(def.ProcName, conn, tx)
@@ -544,6 +557,20 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
  WHERE TableName = @tbl;";
 
         await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@tbl", dictTableName ?? string.Empty);
+        var obj = await cmd.ExecuteScalarAsync();
+        if (obj == null || obj == DBNull.Value) return null;
+        return obj.ToString();
+    }
+
+    private async Task<string?> ResolveRealTableNameAsync(SqlConnection conn, string dictTableName)
+    {
+        const string sql = @"
+SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
+  FROM CURdTableName WITH (NOLOCK)
+ WHERE TableName = @tbl;";
+
+        await using var cmd = new SqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("@tbl", dictTableName ?? string.Empty);
         var obj = await cmd.ExecuteScalarAsync();
         if (obj == null || obj == DBNull.Value) return null;

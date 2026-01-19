@@ -440,4 +440,37 @@ UPDATE CURdPaperPaper
 
         return Ok(list);
     }
+
+    public class InqMustRow
+    {
+        public string FieldMust { get; set; } = "";
+        public string ShowError { get; set; } = "";
+    }
+
+    // GET /api/DictSetupApi/InqMust?paperId=...
+    [HttpGet("InqMust")]
+    public async Task<IActionResult> GetInqMust([FromQuery] string paperId)
+    {
+        if (string.IsNullOrWhiteSpace(paperId))
+            return BadRequest("paperId is required.");
+
+        var list = new List<InqMustRow>();
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        using var cmd = new SqlCommand("exec CURdInqSelectedGetMust @PaperId", conn);
+        cmd.Parameters.AddWithValue("@PaperId", paperId);
+        using var rd = await cmd.ExecuteReaderAsync();
+
+        while (await rd.ReadAsync())
+        {
+            list.Add(new InqMustRow
+            {
+                FieldMust = rd["sFieldMust"]?.ToString() ?? "",
+                ShowError = rd["sShowError"]?.ToString() ?? ""
+            });
+        }
+
+        return Ok(list);
+    }
 }
