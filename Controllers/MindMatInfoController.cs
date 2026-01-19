@@ -49,6 +49,13 @@ public class MindMatInfoController : ControllerBase
             .OrderByDescending(x => x.Partnum)
             .ThenByDescending(x => x.Revision);
 
+        var totalCount = await query.CountAsync();
+        if (pageSize <= 0)
+        {
+            var allData = await query.ToListAsync();
+            return Ok(new { totalCount, data = allData });
+        }
+
         var result = await _pagedService.GetPagedAsync(query, page, pageSize);
         return Ok(new { totalCount = result.TotalCount, data = result.Data });
     }
