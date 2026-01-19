@@ -1,0 +1,393 @@
+@*
+  AP000010 - 預收付明細維護
+  對應 Delphi: AdvanceDtlDLL
+  模組類型: advance
+*@
+@model dynamic
+@{
+    ViewData["ModuleType"] = "advance";
+    ViewData["ShowOtherTab"] = true;
+    ViewData["DomId"] = "ap000010";
+
+    // Tab 標籤
+    ViewData["SourceTab1Label"] = "(外幣)預收付帳款";
+    ViewData["SourceTab2Label"] = "(本位幣)預收付帳款";
+    ViewData["BankTabLabel"] = "銀存預收付";
+    ViewData["BillTabLabel"] = "票據預收付";
+    ViewData["OtherTabLabel"] = "其他預收付";
+
+    // 來源 Grid 欄位標籤
+    ViewData["CashAmountLabel"] = "現金預收付";
+    ViewData["BankAmountLabel"] = "銀存預收付";
+    ViewData["BillAmountLabel"] = "票據預收付";
+    ViewData["OtherAmountLabel"] = "其他預收付";
+
+    // 票據 Grid 欄位標籤
+    ViewData["BillIdLabel"] = "票據號碼";
+    ViewData["BillAmountFieldLabel"] = "本位幣金額";
+    ViewData["PayBankIdLabel"] = "開票銀行";
+    ViewData["PayAccountIdLabel"] = "開票帳戶";
+    ViewData["RecvBankIdLabel"] = "收票銀行";
+    ViewData["RecvAccountIdLabel"] = "收票帳戶";
+    ViewData["BillAccIdLabel"] = "票據科目";
+    ViewData["BillTypeIdLabel"] = "票別";
+    ViewData["DueDateLabel"] = "到期日";
+
+    // 其他欄位標籤
+    ViewData["AccIdLabel"] = "科目";
+    ViewData["SubAccIdLabel"] = "子科目";
+    ViewData["AmountLabel"] = "金額";
+    ViewData["AmountOgLabel"] = "金額(外幣)";
+
+    // 手續費欄位標籤
+    ViewData["PostAmountLabel"] = "扣款金額";
+    ViewData["PostBankIdLabel"] = "扣款銀行";
+    ViewData["PostAccountIdLabel"] = "扣款帳號";
+    ViewData["PostAccIdLabel"] = "扣款科目";
+    ViewData["PostSubAccIdLabel"] = "扣款明細科目";
+}
+
+@await Html.PartialAsync("_APRdAdvanceDtl", Model, ViewData)
+
+<script>
+(() => {
+    window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+    const MODULE_TYPE = 'advance';
+    const DOM_ID = 'ap000010';
+    const MAIN_TABLE = 'APRdAdvanceMain';
+
+    const readPaperNum = (ctx) => {
+        const v = (ctx?.paperNum || window._paperNum || '').toString().trim();
+        if (v) return v;
+        if (typeof window.getPaperNum === 'function') {
+            try { return (window.getPaperNum() || '').toString().trim(); } catch { /* ignore */ }
+        }
+        return '';
+    };
+
+    const withJwtHeaders = (init = {}) => {
+        const jwt = localStorage.getItem('jwtId');
+        const headers = Object.assign({}, init.headers || {});
+        if (jwt) headers['X-JWTID'] = jwt;
+        return { ...init, headers };
+    };
+
+    // 預收付明細維護主邏輯
+    const openAdvanceDtl = async (ctx) => {
+        const paperNum = readPaperNum(ctx);
+        if (!paperNum) {
+            return Swal.fire({ icon: 'info', title: '沒有單號' });
+        }
+
+        const cfg = window._advanceDtlConfigs?.[DOM_ID];
+        if (!cfg) {
+            return Swal.fire({ icon: 'error', title: '設定載入失敗' });
+        }
+
+        // 1. 驗證必要欄位 (客戶編號、幣別匯率)
+        const checkResp = await fetch(`/api/AdvanceDtl/Check?moduleType=${MODULE_TYPE}&paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
+        const checkData = await checkResp.json();
+        if (!checkData.ok) {
+            Swal.fire({ icon: 'warning', title: checkData.error || '資料驗證失敗' });
+            hidePanel();
+            return;
+        }
+
+        // 顯示面板
+        showPanel();
+
+        // 2. 載入主檔資料
+        await loadMasterData(paperNum, cfg);
+
+        // 3. 載入來源資料
+        await loadSourceData(paperNum, cfg);
+
+        // 4. 載入銀行下拉選項
+        await loadBankOptions(paperNum, cfg);
+
+        // 5. 載入票據資料
+        await loadBillData(paperNum, cfg);
+
+        // 6. 載入其他科目明細
+        if (cfg.showOtherTab) {
+            await loadOtherAccData(paperNum, cfg);
+            await loadStrikePostData(paperNum, cfg);
+        }
+    };
+
+    // 顯示面板
+    const showPanel = () => {
+        const wrapper = document.getElementById(DOM_ID);
+        if (wrapper) wrapper.style.display = 'block';
+    };
+
+    // 隱藏面板
+    const hidePanel = () => {
+        const wrapper = document.getElementById(DOM_ID);
+        if (wrapper) wrapper.style.display = 'none';
+    };
+
+    // 載入主檔資料
+    const loadMasterData = async (paperNum, cfg) => {
+        try {
+            const resp = await fetch(`/api/AdvanceDtl/GetMaster?moduleType=${cfg.moduleType}&paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
+            const data = await resp.json();
+            if (!data.ok) {
+                console.error('載入主檔資料失敗:', data.error);
+                return;
+            }
+            window._advanceMasterData = data.data || {};
+        } catch (err) {
+            console.error('載入主檔資料錯誤:', err);
+        }
+    };
+
+    // 載入來源資料
+    const loadSourceData = async (paperNum, cfg) => {
+        try {
+            const resp = await fetch(`/api/AdvanceDtl/GetSource?moduleType=${cfg.moduleType}&paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
+            const data = await resp.json();
+            if (!data.ok) {
+                console.error('載入來源資料失敗:', data.error);
+                return;
+            }
+            renderSourceGrid(data.rows || [], cfg);
+        } catch (err) {
+            console.error('載入來源資料錯誤:', err);
+        }
+    };
+
+    // 渲染來源 Grid
+    const renderSourceGrid = (rows, cfg) => {
+        const bodyOg = document.getElementById(`${cfg.domId}-sourceBody-og`);
+        const bodyNt = document.getElementById(`${cfg.domId}-sourceBody-nt`);
+        if (!bodyOg || !bodyNt) return;
+
+        // 外幣 Grid
+        bodyOg.innerHTML = rows.map((r, i) => `
+            <tr data-index="${i}" data-paper-num="${r.PaperNum || ''}" data-item="${r.Item || ''}">
+                <td><span class="cell-view">${r.Item || ''}</span></td>
+                <td><input class="cell-edit" data-field="CashAmountOg" value="${r.CashAmountOg || 0}"></td>
+                <td><input class="cell-edit" data-field="BankAmountOg" value="${r.BankAmountOg || 0}"></td>
+                <td><input class="cell-edit" data-field="BillAmountOg" value="${r.BillAmountOg || 0}"></td>
+                ${cfg.showOtherTab ? `<td><input class="cell-edit" data-field="OtherAmountOg" value="${r.OtherAmountOg || 0}"></td>` : ''}
+            </tr>
+        `).join('');
+
+        // 本位幣 Grid
+        bodyNt.innerHTML = rows.map((r, i) => `
+            <tr data-index="${i}" data-paper-num="${r.PaperNum || ''}" data-item="${r.Item || ''}">
+                <td><span class="cell-view readonly-cell">${r.Item || ''}</span></td>
+                <td><input class="cell-edit" data-field="CashAmount" value="${r.CashAmount || 0}"></td>
+                <td><input class="cell-edit" data-field="BankAmount" value="${r.BankAmount || 0}"></td>
+                <td><input class="cell-edit" data-field="BillAmount" value="${r.BillAmount || 0}"></td>
+                ${cfg.showOtherTab ? `<td><input class="cell-edit" data-field="OtherAmount" value="${r.OtherAmount || 0}"></td>` : ''}
+            </tr>
+        `).join('');
+    };
+
+    // 載入銀行下拉選項 (使用共用模板的函式)
+    const loadBankOptions = async (paperNum, cfg) => {
+        if (window.AdvanceDtlManager) {
+            // 載入銀行選項
+            await window.AdvanceDtlManager.loadBankOptions(cfg.domId, cfg.moduleType);
+            // 從主檔設定預選值
+            const masterData = window._advanceMasterData || {};
+            await window.AdvanceDtlManager.setBankAndAccountFromMaster(cfg.domId, masterData);
+        }
+    };
+
+    // 載入票據資料
+    const loadBillData = async (paperNum, cfg) => {
+        try {
+            const resp = await fetch(`/api/AdvanceDtl/GetBill?moduleType=${cfg.moduleType}&paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
+            const data = await resp.json();
+            if (!data.ok) {
+                console.error('載入票據資料失敗:', data.error);
+                return;
+            }
+            renderBillGrid(data.rows || [], cfg);
+        } catch (err) {
+            console.error('載入票據資料錯誤:', err);
+        }
+    };
+
+    // 渲染票據 Grid
+    const renderBillGrid = (rows, cfg) => {
+        const body = document.getElementById(`${cfg.domId}-billBody`);
+        if (!body) return;
+
+        body.innerHTML = rows.map((r, i) => `
+            <tr data-index="${i}" data-paper-num="${r.PaperNum || ''}" data-item="${r.Item || ''}">
+                <td><span class="cell-view">${r.Item || ''}</span></td>
+                <td><input class="cell-edit" data-field="BillId" value="${r.BillId || ''}"></td>
+                <td><input class="cell-edit" data-field="Amount" value="${r.Amount || 0}"></td>
+                <td><input class="cell-edit" data-field="PayBankId" value="${r.PayBankId || ''}"></td>
+                <td><span class="cell-view">${r.BankNamePay || ''}</span></td>
+                <td><input class="cell-edit" data-field="PayAccountId" value="${r.PayAccountId || ''}"></td>
+                <td><input class="cell-edit" data-field="RecvBankId" value="${r.RecvBankId || ''}"></td>
+                <td><span class="cell-view">${r.BankNameRecv || ''}</span></td>
+                <td><input class="cell-edit" data-field="RecvAccountId" value="${r.RecvAccountId || ''}"></td>
+                <td><input class="cell-edit" data-field="BillAccId" value="${r.BillAccId || ''}"></td>
+                <td><input class="cell-edit" data-field="BillTypeId" value="${r.BillTypeId || ''}"></td>
+                <td><input class="cell-edit" data-field="DueDate" type="date" value="${r.DueDate || ''}"></td>
+                <td><input class="cell-edit" data-field="Inhibit" type="checkbox" ${r.Inhibit ? 'checked' : ''}></td>
+                <td><input class="cell-edit" data-field="ParaLine" type="checkbox" ${r.ParaLine ? 'checked' : ''}></td>
+                <td><input class="cell-edit" data-field="Title" type="checkbox" ${r.Title ? 'checked' : ''}></td>
+            </tr>
+        `).join('');
+    };
+
+    // 載入其他科目明細
+    const loadOtherAccData = async (paperNum, cfg) => {
+        try {
+            const resp = await fetch(`/api/AdvanceDtl/GetOtherAcc?moduleType=${cfg.moduleType}&paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
+            const data = await resp.json();
+            if (!data.ok) {
+                console.error('載入其他科目資料失敗:', data.error);
+                return;
+            }
+            renderOtherAccGrid(data.rows || [], cfg);
+        } catch (err) {
+            console.error('載入其他科目資料錯誤:', err);
+        }
+    };
+
+    // 渲染其他科目 Grid
+    const renderOtherAccGrid = (rows, cfg) => {
+        const body = document.getElementById(`${cfg.domId}-otherAccBody`);
+        if (!body) return;
+
+        body.innerHTML = rows.map((r, i) => `
+            <tr data-index="${i}" data-paper-num="${r.PaperNum || ''}" data-item="${r.Item || ''}">
+                <td><span class="cell-view">${r.Item || ''}</span></td>
+                <td><input class="cell-edit" data-field="AccId" value="${r.AccId || ''}"></td>
+                <td><span class="cell-view">${r.AccIdName || ''}</span></td>
+                <td><input class="cell-edit" data-field="SubAccId" value="${r.SubAccId || ''}"></td>
+                <td><span class="cell-view">${r.SubAccName || ''}</span></td>
+                <td><input class="cell-edit" data-field="Amount" value="${r.Amount || 0}"></td>
+                <td><input class="cell-edit" data-field="AmountOg" value="${r.AmountOg || 0}"></td>
+            </tr>
+        `).join('');
+    };
+
+    // 載入手續費資料
+    const loadStrikePostData = async (paperNum, cfg) => {
+        try {
+            const resp = await fetch(`/api/AdvanceDtl/GetStrikePost?moduleType=${cfg.moduleType}&paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
+            const data = await resp.json();
+            if (!data.ok) {
+                console.error('載入手續費資料失敗:', data.error);
+                return;
+            }
+            renderStrikePostGrid(data.rows || [], cfg);
+        } catch (err) {
+            console.error('載入手續費資料錯誤:', err);
+        }
+    };
+
+    // 渲染手續費 Grid
+    const renderStrikePostGrid = (rows, cfg) => {
+        const body = document.getElementById(`${cfg.domId}-strikePostBody`);
+        if (!body) return;
+
+        body.innerHTML = rows.map((r, i) => `
+            <tr data-index="${i}" data-paper-num="${r.PaperNum || ''}" data-item="${r.Item || ''}">
+                <td><span class="cell-view">${r.Item || ''}</span></td>
+                <td><input class="cell-edit" data-field="PostAmount" value="${r.PostAmount || 0}"></td>
+                <td><input class="cell-edit" data-field="PostBankId" value="${r.PostBankId || ''}"></td>
+                <td><span class="cell-view">${r.PostBankName || ''}</span></td>
+                <td><input class="cell-edit" data-field="PostAccountId" value="${r.PostAccountId || ''}"></td>
+                <td><input class="cell-edit" data-field="PostAccId" value="${r.PostAccId || ''}"></td>
+                <td><span class="cell-view">${r.AccIdName || ''}</span></td>
+                <td><input class="cell-edit" data-field="PostSubAccId" value="${r.PostSubAccId || ''}"></td>
+                <td><span class="cell-view">${r.SubAccName || ''}</span></td>
+            </tr>
+        `).join('');
+    };
+
+    // 確定按鈕處理
+    const handleOK = async (ctx) => {
+        const paperNum = readPaperNum(ctx);
+        if (!paperNum) {
+            return Swal.fire({ icon: 'info', title: '沒有單號' });
+        }
+
+        const cfg = window._advanceDtlConfigs?.[DOM_ID];
+        if (!cfg) {
+            return Swal.fire({ icon: 'error', title: '設定載入失敗' });
+        }
+
+        try {
+            // 1. 執行檢查 (APRDAdvanceCheck)
+            const checkResp = await fetch(`/api/AdvanceDtl/RunCheck`, withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    moduleType: cfg.moduleType,
+                    paperNum: paperNum
+                })
+            }));
+            const checkData = await checkResp.json();
+            if (!checkData.ok) {
+                return Swal.fire({ icon: 'error', title: checkData.error || '檢查失敗' });
+            }
+
+            // 2. 執行插入彙總 (APRdAdvanceSubInsSum)
+            const sumResp = await fetch(`/api/AdvanceDtl/InsertSum`, withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    moduleType: cfg.moduleType,
+                    paperNum: paperNum
+                })
+            }));
+            const sumData = await sumResp.json();
+            if (!sumData.ok) {
+                return Swal.fire({ icon: 'error', title: sumData.error || '彙總失敗' });
+            }
+
+            // 3. 預設子科目 (APRdDefaultSubAccID)
+            const defaultResp = await fetch(`/api/AdvanceDtl/DefaultSubAccId`, withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    moduleType: cfg.moduleType,
+                    paperNum: paperNum
+                })
+            }));
+
+            await Swal.fire({ icon: 'success', title: '完成', timer: 1000, showConfirmButton: false });
+            // 沖帳明細更新會在 Modal 關閉事件中觸發
+        } catch (err) {
+            Swal.fire({ icon: 'error', title: String(err?.message || err) });
+        }
+    };
+
+    // 綁定確定按鈕事件
+    document.addEventListener('DOMContentLoaded', () => {
+        const btnOK = document.getElementById(`${DOM_ID}-btnOK`);
+        if (btnOK) {
+            btnOK.addEventListener('click', () => handleOK({}));
+        }
+
+        // Modal 關閉時觸發沖帳明細更新
+        const modalEl = document.getElementById(`${DOM_ID}-modal`);
+        if (modalEl) {
+            modalEl.addEventListener('hidden.bs.modal', () => {
+                // 觸發沖帳明細更新（通知 StrikeDetail 元件重新載入資料）
+                if (typeof window.triggerSpecialUIUpdate === 'function') {
+                    window.triggerSpecialUIUpdate();
+                }
+            });
+        }
+    });
+
+    // 註冊按鈕處理函式
+    window.ActionRailCustomHandlers['AP000010'] = {
+        btnC1: openAdvanceDtl,
+        btnOK: handleOK
+    };
+})();
+</script>

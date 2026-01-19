@@ -1,0 +1,1283 @@
+@*
+  預收付/退款/收款明細維護模板
+
+  配置參數 (透過 ViewData 傳入):
+  - ModuleType: "advance" | "advanceRev" | "recv" - 模組類型
+  - ShowOtherTab: bool - 是否顯示其他收付 Tab
+  - DomId: string - DOM ID 前綴
+
+  表格名稱 (依 ModuleType 自動決定):
+  - advance: APRdAdvanceMain, APRdAdvanceSource, APRdAdvanceBill, APRdAdvanceOtherAccDtl, APRdAdvanceStrikePost
+  - advanceRev: APRdAdvanceRevMain, APRdAdvanceRevSource, APRdAdvanceRevBill, APRdAdvanceRevOtherAccDtl, APRdAdvanceRevStrikePost
+  - recv: SPOdRecvMain, SPOdRecvSource, SPOdRecvBill
+
+  標籤配置 (透過 ViewData 傳入):
+  - SourceTab1Label: 來源 Tab1 標籤 (預設: "(外幣)預收付帳款")
+  - SourceTab2Label: 來源 Tab2 標籤 (預設: "(本位幣)預收付帳款")
+  - BankTabLabel: 銀存收付 Tab 標籤 (預設: "銀存預收付")
+  - BillTabLabel: 票據收付 Tab 標籤 (預設: "票據預收付")
+  - OtherTabLabel: 其他收付 Tab 標籤 (預設: "其他預收付")
+
+  來源 Grid 欄位標籤:
+  - ItemLabel: 項目 (固定: "項目")
+  - CashAmountLabel: 現金收付標籤 (預設: "現金預收付")
+  - BankAmountLabel: 銀存收付標籤 (預設: "銀存預收付")
+  - BillAmountLabel: 票據收付標籤 (預設: "票據預收付")
+  - OtherAmountLabel: 其他收付標籤 (預設: "其他預收付")
+*@
+
+@{
+    // 模組類型
+    var moduleType = (ViewData["ModuleType"] ?? "advance").ToString().ToLower();
+    var showOtherTab = (bool)(ViewData["ShowOtherTab"] ?? true);
+    var domId = (ViewData["DomId"] ?? "advanceDtl").ToString();
+
+    // 根據模組類型決定表格名稱
+    string mainTable, sourceTable, billTable, otherAccDtlTable, strikePostTable;
+    string checkProc, autoCountProc, insertSumProc;
+    string payBankIdProc, recvBankIdProc, payAccountProc, recvAccountProc;
+    string strikeGetItemProc, billDefaultProc, dueDateProc;
+
+    switch (moduleType)
+    {
+        case "advancerev":
+            mainTable = "APRdAdvanceRevMain";
+            sourceTable = "APRdAdvanceRevSource";
+            billTable = "APRdAdvanceRevBill";
+            otherAccDtlTable = "APRdAdvanceRevOtherAccDtl";
+            strikePostTable = "APRdAdvanceRevStrikePost";
+            checkProc = "APRDAdvanceRevCheck";
+            autoCountProc = "APRdAdvanceRevAutoCount";
+            insertSumProc = "APRdAdvanceRevSubInsSum";
+            payBankIdProc = "APRDAdvanceRevPayBankIdGet";
+            recvBankIdProc = "APRDAdvanceRecvBankIdGet";
+            payAccountProc = "APRdGetPayAccount";
+            recvAccountProc = "APRdGetRecvAccount";
+            strikeGetItemProc = "APRdStrikeDtlGetItem";
+            billDefaultProc = "APRdStrikeBillDefault";
+            dueDateProc = "ARPdGetBillDueDate";
+            break;
+        case "recv":
+            mainTable = "SPOdRecvMain";
+            sourceTable = "SPOdRecvSource";
+            billTable = "SPOdRecvBill";
+            otherAccDtlTable = "";
+            strikePostTable = "";
+            checkProc = "SPOdRecvCheck";
+            autoCountProc = "SPOdRecvAutoCount";
+            insertSumProc = "SPOdRecvSubInsSum";
+            payBankIdProc = "SPOdRecvBankIdGet";
+            recvBankIdProc = "SPOdRecvBankIdGet";
+            payAccountProc = "SPOdRecvGetAccount";
+            recvAccountProc = "SPOdRecvGetAccount";
+            strikeGetItemProc = "APRdStrikeDtlGetItem";
+            billDefaultProc = "SPOdRecvBillDefault";
+            dueDateProc = "ARPdGetBillDueDate";
+            break;
+        default: // advance
+            mainTable = "APRdAdvanceMain";
+            sourceTable = "APRdAdvanceSource";
+            billTable = "APRdAdvanceBill";
+            otherAccDtlTable = "APRdAdvanceOtherAccDtl";
+            strikePostTable = "APRdAdvanceStrikePost";
+            checkProc = "APRDAdvanceCheck";
+            autoCountProc = "APRdAdvanceAutoCount";
+            insertSumProc = "APRdAdvanceSubInsSum";
+            payBankIdProc = "APRDAdvancePayBankIdGet";
+            recvBankIdProc = "APRDAdvanceRecvBankIdGet";
+            payAccountProc = "APRdGetPayAccount";
+            recvAccountProc = "APRdGetRecvAccount";
+            strikeGetItemProc = "APRdStrikeDtlGetItem";
+            billDefaultProc = "APRdStrikeBillDefault";
+            dueDateProc = "ARPdGetBillDueDate";
+            break;
+    }
+
+    // 對於 recv 模組，強制不顯示其他 Tab
+    if (moduleType == "recv")
+    {
+        showOtherTab = false;
+    }
+
+    // Tab 標籤
+    var sourceTab1Label = (ViewData["SourceTab1Label"] ?? "(外幣)預收付帳款").ToString();
+    var sourceTab2Label = (ViewData["SourceTab2Label"] ?? "(本位幣)預收付帳款").ToString();
+    var bankTabLabel = (ViewData["BankTabLabel"] ?? "銀存預收付").ToString();
+    var billTabLabel = (ViewData["BillTabLabel"] ?? "票據預收付").ToString();
+    var otherTabLabel = (ViewData["OtherTabLabel"] ?? "其他預收付").ToString();
+
+    // 來源 Grid 欄位標籤
+    var cashAmountLabel = (ViewData["CashAmountLabel"] ?? "現金預收付").ToString();
+    var bankAmountLabel = (ViewData["BankAmountLabel"] ?? "銀存預收付").ToString();
+    var billAmountLabel = (ViewData["BillAmountLabel"] ?? "票據預收付").ToString();
+    var otherAmountLabel = (ViewData["OtherAmountLabel"] ?? "其他預收付").ToString();
+
+    // 票據 Grid 欄位標籤
+    var billIdLabel = (ViewData["BillIdLabel"] ?? "票據號碼").ToString();
+    var billAmountFieldLabel = (ViewData["BillAmountFieldLabel"] ?? "本位幣金額").ToString();
+    var payBankIdLabel = (ViewData["PayBankIdLabel"] ?? "開票銀行").ToString();
+    var payAccountIdLabel = (ViewData["PayAccountIdLabel"] ?? "開票帳戶").ToString();
+    var recvBankIdLabel = (ViewData["RecvBankIdLabel"] ?? "收票銀行").ToString();
+    var recvAccountIdLabel = (ViewData["RecvAccountIdLabel"] ?? "收票帳戶").ToString();
+    var billAccIdLabel = (ViewData["BillAccIdLabel"] ?? "票據科目").ToString();
+    var billTypeIdLabel = (ViewData["BillTypeIdLabel"] ?? "票別").ToString();
+    var dueDateLabel = (ViewData["DueDateLabel"] ?? "到期日").ToString();
+
+    // 其他欄位標籤
+    var accIdLabel = (ViewData["AccIdLabel"] ?? "科目").ToString();
+    var subAccIdLabel = (ViewData["SubAccIdLabel"] ?? "子科目").ToString();
+    var amountLabel = (ViewData["AmountLabel"] ?? "金額").ToString();
+    var amountOgLabel = (ViewData["AmountOgLabel"] ?? "金額(外幣)").ToString();
+
+    // 手續費欄位標籤
+    var postAmountLabel = (ViewData["PostAmountLabel"] ?? "扣款金額").ToString();
+    var postBankIdLabel = (ViewData["PostBankIdLabel"] ?? "扣款銀行").ToString();
+    var postAccountIdLabel = (ViewData["PostAccountIdLabel"] ?? "扣款帳號").ToString();
+    var postAccIdLabel = (ViewData["PostAccIdLabel"] ?? "扣款科目").ToString();
+    var postSubAccIdLabel = (ViewData["PostSubAccIdLabel"] ?? "扣款明細科目").ToString();
+}
+
+<!-- Modal 彈出視窗 -->
+<div class="modal fade" id="@(domId)-modal" tabindex="-1" aria-labelledby="@(domId)-modalLabel" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg fixed-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white py-0 px-1">
+                <h5 class="modal-title" id="@(domId)-modalLabel">輸入款項</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0">
+<div id="@domId" class="advance-dtl-wrapper">
+    <!-- 來源金額區域 -->
+    <div class="card shadow-sm border-0 rounded-3">
+        <div class="card-header bg-light advance-dtl-wrapper">
+            <ul class="nav nav-tabs card-header-tabs" id="@(domId)-sourceTab" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active px-1 py-0" id="@(domId)-source-og-tab" data-bs-toggle="tab"
+                            data-bs-target="#@(domId)-source-og" type="button" role="tab">@sourceTab1Label</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link px-1 py-0" id="@(domId)-source-nt-tab" data-bs-toggle="tab"
+                            data-bs-target="#@(domId)-source-nt" type="button" role="tab">@sourceTab2Label</button>
+                </li>
+            </ul>
+        </div>
+        <div class="card-body p-0">
+            <div class="tab-content" id="@(domId)-sourceTabContent">
+                <!-- 外幣 Tab -->
+                <div class="tab-pane fade show active" id="@(domId)-source-og" role="tabpanel">
+                    <div class="advance-dtl-nav d-flex gap-1 p-1 border-bottom">
+                        <button type="button" class="btn btn-sm btn-outline-primary" data-action="insert" data-target="source">+</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" data-action="delete" data-target="source">-</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="post" data-target="source">&#10003;</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="cancel" data-target="source">&#10007;</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="refresh" data-target="source">&#8635;</button>
+                    </div>
+                    <div class="table-responsive advance-dtl-source-scroll">
+                        <table id="@(domId)-sourceGrid-og" class="table table-sm table-hover advance-dtl-table"
+                               data-dict-table="@sourceTable" data-mode="og">
+                            <thead class="sticky-top">
+                                <tr>
+                                    <th style="width:60px;">項目</th>
+                                    <th style="width:120px;">@cashAmountLabel</th>
+                                    <th style="width:120px;">@bankAmountLabel</th>
+                                    <th style="width:120px;">@billAmountLabel</th>
+                                    @if (showOtherTab)
+                                    {
+                                        <th style="width:120px;">@otherAmountLabel</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody id="@(domId)-sourceBody-og"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 本位幣 Tab -->
+                <div class="tab-pane fade" id="@(domId)-source-nt" role="tabpanel">
+                    <div class="advance-dtl-nav d-flex gap-1 p-1 border-bottom">
+                        <button type="button" class="btn btn-sm btn-outline-primary" data-action="insert" data-target="source">+</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" data-action="delete" data-target="source">-</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="post" data-target="source">&#10003;</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="cancel" data-target="source">&#10007;</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="refresh" data-target="source">&#8635;</button>
+                    </div>
+                    <div class="table-responsive advance-dtl-source-scroll">
+                        <table id="@(domId)-sourceGrid-nt" class="table table-sm table-hover advance-dtl-table"
+                               data-dict-table="@sourceTable" data-mode="nt">
+                            <thead class="sticky-top">
+                                <tr>
+                                    <th style="width:60px;">項目</th>
+                                    <th style="width:120px;">@cashAmountLabel</th>
+                                    <th style="width:120px;">@bankAmountLabel</th>
+                                    <th style="width:120px;">@billAmountLabel</th>
+                                    @if (showOtherTab)
+                                    {
+                                        <th style="width:120px;">@otherAmountLabel</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody id="@(domId)-sourceBody-nt"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 明細區域 -->
+    <div class="card shadow-sm border-0 rounded-3">
+        <div class="card-header bg-light px-1 py-2">
+            <ul class="nav nav-tabs card-header-tabs" id="@(domId)-detailTab" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active px-1 py-0" id="@(domId)-bank-tab" data-bs-toggle="tab"
+                            data-bs-target="#@(domId)-bank" type="button" role="tab">@bankTabLabel</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link px-1 py-0" id="@(domId)-bill-tab" data-bs-toggle="tab"
+                            data-bs-target="#@(domId)-bill" type="button" role="tab">@billTabLabel</button>
+                </li>
+                @if (showOtherTab)
+                {
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link px-1 py-0" id="@(domId)-other-tab" data-bs-toggle="tab"
+                                data-bs-target="#@(domId)-other" type="button" role="tab">@otherTabLabel</button>
+                    </li>
+                }
+            </ul>
+        </div>
+        <div class="card-body p-0 m-0">
+            <div class="tab-content" id="@(domId)-detailTabContent">
+                <!-- 銀存收付 Tab -->
+                <div class="tab-pane fade show active" id="@(domId)-bank" role="tabpanel">
+                    <div class="p-1">
+                        <div class="row g-3">
+                            <div class="col-12 col-md-6">
+                                <label class="form-label">銀行名稱</label>
+                                <select id="@(domId)-bankId" class="form-select form-select-sm" data-field="BankId"></select>
+                            </div>
+                            <div class="col-12 col-md-6">
+                                <label class="form-label">帳戶編號</label>
+                                <select id="@(domId)-accountId" class="form-select form-select-sm" data-field="AccountId"></select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 票據收付 Tab -->
+                <div class="tab-pane fade" id="@(domId)-bill" role="tabpanel">
+                    <div class="advance-dtl-nav d-flex gap-1 p-2 border-bottom">
+                        <button type="button" class="btn btn-sm btn-outline-primary" data-action="insert" data-target="bill">+</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" data-action="delete" data-target="bill">-</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="post" data-target="bill">&#10003;</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="cancel" data-target="bill">&#10007;</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="refresh" data-target="bill">&#8635;</button>
+                    </div>
+                    <div class="table-responsive advance-dtl-bill-scroll">
+                        <table id="@(domId)-billGrid" class="table table-sm table-hover mb-0 advance-dtl-table"
+                               data-dict-table="@billTable">
+                            <thead class="sticky-top">
+                                <tr>
+                                    <th style="width:50px;">項目</th>
+                                    <th style="width:120px;">@billIdLabel</th>
+                                    <th style="width:100px;">@billAmountFieldLabel</th>
+                                    <th style="width:80px;">@payBankIdLabel</th>
+                                    <th style="width:120px;">開票銀行名稱</th>
+                                    <th style="width:120px;">@payAccountIdLabel</th>
+                                    <th style="width:80px;">@recvBankIdLabel</th>
+                                    <th style="width:120px;">收票銀行名稱</th>
+                                    <th style="width:120px;">@recvAccountIdLabel</th>
+                                    <th style="width:80px;">@billAccIdLabel</th>
+                                    <th style="width:80px;">@billTypeIdLabel</th>
+                                    <th style="width:100px;">@dueDateLabel</th>
+                                    <th style="width:50px;">禁背</th>
+                                    <th style="width:50px;">劃線</th>
+                                    <th style="width:50px;">抬頭</th>
+                                </tr>
+                            </thead>
+                            <tbody id="@(domId)-billBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                @if (showOtherTab)
+                {
+                    <!-- 其他收付 Tab -->
+                    <div class="tab-pane fade" id="@(domId)-other" role="tabpanel">
+                        <div class="row g-0">
+                            <!-- 左側：其他科目明細 -->
+                            <div class="col-12 col-lg-6 border-end">
+                                <div class="advance-dtl-nav d-flex gap-1 p-2 border-bottom">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" data-action="insert" data-target="otherAcc">+</button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" data-action="delete" data-target="otherAcc">-</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-action="post" data-target="otherAcc">&#10003;</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-action="cancel" data-target="otherAcc">&#10007;</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-action="refresh" data-target="otherAcc">&#8635;</button>
+                                </div>
+                                <div class="table-responsive advance-dtl-other-scroll">
+                                    <table id="@(domId)-otherAccGrid" class="table table-sm table-hover mb-0 advance-dtl-table"
+                                           data-dict-table="@otherAccDtlTable">
+                                        <thead class="sticky-top">
+                                            <tr>
+                                                <th style="width:50px;">項目</th>
+                                                <th style="width:80px;">@accIdLabel</th>
+                                                <th style="width:100px;">科目名稱</th>
+                                                <th style="width:80px;">@subAccIdLabel</th>
+                                                <th style="width:100px;">子科目名稱</th>
+                                                <th style="width:100px;">@amountLabel</th>
+                                                <th style="width:100px;">@amountOgLabel</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="@(domId)-otherAccBody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- 右側：手續費 (台幣專用) -->
+                            <div class="col-12 col-lg-6">
+                                <div class="p-2 border-bottom bg-light">
+                                    <strong>手續費(台幣專用)</strong>
+                                </div>
+                                <div class="advance-dtl-nav d-flex gap-1 p-2 border-bottom">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" data-action="insert" data-target="strikePost">+</button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" data-action="delete" data-target="strikePost">-</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-action="post" data-target="strikePost">&#10003;</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-action="cancel" data-target="strikePost">&#10007;</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-action="refresh" data-target="strikePost">&#8635;</button>
+                                </div>
+                                <div class="table-responsive advance-dtl-post-scroll">
+                                    <table id="@(domId)-strikePostGrid" class="table table-sm table-hover mb-0 advance-dtl-table"
+                                           data-dict-table="@strikePostTable">
+                                        <thead class="sticky-top">
+                                            <tr>
+                                                <th style="width:50px;">項目</th>
+                                                <th style="width:100px;">@postAmountLabel</th>
+                                                <th style="width:80px;">@postBankIdLabel</th>
+                                                <th style="width:100px;">銀行名稱</th>
+                                                <th style="width:100px;">@postAccountIdLabel</th>
+                                                <th style="width:80px;">@postAccIdLabel</th>
+                                                <th style="width:100px;">科目</th>
+                                                <th style="width:100px;">@postSubAccIdLabel</th>
+                                                <th style="width:100px;">明細科目</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="@(domId)-strikePostBody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+            </div><!-- end modal-body -->
+            <div class="modal-footer py-0">
+                <button type="button" id="@(domId)-btnOK" class="btn btn-success btn-sm px-1">確定</button>
+                <button type="button" class="btn btn-secondary btn-sm px-1" data-bs-dismiss="modal">取消</button>
+            </div>
+        </div><!-- end modal-content -->
+    </div><!-- end modal-dialog -->
+</div><!-- end modal -->
+
+<style>
+    .fixed-lg {
+        width: 900px;
+        max-width: calc(100vw - 1rem);
+    }
+
+    .advance-dtl-wrapper {
+        padding-top: 0px;
+        padding-bottom: 8px;
+        padding-inline: 4px;
+    }
+
+    .advance-dtl-toolbar {
+        display: none; /* 隱藏原本的工具列，改用 modal footer */
+    }
+
+    .advance-dtl-source-scroll,
+    .advance-dtl-bill-scroll,
+    .advance-dtl-other-scroll,
+    .advance-dtl-post-scroll {
+        max-height: 180px;
+        overflow: auto;
+    }
+
+    .advance-dtl-table {
+        font-size: 13px;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+    .advance-dtl-table th,
+    .advance-dtl-table td {
+        white-space: nowrap;
+        padding: 4px 8px !important;
+        vertical-align: middle;
+        border-right: 1px solid #dee2e6;
+    }
+
+    .advance-dtl-table thead th {
+        background: #f8f9fa;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .advance-dtl-table tbody tr:hover {
+        background: #f1f5f9;
+    }
+
+    .advance-dtl-table tbody tr.row-selected {
+        background: #fff3cd !important;
+    }
+
+    .advance-dtl-table .cell-edit {
+        width: 100%;
+        height: 24px;
+        padding: 2px 4px;
+        font-size: 13px;
+        border: 1px solid #ced4da;
+        border-radius: 2px;
+        box-sizing: border-box;
+    }
+
+    .advance-dtl-table .cell-edit:focus {
+        border-color: #86b7fe;
+        outline: 0;
+        box-shadow: 0 0 0 0.15rem rgba(13, 110, 253, 0.25);
+    }
+
+    .advance-dtl-table .cell-view {
+        display: inline-block;
+        width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .advance-dtl-table .readonly-cell {
+        background: #e9ecef !important;
+        cursor: not-allowed;
+    }
+
+    .advance-dtl-nav .btn {
+        min-width: 28px;
+        padding: 2px 6px;
+        font-size: 12px;
+    }
+
+    .nav-tabs .nav-link {
+        font-size: 14px;
+        font-weight: 500;
+    }
+
+    .nav-tabs .nav-link.active {
+        background: #fff;
+        border-bottom-color: #fff;
+    }
+
+    /* 欄位可調整寬度功能 */
+    .advance-dtl-table th {
+        position: relative;
+    }
+
+    .advance-dtl-table th .col-resizer {
+        position: absolute;
+        right: 0;
+        top: 0;
+        width: 5px;
+        height: 100%;
+        cursor: col-resize;
+        user-select: none;
+        background: transparent;
+    }
+
+    .advance-dtl-table th .col-resizer:hover,
+    .advance-dtl-table th .col-resizer.resizing {
+        background: #0d6efd;
+    }
+
+    .advance-dtl-table.resizing {
+        cursor: col-resize;
+        user-select: none;
+    }
+</style>
+
+<script>
+window._advanceDtlConfigs = window._advanceDtlConfigs || {};
+window._advanceDtlConfigs['@domId'] = {
+    domId: '@domId',
+    moduleType: '@moduleType',
+    showOtherTab: @(showOtherTab ? "true" : "false"),
+    tables: {
+        main: '@mainTable',
+        source: '@sourceTable',
+        bill: '@billTable',
+        otherAccDtl: '@otherAccDtlTable',
+        strikePost: '@strikePostTable'
+    },
+    procs: {
+        check: '@checkProc',
+        autoCount: '@autoCountProc',
+        insertSum: '@insertSumProc',
+        payBankId: '@payBankIdProc',
+        recvBankId: '@recvBankIdProc',
+        payAccount: '@payAccountProc',
+        recvAccount: '@recvAccountProc',
+        strikeGetItem: '@strikeGetItemProc',
+        billDefault: '@billDefaultProc',
+        dueDate: '@dueDateProc'
+    },
+    labels: {
+        sourceTab1: '@sourceTab1Label',
+        sourceTab2: '@sourceTab2Label',
+        bankTab: '@bankTabLabel',
+        billTab: '@billTabLabel',
+        otherTab: '@otherTabLabel',
+        cashAmount: '@cashAmountLabel',
+        bankAmount: '@bankAmountLabel',
+        billAmount: '@billAmountLabel',
+        otherAmount: '@otherAmountLabel'
+    }
+};
+
+/**
+ * 共用的預收付明細操作管理器
+ * 處理 +, -, 打勾(儲存), 打叉(取消), 重新整理 按鈕功能
+ */
+window.AdvanceDtlManager = window.AdvanceDtlManager || (() => {
+    // 儲存各表格的原始資料 (用於取消時恢復)
+    const _originalData = {};
+    // 儲存各表格的當前資料
+    const _currentData = {};
+    // 儲存選中的列索引
+    const _selectedRows = {};
+    // 當前 paperNum
+    let _currentPaperNum = '';
+    // 當前 domId
+    let _currentDomId = '';
+
+    // JWT Headers
+    const withJwtHeaders = (init = {}) => {
+        const jwt = localStorage.getItem('jwtId');
+        const headers = Object.assign({}, init.headers || {});
+        if (jwt) headers['X-JWTID'] = jwt;
+        return { ...init, headers };
+    };
+
+    // 初始化管理器
+    const init = (domId, paperNum) => {
+        _currentDomId = domId;
+        _currentPaperNum = paperNum;
+        _originalData[domId] = {};
+        _currentData[domId] = {};
+        _selectedRows[domId] = {};
+
+        // 綁定按鈕事件
+        bindButtonEvents(domId);
+        // 綁定列選擇事件
+        bindRowSelectEvents(domId);
+        // 綁定銀行下拉選單變更事件
+        bindBankSelectEvent(domId);
+    };
+
+    // 綁定銀行下拉選單變更事件
+    const bindBankSelectEvent = (domId) => {
+        const bankSelect = document.getElementById(`${domId}-bankId`);
+        const accountSelect = document.getElementById(`${domId}-accountId`);
+        if (!bankSelect || !accountSelect) return;
+
+        bankSelect.onchange = async () => {
+            const selectedBankId = bankSelect.value;
+            await loadAccountOptions(domId, selectedBankId);
+        };
+    };
+
+    // 載入銀行下拉選項
+    const loadBankOptions = async (domId, moduleType) => {
+        try {
+            const resp = await fetch(`/api/AdvanceDtl/GetBankOptions?moduleType=${moduleType}&paperNum=${encodeURIComponent(_currentPaperNum)}`, withJwtHeaders());
+            const data = await resp.json();
+            if (!data.ok) {
+                console.error('載入銀行選項失敗:', data.error);
+                return;
+            }
+            const bankSelect = document.getElementById(`${domId}-bankId`);
+            if (bankSelect && data.banks) {
+                bankSelect.innerHTML = '<option value="">-- 請選擇 --</option>' +
+                    data.banks.map(b => `<option value="${b.BankId}">${b.BankId} - ${b.ShortName || ''}</option>`).join('');
+            }
+        } catch (err) {
+            console.error('載入銀行選項錯誤:', err);
+        }
+    };
+
+    // 載入帳戶下拉選項
+    const loadAccountOptions = async (domId, bankId) => {
+        const accountSelect = document.getElementById(`${domId}-accountId`);
+        if (!accountSelect) return;
+
+        // 清空帳戶選項
+        accountSelect.innerHTML = '<option value="">-- 請選擇 --</option>';
+
+        if (!bankId) return;
+
+        try {
+            const resp = await fetch(`/api/AdvanceDtl/GetAccountOptions?bankId=${encodeURIComponent(bankId)}`, withJwtHeaders());
+            const data = await resp.json();
+            if (!data.ok) {
+                console.error('載入帳戶選項失敗:', data.error);
+                return;
+            }
+            if (data.accounts && data.accounts.length > 0) {
+                accountSelect.innerHTML = '<option value="">-- 請選擇 --</option>' +
+                    data.accounts.map(a => `<option value="${a.AccountId}">${a.AccountId}</option>`).join('');
+            }
+        } catch (err) {
+            console.error('載入帳戶選項錯誤:', err);
+        }
+    };
+
+    // 不區分大小寫取得欄位值
+    const getFieldValue = (obj, fieldName) => {
+        if (!obj) return '';
+        // 先嘗試原始名稱
+        if (obj[fieldName] !== undefined && obj[fieldName] !== null) return obj[fieldName];
+        // 再嘗試不區分大小寫
+        const lowerName = fieldName.toLowerCase();
+        for (const key in obj) {
+            if (key.toLowerCase() === lowerName) {
+                return obj[key] || '';
+            }
+        }
+        return '';
+    };
+
+    // 設定銀行和帳戶的預選值 (從主檔資料)
+    const setBankAndAccountFromMaster = async (domId, masterData) => {
+        const bankSelect = document.getElementById(`${domId}-bankId`);
+        const accountSelect = document.getElementById(`${domId}-accountId`);
+        if (!bankSelect) return;
+
+        // 使用不區分大小寫的方式取得欄位值
+        const savedBankId = getFieldValue(masterData, 'BankId');
+        const savedAccountId = getFieldValue(masterData, 'AccountId');
+
+        console.log('masterData:', masterData);
+        console.log('savedBankId:', savedBankId, 'savedAccountId:', savedAccountId);
+
+        if (savedBankId) {
+            bankSelect.value = savedBankId;
+            // 載入該銀行的帳戶選項
+            await loadAccountOptions(domId, savedBankId);
+            // 設定預選的帳戶
+            if (savedAccountId && accountSelect) {
+                accountSelect.value = savedAccountId;
+            }
+        }
+    };
+
+    // 綁定按鈕事件
+    const bindButtonEvents = (domId) => {
+        const wrapper = document.getElementById(domId);
+        if (!wrapper) return;
+
+        // 移除之前的事件監聽器（如果有的話）
+        const buttons = wrapper.querySelectorAll('[data-action]');
+        buttons.forEach(btn => {
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode.replaceChild(newBtn, btn);
+        });
+
+        // 重新綁定事件
+        wrapper.querySelectorAll('[data-action]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const action = btn.dataset.action;
+                const target = btn.dataset.target;
+                handleAction(domId, action, target);
+            });
+        });
+    };
+
+    // 綁定列選擇事件
+    const bindRowSelectEvents = (domId) => {
+        const wrapper = document.getElementById(domId);
+        if (!wrapper) return;
+
+        // 為所有表格的 tbody 綁定點擊事件
+        const tbodies = wrapper.querySelectorAll('tbody');
+        tbodies.forEach(tbody => {
+            tbody.addEventListener('click', (e) => {
+                const row = e.target.closest('tr');
+                if (!row) return;
+
+                const table = tbody.closest('table');
+                const tableId = table?.id || '';
+                const target = getTargetFromTableId(tableId, domId);
+
+                // 移除同一表格中其他列的選中狀態
+                tbody.querySelectorAll('tr').forEach(r => r.classList.remove('row-selected'));
+                // 選中當前列
+                row.classList.add('row-selected');
+
+                // 記錄選中的索引
+                if (!_selectedRows[domId]) _selectedRows[domId] = {};
+                _selectedRows[domId][target] = parseInt(row.dataset.index) || 0;
+            });
+        });
+    };
+
+    // 從 tableId 獲取 target 類型
+    const getTargetFromTableId = (tableId, domId) => {
+        if (tableId.includes('sourceGrid-og')) return 'source-og';
+        if (tableId.includes('sourceGrid-nt')) return 'source-nt';
+        if (tableId.includes('billGrid')) return 'bill';
+        if (tableId.includes('otherAccGrid')) return 'otherAcc';
+        if (tableId.includes('strikePostGrid')) return 'strikePost';
+        return 'source';
+    };
+
+    // 處理按鈕動作
+    const handleAction = async (domId, action, target) => {
+        const cfg = window._advanceDtlConfigs?.[domId];
+        if (!cfg) return;
+
+        switch (action) {
+            case 'insert':
+                await insertRow(domId, target, cfg);
+                break;
+            case 'delete':
+                await deleteRow(domId, target, cfg);
+                break;
+            case 'post':
+                await saveData(domId, target, cfg);
+                break;
+            case 'cancel':
+                await cancelChanges(domId, target, cfg);
+                break;
+            case 'refresh':
+                await refreshData(domId, target, cfg);
+                break;
+        }
+    };
+
+    // 新增一筆資料
+    const insertRow = async (domId, target, cfg) => {
+        // 確定是哪個表格
+        let actualTarget = target;
+        if (target === 'source') {
+            // 判斷當前在哪個 tab
+            const ogTab = document.getElementById(`${domId}-source-og`);
+            actualTarget = ogTab?.classList.contains('show') ? 'source-og' : 'source-nt';
+        }
+
+        const tableType = actualTarget.replace('-og', '').replace('-nt', '');
+        const mode = actualTarget.includes('-og') ? 'og' : (actualTarget.includes('-nt') ? 'nt' : '');
+
+        try {
+            const resp = await fetch(`/api/AdvanceDtl/InsertRow`, withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    moduleType: cfg.moduleType,
+                    paperNum: _currentPaperNum,
+                    tableType: tableType,
+                    mode: mode
+                })
+            }));
+            const data = await resp.json();
+            if (!data.ok) {
+                Swal.fire({ icon: 'error', title: data.error || '新增失敗' });
+                return;
+            }
+            // 重新載入資料
+            await refreshData(domId, target, cfg);
+            Swal.fire({ icon: 'success', title: '新增成功', timer: 800, showConfirmButton: false });
+        } catch (err) {
+            Swal.fire({ icon: 'error', title: '新增失敗', text: err.message });
+        }
+    };
+
+    // 刪除選中的資料
+    const deleteRow = async (domId, target, cfg) => {
+        // 確定是哪個表格
+        let actualTarget = target;
+        if (target === 'source') {
+            const ogTab = document.getElementById(`${domId}-source-og`);
+            actualTarget = ogTab?.classList.contains('show') ? 'source-og' : 'source-nt';
+        }
+
+        const tableType = actualTarget.replace('-og', '').replace('-nt', '');
+        const mode = actualTarget.includes('-og') ? 'og' : (actualTarget.includes('-nt') ? 'nt' : '');
+
+        // 獲取選中的列
+        const selectedIndex = _selectedRows[domId]?.[actualTarget];
+        if (selectedIndex === undefined || selectedIndex === null) {
+            Swal.fire({ icon: 'warning', title: '請先選擇要刪除的資料列' });
+            return;
+        }
+
+        // 獲取選中列的 item
+        const bodyId = getBodyId(domId, actualTarget);
+        const tbody = document.getElementById(bodyId);
+        const row = tbody?.querySelector(`tr[data-index="${selectedIndex}"]`);
+        const item = row?.dataset.item;
+
+        if (!item) {
+            Swal.fire({ icon: 'warning', title: '無法取得項目編號' });
+            return;
+        }
+
+        // 確認刪除
+        const result = await Swal.fire({
+            icon: 'question',
+            title: '確定要刪除此筆資料嗎？',
+            showCancelButton: true,
+            confirmButtonText: '確定',
+            cancelButtonText: '取消'
+        });
+
+        if (!result.isConfirmed) return;
+
+        try {
+            const resp = await fetch(`/api/AdvanceDtl/DeleteRow`, withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    moduleType: cfg.moduleType,
+                    paperNum: _currentPaperNum,
+                    tableType: tableType,
+                    item: parseInt(item)
+                })
+            }));
+            const data = await resp.json();
+            if (!data.ok) {
+                Swal.fire({ icon: 'error', title: data.error || '刪除失敗' });
+                return;
+            }
+            // 清除選中狀態
+            _selectedRows[domId][actualTarget] = null;
+            // 重新載入資料
+            await refreshData(domId, target, cfg);
+            Swal.fire({ icon: 'success', title: '刪除成功', timer: 800, showConfirmButton: false });
+        } catch (err) {
+            Swal.fire({ icon: 'error', title: '刪除失敗', text: err.message });
+        }
+    };
+
+    // 儲存修改
+    const saveData = async (domId, target, cfg) => {
+        // 確定是哪個表格
+        let actualTarget = target;
+        if (target === 'source') {
+            const ogTab = document.getElementById(`${domId}-source-og`);
+            actualTarget = ogTab?.classList.contains('show') ? 'source-og' : 'source-nt';
+        }
+
+        const tableType = actualTarget.replace('-og', '').replace('-nt', '');
+        const mode = actualTarget.includes('-og') ? 'og' : (actualTarget.includes('-nt') ? 'nt' : '');
+
+        // 收集表格資料
+        const rows = collectTableData(domId, actualTarget);
+
+        try {
+            const resp = await fetch(`/api/AdvanceDtl/SaveRows`, withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    moduleType: cfg.moduleType,
+                    paperNum: _currentPaperNum,
+                    tableType: tableType,
+                    mode: mode,
+                    rows: rows
+                })
+            }));
+            const data = await resp.json();
+            if (!data.ok) {
+                Swal.fire({ icon: 'error', title: data.error || '儲存失敗' });
+                return;
+            }
+            // 更新原始資料
+            storeOriginalData(domId, actualTarget);
+            Swal.fire({ icon: 'success', title: '儲存成功', timer: 800, showConfirmButton: false });
+        } catch (err) {
+            Swal.fire({ icon: 'error', title: '儲存失敗', text: err.message });
+        }
+    };
+
+    // 取消修改 (恢復到原始資料)
+    const cancelChanges = async (domId, target, cfg) => {
+        // 確定是哪個表格
+        let actualTarget = target;
+        if (target === 'source') {
+            const ogTab = document.getElementById(`${domId}-source-og`);
+            actualTarget = ogTab?.classList.contains('show') ? 'source-og' : 'source-nt';
+        }
+
+        // 確認取消
+        const result = await Swal.fire({
+            icon: 'question',
+            title: '確定要放棄所有修改嗎？',
+            showCancelButton: true,
+            confirmButtonText: '確定',
+            cancelButtonText: '取消'
+        });
+
+        if (!result.isConfirmed) return;
+
+        // 重新載入資料即可恢復
+        await refreshData(domId, target, cfg);
+        Swal.fire({ icon: 'info', title: '已恢復原始資料', timer: 800, showConfirmButton: false });
+    };
+
+    // 重新整理資料
+    const refreshData = async (domId, target, cfg) => {
+        // 確定是哪個表格
+        let actualTarget = target;
+        if (target === 'source') {
+            const ogTab = document.getElementById(`${domId}-source-og`);
+            actualTarget = ogTab?.classList.contains('show') ? 'source-og' : 'source-nt';
+        }
+
+        const tableType = actualTarget.replace('-og', '').replace('-nt', '');
+
+        try {
+            let apiPath = '';
+            switch (tableType) {
+                case 'source':
+                    apiPath = 'GetSource';
+                    break;
+                case 'bill':
+                    apiPath = 'GetBill';
+                    break;
+                case 'otherAcc':
+                    apiPath = 'GetOtherAcc';
+                    break;
+                case 'strikePost':
+                    apiPath = 'GetStrikePost';
+                    break;
+                default:
+                    apiPath = 'GetSource';
+            }
+
+            const resp = await fetch(`/api/AdvanceDtl/${apiPath}?moduleType=${cfg.moduleType}&paperNum=${encodeURIComponent(_currentPaperNum)}`, withJwtHeaders());
+            const data = await resp.json();
+            if (!data.ok) {
+                console.error('重新載入資料失敗:', data.error);
+                return;
+            }
+
+            // 觸發重新渲染事件
+            const event = new CustomEvent('advanceDtlRefresh', {
+                detail: { domId, target: tableType, rows: data.rows || [] }
+            });
+            document.dispatchEvent(event);
+
+        } catch (err) {
+            console.error('重新載入資料錯誤:', err);
+        }
+    };
+
+    // 獲取 tbody 的 ID
+    const getBodyId = (domId, actualTarget) => {
+        if (actualTarget === 'source-og') return `${domId}-sourceBody-og`;
+        if (actualTarget === 'source-nt') return `${domId}-sourceBody-nt`;
+        if (actualTarget === 'bill') return `${domId}-billBody`;
+        if (actualTarget === 'otherAcc') return `${domId}-otherAccBody`;
+        if (actualTarget === 'strikePost') return `${domId}-strikePostBody`;
+        return `${domId}-sourceBody-og`;
+    };
+
+    // 收集表格資料
+    const collectTableData = (domId, actualTarget) => {
+        const bodyId = getBodyId(domId, actualTarget);
+        const tbody = document.getElementById(bodyId);
+        if (!tbody) return [];
+
+        const rows = [];
+        tbody.querySelectorAll('tr').forEach(tr => {
+            const row = {
+                PaperNum: tr.dataset.paperNum || _currentPaperNum,
+                Item: parseInt(tr.dataset.item) || 0
+            };
+
+            // 收集所有可編輯欄位
+            tr.querySelectorAll('.cell-edit').forEach(input => {
+                const field = input.dataset.field;
+                if (!field) return;
+
+                if (input.type === 'checkbox') {
+                    row[field] = input.checked;
+                } else {
+                    row[field] = input.value;
+                }
+            });
+
+            rows.push(row);
+        });
+
+        return rows;
+    };
+
+    // 儲存原始資料 (用於取消時恢復)
+    const storeOriginalData = (domId, actualTarget) => {
+        if (!_originalData[domId]) _originalData[domId] = {};
+        _originalData[domId][actualTarget] = collectTableData(domId, actualTarget);
+    };
+
+    // 切換到本位幣頁籤
+    const switchToNtTab = (domId) => {
+        const ntTab = document.getElementById(`${domId}-source-nt-tab`);
+        if (ntTab) {
+            ntTab.click();
+        }
+    };
+
+    // 切換到外幣頁籤
+    const switchToOgTab = (domId) => {
+        const ogTab = document.getElementById(`${domId}-source-og-tab`);
+        if (ogTab) {
+            ogTab.click();
+        }
+    };
+
+    // 設定當前 paperNum
+    const setPaperNum = (paperNum) => {
+        _currentPaperNum = paperNum;
+    };
+
+    // 獲取當前 paperNum
+    const getPaperNum = () => _currentPaperNum;
+
+    // 渲染來源 Grid (供外部呼叫)
+    const renderSourceGrid = (domId, rows, showOtherTab) => {
+        const bodyOg = document.getElementById(`${domId}-sourceBody-og`);
+        const bodyNt = document.getElementById(`${domId}-sourceBody-nt`);
+        if (!bodyOg || !bodyNt) return;
+
+        // 外幣 Grid
+        bodyOg.innerHTML = rows.map((r, i) => `
+            <tr data-index="${i}" data-paper-num="${r.PaperNum || ''}" data-item="${r.Item || ''}">
+                <td><span class="cell-view">${r.Item || ''}</span></td>
+                <td><input class="cell-edit" data-field="CashAmountOg" value="${r.CashAmountOg || 0}"></td>
+                <td><input class="cell-edit" data-field="BankAmountOg" value="${r.BankAmountOg || 0}"></td>
+                <td><input class="cell-edit" data-field="BillAmountOg" value="${r.BillAmountOg || 0}"></td>
+                ${showOtherTab ? `<td><input class="cell-edit" data-field="OtherAmountOg" value="${r.OtherAmountOg || 0}"></td>` : ''}
+            </tr>
+        `).join('');
+
+        // 本位幣 Grid
+        bodyNt.innerHTML = rows.map((r, i) => `
+            <tr data-index="${i}" data-paper-num="${r.PaperNum || ''}" data-item="${r.Item || ''}">
+                <td><span class="cell-view readonly-cell">${r.Item || ''}</span></td>
+                <td><input class="cell-edit" data-field="CashAmount" value="${r.CashAmount || 0}"></td>
+                <td><input class="cell-edit" data-field="BankAmount" value="${r.BankAmount || 0}"></td>
+                <td><input class="cell-edit" data-field="BillAmount" value="${r.BillAmount || 0}"></td>
+                ${showOtherTab ? `<td><input class="cell-edit" data-field="OtherAmount" value="${r.OtherAmount || 0}"></td>` : ''}
+            </tr>
+        `).join('');
+    };
+
+    // 渲染票據 Grid (供外部呼叫)
+    const renderBillGrid = (domId, rows) => {
+        const body = document.getElementById(`${domId}-billBody`);
+        if (!body) return;
+
+        body.innerHTML = rows.map((r, i) => `
+            <tr data-index="${i}" data-paper-num="${r.PaperNum || ''}" data-item="${r.Item || ''}">
+                <td><span class="cell-view">${r.Item || ''}</span></td>
+                <td><input class="cell-edit" data-field="BillId" value="${r.BillId || ''}"></td>
+                <td><input class="cell-edit" data-field="Amount" value="${r.Amount || 0}"></td>
+                <td><input class="cell-edit" data-field="PayBankId" value="${r.PayBankId || ''}"></td>
+                <td><span class="cell-view">${r.BankNamePay || ''}</span></td>
+                <td><input class="cell-edit" data-field="PayAccountId" value="${r.PayAccountId || ''}"></td>
+                <td><input class="cell-edit" data-field="RecvBankId" value="${r.RecvBankId || ''}"></td>
+                <td><span class="cell-view">${r.BankNameRecv || ''}</span></td>
+                <td><input class="cell-edit" data-field="RecvAccountId" value="${r.RecvAccountId || ''}"></td>
+                <td><input class="cell-edit" data-field="BillAccId" value="${r.BillAccId || ''}"></td>
+                <td><input class="cell-edit" data-field="BillTypeId" value="${r.BillTypeId || ''}"></td>
+                <td><input class="cell-edit" data-field="DueDate" type="date" value="${r.DueDate || ''}"></td>
+                <td><input class="cell-edit" data-field="Inhibit" type="checkbox" ${r.Inhibit ? 'checked' : ''}></td>
+                <td><input class="cell-edit" data-field="ParaLine" type="checkbox" ${r.ParaLine ? 'checked' : ''}></td>
+                <td><input class="cell-edit" data-field="Title" type="checkbox" ${r.Title ? 'checked' : ''}></td>
+            </tr>
+        `).join('');
+    };
+
+    // 渲染其他科目 Grid (供外部呼叫)
+    const renderOtherAccGrid = (domId, rows) => {
+        const body = document.getElementById(`${domId}-otherAccBody`);
+        if (!body) return;
+
+        body.innerHTML = rows.map((r, i) => `
+            <tr data-index="${i}" data-paper-num="${r.PaperNum || ''}" data-item="${r.Item || ''}">
+                <td><span class="cell-view">${r.Item || ''}</span></td>
+                <td><input class="cell-edit" data-field="AccId" value="${r.AccId || ''}"></td>
+                <td><span class="cell-view">${r.AccIdName || ''}</span></td>
+                <td><input class="cell-edit" data-field="SubAccId" value="${r.SubAccId || ''}"></td>
+                <td><span class="cell-view">${r.SubAccName || ''}</span></td>
+                <td><input class="cell-edit" data-field="Amount" value="${r.Amount || 0}"></td>
+                <td><input class="cell-edit" data-field="AmountOg" value="${r.AmountOg || 0}"></td>
+            </tr>
+        `).join('');
+    };
+
+    // 渲染手續費 Grid (供外部呼叫)
+    const renderStrikePostGrid = (domId, rows) => {
+        const body = document.getElementById(`${domId}-strikePostBody`);
+        if (!body) return;
+
+        body.innerHTML = rows.map((r, i) => `
+            <tr data-index="${i}" data-paper-num="${r.PaperNum || ''}" data-item="${r.Item || ''}">
+                <td><span class="cell-view">${r.Item || ''}</span></td>
+                <td><input class="cell-edit" data-field="PostAmount" value="${r.PostAmount || 0}"></td>
+                <td><input class="cell-edit" data-field="PostBankId" value="${r.PostBankId || ''}"></td>
+                <td><span class="cell-view">${r.PostBankName || ''}</span></td>
+                <td><input class="cell-edit" data-field="PostAccountId" value="${r.PostAccountId || ''}"></td>
+                <td><input class="cell-edit" data-field="PostAccId" value="${r.PostAccId || ''}"></td>
+                <td><span class="cell-view">${r.AccIdName || ''}</span></td>
+                <td><input class="cell-edit" data-field="PostSubAccId" value="${r.PostSubAccId || ''}"></td>
+                <td><span class="cell-view">${r.SubAccName || ''}</span></td>
+            </tr>
+        `).join('');
+    };
+
+    // 自動監聽重新整理事件
+    document.addEventListener('advanceDtlRefresh', (e) => {
+        const { domId, target, rows } = e.detail || {};
+        const cfg = window._advanceDtlConfigs?.[domId];
+        if (!cfg) return;
+
+        // 根據 target 重新渲染對應的表格
+        switch (target) {
+            case 'source':
+                renderSourceGrid(domId, rows, cfg.showOtherTab);
+                break;
+            case 'bill':
+                renderBillGrid(domId, rows);
+                break;
+            case 'otherAcc':
+                renderOtherAccGrid(domId, rows);
+                break;
+            case 'strikePost':
+                renderStrikePostGrid(domId, rows);
+                break;
+        }
+        // 重新綁定列選擇事件
+        bindRowSelectEvents(domId);
+    });
+
+    return {
+        init,
+        switchToNtTab,
+        switchToOgTab,
+        setPaperNum,
+        getPaperNum,
+        refreshData,
+        bindRowSelectEvents,
+        loadBankOptions,
+        loadAccountOptions,
+        setBankAndAccountFromMaster,
+        renderSourceGrid,
+        renderBillGrid,
+        renderOtherAccGrid,
+        renderStrikePostGrid
+    };
+})();
+
+/**
+ * 欄位寬度調整功能
+ */
+window.ColumnResizer = window.ColumnResizer || (() => {
+    let _isResizing = false;
+    let _currentTh = null;
+    let _startX = 0;
+    let _startWidth = 0;
+    let _table = null;
+
+    // 初始化欄位調整功能
+    const init = (tableSelector) => {
+        const tables = document.querySelectorAll(tableSelector || '.advance-dtl-table');
+        tables.forEach(table => {
+            initTable(table);
+        });
+    };
+
+    // 為單個表格初始化
+    const initTable = (table) => {
+        const headers = table.querySelectorAll('thead th');
+        headers.forEach((th, index) => {
+            // 跳過最後一個欄位（不需要 resizer）
+            if (index === headers.length - 1) return;
+
+            // 如果已經有 resizer 就跳過
+            if (th.querySelector('.col-resizer')) return;
+
+            // 創建 resizer 元素
+            const resizer = document.createElement('div');
+            resizer.className = 'col-resizer';
+            th.appendChild(resizer);
+
+            // 綁定事件
+            resizer.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                _isResizing = true;
+                _currentTh = th;
+                _startX = e.pageX;
+                _startWidth = th.offsetWidth;
+                _table = table;
+
+                resizer.classList.add('resizing');
+                table.classList.add('resizing');
+
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+            });
+        });
+    };
+
+    // 拖動時調整寬度
+    const onMouseMove = (e) => {
+        if (!_isResizing || !_currentTh) return;
+
+        const diff = e.pageX - _startX;
+        const newWidth = Math.max(30, _startWidth + diff); // 最小寬度 30px
+        _currentTh.style.width = newWidth + 'px';
+        _currentTh.style.minWidth = newWidth + 'px';
+    };
+
+    // 拖動結束
+    const onMouseUp = () => {
+        if (_currentTh) {
+            const resizer = _currentTh.querySelector('.col-resizer');
+            if (resizer) resizer.classList.remove('resizing');
+        }
+        if (_table) {
+            _table.classList.remove('resizing');
+        }
+
+        _isResizing = false;
+        _currentTh = null;
+        _table = null;
+
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    return { init, initTable };
+})();
+
+// 頁面載入完成後初始化 column resizer
+document.addEventListener('DOMContentLoaded', () => {
+    ColumnResizer.init('.advance-dtl-table');
+});
+
+// Modal 顯示後也初始化（因為表格可能是動態載入的）
+document.addEventListener('shown.bs.modal', (e) => {
+    if (e.target.querySelector('.advance-dtl-table')) {
+        ColumnResizer.init('.advance-dtl-table');
+    }
+});
+</script>
