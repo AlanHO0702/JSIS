@@ -137,11 +137,85 @@
 
         const btnConfirm = document.getElementById('btnConfirm');
         if (btnConfirm) {
+            const buildConfirmPayload = (tableName, paperNum, userId, extra) => ({
+                paperId: tableName,
+                paperNum: paperNum,
+                userId: userId,
+                eoc: 1,
+                aftFinished: 1,
+                itemId: window._itemId || window._singleItemId || '',
+                useId: window._useId || 'A001',
+                globalId: window._globalId || '',
+                ...extra
+            });
+
+            const runConfirm = async (tableName, paperNum, userId, extra = {}) => {
+                const resp = await fetcher('/api/PaperAction/DoAction', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(buildConfirmPayload(tableName, paperNum, userId, extra))
+                }, '確認中…');
+
+                if (!resp.ok) {
+                    let msg = '確認失敗';
+                    try {
+                        const err = await resp.json();
+                        msg = err.message || err.Message || msg;
+                    } catch {
+                        try { msg = await resp.text() || msg; } catch {}
+                    }
+                    Swal.fire({ icon: 'error', title: msg });
+                    return;
+                }
+
+                const data = await resp.json().catch(() => ({}));
+                if (data?.needConfirm) {
+                    const confirm = await Swal.fire({
+                        title: data.confirmMessage || '是否要繼續？',
+                        icon: 'question',
+                        showCancelButton: true,
+                        confirmButtonText: '確定',
+                        cancelButtonText: '取消'
+                    });
+
+                    if (!confirm.isConfirmed) {
+                        if (data.confirmType === 'autoExam') {
+                            await runConfirm(tableName, paperNum, userId, { ...extra, autoExam: false });
+                        }
+                        return;
+                    }
+
+                    const next = { ...extra };
+                    if (data.confirmType === 'paperMsg') next.acceptPaperMsg = true;
+                    if (data.confirmType === 'beforeSql') next.acceptBeforeSql = true;
+                    if (data.confirmType === 'autoExam') next.autoExam = true;
+                    await runConfirm(tableName, paperNum, userId, next);
+                    return;
+                }
+
+                // Hook: afterConfirm
+                await executeInherited('afterConfirm', { tableName, paperNum, userId, result: data });
+
+                if (data.transferPrompt) {
+                    const ask = await Swal.fire({
+                        title: data.transferMessage || '是否要檢視拋轉的單據？',
+                        icon: 'question',
+                        showCancelButton: true,
+                        confirmButtonText: '是',
+                        cancelButtonText: '否'
+                    });
+                    if (ask.isConfirmed) {
+                        document.getElementById('btnPrint')?.click();
+                    }
+                }
+
+                location.reload();
+            };
+
             btnConfirm.addEventListener('click', async function () {
-                // 自動抓取正確的 tableName (從 HeaderTableName)
                 const tableName = window._headerTableName || window._tableName;
                 const paperNum = window.selectedPaperNum;
-                const userId = window._userId || 'admin';  // TODO: 換成實際登入者
+                const userId = window._userId || localStorage.getItem('erpLoginUserId') || 'admin';
 
                 if (!tableName) {
                     Swal.fire({ icon: 'warning', title: '尚未設定送審 Table', text: '請檢查頁面是否正確設定 HeaderTableName' });
@@ -151,6 +225,11 @@
                 if (!paperNum) {
                     Swal.fire({ icon: 'warning', title: '查無單號！' });
                     return;
+                }
+
+                if (typeof window.saveHeaderForm === 'function') {
+                    const saved = await window.saveHeaderForm();
+                    if (!saved || saved.ok === false) return;
                 }
 
                 const result = await Swal.fire({
@@ -172,30 +251,7 @@
                     }
                 }
 
-                // DoAction: 確認
-                const resp = await fetcher('/api/PaperAction/DoAction', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        paperId: tableName,
-                        paperNum: paperNum,
-                        userId: userId,
-                        eoc: 1,
-                        aftFinished: 1
-                    })
-                }, '確認中…');
-                if (resp.ok) {
-                    const data = await resp.json();
-
-                    // Hook: afterConfirm
-                    await executeInherited('afterConfirm', { tableName, paperNum, userId, result: data });
-
-                    Swal.fire({ icon: 'success', title: data.message || '確認成功' });
-                    location.reload();
-                } else {
-                    const msg = await resp.text();
-                    Swal.fire({ icon: 'error', title: msg || '確認失敗' });
-                }
+                await runConfirm(tableName, paperNum, userId);
             });
         }
 
@@ -206,7 +262,7 @@
                 // 自動抓取正確的 tableName (從 HeaderTableName)
                 const tableName = window._headerTableName || window._tableName;
                 const paperNum = window.selectedPaperNum;
-                const userId = window._userId || 'admin';  // TODO: 換成實際登入者
+                const userId = window._userId || localStorage.getItem('erpLoginUserId') || 'admin';  // TODO: 換成實際登入者
 
                 if (!tableName) {
                     Swal.fire({ icon: 'warning', title: '尚未設定送審 Table', text: '請檢查頁面是否正確設定 HeaderTableName' });
@@ -237,30 +293,78 @@
                     }
                 }
 
-                // DoAction: 退審
-                const resp = await fetcher('/api/PaperAction/DoAction', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        paperId: tableName,
-                        paperNum: paperNum,
-                        userId: userId,
-                        eoc: 0,
-                        aftFinished: 3 // 退審時 AftFinished 設為 3 (審核中)
-                    })
-                }, '退審中…');
-                if (resp.ok) {
-                    const data = await resp.json();
+                if (typeof window.saveHeaderForm === 'function') {
+                    const saved = await window.saveHeaderForm();
+                    if (!saved || saved.ok === false) return;
+                }
+
+                const runReject = async (extra = {}) => {
+                    const resp = await fetcher('/api/PaperAction/DoAction', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            paperId: tableName,
+                            paperNum: paperNum,
+                            userId: userId,
+                            eoc: 0,
+                            aftFinished: 3, // 退審時 AftFinished 設為 3 (審核中)
+                            itemId: window._itemId || window._singleItemId || '',
+                            useId: window._useId || 'A001',
+                            ...extra
+                        })
+                    }, '退審中…');
+
+                    if (!resp.ok) {
+                        let msg = '退審失敗';
+                        try {
+                            const err = await resp.json();
+                            msg = err.message || err.Message || msg;
+                        } catch {
+                            try { msg = await resp.text() || msg; } catch {}
+                        }
+                        Swal.fire({ icon: 'error', title: msg });
+                        return;
+                    }
+
+                    const data = await resp.json().catch(() => ({}));
+                    if (data?.needConfirm) {
+                        if (data.confirmType === 'rejExamNotes') {
+                            const noteResp = await Swal.fire({
+                                icon: 'question',
+                                title: '確認退審',
+                                input: 'textarea',
+                                inputPlaceholder: '請輸入退審原因',
+                                showCancelButton: true,
+                                confirmButtonText: '確定退審',
+                                cancelButtonText: '取消',
+                                inputValidator: (value) => {
+                                    if (!value || !value.trim()) return '請輸入退審原因';
+                                }
+                            });
+                            if (!noteResp.isConfirmed) return;
+                            await runReject({ rejectNotes: noteResp.value || '' });
+                            return;
+                        }
+
+                        const confirm = await Swal.fire({
+                            title: data.confirmMessage || '確定要退審？',
+                            icon: 'question',
+                            showCancelButton: true,
+                            confirmButtonText: '確定退審',
+                            cancelButtonText: '取消'
+                        });
+                        if (!confirm.isConfirmed) return;
+                        await runReject({ acceptRejMsg: true });
+                        return;
+                    }
 
                     // Hook: afterCancel
                     await executeInherited('afterCancel', { tableName, paperNum, userId, result: data });
 
-                    Swal.fire({ icon: 'success', title: data.message || '退審成功' });
                     location.reload();
-                } else {
-                    const msg = await resp.text();
-                    Swal.fire({ icon: 'error', title: msg || '退審失敗' });
-                }
+                };
+
+                await runReject();
             });
         }
 

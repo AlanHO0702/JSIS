@@ -104,6 +104,33 @@ exec CURdOCXLinkPaperGetFromTo
         return Ok(new { ok = true, rows });
     }
 
+    [HttpGet("ResolveItem")]
+    public async Task<IActionResult> ResolveItem(
+        [FromQuery] string paperId,
+        [FromQuery] string paperNum)
+    {
+        if (string.IsNullOrWhiteSpace(paperId) || string.IsNullOrWhiteSpace(paperNum))
+            return Ok(new { ok = false, error = "參數不足" });
+
+        await using var conn = new SqlConnection(_cs);
+        await conn.OpenAsync();
+
+        const string sql = "exec CURdOCXItemIdByFromType @PaperId, @PaperNum";
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@PaperId", paperId);
+        cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+
+        await using var rd = await cmd.ExecuteReaderAsync();
+        if (!await rd.ReadAsync())
+            return Ok(new { ok = false, error = "查無程式項目" });
+
+        var itemId = rd["ItemId"]?.ToString() ?? "";
+        var itemName = rd["ItemName"]?.ToString() ?? "";
+        var systemId = rd["SystemId"]?.ToString() ?? "";
+        var ocxTemplate = rd["OCXTemplete"]?.ToString() ?? "";
+        return Ok(new { ok = true, itemId, itemName, systemId, ocxTemplate });
+    }
+
     private static async Task<List<Dictionary<string, object?>>> QueryRowsAsync(
         SqlConnection conn,
         string sql,

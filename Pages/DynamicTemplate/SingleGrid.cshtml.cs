@@ -14,6 +14,7 @@ using Microsoft.Extensions.Logging;
 using System.Text.Encodings.Web;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
+using ClosedXML.Excel;
 
 namespace PcbErpApi.Pages.CUR
 {
@@ -157,6 +158,94 @@ namespace PcbErpApi.Pages.CUR
             return Page();
         }
 
+        public async Task<IActionResult> OnGetExportAsync(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+                return NotFound("itemId is required");
+
+            var item = await _ctx.CurdSysItems.AsNoTracking()
+                .SingleOrDefaultAsync(x => x.ItemId == itemId);
+
+            if (item is null)
+                return NotFound($"Item {itemId} not found.");
+
+            if (item.ItemType != 6 || !string.Equals(item.Ocxtemplete, "JSdSingleGridDLL.dll", StringComparison.OrdinalIgnoreCase))
+                return NotFound($"Item {itemId} is not a SingleGrid item.");
+
+            ItemId = item.ItemId;
+            ItemName = item.ItemName;
+
+            var setup = await _ctx.CurdOcxtableSetUp.AsNoTracking()
+                .Where(x => x.ItemId == itemId)
+                .OrderBy(x => x.TableKind)
+                .FirstOrDefaultAsync();
+
+            if (setup == null)
+                return NotFound($"CURdOCXTableSetUp not found for item {itemId}.");
+
+            DictTableName = setup.TableName;
+            TableName = await ResolveRealTableNameAsync(DictTableName) ?? DictTableName;
+
+            try
+            {
+                FieldDictList = _dictService.GetFieldDict(DictTableName, typeof(object));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetFieldDict failed for {Table}", DictTableName);
+                FieldDictList = await LoadFieldDictFallbackAsync(DictTableName);
+            }
+            await ApplyLangDisplaySizeAsync(DictTableName, FieldDictList);
+            TableFields = FieldDictList
+                .Where(f => f.Visible == 1)
+                .OrderBy(f => f.SerialNum ?? 0)
+                .ToList();
+
+            var orderBy = string.IsNullOrWhiteSpace(setup.OrderByField)
+                ? await GetDefaultOrderByAsync(TableName)
+                : setup.OrderByField;
+
+            QueryFields = await LoadQueryFieldsAsync(itemId, TableName, "TW");
+            var filterParams = new List<SqlParameter>();
+            var filterSql = BuildFilterSql(QueryFields, Request.Query, filterParams);
+            var combinedFilter = CombineFilter(setup.FilterSql, filterSql);
+
+            var rows = await LoadAllRowsAsync(TableName, combinedFilter, orderBy, filterParams);
+
+            using var wb = new XLWorkbook();
+            var ws = wb.AddWorksheet("SingleGrid");
+
+            for (var c = 0; c < TableFields.Count; c++)
+            {
+                ws.Cell(1, c + 1).Value = TableFields[c].DisplayLabel ?? TableFields[c].FieldName;
+                ws.Cell(1, c + 1).Style.Font.Bold = true;
+            }
+
+            for (var r = 0; r < rows.Count; r++)
+            {
+                var row = rows[r];
+                for (var c = 0; c < TableFields.Count; c++)
+                {
+                    var field = TableFields[c].FieldName ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(field)) continue;
+                    row.TryGetValue(field, out var val);
+                    ws.Cell(r + 2, c + 1).Value = val == null
+                        ? default(XLCellValue)
+                        : XLCellValue.FromObject(val);
+                }
+            }
+
+            ws.Columns().AdjustToContents();
+
+            var fileName = $"{TableName}_{DateTime.Now:yyyyMMdd}.xlsx";
+            using var stream = new MemoryStream();
+            wb.SaveAs(stream);
+            stream.Position = 0;
+            return File(stream.ToArray(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                fileName);
+        }
+
         private async Task<string?> ResolveRealTableNameAsync(string dictTableName)
         {
             var cs = GetConnStr();
@@ -190,6 +279,43 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             await conn.OpenAsync();
 
             await using var cmd = new SqlCommand(sql, conn);
+            if (filterParams != null && filterParams.Count > 0)
+                cmd.Parameters.AddRange(CloneParams(filterParams).ToArray());
+            await using var rd = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess);
+            var columns = Enumerable.Range(0, rd.FieldCount).Select(rd.GetName).ToList();
+
+            while (await rd.ReadAsync())
+            {
+                var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < columns.Count; i++)
+                {
+                    row[columns[i]] = rd.IsDBNull(i) ? null : rd.GetValue(i);
+                }
+                list.Add(row);
+            }
+
+            return list;
+        }
+
+        private async Task<List<Dictionary<string, object?>>> LoadAllRowsAsync(string tableName, string? filter, string? orderBy, List<SqlParameter>? filterParams)
+        {
+            var list = new List<Dictionary<string, object?>>();
+            var sb = new StringBuilder($"SELECT * FROM [{tableName}] t0");
+            var where = (filter ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(where))
+            {
+                sb.Append(' ').Append(where);
+            }
+
+            var order = (orderBy ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(order))
+                sb.Append(" ORDER BY ").Append(order);
+
+            var cs = GetConnStr();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            await using var cmd = new SqlCommand(sb.ToString(), conn);
             if (filterParams != null && filterParams.Count > 0)
                 cmd.Parameters.AddRange(CloneParams(filterParams).ToArray());
             await using var rd = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess);
@@ -494,9 +620,21 @@ SELECT FieldName, DisplaySize
             public string OCXName { get; set; } = string.Empty;
             public string CoClassName { get; set; } = string.Empty;
             public string SpName { get; set; } = string.Empty;
+            public string ExecSpName { get; set; } = string.Empty;
+            public string SearchTemplate { get; set; } = string.Empty;
+            public string MultiSelectDD { get; set; } = string.Empty;
+            public int? ReplaceExists { get; set; }
+            public string DialogCaption { get; set; } = string.Empty;
+            public int? AllowSelCount { get; set; }
             public int? bVisible { get; set; }
             public int? ChkCanUpdate { get; set; }
             public int? bNeedNum { get; set; }
+            public int? bNeedInEdit { get; set; }
+            public int? ChkStatus { get; set; }
+            public int? bSpHasResult { get; set; }
+            public int? IsUpdateMoney { get; set; }
+            public int? iNeedConfirmBefExec { get; set; }
+            public string? sConfirmBefExec { get; set; }
             public int? DesignType { get; set; }
         }
 
@@ -528,6 +666,18 @@ SELECT FieldName, DisplaySize
             await conn.OpenAsync();
 
             var schema = await DetectButtonSchemaAsync(conn);
+            var hasExecSpName = await HasButtonColumnAsync(conn, "ExecSpName");
+            var hasSearchTemplate = await HasButtonColumnAsync(conn, "SearchTemplate");
+            var hasMultiSelect = await HasButtonColumnAsync(conn, "MultiSelectDD");
+            var hasReplaceExists = await HasButtonColumnAsync(conn, "ReplaceExists");
+            var hasDialogCaption = await HasButtonColumnAsync(conn, "DialogCaption");
+            var hasAllowSelCount = await HasButtonColumnAsync(conn, "AllowSelCount");
+            var hasNeedInEdit = await HasButtonColumnAsync(conn, "bNeedInEdit");
+            var hasChkStatus = await HasButtonColumnAsync(conn, "ChkStatus");
+            var hasSpHasResult = await HasButtonColumnAsync(conn, "bSpHasResult");
+            var hasIsUpdateMoney = await HasButtonColumnAsync(conn, "IsUpdateMoney");
+            var hasNeedConfirm = await HasButtonColumnAsync(conn, "iNeedConfirmBefExec");
+            var hasConfirmText = await HasButtonColumnAsync(conn, "sConfirmBefExec");
 
             var sql = $@"
 SELECT ItemId, SerialNum, ButtonName,
@@ -536,7 +686,20 @@ SELECT ItemId, SerialNum, ButtonName,
        CustHint,
        {(schema.hasHintE ? "CustHintE" : "CAST('' AS nvarchar(1)) AS CustHintE")},
        OCXName, CoClassName, SpName,
-       bVisible, {schema.chkCol} AS ChkCanUpdate, bNeedNum, DesignType
+       {(hasExecSpName ? "ExecSpName" : "CAST('' AS nvarchar(1)) AS ExecSpName")},
+       {(hasSearchTemplate ? "SearchTemplate" : "CAST('' AS nvarchar(1)) AS SearchTemplate")},
+       {(hasMultiSelect ? "MultiSelectDD" : "CAST('' AS nvarchar(1)) AS MultiSelectDD")},
+       {(hasReplaceExists ? "ReplaceExists" : "CAST(0 AS int) AS ReplaceExists")},
+       {(hasDialogCaption ? "DialogCaption" : "CAST('' AS nvarchar(1)) AS DialogCaption")},
+       {(hasAllowSelCount ? "AllowSelCount" : "CAST(0 AS int) AS AllowSelCount")},
+       bVisible, {schema.chkCol} AS ChkCanUpdate, bNeedNum,
+       {(hasNeedInEdit ? "bNeedInEdit" : "CAST(0 AS int) AS bNeedInEdit")},
+       {(hasChkStatus ? "ChkStatus" : "CAST(0 AS int) AS ChkStatus")},
+       {(hasSpHasResult ? "bSpHasResult" : "CAST(0 AS int) AS bSpHasResult")},
+       {(hasIsUpdateMoney ? "IsUpdateMoney" : "CAST(0 AS int) AS IsUpdateMoney")},
+       {(hasNeedConfirm ? "iNeedConfirmBefExec" : "CAST(0 AS int) AS iNeedConfirmBefExec")},
+       {(hasConfirmText ? "sConfirmBefExec" : "CAST('' AS nvarchar(1)) AS sConfirmBefExec")},
+       DesignType
   FROM CURdOCXItemCustButton WITH (NOLOCK)
  WHERE ItemId = @itemId
  ORDER BY SerialNum, ButtonName;";
@@ -559,9 +722,21 @@ SELECT ItemId, SerialNum, ButtonName,
                     OCXName = rd["OCXName"]?.ToString() ?? string.Empty,
                     CoClassName = rd["CoClassName"]?.ToString() ?? string.Empty,
                     SpName = rd["SpName"]?.ToString() ?? string.Empty,
+                    ExecSpName = rd["ExecSpName"]?.ToString() ?? string.Empty,
+                    SearchTemplate = rd["SearchTemplate"]?.ToString() ?? string.Empty,
+                    MultiSelectDD = rd["MultiSelectDD"]?.ToString() ?? string.Empty,
+                    ReplaceExists = TryToInt(rd["ReplaceExists"]),
+                    DialogCaption = rd["DialogCaption"]?.ToString() ?? string.Empty,
+                    AllowSelCount = TryToInt(rd["AllowSelCount"]),
                     bVisible = TryToInt(rd["bVisible"]),
                     ChkCanUpdate = TryToInt(rd["ChkCanUpdate"]),
                     bNeedNum = TryToInt(rd["bNeedNum"]),
+                    bNeedInEdit = TryToInt(rd["bNeedInEdit"]),
+                    ChkStatus = TryToInt(rd["ChkStatus"]),
+                    bSpHasResult = TryToInt(rd["bSpHasResult"]),
+                    IsUpdateMoney = TryToInt(rd["IsUpdateMoney"]),
+                    iNeedConfirmBefExec = TryToInt(rd["iNeedConfirmBefExec"]),
+                    sConfirmBefExec = rd["sConfirmBefExec"]?.ToString(),
                     DesignType = TryToInt(rd["DesignType"])
                 });
             }
@@ -592,6 +767,20 @@ SELECT ItemId, SerialNum, ButtonName,
             }
 
             return new HtmlString(sb.ToString());
+        }
+
+        private static async Task<bool> HasButtonColumnAsync(SqlConnection conn, string columnName)
+        {
+            if (string.IsNullOrWhiteSpace(columnName)) return false;
+            const string sql = @"
+SELECT 1
+  FROM sys.columns
+ WHERE object_id = OBJECT_ID('dbo.CURdOCXItemCustButton')
+   AND name = @col";
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@col", columnName);
+            var obj = await cmd.ExecuteScalarAsync();
+            return obj != null && obj != DBNull.Value;
         }
     }
 }
