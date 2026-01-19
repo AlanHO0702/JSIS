@@ -258,6 +258,33 @@
             .replace(/'/g, '&#39;');
     }
 
+    function isPartNumField(name) {
+        return !!name && String(name).replace(/_/g, '').toLowerCase().includes('partnum');
+    }
+
+    function getPartNumFromCell(cell) {
+        if (!cell) return '';
+        const input = cell.querySelector('.cell-edit');
+        if (input) return (input.value || '').trim();
+        const view = cell.querySelector('.cell-view');
+        return (view?.textContent || '').trim();
+    }
+
+    document.addEventListener('click', (e) => {
+        if (e.__partnumHandled) return;
+        const btn = e.target.closest('.partnum-lookup-btn');
+        if (!btn) return;
+        e.__partnumHandled = true;
+        e.preventDefault();
+        e.stopPropagation();
+        const cell = btn.closest('td');
+        const partNum = getPartNumFromCell(cell);
+        if (!partNum) return;
+        const url = `/MIN/MatDetail?PartNum=${encodeURIComponent(partNum)}`;
+        window.open(url, '_blank');
+    });
+
+
     function extractRowData(tr) {
         try {
             if (!tr) return null;
@@ -514,6 +541,9 @@
                 edit.dispatchEvent(new Event('input', { bubbles: true }));
                 edit.dispatchEvent(new Event('change', { bubbles: true }));
             } catch {}
+            if (typeof window.__autoSaveDetail === 'function') {
+                window.__autoSaveDetail();
+            }
             cleanup();
         };
 
@@ -776,8 +806,7 @@
             loadingTabs.add(tabId);
 
             // 清除舊的表格（保留按鈕）
-            const existingTable = container.querySelector('.erp-table-wrapper');
-            if (existingTable) existingTable.remove();
+            container.querySelectorAll('.erp-table-wrapper').forEach(t => t.remove());
             const existingAlert = container.querySelector('.alert');
             if (existingAlert) existingAlert.remove();
 
@@ -817,11 +846,70 @@
         });
     });
 
+    async function reloadTabById(tabId) {
+        if (!tabId) return;
+        const tabInfo = tabsData?.find(x => x?.Id === tabId);
+        if (!tabInfo) return;
+        const apiUrl = tabInfo.ApiUrl || '';
+        const contentPane = document.getElementById(`content-${tabId}`);
+        if (!contentPane) return;
+        const container = contentPane.querySelector('.table-container');
+        if (!container) return;
+
+        if (container.dataset.dictTable) {
+            window._dictTableName = container.dataset.dictTable;
+        }
+
+        const loading = contentPane.querySelector('.loading-indicator');
+        if (loading) loading.style.display = 'block';
+        loadingTabs.add(tabId);
+
+        container.querySelectorAll('.erp-table-wrapper').forEach(t => t.remove());
+        const existingAlert = container.querySelector('.alert');
+        if (existingAlert) existingAlert.remove();
+
+        try {
+            const response = await fetch(withPaperNum(apiUrl));
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`API 錯誤 (${response.status}):`, errorText);
+                throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
+            }
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await response.text();
+                console.error('回應不是 JSON:', text.substring(0, 200));
+                throw new Error('API 回應格式錯誤，請檢查 API 是否正常運作');
+            }
+            const data = await response.json();
+            await renderTable(container, data, tabId);
+            loadedTabs.add(tabId);
+        } catch (error) {
+            console.error(`載入分頁 ${tabId} 失敗:`, error);
+            container.insertAdjacentHTML('beforeend', `<div class="alert alert-danger">載入失敗: ${error.message}</div>`);
+        } finally {
+            if (loading) loading.style.display = 'none';
+            loadingTabs.delete(tabId);
+        }
+    }
+
+    window.__refreshMultiTab = async (opts = {}) => {
+        const allTabs = Array.isArray(tabsData) ? tabsData : [];
+        if (!allTabs.length) return;
+        for (const t of allTabs) {
+            const tabId = (t?.Id || '').toString();
+            if (!tabId) continue;
+            loadedTabs.delete(tabId);
+            await reloadTabById(tabId);
+        }
+    };
+
     // 渲染表格函式
     async function renderTable(container, data, tabId) {
         // ✅ 先清除舊的 alert，避免重複顯示「無資料」
         const existingAlerts = container.querySelectorAll('.alert');
         existingAlerts.forEach(a => a.remove());
+        container.querySelectorAll('.erp-table-wrapper').forEach(t => t.remove());
 
         const rows = Array.isArray(data) ? data : [];
 
@@ -956,6 +1044,8 @@
                     const isDate = isDateType(meta);
                     const tdClasses = [alignClass];
                     if (canDropdown) tdClasses.push('lookup-cell');
+                    const isPartNum = isPartNumField(fieldLower);
+                    if (isPartNum) tdClasses.push('partnum-field');
                     const classAttr = tdClasses.length ? ` class="${tdClasses.join(' ')}"` : '';
                     const keyFieldAttr = canDropdown ? ` data-lookup-key-field="${escapeHtml(metaLookup?.key || '')}"` : "";
                     const resultFieldAttr = canDropdown ? ` data-lookup-result-field="${escapeHtml(metaLookup?.result || '')}"` : "";
@@ -969,6 +1059,9 @@
                         ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
                            <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
                         : '';
+                    const partNumBtn = isPartNum
+                        ? '<button type="button" class="partnum-lookup-btn" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>'
+                        : '';
                     html += `<td${classAttr}${lookupAttr}${tdReadOnlyAttr}>
                         <span class="${viewClass}${roClass}" data-init-view="${escapeHtml(viewText)}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span>
                         <input type="text"
@@ -977,6 +1070,7 @@
                                data-init="${escapeHtml(editText)}"
                                value="${escapeHtml(editText)}"${roAttr}>
                         ${dateAddon}
+                        ${partNumBtn}
                     </td>`;
             });
             html += '</tr>';
@@ -1190,8 +1284,7 @@
         loadingTabs.add(tabId);
 
         // 清除舊的表格（保留按鈕）
-        const existingTable = container.querySelector('.erp-table-wrapper');
-        if (existingTable) existingTable.remove();
+        container.querySelectorAll('.erp-table-wrapper').forEach(t => t.remove());
         const existingAlert = container.querySelector('.alert');
         if (existingAlert) existingAlert.remove();
 
@@ -1443,6 +1536,29 @@ body.resizing { cursor: col-resize !important; }
     white-space: nowrap;
     line-height: 20px;  /* ← 固定行高 */
 }
+
+  .multi-tab-detail .partnum-field{ position: relative; }
+  .multi-tab-detail .partnum-lookup-btn{
+      position: absolute;
+      top: 0;
+      right: 0;
+      height: 100%;
+      width: 22px;
+      border: 0;
+      border-left: 1px solid #9fb1d0;
+      background: #e9f1ff;
+      color: #1f5fbf;
+      font-weight: 700;
+      line-height: 1;
+      padding: 0;
+      cursor: pointer;
+  }
+  .multi-tab-detail .partnum-lookup-btn:hover{ background: #dbe9ff; }
+  .multi-tab-detail .partnum-field .cell-view,
+  .multi-tab-detail .partnum-field .cell-edit{
+      padding-right: 26px !important;
+  }
+
 
 /* ✅ 編輯模式的 input 樣式（融入表格，與 SpodOrderSub 一致） */
 .multi-tab-detail .erp-table td {

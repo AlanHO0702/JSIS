@@ -117,7 +117,7 @@
     <div class="toolbar-right">
         <div class="btn-group">
             <button id="btnToolbarActions" type="button" class="btn toolbar-btn dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                功能
+                <i class="bi bi-grid-3x3-gap"></i>功能
             </button>
             <ul class="dropdown-menu">
                 <li><button id="btnEditNotes" class="dropdown-item" type="button">改備註</button></li>
@@ -191,6 +191,21 @@
     return null;
   };
 
+  if (typeof window.safeMapLookupKey !== 'function') {
+    window.safeMapLookupKey = (raw, labelToKey) => {
+      if (typeof mapLookupKey === 'function') return mapLookupKey(raw, labelToKey);
+      return raw ?? '';
+    };
+  }
+  if (typeof window.getLookupLabel !== 'function') {
+    window.getLookupLabel = (key, keyToLabel) => {
+      if (!key || !keyToLabel) return '';
+      if (keyToLabel[key] != null) return keyToLabel[key];
+      const lower = (key ?? '').toString().trim().toLowerCase();
+      return lower && keyToLabel[lower] != null ? keyToLabel[lower] : '';
+    };
+  }
+
   const readHeaderFieldInfo = (fieldName) => {
     const el = findHeaderFieldControl(fieldName);
     if (!el) return { value: '', isCheckbox: false };
@@ -200,7 +215,7 @@
       if (hidden) return { value: (hidden.value ?? '').toString().trim(), isCheckbox: false };
       const raw = (el.value ?? '').toString().trim();
       const map = el._lookupLabelToKey || {};
-      const mapped = mapLookupKey(raw, map);
+      const mapped = window.safeMapLookupKey(raw, map);
       const fallback = raw.split(' - ')[0] || raw;
       const key = mapped && mapped !== raw ? mapped : fallback;
       return { value: (key ?? '').toString().trim(), isCheckbox: false };
@@ -217,6 +232,13 @@
     const tn = cleanTableName(dictTable);
     if (!tn || !paperNum) return null;
     try {
+      const url = `/api/OrderHeaderApi/GetHeaderRow?table=${encodeURIComponent(tn)}&paperNum=${encodeURIComponent(paperNum)}`;
+      const res = await fetch(url, withJwtHeaders());
+      if (res.ok) return await res.json();
+    } catch {
+      // ignore and fallback
+    }
+    try {
       const url = `/api/DynamicTable/ByPaperNum?table=${encodeURIComponent(tn)}&paperNum=${encodeURIComponent(paperNum)}&top=1`;
       const res = await fetch(url, withJwtHeaders());
       if (!res.ok) return null;
@@ -226,6 +248,179 @@
       return null;
     }
   }
+
+  function getRowValueCI(row, fieldName) {
+    if (!row || !fieldName) return undefined;
+    const key = String(fieldName).toLowerCase();
+    const hit = Object.keys(row).find(k => k.toLowerCase() === key);
+    return hit ? row[hit] : undefined;
+  }
+
+  function normalizeBoolValue(raw) {
+    const s = (raw ?? '').toString().trim().toLowerCase();
+    return s === '1' || s === 'true' || s === 'y' || s === 'yes';
+  }
+
+  function getHeaderFieldMeta(fieldName) {
+    const list = (Array.isArray(PAGE?.headerFields)) ? PAGE.headerFields : [];
+    const key = (fieldName || '').toString().toLowerCase();
+    return list.find(f => (f?.FieldName || '').toString().toLowerCase() === key) || null;
+  }
+
+  function isDateMask(fmt) {
+    const f = (fmt || '').toString().toLowerCase();
+    return f.includes('yyyy') && f.includes('mm') && f.includes('dd');
+  }
+
+  function isNumberMask(fmt) {
+    const f = (fmt || '').toString().toLowerCase();
+    if (!f) return false;
+    if (isDateMask(f)) return false;
+    return /[0#]/.test(f);
+  }
+
+  function parseDecimalsFromFormat(fmt) {
+    const s = (fmt || '').toString();
+    const dot = s.lastIndexOf('.');
+    if (dot < 0) return null;
+    const tail = s.slice(dot + 1);
+    const min = (tail.match(/0/g) || []).length;
+    const max = min + (tail.match(/#/g) || []).length;
+    if (max === 0) return null;
+    return { min, max };
+  }
+
+  function isNumberDataType(dt) {
+    const t = (dt || '').toString().trim().toLowerCase();
+    if (!t) return false;
+    return t === 'number'
+      || t === 'int' || t === 'smallint' || t === 'tinyint' || t === 'bigint'
+      || t.startsWith('decimal') || t.startsWith('numeric')
+      || t.startsWith('money') || t.startsWith('smallmoney')
+      || t.startsWith('float') || t.startsWith('real');
+  }
+
+  function formatNumberByMask(value, mask) {
+    const n = Number(String(value ?? '').replace(/,/g, ''));
+    if (!Number.isFinite(n)) return value == null ? '' : String(value);
+    const decimals = parseDecimalsFromFormat(mask);
+    if (decimals) {
+      return n.toLocaleString(undefined, {
+        minimumFractionDigits: decimals.min,
+        maximumFractionDigits: decimals.max
+      });
+    }
+    return n.toLocaleString();
+  }
+
+  function formatHeaderValue(raw, meta) {
+    if (raw == null) return '';
+    const text = String(raw);
+    const dt = (meta?.DataType || '').toString().toLowerCase();
+    const fmt = (meta?.FormatStr || '').toString();
+    if (dt.includes('date') || isDateMask(fmt)) return formatDateByMask(text, fmt);
+    if (isNumberDataType(dt) || isNumberMask(fmt)) return formatNumberByMask(text, fmt);
+    return text;
+  }
+
+  function applyHeaderRow(row) {
+    if (!row) return false;
+
+    // Update inputs with name attribute (skip hidden checkbox defaults)
+    document.querySelectorAll('.erp-header-form input[name], .erp-header-form textarea[name], .erp-header-form select[name]')
+      .forEach(el => {
+        if (el.closest('.modal')) return;
+        if (el instanceof HTMLInputElement && el.type === 'hidden' && !el.classList.contains('lookup-key')) return;
+        if (el.classList?.contains('lookup-dropdown')) return;
+        const fieldName = el.name;
+        if (!fieldName) return;
+        const raw = getRowValueCI(row, fieldName);
+        if (raw === undefined) return;
+        const meta = getHeaderFieldMeta(fieldName);
+        if (el instanceof HTMLSelectElement) {
+          const v = raw == null ? '' : String(raw);
+          el.value = v;
+          el.dataset.init = v;
+          syncLookupLabel(el);
+          return;
+        }
+        if (el.type === 'checkbox') {
+          const checked = normalizeBoolValue(raw);
+          el.checked = checked;
+          el.dataset.init = checked ? '1' : '0';
+          return;
+        }
+        const value = formatHeaderValue(raw, meta);
+        el.value = value ?? '';
+        el.dataset.init = value ?? '';
+        if (el.matches('.lookup-dropdown')) syncLookupLabel(el);
+      });
+
+    // Update lookup inputs (text + hidden key)
+    document.querySelectorAll('.erp-header-form .lookup-dropdown[data-field]').forEach(input => {
+      if (input.closest('.modal')) return;
+      const field = input.dataset.field || '';
+      if (!field) return;
+      const raw = getRowValueCI(row, field);
+      if (raw === undefined) return;
+      const value = raw == null ? '' : String(raw);
+      input.value = value;
+      input.dataset.selected = value;
+      const hidden = input.closest('li')?.querySelector('input.lookup-key[name]');
+      if (hidden) {
+        hidden.value = value;
+        hidden.dataset.init = value;
+      }
+      // Reload lookup options so display shows "code - name" after refresh.
+      const keyToLabel = input._lookupKeyToLabel || {};
+      const label = getLookupLabel(value, keyToLabel);
+      if (label) {
+        input.value = formatLookupDisplay(value, label);
+        syncLookupLabel(input);
+      } else {
+        delete input.dataset.lookupLoaded;
+        delete input.dataset.lookupCondKey;
+        if (typeof loadLookupOptions === 'function') loadLookupOptions(input);
+      }
+    });
+
+    // Update date picker inputs
+    document.querySelectorAll('.erp-header-form .date-dropdown').forEach(textInput => {
+      if (textInput.closest('.modal')) return;
+      const name = textInput.getAttribute('name') || '';
+      if (!name) return;
+      const raw = getRowValueCI(row, name);
+      if (raw === undefined) return;
+      const meta = getHeaderFieldMeta(name);
+      const display = formatHeaderValue(raw, meta);
+      textInput.value = display ?? '';
+      textInput.dataset.init = display ?? '';
+      const dateInput = textInput.parentElement?.querySelector('.date-picker-input');
+      if (dateInput instanceof HTMLInputElement) {
+        const dt = parseDateValue(raw);
+        dateInput.value = dt ? `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}` : '';
+      }
+    });
+
+    const newPaperNum = getRowValueCI(row, 'PaperNum');
+    if (newPaperNum != null) {
+      window._paperNum = String(newPaperNum);
+      window.selectedPaperNum = String(newPaperNum);
+    }
+    window.__unsavedChanges = false;
+    captureHeaderInitValues();
+    return true;
+  }
+
+  async function refreshHeaderData() {
+    const headerTable = (window._headerTableName || '').toString().trim();
+    const paperNum = readPaperNum();
+    if (!headerTable || !paperNum) return false;
+    const row = await fetchHeaderRow(headerTable, paperNum);
+    return applyHeaderRow(row);
+  }
+
+  window.__refreshHeaderData = refreshHeaderData;
 
   const readPaperNum = () => {
     const v = (window._paperNum || '').toString().trim();
@@ -1895,6 +2090,129 @@ function collectHeaderFormData() {
   return withTemporarilyEnabled(form, () => Object.fromEntries(new FormData(form)));
 }
 
+function collectHeaderChanges() {
+  const form = document.getElementById('orderHeaderForm');
+  if (!form) return {};
+
+  const metaList = (Array.isArray(PAGE?.headerFields)) ? PAGE.headerFields : [];
+  const lookupFields = new Set(
+    metaList
+      .filter(f => f && f.LookupTable && f.LookupKeyField && f.LookupResultField)
+      .map(f => (f.FieldName || '').toString())
+      .filter(f => f)
+  );
+
+  return withTemporarilyEnabled(form, () => {
+    const changes = {};
+    const inputs = form.querySelectorAll('input[name], select[name], textarea[name]');
+
+    inputs.forEach(inp => {
+      const name = (inp.name || '').toString().trim();
+      if (!name) return;
+      const isLookupKey = inp.classList.contains('lookup-key');
+      if (isLookupKey && !lookupFields.has(name)) return;
+
+      let currentValue = '';
+      if (inp.type === 'checkbox') {
+        currentValue = inp.checked ? '1' : '0';
+      } else {
+        currentValue = (inp.value ?? '').toString();
+      }
+      currentValue = currentValue.trim();
+
+      const initValue = (inp.dataset.init ?? '').toString().trim();
+
+      if (lookupFields.has(name)) {
+        const container = inp.closest('li') || inp.parentElement;
+        const hidden = container?.querySelector('input.lookup-key[name]');
+        const textInput = container?.querySelector(`input.lookup-dropdown[data-field="${CSS.escape(name)}"]`);
+        const hiddenValue = (hidden?.value ?? '').toString().trim();
+        const hiddenInit = (hidden?.dataset?.init ?? '').toString().trim();
+        const inputValue = (textInput?.value ?? currentValue).toString().trim();
+        const inputInit = (textInput?.dataset?.init ?? '').toString().trim();
+
+        let candidate = hiddenValue || inputValue;
+        if (inputValue && hiddenValue) {
+          const hv = hiddenValue.toLowerCase();
+          const iv = inputValue.toLowerCase();
+          if (!(iv === hv || iv.startsWith(hv + ' ') || iv.startsWith(hv + '-'))) {
+            candidate = inputValue;
+          }
+        } else if (inputValue) {
+          candidate = inputValue;
+        }
+
+        const initCandidate = hiddenInit || inputInit || initValue;
+        if (candidate === initCandidate) return;
+        changes[name] = candidate;
+        return;
+      }
+
+      if (isLookupKey) return;
+      if (currentValue === initValue) return;
+      changes[name] = currentValue;
+    });
+
+    const paperNum = (PAGE.paperNum || window.selectedPaperNum || changes.PaperNum || '').toString().trim();
+    if (paperNum) changes.PaperNum = paperNum;
+
+    return changes;
+  });
+}
+
+function normalizeLookupHeaderValues(header) {
+  const form = document.getElementById('orderHeaderForm');
+  if (!form || !header) return header;
+
+  const metaList = (Array.isArray(PAGE?.headerFields)) ? PAGE.headerFields : [];
+  const lookupFields = new Set(
+    metaList
+      .filter(f => f && f.LookupTable && f.LookupKeyField && f.LookupResultField)
+      .map(f => (f.FieldName || '').toString())
+      .filter(f => f)
+  );
+
+  lookupFields.forEach(field => {
+    if (header[field] == null) return;
+    const inp = form.querySelector(`input.lookup-dropdown[data-field="${CSS.escape(field)}"]`);
+    const hidden = inp?.closest('li')?.querySelector('input.lookup-key[name]');
+    const rawHeader = (header[field] ?? '').toString().trim();
+    const inputValue = (inp?.value ?? '').toString().trim();
+    const hiddenValue = (hidden?.value ?? '').toString().trim();
+    let candidate = (hiddenValue || rawHeader).toString().trim();
+
+    if (inputValue && hiddenValue) {
+      const hv = hiddenValue.toLowerCase();
+      const iv = inputValue.toLowerCase();
+      if (!(iv === hv || iv.startsWith(hv + ' ') || iv.startsWith(hv + '-'))) {
+        candidate = inputValue;
+      }
+    } else if (inputValue) {
+      candidate = inputValue;
+    }
+
+    const map = inp?._lookupLabelToKey || {};
+    const mapped = (window.safeMapLookupKey ? window.safeMapLookupKey(candidate, map) : candidate) ?? candidate;
+    const fallback = candidate.split(' - ')[0] || candidate;
+    const key = (mapped && mapped !== candidate ? mapped : fallback).trim();
+    if (key) header[field] = key;
+  });
+
+  form.querySelectorAll('select[name]').forEach(sel => {
+    const field = (sel.name || '').toString();
+    if (!field || header[field] == null) return;
+    if (lookupFields.size && !lookupFields.has(field)) return;
+    const raw = (header[field] ?? '').toString().trim();
+    if (!raw) return;
+    if (raw.includes(' - ')) {
+      const v = raw.split(' - ')[0].trim();
+      if (v) header[field] = v;
+    }
+  });
+
+  return header;
+}
+
 function getPaperNum() {
   const p1 = (PAGE.paperNum || window.selectedPaperNum || '').trim();
   if (p1) return p1;
@@ -1908,6 +2226,17 @@ function getPaperNum() {
 async function saveMultiTabChanges(options) {
   const opts = Object.assign({ silentSuccess: false }, options || {});
   const headerTableName = window._headerTableName;
+  const keyCandidates = ['PaperNum', 'Item', 'SeqNum', 'Seq', 'LineNum', 'RowNo', 'SerialNum', 'LineId'];
+
+  const getRowFieldValue = (row, fieldName) => {
+    if (!row || !fieldName) return undefined;
+    const target = fieldName.toString().toLowerCase();
+    const input = Array.from(row.querySelectorAll('.cell-edit[data-field]'))
+      .find(el => (el.dataset.field || '').toString().toLowerCase() === target);
+    if (!input) return undefined;
+    if (input.type === 'checkbox') return input.checked ? '1' : '0';
+    return (input.value ?? '').toString().trim();
+  };
 
   // ? 針對 FMEdIssueMain，在儲存前重新檢查資料庫的實際狀態
   if (headerTableName === 'FMEdIssueMain') {
@@ -2034,8 +2363,18 @@ async function saveMultiTabChanges(options) {
         if (!isNaN(itemNum)) {
           rowData.Item = itemNum;
           console.log(`?? [儲存] 明確加入 Item: ${itemNum}`);
+        } else {
+          rowData.Item = rowItem;
+          console.log(`?? [儲存] 明確加入 Item: ${rowItem}`);
         }
       }
+
+      // ? 補上可能的鍵欄位（即使未變更），避免找不到主鍵
+      keyCandidates.forEach(k => {
+        if (rowData[k] !== undefined) return;
+        const v = getRowFieldValue(row, k);
+        if (v != null && v !== '') rowData[k] = v;
+      });
 
       // 確保有資料再加入，並且顯示完整的 rowData 內容
       if (Object.keys(rowData).length > 0) {
@@ -2084,8 +2423,12 @@ async function saveMultiTabChanges(options) {
       const firstRow = changes[0];
       const keyFields = Array.isArray(keyFieldsOverride) ? keyFieldsOverride.slice(0) : [];
       if (keyFields.length === 0) {
-        if (firstRow.PaperNum !== undefined) keyFields.push('PaperNum');
-        if (firstRow.Item !== undefined) keyFields.push('Item');
+        keyCandidates.forEach(k => {
+          if (firstRow[k] !== undefined) keyFields.push(k);
+        });
+      }
+      if (keyFields.length === 0) {
+        keyFields.push(HEADER_KEY_FIELD);
       }
 
       const payload = {
@@ -2108,7 +2451,15 @@ async function saveMultiTabChanges(options) {
         console.error(`? [儲存] ${tableName} 儲存失敗:`, errorText);
       } else {
         const result = await resp.json();
-        console.log(`? [儲存] ${tableName} 儲存成功:`, result);
+        const badRows = Array.isArray(result?.results)
+          ? result.results.filter(r => r && r.ok === false)
+          : [];
+        if (badRows.length) {
+          saveSuccess = false;
+          const reasons = badRows.map(r => r.reason || r.skip || '儲存失敗');
+          saveErrors.push(`${tableName}: ${reasons.join('; ')}`);
+        }
+        console.log(`? [儲存] ${tableName} 儲存完成:`, result);
 
         // 儲存成功後，將所有已修改列的狀態改為 unchanged，並同步更新 view 顯示值
         const container = document.querySelector(`.table-container[data-dict-table="${tableName}"]`);
@@ -2152,15 +2503,6 @@ async function saveMultiTabChanges(options) {
     }
 
     if (saveSuccess) {
-      if (!opts.silentSuccess) {
-        await Swal.fire({
-          icon: 'success',
-          title: '儲存成功',
-          text: '單身資料已成功儲存',
-          timer: 1500,
-          showConfirmButton: false
-        });
-      }
       return { ok: true, hasChanges: true };
     }
 
@@ -2184,16 +2526,21 @@ async function saveMultiTabChanges(options) {
 // ============================
 // 儲存單頭
 // ============================
-document.getElementById('orderHeaderForm').addEventListener('submit', async function (e) {
-  e.preventDefault();
-  const header = collectHeaderFormData();
+async function saveHeaderForm() {
+  const header = collectHeaderChanges();
   normalizeNumberFields(header, PAGE.headerFields);
+  normalizeLookupHeaderValues(header);
 
   const payload = { ...header, __headerTable: PAGE.headerTable };
 
   try {
     const detailSave = await saveMultiTabChanges({ silentSuccess: true });
-    if (!detailSave.ok) return;
+    if (!detailSave.ok) return { ok: false };
+
+    const changeKeys = Object.keys(header).filter(k => k.toLowerCase() !== 'papernum');
+    if (!changeKeys.length) {
+      return { ok: true, hasChanges: detailSave.hasChanges === true };
+    }
 
     const resp = await fetch('/api/OrderHeaderApi/SaveOrderHeader', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -2201,16 +2548,76 @@ document.getElementById('orderHeaderForm').addEventListener('submit', async func
     if (resp.ok) {
       const result = await resp.json();
       if (result.updated) {
-        await Swal.fire({ icon: 'success', title: '儲存成功！', timer: 1000, showConfirmButton: false });
-        localStorage.setItem("afterSave", "1"); location.reload();
+        if (result.data) {
+          try { applyHeaderRow(result.data); } catch {}
+        }
+        if (typeof window.__refreshHeaderData === 'function') {
+          try { await window.__refreshHeaderData(); } catch {}
+        }
+        if (typeof window.__refreshMultiTab === 'function') {
+          try { await window.__refreshMultiTab(); } catch {}
+        }
+        if (typeof window.__paper3lSubDetailRefresh === 'function') {
+          try { await window.__paper3lSubDetailRefresh(); } catch {}
+        }
       } else {
         Swal.fire({ icon: 'info', title: '沒有資料異動' });
       }
-    } else {
-      let msg = '儲存失敗'; try { const txt = await resp.text(); msg = txt || msg; } catch {}
-      Swal.fire({ icon: 'error', title: msg });
+      return { ok: true };
     }
-  } catch (err) { Swal.fire({ icon: 'error', title: '網路或伺服器錯誤' }); }
+    let msg = '儲存失敗'; try { const txt = await resp.text(); msg = txt || msg; } catch {}
+    Swal.fire({ icon: 'error', title: msg });
+    return { ok: false };
+  } catch (err) {
+    Swal.fire({ icon: 'error', title: '網路或伺服器錯誤' });
+    return { ok: false };
+  }
+}
+
+document.getElementById('orderHeaderForm').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  await saveHeaderForm();
+});
+
+// ============================
+// 下拉選項自動存檔
+// ============================
+let autoSaveHeaderTimer = null;
+let autoSaveHeaderInFlight = false;
+let autoSaveDetailTimer = null;
+let autoSaveDetailInFlight = false;
+
+window.__autoSaveHeader = () => {
+  if (!getHeaderEditState()) return;
+  if (autoSaveHeaderTimer) clearTimeout(autoSaveHeaderTimer);
+  autoSaveHeaderTimer = setTimeout(async () => {
+    if (autoSaveHeaderInFlight) return;
+    autoSaveHeaderInFlight = true;
+    try { await saveHeaderForm(); } finally { autoSaveHeaderInFlight = false; }
+  }, 200);
+};
+
+window.__autoSaveDetail = () => {
+  if (!getHeaderEditState()) return;
+  if (autoSaveDetailTimer) clearTimeout(autoSaveDetailTimer);
+  autoSaveDetailTimer = setTimeout(async () => {
+    if (autoSaveDetailInFlight) return;
+    autoSaveDetailInFlight = true;
+    try { await saveMultiTabChanges({ silentSuccess: true }); } finally { autoSaveDetailInFlight = false; }
+  }, 200);
+};
+
+document.addEventListener('change', (e) => {
+  const el = e.target;
+  if (!(el instanceof HTMLElement)) return;
+  if (!el.closest('.erp-header-form')) return;
+  if (el.matches('select')) {
+    window.__autoSaveHeader?.();
+    return;
+  }
+  if (el.matches('input.lookup-dropdown')) {
+    window.__autoSaveHeader?.();
+  }
 });
 
 // ============================
@@ -2348,6 +2755,37 @@ if (editBtn) {
     return !!btn && (btn.textContent || '').trim() === '保留';
   }
 
+  function getHeaderLabelText(fieldName) {
+    if (!fieldName) return '';
+    const label = document.querySelector(`.header-label-item[data-field="${CSS.escape(fieldName)}"]`);
+    return (label?.textContent || '').trim();
+  }
+
+  function refreshDependentLookups(changedField) {
+    const labelText = getHeaderLabelText(changedField);
+    document.querySelectorAll('.erp-header-form .lookup-dropdown[data-field]').forEach(input => {
+      if (input.closest('.modal')) return;
+      const src1 = (input.dataset.cond1Source || '').trim();
+      const src2 = (input.dataset.cond2Source || '').trim();
+      const match1 = src1 && (src1 === changedField || (labelText && src1 === labelText));
+      const match2 = src2 && (src2 === changedField || (labelText && src2 === labelText));
+      if (!match1 && !match2) return;
+      delete input.dataset.lookupLoaded;
+      delete input.dataset.lookupCondKey;
+      input._lookupItems = [];
+      if (typeof loadLookupOptions === 'function') loadLookupOptions(input);
+    });
+  }
+
+  document.addEventListener('change', (e) => {
+    const el = e.target;
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement)) return;
+    if (!el.closest('.erp-header-form') || el.closest('.modal')) return;
+    const fieldName = (el.getAttribute('name') || el.dataset.field || '').toString().trim();
+    if (!fieldName) return;
+    refreshDependentLookups(fieldName);
+  }, true);
+
   // 編輯模式：lookup input 用 Backspace/Delete 直接清空
   document.addEventListener('keydown', (e) => {
     const inp = e.target;
@@ -2402,7 +2840,9 @@ if (editBtn) {
       countBox.classList.toggle('mode-edit', isEdit);
       countBox.classList.toggle('mode-view', !isEdit);
     }
-    editBtn.textContent = isEdit ? '保留' : '修改';
+    editBtn.innerHTML = isEdit
+      ? '<i class="bi bi-save"></i>保留'
+      : '<i class="bi bi-pencil-square"></i>修改';
     applyHeaderEditState(isEdit);
     applyToolbarEditState(isEdit);
 
@@ -2452,52 +2892,149 @@ if (editBtn) {
   window.__setHeaderEditMode = setHeaderEditMode;
 
   editBtn.addEventListener('click', async function () {
-    // ✅ 針對 FMEdIssueMain 使用 Finished 欄位檢查（數字）
     const headerTableName = window._headerTableName;
-    console.log('🔍 [修改按鈕] headerTableName:', headerTableName);
-    console.log('🔍 [修改按鈕] finishedStatus:', window._finishedStatus);
+    const paperNum = window._paperNum || (typeof PAGE !== 'undefined' ? PAGE.paperNum : null);
+    console.log('[修改按鈕] headerTableName:', headerTableName, 'paperNum:', paperNum);
 
-    // ? 如果是從「編輯模式」切回「檢視模式」（保留），則儲存單身資料
+    // 如果是從「編輯模式」切回「檢視模式」（保留），則儲存單身資料
     if (isEdit) {
-      console.log('?? [保留按鈕] 開始儲存單身資料...');
+      console.log('[保留按鈕] 開始儲存單身資料...');
       const detailSave = await saveMultiTabChanges();
       if (!detailSave.ok) return;
+      setHeaderEditMode(false);
+      return;
     }
 
-    // ⭐ 如果是從「檢視模式」切到「編輯模式」（修改），先檢查狀態
-    if (!isEdit) {
-      if (headerTableName === 'FMEdIssueMain') {
-        // 使用後端傳遞的 Finished 狀態
-        const finished = window._finishedStatus;
+    // 從「檢視模式」切到「編輯模式」（修改），呼叫後端 API 檢查
+    if (!paperNum || !headerTableName) {
+      console.warn('[修改按鈕] 缺少 paperNum 或 headerTableName');
+      setHeaderEditMode(true);
+      return;
+    }
 
-        // 狀態對照表
-        const statusMap = {0:'作業中', 1:'已確認', 2:'作廢中', 3:'審核中', 4:'已結案'};
-        const statusName = statusMap[finished] || `代碼:${finished}`;
+    try {
+      const checkResp = await fetch('/api/PaperAction/CheckCanEdit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paperId: headerTableName,
+          paperNum: paperNum,
+          itemId: window._itemId || '',
+          userId: window._userId || localStorage.getItem('erpLoginUserId') || 'admin',
+          useId: window._useId || 'A001'
+        })
+      });
 
-        // 允許修改的狀態：作業中(0) 和 審核中(3)
-        const allowedStatuses = [0, 3];
-        if (finished !== null && !allowedStatuses.includes(finished)) {
-          console.log('🚫 [修改按鈕] 狀態不允許修改，阻止修改');
-          Swal.fire({
-            icon: 'warning',
-            title: '無法修改',
-            html: `單據狀態：<b>${statusName}</b><br>只有「作業中」或「審核中」的單據才能進行修改。`
-          });
-          return;
-        }
-        console.log('✅ [修改按鈕] 狀態允許修改');
-      } else {
-        // 一般單據使用原本的「單據狀態」文字檢查
-        const status = getHeaderValueByLabel('單據狀態') || '';
-        if (window.BLOCK_STATUSES && window.BLOCK_STATUSES.includes(status)) {
-          Swal.fire({ icon: 'warning', title: '無法修改', text: `此單據狀態為「${status}」，不可進行修改。`});
-          return;
-        }
+      if (!checkResp.ok) {
+        const errData = await checkResp.json().catch(() => ({}));
+        await Swal.fire({ icon: 'error', title: '檢查失敗', text: errData.message || '無法驗證編輯權限' });
+        return;
       }
-    }
 
-    setHeaderEditMode(!isEdit);
+      const result = await checkResp.json();
+      console.log('[修改按鈕] CheckCanEdit 結果:', result);
+
+      // 支援 PascalCase (C# 預設) 和 camelCase
+      const canEdit = result.CanEdit ?? result.canEdit;
+      const message = result.Message ?? result.message;
+      const requiresRejection = result.RequiresRejection ?? result.requiresRejection;
+      const canAutoReject = result.CanAutoReject ?? result.canAutoReject;
+      const rejectRequiresNotes = result.RejectRequiresNotes ?? result.rejectRequiresNotes;
+      const rejectMessage = result.RejectMessage ?? result.rejectMessage;
+      const latestData = result.LatestData ?? result.latestData;
+
+      // 更新前端狀態 (從後端取得最新資料)
+      if (latestData) {
+        window._finishedStatus = latestData.Finished;
+      }
+
+      if (canEdit) {
+        setHeaderEditMode(true);
+        return;
+      }
+
+      // 不能直接編輯
+      if (!requiresRejection) {
+        await Swal.fire({ icon: 'warning', title: '無法修改', text: message });
+        return;
+      }
+
+      // 需要退審但沒有權限
+      if (!canAutoReject) {
+        await Swal.fire({ icon: 'warning', title: '無法修改', text: message });
+        return;
+      }
+
+      // 有權限可自動退審，顯示確認對話框
+      const shouldReject = await showRejectConfirmDialog({ message, rejectRequiresNotes, rejectMessage });
+      if (!shouldReject.confirmed) return;
+
+      // 執行退審
+      const rejectResp = await fetch('/api/PaperAction/RejectForEdit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paperId: headerTableName,
+          paperNum: paperNum,
+          itemId: window._itemId || '',
+          userId: window._userId || localStorage.getItem('erpLoginUserId') || 'admin',
+          useId: window._useId || 'A001',
+          rejectNotes: shouldReject.notes || ''
+        })
+      });
+
+      if (!rejectResp.ok) {
+        const errData = await rejectResp.json().catch(() => ({}));
+        await Swal.fire({ icon: 'error', title: '退審失敗', text: errData.message || '無法完成退審操作' });
+        return;
+      }
+
+      // 退審成功，重新載入頁面並自動進入編輯模式
+      await Swal.fire({
+        icon: 'success',
+        title: '退審成功',
+        text: '頁面將重新載入以取得最新狀態',
+        timer: 1500,
+        showConfirmButton: false
+      });
+      localStorage.setItem('afterSave', '1');
+      location.reload();
+
+    } catch (err) {
+      console.error('[修改按鈕] 錯誤:', err);
+      await Swal.fire({ icon: 'error', title: '系統錯誤', text: '無法驗證編輯權限，請稍後再試' });
+    }
   });
+
+  // 退審確認對話框
+  async function showRejectConfirmDialog(checkResult) {
+    if (checkResult.rejectRequiresNotes) {
+      const result = await Swal.fire({
+        icon: 'question',
+        title: '確認退審',
+        html: `${checkResult.rejectMessage || checkResult.message}<br><br>請輸入退審原因：`,
+        input: 'textarea',
+        inputPlaceholder: '請輸入退審原因',
+        showCancelButton: true,
+        confirmButtonText: '確定退審',
+        cancelButtonText: '取消',
+        inputValidator: (value) => {
+          if (!value || !value.trim()) return '請輸入退審原因';
+        }
+      });
+      return { confirmed: result.isConfirmed, notes: result.value || '' };
+    } else {
+      const result = await Swal.fire({
+        icon: 'question',
+        title: '確認退審',
+        text: checkResult.rejectMessage || checkResult.message,
+        showCancelButton: true,
+        confirmButtonText: '確定退審',
+        cancelButtonText: '取消'
+      });
+      return { confirmed: result.isConfirmed, notes: '' };
+    }
+  }
 
   window.addEventListener('load', () => {
     captureHeaderInitValues();
@@ -2961,7 +3498,10 @@ $(function () {
     inputEl._lookupKeyToLabel = keyToLabel;
     inputEl._lookupLabelToKey = labelToKey;
     inputEl._lookupItems = items;
-    const initKey = selected ?? '';
+    const initRaw = selected ?? '';
+    const initMapped = mapLookupKey(initRaw, labelToKey);
+    const initFallback = initRaw.split(' - ')[0] || initRaw;
+    const initKey = (initMapped && initMapped !== initRaw) ? initMapped : initFallback;
     if (initKey !== '') inputEl.value = formatLookupDisplay(initKey, getLookupLabel(initKey, keyToLabel));
     const hidden = inputEl.closest('li')?.querySelector('input.lookup-key[name]');
     if (hidden) hidden.value = initKey;
@@ -2969,9 +3509,10 @@ $(function () {
     if (inputEl.classList.contains('lookup-readonly')) {
       inputEl.dataset.lockedValue = inputEl.value ?? '';
     }
-    if (document.activeElement === inputEl) {
+    if (document.activeElement === inputEl || inputEl.dataset.forceOpen === '1' || activeLookupInput === inputEl) {
       const allowApply = !!(getHeaderEditState() && inputEl.dataset.readonly !== '1' && !inputEl.readOnly);
       openLookupDropdownForInput(inputEl, true, allowApply);
+      delete inputEl.dataset.forceOpen;
     }
   }
 
@@ -2986,16 +3527,20 @@ $(function () {
     const cond1Source = (el.dataset.cond1Source || '').trim();
     const cond2Field = (el.dataset.cond2Field || '').trim();
     const cond2Source = (el.dataset.cond2Source || '').trim();
-    const cond1Value = cond1Source ? readHeaderValue(cond1Source) : '';
-    const cond2Value = cond2Source ? readHeaderValue(cond2Source) : '';
+    const cond1ValueField = cond1Source || cond1Field;
+    const cond2ValueField = cond2Source || cond2Field;
+    const cond1Value = cond1ValueField ? resolveCondValue(cond1ValueField) : '';
+    const cond2Value = cond2ValueField ? resolveCondValue(cond2ValueField) : '';
+    const cond1FieldParam = cond1Field || cond1Source;
+    const cond2FieldParam = cond2Field || cond2Source;
     const condKey = `${cond1Field}:${cond1Value}|${cond2Field}:${cond2Value}`;
     if (el.dataset.lookupLoaded === '1' && el.dataset.lookupCondKey === condKey) return;
 
     el.dataset.lookupCondKey = condKey;
     el.dataset.lookupLoading = '1';
     const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(table)}&key=${encodeURIComponent(key)}&result=${encodeURIComponent(result)}`
-      + (cond1Field && cond1Value ? `&cond1Field=${encodeURIComponent(cond1Field)}&cond1Value=${encodeURIComponent(cond1Value)}` : '')
-      + (cond2Field && cond2Value ? `&cond2Field=${encodeURIComponent(cond2Field)}&cond2Value=${encodeURIComponent(cond2Value)}` : '');
+      + (cond1FieldParam && cond1Value ? `&cond1Field=${encodeURIComponent(cond1FieldParam)}&cond1Value=${encodeURIComponent(cond1Value)}` : '')
+      + (cond2FieldParam && cond2Value ? `&cond2Field=${encodeURIComponent(cond2FieldParam)}&cond2Value=${encodeURIComponent(cond2Value)}` : '');
     fetch(url)
       .then(r => r.ok ? r.json() : [])
       .then(data => {
@@ -3016,6 +3561,18 @@ $(function () {
 
   function normalizeLookupKey(value) {
     return (value ?? '').toString().trim().toLowerCase();
+  }
+
+  function resolveCondValue(fieldOrLabel) {
+    const key = (fieldOrLabel || '').toString().trim();
+    if (!key) return '';
+    const direct = readHeaderValue(key);
+    if (direct) return direct;
+    const labelEl = Array.from(document.querySelectorAll('.header-label-item'))
+      .find(el => (el.textContent || '').trim() === key);
+    const field = labelEl?.getAttribute('data-field') || '';
+    if (!field) return '';
+    return readHeaderValue(field);
   }
 
   function getLookupLabel(key, keyToLabel) {
@@ -3142,11 +3699,15 @@ $(function () {
       input.value = key ? formatLookupDisplay(key, label) : '';
       const hidden = input.closest('li')?.querySelector('input.lookup-key[name]');
       if (hidden) hidden.value = key;
+      input.dataset.selected = key ?? '';
       syncLookupLabel(input);
       try {
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
       } catch {}
+      if (input.closest('.erp-header-form') && typeof window.__autoSaveHeader === 'function') {
+        window.__autoSaveHeader();
+      }
       closeLookupDropdown();
     };
 
@@ -3186,7 +3747,7 @@ $(function () {
         loadLookupOptions(this);
         try {
           const map = this._lookupLabelToKey || {};
-          const key = mapLookupKey(this.value, map);
+        const key = window.safeMapLookupKey(this.value, map);
           if (key) this.value = key;
           const len = (this.value || '').length;
           if (len) this.setSelectionRange(0, len);
@@ -3197,7 +3758,7 @@ $(function () {
         const keyToLabel = this._lookupKeyToLabel || {};
         const raw = (this.value || '').trim();
         if (!raw) return;
-        const key = mapLookupKey(raw, this._lookupLabelToKey || {});
+        const key = window.safeMapLookupKey(raw, this._lookupLabelToKey || {});
         const label = getLookupLabel(key, keyToLabel);
         if (label) {
           this.value = formatLookupDisplay(key, label);
@@ -3212,6 +3773,8 @@ $(function () {
         e.stopPropagation();
         const inputEl = $(this).siblings('input.lookup-dropdown')[0];
         if (!inputEl) return;
+        inputEl.dataset.forceOpen = '1';
+        try { inputEl.focus(); } catch {}
         loadLookupOptions(inputEl);
         const allowApply = !!(getHeaderEditState() && inputEl.dataset.readonly !== '1' && !inputEl.readOnly);
         openLookupDropdownForInput(inputEl, true, allowApply);
@@ -3361,9 +3924,10 @@ async function fetchIdListByPagedQuery(filters) {
 }
 async function fetchIdListByDynamicTable(filters) {
   const fs = [...(filters || []), { Field: "page", Op: "", Value: "1" }, { Field: "pageSize", Op: "", Value: "999999" }];
+  const itemId = (window._itemId || window._singleItemId || '').toString().trim();
   const res = await fetch('/api/DynamicTable/PagedQuery', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table: PAGE.headerTable, filters: fs })
+    body: JSON.stringify({ table: PAGE.headerTable, itemId, filters: fs })
   });
   if (!res.ok) throw new Error('DynamicTable/PagedQuery failed');
   const json = await res.json();
@@ -3766,19 +4330,26 @@ function getHeaderValueByLabel(labelText) {
       }
       return;
     }
-    if (selectEl instanceof HTMLInputElement) {
-      const keyToLabel = selectEl._lookupKeyToLabel || {};
-      const labelToKey = selectEl._lookupLabelToKey || {};
-      const raw = selectEl.value ?? '';
-      const key = mapLookupKey(raw, labelToKey) ?? raw;
-      const display = formatLookupDisplay(key, getLookupLabel(key, keyToLabel));
-      if (label && label.classList.contains('lookup-label')) {
-        label.textContent = display || raw;
-      }
-      const hidden = selectEl.closest('li')?.querySelector('input.lookup-key[name]');
-      if (hidden) hidden.value = raw === '' ? '' : key;
+  if (selectEl instanceof HTMLInputElement) {
+    const keyToLabel = selectEl._lookupKeyToLabel || {};
+    const labelToKey = selectEl._lookupLabelToKey || {};
+    const raw = selectEl.value ?? '';
+    const mapped = window.safeMapLookupKey(raw, labelToKey);
+    const fallback = raw.split(' - ')[0] || raw;
+    const key = (mapped && mapped !== raw) ? mapped : fallback;
+    const labelText = getLookupLabel(key, keyToLabel);
+    const display = formatLookupDisplay(key, labelText);
+    if (labelText && raw !== display) {
+      selectEl.value = display;
     }
+    if (label && label.classList.contains('lookup-label')) {
+      label.textContent = display || raw;
+    }
+    const hidden = selectEl.closest('li')?.querySelector('input.lookup-key[name]');
+    if (hidden) hidden.value = raw === '' ? '' : key;
+    selectEl.dataset.selected = key ?? '';
   }
+}
 
   function captureHeaderInitValues() {
     document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
@@ -3975,7 +4546,7 @@ body { background: #f7f9fb !important; }
   font-size: var(--top-toolbar-font-size);
   height: var(--top-toolbar-btn-height);
   min-height: var(--top-toolbar-btn-height);
-  padding: 0 12px;
+  padding: 0 6px;
   line-height: 1;
 }
 .top-toolbar .toolbar-btn-icon{

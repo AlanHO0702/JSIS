@@ -201,6 +201,7 @@ SELECT c.name
             Add("PaperDate");
             Add("dllHeadFirst");
             Add("Notes");
+            Add("FlowStatus");
 
             if (selectCols.Count == 0) return null;
 
@@ -396,5 +397,370 @@ UPDATE [{table}]
                 return parsed.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture);
             return null;
         }
+
+        #region CheckCanEdit / RejectForEdit
+
+        public class CheckCanEditRequest
+        {
+            public string PaperId { get; set; } = "";
+            public string PaperNum { get; set; } = "";
+            public string? ItemId { get; set; }
+            public string? UserId { get; set; }
+            public string? UseId { get; set; }
+        }
+
+        public class CheckCanEditResponse
+        {
+            public bool CanEdit { get; set; }
+            public string? Message { get; set; }
+            public string? BlockReason { get; set; }
+            public bool RequiresRejection { get; set; }
+            public bool CanAutoReject { get; set; }
+            public bool RejectRequiresNotes { get; set; }
+            public string? RejectMessage { get; set; }
+            public Dictionary<string, object?>? LatestData { get; set; }
+        }
+
+        [HttpPost("CheckCanEdit")]
+        public async Task<IActionResult> CheckCanEdit([FromBody] CheckCanEditRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.PaperId) || string.IsNullOrWhiteSpace(req.PaperNum))
+                return BadRequest(new { message = "缺少必要參數" });
+
+            var connStr = _config.GetConnectionString("DefaultConnection");
+            using var conn = new SqlConnection(connStr);
+
+            try
+            {
+                await conn.OpenAsync();
+                var dictPaperId = req.PaperId.Trim();
+
+                // 從 CURdTableName 取得實際的資料表名稱
+                var safePaperId = await ResolveRealTableNameAsync(conn, dictPaperId);
+                if (!IsSafeIdentifier(safePaperId))
+                    return BadRequest(new { message = "PaperId 不合法" });
+
+                if (!await TableExistsAsync(conn, safePaperId))
+                    return BadRequest(new { message = "找不到單據資料表" });
+
+                var paperNum = req.PaperNum.Trim();
+                var userId = string.IsNullOrWhiteSpace(req.UserId) ? "admin" : req.UserId.Trim();
+                var useId = string.IsNullOrWhiteSpace(req.UseId) ? "A001" : req.UseId.Trim();
+
+                var columns = await GetTableColumnsAsync(conn, safePaperId);
+                if (!columns.Contains("PaperNum"))
+                    return BadRequest(new { message = "單據資料表缺少 PaperNum 欄位" });
+
+                var row = await LoadPaperRowAsync(conn, safePaperId, paperNum, columns);
+                if (row == null)
+                    return BadRequest(new { message = "找不到指定單據" });
+
+                var finished = TryParseInt(row, "Finished") ?? 0;
+                var rowPaperId = TryGetString(row, "PaperId");
+                var flowStatus = TryParseInt(row, "FlowStatus") ?? 0;
+
+                var (canbRunFlow, canbSelectType, canbLockPaperDate, canbLockUserEdit, canbMustNotes, headFirst) =
+                    await LoadPaperInfoAsync(conn, safePaperId);
+                var (canbScrap, canbUpdate, canbAudit, canbAuditBack, canbUpdateNotes, canbUpdateMoney, canbViewMoney, canbPrint) =
+                    await LoadUserItemPowerAsync(conn, req.ItemId, userId, useId);
+
+                var latestData = new Dictionary<string, object?>
+                {
+                    ["Finished"] = finished,
+                    ["FlowStatus"] = flowStatus,
+                    ["PaperId"] = rowPaperId
+                };
+
+                // 1. 檢查 PaperId 拋轉單據
+                if (!string.IsNullOrWhiteSpace(rowPaperId))
+                {
+                    if (string.Equals(safePaperId, "MPHdExtendMain", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(safePaperId, "MPHdPettyMain", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Ok(new CheckCanEditResponse
+                        {
+                            CanEdit = false,
+                            Message = "此單據是其它單據拋轉而來，不能修改!",
+                            BlockReason = "TRANSFER_NO_EDIT",
+                            LatestData = latestData
+                        });
+                    }
+                    else
+                    {
+                        return Ok(new CheckCanEditResponse
+                        {
+                            CanEdit = false,
+                            Message = "此單據是其它單據拋轉而來，請由原單據修改",
+                            BlockReason = "TRANSFER_EDIT_ORIGINAL",
+                            LatestData = latestData
+                        });
+                    }
+                }
+
+                // 2. 檢查已作廢/已結案
+                if (finished == 2)
+                {
+                    return Ok(new CheckCanEditResponse
+                    {
+                        CanEdit = false,
+                        Message = "此單據已作廢,不可修改",
+                        BlockReason = "VOIDED",
+                        LatestData = latestData
+                    });
+                }
+                if (finished == 4)
+                {
+                    return Ok(new CheckCanEditResponse
+                    {
+                        CanEdit = false,
+                        Message = "此單據已結案,不可修改",
+                        BlockReason = "CLOSED",
+                        LatestData = latestData
+                    });
+                }
+
+                // 3. 檢查 FlowStatus = 31 (已進入簽核流程)
+                if (flowStatus == 31)
+                {
+                    var flowPrcId = await GetFlowPrcIdAsync(conn, req.ItemId);
+                    var bUseFlow = canbRunFlow == 1;
+
+                    if (bUseFlow && !string.IsNullOrWhiteSpace(flowPrcId))
+                    {
+                        return Ok(new CheckCanEditResponse
+                        {
+                            CanEdit = false,
+                            Message = "此單據已進入電子簽核流程,不可修改",
+                            BlockReason = "ELECTRONIC_FLOW",
+                            LatestData = latestData
+                        });
+                    }
+                    else if (canbRunFlow == 1)
+                    {
+                        return Ok(new CheckCanEditResponse
+                        {
+                            CanEdit = false,
+                            Message = "此單據已送審,須先退審才可修改",
+                            BlockReason = "SENT_FOR_APPROVAL",
+                            RequiresRejection = true,
+                            CanAutoReject = canbAuditBack == 1,
+                            RejectRequiresNotes = canbMustNotes == 1,
+                            RejectMessage = "是否確定退審此單據？退審後可進行修改。",
+                            LatestData = latestData
+                        });
+                    }
+                }
+
+                // 4. 檢查 Finished = 1 (已確認)
+                if (finished == 1)
+                {
+                    if (canbRunFlow == 1 && canbAuditBack == 0)
+                    {
+                        return Ok(new CheckCanEditResponse
+                        {
+                            CanEdit = false,
+                            Message = "此單據已確認,須先退審才可修改",
+                            BlockReason = "FINISHED_NO_PERMISSION",
+                            RequiresRejection = true,
+                            CanAutoReject = false,
+                            LatestData = latestData
+                        });
+                    }
+
+                    if (canbRunFlow == 1 && canbAuditBack == 1)
+                    {
+                        return Ok(new CheckCanEditResponse
+                        {
+                            CanEdit = false,
+                            Message = "此單據已確認,須先退審才可修改",
+                            BlockReason = "FINISHED_NEED_REJECT",
+                            RequiresRejection = true,
+                            CanAutoReject = true,
+                            RejectRequiresNotes = canbMustNotes == 1,
+                            RejectMessage = "是否確定退審此單據？退審後可進行修改。",
+                            LatestData = latestData
+                        });
+                    }
+                }
+
+                // 5. 檢查 Finished = 3 (審核中) - 視情況
+                if (finished == 3)
+                {
+                    if (canbRunFlow == 1 && canbAuditBack == 0)
+                    {
+                        return Ok(new CheckCanEditResponse
+                        {
+                            CanEdit = false,
+                            Message = "此單據審核中,須先退審才可修改",
+                            BlockReason = "REVIEWING_NO_PERMISSION",
+                            RequiresRejection = true,
+                            CanAutoReject = false,
+                            LatestData = latestData
+                        });
+                    }
+
+                    if (canbRunFlow == 1 && canbAuditBack == 1)
+                    {
+                        return Ok(new CheckCanEditResponse
+                        {
+                            CanEdit = false,
+                            Message = "此單據審核中,須先退審才可修改",
+                            BlockReason = "REVIEWING_NEED_REJECT",
+                            RequiresRejection = true,
+                            CanAutoReject = true,
+                            RejectRequiresNotes = canbMustNotes == 1,
+                            RejectMessage = "是否確定退審此單據？退審後可進行修改。",
+                            LatestData = latestData
+                        });
+                    }
+                }
+
+                // 通過所有檢查，可以編輯
+                return Ok(new CheckCanEditResponse
+                {
+                    CanEdit = true,
+                    LatestData = latestData
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = ex.Message });
+            }
+        }
+
+        public class RejectForEditRequest
+        {
+            public string PaperId { get; set; } = "";
+            public string PaperNum { get; set; } = "";
+            public string? ItemId { get; set; }
+            public string? UserId { get; set; }
+            public string? UseId { get; set; }
+            public string? RejectNotes { get; set; }
+        }
+
+        [HttpPost("RejectForEdit")]
+        public async Task<IActionResult> RejectForEdit([FromBody] RejectForEditRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.PaperId) || string.IsNullOrWhiteSpace(req.PaperNum))
+                return BadRequest(new { message = "缺少必要參數" });
+
+            var connStr = _config.GetConnectionString("DefaultConnection");
+            using var conn = new SqlConnection(connStr);
+
+            try
+            {
+                await conn.OpenAsync();
+                var dictPaperId = req.PaperId.Trim();
+
+                // 從 CURdTableName 取得實際的資料表名稱
+                var safePaperId = await ResolveRealTableNameAsync(conn, dictPaperId);
+                if (!IsSafeIdentifier(safePaperId))
+                    return BadRequest(new { message = "PaperId 不合法" });
+
+                if (!await TableExistsAsync(conn, safePaperId))
+                    return BadRequest(new { message = "找不到單據資料表" });
+
+                var paperNum = req.PaperNum.Trim();
+                var userId = string.IsNullOrWhiteSpace(req.UserId) ? "admin" : req.UserId.Trim();
+                var useId = string.IsNullOrWhiteSpace(req.UseId) ? "A001" : req.UseId.Trim();
+
+                var columns = await GetTableColumnsAsync(conn, safePaperId);
+                var row = await LoadPaperRowAsync(conn, safePaperId, paperNum, columns);
+                if (row == null)
+                    return BadRequest(new { message = "找不到指定單據" });
+
+                var finished = TryParseInt(row, "Finished") ?? 0;
+
+                var (canbRunFlow, _, _, _, canbMustNotes, _) = await LoadPaperInfoAsync(conn, safePaperId);
+                var (_, _, _, canbAuditBack, _, _, _, _) = await LoadUserItemPowerAsync(conn, req.ItemId, userId, useId);
+
+                // 檢查權限
+                if (canbRunFlow == 1 && canbAuditBack == 0)
+                    return BadRequest(new { message = "您沒有「退審」的權限" });
+
+                // 檢查是否需要備註
+                if (canbMustNotes == 1 && string.IsNullOrWhiteSpace(req.RejectNotes))
+                    return BadRequest(new { code = "NEED_REJECT_NOTES", message = "請輸入退審原因" });
+
+                // 如果有備註，先更新 Notes 欄位
+                if (!string.IsNullOrWhiteSpace(req.RejectNotes) && columns.Contains("Notes"))
+                {
+                    var notesText = $"\n[退審] {DateTime.Now:yyyy/MM/dd HH:mm} {userId}: {req.RejectNotes}";
+                    await AppendNotesAsync(conn, safePaperId, paperNum, notesText);
+                }
+
+                // 呼叫 CURdRejNotes 記錄退審原因 (如果有備註)
+                if (!string.IsNullOrWhiteSpace(req.RejectNotes))
+                {
+                    try
+                    {
+                        await ExecRejNotesAsync(conn, safePaperId, req.RejectNotes, paperNum, req.ItemId ?? "", userId);
+                    }
+                    catch
+                    {
+                        // CURdRejNotes 可能不存在，忽略錯誤
+                    }
+                }
+
+                // 呼叫 CURdPaperAction 執行退審 (AftFinished = 0)
+                using var cmd = new SqlCommand("CURdPaperAction", conn);
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@PaperId", safePaperId);
+                cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+                cmd.Parameters.AddWithValue("@UserId", userId);
+                cmd.Parameters.AddWithValue("@EOC", 0);
+                cmd.Parameters.AddWithValue("@AftFinished", 0); // 退回作業中狀態
+
+                await cmd.ExecuteNonQueryAsync();
+
+                return Ok(new { success = true, message = "退審成功，可進行修改", newFinished = 0 });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = ex.Message });
+            }
+        }
+
+        private static async Task<string?> GetFlowPrcIdAsync(SqlConnection conn, string? itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId)) return null;
+
+            const string sql = @"
+SELECT TOP 1 FlowPrcId
+  FROM CURdSysItems WITH (NOLOCK)
+ WHERE ItemId = @itemId";
+            using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@itemId", itemId);
+            var obj = await cmd.ExecuteScalarAsync();
+            return obj == null || obj == DBNull.Value ? null : obj.ToString()?.Trim();
+        }
+
+        private static async Task<string> ResolveRealTableNameAsync(SqlConnection conn, string dictTableName)
+        {
+            if (string.IsNullOrWhiteSpace(dictTableName)) return dictTableName;
+
+            const string sql = @"
+SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
+  FROM CURdTableName WITH (NOLOCK)
+ WHERE TableName = @tbl";
+            using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@tbl", dictTableName.Trim());
+            var obj = await cmd.ExecuteScalarAsync();
+            return obj == null || obj == DBNull.Value ? dictTableName.Trim() : obj.ToString()?.Trim() ?? dictTableName.Trim();
+        }
+
+        private static async Task ExecRejNotesAsync(SqlConnection conn, string paperId, string reason, string paperNum, string itemId, string userId)
+        {
+            const string sql = "exec CURdRejNotes @PaperId, @Reason, @PaperNum, @ItemId, @UserId";
+            using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@PaperId", paperId);
+            cmd.Parameters.AddWithValue("@Reason", reason ?? "");
+            cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+            cmd.Parameters.AddWithValue("@ItemId", itemId ?? "");
+            cmd.Parameters.AddWithValue("@UserId", userId ?? "");
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        #endregion
     }
 }

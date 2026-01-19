@@ -32,6 +32,22 @@
     leftOffset: 1
   };
 
+  function canOpenDictModal() {
+    const uid = (localStorage.getItem('erpLoginUserId') || window._userId || '').toString().trim().toLowerCase();
+    const cachedAdmin = uid ? localStorage.getItem(`erpIsAdmin:${uid}`) === '1' : false;
+    const bodyAdmin = document.body?.dataset?.isAdmin === '1';
+    return window.__isAdmin === true || cachedAdmin || bodyAdmin;
+  }
+
+  function warnDictPermission() {
+    const msg = '需要最高權限才能開啟資料辭典';
+    if (window.Swal?.fire) {
+      window.Swal.fire({ icon: 'warning', title: msg });
+    } else {
+      alert(msg);
+    }
+  }
+
   function calcGridLayout(row, col) {
     const r = Number(row);
     const c = Number(col);
@@ -535,6 +551,10 @@
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'F3' || e.repeat) return;
       e.preventDefault();
+      if (!canOpenDictModal()) {
+        warnDictPermission();
+        return;
+      }
 
       const modalId = resolveModalId();
       if (!modalId) { console.warn("[fieldDictModal] 找不到 modal"); return; }

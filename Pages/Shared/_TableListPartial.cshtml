@@ -577,6 +577,7 @@ function updateToolbarHeaderCountForRow(row) {
 function doQuery(page = 1) {
   let filters = lastQueryFilters.slice();
   let hasPage = false, hasSize = false;
+  const itemId = (window._itemId || window._singleItemId || '').toString().trim();
 
   filters.forEach(f => {
     if (f.Field === "page")     { f.Value = String(page); hasPage = true; }
@@ -590,7 +591,7 @@ function doQuery(page = 1) {
   http('/api/DynamicTable/PagedQuery', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table: window._tableName, filters })
+    body: JSON.stringify({ table: window._tableName, itemId, filters })
   }, '讀取資料中…')
     .then(r => r.json())
     .then(result => {
@@ -745,45 +746,64 @@ document.addEventListener("DOMContentLoaded", function () {
     const id = window.selectedPaperNum;
     if (!id) return Swal.fire({ icon: 'warning', title: '請先選擇一筆單據' });
 
-    const row = document.querySelector(`tr[data-paper-num="${id}"]`);
-
-    // ✅ 針對 FMEdIssueMain 使用 Finished 欄位（數字）檢查
     const tableName = window._tableName || '@tableName';
-    if (tableName === 'FMEdIssueMain') {
-      try {
-        // 從 API 取得單頭資料
-        const response = await fetch(`/api/FMEdIssueMain/${encodeURIComponent(id)}`);
-        if (response.ok) {
-          const mainData = await response.json();
-          const finished = mainData.Finished;
 
-          // 狀態對照表
-          const statusMap = {0:'作業中', 1:'已確認', 2:'作廢中', 4:'已結案'};
-          const statusName = statusMap[finished] || `代碼:${finished}`;
+    try {
+      // 呼叫後端 API 檢查是否可編輯
+      const checkResp = await fetch('/api/PaperAction/CheckCanEdit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paperId: tableName,
+          paperNum: id,
+          itemId: window._itemId || '',
+          userId: window._userId || localStorage.getItem('erpLoginUserId') || 'admin',
+          useId: window._useId || 'A001'
+        })
+      });
 
-          // 如果不是作業中 (Finished != 0)，阻止跳轉
-          if (finished !== 0) {
-            return Swal.fire({
-              icon: 'warning',
-              title: '無法修改',
-              html: `單據狀態：<b>${statusName}</b><br>只有「作業中」的單據才能進行修改。`
-            });
-          }
-        }
-      } catch (error) {
-        console.error('檢查單據狀態時發生錯誤:', error);
+      if (!checkResp.ok) {
+        const errData = await checkResp.json().catch(() => ({}));
+        return Swal.fire({ icon: 'error', title: '檢查失敗', text: errData.message || '無法驗證編輯權限' });
       }
-    } else {
-      // 一般單據使用原本的「單據狀態」文字檢查
-      const status = row?.querySelector("td:nth-child(6)")?.textContent.trim() || '';
-      if (window.BLOCK_STATUSES?.includes(status)) {
-        return Swal.fire({ icon: 'warning', title: '無法修改', text: `此單據狀態為「${status}」，不可進行修改。` });
+
+      const result = await checkResp.json();
+      console.log('[列表頁修改按鈕] CheckCanEdit 結果:', result);
+
+      // 支援 PascalCase (C# 預設) 和 camelCase
+      const canEdit = result.CanEdit ?? result.canEdit;
+      const message = result.Message ?? result.message;
+      const requiresRejection = result.RequiresRejection ?? result.requiresRejection;
+      const canAutoReject = result.CanAutoReject ?? result.canAutoReject;
+
+      // 完全不能編輯 (作廢、結案、拋轉單據、電子簽核等)
+      if (!canEdit && !requiresRejection) {
+        return Swal.fire({ icon: 'warning', title: '無法修改', text: message });
       }
+
+      // 需要退審但沒有權限
+      if (!canEdit && requiresRejection && !canAutoReject) {
+        return Swal.fire({ icon: 'warning', title: '無法修改', text: message });
+      }
+
+      // 可以編輯或需要退審且有權限，跳轉到明細頁處理
+      // 如果需要退審，在詳細頁會再次確認
+      if (requiresRejection) {
+        sessionStorage.setItem('pendingEditCheck', JSON.stringify({
+          paperNum: id,
+          checkResult: result
+        }));
+      }
+
+      const url = detailRouteTemplate.replace("{PaperNum}", id);
+      window.location.href = url;
+
+    } catch (error) {
+      console.error('[列表頁修改按鈕] 檢查單據狀態時發生錯誤:', error);
+      // 發生錯誤時仍允許跳轉，讓詳細頁處理
+      const url = detailRouteTemplate.replace("{PaperNum}", id);
+      window.location.href = url;
     }
-
-    // 狀態檢查通過，跳轉到明細頁
-    const url = detailRouteTemplate.replace("{PaperNum}", id);
-    window.location.href = url;
   });
 });
 

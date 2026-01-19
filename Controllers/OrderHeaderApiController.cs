@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using System.Collections.Concurrent;
 
@@ -91,6 +92,77 @@ public class OrderHeaderApiController : ControllerBase
         return v?.ToString();
     }
 
+    private async Task<string> ResolveRealTableNameAsync(string dictTable)
+    {
+        var table = (dictTable ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(table)) return table;
+
+        var realTable = await _context.CurdTableNames
+            .AsNoTracking()
+            .Where(x => x.TableName.ToLower() == table.ToLower())
+            .Select(x => string.IsNullOrWhiteSpace(x.RealTableName) ? x.TableName : x.RealTableName)
+            .FirstOrDefaultAsync();
+
+        return string.IsNullOrWhiteSpace(realTable) ? table : realTable.Trim();
+    }
+
+    private static string Esc(string id) => $"[{id.Replace("]", "]]")}]";
+
+    private static string EscTableName(string raw)
+    {
+        var s = (raw ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(s)) throw new ArgumentException("table required");
+
+        var parts = s.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var part in parts)
+        {
+            if (!SafeIdent.IsMatch(part))
+                throw new ArgumentException($"非法識別名稱：{raw}");
+        }
+        return string.Join(".", parts.Select(Esc));
+    }
+
+    [HttpGet("GetHeaderRow")]
+    public async Task<IActionResult> GetHeaderRow([FromQuery] string table, [FromQuery] string paperNum)
+    {
+        if (string.IsNullOrWhiteSpace(table))
+            return BadRequest("table 必須指定");
+        if (string.IsNullOrWhiteSpace(paperNum))
+            return Ok(null);
+
+        var resolved = await ResolveRealTableNameAsync(table);
+        string safeTable;
+        try
+        {
+            safeTable = EscTableName(resolved);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        await using (var cmd = new SqlCommand(
+            $"SELECT TOP 1 * FROM {safeTable} WHERE [PaperNum]=@paperNum", conn))
+        {
+            cmd.Parameters.AddWithValue("@paperNum", paperNum);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            if (await rd.ReadAsync())
+            {
+                for (int i = 0; i < rd.FieldCount; i++)
+                {
+                    var name = rd.GetName(i);
+                    row[name] = rd.IsDBNull(i) ? null : rd.GetValue(i);
+                }
+            }
+        }
+
+        return row.Count == 0 ? Ok(null) : Ok(row);
+    }
+
     // ====== 儲存（單頭固定 PaperNum；單身固定 PaperNum + Item） ======
     [HttpPost("SaveOrderHeader")]
     public async Task<IActionResult> SaveOrderHeader([FromBody] Dictionary<string, object> body)
@@ -105,6 +177,10 @@ public class OrderHeaderApiController : ControllerBase
         const string headerKey = "PaperNum";
         const string detailFk = "PaperNum";
         const string detailPk = "Item";   // int 自動遞增
+
+        headerTable = await ResolveRealTableNameAsync(headerTable);
+        if (!string.IsNullOrWhiteSpace(detailTable))
+            detailTable = await ResolveRealTableNameAsync(detailTable);
 
         // 取出 Details（若有）
         List<Dictionary<string, object>> details = new List<Dictionary<string, object>>();
@@ -336,7 +412,7 @@ public class OrderHeaderApiController : ControllerBase
                 if (await rd.ReadAsync())
                 {
                     for (int i = 0; i < rd.FieldCount; i++)
-                        latestMain[rd.GetName(i)] = rd.GetValue(i);
+                        latestMain[rd.GetName(i)] = rd.IsDBNull(i) ? null : rd.GetValue(i);
                 }
             }
 
@@ -352,7 +428,7 @@ public class OrderHeaderApiController : ControllerBase
                 {
                     var row = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
                     for (int i = 0; i < rd.FieldCount; i++)
-                        row[rd.GetName(i)] = rd.GetValue(i);
+                        row[rd.GetName(i)] = rd.IsDBNull(i) ? null : rd.GetValue(i);
                     latestSubs.Add(row);
                 }
             }
