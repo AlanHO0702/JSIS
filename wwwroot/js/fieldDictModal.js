@@ -4,7 +4,7 @@
 
     window.showDictModal = async function (modalId = 'fieldDictModal', tableName = window._dictTableName) {
       const el = document.getElementById(modalId);
-      if (!el) { console.warn("[fieldDictModal] 找不到 modal:", modalId); return; }
+      if (!el) { console.warn("[fieldDictModal] ?��???modal:", modalId); return; }
       await window.initFieldDictModal(tableName, modalId);
 
       const md = bootstrap.Modal.getOrCreateInstance(el);
@@ -40,7 +40,7 @@
   }
 
   function warnDictPermission() {
-    const msg = '需要最高權限才能開啟資料辭典';
+    const msg = "\u9700\u8981\u7ba1\u7406\u54e1\u6b0a\u9650\u624d\u53ef\u958b\u555f\u8cc7\u6599\u8fad\u5178";
     if (window.Swal?.fire) {
       window.Swal.fire({ icon: 'warning', title: msg });
     } else {
@@ -69,7 +69,7 @@
 
   window.showDictModal = async function (modalId = 'fieldDictModal', tableName = window._dictTableName) {
     const el = document.getElementById(modalId);
-    if (!el) { console.warn("[fieldDictModal] 找不到 modal:", modalId); return; }
+    if (!el) { console.warn("[fieldDictModal] ?��???modal:", modalId); return; }
     await window.initFieldDictModal(tableName, modalId);
 
     const displayEl = document.getElementById('dictTableNameDisplay');
@@ -92,7 +92,7 @@
       scope.querySelector('.dictTableBody') ||
       scope.querySelector('tbody[data-role="dict"]');
 
-    if (!tbody) { console.warn("[fieldDictModal] 找不到 tbody"); return; }
+    if (!tbody) { console.warn("[fieldDictModal] ?��???tbody"); return; }
     const loadedFor  = (tbody.getAttribute('data-loaded-for') || '').toLowerCase();
     const want       = tname.toLowerCase();
     const needReload = loadedFor !== want;
@@ -111,7 +111,7 @@
 
         const res  = await fetch(u.toString());
         if (!res.ok) {
-          if (!QUIET) alert("欄位清單載入失敗。");
+          if (!QUIET) alert("\u6b04\u4f4d\u6e05\u55ae\u8f09\u5165\u5931\u6557");
         } else {
           const rows = await res.json();
           rows.sort((a, b) => (Number(a.SerialNum ?? 9999)) - (Number(b.SerialNum ?? 9999)));
@@ -166,13 +166,13 @@
             </td>
 
             <td class="text-center" style="width:40px">
-              <input type="checkbox" class="checkbox-dark" data-field="Visible"
-                    ${(+x.Visible === 1 ? 'checked' : '')} />
+              <input type="checkbox" class="checkbox-dark" data-field="ReadOnly"
+                    ${(+x.ReadOnly === 1 ? 'checked' : '')} />
             </td>
 
             <td class="text-center" style="width:40px">
-              <input type="checkbox" class="checkbox-dark" data-field="ReadOnly"
-                    ${(+x.ReadOnly === 1 ? 'checked' : '')} />
+              <input type="checkbox" class="checkbox-dark" data-field="Visible"
+                    ${(+x.Visible === 1 ? 'checked' : '')} />
             </td>
 
             <td class="text-center" style="width:40px">
@@ -204,7 +204,7 @@
             </td>
             <td style="width:60px" class="text-center">
               <button type="button" class="btn btn-sm btn-outline-secondary"
-                      aria-label="設定"
+                      aria-label="設�?"
                       onclick="window.editFieldDetail && window.editFieldDetail('${x.FieldName}')">
                 <i class="bi bi-gear"></i>
               </button>
@@ -215,8 +215,8 @@
           tbody.setAttribute('data-loaded-for', tname);
         }
       } catch (err) {
-        if (!QUIET) alert("欄位清單載入失敗。");
-        console.warn('[fieldDictModal] 載入失敗:', err);
+        if (!QUIET) alert("\u6b04\u4f4d\u6e05\u55ae\u8f09\u5165\u5931\u6557");
+        console.warn('[fieldDictModal] 載入失�?:', err);
       }
     }
 
@@ -295,7 +295,7 @@
       });
       return { updated };
     } catch (err) {
-      console.warn('[fieldDictModal] 同步資料型態失敗:', err);
+      console.warn('[fieldDictModal] ?�步資�??��?失�?:', err);
       return { updated: 0 };
     }
   }
@@ -326,8 +326,8 @@
 
   window.applyGridLayoutByRowCol = function (tableSelector = '#fieldDictTable tbody') {
     const tbody = document.querySelector(tableSelector);
-    if (!tbody) { alert("找不到表格內容。"); return; }
-    if (!confirm("要套用所有欄位的格線位置設定嗎？")) return;
+    if (!tbody) { alert("\u627e\u4e0d\u5230\u8868\u683c\u5167\u5bb9\u3002"); return; }
+    if (!confirm("\u8981\u4f9d\u5217/\u6b04\u6279\u6b21\u8abf\u6574\u4f4d\u7f6e\uff1f")) return;
     const rows = Array.from(tbody.querySelectorAll('tr'));
     let applied = 0;
 
@@ -347,8 +347,8 @@
       syncRowDirtyUi(tr);
     });
 
-    if (applied === 0) { alert("沒有可套用的列。"); return; }
-    alert("已套用 " + applied + " 筆。");
+    if (applied === 0) { alert("\u6c92\u6709\u53ef\u5957\u7528\u7684\u5217\u3002"); return; }
+    alert("\u5df2\u5957\u7528" + applied + " \u7b46\u3002");
   };
 
       function sortDictTbody(tbody) {
@@ -401,19 +401,19 @@
 
     try {
       const tbody = document.querySelector(tableSelector);
-      if (!tbody) { alert("找不到表格內容。"); return; }
+      if (!tbody) { alert("\u627e\u4e0d\u5230\u8868\u683c\u5167\u5bb9\u3002"); return; }
       const dictTableName =
         tbody.getAttribute("data-loaded-for") ||
         tbody.dataset.dictTable ||
         window._dictTableName ||
         "";
 
-      if (!dictTableName) { alert("找不到資料表名稱。"); return; }
+      if (!dictTableName) { alert("\u627e\u4e0d\u5230\u8cc7\u6599\u8fad\u5178\u8868\u540d\u3002"); return; }
       await syncDbDataTypes(tbody, dictTableName);
 
       const allRows = Array.from(tbody.querySelectorAll("tr"));
       const dirtyRows = allRows.filter(tr => tr.dataset.dirty === "1" || isRowDirty(tr));
-      if (dirtyRows.length === 0) { alert("沒有變更需要儲存。"); return; }
+      if (dirtyRows.length === 0) { alert("\u6c92\u6709\u8b8a\u66f4\u9700\u8981\u5132\u5b58\u3002"); return; }
       const data = dirtyRows.map(tr => {
         const getVal = name => tr.querySelector(`input[data-field="${name}"]`)?.value ?? "";
         const getInt = name => {
@@ -484,7 +484,7 @@
       });
       const result = await res.json().catch(() => ({}));
       if (!result?.success) {
-        alert(result?.message || "儲存失敗。");
+        alert(result?.message || "\u5132\u5b58\u5931\u6557");
         return;
       }
 
@@ -495,7 +495,7 @@
       });
       const result2 = await res2.json().catch(() => ({}));
       if (!result2?.success) {
-        alert(result2?.message || "OCX Key 儲存失敗。");
+        alert(result2?.message || "OCX Key \u5132\u5b58\u5931\u6557");
         return;
       }
 
@@ -504,11 +504,11 @@
         syncRowDirtyUi(tr);
       });
 
-      alert("儲存完成，更新 " + dirtyRows.length + " 筆。");
+      alert("\u5132\u5b58\u5b8c\u6210\uff0c\u66f4\u65b0" + dirtyRows.length + " \u7b46\u3002");
       window.dispatchEvent(new Event("field-dict-saved"));
       setTimeout(() => location.reload(), 300);
     } catch (err) {
-      alert("API 錯誤: " + err);
+      alert("API ?�誤: " + err);
     } finally {
       document.body.style.cursor = "default";
       saveAllDictFields.__busy = false;
@@ -557,7 +557,7 @@
       }
 
       const modalId = resolveModalId();
-      if (!modalId) { console.warn("[fieldDictModal] 找不到 modal"); return; }
+      if (!modalId) { console.warn("[fieldDictModal] ?��???modal"); return; }
       const focusEl = document.activeElement?.closest?.('[data-dict-table]');
       const pt      = window.__lastMouse || { x: 0, y: 0 };
       const hoverEl = document.elementFromPoint?.(pt.x, pt.y)?.closest?.('[data-dict-table]');
@@ -736,7 +736,7 @@
 
           const tr = document.querySelector(`.dictTableBody tr[data-fieldname="${safeName}"]`);
           if (!tr) {
-              alert("找不到欄位: " + fieldName);
+              alert("?��??��?�? " + fieldName);
               return;
           }
 
@@ -833,6 +833,7 @@
 
 
 })();
+
 
 
 
