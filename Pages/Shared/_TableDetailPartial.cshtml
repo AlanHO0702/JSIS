@@ -74,6 +74,12 @@
             s = s.Substring(2);
         return s;
     }
+    static bool IsPartNumField(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        var normalized = name.Replace("_", "").Trim().ToLowerInvariant();
+        return normalized.Contains("partnum");
+    }
 
     var groupedTabs = headerFieldsList
         .GroupBy(f => NormalizeShowWhere(f.iShowWhere))
@@ -246,6 +252,7 @@
                                     var editColor = NormalizeEditColor(field.EditColor);
                                     var editStyle = !string.IsNullOrWhiteSpace(editColor) ? $"background-color:{editColor} !important;" : "";
                                     var editStyleForSelect = editStyle;
+                                    var isPartNumField = IsPartNumField(field.FieldName);
 
 
                                     <li class="header-label-item"
@@ -263,7 +270,7 @@
                                     {
                                         // 下拉選單元件（可輸入）
                                         var lookupListId = $"lk_{tab.Key}_{field.FieldName}".Replace(" ", "_");
-                                        <li class="@liClass @(alignRight ? "field-number" : "field-text")"
+                                        <li class="@liClass @(alignRight ? "field-number" : "field-text") @(isPartNumField ? "partnum-field" : "")"
                                             data-field="@field.FieldName"
                                             data-tab="@tab.Key"
                                             title="@field.FieldName"
@@ -290,11 +297,15 @@
                                                    list="@lookupListId"
                                                    style="@editStyleForSelect" />
                                             <datalist id="@lookupListId"></datalist>
+                                            @if (isPartNumField)
+                                            {
+                                                <button type="button" class="partnum-lookup-btn" data-field="@field.FieldName" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>
+                                            }
                                         </li>
                                     }
                                     else
                                     {
-                                        <li class="@liClass @(alignRight ? "field-number" : "field-text")"
+                                        <li class="@liClass @(alignRight ? "field-number" : "field-text") @(isPartNumField ? "partnum-field" : "")"
                                             data-field="@field.FieldName"
                                             data-tab="@tab.Key"
                                             title="@field.FieldName"
@@ -304,6 +315,10 @@
                                                 name="@field.FieldName"
                                                 data-align="@(alignRight ? "right" : (alignCenter ? "center" : null))"
                                                 style="@editStyle">@displayText</textarea>
+                                            @if (isPartNumField)
+                                            {
+                                                <button type="button" class="partnum-lookup-btn" data-field="@field.FieldName" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>
+                                            }
                                         </li>
                                     }
                                 }
@@ -397,6 +412,7 @@
 
                                         // 預先算好 name，避免 Razor 解析錯誤
                                         var inputName = $"Details[{index}].{col.FieldName}";
+                                        var isPartNumCol = IsPartNumField(col.FieldName);
 
                                         var isNumberCell = IsNumberType(col.DataType);
                                         string lookupCellType = "";
@@ -423,7 +439,7 @@
                                         {
                                             isReadOnly = true;
                                         }
-                                        <td class="detail-cell @(alignRightCell ? "detail-number" : "detail-text")" style="@cellStyle" data-readonly="@(isReadOnly ? "1" : "0")">
+                                        <td class="detail-cell @(alignRightCell ? "detail-number" : "detail-text") @(isPartNumCol ? "partnum-field" : "")" style="@cellStyle" data-readonly="@(isReadOnly ? "1" : "0")" data-field="@col.FieldName">
                                             <span class="cell-view @(isReadOnly ? "readonly-cell" : "")">@cellValue</span>
 
                                             <input type="text"
@@ -433,6 +449,10 @@
                                                 data-init="@cellValue"
                                                 value="@cellValue"
                                                 @(isReadOnly ? "readonly data-readonly=\"1\"" : "data-readonly=\"0\"") />
+                                            @if (isPartNumCol)
+                                            {
+                                                <button type="button" class="partnum-lookup-btn" data-field="@col.FieldName" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>
+                                            }
                                                 
                                         </td>
 
@@ -490,6 +510,35 @@ const PAGE = {
   headerFields: @Html.Raw(JsonSerializer.Serialize(headerFieldsList)),
   detailFields: @Html.Raw(JsonSerializer.Serialize(fields))
 };
+
+function getPartNumFromContainer(container) {
+  if (!container) return '';
+  const keyInput = container.querySelector('input.lookup-key[name]');
+  if (keyInput && keyInput.value) return keyInput.value.trim();
+  const input = container.querySelector('input.cell-edit, input[type="text"], textarea, select');
+  if (input) {
+    if (input.tagName && input.tagName.toLowerCase() === 'select') {
+      return (input.value || input.options?.[input.selectedIndex]?.value || '').trim();
+    }
+    return (input.value || '').trim();
+  }
+  const view = container.querySelector('.cell-view');
+  return view ? (view.textContent || '').trim() : '';
+}
+
+document.addEventListener('click', (e) => {
+  if (e.__partnumHandled) return;
+  const btn = e.target.closest('.partnum-lookup-btn');
+  if (!btn) return;
+  e.__partnumHandled = true;
+  e.preventDefault();
+  e.stopPropagation();
+  const container = btn.closest('td, li');
+  const partNum = getPartNumFromContainer(container);
+  if (!partNum) return;
+  const url = `/MIN/MatDetail?PartNum=${encodeURIComponent(partNum)}`;
+  window.open(url, '_blank');
+});
 
 // 放在最前面（辭典開關）
 window.__DICT_OPEN__ = false;
@@ -734,8 +783,10 @@ function appendEmptyDetailRow() {
     const isReadOnly = (col.ReadOnly || 0) > 0;
     const roClass = isReadOnly ? ' readonly-cell' : '';
     const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
+    const isPartNum = /partnum/i.test((col.FieldName || '').replace(/_/g, ''));
+    const partNumBtn = isPartNum ? '<button type="button" class="partnum-lookup-btn" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>' : '';
     tdsHtml += `
-      <td data-readonly="${isReadOnly ? '1' : '0'}">
+      <td data-readonly="${isReadOnly ? '1' : '0'}" data-field="${col.FieldName}" class="${isPartNum ? 'partnum-field' : ''}">
         <span class="cell-view${roClass}">${v}</span>
         <input type="text"
           class="form-control form-control-sm cell-edit d-none w-100${roClass}"
@@ -743,6 +794,7 @@ function appendEmptyDetailRow() {
           data-field="${col.FieldName}"
           data-init="${v}"
           value="${v}"${roAttr}>
+        ${partNumBtn}
       </td>`;
   });
   tr.innerHTML = tdsHtml;
@@ -2243,6 +2295,32 @@ body { background: #f7f9fb !important; }
   overflow: visible !important;
   text-overflow: clip !important;
   max-width: none !important;
+}
+.partnum-field{ position: relative; }
+.partnum-lookup-btn{
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 22px;
+  border: 0;
+  border-left: 1px solid #cfd7e6;
+  background: #e9f1ff;
+  color: #1f5fbf;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+.partnum-lookup-btn:hover{ background: #dbe9ff; }
+.partnum-field textarea,
+.partnum-field input,
+.partnum-field select{
+  padding-right: 26px !important;
+}
+.erp-table td.partnum-field .cell-view,
+.erp-table td.partnum-field .cell-edit{
+  padding-right: 26px !important;
 }
 .draggable-field.md-selected{
   border-radius: 8px;
