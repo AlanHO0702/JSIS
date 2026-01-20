@@ -1,8 +1,11 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
 using PcbErpApi.Helpers;
 using static PcbErpApi.Helpers.DynamicQueryHelper;
+using System.Text;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Reflection;
@@ -44,10 +47,10 @@ namespace PcbErpApi.Controllers
         [HttpPost("PagedQuery")]
         public async Task<IActionResult> PagedQuery([FromBody] QueryFilterRequest request)
         {
-            var tableName = request?.Table?.Trim();
+            var dictTableName = request?.Table?.Trim();
             var filters = request?.filters ?? new List<QueryParamDto>();
 
-            if (string.IsNullOrEmpty(tableName))
+            if (string.IsNullOrEmpty(dictTableName))
                 return BadRequest("Table 必須指定");
 
             if (!filters.Any())
@@ -60,12 +63,53 @@ namespace PcbErpApi.Controllers
             if (!int.TryParse(pageSize, out int pageSizeNumber)) pageSizeNumber = 50;
 
             // 1) 取 DbSet / entityType / query
+            // 先嘗試用原始名稱查詢 CURdTableName
+            var realTableName = await _context.CurdTableNames
+                .AsNoTracking()
+                .Where(x => x.TableName.ToLower() == dictTableName.ToLower())
+                .Select(x => string.IsNullOrWhiteSpace(x.RealTableName) ? x.TableName : x.RealTableName)
+                .FirstOrDefaultAsync();
+
+            // 若找不到，嘗試用移除底線的版本查詢
+            if (string.IsNullOrWhiteSpace(realTableName))
+            {
+                var normalizedName = dictTableName.Replace("_", "");
+                realTableName = await _context.CurdTableNames
+                    .AsNoTracking()
+                    .Where(x => x.TableName.ToLower().Replace("_", "") == normalizedName.ToLower())
+                    .Select(x => string.IsNullOrWhiteSpace(x.RealTableName) ? x.TableName : x.RealTableName)
+                    .FirstOrDefaultAsync();
+            }
+
+            if (string.IsNullOrWhiteSpace(realTableName))
+                realTableName = dictTableName;
+
             // 將 View 名稱對應到 DbSet 屬性名稱（移除底線和特殊字元）
-            var dbSetName = MapViewNameToDbSetName(tableName);
+            var dbSetName = MapViewNameToDbSetName(realTableName);
             var dbSetProp = _context.GetType().GetProperties()
                 .FirstOrDefault(p => p.Name.Equals(dbSetName, StringComparison.OrdinalIgnoreCase));
+
+            // fallback 1: 若實體表找不到，試試原始字典表名稱
+            if (dbSetProp == null && !realTableName.Equals(dictTableName, StringComparison.OrdinalIgnoreCase))
+            {
+                dbSetName = MapViewNameToDbSetName(dictTableName);
+                dbSetProp = _context.GetType().GetProperties()
+                    .FirstOrDefault(p => p.Name.Equals(dbSetName, StringComparison.OrdinalIgnoreCase));
+            }
+
+            // fallback 2: 直接嘗試移除底線的版本
             if (dbSetProp == null)
-                return BadRequest($"找不到 Table {tableName} (嘗試對應到 DbSet: {dbSetName})");
+            {
+                dbSetName = dictTableName.Replace("_", "");
+                dbSetProp = _context.GetType().GetProperties()
+                    .FirstOrDefault(p => p.Name.Equals(dbSetName, StringComparison.OrdinalIgnoreCase));
+            }
+
+            // ★ fallback 3: 若仍找不到 DbSet，改用 Raw SQL 查詢
+            if (dbSetProp == null)
+            {
+                return await PagedQueryRawSqlAsync(dictTableName, realTableName, filters, pageNumber, pageSizeNumber);
+            }
 
             var entityType = dbSetProp.PropertyType.GenericTypeArguments.First();
             var query = (IQueryable)dbSetProp.GetValue(_context);
@@ -126,10 +170,10 @@ namespace PcbErpApi.Controllers
 
             // 6) lookup 與欄位
             var tableDictService = new TableDictionaryService(_context);
-            var lookupMaps = tableDictService.GetOCXLookups(tableName);
+            var lookupMaps = tableDictService.GetOCXLookups(dictTableName);
 
             var fields = _context.CURdTableFields
-                .Where(f => f.TableName == tableName)
+                .Where(f => f.TableName == dictTableName)
                 .Select(f => new TableFieldViewModel
                 {
                     FieldName = f.FieldName,
@@ -157,6 +201,194 @@ namespace PcbErpApi.Controllers
                 });
 
             return Ok(new { totalCount, data = formattedData, lookupMapData });
+        }
+
+        /// <summary>
+        /// 當找不到 DbSet 時，使用 Raw SQL 查詢（類似 DynamicTableController 的實現）
+        /// </summary>
+        private async Task<IActionResult> PagedQueryRawSqlAsync(
+            string dictTableName,
+            string realTableName,
+            List<QueryParamDto> filters,
+            int pageNumber,
+            int pageSizeNumber)
+        {
+            // 基本白名單，防止 injection
+            if (!Regex.IsMatch(realTableName, @"^[A-Za-z0-9_]+$"))
+                return BadRequest("Table 名稱不合法");
+
+            // 欄位白名單
+            var fieldList = await _context.CURdTableFields
+                .AsNoTracking()
+                .Where(f => f.TableName.ToLower() == dictTableName.ToLower()
+                         || f.TableName.ToLower() == realTableName.ToLower())
+                .Select(f => f.FieldName)
+                .ToListAsync();
+
+            var fieldSet = new HashSet<string>(fieldList, StringComparer.OrdinalIgnoreCase);
+            var fieldMap = fieldList
+                .Where(f => !string.IsNullOrWhiteSpace(f))
+                .GroupBy(f => f, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            static string NormalizeFilterField(string field)
+            {
+                if (string.IsNullOrWhiteSpace(field)) return field;
+                var s = field.Trim();
+                s = Regex.Replace(s, @"(?:_?(From|To))$", "", RegexOptions.IgnoreCase);
+                s = Regex.Replace(s, @"[_\-]?\d+$", "", RegexOptions.IgnoreCase);
+                return s;
+            }
+
+            string? ResolveFieldName(string rawField)
+            {
+                if (string.IsNullOrWhiteSpace(rawField)) return null;
+                if (fieldMap.TryGetValue(rawField.Trim(), out var exact)) return exact;
+                var norm = NormalizeFilterField(rawField);
+                if (!string.Equals(norm, rawField, StringComparison.OrdinalIgnoreCase)
+                    && fieldMap.TryGetValue(norm, out var n2))
+                    return n2;
+                var alt = fieldMap.Keys.FirstOrDefault(k => k.Equals(norm, StringComparison.OrdinalIgnoreCase));
+                return string.IsNullOrWhiteSpace(alt) ? null : alt;
+            }
+
+            static string NormalizeOp(string op)
+            {
+                if (string.IsNullOrWhiteSpace(op)) return "=";
+                return op.ToLowerInvariant() switch
+                {
+                    "contains" or "like" => "LIKE",
+                    "eq" or "=" or "==" => "=",
+                    "ne" or "!=" or "<>" => "<>",
+                    "gt" or ">" => ">",
+                    "ge" or ">=" => ">=",
+                    "lt" or "<" => "<",
+                    "le" or "<=" => "<=",
+                    _ => "="
+                };
+            }
+
+            var conditions = new List<string>();
+            var parameters = new List<SqlParameter>();
+            int pIndex = 0;
+
+            foreach (var f in filters ?? new())
+            {
+                if (string.Equals(f.Field, "page", StringComparison.OrdinalIgnoreCase)) continue;
+                if (string.Equals(f.Field, "pageSize", StringComparison.OrdinalIgnoreCase)) continue;
+                if (string.IsNullOrWhiteSpace(f.Field) || string.IsNullOrWhiteSpace(f.Value)) continue;
+                if (f.Field?.StartsWith("__") ?? false) continue;
+
+                var realField = ResolveFieldName(f.Field);
+                if (string.IsNullOrWhiteSpace(realField)) continue;
+
+                var op = NormalizeOp(f.Op);
+                var paramName = $"@p{pIndex++}";
+                if (op == "LIKE")
+                    parameters.Add(new SqlParameter(paramName, $"%{f.Value}%"));
+                else
+                    parameters.Add(new SqlParameter(paramName, f.Value));
+                conditions.Add($"[{realField}] {op} {paramName}");
+            }
+
+            var whereSql = conditions.Count > 0 ? $"WHERE {string.Join(" AND ", conditions)}" : "";
+
+            // 決定排序欄位
+            var orderSql =
+                fieldSet.Contains("PaperDate")
+                    ? (fieldSet.Contains("PaperNum") ? "[PaperDate] DESC, [PaperNum] DESC" : "[PaperDate] DESC")
+                    : fieldSet.Contains("Item") ? "[Item]"
+                    : fieldSet.Contains("PaperNum") ? "[PaperNum]"
+                    : "1";
+
+            try
+            {
+                var sqlPaged = new StringBuilder();
+                sqlPaged.Append($"SELECT * FROM [{realTableName}] t0 WITH (NOLOCK) {whereSql} ");
+                sqlPaged.Append($"ORDER BY {orderSql} ");
+                sqlPaged.Append($"OFFSET {(pageNumber - 1) * pageSizeNumber} ROWS FETCH NEXT {pageSizeNumber} ROWS ONLY;");
+
+                var sqlCount = $"SELECT COUNT(1) FROM [{realTableName}] t0 WITH (NOLOCK) {whereSql};";
+
+                var result = new List<Dictionary<string, object?>>();
+                int totalCount = 0;
+
+                var cs = _context.Database.GetConnectionString();
+                await using var conn = new SqlConnection(cs);
+                await conn.OpenAsync();
+
+                // count
+                await using (var cmd = new SqlCommand(sqlCount, conn))
+                {
+                    foreach (var p in parameters) cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value));
+                    var obj = await cmd.ExecuteScalarAsync();
+                    totalCount = obj != null && obj != DBNull.Value ? Convert.ToInt32(obj) : 0;
+                }
+
+                // data
+                await using (var cmd = new SqlCommand(sqlPaged.ToString(), conn))
+                {
+                    foreach (var p in parameters) cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value));
+                    await using var rd = await cmd.ExecuteReaderAsync();
+                    while (await rd.ReadAsync())
+                    {
+                        var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                        for (var i = 0; i < rd.FieldCount; i++)
+                        {
+                            var name = rd.GetName(i);
+                            row[name] = rd.IsDBNull(i) ? null : rd.GetValue(i);
+                        }
+                        result.Add(row);
+                    }
+                }
+
+                // lookup 與欄位
+                var tableDictService = new TableDictionaryService(_context);
+                var lookupMaps = tableDictService.GetOCXLookups(dictTableName);
+
+                var fields = _context.CURdTableFields
+                    .Where(f => f.TableName.ToLower() == dictTableName.ToLower()
+                             || f.TableName.ToLower() == realTableName.ToLower())
+                    .Select(f => new TableFieldViewModel
+                    {
+                        FieldName = f.FieldName,
+                        DataType = f.DataType,
+                        FormatStr = f.FormatStr
+                    })
+                    .ToList();
+
+                var formattedData = result.Select(row =>
+                {
+                    var dict = new Dictionary<string, object?>();
+                    foreach (var field in fields)
+                    {
+                        if (row.TryGetValue(field.FieldName, out var rawValue))
+                            dict[field.FieldName] = FormatHelper.FormatValue(rawValue, field.DataType, field.FormatStr);
+                    }
+                    // 也把不在 fields 裡的欄位加進去（例如 PaperNum）
+                    foreach (var kv in row)
+                    {
+                        if (!dict.ContainsKey(kv.Key))
+                            dict[kv.Key] = kv.Value;
+                    }
+                    return dict;
+                }).ToList();
+
+                var lookupMapData = LookupDisplayHelper.BuildLookupDisplayMap(
+                    result, lookupMaps, item =>
+                    {
+                        if (item is Dictionary<string, object?> d && d.TryGetValue("PaperNum", out var pn))
+                            return pn?.ToString()?.Trim() ?? "";
+                        return "";
+                    });
+
+                return Ok(new { totalCount, data = formattedData, lookupMapData });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "PagedQueryRawSqlAsync error for table {Table}", realTableName);
+                return StatusCode(500, new { ok = false, message = ex.Message });
+            }
         }
 
         private object GetValue(object item, string fieldName)

@@ -101,7 +101,7 @@ namespace PcbErpApi.Data
                     .IsUnicode(false);
             });
 
-            // FMEdIssuePO 複合主鍵配置
+            // FMEdIssuePO 複�?主鍵?�置
             modelBuilder.Entity<FmedIssuePo>(entity =>
             {
                 entity.HasKey(e => new { e.PaperNum, e.Item });
@@ -292,13 +292,13 @@ namespace PcbErpApi.Data
             });
 
 
-            // FMEdIssueMat 複合主鍵配置
+            // FMEdIssueMat 複�?主鍵?�置
             modelBuilder.Entity<FmedIssueMat>(entity =>
             {
                 entity.HasKey(e => new { e.PaperNum, e.Item });
             });
 
-            // FMEdIssueLayer 複合主鍵配置
+            // FMEdIssueLayer 複�?主鍵?�置
             modelBuilder.Entity<FmedIssueLayer>(entity =>
             {
                 entity.HasKey(e => new { e.PaperNum, e.Item });
@@ -718,7 +718,7 @@ namespace PcbErpApi.Data
             entity.Property(e => e.LotNotes)
                 .HasMaxLength(12)
                 .IsUnicode(false)
-                .HasDefaultValue("一般");
+                .HasDefaultValue("�@");
             entity.Property(e => e.McutNum)
                 .HasMaxLength(16)
                 .IsUnicode(false);
@@ -1233,14 +1233,15 @@ namespace PcbErpApi.Data
                     .IsUnicode(false);
             });
 
-            modelBuilder.Entity<MindMatInfo>()
-            .HasKey(e => new { e.Partnum, e.Revision });  // ✅ 複合主鍵設定
+            var mindMatInfo = modelBuilder.Entity<MindMatInfo>();
+            mindMatInfo.HasKey(e => new { e.Partnum, e.Revision });
+            mindMatInfo.ToTable(tb => tb.UseSqlOutputClause(false));
 
             modelBuilder.Entity<CURdTableField>()
-            .HasKey(e => new { e.TableName, e.FieldName }); // 這裡改成你真正的複合主鍵欄位
+            .HasKey(e => new { e.TableName, e.FieldName }); // ?�裡?��?你�?�??複�?主鍵欄�?
 
             modelBuilder.Entity<CURdOCXTableFieldLK>()
-            .HasKey(e => new { e.TableName, e.FieldName, e.KeyFieldName, e.KeySelfName }); // 這裡改成你真正的複合主鍵欄位
+            .HasKey(e => new { e.TableName, e.FieldName, e.KeyFieldName, e.KeySelfName }); // ?�裡?��?你�?�??複�?主鍵欄�?
 
             modelBuilder.Entity<CURdTableField>().ToTable("CURdTableField");
 
@@ -1262,13 +1263,13 @@ namespace PcbErpApi.Data
 
             modelBuilder.Entity<CURdSysParams>(e =>
             {
-                e.HasKey(x => new { x.SystemId, x.ParamId });   // ★ 複合主鍵
+                e.HasKey(x => new { x.SystemId, x.ParamId });   // ??複�?主鍵
 
-                // （可選）若要保險再指定長度
+                // （可?��??��?保險?��?定長�?
                 e.Property(x => x.SystemId).HasMaxLength(8).IsRequired();
                 e.Property(x => x.ParamId).HasMaxLength(24).IsRequired();
 
-                e.ToTable(tb => tb.HasTrigger("CURdSysParams_tIU")); // ✅ EF 會改用普通 UPDATE
+                e.ToTable(tb => tb.HasTrigger("CURdSysParams_tIU")); // ??EF ?�改?�普??UPDATE
 
             });
 
@@ -1354,22 +1355,22 @@ namespace PcbErpApi.Data
             });
                 modelBuilder.Entity<SpodPoKind>(entity =>
             {
-                // 資料庫的實際表名：SPODPoKind  （照你 SQL 的名字）
+                // 資�?庫�?實�?表�?：SPODPoKind  （照�?SQL ?��?字�?
                 entity.ToTable("SPODPoKind");
 
                 // PK_SPOdPoKind clustered, unique, primary key located on PRIMARY PoKind, UseId
                 entity.HasKey(e => new { e.PoKind, e.UseId });
 
-                // PoKind int not null（預設就可以，不一定要再設定）
+                // PoKind int not null（�?設就?�以，�?一定�??�設定�?
 
                 entity.Property(e => e.PoKindName)
                     .HasMaxLength(100);          // nvarchar(100)
 
                 entity.Property(e => e.UseId)
                     .HasMaxLength(8)
-                    .IsUnicode(false)            // char(8)，不是 nvarchar
+                    .IsUnicode(false)            // char(8)，�???nvarchar
                     .IsFixedLength()
-                    .HasDefaultValue("A001");    // 如果資料庫有預設值就一起寫
+                    .HasDefaultValue("A001");    // 如�?資�?庫�??�設?�就一起寫
 
                 entity.Property(e => e.LotNotes)
                     .HasMaxLength(12)
@@ -1682,7 +1683,7 @@ namespace PcbErpApi.Data
                     .IsUnicode(false);
                 entity.Property(e => e.BProcNameEng).HasMaxLength(200);
 
-                // Ignore 用於 lookup 的欄位（不在資料表中）
+                // Ignore ?�於 lookup ?��?位�?不在資�?表中�?
                 entity.Ignore(e => e.BPTypeNameM);
             });
 
@@ -2301,7 +2302,7 @@ namespace PcbErpApi.Data
             modelBuilder.Entity<UpdateDictFieldInput>().HasNoKey();
             modelBuilder.Entity<AddItemRequest>().HasNoKey();
 
-            // 針對每個 entity 有 decimal 欄位時，自動設定 HasPrecision
+            // ?��?每�?entity ??decimal 欄�??��??��?設�? HasPrecision
 
             modelBuilder.Entity<AddItemRequest>(entity =>
             {
@@ -2590,3 +2591,5 @@ namespace PcbErpApi.Data
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
     }
 }
+
+
