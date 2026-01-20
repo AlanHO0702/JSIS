@@ -106,21 +106,40 @@ namespace PcbErpApi.Pages.CUR
             QueryFields = await LoadQueryFieldsAsync(itemId, TableName, "TW");
             ViewData["QueryFields"] = QueryFields;
 
+            // 檢查是否為 OpenNoRecord 模式（開啟時不自動載入資料）
+            var openNoRecord = await IsOpenNoRecordAsync(itemId);
+            ViewData["OpenNoRecord"] = openNoRecord;
+
+            // 判斷是否有查詢參數（使用者透過查詢功能帶入條件）
+            var hasQueryParams = QueryFields.Any(qf =>
+                Request.Query.ContainsKey(qf.ColumnName) &&
+                !string.IsNullOrWhiteSpace(Request.Query[qf.ColumnName].ToString()));
+            ViewData["HasQueryParams"] = hasQueryParams;
+
             var filterParams = new List<SqlParameter>();
             var filterSql = BuildFilterSql(QueryFields, Request.Query, filterParams);
             var combinedFilter = CombineFilter(setup.FilterSql, filterSql);
 
-            try
+            // 如果是 OpenNoRecord 模式且沒有查詢參數，則不載入資料
+            if (openNoRecord && !hasQueryParams)
             {
-                TotalCount = await CountRowsAsync(TableName, combinedFilter, filterParams);
-                Items = await LoadRowsAsync(TableName, combinedFilter, orderBy, PageNumber, PageSize, filterParams);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "LoadRows failed for {ItemId} -> {TableName}", itemId, TableName);
                 Items = new();
                 TotalCount = 0;
-                ViewData["LoadError"] = ex.Message;
+            }
+            else
+            {
+                try
+                {
+                    TotalCount = await CountRowsAsync(TableName, combinedFilter, filterParams);
+                    Items = await LoadRowsAsync(TableName, combinedFilter, orderBy, PageNumber, PageSize, filterParams);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "LoadRows failed for {ItemId} -> {TableName}", itemId, TableName);
+                    Items = new();
+                    TotalCount = 0;
+                    ViewData["LoadError"] = ex.Message;
+                }
             }
 
             ViewData["DictTableName"] = DictTableName;
@@ -151,11 +170,128 @@ namespace PcbErpApi.Pages.CUR
                 _logger.LogError(ex, "Load custom buttons failed for {ItemId}", ItemId);
             }
 
+            try
+            {
+                var toolbarVisibility = await LoadToolbarButtonVisibilityAsync(ItemId);
+                if (toolbarVisibility.Count > 0)
+                    ViewData["ToolbarButtonVisibility"] = toolbarVisibility;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Load toolbar button visibility failed for {ItemId}", ItemId);
+            }
+
             var keyFields = BuildKeyFields(setup.Mdkey, setup.LocateKeys);
             if (keyFields.Count > 0)
                 ViewData["KeyFields"] = keyFields;
 
             return Page();
+        }
+
+        public async Task<IActionResult> OnGetDataAsync(
+            string itemId,
+            [FromQuery(Name = "pageIndex")] int pageIndex = 1,
+            [FromQuery(Name = "pageSize")] int pageSize = 50,
+            [FromQuery(Name = "sortBy")] string? sortBy = null,
+            [FromQuery(Name = "sortDir")] string? sortDir = null)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+                return new JsonResult(new { success = false, error = "itemId is required" });
+
+            try
+            {
+                var item = await _ctx.CurdSysItems.AsNoTracking()
+                    .SingleOrDefaultAsync(x => x.ItemId == itemId);
+
+                if (item is null)
+                    return new JsonResult(new { success = false, error = $"Item {itemId} not found." });
+
+                if (item.ItemType != 6 || !string.Equals(item.Ocxtemplete, "JSdSingleGridDLL.dll", StringComparison.OrdinalIgnoreCase))
+                    return new JsonResult(new { success = false, error = $"Item {itemId} is not a SingleGrid item." });
+
+                ItemId = item.ItemId;
+                ItemName = item.ItemName;
+
+                var setup = await _ctx.CurdOcxtableSetUp.AsNoTracking()
+                    .Where(x => x.ItemId == itemId)
+                    .OrderBy(x => x.TableKind)
+                    .FirstOrDefaultAsync();
+
+                if (setup == null)
+                    return new JsonResult(new { success = false, error = $"CURdOCXTableSetUp not found for item {itemId}." });
+
+                DictTableName = setup.TableName;
+                TableName = await ResolveRealTableNameAsync(DictTableName) ?? DictTableName;
+
+                try
+                {
+                    FieldDictList = _dictService.GetFieldDict(DictTableName, typeof(object));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "GetFieldDict failed for {Table}", DictTableName);
+                    FieldDictList = await LoadFieldDictFallbackAsync(DictTableName);
+                }
+
+                QueryFields = await LoadQueryFieldsAsync(itemId, TableName, "TW");
+                var openNoRecord = await IsOpenNoRecordAsync(itemId);
+                var hasQueryParams = QueryFields.Any(qf =>
+                    Request.Query.ContainsKey(qf.ColumnName) &&
+                    !string.IsNullOrWhiteSpace(Request.Query[qf.ColumnName].ToString()));
+
+                if (openNoRecord && !hasQueryParams)
+                {
+                    return new JsonResult(new
+                    {
+                        success = true,
+                        items = new List<Dictionary<string, object?>>(),
+                        pageNumber = pageIndex <= 0 ? 1 : pageIndex,
+                        pageSize = pageSize <= 0 ? 50 : pageSize,
+                        totalCount = 0,
+                        openNoRecord,
+                        hasQueryParams
+                    });
+                }
+                var filterParams = new List<SqlParameter>();
+                var filterSql = BuildFilterSql(QueryFields, Request.Query, filterParams);
+                var combinedFilter = CombineFilter(setup.FilterSql, filterSql);
+
+                // 處理排序
+                string orderBy;
+                if (!string.IsNullOrWhiteSpace(sortBy))
+                {
+                    var dir = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC";
+                    orderBy = $"[{sortBy}] {dir}";
+                }
+                else
+                {
+                    orderBy = string.IsNullOrWhiteSpace(setup.OrderByField)
+                        ? await GetDefaultOrderByAsync(TableName)
+                        : setup.OrderByField;
+                }
+
+                pageIndex = pageIndex <= 0 ? 1 : pageIndex;
+                pageSize = pageSize <= 0 ? 50 : pageSize;
+
+                var totalCount = await CountRowsAsync(TableName, combinedFilter, filterParams);
+                var items = await LoadRowsAsync(TableName, combinedFilter, orderBy, pageIndex, pageSize, filterParams);
+
+                return new JsonResult(new
+                {
+                    success = true,
+                    items,
+                    pageNumber = pageIndex,
+                    pageSize,
+                    totalCount,
+                    openNoRecord,
+                    hasQueryParams
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "OnGetDataAsync failed for {ItemId}", itemId);
+                return new JsonResult(new { success = false, error = ex.Message });
+            }
         }
 
         public async Task<IActionResult> OnGetExportAsync(string itemId)
@@ -415,6 +551,7 @@ SELECT TOP 1 c.name
             public string? DefaultValue { get; set; }
             public string? DefaultEqual { get; set; }
             public string? CommandText { get; set; }
+            public int? DefaultType { get; set; }
         }
 
         private async Task<List<QueryFieldDef>> LoadQueryFieldsAsync(string itemId, string tableName, string lang)
@@ -430,21 +567,63 @@ SELECT TOP 1 c.name
             cmd.Parameters.AddWithValue("@p1", tableName);
             cmd.Parameters.AddWithValue("@p2", lang ?? "TW");
 
-            using var rd = await cmd.ExecuteReaderAsync();
-            while (await rd.ReadAsync())
+            using (var rd = await cmd.ExecuteReaderAsync())
             {
-                list.Add(new QueryFieldDef
+                var hasDefaultType = false;
+                try
                 {
-                    ColumnName = rd["ColumnName"]?.ToString() ?? "",
-                    ColumnCaption = rd["ColumnCaption"]?.ToString() ?? rd["old_ColumnCaption"]?.ToString() ?? "",
-                    DataType = TryToInt(rd["DataType"]),
-                    ControlType = TryToInt(rd["ControlType"]),
-                    DefaultValue = rd["DefaultValue"]?.ToString(),
-                    DefaultEqual = rd["DefaultEqual"]?.ToString(),
-                    CommandText = rd["CommandText"]?.ToString()
-                });
+                    for (int i = 0; i < rd.FieldCount; i++)
+                    {
+                        if (rd.GetName(i).Equals("DefaultType", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasDefaultType = true;
+                            break;
+                        }
+                    }
+                }
+                catch { }
+                while (await rd.ReadAsync())
+                {
+                    int? defaultType = null;
+                    if (hasDefaultType)
+                    {
+                        try { defaultType = TryToInt(rd["DefaultType"]); } catch { }
+                    }
+
+                    list.Add(new QueryFieldDef
+                    {
+                        ColumnName = rd["ColumnName"]?.ToString() ?? "",
+                        ColumnCaption = rd["ColumnCaption"]?.ToString() ?? rd["old_ColumnCaption"]?.ToString() ?? "",
+                        DataType = TryToInt(rd["DataType"]),
+                        ControlType = TryToInt(rd["ControlType"]),
+                        DefaultValue = rd["DefaultValue"]?.ToString(),
+                        DefaultEqual = rd["DefaultEqual"]?.ToString(),
+                        CommandText = rd["CommandText"]?.ToString(),
+                        DefaultType = defaultType
+                    });
+                }
+            }
+
+            foreach (var def in list)
+            {
+                def.DefaultValue = await ResolveDefaultValueAsync(conn, def.DefaultValue, def.DefaultType);
             }
             return list;
+        }
+
+        private static async Task<string?> ResolveDefaultValueAsync(SqlConnection conn, string? defaultValue, int? defaultType)
+        {
+            if (defaultType != 1 || string.IsNullOrWhiteSpace(defaultValue))
+                return defaultValue;
+
+            var sql = defaultValue.Trim();
+            if (!sql.StartsWith("select", StringComparison.OrdinalIgnoreCase))
+                return defaultValue;
+
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.CommandType = CommandType.Text;
+            var result = await cmd.ExecuteScalarAsync();
+            return result == null || result == DBNull.Value ? "" : result.ToString();
         }
 
         private static int? TryToInt(object? o)
@@ -758,7 +937,7 @@ SELECT ItemId, SerialNum, ButtonName,
                 var caption = string.IsNullOrWhiteSpace(b.CustCaption) ? b.ButtonName : b.CustCaption;
                 var hint = b.CustHint ?? string.Empty;
 
-                sb.Append("<button type='button' class='btn btn-outline-secondary btn-sm' data-custom-btn='1'");
+                sb.Append("<button type='button' class='btn btn-sm singlegrid-custom-btn' data-custom-btn='1'");
                 sb.Append(" data-button-name='").Append(enc.Encode(b.ButtonName)).Append('\'');
                 sb.Append(" data-item-id='").Append(enc.Encode(b.ItemId ?? string.Empty)).Append('\'');
                 sb.Append(" title='").Append(enc.Encode(hint)).Append("'>");
@@ -781,6 +960,87 @@ SELECT 1
             cmd.Parameters.AddWithValue("@col", columnName);
             var obj = await cmd.ExecuteScalarAsync();
             return obj != null && obj != DBNull.Value;
+        }
+
+        /// <summary>
+        /// 查詢 CURdOCXItemOtherRule 取得指定 RuleId 的值
+        /// </summary>
+        private async Task<string?> GetItemOtherRuleAsync(string itemId, string ruleId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId) || string.IsNullOrWhiteSpace(ruleId))
+                return null;
+
+            var cs = GetConnStr();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            const string sql = @"
+SELECT DLLValue FROM CURdOCXItemOtherRule WITH (NOLOCK)
+ WHERE ItemId = @itemId AND RuleId = @ruleId";
+
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@itemId", itemId);
+            cmd.Parameters.AddWithValue("@ruleId", ruleId);
+
+            var result = await cmd.ExecuteScalarAsync();
+            return result == null || result == DBNull.Value ? null : result.ToString();
+        }
+
+        /// <summary>
+        /// 檢查是否為 OpenNoRecord 模式（開啟時不自動載入資料）
+        /// </summary>
+        private async Task<bool> IsOpenNoRecordAsync(string itemId)
+        {
+            var value = await GetItemOtherRuleAsync(itemId, "OpenNoRecord");
+            return value == "1";
+        }
+
+        private static async Task<(string? TableName, string? VisibleColumn)> ResolveToolbarButtonTableAsync(SqlConnection conn)
+        {
+            const string sql = @"
+SELECT TOP 1 t.name AS TableName,
+       c3.name AS VisibleColumn
+  FROM sys.tables t
+  JOIN sys.columns c1 ON c1.object_id = t.object_id AND c1.name = 'ItemId'
+  JOIN sys.columns c2 ON c2.object_id = t.object_id AND c2.name = 'ButtonName'
+  JOIN sys.columns c3 ON c3.object_id = t.object_id AND (c3.name = 'bVisiable' OR c3.name = 'bVisible')
+ ORDER BY CASE WHEN c3.name = 'bVisiable' THEN 0 ELSE 1 END, t.name;";
+            await using var cmd = new SqlCommand(sql, conn);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            if (!await rd.ReadAsync()) return (null, null);
+            return (rd["TableName"]?.ToString(), rd["VisibleColumn"]?.ToString());
+        }
+
+        private async Task<Dictionary<string, bool>> LoadToolbarButtonVisibilityAsync(string itemId)
+        {
+            var map = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(itemId)) return map;
+
+            var cs = GetConnStr();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            var (tableName, visibleColumn) = await ResolveToolbarButtonTableAsync(conn);
+            if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(visibleColumn))
+                return map;
+
+            var sql = $@"
+SELECT ButtonName, [{visibleColumn}] AS IsVisible
+  FROM dbo.[{tableName}] WITH (NOLOCK)
+ WHERE ItemId = @itemId";
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@itemId", itemId);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var btn = rd["ButtonName"]?.ToString();
+                if (string.IsNullOrWhiteSpace(btn)) continue;
+                var raw = rd["IsVisible"];
+                var visible = raw != null && raw != DBNull.Value && int.TryParse(raw.ToString(), out var n) && n == 1;
+                map[btn] = visible;
+            }
+
+            return map;
         }
     }
 }
