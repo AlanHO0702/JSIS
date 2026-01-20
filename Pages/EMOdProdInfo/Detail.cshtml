@@ -403,6 +403,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const detailTabs = Array.from(document.querySelectorAll('[data-table][data-dict]'));
   let currentMasterKeys = @Html.Raw(JsonSerializer.Serialize(Model.MasterKeyValues.ToDictionary(kv => kv.Key, kv => kv.Value)));
   const tabState = {};
+  window.tabState = tabState; // 設為全域變數供其他 script 使用
   let masterData = null;
   let masterDict = null;
   const isViewOnly = @(Model.IsViewOnly ? "true" : "false"); // 查詢模式標記
@@ -510,8 +511,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 載入層別資料
   function loadLayerPress() {
+    console.log('[DEBUG loadLayerPress] 開始載入層別資料');
+    console.log('[DEBUG loadLayerPress] layerPressApiUrl:', layerPressApiUrl);
+
     const layerListEl = document.getElementById('layer-list');
     if (!layerListEl || !layerPressApiUrl) {
+      console.log('[DEBUG loadLayerPress] 無法載入: layerListEl=', layerListEl, 'layerPressApiUrl=', layerPressApiUrl);
       if (layerListEl) layerListEl.innerHTML = '<div class="text-center text-muted py-3">無層別資料</div>';
       return;
     }
@@ -519,6 +524,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fetch(layerPressApiUrl)
       .then(r => r.json())
       .then(rows => {
+        console.log('[DEBUG loadLayerPress] 層別資料載入完成, rows:', rows?.length, rows);
         if (!rows || rows.length === 0) {
           layerListEl.innerHTML = '<div class="text-center text-muted py-3">無層別資料</div>';
           return;
@@ -656,6 +662,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 載入層別相關的資料（壓合明細、壓合方式、途程內容）
   function loadLayerPressDetail(layerId, layerName) {
+    console.log('[DEBUG loadLayerPressDetail] 開始載入, layerId:', layerId, 'layerName:', layerName);
+
     // 需要根據 LayerId 載入的頁籤列表
     const layerTabs = [
       { key: 'layerpress', table: 'EMOdLayerPress', dict: 'EMOdLayerPress', title: '壓合明細/替代料' },
@@ -665,6 +673,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 為每個頁籤載入資料
     layerTabs.forEach(tab => {
+      console.log('[DEBUG loadLayerPressDetail] 載入頁籤:', tab.key);
       // 建立查詢參數（使用 LayerId 來篩選）
       const qs = new URLSearchParams();
       qs.append('keyNames', 'PartNum');
@@ -680,8 +689,10 @@ document.addEventListener('DOMContentLoaded', () => {
         getDict(tab.dict),
         fetch(url).then(r => r.json())
       ]).then(([dict, rows]) => {
+        console.log('[DEBUG loadLayerPressDetail] 載入完成, tab:', tab.key, 'rows:', rows?.length);
         buildTable(tab.key, dict, rows);
       }).catch(err => {
+        console.error('[DEBUG loadLayerPressDetail] 載入失敗, tab:', tab.key, 'err:', err);
         const table = document.getElementById(`grid-${tab.key}`);
         if (table) {
           const tbody = table.querySelector('tbody');
@@ -1214,8 +1225,28 @@ document.addEventListener('DOMContentLoaded', () => {
       ocxMaps[field.FieldName] = await loadOCXLookup(field);
     }
 
-    // 渲染表格資料（套用 Lookup）
+    // 取得 keyFields（用於判斷哪些欄位是主鍵）
+    const keyFields = (table.dataset.keyFields || '').split(',').filter(k => k.trim());
+    const keyFieldSet = new Set(keyFields.map(k => k.toLowerCase()));
+
+    // 渲染表格資料（套用 Lookup，並生成可編輯結構）
     tbody.innerHTML = rows.map(row => {
+      // 為每一行生成主鍵隱藏欄位
+      let pkHiddenHtml = '';
+      keyFields.forEach(k => {
+        const val = row[k] ?? row[k.toLowerCase()] ?? '';
+        pkHiddenHtml += `<input type="hidden" class="mmd-pk-hidden" name="${k}" value="${val}">`;
+      });
+      // 額外加入 PartNum 和 Revision（確保主鍵正確傳遞）
+      if (!keyFieldSet.has('partnum')) {
+        const partNum = currentMasterKeys.PartNum || currentMasterKeys.partnum || '';
+        pkHiddenHtml += `<input type="hidden" class="mmd-fk-hidden" name="PartNum" value="${partNum}">`;
+      }
+      if (!keyFieldSet.has('revision')) {
+        const revision = currentMasterKeys.Revision || currentMasterKeys.revision || '';
+        pkHiddenHtml += `<input type="hidden" class="mmd-fk-hidden" name="Revision" value="${revision}">`;
+      }
+
       const cells = visibleFields.map(f => {
         let rawValue = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
         let displayValue = rawValue;
@@ -1238,15 +1269,29 @@ document.addEventListener('DOMContentLoaded', () => {
         // 格式化顯示
         displayValue = formatCellValue(displayValue, f);
 
-        return `<td data-field="${f.FieldName}" data-raw="${rawValue}">${displayValue}</td>`;
+        // 判斷欄位是否為唯讀
+        const isReadonly = (f.ReadOnly ?? 0) !== 0 || keyFieldSet.has((f.FieldName || '').toLowerCase());
+        const readonlyAttr = isReadonly ? 'data-readonly="1"' : '';
+        const dataType = (f.DataType || '').toLowerCase();
+        const inputType = dataType.includes('int') || dataType.includes('decimal') || dataType.includes('numeric') ? 'number' : 'text';
+
+        // 生成包含 .cell-view 和 .cell-edit 的結構
+        return `<td data-field="${f.FieldName}" data-raw="${rawValue}">
+          <span class="cell-view">${displayValue}</span>
+          <input type="${inputType}" class="cell-edit form-control form-control-sm d-none" name="${f.FieldName}" value="${rawValue}" ${readonlyAttr} data-type="${dataType}">
+        </td>`;
       }).join('');
-      return `<tr>${cells}</tr>`;
+      return `<tr>${pkHiddenHtml}${cells}</tr>`;
     }).join('');
 
     // Make editable
     const tableName = table.dataset.tableName;
     const dictName = table.dataset.dictName;
-    const keyFields = (table.dataset.keyFields || '').split(',').filter(k => k.trim());
+    // keyFields 已在上方宣告，這裡不需要重複宣告
+
+    console.log('[DEBUG buildTable] tabKey:', tabKey);
+    console.log('[DEBUG buildTable] tableName:', tableName);
+    console.log('[DEBUG buildTable] keyFields:', keyFields);
 
     if (!tabState[tabKey]) {
       tabState[tabKey] = { editor: null };
@@ -1254,6 +1299,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const wrapper = table.closest('.table-responsive');
     const saveUrl = "/api/CommonTable/SaveTableChanges";
+
+    console.log('[DEBUG buildTable] 建立 makeEditableGrid, wrapper:', wrapper);
+    console.log('[DEBUG buildTable] table rows count:', table.querySelectorAll('tbody tr').length);
 
     tabState[tabKey].editor = window.makeEditableGrid({
       wrapper: wrapper,
@@ -1263,10 +1311,16 @@ document.addEventListener('DOMContentLoaded', () => {
       saveUrl: saveUrl
     });
 
+    console.log('[DEBUG buildTable] editor 建立完成:', tabState[tabKey].editor);
+
     // Show controls
     const controls = wrapper?.parentElement?.querySelector('.tab-local-controls');
     if (controls) controls.classList.remove('d-none');
+    console.log('[DEBUG buildTable] 完成 tabKey:', tabKey);
   }
+
+  // 暴露 buildTable 給外部 script 使用
+  window.buildTableForEdit = buildTable;
 
   function loadDetailTab(tabBtn) {
     const tabKey = tabBtn.getAttribute('aria-controls')?.replace('tab-', '');
@@ -1466,6 +1520,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Tab local controls
   document.querySelectorAll('[data-btn="edit"]').forEach(btn => {
     btn.addEventListener('click', () => {
+      console.log('[DEBUG] 編輯按鈕被點擊');
+      console.log('[DEBUG] isViewOnly:', isViewOnly);
+
       // 查詢模式下不允許編輯
       if (isViewOnly) {
         alert('查詢模式下無法編輯資料');
@@ -1473,14 +1530,30 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       // 先檢查權限
-      if (!checkEditPermission()) return;
+      console.log('[DEBUG] 檢查編輯權限...');
+      if (!checkEditPermission()) {
+        console.log('[DEBUG] 權限檢查失敗');
+        return;
+      }
+      console.log('[DEBUG] 權限檢查通過');
 
       const tabKey = btn.dataset.tab;
+      console.log('[DEBUG] tabKey:', tabKey);
+      console.log('[DEBUG] tabState:', tabState);
+      console.log('[DEBUG] tabState[tabKey]:', tabState[tabKey]);
+
       const editor = tabState[tabKey]?.editor;
+      console.log('[DEBUG] editor:', editor);
+      console.log('[DEBUG] editor.toggleEdit:', editor?.toggleEdit);
+
       if (editor && editor.toggleEdit) {
+        console.log('[DEBUG] 呼叫 editor.toggleEdit(true)');
         editor.toggleEdit(true);
         btn.classList.add('d-none');
         btn.parentElement?.querySelector('[data-btn="save"]')?.classList.remove('d-none');
+        console.log('[DEBUG] 編輯模式切換完成');
+      } else {
+        console.log('[DEBUG] editor 或 toggleEdit 不存在，無法切換編輯模式');
       }
     });
   });
@@ -1513,21 +1586,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 切換按鈕 - 返回列表頁（根據當前模式決定）
-  const btnSwitch = document.getElementById('btnSwitch');
-  if (btnSwitch) {
-    btnSwitch.addEventListener('click', function() {
-      // 如果當前是查詢模式，返回查詢列表頁；否則返回維護列表頁
-      const isViewOnly = @(Model.IsViewOnly ? "true" : "false");
-      if (isViewOnly) {
-        window.location.href = '@Url.Page("Index", new { mode = "view", itemId = "EMO00018" })';
-      } else {
-        window.location.href = '@Url.Page("Index")';
-      }
-    });
-  }
-
-  // 修改按鈕 - 檢查狀態後切換到編輯模式
   const btnEditToggle = document.getElementById('btnEditToggle');
   if (btnEditToggle) {
     btnEditToggle.addEventListener('click', function() {
@@ -2048,11 +2106,179 @@ document.addEventListener('DOMContentLoaded', () => {
       window.location.href = '@Url.Page("Index", new { mode = "view", itemId = "EMO00018" })';
     });
 
-    overrideButton('btnSwitch', function() {
+    // 改為使用 <a> 標籤以支援滑鼠中鍵開啟新分頁
+    const btnSwitch = document.getElementById('btnSwitch');
+    if (btnSwitch) {
+      const anchor = document.createElement('a');
+      anchor.className = btnSwitch.className;
+      anchor.innerHTML = btnSwitch.innerHTML;
+      anchor.style.cssText = btnSwitch.style.cssText;
+      anchor.style.textDecoration = 'none';
+      anchor.style.display = 'inline-flex'; // 確保圖示垂直置中
+      anchor.style.alignItems = 'center';
+      anchor.style.justifyContent = 'center';
+      anchor.id = 'btnSwitch'; // 保持原 ID，因為上方已移除衝突的監聽器
+
       if (isViewOnly) {
-        window.location.href = '@Url.Page("Index", new { mode = "view", itemId = "EMO00018" })';
+        anchor.href = '@Url.Page("Index", new { mode = "view", itemId = "EMO00018" })';
       } else {
-        window.location.href = '@Url.Page("Index")';
+        anchor.href = '@Url.Page("Index")';
+      }
+      btnSwitch.parentNode.replaceChild(anchor, btnSwitch);
+    }
+
+    // ============================
+    // btnViewEditToggle 修改按鈕邏輯
+    // ============================
+    overrideButton('btnViewEditToggle', async function() {
+      console.log('[DEBUG] btnViewEditToggle 被點擊');
+
+      // 查詢模式下不允許修改
+      if (isViewOnly) {
+        Swal.fire({ icon: 'warning', title: '查詢模式下無法修改' });
+        return;
+      }
+
+      // 取得目前表單頁籤中正在顯示的頁籤
+      let activeTabPane = document.querySelector('#form-content .tab-pane.show.active');
+      console.log('[DEBUG] activeTabPane:', activeTabPane);
+
+      if (!activeTabPane) {
+        // 如果表單頁籤未顯示，先切換到表單頁籤
+        const formTab = document.getElementById('form-tab');
+        if (formTab) {
+          formTab.click();
+          Swal.fire({ icon: 'info', title: '請先選擇要編輯的表單頁籤', timer: 1500, showConfirmButton: false });
+        }
+        return;
+      }
+
+      const tabKey = activeTabPane.id.replace('tab-', '');
+      console.log('[DEBUG] tabKey:', tabKey);
+
+      // 檢查是否為層別控制的頁籤（只有這三個頁籤需要透過左側層別載入）
+      const layerControlledTabs = ['layerpress', 'pressmethod', 'layerroute'];
+      const isLayerControlled = layerControlledTabs.includes(tabKey);
+
+      // 取得對應的 tabState
+      let state = window.tabState ? window.tabState[tabKey] : null;
+      console.log('[DEBUG] tabState:', window.tabState);
+      console.log('[DEBUG] state:', state);
+
+      // 如果頁籤尚未載入，先觸發載入
+      if (!state || !state.editor) {
+        console.log('[DEBUG] 頁籤尚未載入，嘗試載入...');
+        console.log('[DEBUG] isLayerControlled:', isLayerControlled);
+
+        // 如果是層別控制的頁籤，提示使用者先選擇層別
+        if (isLayerControlled) {
+          Swal.fire({ icon: 'warning', title: '此頁籤由左側層別控制', text: '請先點選左側層別以載入資料' });
+          return;
+        }
+
+        // 找到對應的 tab button 並觸發載入
+        const tabBtn = document.querySelector(`[data-bs-target="#tab-${tabKey}"]`);
+        console.log('[DEBUG] tabBtn:', tabBtn);
+
+        if (tabBtn && tabBtn.dataset.table && tabBtn.dataset.dict) {
+          // 手動載入頁籤資料
+          const tableName = tabBtn.dataset.table;
+          const dictName = tabBtn.dataset.dict;
+          const keyFieldsStr = tabBtn.dataset.keyfields || '';
+          const keyFields = keyFieldsStr.split(',').filter(k => k.trim());
+          const extraKeys = tabBtn.dataset.extraKeys || '';
+
+          console.log('[DEBUG] 載入頁籤資料:', { tableName, dictName, keyFields });
+
+          // 建立查詢參數
+          const qs = new URLSearchParams();
+          const masterKeys = @Html.Raw(JsonSerializer.Serialize(Model.MasterKeyValues.ToDictionary(kv => kv.Key, kv => kv.Value)));
+
+          keyFields.forEach(k => {
+            const val = masterKeys[k] ?? masterKeys[k.toLowerCase()] ?? '';
+            if (val) {
+              qs.append('keyNames', k);
+              qs.append('keyValues', val);
+            }
+          });
+
+          // 加入額外的 keys
+          if (extraKeys) {
+            extraKeys.split(';').forEach(pair => {
+              const [k, v] = pair.split('=');
+              if (k && v) {
+                qs.append('keyNames', k.trim());
+                qs.append('keyValues', v.trim());
+              }
+            });
+          }
+
+          const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&${qs.toString()}`;
+          console.log('[DEBUG] API URL:', url);
+
+          try {
+            Swal.fire({ title: '載入中...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+            const [dictResp, dataResp] = await Promise.all([
+              fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictName)}`).then(r => r.json()),
+              fetch(url).then(r => r.json())
+            ]);
+
+            console.log('[DEBUG] 資料載入完成, dict:', dictResp?.length, 'rows:', dataResp?.length);
+
+            // 呼叫全域的 buildTable（需要透過 window 暴露）
+            if (window.buildTableForEdit) {
+              await window.buildTableForEdit(tabKey, dictResp, dataResp);
+            }
+
+            Swal.close();
+
+            // 重新取得 state
+            state = window.tabState ? window.tabState[tabKey] : null;
+
+          } catch (err) {
+            console.error('[DEBUG] 載入失敗:', err);
+            Swal.fire({ icon: 'error', title: '載入失敗', text: err.message });
+            return;
+          }
+        }
+      }
+
+      // 再次檢查 state
+      if (!state || !state.editor) {
+        Swal.fire({ icon: 'warning', title: '此頁籤尚未載入資料', text: '請先點選該頁籤載入資料後再進行編輯' });
+        return;
+      }
+
+      const editor = state.editor;
+      console.log('[DEBUG] editor:', editor);
+
+      // 取得該頁籤的編輯/儲存按鈕
+      const editBtn = document.querySelector(`[data-btn="edit"][data-tab="${tabKey}"]`);
+      const saveBtn = document.querySelector(`[data-btn="save"][data-tab="${tabKey}"]`);
+      console.log('[DEBUG] editBtn:', editBtn, 'saveBtn:', saveBtn);
+
+      if (editor && editor.toggleEdit) {
+        // 切換編輯模式
+        const isCurrentlyEditing = editor.isEdit ? editor.isEdit() : false;
+        console.log('[DEBUG] isCurrentlyEditing:', isCurrentlyEditing);
+
+        if (!isCurrentlyEditing) {
+          editor.toggleEdit(true);
+          // 切換按鈕顯示：隱藏編輯，顯示儲存
+          if (editBtn) editBtn.classList.add('d-none');
+          if (saveBtn) saveBtn.classList.remove('d-none');
+          Swal.fire({ icon: 'success', title: '已進入編輯模式', timer: 1000, showConfirmButton: false });
+        } else {
+          editor.toggleEdit(false);
+          // 切換按鈕顯示：顯示編輯，隱藏儲存
+          if (editBtn) editBtn.classList.remove('d-none');
+          if (saveBtn) saveBtn.classList.add('d-none');
+          Swal.fire({ icon: 'info', title: '已退出編輯模式', timer: 1000, showConfirmButton: false });
+        }
+      } else {
+        console.log('[DEBUG] editor.toggleEdit 不存在');
+        Swal.fire({ icon: 'warning', title: '此頁籤不支援編輯功能' });
       }
     });
   });

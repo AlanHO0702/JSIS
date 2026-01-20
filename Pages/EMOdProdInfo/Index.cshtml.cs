@@ -104,9 +104,11 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             }
         }
 
-        public async Task OnGetAsync([FromQuery(Name = "pageIndex")] int pageIndex = 1, int pageSize = 50, string? sortBy = null, string? sortDir = null)
+        public async Task OnGetAsync(int page = 1, int pageIndex = 1, int pageSize = 50, string? sortBy = null, string? sortDir = null)
         {
-            PageNumber = pageIndex <= 0 ? 1 : pageIndex;
+            // 支援 page 和 pageIndex 兩種參數名稱
+            var effectivePage = page > 1 ? page : pageIndex;
+            PageNumber = effectivePage <= 0 ? 1 : effectivePage;
             PageSize = pageSize <= 0 ? 50 : pageSize;
             ViewData["Title"] = PageTitle;
             ViewData["SortBy"] = sortBy;
