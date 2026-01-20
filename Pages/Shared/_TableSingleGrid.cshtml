@@ -28,6 +28,17 @@
         k => ((string)k.FieldName).ToLowerInvariant(),
         v => (object)new { keySelf = v.KeySelfName as string ?? "", keyField = v.KeyFieldName as string ?? "", map = v.LookupValues }
     ) ?? new Dictionary<string, object>();
+    var toolbarButtonVisibility = ViewData["ToolbarButtonVisibility"] as Dictionary<string, bool>
+        ?? new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+    bool IsToolbarVisible(string name) => !toolbarButtonVisibility.TryGetValue(name, out var visible) || visible;
+    var showBtnInq = IsToolbarVisible("btnInq");
+    var showBtnToExcel = IsToolbarVisible("btnToExcel");
+    var showBtnUpdate = IsToolbarVisible("btnUpdate");
+
+    // OpenNoRecord 模式：開啟時不自動載入資料
+    var openNoRecord = ViewData["OpenNoRecord"] as bool? ?? false;
+    var hasQueryParams = ViewData["HasQueryParams"] as bool? ?? false;
+    var emptyMessage = (openNoRecord && !hasQueryParams) ? "（請先使用查詢功能）" : "（無資料）";
 
     int pageNumber = 1;
     int pageSize = 0;
@@ -146,7 +157,15 @@
     {
         var dataType = GetFieldProp(field, "DataType");
         var formatStr = GetFieldProp(field, "FormatStr");
-        return FormatHelper.FormatValue(value, dataType, formatStr);
+        if (string.IsNullOrWhiteSpace(formatStr) && TryGetDecimalScale(dataType, out _) && TryToDecimal(value, out var dec))
+        {
+            return dec.ToString("###,###,##0.########", System.Globalization.CultureInfo.CurrentCulture);
+        }
+
+        var formatted = FormatHelper.FormatValue(value, dataType, formatStr);
+        if (IsNumberDataType(field) || IsDecimalString(formatted))
+            return TrimZeroDecimal(formatted);
+        return formatted;
     }
 
     private static bool IsNumberDataType(object field)
@@ -160,16 +179,104 @@
             || dt.StartsWith("int") || dt.StartsWith("smallint")
             || dt.StartsWith("tinyint") || dt.StartsWith("bigint");
     }
+
+    private static bool TryGetDecimalScale(string? dataType, out int scale)
+    {
+        scale = 0;
+        if (string.IsNullOrWhiteSpace(dataType)) return false;
+        var s = dataType.Trim().ToLowerInvariant();
+        if (!(s.StartsWith("decimal") || s.StartsWith("numeric"))) return false;
+        var l = s.IndexOf('(');
+        var r = s.IndexOf(')');
+        if (l < 0 || r <= l) return true;
+        var inner = s.Substring(l + 1, r - l - 1);
+        var parts = inner.Split(',');
+        if (parts.Length == 2 && int.TryParse(parts[1].Trim(), out var parsed))
+        {
+            scale = Math.Max(0, parsed);
+        }
+        return true;
+    }
+
+    private static bool TryToDecimal(object? value, out decimal dec)
+    {
+        dec = 0m;
+        if (value == null) return false;
+        if (value is System.Text.Json.JsonElement je)
+        {
+            if (je.ValueKind == System.Text.Json.JsonValueKind.Number && je.TryGetDecimal(out var d))
+            {
+                dec = d;
+                return true;
+            }
+            if (je.ValueKind == System.Text.Json.JsonValueKind.String)
+                value = je.GetString();
+        }
+        if (value is decimal d0)
+        {
+            dec = d0;
+            return true;
+        }
+        if (value is IConvertible)
+        {
+            try
+            {
+                dec = Convert.ToDecimal(value, System.Globalization.CultureInfo.CurrentCulture);
+                return true;
+            }
+            catch { }
+        }
+        if (value is string s)
+        {
+            return decimal.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.CurrentCulture, out dec)
+                || decimal.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out dec);
+        }
+        return false;
+    }
+
+    private static string TrimZeroDecimal(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return text;
+        var sep = System.Globalization.CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator;
+        var idx = text.IndexOf(sep, StringComparison.Ordinal);
+        if (idx < 0) return text;
+        var end = text.Length - 1;
+        while (end > idx && text[end] == '0') end--;
+        if (end == idx) return text.Substring(0, idx);
+        return text.Substring(0, end + 1);
+    }
+
+    private static bool IsDecimalString(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var sep = System.Globalization.CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator;
+        var s = text.Trim();
+        if (s.StartsWith("+", StringComparison.Ordinal) || s.StartsWith("-", StringComparison.Ordinal))
+            s = s.Substring(1);
+        var idx = s.IndexOf(sep, StringComparison.Ordinal);
+        if (idx <= 0 || idx >= s.Length - 1) return false;
+        var left = s.Substring(0, idx);
+        var right = s.Substring(idx + 1);
+        if (left.Length == 0 || right.Length == 0) return false;
+        foreach (var c in left)
+        {
+            if (!char.IsDigit(c)) return false;
+        }
+        foreach (var c in right)
+        {
+            if (!char.IsDigit(c)) return false;
+        }
+        return true;
+    }
 }
 
 <style>
   .sortable-header .header-label {
     user-select: none;
   }
-  .sortable-header:hover .header-label {
-    background: rgba(0, 0, 0, 0.05);
-    padding: 2px 4px;
-    border-radius: 3px;
+  .sortable-header:hover {
+    background: #e8f4fd !important;
+    cursor: pointer;
   }
   .sort-icon {
     display: inline-block;
@@ -182,8 +289,8 @@
   }
 </style>
 
-<div class="table-wrapper my-4 px-4">
-  <div class="card shadow-sm border-0 rounded-4">
+<div class="table-wrapper">
+  <div class="card shadow-sm border-0">
     <div class="card-body">
 
         <div class="top-toolbar singlegrid-toolbar">
@@ -203,15 +310,15 @@
                 <div id="singleGridMode" class="count-line">瀏覽模式</div>
                 <div id="singleGridCount" class="count-line">0 / 0</div>
               </div>
-              <button id="btnOpenQuery" type="button" class="btn toolbar-btn">
-                <i class="bi bi-search"></i>查詢
-              </button>
-              <button id="btnExportExcel" type="button" class="btn toolbar-btn">
-                <i class="bi bi-file-earmark-excel"></i>Excel
-              </button>
-              <button id="btnEditToggle" type="button" class="btn toolbar-btn">
-                <i class="bi bi-pencil-square"></i>修改
-              </button>
+            <button id="btnOpenQuery" type="button" class="btn toolbar-btn @(showBtnInq ? "" : "d-none")" data-toolbar-btn="btnInq">
+              <i class="bi bi-search"></i>查詢
+            </button>
+            <button id="btnExportExcel" type="button" class="btn toolbar-btn @(showBtnToExcel ? "" : "d-none")" data-toolbar-btn="btnToExcel">
+              <i class="bi bi-file-earmark-excel"></i>Excel
+            </button>
+            <button id="btnEditToggle" type="button" class="btn toolbar-btn @(showBtnUpdate ? "" : "d-none")" data-toolbar-btn="btnUpdate">
+              <i class="bi bi-pencil-square"></i>修改
+            </button>
             </div>
           </div>
           <div class="d-flex justify-content-end gap-2"></div>
@@ -223,7 +330,7 @@
           </button>
         }
 
-      <div class="table-fix-wrapper" data-dict-table="@dictTableName" style="max-height:70vh;overflow:auto;background:#fff;border:1px solid #dee2e6;border-radius:.5rem;white-space:nowrap">
+      <div class="table-fix-wrapper" data-dict-table="@dictTableName">
         <table class="table table-bordered table-hover table-sm align-middle mb-0" id="mainGrid" data-dict-table="@dictTableName" style="table-layout:fixed;width:100%">
           <colgroup>
             @foreach (var f in fields)
@@ -260,7 +367,7 @@
           <tbody>
             @if (!hasData)
             {
-              <tr><td colspan="@fields.Count()" class="text-center text-muted py-3">（無資料）</td></tr>
+              <tr><td colspan="@fields.Count()" class="text-center text-muted py-3">@emptyMessage</td></tr>
             }
             else
             {
@@ -325,7 +432,7 @@
         </table>
       </div>
 
-      <div id="customButtonBarBottom" class="d-flex gap-2 flex-wrap mt-3" data-auto-build="@(autoBuildCustomButtons ? "1" : "0")">
+      <div id="customButtonBarBottom" class="d-flex gap-2 flex-wrap my-2" data-auto-build="@(autoBuildCustomButtons ? "1" : "0")">
         @if (hasServerButtons)
         {
             @customButtons
@@ -334,7 +441,7 @@
 
       @if (totalPages > 1)
       {
-        <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
           <div class="d-flex align-items-center gap-2">
             <button class="btn btn-outline-secondary btn-sm" id="pagerFirst" @(pageNumber <= 1 ? "disabled" : "")>|&laquo;</button>
             <button class="btn btn-outline-secondary btn-sm" id="pagerPrev" @(pageNumber <= 1 ? "disabled" : "")>&laquo;</button>
@@ -386,20 +493,43 @@
   </div>
 </div>
 
+<!-- CondRunSp Modal -->
+<div class="modal fade" id="condRunSpModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog cond-runsp-dialog">
+    <div class="modal-content cond-runsp-modal">
+      <div class="modal-header">
+        <h5 class="modal-title">輸入條件</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form class="cond-runsp-form"></form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-success crs-confirm">確定</button>
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <style>
- .table-fix-wrapper{max-height:70vh;overflow:auto;background:#fff;border:1px solid #dee2e6;border-radius:.5rem;white-space:nowrap}
- table.table{table-layout:fixed!important;border-collapse:separate!important;border-spacing:0;font-size:.85rem;width:100%}
- table th,table td{vertical-align:middle!important;border:1px solid #dee2e6!important;padding:0 2px!important;white-space:nowrap}
+ .table-fix-wrapper{flex:1;overflow:auto;background:#fff;border:1px solid #dee2e6;border-radius:.5rem;white-space:nowrap;min-height:0}
+ .table-wrapper{height:calc(100vh - var(--app-toolbar-height, 56px));display:flex;flex-direction:column}
+ .table-wrapper>.card{flex:1;display:flex;flex-direction:column;min-height:0}
+ .table-wrapper>.card>.card-body{flex:1;display:flex;flex-direction:column;min-height:0;padding-top:12px;padding-bottom:8px}
+ table.table{table-layout:fixed!important;border-collapse:collapse!important;font-size:.85rem;width:100%}
+ table th,table td{vertical-align:middle!important;border:1px solid #dee2e6!important;padding:0!important;white-space:nowrap}
+ table th{padding:2px 6px!important}
  .table-hover tbody tr:hover{background:#f1f5ff!important}
-.cell-view,.cell-edit{display:inline-block;width:100%;height:20px;font-size:.85rem;line-height:20px;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 4px!important;vertical-align:middle}
-.cell-view{text-align:inherit}
-.cell-edit.form-control{height:20px!important;min-height:20px!important;max-height:20px!important;padding:0 4px!important;font-size:inherit!important;line-height:20px!important;text-align:inherit!important;border:none!important;border-radius:0!important;box-sizing:border-box!important;background:#fff!important}
-.edit-mode .cell-edit:not(.readonly-cell){border:none!important;background:#fff!important}
+.cell-view,.cell-edit{display:block;width:100%;height:20px!important;min-height:20px!important;max-height:20px!important;font-size:.85rem;line-height:16px!important;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2px 6px!important}
+.cell-view{text-align:inherit;border:none!important;background:transparent!important}
+.cell-edit.form-control{height:20px!important;min-height:20px!important;max-height:20px!important;padding:2px 6px!important;font-size:inherit!important;line-height:16px!important;text-align:inherit!important;border:none!important;border-radius:0!important;box-sizing:border-box!important;background:transparent!important;vertical-align:middle!important;margin:0!important}
 .cell-number{text-align:right}
 .cell-text{text-align:left}
-.readonly-cell{background:transparent!important;color:#555!important;border:1px solid transparent!important;cursor:not-allowed!important;pointer-events:none!important;user-select:none!important}
-.readonly-td{background:#f3f3f3!important}
-.readonly-td .cell-view,.readonly-td .cell-edit{background:transparent!important}
+table.table tbody td{background:#f3f3f3!important}
+.edit-mode table.table tbody td{background:#fff!important}
+.edit-mode table.table tbody td.readonly-td{background:#f3f3f3!important}
+.readonly-cell{color:#555!important;border:none!important;cursor:not-allowed!important;pointer-events:none!important;user-select:none!important}
 .table-fix-wrapper::-webkit-scrollbar{height:10px;width:10px}
   .table-fix-wrapper::-webkit-scrollbar-thumb{background:#c1c1c1;border-radius:6px}
   .table-fix-wrapper::-webkit-scrollbar-thumb:hover{background:#9ca3af}
@@ -427,11 +557,39 @@
   .toolbar-count-box .count-line{font-size:0.75rem}
   .toolbar-count-box.mode-view{background:#1e4db7}
   .toolbar-count-box.mode-edit{background:#f00000}
+  .singlegrid-custom-btn{
+    position:relative;
+    padding:6px 10px;
+    font-size:.92rem;
+    letter-spacing:0;
+    white-space:normal;
+    word-break:break-word;
+    background:#f8f9fb;
+    color:#1f5fbf;
+    font-weight:600;
+    border-radius:10px;
+    cursor:pointer;
+    box-shadow:0 2px 8px rgba(20,40,80,.12);
+    border:1px solid #cfd7e6;
+  }
+  .singlegrid-custom-btn:hover,
+  .singlegrid-custom-btn:focus{
+    background:#e9f1ff;
+    border-color:#9fbaf0;
+  }
   #singleGridQueryModal .modal-dialog{max-width:900px;}
   #singleGridQueryModal .modal-content{max-height:90vh;}
   #singleGridQueryModal .modal-body{max-height:70vh; overflow-y:auto; padding-bottom:1rem;}
 #singleGridQueryModal .form-label{font-size:.9rem;}
 #singleGridQueryModal .form-control{font-size:.9rem;}
+  #condRunSpModal .cond-runsp-dialog { --bs-modal-width: 520px; }
+  #condRunSpModal .cond-runsp-modal { display: flex; flex-direction: column; }
+  #condRunSpModal .modal-body { padding: 16px 18px; }
+  #condRunSpModal .cond-runsp-form { display: flex; flex-direction: column; gap: 10px; }
+  #condRunSpModal .crs-grid { display: grid; grid-template-columns: 1fr; gap: 10px 12px; }
+  #condRunSpModal .crs-field { display: flex; align-items: center; gap: 8px; }
+  #condRunSpModal .crs-label { white-space: nowrap; margin: 0; flex: 0 0 90px; text-align: right; font-size: var(--field-label-size); }
+  #condRunSpModal .crs-control { flex: 1 1 auto; min-width: 0; font-size: var(--field-value-size); }
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -472,6 +630,8 @@
     let currentPage = @pageNumber;
     let pageSize = @pageSize;
     let totalPages = @totalPages;
+    const openNoRecordInit = @(openNoRecord ? "true" : "false");
+    const hasQueryParamsInit = @(hasQueryParams ? "true" : "false");
     let pendingSelect = "";
     let isDirty = false;
 
@@ -564,15 +724,330 @@
       return null;
     };
 
-    const pickFieldCI = (row, names) => {
-      if (!row) return "";
-      const keys = Object.keys(row);
-      for (const name of names) {
-        const hit = keys.find(k => k.toLowerCase() === name.toLowerCase());
-        if (hit) return row[hit];
-      }
-      return "";
+  const pickFieldCI = (row, names) => {
+    if (!row) return "";
+    const keys = Object.keys(row);
+    for (const name of names) {
+      const hit = keys.find(k => k.toLowerCase() === name.toLowerCase());
+      if (hit) return row[hit];
+    }
+    return "";
+  };
+
+    const withJwtHeaders = (init = {}) => {
+      const jwt = localStorage.getItem("jwtId");
+      const headers = Object.assign({}, init.headers || {});
+      if (jwt) headers["X-JWTID"] = jwt;
+      return { ...init, headers };
     };
+
+    const hasDateOnlyMask = (mask) => {
+      const m = (mask || "").toString().toLowerCase();
+      if (!m) return false;
+      const isDate = m.includes("yyyy") && m.includes("mm") && m.includes("dd");
+      const hasTime = m.includes("hh") || m.includes("ss") || m.includes("tt");
+      return isDate && !hasTime;
+    };
+
+    const parseDateValue = (value) => {
+      if (!value) return null;
+      if (value instanceof Date && !isNaN(value)) return value;
+      const s = String(value).trim();
+      if (!s) return null;
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return new Date(s.slice(0, 10));
+      if (/^\d{4}[/.]\d{1,2}[/.]\d{1,2}$/.test(s)) {
+        const [y, m, d] = s.split(/[/.]/).map(Number);
+        return new Date(y, (m || 1) - 1, d || 1);
+      }
+      if (/^\d{8}$/.test(s)) {
+        const y = Number(s.slice(0, 4));
+        const m = Number(s.slice(4, 6));
+        const d = Number(s.slice(6, 8));
+        return new Date(y, (m || 1) - 1, d || 1);
+      }
+      const dt = new Date(s);
+      return isNaN(dt) ? null : dt;
+    };
+
+    const formatDateByMask = (value, mask) => {
+      const dt = parseDateValue(value);
+      if (!dt) return value;
+      const sep = (mask || "").includes("/") ? "/" : ((mask || "").includes(".") ? "." : "-");
+      const y = dt.getFullYear();
+      const m = String(dt.getMonth() + 1).padStart(2, "0");
+      const d = String(dt.getDate()).padStart(2, "0");
+      return `${y}${sep}${m}${sep}${d}`;
+    };
+
+    const applyEditMask = (value, editMask) => {
+      if (hasDateOnlyMask(editMask)) return formatDateByMask(value, editMask);
+      return value;
+    };
+
+    const condRunSp = (() => {
+      const modalEl = document.getElementById("condRunSpModal");
+      if (modalEl && modalEl.parentElement !== document.body) {
+        document.body.appendChild(modalEl);
+      }
+      const formEl = modalEl?.querySelector(".cond-runsp-form");
+      const btnConfirm = modalEl?.querySelector(".crs-confirm");
+      const titleEl = modalEl?.querySelector(".modal-title");
+
+      const state = {
+        itemId: "",
+        buttonName: "",
+        paperNum: "",
+        searchParams: [],
+        inputs: {},
+        selectedRow: {}
+      };
+
+      const normalizeKey = (name) => (name || "").replace(/^@@+/, "").toLowerCase();
+
+      const loadParamOptions = async (itemId, buttonName, paramName, superValue) => {
+        const extra = superValue ? `&superValue=${encodeURIComponent(superValue)}` : "";
+        const url = `/api/PaperSearch/ParamOptionsV2?itemId=${encodeURIComponent(itemId)}&buttonName=${encodeURIComponent(buttonName)}&paramName=${encodeURIComponent(paramName)}${extra}`;
+        const res = await fetch(url, withJwtHeaders());
+        if (!res.ok) throw new Error(await res.text());
+        return await res.json();
+      };
+
+      const getRowFieldValue = (row, field) => {
+        if (!row || !field) return "";
+        const key = String(field).toLowerCase();
+        const hit = Object.keys(row).find(k => String(k).toLowerCase() === key);
+        const val = hit ? row[hit] : "";
+        return val == null ? "" : String(val).trim();
+      };
+
+      const getDefaultFromTableKind = (_tableKind, fieldName) => {
+        if (!fieldName) return "";
+        return getRowFieldValue(state.selectedRow, fieldName);
+      };
+
+      const getSuperValueCrs = (p) => {
+        const rawSuperId = (p.SuperId || p.superId || "").toString().trim().replace(/^@@+/, "");
+        const superKey = normalizeKey(rawSuperId);
+        if (!superKey) return "";
+        const superInput = formEl?.querySelector(`[data-param="${superKey}"]`);
+        if (superInput && (superInput.value ?? "") !== "") return superInput.value ?? "";
+
+        const rowVal = rawSuperId ? getRowFieldValue(state.selectedRow, rawSuperId) : "";
+        if (rowVal) return rowVal;
+
+        const superParam = (state.searchParams || []).find(sp => normalizeKey(sp.ParamName || sp.paramName) === superKey);
+        if (!superParam) return "";
+        const pv = superParam.ParamValue ?? superParam.paramValue;
+        const fromKind = pv ? getDefaultFromTableKind(superParam.TableKind ?? superParam.tableKind, pv) : "";
+        return fromKind || (superParam.DefaultValue ?? superParam.defaultValue ?? "");
+      };
+
+      const buildForm = async (itemId, buttonName) => {
+        if (!formEl) return;
+        formEl.innerHTML = "";
+        const visibleParams = (state.searchParams || []).filter(p => Number(p.iVisible ?? p.IVisible ?? 0) === 1);
+        if (!visibleParams.length) {
+          formEl.innerHTML = '<div class="text-muted small">（沒有可輸入的條件）</div>';
+          return;
+        }
+
+        const grid = document.createElement("div");
+        grid.className = "crs-grid";
+        formEl.appendChild(grid);
+
+        for (const p of visibleParams) {
+          const name = normalizeKey(p.ParamName || p.paramName);
+          if (!name) continue;
+
+          const wrap = document.createElement("div");
+          wrap.className = "crs-field";
+          const label = document.createElement("label");
+          label.className = "form-label crs-label";
+          label.textContent = p.DisplayName || p.displayName || name;
+          wrap.appendChild(label);
+
+          const controlType = Number(p.ControlType ?? p.controlType ?? 0);
+          const tableKind = p.TableKind ?? p.tableKind;
+          const paramValue = p.ParamValue ?? p.paramValue;
+          const rowDefault = paramValue ? getDefaultFromTableKind(tableKind, paramValue) : "";
+
+          if (controlType === 1) {
+            const select = document.createElement("select");
+            select.className = "form-select form-select-sm crs-control";
+            select.setAttribute("data-param", name);
+            const emptyOpt = document.createElement("option");
+            emptyOpt.value = "";
+            emptyOpt.textContent = "";
+            select.appendChild(emptyOpt);
+            wrap.appendChild(select);
+            try {
+              const superValue = getSuperValueCrs(p);
+              const options = await loadParamOptions(itemId, buttonName, p.ParamName || p.paramName, superValue);
+              if (Array.isArray(options)) {
+                options.forEach(opt => {
+                  const o = document.createElement("option");
+                  const val = opt.value ?? opt.Value ?? "";
+                  const text = opt.text ?? opt.Text ?? "";
+                  o.value = val;
+                  o.textContent = text ? `${val} ${text}`.trim() : val;
+                  if (text && text !== val) o.title = text;
+                  select.appendChild(o);
+                });
+              }
+            } catch (err) {
+              console.warn("load options failed", err);
+            }
+            const defVal = rowDefault || (p.DefaultValue ?? p.defaultValue);
+            if (defVal != null && defVal !== "") {
+              select.value = applyEditMask(defVal, p.EditMask ?? p.editMask);
+              if (!select.value) {
+                const o = document.createElement("option");
+                o.value = defVal;
+                o.textContent = defVal;
+                select.appendChild(o);
+                select.value = defVal;
+              }
+            }
+            select.addEventListener("keydown", (ev) => {
+              if (ev.key === "Delete" || ev.key === "Backspace") {
+                select.value = "";
+              }
+            });
+            const superKey = normalizeKey(p.SuperId || p.superId);
+            if (superKey) {
+              const superInput = formEl?.querySelector(`[data-param="${superKey}"]`);
+              if (superInput && !select.dataset.superBound) {
+                select.dataset.superBound = "1";
+                superInput.addEventListener("change", async () => {
+                  try {
+                    const options = await loadParamOptions(itemId, buttonName, p.ParamName || p.paramName, superInput.value ?? "");
+                    select.innerHTML = "";
+                    const emptyOpt = document.createElement("option");
+                    emptyOpt.value = "";
+                    emptyOpt.textContent = "";
+                    select.appendChild(emptyOpt);
+                    if (Array.isArray(options)) {
+                      options.forEach(opt => {
+                        const o = document.createElement("option");
+                        const val = opt.value ?? opt.Value ?? "";
+                        const text = opt.text ?? opt.Text ?? "";
+                        o.value = val;
+                        o.textContent = text ? `${val} ${text}`.trim() : val;
+                        if (text && text !== val) o.title = text;
+                        select.appendChild(o);
+                      });
+                    }
+                  } catch (err) {
+                    console.warn("load options failed", err);
+                  }
+                });
+              }
+            }
+          } else {
+            const input = document.createElement("input");
+            input.className = "form-control form-control-sm crs-control";
+            input.type = "text";
+            input.setAttribute("data-param", name);
+            const defVal = rowDefault || (p.DefaultValue ?? p.defaultValue);
+            if (defVal != null && defVal !== "") {
+              input.value = applyEditMask(defVal, p.EditMask ?? p.editMask);
+            }
+            const readOnly = Number(p.iReadOnly ?? p.IReadOnly ?? 0) === 1;
+            if (readOnly) input.readOnly = true;
+            wrap.appendChild(input);
+          }
+
+          grid.appendChild(wrap);
+        }
+      };
+
+      const collectInputs = () => {
+        const values = {};
+        (state.searchParams || []).forEach(p => {
+          const name = normalizeKey(p.ParamName || p.paramName);
+          if (!name) return;
+          const input = formEl?.querySelector(`[data-param="${name}"]`);
+          if (input) {
+            values[name] = input.value ?? "";
+            return;
+          }
+          const paramValue = p.ParamValue ?? p.paramValue;
+          const fromRow = paramValue ? getRowFieldValue(state.selectedRow, paramValue) : "";
+          const defVal = fromRow || (p.DefaultValue ?? p.defaultValue ?? p.ParamValue ?? p.paramValue);
+          values[name] = defVal == null ? "" : defVal;
+        });
+        if (values.useid != null && String(values.useid).trim() === "") {
+          values.useid = window.DEFAULT_USEID || window._useId || "A001";
+        }
+        state.inputs = values;
+        return values;
+      };
+
+      const setConfirmLoading = (loading) => {
+        if (!btnConfirm) return;
+        btnConfirm.disabled = loading;
+        btnConfirm.textContent = loading ? "執行中..." : "確定";
+      };
+
+      const runSp = async () => {
+        setConfirmLoading(true);
+        const payload = {
+          itemId: state.itemId,
+          buttonName: state.buttonName,
+          paperNum: state.paperNum,
+          params: collectInputs()
+        };
+        try {
+          const res = await fetch("/api/PaperSearch/RunSpExec", withJwtHeaders({
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          }));
+          const raw = await res.text();
+          let data; try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
+          if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+          if (typeof goPage === "function") {
+            goPage(currentPage);
+          } else {
+            location.reload();
+          }
+        } catch (err) {
+          Swal.fire({ icon: "error", title: `執行失敗: ${err?.message || err}` });
+        } finally {
+          setConfirmLoading(false);
+        }
+      };
+
+      const open = async (ctx, meta) => {
+        if (!modalEl) return;
+        state.itemId = ctx.itemId || "";
+        state.buttonName = ctx.buttonName || "";
+        state.paperNum = ctx.paperNum || "";
+        state.selectedRow = ctx.selectedRow || {};
+
+        const configUrl = `/api/PaperSearch/Config?itemId=${encodeURIComponent(state.itemId)}&buttonName=${encodeURIComponent(state.buttonName)}`;
+        const res = await fetch(configUrl, withJwtHeaders());
+        if (!res.ok) {
+          Swal.fire({ icon: "error", title: await res.text() });
+          return;
+        }
+        const cfg = await res.json();
+        state.searchParams = cfg.searchParams || cfg.SearchParams || [];
+
+        const caption = meta?.dialogCaption || cfg.dialogCaption || cfg.DialogCaption || ctx.caption || "輸入條件";
+        if (titleEl) titleEl.textContent = caption;
+
+        await buildForm(state.itemId, state.buttonName);
+        if (window.bootstrap) {
+          const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+          modal.show();
+        }
+      };
+
+      btnConfirm?.addEventListener("click", (e) => { e.preventDefault(); runSp(); });
+
+      return { open };
+    })();
 
     const runCustomButton = async (meta, ctx) => {
       const btnName = ctx?.buttonName || "";
@@ -587,6 +1062,11 @@
 
       const designType = meta?.DesignType ?? meta?.designType ?? 0;
       const searchTemplate = (meta?.SearchTemplate || meta?.searchTemplate || "").toString().toLowerCase();
+      if (designType === 1 && searchTemplate === "jsdcondrunspdll.dll") {
+        const paperNum = pickFieldCI(row, ["PaperNum", "PaperNUM", "PaperNo", "PaperNO"]);
+        await condRunSp.open({ ...ctx, paperNum }, meta);
+        return;
+      }
       if (designType === 1 && searchTemplate) {
         Swal.fire({ icon: 'info', title: '此按鈕需使用模板功能', text: '請先在單據頁面使用此功能。' });
         return;
@@ -664,7 +1144,7 @@
           if (!btnName) return;
           const btn = document.createElement("button");
           btn.type = "button";
-          btn.className = "btn btn-outline-secondary btn-sm";
+          btn.className = "btn btn-sm singlegrid-custom-btn";
           btn.dataset.customBtn = "1";
           btn.dataset.buttonName = btnName;
           btn.dataset.itemId = b.itemId || b.ItemId || "";
@@ -809,13 +1289,17 @@
         if (!span || !inp) return;
 
         if (isEdit) {
-          span.classList.add("d-none");
-          inp.classList.remove("d-none");
           if (inp.dataset.readonly === "1") {
+            // readonly 欄位：維持顯示 span（lookup 值），隱藏 input
+            span.classList.remove("d-none");
+            inp.classList.add("d-none");
             inp.classList.add("readonly-cell");
             inp.setAttribute("readonly", "readonly");
             inp.setAttribute("tabindex", "-1");
           } else {
+            // 可編輯欄位：顯示 input，隱藏 span
+            span.classList.add("d-none");
+            inp.classList.remove("d-none");
             inp.classList.remove("readonly-cell");
             inp.removeAttribute("readonly");
             inp.removeAttribute("tabindex");
@@ -1189,7 +1673,8 @@
 
       // 更新表格
       const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
-      updateTableBody(data.items, fields);
+      const emptyMessage = getEmptyMessage(!!data.openNoRecord, !!data.hasQueryParams);
+      updateTableBody(data.items, fields, emptyMessage);
       applyLookupToTable(); // 套用 lookup 顯示
       console.log('[goPage] Table updated with', data.items.length, 'items');
 
@@ -1559,12 +2044,52 @@
   }
 
   // 更新表格內容
-  function updateTableBody(items, fields) {
+  const getEmptyMessage = (openNoRecordFlag, hasQueryFlag) => {
+    return (openNoRecordFlag && !hasQueryFlag) ? "（請先使用查詢功能）" : "（無資料）";
+  };
+
+  const trimZeroDecimal = (value) => {
+    if (value === null || value === undefined) return "";
+    const text = String(value);
+    const idx = text.indexOf(".");
+    if (idx < 0) return text;
+    const head = text.slice(0, idx + 1);
+    let tail = text.slice(idx + 1);
+    tail = tail.replace(/0+$/, "");
+    if (!tail) return head.slice(0, -1);
+    return head + tail;
+  };
+
+  const getDecimalScale = (dataType) => {
+    if (!dataType) return null;
+    const s = String(dataType).trim().toLowerCase();
+    if (!s.startsWith("decimal") && !s.startsWith("numeric")) return null;
+    const l = s.indexOf("(");
+    const r = s.indexOf(")");
+    if (l < 0 || r <= l) return 0;
+    const inner = s.slice(l + 1, r);
+    const parts = inner.split(",");
+    if (parts.length === 2) {
+      const n = parseInt(parts[1].trim(), 10);
+      return Number.isFinite(n) ? Math.max(0, n) : 0;
+    }
+    return 0;
+  };
+
+  const isDecimalString = (value) => {
+    if (value === null || value === undefined) return false;
+    const text = String(value).trim();
+    if (!text) return false;
+    return /^[+-]?\d+\.\d+$/.test(text);
+  };
+
+  function updateTableBody(items, fields, emptyMessage) {
     const tbody = sortTableBody || document.querySelector("#mainGrid tbody");
     if (!tbody) return;
 
     if (!items || items.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="' + fields.length + '" class="text-center text-muted py-3">（無資料）</td></tr>';
+      const msg = emptyMessage || getEmptyMessage(openNoRecordInit, hasQueryParamsInit);
+      tbody.innerHTML = '<tr><td colspan="' + fields.length + '" class="text-center text-muted py-3">' + msg + '</td></tr>';
       return;
     }
 
@@ -1654,7 +2179,10 @@
             }
           }
         } else if (typeof rawVal === 'number') {
-          displayVal = rawVal.toLocaleString('zh-TW');
+          const scale = getDecimalScale(dt);
+          displayVal = scale !== null ? trimZeroDecimal(rawVal.toLocaleString('zh-TW', { maximumFractionDigits: 8 })) : trimZeroDecimal(rawVal.toLocaleString('zh-TW'));
+        } else if (typeof rawVal === 'string' && (isNumber || isDecimalString(rawVal) || getDecimalScale(dt) !== null)) {
+          displayVal = trimZeroDecimal(rawVal);
         }
 
         // 安全處理值，避免 0 被視為 falsy
@@ -1663,8 +2191,9 @@
         const safeDisplayVal = (displayVal !== null && displayVal !== undefined) ? String(displayVal) : '';
 
         // 產生與初始渲染一致的結構，包含 data-field, cell-view, cell-edit
-        return '<td class="text-nowrap ' + cellClass + '" data-field="' + fieldName + '" style="' + hiddenStyle + '">' +
-          '<span class="cell-view" data-raw="' + safeRawVal + '" data-lookupkey="' + safeLookupKey + '">' + safeDisplayVal + '</span>' +
+        const tdClass = 'text-nowrap ' + cellClass + (isReadOnly ? ' readonly-td' : '');
+        return '<td class="' + tdClass + '" data-field="' + fieldName + '" style="' + hiddenStyle + '">' +
+          '<span class="cell-view' + (isReadOnly ? ' readonly-cell' : '') + '" data-raw="' + safeRawVal + '" data-lookupkey="' + safeLookupKey + '">' + safeDisplayVal + '</span>' +
           '<input class="form-control form-control-sm cell-edit d-none ' + (isReadOnly ? 'readonly-cell' : '') + '" ' +
           'name="' + fieldName + '" ' +
           'value="' + safeRawVal + '" ' +
@@ -1691,21 +2220,44 @@
   // AJAX 排序處理
   async function handleSort(fieldName) {
     if (isSorting) return;
-    isSorting = true;
-    showLoading();
 
-    try {
-      // 處理 Lookup 欄位：先計算實際要排序的欄位名稱
-      let actualFieldName = fieldName;
-      if (fieldName.endsWith('Name')) {
+    const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+    const ocxLookupPayload = @Html.Raw(JsonSerializer.Serialize(ocxLookupPayload));
+
+    // 計算實際要排序的欄位名稱
+    let actualFieldName = fieldName;
+    const fieldDef = fields.find(f => f.FieldName === fieldName);
+
+    // 判斷是否為非實體欄位：DataType 為空或 null 表示非實體欄位
+    const isVirtualField = fieldDef && (!fieldDef.DataType || fieldDef.DataType === '');
+
+    // 檢查是否為非實體欄位
+    if (isVirtualField) {
+      // 嘗試從 OCXLookup 找到對應的 KeyField
+      const lookupInfo = ocxLookupPayload[fieldName.toLowerCase()];
+      if (lookupInfo && lookupInfo.keyField) {
+        // 使用 lookup 的 keyField 作為實際排序欄位
+        actualFieldName = lookupInfo.keyField;
+      } else if (fieldName.endsWith('Name')) {
+        // 嘗試去掉 Name 後綴找到對應的實體欄位
         const baseFieldName = fieldName.substring(0, fieldName.length - 4);
-        // 檢查這個基礎欄位是否存在
-        const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
-        const baseField = fields.find(f => f.FieldName === baseFieldName);
+        const baseField = fields.find(f => f.FieldName === baseFieldName && f.DataType);
         if (baseField) {
           actualFieldName = baseFieldName;
         }
       }
+
+      // 如果還是找不到對應的實體欄位，則無法排序
+      if (actualFieldName === fieldName) {
+        Swal.fire({ icon: 'info', title: '此欄位不支援排序', text: '找不到對應的實體欄位', timer: 2000, showConfirmButton: false });
+        return;
+      }
+    }
+
+    isSorting = true;
+    showLoading();
+
+    try {
 
       // 決定新的排序方向（使用實際欄位名稱比較）
       let newSortDir = 'asc';
@@ -1733,8 +2285,8 @@
       }
 
       // 更新表格
-      const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
-      updateTableBody(data.items, fields);
+      const emptyMessage = getEmptyMessage(!!data.openNoRecord, !!data.hasQueryParams);
+      updateTableBody(data.items, fields, emptyMessage);
       applyLookupToTable(); // 套用 lookup 顯示
 
       // 更新排序狀態（使用實際傳送的欄位名稱）
@@ -1744,7 +2296,7 @@
 
     } catch (err) {
       console.error('Sort failed:', err);
-      alert('排序失敗：' + err.message);
+      Swal.fire({ icon: 'error', title: '排序失敗', text: err.message });
     } finally {
       hideLoading();
       isSorting = false;

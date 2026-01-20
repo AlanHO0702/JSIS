@@ -92,169 +92,169 @@
         };
         return QueryHelpers.AddQueryString(path, qs);
     }
+
+    private static bool IsNumberDataType(CURdTableField field)
+    {
+        var dt = (field.DataType ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(dt)) return false;
+        return dt == "number"
+            || dt.StartsWith("decimal") || dt.StartsWith("numeric")
+            || dt.StartsWith("money") || dt.StartsWith("smallmoney")
+            || dt.StartsWith("float") || dt.StartsWith("real")
+            || dt.StartsWith("int") || dt.StartsWith("smallint")
+            || dt.StartsWith("tinyint") || dt.StartsWith("bigint");
+    }
 }
 
-<div class="card shadow-sm border-0 rounded-4 mb-3">
-    <div class="card-body">
-        <div class="table-responsive" style="max-height:70vh;">
-            <table class="table table-hover table-sm align-middle text-nowrap mb-0 grid-table"
-                   id="grid-@tabKey"
-                   data-dict-table="@Model.DictTableName"
-                   data-table-name="@Model.TableName"
-                   data-tabkey="@tabKey"
-                   data-key-fields="@string.Join(",", extraKeys)">
-                <colgroup>
-                    @foreach (var f in fields)
-                    {
-                        var widthPx = f.DisplaySize.HasValue && f.DisplaySize.Value > 0 ? f.DisplaySize.Value * 10 : (int?)null;
-                        if (widthPx.HasValue)
-                        {
-                            <col data-field="@f.FieldName" style="width:@($"{widthPx}px");min-width:@($"{widthPx}px");max-width:@($"{widthPx}px")" />
-                        }
-                        else
-                        {
-                            <col data-field="@f.FieldName" />
-                        }
-                    }
-                </colgroup>
-                <thead class="table-light">
-                    <tr>
-                        @foreach (var f in fields)
-                        {
-                            var widthPx = f.DisplaySize.HasValue && f.DisplaySize.Value > 0 ? f.DisplaySize.Value * 10 : (int?)null;
-                            <th style="@(widthPx.HasValue ? $"width:{widthPx}px;min-width:{widthPx}px;" : null)">
-                                @(string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel)
-                            </th>
-                        }
-                    </tr>
-                </thead>
-                <tbody>
-                    @if (items.Count == 0)
-                    {
-                        <tr>
-                            <td colspan="@Math.Max(1, fields.Count)" class="text-center text-muted py-4">沒有資料</td>
-                        </tr>
-                    }
-                    else
-                    {
-                        foreach (var row in items)
-                        {
-                            <tr>
-                                @foreach (var f in fields)
-                                {
-                                    var rawObj = GetValue(row, f.FieldName);
-                                    var raw = rawObj?.ToString() ?? "";
-                                    bool isReadOnly = f.ReadOnly != null && (int)f.ReadOnly != 0;
-            bool isCheckbox = (f.ComboStyle ?? 0) == 1;
-            <td class="@(isCheckbox ? "text-center align-middle" : "")">
-                <span class="cell-view @(isCheckbox ? "d-inline-flex justify-content-center w-100" : "")" data-raw="@raw">
-                    @if (isCheckbox)
-                    {
-                        <input type="checkbox" class="form-check-input checkbox-dark" disabled tabindex="-1" @(raw == "1" ? "checked" : "") />
-                    }
-                    else
-                    {
-                        @DisplayVal(row, f, lookups)
-                    }
-                </span>
-                @if (isCheckbox)
+<div class="table-fix-wrapper" data-dict-table="@Model.DictTableName">
+    <table class="table table-bordered table-hover table-sm align-middle mb-0 grid-table"
+           id="grid-@tabKey"
+           data-dict-table="@Model.DictTableName"
+           data-table-name="@Model.TableName"
+           data-tabkey="@tabKey"
+           data-total-count="@totalCount"
+           data-key-fields="@string.Join(",", extraKeys)"
+           style="table-layout:auto;width:auto;min-width:0">
+        <colgroup>
+            @foreach (var f in fields)
+            {
+                var widthPx = f.DisplaySize.HasValue && f.DisplaySize.Value > 0 ? f.DisplaySize.Value * 10 : (int?)null;
+                if (widthPx.HasValue)
                 {
-                    <input type="checkbox"
-                           class="form-check-input checkbox-dark cell-edit d-none @(isReadOnly ? "readonly-cell" : "")"
-                           name="@f.FieldName"
-                           value="@(raw == "1" ? "1" : "0")"
-                           data-raw="@raw"
-                           data-readonly="@(isReadOnly ? "1" : "0")"
-                           @(raw == "1" ? "checked" : "")
-                           @(isReadOnly ? "readonly" : "") />
+                    <col data-field="@f.FieldName" style="width:@($"{widthPx}px");min-width:@($"{widthPx}px");max-width:@($"{widthPx}px")" />
                 }
                 else
                 {
-                    <input class="form-control form-control-sm cell-edit d-none @(isReadOnly ? "readonly-cell" : "")"
-                           name="@f.FieldName"
-                                                   value="@raw"
-                                                   data-raw="@raw"
-                                                   data-readonly="@(isReadOnly ? "1" : "0")"
-                                                   @(isReadOnly ? "readonly" : "") />
-                                        }
-                                    </td>
-                                }
-                                @{
-                                    var lowerSet = new HashSet<string>(fields.Select(ff => (ff.FieldName ?? "").ToLowerInvariant()));
-                                }
-                                @foreach (var kf in extraKeys)
-                                {
-                                    var kfname = kf ?? "";
-                                    if (string.IsNullOrWhiteSpace(kfname)) { continue; }
-                                    var keyLower = kfname.ToLowerInvariant();
-                                    if (lowerSet.Contains(keyLower)) { continue; }
-                                    var kval = GetValue(row, kfname)?.ToString() ?? "";
-                                    <input type="hidden" class="cell-edit d-none readonly-cell key-field-hidden"
-                                           name="@kfname"
-                                           value="@kval"
-                                           data-raw="@kval"
-                                           data-readonly="1"
-                                           readonly />
-                                }
-                            </tr>
-                        }
-                    }
-                </tbody>
-            </table>
-        </div>
-
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-3">
-            <div class="d-flex align-items-center gap-3 text-muted small flex-wrap">
-                <span>共 @totalCount 筆</span>
-                <span>頁 @pageNumber / @totalPages</span>
-                <span class="d-flex align-items-center gap-1">
-                    每頁筆數
-                    <select class="form-select form-select-sm" style="width:auto"
-                            onchange="(function(el){const url=new URL(window.location.href);url.searchParams.set('tab','@tabKey');url.searchParams.set('@pageParam','1');url.searchParams.set('@sizeParam',el.value);window.location.href=url.toString();})(this);">
-                        @foreach (var s in sizeOptions)
-                        {
-                            <option value="@s" selected="@(s == pageSize ? "selected" : null)">@s</option>
-                        }
-                    </select>
-                </span>
-            </div>
-            @if (totalPages > 1)
-            {
-                <nav>
-                    <ul class="pagination pagination-sm mb-0">
-                        <li class="page-item @(pageNumber <= 1 ? "disabled" : "")">
-                            <a class="page-link" href="@BuildPageUrl(basePath, baseQuery, pageParam, sizeParam, 1, pageSize)">«</a>
-                        </li>
-                        <li class="page-item @(pageNumber <= 1 ? "disabled" : "")">
-                            <a class="page-link" href="@BuildPageUrl(basePath, baseQuery, pageParam, sizeParam, Math.Max(1, pageNumber - 1), pageSize)">‹</a>
-                        </li>
-                        <li class="page-item disabled">
-                            <span class="page-link">@pageNumber / @totalPages</span>
-                        </li>
-                        <li class="page-item @(pageNumber >= totalPages ? "disabled" : "")">
-                            <a class="page-link" href="@BuildPageUrl(basePath, baseQuery, pageParam, sizeParam, Math.Min(totalPages, pageNumber + 1), pageSize)">›</a>
-                        </li>
-                        <li class="page-item @(pageNumber >= totalPages ? "disabled" : "")">
-                            <a class="page-link" href="@BuildPageUrl(basePath, baseQuery, pageParam, sizeParam, totalPages, pageSize)">»</a>
-                        </li>
-                    </ul>
-                </nav>
+                    <col data-field="@f.FieldName" />
+                }
             }
-        </div>
-    </div>
+        </colgroup>
+        <thead class="table-light sticky-top">
+            <tr>
+                @foreach (var f in fields)
+                {
+                    var widthPx = f.DisplaySize.HasValue && f.DisplaySize.Value > 0 ? f.DisplaySize.Value * 10 : (int?)null;
+                    <th class="text-nowrap" style="@(widthPx.HasValue ? $"width:{widthPx}px;min-width:{widthPx}px;" : null)">
+                        <span class="header-label">@(string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel)</span>
+                        <span class="col-resizer" data-field="@f.FieldName"></span>
+                    </th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @if (items.Count == 0)
+            {
+                <tr>
+                    <td colspan="@Math.Max(1, fields.Count)" class="text-center text-muted py-3">（無資料）</td>
+                </tr>
+            }
+            else
+            {
+                foreach (var row in items)
+                {
+                    <tr>
+                        @foreach (var f in fields)
+                        {
+                            var rawObj = GetValue(row, f.FieldName);
+                            var raw = rawObj?.ToString() ?? "";
+                            bool isReadOnly = f.ReadOnly != null && (int)f.ReadOnly != 0;
+                            bool isCheckbox = (f.ComboStyle ?? 0) == 1;
+                            var cellClass = IsNumberDataType(f) ? "cell-number" : "cell-text";
+                            <td class="text-nowrap @cellClass @(isReadOnly ? "readonly-td" : "")" data-field="@f.FieldName">
+                                <span class="cell-view @(isCheckbox ? "d-inline-flex justify-content-center w-100" : "") @(isReadOnly ? "readonly-cell" : "")" data-raw="@raw">
+                                    @if (isCheckbox)
+                                    {
+                                        <input type="checkbox" class="form-check-input checkbox-dark" disabled tabindex="-1" @(raw == "1" ? "checked" : "") />
+                                    }
+                                    else
+                                    {
+                                        @DisplayVal(row, f, lookups)
+                                    }
+                                </span>
+                                @if (isCheckbox)
+                                {
+                                    <input type="checkbox"
+                                           class="form-check-input checkbox-dark cell-edit d-none @(isReadOnly ? "readonly-cell" : "")"
+                                           name="@f.FieldName"
+                                           value="@(raw == "1" ? "1" : "0")"
+                                           data-raw="@raw"
+                                           data-readonly="@(isReadOnly ? "1" : "0")"
+                                           @(raw == "1" ? "checked" : "")
+                                           @(isReadOnly ? "readonly" : "") />
+                                }
+                                else
+                                {
+                                    <input class="form-control form-control-sm cell-edit d-none @(isReadOnly ? "readonly-cell" : "")"
+                                           name="@f.FieldName"
+                                           value="@raw"
+                                           data-raw="@raw"
+                                           data-readonly="@(isReadOnly ? "1" : "0")"
+                                           @(isReadOnly ? "readonly" : "") />
+                                }
+                            </td>
+                        }
+                        @{
+                            var lowerSet = new HashSet<string>(fields.Select(ff => (ff.FieldName ?? "").ToLowerInvariant()));
+                        }
+                        @foreach (var kf in extraKeys)
+                        {
+                            var kfname = kf ?? "";
+                            if (string.IsNullOrWhiteSpace(kfname)) { continue; }
+                            var keyLower = kfname.ToLowerInvariant();
+                            if (lowerSet.Contains(keyLower)) { continue; }
+                            var kval = GetValue(row, kfname)?.ToString() ?? "";
+                            <input type="hidden" class="cell-edit d-none readonly-cell key-field-hidden"
+                                   name="@kfname"
+                                   value="@kval"
+                                   data-raw="@kval"
+                                   data-readonly="1"
+                                   readonly />
+                        }
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
 </div>
 
-<style>
-    .table.grid-table { table-layout: auto; width: auto !important; min-width: 0; }
-    .table thead th { position: sticky; top: 0; z-index: 5; background: #f8fafc; }
-    .table-hover tbody tr:hover { background-color: #f4f8ff !important; }
-    .table > :not(caption) > * > * { border-color: #d9dde4; }
-    .table td, .table th { border: 1px solid #d9dde4; position: relative; }
-    .cell-edit.form-control{height:calc(1.45em + .45rem + 2px)!important;padding:.28rem .4rem!important;font-size:.85rem!important;line-height:1.35!important;border-radius:0!important;box-sizing:border-box!important}
-    .readonly-cell{background:#f3f3f3!important;color:#555!important;border:1px solid #ddd!important;cursor:not-allowed!important;pointer-events:none!important;user-select:none!important}
-    .col-resizer{position:absolute;top:0;right:-3px;width:6px;cursor:col-resize;user-select:none;height:100%;}
-    .checkbox-dark { accent-color: #2c3e50; border: 1px solid #2c3e50 !important; }
-</style>
+@if (totalPages > 1)
+{
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-3">
+    <div class="d-flex align-items-center gap-3 text-muted small flex-wrap">
+        <span>共 @totalCount 筆</span>
+        <span>頁 @pageNumber / @totalPages</span>
+        <span class="d-flex align-items-center gap-1">
+            每頁筆數
+            <select class="form-select form-select-sm" style="width:auto"
+                    onchange="(function(el){const url=new URL(window.location.href);url.searchParams.set('tab','@tabKey');url.searchParams.set('@pageParam','1');url.searchParams.set('@sizeParam',el.value);window.location.href=url.toString();})(this);">
+                @foreach (var s in sizeOptions)
+                {
+                    <option value="@s" selected="@(s == pageSize ? "selected" : null)">@s</option>
+                }
+            </select>
+        </span>
+    </div>
+    <nav>
+        <ul class="pagination pagination-sm mb-0">
+            <li class="page-item @(pageNumber <= 1 ? "disabled" : "")">
+                <a class="page-link" href="@BuildPageUrl(basePath, baseQuery, pageParam, sizeParam, 1, pageSize)">«</a>
+            </li>
+            <li class="page-item @(pageNumber <= 1 ? "disabled" : "")">
+                <a class="page-link" href="@BuildPageUrl(basePath, baseQuery, pageParam, sizeParam, Math.Max(1, pageNumber - 1), pageSize)">‹</a>
+            </li>
+            <li class="page-item disabled">
+                <span class="page-link">@pageNumber / @totalPages</span>
+            </li>
+            <li class="page-item @(pageNumber >= totalPages ? "disabled" : "")">
+                <a class="page-link" href="@BuildPageUrl(basePath, baseQuery, pageParam, sizeParam, Math.Min(totalPages, pageNumber + 1), pageSize)">›</a>
+            </li>
+            <li class="page-item @(pageNumber >= totalPages ? "disabled" : "")">
+                <a class="page-link" href="@BuildPageUrl(basePath, baseQuery, pageParam, sizeParam, totalPages, pageSize)">»</a>
+            </li>
+        </ul>
+    </nav>
+</div>
+}
 
 <script>
 (() => {
@@ -263,9 +263,11 @@
 
     // add resizers
     grid.querySelectorAll('thead th').forEach(th => {
-        const handle = document.createElement('span');
-        handle.className = 'col-resizer';
-        th.appendChild(handle);
+        if (!th.querySelector('.col-resizer')) {
+            const handle = document.createElement('span');
+            handle.className = 'col-resizer';
+            th.appendChild(handle);
+        }
     });
 
     const ths = Array.from(grid.querySelectorAll('thead th'));
