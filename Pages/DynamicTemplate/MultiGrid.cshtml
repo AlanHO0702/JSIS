@@ -1,70 +1,220 @@
 @page "/CUR/MultiGrid/{itemId}"
 @model PcbErpApi.Pages.CUR.MultiGridModel
+@using System.Text.Json
 @{
     Layout = "_Layout";
     var tabs = Model.Tabs ?? new List<PcbErpApi.Pages.CUR.MultiGridModel.GridTabViewModel>();
     var activeKey = Model.ActiveTabKey;
+    var enableRowDelete = true;
 }
 
-<link rel="stylesheet" href="~/css/grid-toolbar.css" />
+@if (!string.IsNullOrWhiteSpace(ViewData["LoadError"] as string))
+{
+    <div class="alert alert-warning">@ViewData["LoadError"]</div>
+}
 
-<div class="container py-4">
-    @if (!string.IsNullOrWhiteSpace(ViewData["LoadError"] as string))
-    {
-        <div class="alert alert-warning">@ViewData["LoadError"]</div>
-    }
+@if (tabs.Count == 0)
+{
+    <div class="alert alert-info">找不到對應的表格設定。</div>
+}
+else
+{
+<div class="table-wrapper">
+  <div class="card shadow-sm border-0">
+    <div class="card-body">
 
-    @if (tabs.Count == 0)
-    {
-        <div class="alert alert-info">找不到對應的表格設定。</div>
-    }
-    else
-    {
-        <partial name="~/Pages/Shared/_GridToolbar.cshtml" model='@(new PcbErpApi.Models.GridToolbarConfig { Prefix = "mg-", ShowCancel = true })' />
-
-        <ul class="nav nav-tabs flex-wrap mb-2" role="tablist">
-            @foreach (var tab in tabs)
-            {
-                var isActive = string.Equals(tab.TabKey, activeKey, StringComparison.OrdinalIgnoreCase);
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link @(isActive ? "active" : "")"
-                            id="tab-@tab.TabKey-tab"
-                            data-mg-tab="@tab.TabKey"
-                            data-dict-table="@tab.DictTableName"
-                            data-bs-toggle="tab"
-                            data-bs-target="#tab-@tab.TabKey"
-                            type="button" role="tab"
-                            aria-controls="tab-@tab.TabKey"
-                            aria-selected="@(isActive ? "true" : "false")">
-                        @tab.DisplayName
-                    </button>
-                </li>
-            }
-        </ul>
-
-        <div class="tab-content pt-1">
-            @foreach (var tab in tabs)
-            {
-                var isActive = string.Equals(tab.TabKey, activeKey, StringComparison.OrdinalIgnoreCase);
-                <div class="tab-pane fade @(isActive ? "show active" : "")" id="tab-@tab.TabKey" role="tabpanel" aria-labelledby="tab-@tab.TabKey-tab">
-                    <partial name="~/Pages/Shared/_MultiGridTab.cshtml" model="tab" />
-                </div>
-            }
+      <div class="top-toolbar multigrid-toolbar">
+        <div class="toolbar-icon-row" role="group" aria-label="row-nav-and-actions">
+          <button id="mgFirst" type="button" class="btn toolbar-btn toolbar-btn-icon" title="第一筆" aria-label="第一筆"><i class="bi bi-chevron-bar-left toolbar-icon"></i></button>
+          <button id="mgPrev" type="button" class="btn toolbar-btn toolbar-btn-icon" title="上一筆" aria-label="上一筆"><i class="bi bi-chevron-left toolbar-icon"></i></button>
+          <button id="mgNext" type="button" class="btn toolbar-btn toolbar-btn-icon" title="下一筆" aria-label="下一筆"><i class="bi bi-chevron-right toolbar-icon"></i></button>
+          <button id="mgLast" type="button" class="btn toolbar-btn toolbar-btn-icon" title="最後一筆" aria-label="最後一筆"><i class="bi bi-chevron-bar-right toolbar-icon"></i></button>
+          <button id="mgAdd" type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add" title="新增" aria-label="新增" disabled><span class="toolbar-icon">+</span></button>
+          <button id="mgDelete" type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-del" title="刪除" aria-label="刪除" disabled @(enableRowDelete ? "" : "data-lock='1'")><span class="toolbar-icon">-</span></button>
+          <button id="mgSave" type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add toolbar-btn-check" title="儲存" aria-label="儲存" disabled><span class="toolbar-icon">✓</span></button>
+          <button id="mgCancel" type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-cancel toolbar-btn-check" title="取消" aria-label="取消" disabled><span class="toolbar-icon">&times;</span></button>
         </div>
-    }
+        <div class="toolbar-main">
+          <div class="d-flex gap-2 flex-wrap align-items-center">
+            <div id="multiGridCountBox" class="toolbar-count-box mode-view">
+              <div id="multiGridMode" class="count-line">瀏覽模式</div>
+              <div id="multiGridCount" class="count-line">0 / 0</div>
+            </div>
+            <button id="btnEditToggle" type="button" class="btn toolbar-btn">
+              <i class="bi bi-pencil-square"></i>修改
+            </button>
+          </div>
+        </div>
+        <div class="d-flex justify-content-end gap-2"></div>
+      </div>
+
+      <ul class="nav nav-tabs flex-wrap mb-2" role="tablist">
+        @foreach (var tab in tabs)
+        {
+          var isActive = string.Equals(tab.TabKey, activeKey, StringComparison.OrdinalIgnoreCase);
+          <li class="nav-item" role="presentation">
+            <button class="nav-link @(isActive ? "active" : "")"
+                    id="tab-@tab.TabKey-tab"
+                    data-mg-tab="@tab.TabKey"
+                    data-dict-table="@tab.DictTableName"
+                    data-bs-toggle="tab"
+                    data-bs-target="#tab-@tab.TabKey"
+                    type="button" role="tab"
+                    aria-controls="tab-@tab.TabKey"
+                    aria-selected="@(isActive ? "true" : "false")">
+              @tab.DisplayName
+            </button>
+          </li>
+        }
+      </ul>
+
+      <div class="tab-content pt-1">
+        @foreach (var tab in tabs)
+        {
+          var isActive = string.Equals(tab.TabKey, activeKey, StringComparison.OrdinalIgnoreCase);
+          <div class="tab-pane fade @(isActive ? "show active" : "")" id="tab-@tab.TabKey" role="tabpanel" aria-labelledby="tab-@tab.TabKey-tab">
+            <partial name="~/Pages/Shared/_MultiGridTab.cshtml" model="tab" />
+          </div>
+        }
+      </div>
+
+    </div>
+  </div>
 </div>
+}
+
+<style>
+ .table-fix-wrapper{flex:1;overflow:auto;background:#fff;border:1px solid #dee2e6;border-radius:.5rem;white-space:nowrap;min-height:0}
+ .table-wrapper{height:calc(100vh - var(--app-toolbar-height, 56px));display:flex;flex-direction:column}
+ .table-wrapper>.card{flex:1;display:flex;flex-direction:column;min-height:0}
+ .table-wrapper>.card>.card-body{flex:1;display:flex;flex-direction:column;min-height:0;padding-top:12px;padding-bottom:8px}
+ table.table{table-layout:auto;border-collapse:collapse!important;font-size:.85rem;width:auto!important;min-width:0}
+ table th,table td{vertical-align:middle!important;border:1px solid #dee2e6!important;padding:0!important;white-space:nowrap}
+ table th{padding:2px 6px!important}
+ .table-hover tbody tr:hover{background:#f1f5ff!important}
+.cell-view,.cell-edit{display:block;width:100%;height:20px!important;min-height:20px!important;max-height:20px!important;font-size:.85rem;line-height:16px!important;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2px 6px!important}
+.cell-view{text-align:inherit;border:none!important;background:transparent!important}
+.cell-edit.form-control{height:20px!important;min-height:20px!important;max-height:20px!important;padding:2px 6px!important;font-size:inherit!important;line-height:16px!important;text-align:inherit!important;border:none!important;border-radius:0!important;box-sizing:border-box!important;background:transparent!important;vertical-align:middle!important;margin:0!important}
+.cell-number{text-align:right}
+.cell-text{text-align:left}
+table.table tbody td{background:#f3f3f3!important}
+.edit-mode table.table tbody td{background:#fff!important}
+.edit-mode table.table tbody td.readonly-td{background:#f3f3f3!important}
+.readonly-cell{color:#555!important;border:none!important;cursor:not-allowed!important;pointer-events:none!important;user-select:none!important}
+.table-fix-wrapper::-webkit-scrollbar{height:10px;width:10px}
+.table-fix-wrapper::-webkit-scrollbar-thumb{background:#c1c1c1;border-radius:6px}
+.table-fix-wrapper::-webkit-scrollbar-thumb:hover{background:#9ca3af}
+table.grid-table tbody tr:hover {background-color: #f9f2d7 !important; cursor: pointer;}
+table.grid-table tbody tr.selected-row {background-color: #fff3cd !important; transition: background-color .15s;}
+table th{position:relative;}
+.col-resizer{position:absolute;top:0;right:-3px;width:6px;cursor:col-resize;user-select:none;height:100%;}
+.top-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%;margin-bottom:14px;border-radius:10px}
+.multigrid-toolbar{--top-toolbar-icon-font-size: 20px;}
+.top-toolbar .toolbar-icon-row{display:flex;gap:4px;align-items:center}
+.top-toolbar .toolbar-main{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;flex:1 1 0;min-width:0}
+.toolbar-btn{display:flex;align-items:center;gap:4px;background:#2564b3;color:#fff;border:none;border-radius:11px;font-size:var(--top-toolbar-font-size);font-weight:500;padding:5px 10px;box-shadow:0 2px 10px 0 #c5d9f1;transition:background .18s, transform .11s;cursor:pointer}
+.toolbar-btn:hover,.toolbar-btn:focus{transform:translateY(-1px) scale(1.03)}
+.toolbar-btn i{font-size:1.08em}
+.top-toolbar .toolbar-btn{font-size:var(--top-toolbar-font-size);height:var(--top-toolbar-btn-height);min-height:var(--top-toolbar-btn-height);padding:0 6px;line-height:1}
+.top-toolbar .toolbar-btn-icon{display:inline-flex;align-items:center;justify-content:center;height:var(--top-toolbar-btn-height);min-height:var(--top-toolbar-btn-height);padding:0;width:30px;border-radius:8px;font-size:var(--top-toolbar-icon-font-size);line-height:1}
+.top-toolbar .toolbar-icon{display:inline-block;font-size:var(--top-toolbar-icon-font-size);line-height:1}
+.top-toolbar .toolbar-btn-icon i{font-size:var(--top-toolbar-icon-font-size);line-height:1}
+.top-toolbar .toolbar-btn:disabled{background:#9aa7bb;cursor:not-allowed;box-shadow:none;opacity:0.7}
+.top-toolbar .toolbar-btn-add{background:#0e9f4b}
+.top-toolbar .toolbar-btn-del{background:#e04848}
+.top-toolbar .toolbar-btn-cancel{background:#e04848}
+.top-toolbar .toolbar-btn-check,.top-toolbar .toolbar-btn-cancel{font-size:18px}
+.toolbar-count-box{display:inline-flex;flex-direction:column;justify-content:center;align-items:center;height:var(--top-toolbar-btn-height, 36px);min-width:74px;padding:2px 8px;border-radius:6px;font-weight:700;line-height:1.05;color:#fff;user-select:none}
+.toolbar-count-box .count-line{font-size:0.75rem}
+.toolbar-count-box.mode-view{background:#1e4db7}
+.toolbar-count-box.mode-edit{background:#f00000}
+.checkbox-dark { accent-color: #2c3e50; border: 1px solid #2c3e50 !important; }
+.tab-content{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.tab-pane{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.tab-pane .card{flex:1;display:flex;flex-direction:column;min-height:0}
+.tab-pane .card-body{flex:1;display:flex;flex-direction:column;min-height:0}
+</style>
 
 <script src="~/js/gridToolbarTemplate.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    const btnEdit = document.getElementById('mg-btnEdit');
-    const btnAdd = document.getElementById('mg-btnAdd');
-    const btnSave = document.getElementById('mg-btnSave');
-    const btnDelete = document.getElementById('mg-btnDelete');
-    const btnCancel = document.getElementById('mg-btnCancel');
+    const editBtn = document.getElementById('btnEditToggle');
+    const mgFirst = document.getElementById('mgFirst');
+    const mgPrev = document.getElementById('mgPrev');
+    const mgNext = document.getElementById('mgNext');
+    const mgLast = document.getElementById('mgLast');
+    const mgAdd = document.getElementById('mgAdd');
+    const mgDelete = document.getElementById('mgDelete');
+    const mgSave = document.getElementById('mgSave');
+    const mgCancel = document.getElementById('mgCancel');
+    const wrapper = document.querySelector('.table-wrapper');
+    const modeEl = document.getElementById('multiGridMode');
+    const countEl = document.getElementById('multiGridCount');
+    const countBox = document.getElementById('multiGridCountBox');
     let isEdit = false;
+    let isDirty = false;
 
     const getActiveGrid = () => document.querySelector('.tab-pane.show.active table[id^="grid-"]');
+    const getActivePane = () => document.querySelector('.tab-pane.show.active');
+
+    const setModePanel = (editing) => {
+        if (!modeEl) return;
+        modeEl.textContent = editing ? '編輯模式' : '瀏覽模式';
+        if (wrapper) {
+            wrapper.classList.toggle('edit-mode', editing);
+        }
+        if (countBox) {
+            countBox.classList.toggle('mode-edit', editing);
+            countBox.classList.toggle('mode-view', !editing);
+        }
+        if (editBtn) {
+            editBtn.innerHTML = editing
+                ? '<i class="bi bi-eye"></i>瀏覽'
+                : '<i class="bi bi-pencil-square"></i>修改';
+        }
+        if (mgAdd) mgAdd.disabled = !editing;
+        if (mgSave) mgSave.disabled = !editing || !isDirty;
+        if (mgCancel) mgCancel.disabled = !editing || !isDirty;
+        if (mgDelete) {
+            const locked = mgDelete.dataset.lock === '1';
+            mgDelete.disabled = !editing || locked;
+        }
+        if (mgFirst) mgFirst.disabled = false;
+        if (mgPrev) mgPrev.disabled = false;
+        if (mgNext) mgNext.disabled = false;
+        if (mgLast) mgLast.disabled = false;
+    };
+
+    const updateCountPanel = () => {
+        if (!countEl) return;
+        const grid = getActiveGrid();
+        if (!grid) {
+            countEl.textContent = '0 / 0';
+            return;
+        }
+        const rows = grid.querySelectorAll('tbody tr');
+        const total = grid.dataset.totalCount || rows.length;
+        const selected = grid.querySelector('tbody tr.selected-row');
+        const idx = selected ? Array.from(rows).indexOf(selected) + 1 : 0;
+        countEl.textContent = `${idx} / ${total}`;
+    };
+
+    const setDirty = (dirty) => {
+        isDirty = !!dirty;
+        if (!isEdit) return;
+        if (mgSave) mgSave.disabled = !isDirty;
+        if (mgCancel) mgCancel.disabled = !isDirty;
+    };
+
+    const selectRow = (tr) => {
+        if (!tr) return;
+        const grid = getActiveGrid();
+        if (grid) {
+            grid.querySelectorAll('tbody tr').forEach(r => r.classList.remove('selected-row', 'table-primary'));
+        }
+        tr.classList.add('selected-row', 'table-primary');
+        updateCountPanel();
+    };
 
     const ensureEditMode = () => {
         if (!isEdit) toggleEdit();
@@ -74,7 +224,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const grid = getActiveGrid();
         if (!grid) return;
         isEdit = !isEdit;
-        if (btnEdit) btnEdit.textContent = isEdit ? '檢視' : '編輯';
+        setModePanel(isEdit);
 
         grid.querySelectorAll('tbody tr').forEach(tr => {
             tr.querySelectorAll('td').forEach(td => {
@@ -103,7 +253,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             viewChk.type = 'checkbox';
                             viewChk.disabled = true;
                             viewChk.tabIndex = -1;
-                            viewChk.className = 'form-check-input';
+                            viewChk.className = 'form-check-input checkbox-dark';
                             span.innerHTML = '';
                             span.appendChild(viewChk);
                         }
@@ -144,7 +294,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const nameLower = name.toLowerCase();
             const isKey = keyFieldsRaw.includes(nameLower);
             const isReadOnly = inp.dataset.readonly === '1';
-            // 對可編輯的鍵欄位預設空值，讓使用者自行輸入；唯讀鍵保留原值
             const val = (isKey && !isReadOnly) ? '' : (keyFieldsRaw.includes(nameLower) ? (keyDefaults[nameLower] || '') : '');
             inp.value = val;
             inp.defaultValue = val;
@@ -167,7 +316,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isEdit) span.classList.add('d-none');
         });
 
-        // 隱藏鍵欄位可能不存在可見欄位
         keyFieldsRaw.forEach(k => {
             const exists = Array.from(clone.querySelectorAll('.cell-edit')).some(i => (i.name || '').toLowerCase() === k);
             if (!exists) {
@@ -184,6 +332,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (tbody.firstChild) tbody.insertBefore(clone, tbody.firstChild);
         else tbody.appendChild(clone);
+        setDirty(true);
         return clone;
     };
 
@@ -193,14 +342,11 @@ document.addEventListener('DOMContentLoaded', () => {
         grid.querySelectorAll('tbody tr[data-state="added"]').forEach(tr => tr.remove());
     };
 
-    // 行選取：點擊任何 grid 的 tr 即標記 table-primary，供刪除使用
+    // 行選取：點擊任何 grid 的 tr 即標記
     document.addEventListener('click', (e) => {
         const tr = e.target.closest('table[id^="grid-"] tbody tr');
         if (!tr) return;
-        const tbody = tr.closest('tbody');
-        if (!tbody) return;
-        tbody.querySelectorAll('tr').forEach(r => r.classList.remove('table-primary'));
-        tr.classList.add('table-primary');
+        selectRow(tr);
     });
 
     const collectChanges = (grid, onlyAdded = false, includeDeleted = false) => {
@@ -255,8 +401,9 @@ document.addEventListener('DOMContentLoaded', () => {
             body: JSON.stringify({ TableName: tableName, Data: changes })
         });
         if (resp.ok) {
-            alert('儲存成功');
-            toggleEdit();
+            setDirty(false);
+            // 重新載入頁面以刷新資料
+            window.location.reload();
         } else {
             alert('儲存失敗: ' + await resp.text());
         }
@@ -265,7 +412,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const getSelectedRow = () => {
         const grid = getActiveGrid();
         if (!grid) return null;
-        return grid.querySelector('tbody tr.table-primary');
+        return grid.querySelector('tbody tr.selected-row');
     };
 
     const deleteSelectedRow = async () => {
@@ -280,6 +427,54 @@ document.addEventListener('DOMContentLoaded', () => {
         await saveChanges(false, true);
     };
 
+    // 導航按鈕
+    const navigateRow = (direction) => {
+        const grid = getActiveGrid();
+        if (!grid) return;
+        const rows = Array.from(grid.querySelectorAll('tbody tr'));
+        if (rows.length === 0) return;
+        const current = grid.querySelector('tbody tr.selected-row');
+        let idx = current ? rows.indexOf(current) : -1;
+
+        switch(direction) {
+            case 'first': idx = 0; break;
+            case 'prev': idx = Math.max(0, idx - 1); break;
+            case 'next': idx = Math.min(rows.length - 1, idx + 1); break;
+            case 'last': idx = rows.length - 1; break;
+        }
+        selectRow(rows[idx]);
+    };
+
+    mgFirst?.addEventListener('click', () => navigateRow('first'));
+    mgPrev?.addEventListener('click', () => navigateRow('prev'));
+    mgNext?.addEventListener('click', () => navigateRow('next'));
+    mgLast?.addEventListener('click', () => navigateRow('last'));
+
+    // 編輯按鈕
+    editBtn?.addEventListener('click', () => toggleEdit());
+
+    // 新增按鈕
+    mgAdd?.addEventListener('click', () => addRow());
+
+    // 儲存按鈕
+    mgSave?.addEventListener('click', () => saveChanges(false));
+
+    // 刪除按鈕
+    mgDelete?.addEventListener('click', () => {
+        const grid = getActiveGrid();
+        const pending = grid?.querySelector('tbody tr[data-state="added"]');
+        if (pending) { cancelAdd(); setDirty(false); return; }
+        deleteSelectedRow();
+    });
+
+    // 取消按鈕
+    mgCancel?.addEventListener('click', async () => {
+        cancelAdd();
+        if (isEdit) toggleEdit();
+        setDirty(false);
+    });
+
+    // Tab 切換時更新狀態
     document.querySelectorAll('[data-mg-tab]').forEach(btn => {
         btn.addEventListener('shown.bs.tab', (ev) => {
             const key = ev.target?.dataset?.mgTab;
@@ -289,6 +484,23 @@ document.addEventListener('DOMContentLoaded', () => {
             history.replaceState({}, '', url);
             const dict = ev.target?.dataset?.dictTable;
             if (dict) window._dictTableName = dict;
+            updateCountPanel();
+            // 如果有編輯模式，切換後保持編輯狀態
+            if (isEdit) {
+                const grid = getActiveGrid();
+                if (grid) {
+                    grid.querySelectorAll('tbody tr').forEach(tr => {
+                        tr.querySelectorAll('td').forEach(td => {
+                            const span = td.querySelector('.cell-view');
+                            const inp = td.querySelector('.cell-edit');
+                            if (span && inp) {
+                                span.classList.add('d-none');
+                                inp.classList.remove('d-none');
+                            }
+                        });
+                    });
+                }
+            }
         });
         if (btn.classList.contains('active')) {
             const dict = btn.dataset?.dictTable;
@@ -296,29 +508,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    window.createGridController({
-        name: 'multiGrid',
-        btnToggle: btnEdit,
-        btnAdd,
-        btnSave,
-        btnDelete,
-        btnCancel,
-        customToggle: toggleEdit,
-        customAdd: () => addRow(),
-        customSave: () => saveChanges(false),
-        onCancelPending: () => cancelAdd(),
-        onCancelEdit: async () => {
-            cancelAdd();
-            if (isEdit) toggleEdit();
-        },
-        onDelete: () => {
-            // 若有未儲存新增，取消；否則刪除選取列
-            const grid = getActiveGrid();
-            const pending = grid?.querySelector('tbody tr[data-state=\"added\"]');
-            if (pending) { cancelAdd(); return; }
-            return deleteSelectedRow();
+    // 監聽輸入變化以標記 dirty
+    document.addEventListener('input', (e) => {
+        if (e.target.closest('.cell-edit')) {
+            setDirty(true);
         }
     });
+
+    // 初始化狀態面板
+    setModePanel(false);
+    updateCountPanel();
 });
 </script>
 
