@@ -81,6 +81,22 @@ public class MatInfoAddController : ControllerBase
         cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
     }
 
+    private static async Task<bool> HasProcParamAsync(SqlConnection conn, string procName, string paramName)
+    {
+        const string sql = @"
+SELECT 1
+  FROM sys.parameters p
+  JOIN sys.objects o ON o.object_id = p.object_id
+ WHERE o.type = 'P'
+   AND o.name = @proc
+   AND p.name = @param";
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@proc", procName);
+        cmd.Parameters.AddWithValue("@param", paramName);
+        var result = await cmd.ExecuteScalarAsync();
+        return result != null && result != DBNull.Value;
+    }
+
     private static async Task<List<Dictionary<string, object?>>> ReadListAsync(SqlCommand cmd)
     {
         var results = new List<Dictionary<string, object?>>();
@@ -331,21 +347,21 @@ where Spid = @Spid and SetClass = @SetClass and NumId = @NumId", conn))
         AddParam(cmd, "@MatName", req.MatName);
         AddParam(cmd, "@MB", req.MB);
         AddParam(cmd, "@Status", req.Status);
-        AddParam(cmd, "@UserId", req.UserId);
         AddParam(cmd, "@Build_UserId", req.UserId);
-        AddParam(cmd, "@ReferencePN", req.ReferencePN);
-        AddParam(cmd, "@Spid", req.Spid);
+        AddParam(cmd, "@Ref_PartNum", req.ReferencePN);
+        AddParam(cmd, "@SPID", req.Spid);
         AddParam(cmd, "@Unit", req.Unit);
         AddParam(cmd, "@IsTmpPN2Real", req.IsTmpPN2Real);
         AddParam(cmd, "@MergePartNum", req.MergePartNum);
-        AddParam(cmd, "@CurrOldPN", req.CurrOldPN);
+        AddParam(cmd, "@OldPN", req.CurrOldPN);
         AddParam(cmd, "@GlobalId4Add", req.GlobalId4Add);
-        AddParam(cmd, "@AccountType", req.AccountType);
-        AddParam(cmd, "@PartNumAddForJH", req.PartNumAddForJH);
-        AddParam(cmd, "@JH_B", req.JH_B);
-        AddParam(cmd, "@JH_C", req.JH_C);
-        AddParam(cmd, "@MultiBuToJH_B", req.MultiBuToJH_B);
-        AddParam(cmd, "@MultiBuToJH_C", req.MultiBuToJH_C);
+        AddParam(cmd, "@sAccountType", req.AccountType);
+        AddParam(cmd, "@sPartNumAddForJH", req.PartNumAddForJH);
+        AddParam(cmd, "@chbx_JH_B", req.JH_B);
+        AddParam(cmd, "@chbx_JH_C", req.JH_C);
+        AddParam(cmd, "@sMultiBuToJH_B", req.MultiBuToJH_B);
+        AddParam(cmd, "@sMultiBuToJH_C", req.MultiBuToJH_C);
+        AddParam(cmd, "@EngGauge", "");
         await cmd.ExecuteNonQueryAsync();
         return Ok(new { ok = true });
     }
