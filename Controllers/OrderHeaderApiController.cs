@@ -500,9 +500,17 @@ public class OrderHeaderApiController : ControllerBase
         return newVal; // 已是強型別（int/decimal/datetime…）
     }
 
+    private static bool IsStringDbType(string dbType)
+    {
+        if (string.IsNullOrWhiteSpace(dbType)) return false;
+        dbType = dbType.ToLowerInvariant();
+        return dbType is "char" or "nchar" or "varchar" or "nvarchar" or "text" or "ntext";
+    }
+
     private object ParseStringForDbType(string s, string dbType)
     {
-        if (string.IsNullOrWhiteSpace(s)) return null;
+        if (string.IsNullOrWhiteSpace(s))
+            return IsStringDbType(dbType) ? "" : null;
         s = s.Trim().Replace(",", ""); // 去掉千分位
 
         switch (dbType)
