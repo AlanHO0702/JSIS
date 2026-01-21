@@ -6,8 +6,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
+using PcbErpApi.Services;
 
 namespace PcbErpApi.Pages.DynamicTemplate
 {
@@ -16,12 +18,16 @@ namespace PcbErpApi.Pages.DynamicTemplate
         private readonly PcbErpContext _ctx;
         private readonly ITableDictionaryService _dictService;
         private readonly HttpClient _http;
+        private readonly IBreadcrumbService _breadcrumbService;
+        private readonly ILogger<Paper3LModel> _logger;
 
-        public Paper3LModel(PcbErpContext ctx, ITableDictionaryService dictService, IHttpClientFactory httpClientFactory)
+        public Paper3LModel(PcbErpContext ctx, ITableDictionaryService dictService, IHttpClientFactory httpClientFactory, IBreadcrumbService breadcrumbService, ILogger<Paper3LModel> logger)
         {
             _ctx = ctx;
             _dictService = dictService;
             _http = httpClientFactory.CreateClient("MyApiClient");
+            _breadcrumbService = breadcrumbService;
+            _logger = logger;
         }
 
         public string ItemId { get; private set; } = string.Empty;
@@ -52,7 +58,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
 
             var sysItem = await _ctx.CurdSysItems.AsNoTracking()
                 .Where(x => x.ItemId == itemId)
-                .Select(x => new { x.ItemName, x.ItemType, x.Ocxtemplete })
+                .Select(x => new { x.ItemName, x.ItemType, x.Ocxtemplete, x.SuperId })
                 .FirstOrDefaultAsync();
 
             if (sysItem == null)
@@ -63,6 +69,16 @@ namespace PcbErpApi.Pages.DynamicTemplate
                 return NotFound($"Item {itemId} is not a JSdPaper3LDLL paper(3-level) item.");
 
             ItemName = sysItem.ItemName ?? string.Empty;
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(sysItem.SuperId))
+                    ViewData["Breadcrumbs"] = await _breadcrumbService.BuildBreadcrumbsAsync(sysItem.SuperId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Build breadcrumbs failed for {ItemId}", ItemId);
+            }
 
             var setupList = await _ctx.CurdOcxtableSetUp.AsNoTracking()
                 .Where(x => x.ItemId == itemId)
