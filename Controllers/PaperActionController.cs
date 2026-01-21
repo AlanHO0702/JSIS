@@ -1416,5 +1416,98 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         }
 
         #endregion
+
+        #region EMOdProdAudit - 工程資料審核
+
+        public class EMOdProdAuditRequest
+        {
+            public string PartNum { get; set; } = "";
+            public string Revision { get; set; } = "0";
+            public int Tag { get; set; } = 0;
+            public int IOType { get; set; } = 1;  // 1=審核, 6=退審
+            public string UserId { get; set; } = "Admin";
+            public string Meno { get; set; } = "";
+        }
+
+        /// <summary>
+        /// 取得 EMOdProdInfo 的 Status 狀態
+        /// </summary>
+        [HttpGet("GetEMOdProdStatus")]
+        public async Task<IActionResult> GetEMOdProdStatus([FromQuery] string partNum, [FromQuery] string revision = "0")
+        {
+            if (string.IsNullOrWhiteSpace(partNum))
+                return BadRequest(new { success = false, message = "PartNum 不可為空" });
+
+            var connStr = _config.GetConnectionString("DefaultConnection");
+            using var conn = new SqlConnection(connStr);
+
+            try
+            {
+                await conn.OpenAsync();
+
+                const string sql = @"
+                    SELECT Status
+                    FROM EMOdProdInfo WITH (NOLOCK)
+                    WHERE PartNum = @PartNum AND Revision = @Revision";
+
+                using var cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@PartNum", partNum.Trim());
+                cmd.Parameters.AddWithValue("@Revision", revision?.Trim() ?? "0");
+
+                var result = await cmd.ExecuteScalarAsync();
+                if (result == null || result == DBNull.Value)
+                    return NotFound(new { success = false, message = "找不到該料號" });
+
+                var status = Convert.ToInt32(result);
+                return Ok(new { success = true, status });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// 執行 EMOdProdAudit 存儲過程（送審/審核/退審）
+        /// </summary>
+        [HttpPost("EMOdProdAudit")]
+        public async Task<IActionResult> EMOdProdAudit([FromBody] EMOdProdAuditRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.PartNum))
+                return BadRequest(new { success = false, message = "PartNum 不可為空" });
+
+            var connStr = _config.GetConnectionString("DefaultConnection");
+            using var conn = new SqlConnection(connStr);
+
+            try
+            {
+                await conn.OpenAsync();
+
+                using var cmd = new SqlCommand("EMOdProdAudit", conn);
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@PartNum", req.PartNum.Trim());
+                cmd.Parameters.AddWithValue("@Revision", req.Revision?.Trim() ?? "0");
+                cmd.Parameters.AddWithValue("@Tag", req.Tag);
+                cmd.Parameters.AddWithValue("@IOType", req.IOType);
+                cmd.Parameters.AddWithValue("@UserId", string.IsNullOrWhiteSpace(req.UserId) ? "Admin" : req.UserId.Trim());
+                cmd.Parameters.AddWithValue("@Meno", req.Meno ?? "");
+
+                await cmd.ExecuteNonQueryAsync();
+
+                var actionName = req.IOType == 1 ? "審核" : "退審";
+                return Ok(new { success = true, message = $"已成功執行{actionName}" });
+            }
+            catch (SqlException ex)
+            {
+                // 處理 SP 中的 RAISERROR
+                return BadRequest(new { success = false, message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        #endregion
     }
 }

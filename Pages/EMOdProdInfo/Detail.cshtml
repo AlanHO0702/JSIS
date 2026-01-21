@@ -2062,10 +2062,46 @@ document.addEventListener('DOMContentLoaded', () => {
     // ============================
     // 3. 按鈕邏輯 (送審、審核、退審...)
     // ============================
+    const PARTNUM = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "PartNum").Value ?? "")';
+    const REVISION = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "Revision").Value ?? "0")';
+    const USERID = window._userId || localStorage.getItem('erpLoginUserId') || 'admin';
+
+    // 取得目前狀態
+    async function getCurrentStatus() {
+      try {
+        const resp = await fetch(`/api/PaperAction/GetEMOdProdStatus?partNum=${encodeURIComponent(PARTNUM)}&revision=${encodeURIComponent(REVISION)}`);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        return data.success ? data.status : null;
+      } catch {
+        return null;
+      }
+    }
+
+    // 執行 EMOdProdAudit
+    async function execEMOdProdAudit(ioType, tag = 0) {
+      const resp = await fetch('/api/PaperAction/EMOdProdAudit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          PartNum: PARTNUM,
+          Revision: REVISION,
+          Tag: tag,
+          IOType: ioType,
+          UserId: USERID,
+          Meno: ''
+        })
+      });
+      return resp;
+    }
+
+    // 建立按鈕
     const btnConfirm = document.getElementById('btnConfirm');
     if (btnConfirm) {
       btnConfirm.textContent = '送審';
       btnConfirm.id = 'btnSubmit';
+
+      // 新增審核按鈕
       const btnApprove = document.createElement('button');
       btnApprove.id = 'btnApprove';
       btnApprove.className = 'btn toolbar-btn success';
@@ -2074,26 +2110,155 @@ document.addEventListener('DOMContentLoaded', () => {
       btnConfirm.parentNode.insertBefore(btnApprove, btnConfirm.nextSibling);
     }
 
+    // 送審按鈕邏輯
     const btnSubmit = document.getElementById('btnSubmit');
     if (btnSubmit) {
       const newBtnSubmit = btnSubmit.cloneNode(true);
       btnSubmit.parentNode.replaceChild(newBtnSubmit, btnSubmit);
       newBtnSubmit.addEventListener('click', async function() {
-        const partNum = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "PartNum").Value ?? "")';
-        const revision = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "Revision").Value ?? "")';
-        Swal.fire({ icon: 'info', title: '送審功能待實作', text: `${partNum} / ${revision}` });
+        const status = await getCurrentStatus();
+        if (status === null) {
+          Swal.fire({ icon: 'error', title: '錯誤', text: '無法取得料號狀態' });
+          return;
+        }
+
+        // Status: 0=設計中, 1=設計完成(已送審), 2=已審核
+        if (status === 1) {
+          Swal.fire({ icon: 'warning', title: '無法送審', text: '該料號已經送審' });
+          return;
+        }
+        if (status === 2) {
+          // 已審核，使用 Tag=1 讓後台防呆
+          const confirm = await Swal.fire({
+            title: '該料號已審核',
+            text: '確定要重新送審嗎？',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '確定',
+            cancelButtonText: '取消'
+          });
+          if (!confirm.isConfirmed) return;
+
+          const resp = await execEMOdProdAudit(1, 1);  // IOType=1, Tag=1
+          const data = await resp.json();
+          if (resp.ok && data.success) {
+            Swal.fire({ icon: 'success', title: '送審成功' }).then(() => location.reload());
+          } else {
+            Swal.fire({ icon: 'error', title: '送審失敗', text: data.message });
+          }
+          return;
+        }
+
+        // Status=0 設計中，正常送審
+        const confirm = await Swal.fire({
+          title: '確定要送審嗎？',
+          text: `料號: ${PARTNUM} / 版次: ${REVISION}`,
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonText: '確定',
+          cancelButtonText: '取消'
+        });
+        if (!confirm.isConfirmed) return;
+
+        const resp = await execEMOdProdAudit(1, 0);  // IOType=1, Tag=0
+        const data = await resp.json();
+        if (resp.ok && data.success) {
+          Swal.fire({ icon: 'success', title: '送審成功' }).then(() => location.reload());
+        } else {
+          Swal.fire({ icon: 'error', title: '送審失敗', text: data.message });
+        }
       });
     }
 
+    // 審核按鈕邏輯
     const btnApprove = document.getElementById('btnApprove');
     if (btnApprove) {
       btnApprove.addEventListener('click', async function() {
-         Swal.fire({ icon: 'info', title: '審核功能待實作' });
+        const status = await getCurrentStatus();
+        if (status === null) {
+          Swal.fire({ icon: 'error', title: '錯誤', text: '無法取得料號狀態' });
+          return;
+        }
+
+        // Status: 0=設計中, 1=設計完成(已送審), 2=已審核
+        if (status === 0) {
+          Swal.fire({ icon: 'warning', title: '無法審核', text: '該料號尚未送審' });
+          return;
+        }
+        if (status === 2) {
+          // 已審核，使用 Tag=1 讓後台防呆
+          const confirm = await Swal.fire({
+            title: '該料號已審核',
+            text: '確定要重新審核嗎？',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '確定',
+            cancelButtonText: '取消'
+          });
+          if (!confirm.isConfirmed) return;
+
+          const resp = await execEMOdProdAudit(1, 1);  // IOType=1, Tag=1
+          const data = await resp.json();
+          if (resp.ok && data.success) {
+            Swal.fire({ icon: 'success', title: '審核成功' }).then(() => location.reload());
+          } else {
+            Swal.fire({ icon: 'error', title: '審核失敗', text: data.message });
+          }
+          return;
+        }
+
+        // Status=1 設計完成，正常審核
+        const confirm = await Swal.fire({
+          title: '確定要審核嗎？',
+          text: `料號: ${PARTNUM} / 版次: ${REVISION}`,
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonText: '確定',
+          cancelButtonText: '取消'
+        });
+        if (!confirm.isConfirmed) return;
+
+        const resp = await execEMOdProdAudit(1, 1);  // IOType=1, Tag=1 (審核需要 Tag=1)
+        const data = await resp.json();
+        if (resp.ok && data.success) {
+          Swal.fire({ icon: 'success', title: '審核成功' }).then(() => location.reload());
+        } else {
+          Swal.fire({ icon: 'error', title: '審核失敗', text: data.message });
+        }
       });
     }
 
+    // 退審按鈕邏輯
     overrideButton('btnCancel', async function() {
-       Swal.fire({ icon: 'info', title: '退審功能待實作' });
+      const status = await getCurrentStatus();
+      if (status === null) {
+        Swal.fire({ icon: 'error', title: '錯誤', text: '無法取得料號狀態' });
+        return;
+      }
+
+      // Status: 0=設計中, 1=設計完成(已送審), 2=已審核
+      if (status === 0) {
+        Swal.fire({ icon: 'warning', title: '無法退審', text: '該料號尚未送審，無需退審' });
+        return;
+      }
+
+      const confirm = await Swal.fire({
+        title: '確定要退審嗎？',
+        text: `料號: ${PARTNUM} / 版次: ${REVISION}`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: '確定',
+        cancelButtonText: '取消'
+      });
+      if (!confirm.isConfirmed) return;
+
+      const resp = await execEMOdProdAudit(6, 0);  // IOType=6 退審
+      const data = await resp.json();
+      if (resp.ok && data.success) {
+        Swal.fire({ icon: 'success', title: '退審成功' }).then(() => location.reload());
+      } else {
+        Swal.fire({ icon: 'error', title: '退審失敗', text: data.message });
+      }
     });
 
     overrideButton('btnPaperLog', async function() {
