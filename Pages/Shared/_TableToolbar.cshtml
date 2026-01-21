@@ -80,7 +80,6 @@
 
     document.addEventListener("DOMContentLoaded", function () {
         const btn = document.getElementById('btnViewEditToggle');
-        if (!btn) return;
 
         // 先宣告：要封鎖的狀態
         const BLOCK_STATUSES = ['已確認', '已結案', '已作廢'];
@@ -213,7 +212,7 @@
             };
 
             btnConfirm.addEventListener('click', async function () {
-                const tableName = window._headerTableName || window._tableName;
+                const tableName = window._headerRealTableName || window._headerTableName || window._tableName;
                 const paperNum = window.selectedPaperNum;
                 const userId = window._userId || localStorage.getItem('erpLoginUserId') || 'admin';
 
@@ -260,9 +259,9 @@
         if (btnCancel) {
             btnCancel.addEventListener('click', async function () {
                 // 自動抓取正確的 tableName (從 HeaderTableName)
-                const tableName = window._headerTableName || window._tableName;
+                const tableName = window._headerRealTableName || window._headerTableName || window._tableName;
                 const paperNum = window.selectedPaperNum;
-                const userId = window._userId || localStorage.getItem('erpLoginUserId') || 'admin';  // TODO: 換成實際登入者
+                const userId = window._userId || localStorage.getItem('erpLoginUserId') || 'admin';
 
                 if (!tableName) {
                     Swal.fire({ icon: 'warning', title: '尚未設定送審 Table', text: '請檢查頁面是否正確設定 HeaderTableName' });
@@ -283,8 +282,11 @@
                 });
                 if (!result.isConfirmed) return;
 
+                // 建立共用的 context 物件，讓 beforeCancel 和 afterCancel 可以共享資料
+                const hookContext = { tableName, paperNum, userId };
+
                 // Hook: beforeCancel
-                const beforeHook = await executeInherited('beforeCancel', { tableName, paperNum, userId });
+                const beforeHook = await executeInherited('beforeCancel', hookContext);
                 if (!beforeHook.ok) {
                     if (beforeHook.reason === 'hook-canceled') return;
                     if (beforeHook.reason === 'hook-error') {
@@ -299,69 +301,80 @@
                 }
 
                 const runReject = async (extra = {}) => {
-                    const resp = await fetcher('/api/PaperAction/DoAction', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            paperId: tableName,
-                            paperNum: paperNum,
-                            userId: userId,
-                            eoc: 0,
-                            aftFinished: 3, // 退審時 AftFinished 設為 3 (審核中)
-                            itemId: window._itemId || window._singleItemId || '',
-                            useId: window._useId || 'A001',
-                            ...extra
-                        })
-                    }, '退審中…');
+                    try {
+                        const resp = await fetcher('/api/PaperAction/DoAction', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                paperId: tableName,
+                                paperNum: paperNum,
+                                userId: userId,
+                                eoc: 0,
+                                aftFinished: 3, // 退審時 AftFinished 設為 3 (審核中)
+                                itemId: window._itemId || window._singleItemId || '',
+                                useId: window._useId || 'A001',
+                                ...extra
+                            })
+                        }, '退審中…');
 
-                    if (!resp.ok) {
-                        let msg = '退審失敗';
-                        try {
-                            const err = await resp.json();
-                            msg = err.message || err.Message || msg;
-                        } catch {
-                            try { msg = await resp.text() || msg; } catch {}
-                        }
-                        Swal.fire({ icon: 'error', title: msg });
-                        return;
-                    }
-
-                    const data = await resp.json().catch(() => ({}));
-                    if (data?.needConfirm) {
-                        if (data.confirmType === 'rejExamNotes') {
-                            const noteResp = await Swal.fire({
-                                icon: 'question',
-                                title: '確認退審',
-                                input: 'textarea',
-                                inputPlaceholder: '請輸入退審原因',
-                                showCancelButton: true,
-                                confirmButtonText: '確定退審',
-                                cancelButtonText: '取消',
-                                inputValidator: (value) => {
-                                    if (!value || !value.trim()) return '請輸入退審原因';
-                                }
-                            });
-                            if (!noteResp.isConfirmed) return;
-                            await runReject({ rejectNotes: noteResp.value || '' });
+                        if (!resp.ok) {
+                            let msg = '退審失敗';
+                            try {
+                                const err = await resp.json();
+                                msg = err.message || err.Message || msg;
+                            } catch {
+                                try { msg = await resp.text() || msg; } catch {}
+                            }
+                            Swal.fire({ icon: 'error', title: msg });
                             return;
                         }
 
-                        const confirm = await Swal.fire({
-                            title: data.confirmMessage || '確定要退審？',
-                            icon: 'question',
-                            showCancelButton: true,
-                            confirmButtonText: '確定退審',
-                            cancelButtonText: '取消'
-                        });
-                        if (!confirm.isConfirmed) return;
-                        await runReject({ acceptRejMsg: true });
-                        return;
+                        const data = await resp.json().catch(() => ({}));
+                        // 注意：API 回傳的欄位名稱是 PascalCase (NeedConfirm, ConfirmType 等)
+                        const needConfirm = data?.NeedConfirm || data?.needConfirm;
+                        const confirmType = data?.ConfirmType || data?.confirmType;
+                        const confirmMessage = data?.ConfirmMessage || data?.confirmMessage;
+
+                        if (needConfirm) {
+                            if (confirmType === 'rejExamNotes') {
+                                const noteResp = await Swal.fire({
+                                    icon: 'question',
+                                    title: '確認退審',
+                                    input: 'textarea',
+                                    inputPlaceholder: '請輸入退審原因',
+                                    showCancelButton: true,
+                                    confirmButtonText: '確定退審',
+                                    cancelButtonText: '取消',
+                                    inputValidator: (value) => {
+                                        if (!value || !value.trim()) return '請輸入退審原因';
+                                    }
+                                });
+                                if (!noteResp.isConfirmed) return;
+                                await runReject({ rejectNotes: noteResp.value || '' });
+                                return;
+                            }
+
+                            const confirm = await Swal.fire({
+                                title: confirmMessage || '確定要退審？',
+                                icon: 'question',
+                                showCancelButton: true,
+                                confirmButtonText: '確定退審',
+                                cancelButtonText: '取消'
+                            });
+                            if (!confirm.isConfirmed) return;
+                            await runReject({ acceptRejMsg: true });
+                            return;
+                        }
+
+                        // Hook: afterCancel - 使用同一個 hookContext，包含 beforeCancel 設定的資料
+                        hookContext.result = data;
+                        await executeInherited('afterCancel', hookContext);
+
+                        location.reload();
+                    } catch (err) {
+                        console.error('[退審] runReject 發生錯誤:', err);
+                        Swal.fire({ icon: 'error', title: '退審錯誤', text: err.message });
                     }
-
-                    // Hook: afterCancel
-                    await executeInherited('afterCancel', { tableName, paperNum, userId, result: data });
-
-                    location.reload();
                 };
 
                 await runReject();
@@ -500,9 +513,12 @@
         const btnSwitch = document.getElementById("btnSwitch");
         if (btnSwitch) {
             btnSwitch.addEventListener("click", function () {
-                // 這裡直接取選中的單號
-                const id = (window.getSelectedId && window.getSelectedId()) 
-                            || window.selectedPaperNum;
+                // 這裡直接取選中的單號（優先用選取列，避免使用到過期的全域值）
+                let id = (window.getSelectedId && window.getSelectedId()) || window.selectedPaperNum;
+                if (!id) {
+                    const row = document.querySelector('#dataTbody tr.selected');
+                    id = row?.getAttribute('data-paper-num') || id;
+                }
 
                 if (!id) {
                     Swal.fire({ icon: 'warning', title: '請先選擇一筆單據' });

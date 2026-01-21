@@ -101,6 +101,73 @@
     isKey:   f => (f.IsKey ?? 0) === 1
   };
 
+  const WIDTH_SAVE_API = "/api/DictSetupApi/FieldWidth/Save";
+  const normalizeTableName = (name) => (name || "").replace(/^dbo\./i, "").trim().toLowerCase();
+
+  const persistWidthField = async (table, field, width) => {
+    if (!table || !field || !Number.isFinite(width)) return;
+    try {
+      await fetch(WIDTH_SAVE_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tableName: normalizeTableName(table),
+          fieldName: field,
+          widthPx: Math.round(width)
+        })
+      });
+    } catch { /* ignore */ }
+  };
+
+  const enableColumnResize = (tableEl, tableName) => {
+    if (!tableEl || !tableName) return;
+    const ths = Array.from(tableEl.querySelectorAll("thead th"));
+    if (!ths.length) return;
+
+    ths.forEach(th => {
+      if (!th.querySelector(".col-resizer")) {
+        const handle = document.createElement("span");
+        handle.className = "col-resizer";
+        th.appendChild(handle);
+      }
+    });
+
+    let isDown = false, startX = 0, startW = 0, th = null, activeField = "";
+
+    ths.forEach(h => {
+      const handle = h.querySelector(".col-resizer");
+      if (!handle) return;
+      handle.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        isDown = true;
+        th = h;
+        startX = e.pageX;
+        startW = th.getBoundingClientRect().width;
+        activeField = th.dataset.field || "";
+        document.body.style.cursor = "col-resize";
+      });
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!isDown || !th) return;
+      const dx = e.pageX - startX;
+      const newW = Math.max(48, startW + dx);
+      th.style.width = `${newW}px`;
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (!isDown) return;
+      isDown = false;
+      document.body.style.cursor = "";
+      if (th && activeField) {
+        const w = th.getBoundingClientRect().width;
+        persistWidthField(tableName, activeField, w);
+      }
+      th = null;
+      activeField = "";
+    });
+  };
+
   // ==============================================================================
   //  UI Helpers - 將佈局模式轉換為字串
   // ==============================================================================
@@ -354,9 +421,13 @@
       .forEach(f => {
         const th = document.createElement("th");
         th.textContent = DICT.header(f);
+        th.dataset.field = f.FieldName;
         const w = DICT.width(f);
         if (w) th.style.width = w + "px";
         th.style.whiteSpace = "nowrap";
+        const handle = document.createElement("span");
+        handle.className = "col-resizer";
+        th.appendChild(handle);
         tr.appendChild(th);
       });
   };
@@ -511,6 +582,8 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
     const masterDict = await fetchDict(cfg.MasterDict || cfg.MasterTable);
 
     buildHead(mHead, masterDict);
+    const masterGrid = document.getElementById(`${cfg.DomId}-masterGrid`);
+    enableColumnResize(masterGrid, cfg.MasterTable || cfg.MasterDict);
 
     const uniq = (arr) => [...new Set((arr || []).filter(Boolean).map(s => String(s)))];
 
@@ -537,6 +610,8 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
 
       const headTr = document.getElementById(hid);
       if (headTr) buildHead(headTr, dict);
+      const detailGrid = document.getElementById(`${cfg.DomId}-detail-${i}-grid`);
+      enableColumnResize(detailGrid, d.DetailTable || d.DetailDict);
       detailDicts[i] = dict;
     }
 
