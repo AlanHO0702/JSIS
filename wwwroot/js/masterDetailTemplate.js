@@ -87,6 +87,7 @@
   // 🧩 欄寬存取（拖曳後寫回辭典 + localStorage）
   // -----------------------------
   const WIDTH_SAVE_URL = "/api/TableFieldLayout/SaveDetailLayout";
+  const WIDTH_SAVE_API = "/api/DictSetupApi/FieldWidth/Save";
   const normalizeTableName = (name) => (name || "").replace(/^dbo\./i, "").trim().toLowerCase();
   const savedWidthKey = (table) => `colwidth:${normalizeTableName(table)}`;
 
@@ -120,6 +121,21 @@
     } catch { /* ignore */ }
   };
 
+  const persistWidthField = async (table, field, width) => {
+    if (!table || !field || !Number.isFinite(width)) return;
+    try {
+      await fetch(WIDTH_SAVE_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tableName: normalizeTableName(table),
+          fieldName: field,
+          widthPx: Math.round(width)
+        })
+      });
+    } catch { /* ignore */ }
+  };
+
   const enableColumnResize = (tableEl, tableName) => {
     if (!tableEl || !tableName) return;
     const ths = Array.from(tableEl.querySelectorAll("thead th"));
@@ -137,7 +153,7 @@
       }
     });
 
-    let isDown = false, startX = 0, startW = 0, th = null;
+    let isDown = false, startX = 0, startW = 0, th = null, activeField = "";
     let saveTimer = null;
     const debounceSave = () => {
       clearTimeout(saveTimer);
@@ -153,6 +169,7 @@
         th = h;
         startX = e.pageX;
         startW = th.getBoundingClientRect().width;
+        activeField = th.dataset.field || "";
         document.body.classList.add("resizing");
         th.classList.add("resizing");
       });
@@ -170,8 +187,13 @@
       isDown = false;
       document.body.classList.remove("resizing");
       th?.classList.remove("resizing");
+      if (th && activeField) {
+        const w = th.getBoundingClientRect().width;
+        persistWidthField(tableName, activeField, w);
+      }
       debounceSave();
       th = null;
+      activeField = "";
     });
   };
 
@@ -477,6 +499,75 @@
     });
   };
 
+  const parseDateValue = (val) => {
+    if (val == null) return NaN;
+    if (typeof val === "object") {
+      val = val.value ?? val.Value ?? "";
+    }
+    const str = String(val || "").trim();
+    if (!str) return NaN;
+    const direct = Date.parse(str);
+    if (Number.isFinite(direct)) return direct;
+    const match = str.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+    if (match) {
+      const year = Number(match[1]);
+      const month = Number(match[2]) - 1;
+      const day = Number(match[3]);
+      const hour = Number(match[4] || 0);
+      const min = Number(match[5] || 0);
+      const sec = Number(match[6] || 0);
+      return new Date(year, month, day, hour, min, sec).getTime();
+    }
+    return NaN;
+  };
+
+  const getRowValue = (row, fieldName) => {
+    if (!row || !fieldName) return "";
+    const key = Object.keys(row).find(k => k.toLowerCase() === fieldName.toLowerCase());
+    return key ? row[key] : "";
+  };
+
+  const getSortKey = (val, dataType) => {
+    if (val == null || val === "") return { type: "empty", value: "" };
+    if (isDateType(dataType)) {
+      const d = parseDateValue(val);
+      if (Number.isFinite(d)) return { type: "date", value: d };
+    }
+    const str = String(val).trim();
+    const num = Number(str.replace(/,/g, ""));
+    if (Number.isFinite(num) && /^-?\d+(\.\d+)?$/.test(str.replace(/,/g, ""))) {
+      return { type: "number", value: num };
+    }
+    if (/[\/:\-]/.test(str)) {
+      const d = parseDateValue(str);
+      if (Number.isFinite(d)) return { type: "date", value: d };
+    }
+    return { type: "string", value: str.toLowerCase() };
+  };
+
+  const compareSortKey = (a, b, order) => {
+    if (a.type === "empty" && b.type === "empty") return 0;
+    if (a.type === "empty") return 1;
+    if (b.type === "empty") return -1;
+    const dir = order === "desc" ? -1 : 1;
+    if (a.type === b.type && (a.type === "number" || a.type === "date")) {
+      return (a.value - b.value) * dir;
+    }
+    return a.value > b.value ? dir : a.value < b.value ? -dir : 0;
+  };
+
+  const sortRowsByField = (rows, fieldName, dict, order) => {
+    if (!rows || !rows.length) return rows;
+    const col = dict.find(d => (d.FieldName || "").toLowerCase() === fieldName.toLowerCase());
+    const dataType = col ? DICT_MAP.dataType(col) : null;
+    const mapped = rows.map(row => {
+      const raw = getRowValue(row, fieldName);
+      return { row, key: getSortKey(raw, dataType) };
+    });
+    mapped.sort((a, b) => compareSortKey(a.key, b.key, order));
+    return mapped.map(x => x.row);
+  };
+
   // ------------------------------
   // 🧩 從 URL 讀取查詢參數
   // ------------------------------
@@ -581,6 +672,39 @@
     buildHead(dHead, dDict, false, detailName);
     enableColumnResize(masterTbl, masterName);
     enableColumnResize(detailTbl, detailName);
+
+    const bindHeaderSort = (tableEl, dict, isMaster) => {
+      if (!tableEl) return;
+      const head = tableEl.querySelector("thead");
+      if (!head) return;
+      head.querySelectorAll("th").forEach(th => {
+        th.style.cursor = "default";
+        th.title = "點擊排序";
+        th.addEventListener("click", (e) => {
+          if (e.target?.classList?.contains("md-col-resizer")) return;
+          const field = th.dataset.field;
+          if (!field) return;
+          const current = th.dataset.sortOrder || "desc";
+          const nextOrder = current === "desc" ? "asc" : "desc";
+          head.querySelectorAll("th").forEach(h => { h.dataset.sortOrder = ""; });
+          th.dataset.sortOrder = nextOrder;
+
+          if (isMaster) {
+            masterData = sortRowsByField(masterData, field, dict, nextOrder);
+            currentMasterRow = null;
+            renderMaster();
+            const first = mBody.querySelector("tr");
+            first?.click();
+          } else {
+            detailData = sortRowsByField(detailData, field, dict, nextOrder);
+            renderDetail();
+          }
+        });
+      });
+    };
+
+    bindHeaderSort(masterTbl, mDict, true);
+    bindHeaderSort(detailTbl, dDict, false);
 
     const ensureEditMode = () => {
       if (!window._mdEditing) return false;
