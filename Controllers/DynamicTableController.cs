@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
 using PcbErpApi.Helpers;
+using static TableDictionaryService;
 
 namespace PcbErpApi.Controllers
 {
@@ -36,6 +37,7 @@ namespace PcbErpApi.Controllers
             public string Table { get; set; } = "";
             public string? ItemId { get; set; }
             public List<FilterItem> Filters { get; set; } = new();
+            public bool SkipLookup { get; set; } = false;  // 前端已有快取時跳過 lookup 查詢
         }
 
         public class PaperTypeOption
@@ -694,55 +696,61 @@ SELECT TOP 1 RunSQLAfterAdd
                 }
 
                 // lookup（失敗不要影響主要資料回傳）
+                // 當前端已有快取 (SkipLookup=true) 時，跳過耗時的 lookup 查詢
                 Dictionary<string, Dictionary<string, string>> lookupMapData = new();
-                try
+                List<OCXLookupMap>? lookupMaps = null;
+
+                if (!req.SkipLookup)
                 {
-                    var tableDictService = new TableDictionaryService(_ctx);
-                    var lookupMaps = tableDictService.GetOCXLookups(dictTable);
-
-                    // 1) 補上 OCX Lookup 的「非實體顯示欄位」（第三階子明細會用到）
-                    if (lookupMaps.Count > 0)
+                    try
                     {
-                        foreach (var row in result)
+                        var tableDictService = new TableDictionaryService(_ctx);
+                        lookupMaps = tableDictService.GetOCXLookups(dictTable);
+
+                        // 1) 補上 OCX Lookup 的「非實體顯示欄位」（第三階子明細會用到）
+                        if (lookupMaps.Count > 0)
                         {
-                            foreach (var map in lookupMaps)
+                            foreach (var row in result)
                             {
-                                if (map == null || string.IsNullOrWhiteSpace(map.FieldName)) continue;
+                                foreach (var map in lookupMaps)
+                                {
+                                    if (map == null || string.IsNullOrWhiteSpace(map.FieldName)) continue;
 
-                                // 若實體欄位本來就存在，避免覆寫
-                                if (row.ContainsKey(map.FieldName)) continue;
+                                    // 若實體欄位本來就存在，避免覆寫
+                                    if (row.ContainsKey(map.FieldName)) continue;
 
-                                static string ToKey(object? v) => v == null || v == DBNull.Value ? "" : v.ToString()?.Trim() ?? "";
+                                    static string ToKey(object? v) => v == null || v == DBNull.Value ? "" : v.ToString()?.Trim() ?? "";
 
-                                var key = "";
-                                if (!string.IsNullOrWhiteSpace(map.KeyFieldName) && row.TryGetValue(map.KeyFieldName, out var keyFieldVal))
-                                    key = ToKey(keyFieldVal);
-                                if (string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(map.KeySelfName) && row.TryGetValue(map.KeySelfName, out var keySelfVal))
-                                    key = ToKey(keySelfVal);
-                                if (string.IsNullOrWhiteSpace(key) && row.TryGetValue(map.FieldName, out var rawVal))
-                                    key = ToKey(rawVal);
+                                    var key = "";
+                                    if (!string.IsNullOrWhiteSpace(map.KeyFieldName) && row.TryGetValue(map.KeyFieldName, out var keyFieldVal))
+                                        key = ToKey(keyFieldVal);
+                                    if (string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(map.KeySelfName) && row.TryGetValue(map.KeySelfName, out var keySelfVal))
+                                        key = ToKey(keySelfVal);
+                                    if (string.IsNullOrWhiteSpace(key) && row.TryGetValue(map.FieldName, out var rawVal))
+                                        key = ToKey(rawVal);
 
-                                var display = "";
-                                if (!string.IsNullOrWhiteSpace(key) && map.LookupValues != null && map.LookupValues.TryGetValue(key, out var dv) && dv != null)
-                                    display = dv;
+                                    var display = "";
+                                    if (!string.IsNullOrWhiteSpace(key) && map.LookupValues != null && map.LookupValues.TryGetValue(key, out var dv) && dv != null)
+                                        display = dv;
 
-                                // 即使沒找到，也補空字串，避免前端因第一筆缺值而不產生欄位
-                                row[map.FieldName] = display;
+                                    // 即使沒找到，也補空字串，避免前端因第一筆缺值而不產生欄位
+                                    row[map.FieldName] = display;
+                                }
                             }
                         }
-                    }
 
-                    // 2) 舊版回傳 lookupMapData（其他頁面可能仍在用）
-                    lookupMapData = LookupDisplayHelper.BuildLookupDisplayMap(
-                        result,
-                        lookupMaps,
-                        item => item.TryGetValue("PaperNum", out var v) ? v?.ToString() ?? "" : ""
-                    );
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Build lookup map failed for {Table}", dictTable);
-                    lookupMapData = new();
+                        // 2) 舊版回傳 lookupMapData（其他頁面可能仍在用）
+                        lookupMapData = LookupDisplayHelper.BuildLookupDisplayMap(
+                            result,
+                            lookupMaps.Cast<dynamic>(),
+                            item => item.TryGetValue("PaperNum", out var v) ? v?.ToString() ?? "" : ""
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Build lookup map failed for {Table}", dictTable);
+                        lookupMapData = new();
+                    }
                 }
 
                 return Ok(new { totalCount, data = result, lookupMapData });

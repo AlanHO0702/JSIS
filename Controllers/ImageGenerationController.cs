@@ -86,7 +86,7 @@ namespace PcbErpApi.Controllers
                     return Ok(new
                     {
                         success = false,
-                        message = "料號和版次不可為空"
+                        message = "料號和版序不可為空"
                     });
                 }
 

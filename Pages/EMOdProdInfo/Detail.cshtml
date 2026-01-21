@@ -408,7 +408,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let masterDict = null;
   const isViewOnly = @(Model.IsViewOnly ? "true" : "false"); // 查詢模式標記
 
-  // 第一行欄位：料號、版次、客戶料號、預鑄列印(checkbox)、預設不料本(checkbox)、暫停發料(checkbox)、混款(checkbox)
+  // 第一行欄位：料號、版序、客戶料號、預鑄列印(checkbox)、預設不料本(checkbox)、暫停發料(checkbox)、混款(checkbox)
   const headerRow1Fields = ['PartNum', 'Revision', 'CustomerPartNum'];
   const headerRow1Checkboxes = [
     { field: 'IsPrintPrecast', label: '傳統列印' },
@@ -1050,7 +1050,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const revision = currentMasterKeys.Revision || currentMasterKeys.revision;
 
     if (!partNum || !revision) {
-      console.error('無法取得料號或版次');
+      console.error('無法取得料號或版序');
       return;
     }
 
@@ -1455,11 +1455,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const revision = currentMasterKeys.Revision || currentMasterKeys.revision;
 
       if (!partNum || !revision) {
-        alert('無法取得料號或版次，請重新載入頁面');
+        alert('無法取得料號或版序，請重新載入頁面');
         return;
       }
 
-      if (!confirm(`確定要產生圖檔？\n\n料號: ${partNum}\n版次: ${revision}`)) {
+      if (!confirm(`確定要產生圖檔？\n\n料號: ${partNum}\n版序: ${revision}`)) {
         return;
       }
 
@@ -2124,35 +2124,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Status: 0=設計中, 1=設計完成(已送審), 2=已審核
         if (status === 1) {
-          Swal.fire({ icon: 'warning', title: '無法送審', text: '該料號已經送審' });
+          Swal.fire({ icon: 'warning', title: '該料號已送審' });
           return;
         }
         if (status === 2) {
-          // 已審核，使用 Tag=1 讓後台防呆
-          const confirm = await Swal.fire({
-            title: '該料號已審核',
-            text: '確定要重新送審嗎？',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: '確定',
-            cancelButtonText: '取消'
-          });
-          if (!confirm.isConfirmed) return;
-
-          const resp = await execEMOdProdAudit(1, 1);  // IOType=1, Tag=1
-          const data = await resp.json();
-          if (resp.ok && data.success) {
-            Swal.fire({ icon: 'success', title: '送審成功' }).then(() => location.reload());
-          } else {
-            Swal.fire({ icon: 'error', title: '送審失敗', text: data.message });
-          }
+          Swal.fire({ icon: 'warning', title: '該料號已審核' });
           return;
         }
 
         // Status=0 設計中，正常送審
         const confirm = await Swal.fire({
           title: '確定要送審嗎？',
-          text: `料號: ${PARTNUM} / 版次: ${REVISION}`,
+          text: `料號: ${PARTNUM} / 版序: ${REVISION}`,
           icon: 'question',
           showCancelButton: true,
           confirmButtonText: '確定',
@@ -2182,35 +2165,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Status: 0=設計中, 1=設計完成(已送審), 2=已審核
         if (status === 0) {
-          Swal.fire({ icon: 'warning', title: '無法審核', text: '該料號尚未送審' });
+          Swal.fire({ icon: 'warning', title: '該料號尚未送審' });
           return;
         }
         if (status === 2) {
-          // 已審核，使用 Tag=1 讓後台防呆
-          const confirm = await Swal.fire({
-            title: '該料號已審核',
-            text: '確定要重新審核嗎？',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: '確定',
-            cancelButtonText: '取消'
-          });
-          if (!confirm.isConfirmed) return;
-
-          const resp = await execEMOdProdAudit(1, 1);  // IOType=1, Tag=1
-          const data = await resp.json();
-          if (resp.ok && data.success) {
-            Swal.fire({ icon: 'success', title: '審核成功' }).then(() => location.reload());
-          } else {
-            Swal.fire({ icon: 'error', title: '審核失敗', text: data.message });
-          }
+          Swal.fire({ icon: 'warning', title: '該料號已審核' });
           return;
         }
 
         // Status=1 設計完成，正常審核
         const confirm = await Swal.fire({
           title: '確定要審核嗎？',
-          text: `料號: ${PARTNUM} / 版次: ${REVISION}`,
+          text: `料號: ${PARTNUM} / 版序: ${REVISION}`,
           icon: 'question',
           showCancelButton: true,
           confirmButtonText: '確定',
@@ -2244,7 +2210,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const confirm = await Swal.fire({
         title: '確定要退審嗎？',
-        text: `料號: ${PARTNUM} / 版次: ${REVISION}`,
+        text: `料號: ${PARTNUM} / 版序: ${REVISION}`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonText: '確定',
@@ -2282,12 +2248,16 @@ document.addEventListener('DOMContentLoaded', () => {
       anchor.style.display = 'inline-flex'; // 確保圖示垂直置中
       anchor.style.alignItems = 'center';
       anchor.style.justifyContent = 'center';
-      anchor.id = 'btnSwitch'; // 保持原 ID，因為上方已移除衝突的監聽器
+      anchor.id = 'btnSwitch'; // 保持原 ID，因為上方已移除衝突的監聯器
+
+      // 從 localStorage 讀取上次的頁數，返回時帶上 page 參數
+      const tableName = 'emodprodinfo';
+      const savedPage = localStorage.getItem(`orderListQueryPage:${tableName}`) || '1';
 
       if (isViewOnly) {
-        anchor.href = '@Url.Page("Index", new { mode = "view", itemId = "EMO00018" })';
+        anchor.href = `/EMOdProdInfo?mode=view&itemId=EMO00018&page=${savedPage}`;
       } else {
-        anchor.href = '@Url.Page("Index")';
+        anchor.href = `/EMOdProdInfo?page=${savedPage}`;
       }
       btnSwitch.parentNode.replaceChild(anchor, btnSwitch);
     }
