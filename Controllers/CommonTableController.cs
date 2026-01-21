@@ -52,8 +52,11 @@ namespace PcbErpApi.Controllers
 
             try
             {
-                var (columns, updatable, pkCols) = await LoadTableSchemaAsync(conn, tx, req.TableName);
-                var uniqueIndexSets = await LoadUniqueIndexSetsAsync(conn, tx, req.TableName);
+                // ★ 將辭典表名轉換為實際資料表名（查詢 CURdTableName.RealTableName）
+                var realTableName = await ResolveRealTableNameAsync(conn, tx, req.TableName) ?? req.TableName;
+
+                var (columns, updatable, pkCols) = await LoadTableSchemaAsync(conn, tx, realTableName);
+                var uniqueIndexSets = await LoadUniqueIndexSetsAsync(conn, tx, realTableName);
 
                 var hintedKeys = new HashSet<string>(
                     (req.KeyFields ?? Enumerable.Empty<string>())
@@ -135,7 +138,7 @@ namespace PcbErpApi.Controllers
                     if (isDelete)
                     {
                         var delWhereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Col.Name}] = @K_{p.Col.Name}"));
-                        var delSql = $"DELETE FROM [{req.TableName}] WHERE {delWhereSql}";
+                        var delSql = $"DELETE FROM [{realTableName}] WHERE {delWhereSql}";
                         using var delCmd = conn.CreateCommand();
                         delCmd.Transaction = (System.Data.Common.DbTransaction)tx;
                         delCmd.CommandText = delSql;
@@ -161,7 +164,7 @@ namespace PcbErpApi.Controllers
                         {
                             var colsSql0 = string.Join(", ", insertPairs0.Select(p => $"[{p.Col.Name}]"));
                             var valsSql0 = string.Join(", ", insertPairs0.Select(p => $"@I_{p.Col.Name}"));
-                            var insertSql0 = $"INSERT INTO [{req.TableName}] ({colsSql0}) VALUES ({valsSql0})";
+                            var insertSql0 = $"INSERT INTO [{realTableName}] ({colsSql0}) VALUES ({valsSql0})";
                             using var insertCmd0 = conn.CreateCommand();
                             insertCmd0.Transaction = (System.Data.Common.DbTransaction)tx;
                             insertCmd0.CommandText = insertSql0;
@@ -180,7 +183,7 @@ namespace PcbErpApi.Controllers
 
                     var setSql   = string.Join(", ", setPairs.Select(p => $"[{p.Col.Name}] = @{p.Col.Name}"));
                     var whereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Col.Name}] = @K_{p.Col.Name}"));
-                    var sql      = $"UPDATE [{req.TableName}] SET {setSql} WHERE {whereSql}";
+                    var sql      = $"UPDATE [{realTableName}] SET {setSql} WHERE {whereSql}";
 
                     using var cmd = conn.CreateCommand();
                     cmd.Transaction = (System.Data.Common.DbTransaction)tx;
@@ -215,7 +218,7 @@ namespace PcbErpApi.Controllers
                         {
                             var colsSql = string.Join(", ", insertPairs.Select(p => $"[{p.Col.Name}]"));
                             var valsSql = string.Join(", ", insertPairs.Select(p => $"@I_{p.Col.Name}"));
-                            var insertSql = $"INSERT INTO [{req.TableName}] ({colsSql}) VALUES ({valsSql})";
+                            var insertSql = $"INSERT INTO [{realTableName}] ({colsSql}) VALUES ({valsSql})";
                             using var insertCmd = conn.CreateCommand();
                             insertCmd.Transaction = (System.Data.Common.DbTransaction)tx;
                             insertCmd.CommandText = insertSql;
@@ -350,6 +353,29 @@ ORDER BY idx.index_id, ic.key_ordinal";
             if (bucket != null && bucket.Count > 0) result.Add(bucket);
 
             return result;
+        }
+
+        /// <summary>
+        /// 將辭典表名轉換為實際資料表名（查詢 CURdTableName.RealTableName）
+        /// 若無對應或 RealTableName 為空，則回傳 null（由呼叫端 fallback 使用原 TableName）
+        /// </summary>
+        private async Task<string?> ResolveRealTableNameAsync(DbConnection conn, IDbTransaction tx, string dictTableName)
+        {
+            if (string.IsNullOrWhiteSpace(dictTableName)) return null;
+
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = (System.Data.Common.DbTransaction)tx;
+            cmd.CommandText = @"
+SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
+  FROM CURdTableName WITH (NOLOCK)
+ WHERE TableName = @tbl";
+            var p = cmd.CreateParameter();
+            p.ParameterName = "@tbl";
+            p.Value = dictTableName;
+            cmd.Parameters.Add(p);
+
+            var result = await cmd.ExecuteScalarAsync();
+            return result == null || result == DBNull.Value ? null : result.ToString();
         }
 
         // ===== 參數與轉型 =====
@@ -706,6 +732,72 @@ ORDER BY idx.index_id, ic.key_ordinal";
         }
 
         return list.Count == 0 ? "" : " ORDER BY " + string.Join(", ", list);
+    }
+
+    // 新增：Query(table, top, orderBy?, orderDir?, 其他欄位參數) → 支援動態查詢條件
+    [HttpGet]
+    public async Task<IActionResult> Query([FromQuery] string table, [FromQuery] int top = 200, [FromQuery] string? orderBy = null, [FromQuery] string? orderDir = "ASC")
+    {
+        if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required");
+
+        var tblOk = await TableExistsAsync(table);
+        if (!tblOk) return NotFound($"Table '{table}' not found.");
+
+        // 收集其他查詢參數（排除 table, top, orderBy, orderDir）
+        var excludeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "table", "top", "orderBy", "orderDir" };
+        var filterParams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var qp in Request.Query)
+        {
+            if (excludeKeys.Contains(qp.Key)) continue;
+            var val = qp.Value.ToString();
+            if (!string.IsNullOrWhiteSpace(val))
+            {
+                filterParams[qp.Key] = val;
+            }
+        }
+
+        var whereParts = new List<string>();
+        var parameters = new List<SqlParameter> { new SqlParameter("@top", top) };
+        int paramIdx = 0;
+
+        foreach (var kv in filterParams)
+        {
+            var col = kv.Key;
+            var val = kv.Value;
+
+            var colOk = await ColumnExistsAsync(table, col);
+            if (!colOk) continue; // 忽略不存在的欄位
+
+            var pName = $"@p{paramIdx++}";
+            // 支援模糊查詢（如果值包含 %）
+            if (val.Contains('%'))
+            {
+                whereParts.Add($"[{col}] LIKE {pName}");
+                parameters.Add(new SqlParameter(pName, val));
+            }
+            else
+            {
+                // 預設使用 LIKE '%value%' 模糊查詢
+                whereParts.Add($"[{col}] LIKE {pName}");
+                parameters.Add(new SqlParameter(pName, $"%{val}%"));
+            }
+        }
+
+        var whereSql = whereParts.Count > 0 ? " WHERE " + string.Join(" AND ", whereParts) : "";
+        var orderSql = await BuildOrderBySqlAsync(table, orderBy, orderDir);
+        var sql = $"SELECT TOP (@top) * FROM [{table}]{whereSql}{orderSql}";
+
+        var dt = new DataTable();
+        await using var conn = (SqlConnection)_context.Database.GetDbConnection();
+        await conn.OpenAsync();
+        await using (var cmd = new SqlCommand(sql, conn))
+        {
+            parameters.ForEach(p => cmd.Parameters.Add(p));
+            await using var rd = await cmd.ExecuteReaderAsync();
+            dt.Load(rd);
+        }
+        return Ok(ToDictList(dt));
     }
 
     private Task<bool> TableExistsAsync(string name)

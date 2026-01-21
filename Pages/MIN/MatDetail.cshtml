@@ -237,15 +237,24 @@
     }
 
     .detail-content {
-        padding: 10px;
+        padding: 0;
         height: 240px;
         overflow-y: auto;
+        background: #ffffff;
     }
 
     .detail-content table {
         width: 100%;
         font-size: 13px;
         border-collapse: collapse;
+        margin: 0;
+    }
+
+    .detail-content table thead {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: #f9fafb;
     }
 
     .detail-content table th {
@@ -257,6 +266,9 @@
         font-size: 12px;
         text-align: left;
         color: #374151;
+        position: sticky;
+        top: 0;
+        z-index: 2;
     }
 
     .detail-content table td {
@@ -579,6 +591,7 @@
                             <tr>
                                 <th data-field="IOSource">作業名稱</th>
                                 <th data-field="PaperNum">單據號碼</th>
+                                <th data-field="Item">項次</th>
                                 <th data-field="PaperDate">單據日期</th>
                                 <th data-field="RequireDate">需求日</th>
                                 <th data-field="IOQnty">進出量</th>
@@ -593,6 +606,7 @@
                                     <tr>
                                         <td>@Model.GetValue(row, "IOSource")</td>
                                         <td>@Model.GetValue(row, "PaperNum")</td>
+                                        <td>@Model.GetValue(row, "Item")</td>
                                         <td>@Model.FormatDate(row.ContainsKey("PaperDate") ? row["PaperDate"] : null)</td>
                                         <td>@Model.FormatDate(row.ContainsKey("RequireDate") ? row["RequireDate"] : null)</td>
                                         <td class="text-end">@Model.FormatDecimal(row.ContainsKey("IOQnty") ? row["IOQnty"] : 0)</td>
@@ -603,7 +617,7 @@
                             else
                             {
                                 <tr>
-                                    <td colspan="6" style="text-align: center; color: #999;">無預計庫存資料</td>
+                                    <td colspan="7" style="text-align: center; color: #999;">無預計庫存資料</td>
                                 </tr>
                             }
                         </tbody>
@@ -1092,8 +1106,15 @@
                 return;
             }
 
+            const sorted = [...data].sort((a, b) => {
+                const at = parseDateValue(getRowValue(a, 'IOTime'));
+                const bt = parseDateValue(getRowValue(b, 'IOTime'));
+                const aVal = Number.isFinite(at) ? at : -Infinity;
+                const bVal = Number.isFinite(bt) ? bt : -Infinity;
+                return bVal - aVal;
+            });
             let html = '';
-            data.forEach(row => {
+            sorted.forEach(row => {
                 const cells = fields.map(fieldName => {
                     const value = getRowValue(row, fieldName);
                     const alignClass = isNumericField(fieldName) ? ' class="text-end"' : '';
@@ -1151,14 +1172,20 @@
     // 格式化歷史欄位
     function formatHistoryCell(fieldName, value, row) {
         const lower = fieldName?.toLowerCase() || '';
-        // 項次欄位：組合 PaperNum + Item
+        // 項次欄位
         if (lower === 'papernum') {
+            return safeStr(row.Item || row.item);
+        }
+        // 單據號碼欄位
+        if (lower === 'batchnum') {
             const paperNum = safeStr(row.PaperNum || row.paperNum);
-            const item = safeStr(row.Item || row.item);
-            return item ? `${paperNum} / ${item}` : paperNum;
+            return paperNum || safeStr(value);
         }
         // 時間欄位
-        if (lower === 'iotime' || lower.includes('date')) {
+        if (lower === 'iotime') {
+            return formatDateTime(value);
+        }
+        if (lower.includes('date')) {
             return formatDate(value);
         }
         // 數量欄位
@@ -1288,6 +1315,44 @@
         }
     }
 
+    function formatDateTime(dateStr) {
+        if (dateStr === null || dateStr === undefined) return '';
+        const normalized = safeStr(dateStr);
+        if (!normalized) return '';
+        try {
+            const date = new Date(normalized);
+            if (isNaN(date.getTime())) return normalized;
+            const ymd = `${date.getFullYear()}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getDate().toString().padStart(2, '0')}`;
+            const hms = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`;
+            return `${ymd} ${hms}`;
+        } catch {
+            return normalized;
+        }
+    }
+
+    function parseDateValue(val) {
+        if (val === null || val === undefined) return NaN;
+        let normalized = val;
+        if (typeof normalized === 'object') {
+            normalized = normalized.value || normalized.Value || '';
+        }
+        const str = safeStr(normalized).trim();
+        if (!str) return NaN;
+        const direct = Date.parse(str);
+        if (Number.isFinite(direct)) return direct;
+        const match = str.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+        if (match) {
+            const year = Number(match[1]);
+            const month = Number(match[2]) - 1;
+            const day = Number(match[3]);
+            const hour = Number(match[4] || 0);
+            const min = Number(match[5] || 0);
+            const sec = Number(match[6] || 0);
+            return new Date(year, month, day, hour, min, sec).getTime();
+        }
+        return NaN;
+    }
+
     // 安全取得字串值 (處理 null, undefined, object 等情況)
     function safeStr(val) {
         if (val === null || val === undefined) return '';
@@ -1297,4 +1362,72 @@
         }
         return String(val);
     }
+
+    function setupTabHeaderSort() {
+        document.querySelectorAll('.detail-content table').forEach(table => {
+            const thead = table.querySelector('thead');
+            const tbody = table.querySelector('tbody');
+            if (!thead || !tbody) return;
+            thead.querySelectorAll('th').forEach((th, index) => {
+                th.style.cursor = 'pointer';
+                th.title = '點擊排序';
+                th.addEventListener('click', () => sortTableByColumn(table, index));
+            });
+        });
+    }
+
+    function sortTableByColumn(table, colIndex) {
+        const tbody = table.querySelector('tbody');
+        if (!tbody) return;
+        const rows = Array.from(tbody.querySelectorAll('tr')).filter(row => !row.querySelector('.empty-message'));
+        if (rows.length <= 1) return;
+
+        const ths = table.querySelectorAll('thead th');
+        const activeTh = ths[colIndex];
+        const current = activeTh?.dataset.sortOrder || 'desc';
+        const nextOrder = current === 'desc' ? 'asc' : 'desc';
+        ths.forEach(th => { th.dataset.sortOrder = ''; });
+        if (activeTh) activeTh.dataset.sortOrder = nextOrder;
+
+        const mapped = rows.map(row => {
+            const cell = row.children[colIndex];
+            const raw = cell ? cell.textContent.trim() : '';
+            return { row, key: getSortKey(raw) };
+        });
+
+        mapped.sort((a, b) => compareSortKey(a.key, b.key, nextOrder));
+        mapped.forEach(item => tbody.appendChild(item.row));
+    }
+
+    function getSortKey(value) {
+        const text = String(value || '').trim();
+        if (!text) return { type: 'empty', value: '' };
+
+        if (/[\/:\-]/.test(text)) {
+            const dateVal = parseDateValue(text);
+            if (Number.isFinite(dateVal)) return { type: 'date', value: dateVal };
+        }
+
+        const num = Number(text.replace(/,/g, ''));
+        if (Number.isFinite(num) && /^-?\d+(\.\d+)?$/.test(text.replace(/,/g, ''))) {
+            return { type: 'number', value: num };
+        }
+
+        return { type: 'string', value: text.toLowerCase() };
+    }
+
+    function compareSortKey(a, b, order) {
+        if (a.type === 'empty' && b.type === 'empty') return 0;
+        if (a.type === 'empty') return 1;
+        if (b.type === 'empty') return -1;
+
+        const dir = order === 'desc' ? -1 : 1;
+        if (a.type === b.type && (a.type === 'number' || a.type === 'date')) {
+            return (a.value - b.value) * dir;
+        }
+
+        return a.value > b.value ? dir : a.value < b.value ? -dir : 0;
+    }
+
+    setupTabHeaderSort();
 </script>

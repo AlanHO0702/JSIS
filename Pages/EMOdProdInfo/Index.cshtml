@@ -4,47 +4,385 @@
 @{
     Layout = "_Layout";
     ViewData["Title"] = Model.PageTitle;
+    ViewData["TableTitle"] = "";
+    ViewData["SubRouteTemplate"] = "/EMOdProdInfo/Detail";
+    ViewData["KeyFieldName"] = "PartNum";
 }
 
-<partial name="~/Pages/Shared/_TableSingleGrid.cshtml" model="Model" />
+<partial name="~/Pages/Shared/_TableListPartial.cshtml" model="Model" view-data="ViewData" />
 
-@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", ViewData["FieldDictList"], ViewData)
-@if (!string.IsNullOrWhiteSpace(Model.DictTableName))
-{
-    <script>window._dictTableName = '@Model.DictTableName';</script>
-}
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", Model.FieldDictList, ViewData)
 @if (ViewData["LoadError"] is string loadErr && !string.IsNullOrWhiteSpace(loadErr))
 {
     <div class="alert alert-danger mt-2">資料載入錯誤：@loadErr</div>
 }
 <script>
+  window._tableName = "@Model.DictTableName";
+  window._dictTableName = "@Model.DictTableName";
+  window._tableFields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+  window._lookupMapData = @Html.Raw(JsonSerializer.Serialize(ViewData["LookupDisplayMap"] ?? new Dictionary<string, Dictionary<string, string>>()));
+  window._keyFieldName = "@(ViewData["KeyFieldName"]?.ToString() ?? "PartNum")";
+  window._detailRouteTemplate = "/EMOdProdInfo/Detail";
+  window._isViewOnlyMode = @(Model.IsViewOnly ? "true" : "false");
   window._singleItemId = '@Model.ItemId';
   window._singleRealTable = '@Model.TableName';
   window._emodProdInfoDetailUrl = '@Url.Page("Detail")';
   window._emodProdInfoKeyFields = @Html.Raw(JsonSerializer.Serialize((Model.KeyFields != null && Model.KeyFields.Count > 0) ? Model.KeyFields : new List<string> { "PartNum", "Revision" }));
 </script>
+<script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
 <script>
-  window.SingleGridCustomHandlers = window.SingleGridCustomHandlers || {};
-  window.SingleGridCustomHandlers.openDetail = function(ctx) {
-    const keys = Array.isArray(window._emodProdInfoKeyFields) ? window._emodProdInfoKeyFields : [];
-    const row = ctx && ctx.selectedRow;
-    if (!row) {
-      alert('請先選擇一筆工程資料');
-      return;
-    }
-    const qs = new URLSearchParams();
-    keys.forEach(k => {
-      const v = row[k] ?? row[k?.toLowerCase()] ?? '';
-      if (v !== undefined && v !== null && v !== '') {
-        qs.append(k, v);
-      }
-    });
-    if (!qs.toString()) {
-      alert('找不到工程資料主鍵，請先在辭典標記主鍵欄位');
-      return;
-    }
-    const url = window._emodProdInfoDetailUrl + '?' + qs.toString();
-    window.location.href = url;
-  };
+  // 1. 設定全域變數 (保留原本設定)
+  window._tableName = "@Model.DictTableName";
+  window._dictTableName = "@Model.DictTableName";
+  window._tableFields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+  window._lookupMapData = @Html.Raw(JsonSerializer.Serialize(ViewData["LookupDisplayMap"] ?? new Dictionary<string, Dictionary<string, string>>()));
+  window._keyFieldName = "@(ViewData["KeyFieldName"]?.ToString() ?? "PartNum")";
+  window._detailRouteTemplate = "/EMOdProdInfo/Detail";
+  window._isViewOnlyMode = @(Model.IsViewOnly ? "true" : "false");
+  window._singleItemId = '@Model.ItemId';
+  window._singleRealTable = '@Model.TableName';
+  window._emodProdInfoDetailUrl = '@Url.Page("Detail")';
+  window._emodProdInfoKeyFields = @Html.Raw(JsonSerializer.Serialize((Model.KeyFields != null && Model.KeyFields.Count > 0) ? Model.KeyFields : new List<string> { "PartNum", "Revision" }));
 </script>
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
+<script>
+// 2. 自定義 renderTable 函數 (已加入計數器更新邏輯)
+(function() {
+  const originalRenderTable = window.renderTable;
+
+  window.renderTable = function(data) {
+    const tbody = document.getElementById('dataTbody');
+    if (!tbody) return;
+
+    tbody.innerHTML = "";
+
+    const fields = window._tableFields;
+    const lookupMapData = window._lookupMapData;
+    const keyFields = window._emodProdInfoKeyFields || ['PartNum', 'Revision'];
+
+    if (!fields || !Array.isArray(data)) return;
+
+    data.forEach(item => {
+      const tr = document.createElement('tr');
+      tr.className = "row-link";
+
+      // 儲存所有主鍵欄位的值
+      keyFields.forEach(kf => {
+        const val = item[kf] || item[kf?.toLowerCase()] || "";
+        tr.setAttribute(`data-${kf.toLowerCase()}`, val);
+      });
+
+      // 使用 PartNum 作為主要識別 (兼容舊有邏輯)
+      const partNum = item.PartNum || item.partnum || "";
+      tr.setAttribute('data-paper-num', partNum);
+
+      fields.forEach(field => {
+        const fieldName = field.FieldName;
+        let raw = item[fieldName] || item[fieldName?.toLowerCase()];
+        let valStr = "";
+
+        // 檢查 lookup
+        if (partNum && lookupMapData?.[partNum]?.[fieldName]) {
+          valStr = lookupMapData[partNum][fieldName];
+        } else {
+          // 格式化顯示
+          if (raw == null) {
+            valStr = "";
+          } else if (field.DataType?.toLowerCase().includes('date')) {
+            const dt = new Date(raw);
+            if (!isNaN(dt.getTime())) {
+              valStr = dt.toLocaleDateString('zh-TW');
+            } else {
+              valStr = String(raw);
+            }
+          } else if (typeof raw === 'number') {
+            valStr = raw.toLocaleString();
+          } else {
+            valStr = String(raw);
+          }
+        }
+
+        const td = document.createElement('td');
+        td.innerHTML = valStr;
+        td.setAttribute('data-field', fieldName);
+        tr.appendChild(td);
+      });
+
+      tbody.appendChild(tr);
+    });
+
+    // 綁定點擊事件
+    document.querySelectorAll("#dataTbody .row-link").forEach(row => {
+        row.addEventListener("click", () => {
+        // 1. UI 變色
+        document.querySelectorAll(".row-link.selected").forEach(r => r.classList.remove("selected"));
+        row.classList.add("selected");
+        window.selectedRow = row;
+
+        // [關鍵修正] 計算正確筆數並寫入 LocalStorage
+        try {
+            // A. 取得 Table 名稱 (轉小寫)
+            const tableName = (window._tableName || 'EMOdProdInfo').toLowerCase();
+
+            // B. [重點] 直接從系統存好的 LocalStorage 讀取本頁起始值
+            // 系統在 renderOrderCount 時會自動存入這個值，比抓畫面文字準確
+            const savedStart = localStorage.getItem(`orderListQueryPageStart:${tableName}`);
+            
+            // 如果抓不到(例如第一頁)，預設就是 1
+            const pageStart = savedStart ? parseInt(savedStart, 10) : 1;
+
+            // C. 取得當前是第幾列 (0-based)
+            const tbody = row.parentNode;
+            const rowIndex = Array.from(tbody.children).indexOf(row);
+
+            // D. 計算絕對位置 (起始筆數 + 列索引)
+            // 例如: 第 1 頁(start=1) + 第 6 列 = 7
+            // 例如: 第 2 頁(start=51) + 第 0 列 = 51
+            const absIndex = pageStart + rowIndex;
+            
+            // E. 寫入 LocalStorage 供單身頁讀取
+            localStorage.setItem(`orderListQueryIndex:${tableName}`, String(absIndex));
+            
+            // F. (選擇性) 更新列表頁右上角顯示
+            if (typeof window.updateToolbarHeaderCountForRow === 'function') {
+                window.updateToolbarHeaderCountForRow(row);
+            }
+
+        } catch (e) {
+            console.error("計算筆數失敗", e);
+        }
+      });
+
+      row.addEventListener("dblclick", () => {
+        const qs = new URLSearchParams();
+        keyFields.forEach(kf => {
+          const val = row.getAttribute(`data-${kf.toLowerCase()}`);
+          if (val) qs.append(kf, val);
+        });
+
+        const isViewOnly = window._isViewOnlyMode === true || window._isViewOnlyMode === 'true';
+        if (isViewOnly) {
+          qs.append('mode', 'view');
+          qs.append('itemId', 'EMO00018');
+        }
+
+        window.location.href = '/EMOdProdInfo/Detail?' + qs.toString();
+      });
+    });
+
+    if (window.refreshHScrollWidth) window.refreshHScrollWidth();
+  };
+
+  // 如果已經有資料，重新渲染
+  document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(function() {
+      const tbody = document.getElementById('dataTbody');
+      if (tbody && tbody.children.length === 0) {
+        const initialData = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Items));
+        if (initialData && initialData.length > 0) {
+          window.renderTable(initialData);
+          if (window.renderOrderCount) {
+            window.renderOrderCount(@Model.TotalCount, @Model.PageSize, @Model.PageNumber);
+          }
+        }
+      }
+    }, 100);
+  });
+})();
+
+// 3. EMOdProdInfo 專用工具列邏輯 (按鈕 override) - 這是您原本約 130 行的邏輯，不能刪除
+(function initEMOdProdInfoToolbar() {
+  const keyFields = window._emodProdInfoKeyFields || ['PartNum', 'Revision'];
+  const tableName = window._tableName || 'EMOdProdInfo';
+
+  // 取得選中列的複合主鍵
+  function getSelectedKeys() {
+    const row = document.querySelector('#dataTbody .row-link.selected');
+    if (!row) return null;
+
+    const keys = {};
+    let hasValue = false;
+    keyFields.forEach(kf => {
+      const val = row.getAttribute(`data-${kf.toLowerCase()}`) || '';
+      keys[kf] = val;
+      if (val) hasValue = true;
+    });
+    return hasValue ? keys : null;
+  }
+
+  // 建立查詢字串
+  function buildQueryString(keys, extraParams = {}) {
+    const qs = new URLSearchParams();
+    keyFields.forEach(kf => {
+      if (keys[kf]) qs.append(kf, keys[kf]);
+    });
+    Object.entries(extraParams).forEach(([k, v]) => qs.append(k, v));
+    return qs.toString();
+  }
+
+  // 建立 PaperNum 格式
+  function buildPaperNum(keys) {
+    if (!keys) return null;
+    return `${keys.PartNum || ''}|${keys.Revision || ''}`;
+  }
+
+  // 覆蓋原按鈕事件的輔助函式
+  function overrideButton(btnId, handler) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return null;
+    const newBtn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(newBtn, btn);
+    newBtn.addEventListener('click', handler);
+    return newBtn;
+  }
+
+  // 禁用按鈕的輔助函式
+  function disableButton(btnId) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.disabled = true;
+    btn.style.background = '#aaa';
+    btn.style.cursor = 'not-allowed';
+    btn.style.opacity = '0.6';
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    // 3.1 禁用不需要的按鈕
+    disableButton('btnAddNew');      // 新增
+    disableButton('btnBatchDelete'); // 作廢
+    disableButton('btnPrint');       // 印單據
+    disableButton('btnPaperTrace');  // 追蹤
+
+    // 3.2 切換按鈕（跳轉明細頁 - 瀏覽模式）
+    overrideButton('btnSwitch', function() {
+      const keys = getSelectedKeys();
+      if (!keys) {
+        Swal.fire({ icon: 'warning', title: '請先選擇一筆工程資料' });
+        return;
+      }
+
+      const extraParams = {};
+      const isViewOnly = window._isViewOnlyMode === true || window._isViewOnlyMode === 'true';
+      if (isViewOnly) {
+        extraParams.mode = 'view';
+        extraParams.itemId = 'EMO00018';
+      }
+
+      window.location.href = '/EMOdProdInfo/Detail?' + buildQueryString(keys, extraParams);
+    });
+
+    // 3.3 修改按鈕（跳轉明細頁 - 編輯模式）
+    overrideButton('btnViewEditToggle', function() {
+      const keys = getSelectedKeys();
+      if (!keys) {
+        Swal.fire({ icon: 'warning', title: '請先選擇一筆工程資料' });
+        return;
+      }
+
+      // 檢查是否為查詢模式，查詢模式下不允許修改
+      const isViewOnly = window._isViewOnlyMode === true || window._isViewOnlyMode === 'true';
+      if (isViewOnly) {
+        Swal.fire({ icon: 'warning', title: '查詢模式下無法修改' });
+        return;
+      }
+
+      window.location.href = '/EMOdProdInfo/Detail?' + buildQueryString(keys);
+    });
+
+    // 3.4 送審/審核按鈕 (待實作區)
+    const btnConfirm = document.getElementById('btnConfirm');
+    if (btnConfirm) {
+      btnConfirm.textContent = '送審';
+      btnConfirm.id = 'btnSubmit';
+
+      const btnApprove = document.createElement('button');
+      btnApprove.id = 'btnApprove';
+      btnApprove.className = 'btn toolbar-btn success';
+      btnApprove.type = 'button';
+      btnApprove.textContent = '審核';
+      btnConfirm.parentNode.insertBefore(btnApprove, btnConfirm.nextSibling);
+    }
+
+    // 送審邏輯
+    const btnSubmit = document.getElementById('btnSubmit');
+    if (btnSubmit) {
+      const newBtnSubmit = btnSubmit.cloneNode(true);
+      btnSubmit.parentNode.replaceChild(newBtnSubmit, btnSubmit);
+      newBtnSubmit.addEventListener('click', async function() {
+        const keys = getSelectedKeys();
+        if (!keys) {
+          Swal.fire({ icon: 'warning', title: '請先選擇一筆工程資料' });
+          return;
+        }
+        Swal.fire({ icon: 'info', title: '送審功能待實作', text: keys.PartNum });
+      });
+    }
+
+    // 審核邏輯
+    const btnApprove = document.getElementById('btnApprove');
+    if (btnApprove) {
+      btnApprove.addEventListener('click', async function() {
+        const keys = getSelectedKeys();
+        if (!keys) {
+          Swal.fire({ icon: 'warning', title: '請先選擇一筆工程資料' });
+          return;
+        }
+        Swal.fire({ icon: 'info', title: '審核功能待實作', text: keys.PartNum });
+      });
+    }
+
+    // 3.5 退審按鈕
+    overrideButton('btnCancel', async function() {
+      const keys = getSelectedKeys();
+      if (!keys) {
+        Swal.fire({ icon: 'warning', title: '請先選擇一筆工程資料' });
+        return;
+      }
+      Swal.fire({ icon: 'info', title: '退審功能待實作' });
+    });
+
+    // 3.6 紀錄按鈕
+    overrideButton('btnPaperLog', async function() {
+      const keys = getSelectedKeys();
+      if (!keys) {
+        Swal.fire({ icon: 'warning', title: '請先選擇一筆工程資料' });
+        return;
+      }
+      const paperNum = buildPaperNum(keys);
+
+      try {
+        const resp = await fetch(`/api/PaperLog/GetLogs?paperId=${encodeURIComponent(tableName)}&paperNum=${encodeURIComponent(paperNum)}`);
+        if (resp.ok) {
+          const logs = await resp.json();
+          if (!logs || logs.length === 0) {
+            Swal.fire({ icon: 'info', title: '無修改紀錄' });
+            return;
+          }
+          // 建立紀錄表格
+          let tableHtml = `<table class="table table-sm table-bordered" style="font-size:0.9em;"><thead><tr><th>時間</th><th>操作者</th><th>動作</th><th>說明</th></tr></thead><tbody>`;
+          logs.forEach(log => {
+            const dt = log.LogTime ? new Date(log.LogTime).toLocaleString('zh-TW') : '';
+            tableHtml += `<tr><td>${dt}</td><td>${log.UserId || ''}</td><td>${log.Action || ''}</td><td>${log.Remark || ''}</td></tr>`;
+          });
+          tableHtml += '</tbody></table>';
+
+          Swal.fire({
+            title: `修改紀錄 - ${keys.PartNum} / ${keys.Revision}`,
+            html: tableHtml,
+            width: '80%',
+            showCloseButton: true,
+            showConfirmButton: false
+          });
+        } else {
+          Swal.fire({ icon: 'error', title: '查詢紀錄失敗' });
+        }
+      } catch (err) {
+        Swal.fire({ icon: 'error', title: '查詢紀錄失敗', text: err.message });
+      }
+    });
+
+  });
+})();
+</script>
