@@ -1,0 +1,845 @@
+@page
+@model MatDetailPopupModel
+@{
+    ViewData["Title"] = "庫存一覽";
+    Layout = null;
+}
+
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>庫存一覽 - @Model.PartNum</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            font-size: 13px;
+            background: #f5f7fa;
+            color: #1f2937;
+            padding: 6px;
+            display: flex;
+            flex-direction: column;
+        }
+        .info-bar {
+            background: white;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            padding: 6px 10px;
+            margin-bottom: 6px;
+            display: flex;
+            gap: 14px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .info-item { display: flex; align-items: center; gap: 4px; }
+        .info-item label { color: #6b7280; font-size: 12px; }
+        .info-item .value { font-weight: 600; color: #111827; }
+        .info-item .value.negative { color: #dc2626; }
+        .part-info { font-weight: 700; color: #1d4ed8; font-size: 14px; }
+        .mat-name { color: #374151; margin-left: 4px; font-size: 13px; }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+        .grid-panel {
+            background: white;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .grid-header {
+            background: linear-gradient(to bottom, #f3f4f6 0%, #e5e7eb 100%);
+            padding: 4px 8px;
+            font-weight: 600;
+            font-size: 12px;
+            color: #374151;
+            border-bottom: 1px solid #d1d5db;
+        }
+        .grid-body { overflow-y: auto; }
+        .grid-body table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .grid-body th {
+            background: #f9fafb;
+            padding: 0 4px;
+            height: 18px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 11px;
+            line-height: 16px;
+            color: #374151;
+            border: 1px solid #e5e7eb;
+            position: sticky;
+            top: 0;
+            white-space: nowrap;
+        }
+        .grid-body td {
+            padding: 0 4px;
+            height: 18px;
+            line-height: 16px;
+            border: 1px solid #e5e7eb;
+            white-space: nowrap;
+        }
+        .grid-body tr:hover { background: #eff6ff; }
+        .grid-body tr.selected { background: #3b82f6; color: white; }
+        .text-end { text-align: right; }
+
+        .detail-panel {
+            background: white;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            overflow: hidden;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .detail-tabs {
+            background: #f9fafb;
+            border-bottom: 1px solid #d1d5db;
+            display: flex;
+            gap: 2px;
+            padding: 4px 6px;
+            flex-wrap: wrap;
+        }
+        .detail-tabs button {
+            padding: 4px 12px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 12px;
+            border-radius: 4px;
+            color: #6b7280;
+        }
+        .detail-tabs button:hover { background: white; color: #374151; }
+        .detail-tabs button.active {
+            background: white;
+            color: #3b82f6;
+            font-weight: 600;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+        .detail-content {
+            flex: 1;
+            overflow: auto;
+            padding: 0;
+            min-height: 0;
+            background: #ffffff;
+        }
+        .detail-content table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 12px; margin: 0; }
+        .detail-content thead {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: #f9fafb;
+        }
+        .detail-content th {
+            background: #f9fafb;
+            padding: 2px 4px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 11px;
+            line-height: 16px;
+            color: #374151;
+            border: 1px solid #e5e7eb;
+            white-space: nowrap;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        .detail-content td { padding: 2px 4px; line-height: 16px; border: 1px solid #e5e7eb; white-space: nowrap; }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
+        .empty-message { text-align: center; color: #9ca3af; padding: 12px; font-size: 12px; }
+        .error-alert {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 4px;
+            color: #991b1b;
+            padding: 8px;
+            font-size: 13px;
+        }
+        .main-content {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+            min-height: 0;
+        }
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body>
+
+    @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+    {
+        <div class="error-alert">@Model.ErrorMessage</div>
+    }
+    else if (Model.BaseData != null)
+    {
+        <div class="main-content">
+        <div class="info-bar">
+            <div class="info-item">
+                <span class="value part-info">@Model.PartNum</span>
+                <span class="mat-name">@Model.MatName</span>
+            </div>
+            <div class="info-item">
+                <label>基礎單位:</label>
+                <span class="value">@Model.GetValue(Model.BaseData, "Unit")</span>
+            </div>
+            <div class="info-item">
+                <label>可承諾數:</label>
+                <span class="value">@Model.FormatDecimal(Model.BaseData.ContainsKey("CanUseQnty") ? Model.BaseData["CanUseQnty"] : 0)</span>
+            </div>
+            <div class="info-item">
+                <label>缺料量:</label>
+                <span class="value negative">@Model.FormatDecimal(Model.BaseData.ContainsKey("NeedQnty") ? Model.BaseData["NeedQnty"] : 0)</span>
+            </div>
+        </div>
+
+        <div class="grid-container">
+            <!-- 現有庫存 -->
+            <div class="grid-panel">
+                <div class="grid-header">現有庫存</div>
+                <div class="grid-body">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width:50px;">MRP可用</th>
+                                <th>倉別</th>
+                                <th class="text-end">數量</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-stock">
+                            @if (Model.StockSummary != null && Model.StockSummary.Any())
+                            {
+                                foreach (var row in Model.StockSummary)
+                                {
+                                    var stockId = Model.GetValue(row, "StockId");
+                                    <tr class="stock-row" data-stock-id="@stockId" style="cursor: pointer;">
+                                        <td style="text-align: center;">@(Model.GetValue(row, "IsMRP") == "1" ? "☑" : "☐")</td>
+                                        <td>@stockId</td>
+                                        <td class="text-end">@Model.FormatDecimal(row.ContainsKey("Qnty") ? row["Qnty"] : 0)</td>
+                                    </tr>
+                                }
+                            }
+                            else
+                            {
+                                <tr><td colspan="3" class="empty-message">無庫存資料</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 預計供給 -->
+            <div class="grid-panel">
+                <div class="grid-header">預計供給</div>
+                <div class="grid-body">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>供給別</th>
+                                <th class="text-end">數量</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (Model.IncomingSupply != null && Model.IncomingSupply.Any())
+                            {
+                                foreach (var row in Model.IncomingSupply)
+                                {
+                                    var filterNum = Model.GetValue(row, "FilterNum");
+                                    <tr class="supply-row" data-filter-num="@filterNum" style="cursor: pointer;">
+                                        <td>@Model.GetValue(row, "ColTitle")</td>
+                                        <td class="text-end">@Model.FormatDecimal(row.ContainsKey("Qnty") ? row["Qnty"] : 0)</td>
+                                    </tr>
+                                }
+                            }
+                            else
+                            {
+                                <tr><td colspan="2" class="empty-message">無供給資料</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 需求 -->
+            <div class="grid-panel">
+                <div class="grid-header">需求</div>
+                <div class="grid-body">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>需求別</th>
+                                <th class="text-end">數量</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (Model.OutgoingDemand != null && Model.OutgoingDemand.Any())
+                            {
+                                foreach (var row in Model.OutgoingDemand)
+                                {
+                                    var filterNum = Model.GetValue(row, "FilterNum");
+                                    <tr class="demand-row" data-filter-num="@filterNum" style="cursor: pointer;">
+                                        <td>@Model.GetValue(row, "ColTitle")</td>
+                                        <td class="text-end">@Model.FormatDecimal(row.ContainsKey("Qnty") ? row["Qnty"] : 0)</td>
+                                    </tr>
+                                }
+                            }
+                            else
+                            {
+                                <tr><td colspan="2" class="empty-message">無需求資料</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 下方頁籤 -->
+        <div class="detail-panel">
+            <div class="detail-tabs">
+                <button class="tab-btn active" data-tab="tab-summary">庫存一覽</button>
+                <button class="tab-btn" data-tab="tab-detail">單據明細</button>
+                <button class="tab-btn" data-tab="tab-precount">預估存量</button>
+                <button class="tab-btn" data-tab="tab-history">倉庫進出歷史</button>
+                <button class="tab-btn" data-tab="tab-process">製程現帳</button>
+            </div>
+            <div class="detail-content">
+                <!-- 庫存一覽 -->
+                <div class="tab-pane active" id="tab-summary">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>庫位</th>
+                                <th class="text-end">單位數量</th>
+                                <th>單位</th>
+                                <th class="text-end">換算比率</th>
+                                <th class="text-end">基礎數量</th>
+                                <th>批號</th>
+                                <th>DateCode</th>
+                                <th>過期日</th>
+                                <th>工程版序</th>
+                                <th>寬度</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-tab-summary">
+                            <tr><td colspan="10" class="empty-message">點選左側庫存查看明細</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 單據明細 -->
+                <div class="tab-pane" id="tab-detail">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>單據號碼</th>
+                                <th>項次</th>
+                                <th>單據日期</th>
+                                <th>需求日</th>
+                                <th>請購部門</th>
+                                <th class="text-end">數量</th>
+                                <th class="text-end">已交量</th>
+                                <th>銷售訂單類別</th>
+                                <th>銷售訂單製造別</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-tab-detail">
+                            <tr><td colspan="9" class="empty-message">點選供給或需求查看明細</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 預估存量 -->
+                <div class="tab-pane" id="tab-precount">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>作業名稱</th>
+                                <th>作業單號</th>
+                                <th>項次</th>
+                                <th>作業日期</th>
+                                <th>需求日</th>
+                                <th class="text-end">進出量</th>
+                                <th class="text-end">預估庫存</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (Model.PreCount != null && Model.PreCount.Any())
+                            {
+                                foreach (var row in Model.PreCount)
+                                {
+                                    <tr>
+                                        <td>@Model.GetValue(row, "IOSource")</td>
+                                        <td>@Model.GetValue(row, "PaperNum")</td>
+                                        <td>@Model.GetValue(row, "Item")</td>
+                                        <td>@Model.FormatDate(row.ContainsKey("PaperDate") ? row["PaperDate"] : null)</td>
+                                        <td>@Model.FormatDate(row.ContainsKey("RequireDate") ? row["RequireDate"] : null)</td>
+                                        <td class="text-end">@Model.FormatDecimal(row.ContainsKey("IOQnty") ? row["IOQnty"] : 0)</td>
+                                        <td class="text-end">@Model.FormatDecimal(row.ContainsKey("StockQnty") ? row["StockQnty"] : 0)</td>
+                                    </tr>
+                                }
+                            }
+                            else
+                            {
+                                <tr><td colspan="7" class="empty-message">無預估存量資料</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 倉庫進出歷史 -->
+                <div class="tab-pane" id="tab-history">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>來源單據</th>
+                                <th>項次</th>
+                                <th>倉庫</th>
+                                <th>庫位</th>
+                                <th>過帳日期</th>
+                                <th>備註</th>
+                                <th>單據日期</th>
+                                <th>單據號碼</th>
+                                <th class="text-end">基礎數量</th>
+                                <th>審核者</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-tab-history">
+                            <tr><td colspan="10" class="empty-message">點選倉別查看進出歷史</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 製程現帳 -->
+                <div class="tab-pane" id="tab-process">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>製令單號</th>
+                                <th>品號</th>
+                                <th>版序</th>
+                                <th>製程代號</th>
+                                <th>製程名稱</th>
+                                <th>批號</th>
+                                <th class="text-end">可供給數</th>
+                                <th>批量狀態</th>
+                                <th>單據種類</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-tab-process">
+                            <tr><td colspan="9" class="empty-message">無製程現帳資料</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(Model.PartNum))
+    {
+        <div class="error-alert">找不到料號 @Model.PartNum 的資料</div>
+    }
+
+    <script>
+        const currentPartNum = '@Model.PartNum';
+        const currentSPId = parseInt('@(Model.SPId ?? 0)', 10) || 0;
+
+        // 頁籤切換
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+                this.classList.add('active');
+                document.getElementById(this.dataset.tab).classList.add('active');
+
+                // 倉庫進出歷史頁籤自動載入
+                if (this.dataset.tab === 'tab-history' && currentPartNum) {
+                    loadStockHistory(currentPartNum, '');
+                }
+            });
+        });
+
+        // 現有庫存點擊
+        document.querySelectorAll('.stock-row').forEach(row => {
+            row.addEventListener('click', async function(e) {
+                document.querySelectorAll('.stock-row').forEach(r => r.classList.remove('selected'));
+                this.classList.add('selected');
+                const stockId = this.dataset.stockId;
+                if (!stockId || !currentPartNum) return;
+
+                const clickedCell = e.target.closest('td');
+                const cellIndex = clickedCell ? clickedCell.cellIndex : -1;
+
+                if (cellIndex === 1) {
+                    // 點擊倉別 -> 倉庫進出歷史
+                    switchToTab('tab-history');
+                    await loadStockHistory(currentPartNum, stockId);
+                } else {
+                    // 點擊其他 -> 庫存一覽
+                    switchToTab('tab-summary');
+                    await loadStockDetail(currentPartNum, stockId);
+                }
+            });
+        });
+
+        // 供給點擊
+        document.querySelectorAll('.supply-row').forEach(row => {
+            row.addEventListener('click', async function() {
+                document.querySelectorAll('.supply-row').forEach(r => r.classList.remove('selected'));
+                this.classList.add('selected');
+                const filterNum = parseInt(this.dataset.filterNum, 10);
+
+                // 製程現帳
+                if (filterNum == 82) {
+                    switchToTab('tab-process');
+                    await loadWipDetail(currentPartNum);
+                    return;
+                }
+
+                switchToTab('tab-detail');
+                if (!filterNum || filterNum <= 0 || !currentSPId) {
+                    showEmptyDetail();
+                    return;
+                }
+                await loadPaperDetails(currentSPId, filterNum);
+            });
+        });
+
+        // 需求點擊
+        document.querySelectorAll('.demand-row').forEach(row => {
+            row.addEventListener('click', async function() {
+                document.querySelectorAll('.demand-row').forEach(r => r.classList.remove('selected'));
+                this.classList.add('selected');
+                const filterNum = parseInt(this.dataset.filterNum, 10);
+
+                switchToTab('tab-detail');
+                if (!filterNum || filterNum <= 0 || !currentSPId) {
+                    showEmptyDetail();
+                    return;
+                }
+                await loadPaperDetails(currentSPId, filterNum);
+            });
+        });
+
+        function switchToTab(tabId) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            document.querySelector(`.tab-btn[data-tab="${tabId}"]`)?.classList.add('active');
+            document.getElementById(tabId)?.classList.add('active');
+        }
+
+        function showEmptyDetail() {
+            document.getElementById('tbody-tab-detail').innerHTML = '<tr><td colspan="9" class="empty-message">無單據資料</td></tr>';
+        }
+
+        async function loadStockDetail(partNum, stockId) {
+            const tbody = document.getElementById('tbody-tab-summary');
+            tbody.innerHTML = '<tr><td colspan="10" class="empty-message">載入中...</td></tr>';
+            try {
+                const resp = await fetch(`/api/MatDetailApi/GetStockDetail?partNum=${encodeURIComponent(partNum)}&stockId=${encodeURIComponent(stockId)}`);
+                if (!resp.ok) throw new Error('載入失敗');
+                const data = await resp.json();
+                if (!data || data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="10" class="empty-message">無明細資料</td></tr>';
+                    return;
+                }
+
+                // 過濾掉合計列
+                const filtered = data.filter(row => (row.PosId || row.posId || '') !== '庫存單位合計');
+                const processData = filtered.length > 0 ? filtered : data;
+
+                let html = '';
+                let totalUOM = 0, totalQnty = 0;
+                processData.forEach(row => {
+                    const uomQnty = parseFloat(row.UOMQnty || row.uomQnty || 0);
+                    const qnty = parseFloat(row.Qnty || row.qnty || 0);
+                    totalUOM += uomQnty;
+                    totalQnty += qnty;
+                    html += `<tr>
+                        <td>${safeStr(row.PosId || row.posId)}</td>
+                        <td class="text-end">${formatNum(uomQnty)}</td>
+                        <td>${safeStr(row.UOM || row.uom)}</td>
+                        <td class="text-end">${safeStr(row.Ratio || row.ratio || '1')}</td>
+                        <td class="text-end">${formatNum(qnty)}</td>
+                        <td>${safeStr(row.BatchNum || row.batchNum)}</td>
+                        <td>${safeStr(row.VolumeNum || row.volumeNum)}</td>
+                        <td>${formatDate(row.ExpiredDate || row.expiredDate)}</td>
+                        <td>${safeStr(row.SizeLenth || row.sizeLenth)}</td>
+                        <td>${safeStr(row.SizeWidth || row.sizeWidth)}</td>
+                    </tr>`;
+                });
+                html += `<tr style="background:#f3f4f6;font-weight:600;">
+                    <td>合計</td>
+                    <td class="text-end">${formatNum(totalUOM)}</td>
+                    <td></td><td></td>
+                    <td class="text-end">${formatNum(totalQnty)}</td>
+                    <td colspan="5"></td>
+                </tr>`;
+                tbody.innerHTML = html;
+            } catch (e) {
+                tbody.innerHTML = '<tr><td colspan="10" class="empty-message">載入失敗</td></tr>';
+            }
+        }
+
+        async function loadPaperDetails(spId, filterNum) {
+            const tbody = document.getElementById('tbody-tab-detail');
+            tbody.innerHTML = '<tr><td colspan="9" class="empty-message">載入中...</td></tr>';
+            try {
+                const resp = await fetch(`/api/MatDetailApi/GetPaperDetails?spId=${encodeURIComponent(spId)}&filterNum=${encodeURIComponent(filterNum)}`);
+                if (!resp.ok) throw new Error('載入失敗');
+                const data = await resp.json();
+                if (!data || data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="9" class="empty-message">無單據資料</td></tr>';
+                    return;
+                }
+                const sorted = [...data].sort((a, b) => {
+                    const at = parseDateValue(getRowValueByName(a, 'IOTime'));
+                    const bt = parseDateValue(getRowValueByName(b, 'IOTime'));
+                    const aVal = Number.isFinite(at) ? at : -Infinity;
+                    const bVal = Number.isFinite(bt) ? bt : -Infinity;
+                    return bVal - aVal;
+                });
+                let html = '';
+                sorted.forEach(row => {
+                    html += `<tr>
+                        <td>${safeStr(row.PaperNum || row.paperNum)}</td>
+                        <td>${safeStr(row.Item || row.item)}</td>
+                        <td>${formatDate(row.PaperDate || row.paperDate)}</td>
+                        <td>${formatDate(row.RequireDate || row.requireDate)}</td>
+                        <td>${safeStr(row.DeptId || row.deptId || row.StrCol_2)}</td>
+                        <td class="text-end">${formatNum(row.Qnty || row.qnty || row.PriQnty || row.priQnty)}</td>
+                        <td class="text-end">${formatNum(row.DeliveredQnty || row.deliveredQnty || row.SubQnty || row.subQnty)}</td>
+                        <td>${safeStr(row.POTypeName || row.poTypeName)}</td>
+                        <td>${safeStr(row.OutNotInName || row.outNotInName)}</td>
+                    </tr>`;
+                });
+                tbody.innerHTML = html;
+            } catch (e) {
+                tbody.innerHTML = '<tr><td colspan="9" class="empty-message">載入失敗</td></tr>';
+            }
+        }
+
+        async function loadStockHistory(partNum, stockId) {
+            const tbody = document.getElementById('tbody-tab-history');
+            tbody.innerHTML = '<tr><td colspan="10" class="empty-message">載入中...</td></tr>';
+            try {
+                const stockParam = stockId ? `&stockId=${encodeURIComponent(stockId)}` : '';
+                const resp = await fetch(`/api/MatDetailApi/GetStockHistory?partNum=${encodeURIComponent(partNum)}${stockParam}`);
+                if (!resp.ok) throw new Error('載入失敗');
+                const data = await resp.json();
+                if (!data || data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="10" class="empty-message">無進出歷史資料</td></tr>';
+                    return;
+                }
+                let html = '';
+                data.forEach(row => {
+                    const paperNum = safeStr(row.PaperNum || row.paperNum);
+                    const item = safeStr(row.Item || row.item);
+                    const docNum = paperNum || safeStr(row.BatchNum || row.batchNum);
+                    html += `<tr>
+                        <td>${safeStr(row.PaperName || row.paperName)}</td>
+                        <td>${item}</td>
+                        <td>${safeStr(row.StockId || row.stockId)}</td>
+                        <td>${safeStr(row.PosId || row.posId)}</td>
+                        <td>${formatDateTime(row.IOTime || row.ioTime)}</td>
+                        <td>${safeStr(row.Notes || row.notes)}</td>
+                        <td>${formatDate(row.PaperDate || row.paperDate)}</td>
+                        <td>${docNum}</td>
+                        <td class="text-end">${formatNum(row.IOQnty || row.ioQnty)}</td>
+                        <td>${safeStr(row.UserName || row.userName)}</td>
+                    </tr>`;
+                });
+                tbody.innerHTML = html;
+            } catch (e) {
+                tbody.innerHTML = '<tr><td colspan="9" class="empty-message">載入失敗</td></tr>';
+            }
+        }
+
+        async function loadWipDetail(partNum) {
+            const tbody = document.getElementById('tbody-tab-process');
+            tbody.innerHTML = '<tr><td colspan="9" class="empty-message">載入中...</td></tr>';
+            try {
+                const resp = await fetch(`/api/MatDetailApi/GetWipDetail?partNum=${encodeURIComponent(partNum)}`);
+                if (!resp.ok) throw new Error('載入失敗');
+                const data = await resp.json();
+                if (!data || data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="9" class="empty-message">無製程現帳資料</td></tr>';
+                    return;
+                }
+                let html = '';
+                data.forEach(row => {
+                    html += `<tr>
+                        <td>${safeStr(row.PaperNum || row.paperNum)}</td>
+                        <td>${safeStr(row.PartNum || row.partNum)}</td>
+                        <td>${safeStr(row.Revision || row.revision)}</td>
+                        <td>${safeStr(row.ProcCode || row.procCode)}</td>
+                        <td>${safeStr(row.ProcName || row.procName)}</td>
+                        <td>${safeStr(row.LotNum || row.lotNum)}</td>
+                        <td class="text-end">${formatNum(row.EqualFGPCS || row.equalFGPCS)}</td>
+                        <td>${safeStr(row.LotStatus || row.lotStatus)}</td>
+                        <td>${safeStr(row.PaperType || row.paperType || row.PaperTypeName || row.paperTypeName)}</td>
+                    </tr>`;
+                });
+                tbody.innerHTML = html;
+            } catch (e) {
+                tbody.innerHTML = '<tr><td colspan="9" class="empty-message">載入失敗</td></tr>';
+            }
+        }
+
+        function formatNum(val) {
+            if (val == null) return '';
+            const num = Number(String(val).replace(/,/g, ''));
+            return Number.isFinite(num) ? num.toFixed(2) : '';
+        }
+
+        function formatDate(val) {
+            if (!val) return '';
+            // 處理物件類型 (如 JsonElement)
+            if (typeof val === 'object') {
+                if (val.value !== undefined) val = val.value;
+                else if (val.Value !== undefined) val = val.Value;
+                else return '';
+            }
+            if (!val) return '';
+            try {
+                const d = new Date(val);
+                if (isNaN(d.getTime())) return String(val);
+                return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+            } catch { return String(val); }
+        }
+
+        function formatDateTime(val) {
+            if (!val) return '';
+            if (typeof val === 'object') {
+                if (val.value !== undefined) val = val.value;
+                else if (val.Value !== undefined) val = val.Value;
+                else return '';
+            }
+            if (!val) return '';
+            try {
+                const d = new Date(val);
+                if (isNaN(d.getTime())) return String(val);
+                const ymd = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+                const hms = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+                return `${ymd} ${hms}`;
+            } catch { return String(val); }
+        }
+
+        function parseDateValue(val) {
+            if (val == null) return NaN;
+            if (typeof val === 'object') {
+                if (val.value !== undefined) val = val.value;
+                else if (val.Value !== undefined) val = val.Value;
+            }
+            const str = String(val || '').trim();
+            if (!str) return NaN;
+            const direct = Date.parse(str);
+            if (Number.isFinite(direct)) return direct;
+            const match = str.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+            if (match) {
+                const year = Number(match[1]);
+                const month = Number(match[2]) - 1;
+                const day = Number(match[3]);
+                const hour = Number(match[4] || 0);
+                const min = Number(match[5] || 0);
+                const sec = Number(match[6] || 0);
+                return new Date(year, month, day, hour, min, sec).getTime();
+            }
+            return NaN;
+        }
+
+        function getRowValueByName(row, fieldName) {
+            if (!row || !fieldName) return '';
+            const keys = Object.keys(row);
+            const matchKey = keys.find(k => k.toLowerCase() === fieldName.toLowerCase());
+            return matchKey ? row[matchKey] : '';
+        }
+
+        function safeStr(val) {
+            if (val == null) return '';
+            if (typeof val === 'object') return val.value || val.Value || '';
+            return String(val);
+        }
+
+        function setupTabHeaderSort() {
+            document.querySelectorAll('.detail-content table').forEach(table => {
+                const thead = table.querySelector('thead');
+                const tbody = table.querySelector('tbody');
+                if (!thead || !tbody) return;
+                thead.querySelectorAll('th').forEach((th, index) => {
+                    th.style.cursor = 'pointer';
+                    th.title = '點擊排序';
+                    th.addEventListener('click', () => sortTableByColumn(table, index));
+                });
+            });
+        }
+
+        function sortTableByColumn(table, colIndex) {
+            const tbody = table.querySelector('tbody');
+            if (!tbody) return;
+            const rows = Array.from(tbody.querySelectorAll('tr')).filter(row => !row.querySelector('.empty-message'));
+            if (rows.length <= 1) return;
+
+            const ths = table.querySelectorAll('thead th');
+            const activeTh = ths[colIndex];
+            const current = activeTh?.dataset.sortOrder || 'desc';
+            const nextOrder = current === 'desc' ? 'asc' : 'desc';
+            ths.forEach(th => { th.dataset.sortOrder = ''; });
+            if (activeTh) activeTh.dataset.sortOrder = nextOrder;
+
+            const mapped = rows.map(row => {
+                const cell = row.children[colIndex];
+                const raw = cell ? cell.textContent.trim() : '';
+                return { row, key: getSortKey(raw), raw };
+            });
+
+            mapped.sort((a, b) => compareSortKey(a.key, b.key, nextOrder));
+            mapped.forEach(item => tbody.appendChild(item.row));
+        }
+
+        function getSortKey(value) {
+            const text = String(value || '').trim();
+            if (!text) return { type: 'empty', value: '' };
+
+            if (/[\/:\-]/.test(text)) {
+                const dateVal = parseDateValue(text);
+                if (Number.isFinite(dateVal)) return { type: 'date', value: dateVal };
+            }
+
+            const num = Number(text.replace(/,/g, ''));
+            if (Number.isFinite(num) && /^-?\d+(\.\d+)?$/.test(text.replace(/,/g, ''))) {
+                return { type: 'number', value: num };
+            }
+
+            return { type: 'string', value: text.toLowerCase() };
+        }
+
+        function compareSortKey(a, b, order) {
+            if (a.type === 'empty' && b.type === 'empty') return 0;
+            if (a.type === 'empty') return 1;
+            if (b.type === 'empty') return -1;
+
+            const dir = order === 'desc' ? -1 : 1;
+            if (a.type === b.type && (a.type === 'number' || a.type === 'date')) {
+                return (a.value - b.value) * dir;
+            }
+
+            return a.value > b.value ? dir : a.value < b.value ? -dir : 0;
+        }
+
+        setupTabHeaderSort();
+    </script>
+</body>
+</html>

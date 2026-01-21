@@ -555,38 +555,52 @@ function renderOrderCount(totalCount, pageSize, pageNumber) {
 function updateToolbarHeaderCountForRow(row) {
   const headerCountEl = document.getElementById('toolbarHeaderCount');
   if (!headerCountEl || !row) return;
-  const totalText = headerCountEl.textContent || '';
-  const totalMatch = totalText.match(/\/(\d+)/);
-  const total = totalMatch ? parseInt(totalMatch[1], 10) : 0;
+
+  const tn = String(window._tableName || '').trim().toLowerCase();
+
+  // 從 localStorage 讀取總筆數和頁面起始值（這是最可靠的來源）
+  const total = parseInt(localStorage.getItem(`orderListQueryTotal:${tn}`) || '0', 10);
+  const pageStart = parseInt(localStorage.getItem(`orderListQueryPageStart:${tn}`) || '1', 10);
+
   const tbody = row.closest('tbody');
   if (!tbody) return;
   const rows = Array.from(tbody.querySelectorAll('tr'));
   const idx = rows.indexOf(row);
   if (idx < 0 || total <= 0) return;
-  const startText = document.getElementById('orderCountInfo')?.textContent || '';
-  const rangeMatch = startText.match(/第\\s*(\\d+)\\s*~/);
-  const pageStart = rangeMatch ? parseInt(rangeMatch[1], 10) : 1;
+
   const currentIndex = pageStart + idx;
   headerCountEl.textContent = `${currentIndex}/${total}`;
+
   try {
-    const tn = String(window._tableName || '').trim().toLowerCase();
     if (tn) localStorage.setItem(`orderListQueryIndex:${tn}`, String(currentIndex));
   } catch {}
 }
 
 function doQuery(page = 1) {
-  let filters = lastQueryFilters.slice();
+  // 深拷貝 filters，避免修改原始 lastQueryFilters 中的物件
+  let filters = lastQueryFilters.map(f => ({ ...f }));
   let hasPage = false, hasSize = false;
   const itemId = (window._itemId || window._singleItemId || '').toString().trim();
 
   filters.forEach(f => {
-    if (f.Field === "page")     { f.Value = String(page); hasPage = true; }
-    if (f.Field === "pageSize") { f.Value = "@Model.PageSize"; hasSize = true; }
+    // 使用不區分大小寫的比較
+    const fieldLower = (f.Field || '').toLowerCase();
+    if (fieldLower === "page")     { f.Value = String(page); hasPage = true; }
+    if (fieldLower === "pagesize") { f.Value = "@Model.PageSize"; hasSize = true; }
   });
   if (!hasPage) filters.push({ Field: "page", Op: "", Value: String(page) });
   if (!hasSize) filters.push({ Field: "pageSize", Op: "", Value: "@Model.PageSize" });
 
   saveQueryState(filters, page);
+
+  // 更新網址（不重新整理頁面）
+  const url = new URL(window.location.href);
+  if (page > 1) {
+    url.searchParams.set('page', page);
+  } else {
+    url.searchParams.delete('page');
+  }
+  history.replaceState(null, '', url.toString());
 
   http('/api/DynamicTable/PagedQuery', {
     method: 'POST',

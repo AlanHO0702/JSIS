@@ -44,6 +44,9 @@
             inp.defaultValue = inp.type === "checkbox"
               ? (inp.checked ? "1" : "0")
               : inp.value;
+            if (inp.type === "checkbox") {
+              inp.defaultChecked = inp.checked;
+            }
 
             span.classList.add("d-none");
             inp.classList.remove("d-none");
@@ -127,7 +130,9 @@
 
         tr.querySelectorAll(".cell-edit").forEach(inp => {
           const dataType = inp.dataset.type || "";
-          const oldValRaw = inp.defaultValue ?? "";
+          const oldValRaw = inp.type === "checkbox"
+            ? (inp.defaultChecked ? "1" : "0")
+            : (inp.defaultValue ?? "");
           const newVal = (() => {
             if (inp.type === "checkbox") return inp.checked ? "1" : "0";
             if (dataType === "number") {
@@ -236,6 +241,9 @@
         inp.defaultValue = inp.type === "checkbox"
           ? (inp.checked ? "1" : "0")
           : (inp.value ?? "");
+        if (inp.type === "checkbox") {
+          inp.defaultChecked = inp.checked;
+        }
       });
 
       // ?芷????敺宏??
