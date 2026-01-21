@@ -60,6 +60,7 @@ namespace PcbErpApi.Pages.CUR
                 var cfg = new MasterDetailConfig
                 {
                     DomId = BuildDomId(itemId),
+                    ItemId = itemId,
                     MasterTitle = masterMeta?.DisplayLabel ?? master.TableName,
                     DetailTitle = detailMeta?.DisplayLabel ?? detail.TableName,
                     MasterTable = masterMeta?.RealTableName ?? master.TableName,

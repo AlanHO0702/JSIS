@@ -77,7 +77,21 @@ if (!app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 // 允許靜態檔案（wwwroot 下的 CSS、JS、圖片等）被存取
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        var path = ctx.File.PhysicalPath ?? string.Empty;
+        if (path.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.ContentType = "application/javascript; charset=utf-8";
+        }
+        else if (path.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.ContentType = "text/css; charset=utf-8";
+        }
+    }
+});
 
 // 啟用路由中介軟體，讓路由功能生效
 app.UseRouting();

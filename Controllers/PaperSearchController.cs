@@ -104,6 +104,10 @@ public class PaperSearchController : ControllerBase
             return NotFound(new { ok = false, error = "找不到按鈕設定" });
 
         cfg.SearchParams = await LoadSearchParamsAsync(conn, itemId, buttonName);
+        foreach (var p in cfg.SearchParams)
+        {
+            p.DefaultValue = await ResolveDefaultValueAsync(conn, p.DefaultValue, p.DefaultType);
+        }
         cfg.InsertKeys = await LoadInsertKeysAsync(conn, itemId, buttonName);
         return Ok(cfg);
     }
@@ -685,6 +689,21 @@ SELECT ItemId, ButtonName, ParamName, DisplayName, ControlType, CommandText,
             });
         }
         return list;
+    }
+
+    private static async Task<string?> ResolveDefaultValueAsync(SqlConnection conn, string? defaultValue, int? defaultType)
+    {
+        if (defaultType != 1 || string.IsNullOrWhiteSpace(defaultValue))
+            return defaultValue;
+
+        var sql = defaultValue.Trim();
+        if (!sql.StartsWith("select", StringComparison.OrdinalIgnoreCase))
+            return defaultValue;
+
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.CommandType = CommandType.Text;
+        var result = await cmd.ExecuteScalarAsync();
+        return result == null || result == DBNull.Value ? "" : result.ToString();
     }
 
     private async Task<List<InsKeyRow>> LoadInsertKeysAsync(SqlConnection conn, string itemId, string buttonName, SqlTransaction? tx = null)
