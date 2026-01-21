@@ -139,6 +139,7 @@ public class StoredProcController : ControllerBase
         if (string.IsNullOrWhiteSpace(req?.Key) || !_registry.TryGetValue(req.Key, out var def))
             return BadRequest(new { ok = false, error = "未知的作業代碼" });
 
+        var procName = def.ProcName;
         var args = req.Args ?? new();
         foreach (var p in def.RequiredParams)
             if (!args.ContainsKey(p))
@@ -165,7 +166,7 @@ public class StoredProcController : ControllerBase
 
             tx = (SqlTransaction)await conn.BeginTransactionAsync();
 
-            await using var cmd = new SqlCommand(def.ProcName, conn, tx)
+            await using var cmd = new SqlCommand(procName, conn, tx)
             {
                 CommandType = CommandType.StoredProcedure,
                 CommandTimeout = 120
@@ -208,6 +209,7 @@ public class StoredProcController : ControllerBase
         catch (Exception ex)
         {
             if (tx != null) { try { await tx.RollbackAsync(); } catch { } }
+            Console.WriteLine($"[StoredProc.Query][Error] {ex}");
             return StatusCode(500, new { ok = false, error = ex.GetBaseException().Message });
         }
     }
@@ -220,6 +222,7 @@ public class StoredProcController : ControllerBase
         if (string.IsNullOrWhiteSpace(req?.Key) || !_registry.TryGetValue(req.Key, out var def))
             return BadRequest(new { ok = false, error = "未知的作業代碼" });
 
+        var procName = def.ProcName;
         var args = req.Args ?? new();
         foreach (var p in def.RequiredParams)
             if (!args.ContainsKey(p))
@@ -233,7 +236,7 @@ public class StoredProcController : ControllerBase
             await conn.OpenAsync();
             tx = (SqlTransaction)await conn.BeginTransactionAsync();
 
-            await using var cmd = new SqlCommand(def.ProcName, conn, tx)
+            await using var cmd = new SqlCommand(procName, conn, tx)
             {
                 CommandType = CommandType.StoredProcedure,
                 CommandTimeout = 120
@@ -271,27 +274,30 @@ public class StoredProcController : ControllerBase
 
             // 使用 ExecuteReaderAsync 讀取結果集
             var results = new List<Dictionary<string, object>>();
-            await using var reader = await cmd.ExecuteReaderAsync();
 
-            // 讀取第一個結果集的所有行
-            while (await reader.ReadAsync())
+            // 使用 using 塊確保 reader 在提交事務前完全釋放
+            await using (var reader = await cmd.ExecuteReaderAsync())
             {
-                var row = new Dictionary<string, object>();
-                for (int i = 0; i < reader.FieldCount; i++)
+                // 讀取第一個結果集的所有行
+                while (await reader.ReadAsync())
                 {
-                    var name = reader.GetName(i);
-                    var value = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                    row[name] = value;
+                    var row = new Dictionary<string, object>();
+                    for (int i = 0; i < reader.FieldCount; i++)
+                    {
+                        var name = reader.GetName(i);
+                        var value = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        row[name] = value;
+                    }
+                    results.Add(row);
                 }
-                results.Add(row);
-            }
 
-            // 確保讀取完所有結果集，避免 DataReader 保持打開狀態
-            while (await reader.NextResultAsync())
-            {
-                // 消耗其他結果集，但不處理它們
-                while (await reader.ReadAsync()) { }
-            }
+                // 確保讀取完所有結果集，避免 DataReader 保持打開狀態
+                while (await reader.NextResultAsync())
+                {
+                    // 消耗其他結果集，但不處理它們
+                    while (await reader.ReadAsync()) { }
+                }
+            }  // reader 在此處被釋放
 
             await tx.CommitAsync();
             return Ok(results); // 直接返回結果陣列
@@ -299,7 +305,16 @@ public class StoredProcController : ControllerBase
         catch (Exception ex)
         {
             if (tx != null) { try { await tx.RollbackAsync(); } catch { } }
-            return StatusCode(500, new { ok = false, error = ex.GetBaseException().Message });
+            Console.WriteLine($"[StoredProc.Query][Error] Proc={procName} Args={JsonSerializer.Serialize(args)}");
+            Console.WriteLine($"[StoredProc.Query][Error] {ex}");
+            if (ex is SqlException sqlEx)
+            {
+                foreach (SqlError err in sqlEx.Errors)
+                {
+                    Console.WriteLine($"[StoredProc.Query][SqlError] Number={err.Number} Proc={err.Procedure} Line={err.LineNumber} Message={err.Message}");
+                }
+            }
+            return StatusCode(500, new { ok = false, error = ex.GetBaseException().Message, proc = procName });
         }
     }
 
