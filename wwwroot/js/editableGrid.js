@@ -1,5 +1,5 @@
-// /wwwroot/js/editableGrid.js
-// 讓 table 支援簡易的 編輯 / 檢視 / 儲存 功能
+﻿// /wwwroot/js/editableGrid.js
+// 霈?table ?舀蝪⊥???蝺刻摩 / 瑼Ｚ? / ?脣? ?
 (function () {
 
   window.makeEditableGrid = function (options) {
@@ -14,7 +14,7 @@
     const saveUrl   = options.saveUrl || "/api/CommonTable/SaveTableChanges";
 
     if (!wrapper || !table) {
-      console.warn("makeEditableGrid: wrapper 或 table 未設定");
+      console.warn("makeEditableGrid: wrapper or table not set.");
       return {
         isEdit      : () => false,
         toggleEdit  : () => {},
@@ -22,11 +22,11 @@
       };
     }
 
-    // ===== 狀態 =====
+    // ===== ???=====
     let editing = false;
     function isEdit() { return editing; }
 
-    // ===== 編輯 / 檢視 切換 =====
+    // ===== 蝺刻摩 / 瑼Ｚ? ?? =====
     function toggleEdit(toEdit) {
       editing = !!toEdit;
       wrapper.classList.toggle("edit-mode", editing);
@@ -40,7 +40,7 @@
 
           if (editing) {
 
-            // 進入編輯欄位，記錄 defaultValue
+            // ?脣蝺刻摩甈?嚗???defaultValue
             inp.defaultValue = inp.type === "checkbox"
               ? (inp.checked ? "1" : "0")
               : inp.value;
@@ -63,7 +63,7 @@
 
           } else {
 
-            // 回到顯示欄位
+            // ?憿舐內甈?
             if (inp.type === "checkbox") {
               let viewChk = span.querySelector('input[type="checkbox"]');
               if (!viewChk) {
@@ -88,29 +88,29 @@
       });
     }
 
-    // ===== 收集差異 =====
+    // ===== ?園?撌桃 =====
     function collectChanges() {
 
       const list = [];
 
       table.querySelectorAll("tbody tr").forEach(tr => {
 
-        // ===== 刪除列：只送 KeyFields + __delete =====
+        // ===== ?芷???芷?KeyFields + __delete =====
         if (tr.dataset.state === "deleted") {
           const rowDel = {};
-          // 先嘗試從 cell-edit 取（避免 DOM 還沒塞 hidden）
+          // ??閰血? cell-edit ???踹? DOM ??憛?hidden嚗?
           tr.querySelectorAll(".cell-edit").forEach(inp => {
             if (!inp.name) return;
             if (keyFieldSet.has((inp.name || "").toLowerCase())) {
               rowDel[inp.name] = inp.type === "checkbox" ? (inp.checked ? "1" : "0") : (inp.value ?? "");
             }
           });
-          // 再補 hidden PK / FK
+          // ?? hidden PK / FK
           tr.querySelectorAll(".mmd-pk-hidden, .mmd-fk-hidden").forEach(inp => {
             if (!inp.name) return;
             if (rowDel[inp.name] === undefined || rowDel[inp.name] === "") rowDel[inp.name] = inp.value ?? "";
           });
-          // 最後補 KeyFields（若還缺）
+          // ?敺? KeyFields嚗?撩嚗?
           keyFieldSet.forEach(k => {
             const has = Object.keys(rowDel).some(n => (n || "").toLowerCase() === k);
             if (has) return;
@@ -149,10 +149,9 @@
         });
 
         if (!hasDiff) return;
-
         const rowAll = {};
 
-        // 編輯欄位
+        // 蝺刻摩甈?
         tr.querySelectorAll(".cell-edit").forEach(inp => {
             if (!inp.name) return;
             const dataType = inp.dataset.type || "";
@@ -166,7 +165,7 @@
             }
         });
 
-        // 確保鍵欄位一定帶值：若輸入框空，嘗試從同格 span 或 data-raw 取值
+        // 蝣箔??菜?雿?摰葆?潘??亥撓?交?蝛綽??岫敺???span ??data-raw ??
         keyFieldSet.forEach(k => {
           const inp = Array.from(tr.querySelectorAll('.cell-edit')).find(i => (i.name || '').toLowerCase() === k);
           const span = inp?.previousElementSibling;
@@ -176,7 +175,7 @@
           }
         });
 
-        // PK 隱藏欄位
+        // PK ?梯?甈?
         tr.querySelectorAll(".mmd-pk-hidden").forEach(inp => {
           if (!inp.name) return;
           if (rowAll[inp.name] === undefined || rowAll[inp.name] === "") {
@@ -184,7 +183,7 @@
           }
         });
 
-        // FK 隱藏欄位 (KeyMap)
+        // FK ?梯?甈? (KeyMap)
         tr.querySelectorAll(".mmd-fk-hidden").forEach(inp => {
           if (!inp.name) return;
           if (rowAll[inp.name] === undefined || rowAll[inp.name] === "") {
@@ -198,16 +197,16 @@
       return list;
     }
 
-    // ===== 儲存 =====
+    // ===== ?脣? =====
     async function saveChanges() {
 
       if (!tableName) {
-        return { ok:false, skipped:true, text:"未設定 TableName" };
+        return { ok:false, skipped:true, text:"tableName not set" };
       }
 
       const changes = collectChanges();
       if (changes.length === 0) {
-        return { ok:true, skipped:true, text:"無異動" };
+        return { ok:true, skipped:true, text:"no changes" };
       }
 
       const payload = { TableName: tableName, Data: changes };
@@ -222,7 +221,7 @@
         });
         txt = await resp.text();
       } catch (err) {
-        console.error("saveChanges 發生錯誤:", err);
+        console.error("saveChanges error:", err);
         return { ok:false, skipped:false, text:String(err) };
       }
 
@@ -232,13 +231,12 @@
       if (!resp.ok || (json && json.success === false)) {
         const msg =
           (json && (json.message || json.error)) ||
-          txt ||
-          "儲存失敗";
-        console.error("saveChanges fail:", msg);
+          txt || "save failed";
+        console.error("saveChanges error:", msg);
         return { ok:false, skipped:false, text:msg, raw:json };
       }
 
-      // 成功後，同步 defaultValue
+      // ??敺??郊 defaultValue
       table.querySelectorAll(".cell-edit").forEach(inp => {
         inp.defaultValue = inp.type === "checkbox"
           ? (inp.checked ? "1" : "0")
@@ -248,9 +246,9 @@
         }
       });
 
-      // 刪除列：成功後移除
+      // ?芷????敺宏??
       table.querySelectorAll('tbody tr[data-state="deleted"]').forEach(tr => tr.remove());
-      // 新增列：成功後解除狀態標記
+      // ?啣?????敺圾?斤???閮?
       table.querySelectorAll('tbody tr[data-state="added"]').forEach(tr => {
         delete tr.dataset.state;
         tr.classList.remove("table-warning");
@@ -259,7 +257,7 @@
       return { ok:true, skipped:false, text:"OK", raw:json };
     }
 
-    // ===== 對外 API =====
+    // ===== 撠? API =====
     return {
       isEdit,
       toggleEdit,
@@ -268,3 +266,6 @@
   };
 
 })();
+
+
+

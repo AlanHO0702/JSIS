@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel 圖測試頁面</title>
+    <style>
+        body {
+            font-family: 'Microsoft JhengHei', Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .image-container {
+            margin: 10px 0;
+            padding: 10px;
+            background: #fafafa;
+            border: 1px dashed #ccc;
+        }
+        img {
+            max-width: 100%;
+            border: 1px solid #ddd;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .info {
+            background: #e3f2fd;
+            padding: 10px;
+            border-left: 4px solid #2196F3;
+            margin: 10px 0;
+        }
+        select, input {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        pre {
+            background: #272822;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+        .controls {
+            margin: 15px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Panel 裁板圖測試頁面</h1>
+
+        <div class="info">
+            <strong>測試目的：</strong>逐步驗證 Panel 圖的 MapData 解析和渲染功能
+        </div>
+
+        <div class="controls">
+            <h3>選擇測試料號：</h3>
+            <select id="partNumSelect">
+                <option value="A03270008A/0">A03270008A/0 (有完整3種圖)</option>
+                <option value="A041G0127C/0">A041G0127C/0 (有2種圖)</option>
+            </select>
+
+            <h3>圖片尺寸：</h3>
+            <label>寬度: <input type="number" id="width" value="1200" min="400" max="2000" step="100"></label>
+            <label>高度: <input type="number" id="height" value="800" min="300" max="1500" step="100"></label>
+
+            <br><br>
+            <button onclick="loadTestImage()">🔄 重新載入測試圖</button>
+            <button onclick="loadCurrentImage()">🖼️ 載入當前實作的圖</button>
+            <button onclick="analyzeMapData()">🔍 分析 MapData</button>
+        </div>
+
+        <div class="test-section">
+            <h2>1️⃣ 測試用裁板圖 (理想效果)</h2>
+            <p>這是用硬編碼資料產生的測試圖，顯示渲染引擎是正常的</p>
+            <div class="image-container">
+                <img id="testImage" src="/test/panel" alt="測試圖">
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>2️⃣ 當前實作的圖 (從資料庫讀取)</h2>
+            <p id="currentImageStatus">載入中...</p>
+            <div class="image-container">
+                <img id="currentImage" alt="當前實作">
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>3️⃣ MapData 分析結果</h2>
+            <button onclick="toggleAnalysis()">顯示/隱藏 詳細分析</button>
+            <div id="analysisResult" style="display:none;">
+                <pre id="analysisContent">點擊「分析 MapData」按鈕來查看詳細資訊</pre>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>4️⃣ MapData 原始資料預覽</h2>
+            <button onclick="toggleRawData()">顯示/隱藏 原始資料</button>
+            <div id="rawDataResult" style="display:none;">
+                <pre id="rawDataContent">點擊「分析 MapData」後會顯示原始資料</pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentPartNum = 'A03270008A';
+        let currentRevision = '0';
+
+        // 解析選擇的料號
+        document.getElementById('partNumSelect').addEventListener('change', function() {
+            const selected = this.value.split('/');
+            currentPartNum = selected[0];
+            currentRevision = selected[1];
+            loadCurrentImage();
+        });
+
+        // 載入測試圖
+        function loadTestImage() {
+            const img = document.getElementById('testImage');
+            img.src = '/test/panel?' + new Date().getTime(); // 加上時間戳避免快取
+        }
+
+        // 載入當前實作的圖
+        function loadCurrentImage() {
+            const width = document.getElementById('width').value;
+            const height = document.getElementById('height').value;
+            const img = document.getElementById('currentImage');
+            const status = document.getElementById('currentImageStatus');
+
+            const url = `/api/mappreview/${currentPartNum}/${currentRevision}/panel?width=${width}&height=${height}`;
+
+            status.textContent = `載入中... (${currentPartNum}/${currentRevision})`;
+            img.src = url + '&t=' + new Date().getTime();
+
+            img.onload = function() {
+                status.textContent = `✅ 已載入 ${currentPartNum}/${currentRevision} - ${width}x${height}`;
+            };
+
+            img.onerror = function() {
+                status.textContent = `❌ 載入失敗`;
+            };
+        }
+
+        // 分析 MapData
+        async function analyzeMapData() {
+            try {
+                const url = `/api/mappreview/analyze/${currentPartNum}/${currentRevision}/panel`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                // 顯示分析結果
+                document.getElementById('analysisContent').textContent = JSON.stringify(data.report, null, 2);
+
+                // 顯示原始資料預覽
+                document.getElementById('rawDataContent').textContent =
+                    `完整資料長度: ${data.report.Length}\n行數: ${data.report.LineCount}\n\n` +
+                    `預覽 (前 500 字元):\n${data.report.Preview}`;
+
+                alert('✅ MapData 分析完成！請查看下方詳細資訊');
+            } catch (error) {
+                alert('❌ 分析失敗: ' + error.message);
+            }
+        }
+
+        function toggleAnalysis() {
+            const div = document.getElementById('analysisResult');
+            div.style.display = div.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function toggleRawData() {
+            const div = document.getElementById('rawDataResult');
+            div.style.display = div.style.display === 'none' ? 'block' : 'none';
+        }
+
+        // 頁面載入時自動載入
+        window.onload = function() {
+            loadTestImage();
+            loadCurrentImage();
+        };
+    </script>
+</body>
+</html>

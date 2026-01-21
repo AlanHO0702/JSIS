@@ -54,6 +54,15 @@ builder.Services.AddScoped<ITableDictionaryService, TableDictionaryService>();
 
 builder.Services.AddScoped<PaginationService>();
 
+// 註冊 MapData 相關服務
+builder.Services.AddScoped<PcbErpApi.Services.MapData.MapDataParser>();
+builder.Services.AddScoped<PcbErpApi.Services.MapData.MapDataAnalyzer>();
+builder.Services.AddScoped<PcbErpApi.Services.Rendering.SimpleMapRenderer>();
+builder.Services.AddScoped<PcbErpApi.Services.Rendering.PanelMapRenderer>();
+builder.Services.AddScoped<PcbErpApi.Services.Rendering.UniversalMapRenderer>();
+builder.Services.AddScoped<PcbErpApi.Services.MapService>();
+builder.Services.AddScoped<PcbErpApi.Services.AuditImageService>();
+
 // 建立應用程式物件，進入中介軟體與路由設定階段
 var app = builder.Build();
 
@@ -98,6 +107,20 @@ app.MapControllers();
 
 // 將 Razor Pages 頁面路由映射（.cshtml）
 app.MapRazorPages();
+
+// 測試端點：產生測試用裁板圖
+app.MapGet("/test/panel", (PcbErpApi.Services.Rendering.SimpleMapRenderer renderer) =>
+{
+    var bytes = renderer.RenderTestPanelMap();
+    return Results.File(bytes, "image/jpeg");
+});
+
+// 測試端點：佔位圖
+app.MapGet("/test/placeholder", (PcbErpApi.Services.Rendering.SimpleMapRenderer renderer) =>
+{
+    var bytes = renderer.RenderPlaceholder("這是測試圖片", 800, 600);
+    return Results.File(bytes, "image/jpeg");
+});
 
 app.MapGet("/__routes", (IEnumerable<EndpointDataSource> sources) =>
 {

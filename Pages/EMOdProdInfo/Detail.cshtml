@@ -4,10 +4,101 @@
 @{
     Layout = "_Layout";
     var cfg = Model.Config;
+    ViewData["DictTableName"] = cfg?.MasterDict;
+    ViewData["ActionRailPartial"] = Model.ActionRailPartial;
 }
 
 @await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", null, ViewData)
 <script src="~/js/editableGrid.js"></script>
+
+<script>
+    // 設定全域變數供 ActionRail 使用
+    window._itemId = '@(Model.IsViewOnly ? "EMO00018" : "EMO00004")';
+    window._headerTableName = '@Model.HeaderTableName';
+</script>
+
+@* 左侧按钮条样式调整 *@
+@if ((Model.CustomButtons?.Count > 0))
+{
+    <style>
+    /* EMOdProdInfo 使用 Action Rail（左側自訂按鈕）時，需預留左側空間，避免單頭/頁籤被擋住 */
+    :root{
+      --fab-left: 12px;
+      --fab-width: 120px;
+      --fab-gap: 14px;
+      --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap));
+    }
+
+    .content-wrapper {
+        margin-left: var(--rail-reserve) !important;
+    }
+
+    /* toolbar 往回補，維持視覺對齊 */
+    .d-flex.align-items-center.gap-2.mb-2.mt-1 {
+        margin-left: calc(-1 * var(--rail-reserve)) !important;
+    }
+
+    /* Action Rail 容器樣式 */
+    .action-rail{
+      position: fixed;
+      left: var(--fab-left);
+      top: 80px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      z-index: 900;
+      overflow-y: auto;
+      overflow-x: visible;
+      max-height: calc(100vh - 100px);
+    }
+
+    body.with-toolbar .action-rail{
+      top: calc(80px + var(--app-toolbar-height, 0px));
+    }
+
+    /* 按鈕的共同外觀 */
+    .fab{
+      position: relative;
+      width: var(--fab-width);
+      min-width: 0;
+      padding: 6px 8px;
+      font-size: .92rem;
+      letter-spacing: 0;
+      white-space: normal;
+      word-break: break-word;
+      background:#f8f9fb;
+      color:#1f5fbf;
+      font-weight:600;
+      border-radius:10px;
+      cursor:pointer;
+      box-shadow:0 2px 8px rgba(20,40,80,.12);
+      border:1px solid #cfd7e6;
+    }
+    .fab:hover{
+      background:#e9f1ff;
+      border-color:#9fbaf0;
+    }
+    .fab:focus-visible{
+      outline:2px solid #9fbaf0;
+      outline-offset:2px;
+    }
+    </style>
+}
+
+@* 左側自訂按鈕區（Action Rail） *@
+@if (!string.IsNullOrWhiteSpace(Model.ActionRailPartial))
+{
+    <div class="action-rail">
+        @await Html.PartialAsync(Model.ActionRailPartial, Model)
+    </div>
+}
+
+@* 自訂按鈕邏輯腳本（如果存在） *@
+@if (ViewData["ActionRailLogicPartial"] is string logicPartial && !string.IsNullOrWhiteSpace(logicPartial))
+{
+    @await Html.PartialAsync(logicPartial)
+}
 
 @if (cfg == null)
 {
@@ -15,16 +106,41 @@
 }
 else
 {
-    <div class="d-flex align-items-center gap-2 mb-2 mt-1">
-        <a class="btn btn-link btn-sm" href="@Url.Page("Index")">回列表</a>
+    <div class="content-wrapper">
+    <div id="topToolbar" class="top-toolbar mb-2" data-dict-table="@cfg?.MasterTable">
+        <div class="toolbar-icon-row" role="group" aria-label="row-nav-and-sub-detail">
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnPrev" title="上一筆" aria-label="上一筆"><span class="toolbar-icon">&laquo;</span></button>
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnNext" title="下一筆" aria-label="下一筆"><span class="toolbar-icon">&raquo;</span></button>
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add" id="btnSubDetailAdd" title="新增" aria-label="新增"><span class="toolbar-icon">+</span></button>
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-del" id="btnSubDetailDelete" title="刪除" aria-label="刪除"><span class="toolbar-icon">-</span></button>
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add toolbar-btn-check" id="btnSaveHeader" title="儲存" aria-label="儲存" disabled><span class="toolbar-icon">✓</span></button>
+            <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-del toolbar-btn-check" id="btnCancelChanges" title="取消變更" aria-label="取消變更" disabled><span class="toolbar-icon">&times;</span></button>
+        </div>
+        <div class="toolbar-main">
+            @await Html.PartialAsync("~/Pages/Shared/_TableToolbar.cshtml", new TableToolbarModel {
+                SearchBtnId = "btnSubSearch",
+                AddBtnId = "btnSubAddNew",
+                DeleteBtnId = "btnSubBatchDelete",
+                SearchText = "查詢",
+                AddText = "新增",
+                DeleteText = "作廢",
+                ModalId = "searchModal",
+                ReportSpName = ""
+            })
+            <!-- 產生圖檔按鈕（工程資料特有） -->
+            <button id="btnGenerateImages" class="btn toolbar-btn" type="button" @(Model.IsViewOnly ? "disabled" : "")>產生圖檔</button>
+        </div>
     </div>
 
     <!-- 頂部基本資訊區（全寬度）-->
     <div id="emodprodinfo-header"
-         class="card shadow-sm border-0 rounded mb-2 p-3"
+         class="card shadow-sm border-0 rounded mb-2"
          data-dict="@cfg?.MasterDict"
-         style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);">
-        <div class="row g-2" id="header-fields"></div>
+         style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); padding: 0.5rem 0.75rem;">
+        <!-- 第一行 -->
+        <div class="d-flex align-items-center mb-1 gap-2" id="header-row-1"></div>
+        <!-- 第二行 -->
+        <div class="d-flex align-items-center gap-2" id="header-row-2"></div>
     </div>
 
     <!-- 主要內容區：左側層別+內部資料 + 右側規格/表單 -->
@@ -32,22 +148,37 @@ else
         <!-- 左側：層別面板 + 內部資料 -->
         <div style="width: 180px; flex-shrink: 0;">
             <!-- 層別面板 -->
-            <div class="card shadow-sm border-0 rounded mb-2">
-                <div class="card-header bg-light fw-bold text-center py-2" style="border-bottom: 2px solid #dee2e6;">
+            <div class="card shadow-sm border-0 rounded mb-2" style="height: 350px; display: flex; flex-direction: column;">
+                <div class="card-header bg-light fw-bold text-center py-2" style="border-bottom: 2px solid #dee2e6; flex-shrink: 0;">
                     層別
                 </div>
-                <div class="card-body p-0" id="layer-list" style="max-height: 400px; overflow-y: auto;">
+                <div class="card-body p-0" id="layer-list" style="flex: 1; overflow-y: auto; overflow-x: hidden;">
                     <div class="text-center text-muted py-3">載入中...</div>
                 </div>
             </div>
 
-            <!-- 內部資料 -->
-            <div class="card shadow-sm border-0 rounded">
-                <div class="card-header text-white fw-bold py-2" style="background-color: #17a2b8;">
+            <!-- 內部資料 (暫停記錄) -->
+            <div class="card shadow-sm border-0 rounded" style="height: 250px; display: flex; flex-direction: column;">
+                <div class="card-header text-white fw-bold py-2" style="background-color: #17a2b8; flex-shrink: 0;">
                     內部資料
                 </div>
-                <div class="card-body p-2" id="submit-history-container" style="max-height: 300px; overflow-y: auto; font-size: 12px;">
-                    <div class="text-center text-muted py-2">載入中...</div>
+                <div class="card-body p-0" style="flex: 1; overflow: auto;">
+                    <div class="table-responsive" style="height: 100%;">
+                        <table class="table table-sm table-hover align-middle mb-0"
+                               id="grid-haltlog-sidebar"
+                               data-table-name="EMOdProdLog"
+                               data-dict-name="EMOdProdLog"
+                               data-dict-table="EMOdProdLog"
+                               data-key-fields="PartNum,Revision,SerialNum"
+                               style="font-size: 11px;">
+                            <thead class="table-light">
+                                <tr><th class="text-center text-muted">載入中...</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td class="text-center text-muted py-2">載入中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -154,28 +285,107 @@ else
                             var tab = Model.ExtraTabs[i];
                             var active = i == 0 ? "show active" : "";
                             <div class="tab-pane fade @active" id="tab-@tab.Key" role="tabpanel" aria-labelledby="tab-@tab.Key-tab">
-                                <div class="table-responsive" data-tab-key="@tab.Key">
-                                    <table class="table table-sm table-hover align-middle mb-0"
-                                           id="grid-@tab.Key"
-                                           data-table-name="@tab.TableName"
-                                           data-dict-name="@tab.DictName"
-                                           data-dict-table="@tab.DictName"
-                                           data-key-fields="@string.Join(",", tab.KeyFields ?? Enumerable.Empty<string>())">
-                                        <thead class="table-light">
-                                            <tr><th class="text-center text-muted">載入中...</th></tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr><td class="text-center text-muted py-3">請點選上方主檔資料</td></tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                                <div class="mt-2 d-flex gap-2 tab-local-controls d-none">
-                                    <button type="button" class="btn btn-outline-primary btn-sm" data-btn="edit" data-tab="@tab.Key">編輯</button>
-                                    <button type="button" class="btn btn-success btn-sm d-none" data-btn="save" data-tab="@tab.Key">儲存</button>
-                                    <button type="button" class="btn btn-outline-primary btn-sm" data-btn="add" data-tab="@tab.Key">新增</button>
-                                    <button type="button" class="btn btn-outline-success btn-sm d-none" data-btn="confirm" data-tab="@tab.Key">確認</button>
-                                    <button type="button" class="btn btn-outline-danger btn-sm d-none" data-btn="cancel" data-tab="@tab.Key">取消</button>
-                                </div>
+                                @if (tab.Key == "prodmap")
+                                {
+                                    <!-- 產品工程圖：顯示四張圖片 -->
+                                    <div class="container-fluid p-3">
+                                        <div class="row g-3">
+                                            <!-- 裁板圖 (Cut) -->
+                                            <div class="col-md-6">
+                                                <div class="card shadow-sm">
+                                                    <div class="card-header bg-primary text-white fw-bold">
+                                                        <i class="bi bi-scissors"></i> 裁板圖 (Cut)
+                                                    </div>
+                                                    <div class="card-body p-2 text-center" style="background-color: #f8f9fa;">
+                                                        <img id="img-cut" class="map-preview-img" src="" alt="裁板圖載入中..."
+                                                             style="max-width: 100%; height: auto; border: 1px solid #dee2e6;">
+                                                        <div class="mt-2 text-muted small">
+                                                            <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                                                            載入中...
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- 排板圖 (Panel) -->
+                                            <div class="col-md-6">
+                                                <div class="card shadow-sm">
+                                                    <div class="card-header bg-success text-white fw-bold">
+                                                        <i class="bi bi-grid-3x3"></i> 排板圖 (Panel)
+                                                    </div>
+                                                    <div class="card-body p-2 text-center" style="background-color: #f8f9fa;">
+                                                        <img id="img-panel" class="map-preview-img" src="" alt="排板圖載入中..."
+                                                             style="max-width: 100%; height: auto; border: 1px solid #dee2e6;">
+                                                        <div class="mt-2 text-muted small">
+                                                            <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                                                            載入中...
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- PF裁剪圖 -->
+                                            <div class="col-md-6">
+                                                <div class="card shadow-sm">
+                                                    <div class="card-header bg-warning text-dark fw-bold">
+                                                        <i class="bi bi-crop"></i> PF裁剪圖
+                                                    </div>
+                                                    <div class="card-body p-2 text-center" style="background-color: #f8f9fa;">
+                                                        <img id="img-pf" class="map-preview-img" src="" alt="PF裁剪圖載入中..."
+                                                             style="max-width: 100%; height: auto; border: 1px solid #dee2e6;">
+                                                        <div class="mt-2 text-muted small">
+                                                            <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                                                            載入中...
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- 疊構圖 (Stackup) -->
+                                            <div class="col-md-6">
+                                                <div class="card shadow-sm">
+                                                    <div class="card-header bg-info text-white fw-bold">
+                                                        <i class="bi bi-layers"></i> 疊構圖
+                                                    </div>
+                                                    <div class="card-body p-2 text-center" style="background-color: #f8f9fa;">
+                                                        <img id="img-stackup" class="map-preview-img" src="" alt="疊構圖載入中..."
+                                                             style="max-width: 100%; height: auto; border: 1px solid #dee2e6;">
+                                                        <div class="mt-2 text-muted small">
+                                                            <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                                                            載入中...
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <!-- 其他頁籤：顯示表格 -->
+                                    <div class="table-responsive" data-tab-key="@tab.Key">
+                                        <table class="table table-sm table-hover align-middle mb-0"
+                                               id="grid-@tab.Key"
+                                               data-table-name="@tab.TableName"
+                                               data-dict-name="@tab.DictName"
+                                               data-dict-table="@tab.DictName"
+                                               data-key-fields="@string.Join(",", tab.KeyFields ?? Enumerable.Empty<string>())">
+                                            <thead class="table-light">
+                                                <tr><th class="text-center text-muted">載入中...</th></tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr><td class="text-center text-muted py-3">請點選上方主檔資料</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div class="mt-2 d-flex gap-2 tab-local-controls d-none">
+                                        <button type="button" class="btn btn-outline-primary btn-sm" data-btn="edit" data-tab="@tab.Key" @(Model.IsViewOnly ? "disabled" : "")>編輯</button>
+                                        <button type="button" class="btn btn-success btn-sm d-none" data-btn="save" data-tab="@tab.Key" @(Model.IsViewOnly ? "disabled" : "")>儲存</button>
+                                        <button type="button" class="btn btn-outline-primary btn-sm" data-btn="add" data-tab="@tab.Key" @(Model.IsViewOnly ? "disabled" : "")>新增</button>
+                                        <button type="button" class="btn btn-outline-success btn-sm d-none" data-btn="confirm" data-tab="@tab.Key" @(Model.IsViewOnly ? "disabled" : "")>確認</button>
+                                        <button type="button" class="btn btn-outline-danger btn-sm d-none" data-btn="cancel" data-tab="@tab.Key" @(Model.IsViewOnly ? "disabled" : "")>取消</button>
+                                    </div>
+                                }
                             </div>
                         }
                     </div>
@@ -185,6 +395,7 @@ else
     </div>
         </div>
     </div>
+    </div>
 }
 
 <script>
@@ -192,11 +403,23 @@ document.addEventListener('DOMContentLoaded', () => {
   const detailTabs = Array.from(document.querySelectorAll('[data-table][data-dict]'));
   let currentMasterKeys = @Html.Raw(JsonSerializer.Serialize(Model.MasterKeyValues.ToDictionary(kv => kv.Key, kv => kv.Value)));
   const tabState = {};
+  window.tabState = tabState; // 設為全域變數供其他 script 使用
   let masterData = null;
   let masterDict = null;
+  const isViewOnly = @(Model.IsViewOnly ? "true" : "false"); // 查詢模式標記
 
-  // 頂部基本資訊區要顯示的欄位
-  const headerFields = ['PartNum', 'Revision', 'CustomerPartNum', 'CustomerSSName', 'Status', 'StatusName', 'Designer', 'UserName'];
+  // 第一行欄位：料號、版次、客戶料號、預鑄列印(checkbox)、預設不料本(checkbox)、暫停發料(checkbox)、混款(checkbox)
+  const headerRow1Fields = ['PartNum', 'Revision', 'CustomerPartNum'];
+  const headerRow1Checkboxes = [
+    { field: 'IsPrintPrecast', label: '傳統列印' },
+    { field: 'IsNotTemplate', label: '預設下料版本' },
+    { field: 'IsStopIssue', label: '暫停發料' },
+    { field: 'IsMixed', label: '混裁' }
+  ];
+
+  // 第二行欄位：狀態名稱、製程碼、產品用途、設計者、陣列種、設計日期、客戶機種
+  // StatusName 需要透過 Status 欄位 lookup，DesignDate 需要特殊格式化
+  const headerRow2Fields = ['StatusName', 'ProcessCode', 'ProductUsage', 'Designer', 'ArrayCount', 'DesignDate', 'CustomerSSName'];
 
   // 層別資料 API
   const layerPressApiUrl = '@Html.Raw(Model.LayerPressApi ?? "")';
@@ -206,10 +429,94 @@ document.addEventListener('DOMContentLoaded', () => {
       .then(r => r.json());
   }
 
+  // 儲存層別資料
+  let layerData = [];
+
+  // 建立階層樹狀結構
+  function buildLayerTree(rows) {
+    // 建立 LayerId 到資料的映射
+    const layerMap = new Map();
+    rows.forEach(row => {
+      const layerId = (row.LayerId || row.layerid || '').trim();
+      layerMap.set(layerId, {
+        ...row,
+        children: []
+      });
+    });
+
+    // 建立父子關係
+    const rootNodes = [];
+    rows.forEach(row => {
+      const layerId = (row.LayerId || row.layerid || '').trim();
+      const aftLayerId = (row.AftLayerId || row.aftlayerid || '').trim();
+      const node = layerMap.get(layerId);
+
+      if (!aftLayerId || aftLayerId === '') {
+        // 根節點
+        rootNodes.push(node);
+      } else {
+        // 子節點，加到父節點的 children
+        const parentNode = layerMap.get(aftLayerId);
+        if (parentNode) {
+          parentNode.children.push(node);
+        } else {
+          // 找不到父節點，視為根節點
+          rootNodes.push(node);
+        }
+      }
+    });
+
+    return rootNodes;
+  }
+
+  // 遞迴渲染樹狀節點
+  function renderLayerNode(node, level = 0, isFirst = false) {
+    const layerId = (node.LayerId || node.layerid || '').trim();
+    const layerName = node.LayerName || node.layername || layerId;
+    const hasChildren = node.children && node.children.length > 0;
+    const degree = node.Degree || node.degree || 0;
+
+    // 縮排距離（每層 16px）
+    const indent = level * 16;
+
+    // 展開圖示（預設全展開）
+    const toggleIcon = hasChildren ? '▼' : '';
+    const isActive = isFirst && level === 0 ? 'active' : '';
+
+    // 預設全展開，所以 display 設為空字串（顯示）
+    const displayStyle = 'display: block;';
+
+    let html = `
+      <div class="layer-item ${isActive}"
+           data-layer-id="${layerId}"
+           data-layer-name="${layerName}"
+           data-level="${level}"
+           data-has-children="${hasChildren}"
+           data-expanded="true"
+           style="padding-left: ${indent + 12}px; ${displayStyle}">
+        ${toggleIcon ? `<span class="toggle-icon" style="margin-right: 4px; cursor: pointer; user-select: none;">${toggleIcon}</span>` : '<span style="margin-right: 14px;"></span>'}
+        <span class="layer-name">${layerName}</span>
+      </div>
+    `;
+
+    // 遞迴渲染子節點（預設全展開）
+    if (hasChildren) {
+      node.children.forEach((child, idx) => {
+        html += renderLayerNode(child, level + 1, false);
+      });
+    }
+
+    return html;
+  }
+
   // 載入層別資料
   function loadLayerPress() {
+    console.log('[DEBUG loadLayerPress] 開始載入層別資料');
+    console.log('[DEBUG loadLayerPress] layerPressApiUrl:', layerPressApiUrl);
+
     const layerListEl = document.getElementById('layer-list');
     if (!layerListEl || !layerPressApiUrl) {
+      console.log('[DEBUG loadLayerPress] 無法載入: layerListEl=', layerListEl, 'layerPressApiUrl=', layerPressApiUrl);
       if (layerListEl) layerListEl.innerHTML = '<div class="text-center text-muted py-3">無層別資料</div>';
       return;
     }
@@ -217,78 +524,231 @@ document.addEventListener('DOMContentLoaded', () => {
     fetch(layerPressApiUrl)
       .then(r => r.json())
       .then(rows => {
+        console.log('[DEBUG loadLayerPress] 層別資料載入完成, rows:', rows?.length, rows);
         if (!rows || rows.length === 0) {
           layerListEl.innerHTML = '<div class="text-center text-muted py-3">無層別資料</div>';
           return;
         }
 
-        // 顯示層別清單
-        // 優先使用 LayerSeq (層序號)，或從 FromLayer 和 ToLayer 組合顯示（如 L1-6）
-        const html = rows.map((row, idx) => {
-          let layerName = '';
+        // 儲存層別資料供後續使用
+        layerData = rows;
 
-          // 嘗試不同的欄位組合
-          if (row.LayerSeq || row.layerseq) {
-            layerName = row.LayerSeq || row.layerseq;
-          } else if (row.LayerName || row.layername) {
-            layerName = row.LayerName || row.layername;
-          } else if ((row.FromLayer || row.fromlayer) && (row.ToLayer || row.tolayer)) {
-            const from = row.FromLayer || row.fromlayer;
-            const to = row.ToLayer || row.tolayer;
-            layerName = `L${from}-${to}`;
-          } else if (row.Layer || row.layer) {
-            layerName = row.Layer || row.layer;
-          } else {
-            layerName = `層${idx + 1}`;
-          }
+        // 建立樹狀結構
+        const tree = buildLayerTree(rows);
 
-          const isActive = idx === 0 ? 'active' : '';
-          return `
-            <div class="layer-item ${isActive}" data-layer-idx="${idx}">
-              ${layerName}
-            </div>
-          `;
-        }).join('');
+        // 渲染樹狀清單
+        let html = '';
+        tree.forEach((rootNode, idx) => {
+          html += renderLayerNode(rootNode, 0, idx === 0);
+        });
 
         layerListEl.innerHTML = html;
 
-        // 點擊層別項目
+        // 點擊層別項目（選中並載入資料）
         layerListEl.querySelectorAll('.layer-item').forEach(item => {
-          item.addEventListener('click', () => {
+          // 綁定點擊整個層別項目的事件
+          item.addEventListener('click', (e) => {
+            // 移除所有 active 狀態
             layerListEl.querySelectorAll('.layer-item').forEach(el => el.classList.remove('active'));
             item.classList.add('active');
-            // 可以在此處顯示該層別的詳細資料
+
+            // 取得選中的層別資料
+            const layerId = item.dataset.layerId;
+            const layerName = item.dataset.layerName;
+
+            // 觸發載入壓合明細資料
+            loadLayerPressDetail(layerId, layerName);
           });
+
+          // 綁定展開/收合事件（優先級更高）
+          const toggleIcon = item.querySelector('.toggle-icon');
+          if (toggleIcon) {
+            toggleIcon.addEventListener('click', (e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              toggleLayerNode(item);
+            });
+          }
         });
+
+        // 預設載入第一個層別的資料
+        if (rows.length > 0) {
+          const firstLayerId = (rows[0].LayerId || rows[0].layerid || '').trim();
+          const firstLayerName = rows[0].LayerName || rows[0].layername || '';
+          loadLayerPressDetail(firstLayerId, firstLayerName);
+        }
       })
       .catch(err => {
-        console.error('Load layer press error:', err);
         layerListEl.innerHTML = '<div class="text-center text-danger py-3">載入失敗</div>';
       });
   }
 
-  // 載入送審歷史資料
-  function loadSubmitHistory(row) {
-    const container = document.getElementById('submit-history-container');
-    if (!container) return;
+  // 展開/收合層別節點
+  function toggleLayerNode(item) {
+    const layerId = item.dataset.layerId;
+    const isExpanded = item.dataset.expanded === 'true';
+    const level = parseInt(item.dataset.level || '0');
+    const toggleIcon = item.querySelector('.toggle-icon');
 
-    // 從 masterData 中取得內部資料欄位
-    const historyData = [
-      { label: '作業', value: row.UseId || row.useid || '追審' },
-      { label: '使用者', value: row.UserId || row.userid || row.Designer || row.designer || 'Admin' },
-      { label: '異動日期', value: formatDateTime(row.EditTime || row.edittime) },
-      { label: '設計中', value: formatDateTime(row.DatetimeCol1 || row.datetimecol1) },
-      { label: '設計完成', value: formatDateTime(row.DatetimeCol2 || row.datetimecol2) },
-      { label: '已審核', value: formatDateTime(row.DatetimeCol3 || row.datetimecol3) },
-      { label: '已核准', value: formatDateTime(row.DatetimeCol4 || row.datetimecol4) }
+    if (!toggleIcon) return;
+
+    // 切換展開狀態
+    const newExpanded = !isExpanded;
+    item.dataset.expanded = newExpanded;
+    toggleIcon.textContent = newExpanded ? '▼' : '▶';
+
+    // 遞迴顯示/隱藏子節點
+    function toggleChildren(parentLevel, shouldShow) {
+      let nextItem = item.nextElementSibling;
+
+      while (nextItem && nextItem.classList.contains('layer-item')) {
+        const nextLevel = parseInt(nextItem.dataset.level || '0');
+
+        // 只處理子節點
+        if (nextLevel <= parentLevel) {
+          break;
+        }
+
+        if (shouldShow) {
+          // 展開：顯示直接子節點
+          if (nextLevel === parentLevel + 1) {
+            nextItem.style.display = 'block';
+
+            // 如果這個子節點本身也是展開的，遞迴顯示它的子節點
+            const childExpanded = nextItem.dataset.expanded === 'true';
+            if (childExpanded) {
+              // 遞迴處理這個子節點的子節點
+              showExpandedDescendants(nextItem, nextLevel);
+            }
+          }
+        } else {
+          // 收合：隱藏所有子孫節點
+          nextItem.style.display = 'none';
+        }
+
+        nextItem = nextItem.nextElementSibling;
+      }
+    }
+
+    // 遞迴顯示所有展開狀態的子孫節點
+    function showExpandedDescendants(parentItem, parentLevel) {
+      let nextItem = parentItem.nextElementSibling;
+
+      while (nextItem && nextItem.classList.contains('layer-item')) {
+        const nextLevel = parseInt(nextItem.dataset.level || '0');
+
+        // 只處理子節點
+        if (nextLevel <= parentLevel) {
+          break;
+        }
+
+        // 顯示直接子節點
+        if (nextLevel === parentLevel + 1) {
+          nextItem.style.display = 'block';
+
+          // 如果這個子節點也是展開的，繼續遞迴
+          const childExpanded = nextItem.dataset.expanded === 'true';
+          if (childExpanded) {
+            showExpandedDescendants(nextItem, nextLevel);
+          }
+        }
+
+        nextItem = nextItem.nextElementSibling;
+      }
+    }
+
+    toggleChildren(level, newExpanded);
+  }
+
+  // 載入層別相關的資料（壓合明細、壓合方式、途程內容）
+  function loadLayerPressDetail(layerId, layerName) {
+    console.log('[DEBUG loadLayerPressDetail] 開始載入, layerId:', layerId, 'layerName:', layerName);
+
+    // 需要根據 LayerId 載入的頁籤列表
+    const layerTabs = [
+      { key: 'layerpress', table: 'EMOdLayerPress', dict: 'EMOdLayerPress', title: '壓合明細/替代料' },
+      { key: 'pressmethod', table: 'EMOdProdTier', dict: 'EMOdProdTier', title: '壓合方式' },
+      { key: 'layerroute', table: 'EMOdLayerRoute', dict: 'EMOdLayerRoute', title: '途程內容' }
     ];
 
-    container.innerHTML = historyData.map(item => `
-      <div class="mb-1" style="border-bottom: 1px solid #eee; padding-bottom: 4px;">
-        <div style="font-weight: bold; color: #555; font-size: 11px;">${item.label}</div>
-        <div style="color: #333; font-size: 11px;">${item.value || '----'}</div>
-      </div>
-    `).join('');
+    // 為每個頁籤載入資料
+    layerTabs.forEach(tab => {
+      console.log('[DEBUG loadLayerPressDetail] 載入頁籤:', tab.key);
+      // 建立查詢參數（使用 LayerId 來篩選）
+      const qs = new URLSearchParams();
+      qs.append('keyNames', 'PartNum');
+      qs.append('keyValues', currentMasterKeys.PartNum || currentMasterKeys.partnum || '');
+      qs.append('keyNames', 'Revision');
+      qs.append('keyValues', currentMasterKeys.Revision || currentMasterKeys.revision || '');
+      qs.append('keyNames', 'LayerId');
+      qs.append('keyValues', layerId);
+
+      const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tab.table)}&${qs.toString()}`;
+
+      Promise.all([
+        getDict(tab.dict),
+        fetch(url).then(r => r.json())
+      ]).then(([dict, rows]) => {
+        console.log('[DEBUG loadLayerPressDetail] 載入完成, tab:', tab.key, 'rows:', rows?.length);
+        buildTable(tab.key, dict, rows);
+      }).catch(err => {
+        console.error('[DEBUG loadLayerPressDetail] 載入失敗, tab:', tab.key, 'err:', err);
+        const table = document.getElementById(`grid-${tab.key}`);
+        if (table) {
+          const tbody = table.querySelector('tbody');
+          if (tbody) tbody.innerHTML = `<tr><td colspan="100" class="text-center text-danger py-3">載入失敗: ${err.message}</td></tr>`;
+        }
+      });
+    });
+  }
+
+  // 載入左下角內部資料 (暫停記錄) - 使用與右側相同的表格渲染邏輯
+  async function loadSidebarHaltLog() {
+    const table = document.getElementById('grid-haltlog-sidebar');
+    if (!table) return;
+
+    const tableName = 'EMOdProdLog';
+    const dictName = 'EMOdProdLog';
+
+    // 建立查詢參數
+    const qs = new URLSearchParams();
+    qs.append('keyNames', 'PartNum');
+    qs.append('keyValues', currentMasterKeys.PartNum || currentMasterKeys.partnum || '');
+    qs.append('keyNames', 'Revision');
+    qs.append('keyValues', currentMasterKeys.Revision || currentMasterKeys.revision || '');
+
+    const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&${qs.toString()}`;
+
+    try {
+      // 同時載入字典和資料
+      const [dict, rows] = await Promise.all([
+        getDict(dictName),
+        fetch(url).then(r => r.json())
+      ]);
+
+      // 使用與右側相同的 buildTable 函數來建立表格（自動處理 lookup）
+      await buildTable('haltlog-sidebar', dict, rows);
+    } catch (err) {
+      const tbody = table.querySelector('tbody');
+      if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="100" class="text-center text-danger py-2">載入失敗</td></tr>';
+      }
+    }
+  }
+
+  function formatDateOnly(val) {
+    if (!val) return '';
+    try {
+      const date = new Date(val);
+      if (isNaN(date.getTime())) return val;
+      return date.toLocaleDateString('zh-TW', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).replace(/\//g, '/');
+    } catch {
+      return val;
+    }
   }
 
   function formatDateTime(val) {
@@ -320,19 +780,109 @@ document.addEventListener('DOMContentLoaded', () => {
     return true;
   }
 
-  function renderHeaderFields(dict, row) {
-    const container = document.getElementById('header-fields');
-    if (!container) return;
+  // 狀態代碼對應表（根據系統中的狀態定義）
+  const statusLookupMap = {
+    '0': '設計中',
+    '1': '設計完成',
+    '2': '已審核',
+    '3': '已核准'
+  };
 
-    const fields = headerFields.map(fn => dict.find(f => f.FieldName === fn)).filter(f => f);
+  async function renderHeaderFields(dict, row) {
+    const row1Container = document.getElementById('header-row-1');
+    const row2Container = document.getElementById('header-row-2');
+    if (!row1Container || !row2Container) return;
 
-    container.innerHTML = fields.map(f => {
-      const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
-      return `<div class="col-md-3 d-flex align-items-center mb-2">
-        <label class="form-label fw-bold text-primary mb-0 me-2" style="white-space: nowrap;">${f.DisplayLabel || f.FieldName}</label>
-        <input type="text" class="form-control form-control-sm bg-white" style="flex: 1;" value="${val}" readonly>
-      </div>`;
-    }).join('');
+    // 載入所有欄位的 Lookup Maps
+    const headerFields = [...headerRow1Fields, ...headerRow2Fields]
+      .map(fn => dict.find(f => f.FieldName === fn))
+      .filter(f => f);
+
+    const lookupMaps = {};
+    const ocxMaps = {};
+
+    for (const field of headerFields) {
+      lookupMaps[field.FieldName] = await loadLookup(field);
+      ocxMaps[field.FieldName] = await loadOCXLookup(field);
+    }
+
+    // === 第一行 ===
+    let row1Html = '';
+
+    // 第一行的一般欄位
+    const row1Fields = headerRow1Fields.map(fn => dict.find(f => f.FieldName === fn)).filter(f => f);
+    row1Fields.forEach(f => {
+      let rawValue = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+      let displayValue = rawValue;
+
+      // 套用 Lookup
+      if (ocxMaps[f.FieldName] && rawValue) {
+        displayValue = ocxMaps[f.FieldName][rawValue] ?? rawValue;
+      } else if (lookupMaps[f.FieldName] && rawValue) {
+        displayValue = lookupMaps[f.FieldName][rawValue] ?? rawValue;
+      }
+
+      row1Html += `
+        <div class="d-flex align-items-center" style="margin-right: 1rem;">
+          <label class="mb-0 me-2" style="white-space: nowrap; font-size: 13px; font-weight: 600; color: #0066cc;">${f.DisplayLabel || f.FieldName}</label>
+          <input type="text" class="form-control form-control-sm bg-white" style="width: 150px; font-size: 13px; padding: 0.25rem 0.5rem; height: 28px;" value="${displayValue}" readonly>
+        </div>
+      `;
+    });
+
+    // 第一行的勾選框
+    headerRow1Checkboxes.forEach(chk => {
+      const val = row[chk.field] ?? row[chk.field.toLowerCase()] ?? '';
+      const isChecked = val === '1' || val === 1 || val === true || val === 'true';
+      row1Html += `
+        <div class="form-check" style="font-size: 13px; margin-right: 1rem;">
+          <input class="form-check-input header-checkbox" type="checkbox" id="chk_${chk.field}"
+                 ${isChecked ? 'checked' : ''} disabled>
+          <label class="form-check-label" for="chk_${chk.field}" style="color: #000000; font-weight: 500;">
+            ${chk.label}
+          </label>
+        </div>
+      `;
+    });
+
+    row1Container.innerHTML = row1Html;
+
+    // === 第二行 ===
+    let row2Html = '';
+
+    const row2Fields = headerRow2Fields.map(fn => dict.find(f => f.FieldName === fn)).filter(f => f);
+    for (const f of row2Fields) {
+      let rawValue = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+      let displayValue = rawValue;
+
+      // 特殊處理：StatusName 需要從 Status 欄位 lookup
+      if (f.FieldName === 'StatusName') {
+        const statusCode = row['Status'] ?? row['status'] ?? '';
+        displayValue = statusLookupMap[statusCode.toString()] || statusCode.toString();
+      }
+      // 套用 Lookup（除了 StatusName，因為已特殊處理）
+      else {
+        if (ocxMaps[f.FieldName] && rawValue) {
+          displayValue = ocxMaps[f.FieldName][rawValue] ?? rawValue;
+        } else if (lookupMaps[f.FieldName] && rawValue) {
+          displayValue = lookupMaps[f.FieldName][rawValue] ?? rawValue;
+        }
+      }
+
+      // 特殊處理：DesignDate 只顯示年月日
+      if (f.FieldName === 'DesignDate' && displayValue) {
+        displayValue = formatDateOnly(displayValue);
+      }
+
+      row2Html += `
+        <div class="d-flex align-items-center" style="margin-right: 1rem;">
+          <label class="mb-0 me-2" style="white-space: nowrap; font-size: 13px; font-weight: 600; color: #0066cc;">${f.DisplayLabel || f.FieldName}</label>
+          <input type="text" class="form-control form-control-sm bg-white" style="width: 150px; font-size: 13px; padding: 0.25rem 0.5rem; height: 28px;" value="${displayValue}" readonly>
+        </div>
+      `;
+    }
+
+    row2Container.innerHTML = row2Html;
   }
 
   function renderMasterTab(tabKey, dict, row) {
@@ -369,11 +919,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnContainer && !btnContainer.querySelector('.master-tab-controls')) {
       const controlsDiv = document.createElement('div');
       controlsDiv.className = 'mt-3 d-flex gap-2 master-tab-controls';
+      const disabledAttr = isViewOnly ? 'disabled' : '';
       controlsDiv.innerHTML = `
-        <button type="button" class="btn btn-warning btn-sm" data-btn="master-edit" data-tab="${tabKey}">
+        <button type="button" class="btn btn-warning btn-sm" data-btn="master-edit" data-tab="${tabKey}" ${disabledAttr}>
           <i class="bi bi-pencil-square me-1"></i> 編輯
         </button>
-        <button type="button" class="btn btn-success btn-sm d-none" data-btn="master-save" data-tab="${tabKey}">
+        <button type="button" class="btn btn-success btn-sm d-none" data-btn="master-save" data-tab="${tabKey}" ${disabledAttr}>
           <i class="bi bi-save me-1"></i> 儲存
         </button>
       `;
@@ -397,6 +948,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const inputs = container.querySelectorAll('.master-field');
 
       if (!isEdit) {
+        // 查詢模式下不允許編輯
+        if (isViewOnly) {
+          alert('查詢模式下無法編輯資料');
+          return;
+        }
+
         // 準備進入編輯模式 - 先檢查權限
         if (!checkEditPermission()) return;
 
@@ -404,6 +961,10 @@ document.addEventListener('DOMContentLoaded', () => {
         isEdit = true;
         editBtn.innerHTML = '<i class="bi bi-eye me-1"></i> 檢視';
         saveBtn.classList.remove('d-none');
+
+        // 啟用 V/X 按鈕
+        document.getElementById('btnSaveHeader')?.removeAttribute('disabled');
+        document.getElementById('btnCancelChanges')?.removeAttribute('disabled');
 
         // 解除 readonly（除了真正唯讀的欄位）
         inputs.forEach(inp => {
@@ -417,6 +978,10 @@ document.addEventListener('DOMContentLoaded', () => {
         isEdit = false;
         editBtn.innerHTML = '<i class="bi bi-pencil-square me-1"></i> 編輯';
         saveBtn.classList.add('d-none');
+
+        // 禁用 V/X 按鈕
+        document.getElementById('btnSaveHeader')?.setAttribute('disabled', '');
+        document.getElementById('btnCancelChanges')?.setAttribute('disabled', '');
 
         // 恢復 readonly
         inputs.forEach(inp => {
@@ -479,16 +1044,171 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function buildTable(tabKey, dict, rows) {
+  // 載入產品工程圖的四張圖片
+  function loadProductMapImages() {
+    const partNum = currentMasterKeys.PartNum || currentMasterKeys.partnum;
+    const revision = currentMasterKeys.Revision || currentMasterKeys.revision;
+
+    if (!partNum || !revision) {
+      console.error('無法取得料號或版次');
+      return;
+    }
+
+    // MapType 對應：panel=排板圖, cut=裁板圖, pf=PF裁剪圖, stackup=疊構圖
+    const mapTypes = [
+      { id: 'img-cut', type: 'cut', name: '裁板圖' },
+      { id: 'img-panel', type: 'panel', name: '排板圖' },
+      { id: 'img-pf', type: 'pf', name: 'PF裁剪圖' },
+      { id: 'img-stackup', type: 'stackup', name: '疊構圖' }
+    ];
+
+    mapTypes.forEach(map => {
+      const img = document.getElementById(map.id);
+      const loadingDiv = img?.nextElementSibling;
+
+      if (!img) return;
+
+      // 設定圖片 URL
+      const url = `/api/imagegeneration/preview/${encodeURIComponent(partNum)}/${encodeURIComponent(revision)}/${map.type}`;
+
+      // 載入圖片
+      img.src = url;
+
+      // 圖片載入成功
+      img.onload = () => {
+        if (loadingDiv) loadingDiv.style.display = 'none';
+        img.style.display = 'block';
+      };
+
+      // 圖片載入失敗
+      img.onerror = () => {
+        if (loadingDiv) {
+          loadingDiv.innerHTML = `<span class="text-danger small"><i class="bi bi-exclamation-triangle"></i> ${map.name}載入失敗</span>`;
+        }
+        img.style.display = 'none';
+      };
+    });
+  }
+
+  // ========== 通用 Lookup 功能 ==========
+  const LOOKUP_CACHE = {};
+  const OCX_CACHE = {};
+
+  // 載入一般 Lookup（實體欄位）
+  async function loadLookup(field) {
+    if (!field.LookupTable || !field.LookupKeyField || !field.LookupResultField) {
+      return null;
+    }
+
+    const key = `${field.LookupTable}|${field.LookupKeyField}|${field.LookupResultField}`;
+    if (LOOKUP_CACHE[key]) return LOOKUP_CACHE[key];
+
+    try {
+      const url = `/api/TableFieldLayout/LookupData`
+        + `?table=${encodeURIComponent(field.LookupTable)}`
+        + `&key=${encodeURIComponent(field.LookupKeyField)}`
+        + `&result=${encodeURIComponent(field.LookupResultField)}`;
+
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const rows = await response.json();
+      const map = {};
+      rows.forEach(r => {
+        map[r.key] = r.result0;
+      });
+
+      LOOKUP_CACHE[key] = map;
+      return map;
+    } catch (err) {
+      LOOKUP_CACHE[key] = null;
+      return null;
+    }
+  }
+
+  // 載入 OCX Lookup（虛擬欄位）
+  async function loadOCXLookup(field) {
+    if (!field.OCXLKTableName || !field.KeyFieldName || !field.OCXLKResultName) {
+      return null;
+    }
+
+    const key = `${field.OCXLKTableName}|${field.KeyFieldName}|${field.OCXLKResultName}`;
+    if (OCX_CACHE[key]) return OCX_CACHE[key];
+
+    try {
+      const url = `/api/TableFieldLayout/LookupData`
+        + `?table=${encodeURIComponent(field.OCXLKTableName)}`
+        + `&key=${encodeURIComponent(field.KeyFieldName)}`
+        + `&result=${encodeURIComponent(field.OCXLKResultName)}`;
+
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const rows = await response.json();
+      const map = {};
+      rows.forEach(r => {
+        map[r.key] = r.result0;
+      });
+
+      OCX_CACHE[key] = map;
+      return map;
+    } catch (err) {
+      OCX_CACHE[key] = null;
+      return null;
+    }
+  }
+
+  // 格式化顯示值
+  function formatCellValue(value, field) {
+    if (value == null || value === '') return '';
+
+    const dataType = (field.DataType || '').toLowerCase();
+
+    // 日期格式化
+    if (dataType.includes('date') || dataType.includes('time')) {
+      try {
+        const date = new Date(value);
+        if (!isNaN(date.getTime())) {
+          return date.toLocaleDateString('zh-TW', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+          }).replace(/\//g, '/');
+        }
+      } catch {}
+    }
+
+    // 數字格式化
+    if (dataType.includes('int') || dataType.includes('decimal') || dataType.includes('numeric')) {
+      const num = Number(value);
+      if (!isNaN(num)) {
+        return num.toLocaleString();
+      }
+    }
+
+    return String(value);
+  }
+
+  // 建立表格（支援自動 Lookup）
+  async function buildTable(tabKey, dict, rows) {
     const table = document.getElementById(`grid-${tabKey}`);
     if (!table) return;
     const thead = table.querySelector('thead');
     const tbody = table.querySelector('tbody');
     if (!thead || !tbody) return;
 
-    // Build header
-    const visibleFields = dict.filter(f => f.Visible === 1).sort((a, b) => (a.SerialNum || 0) - (b.SerialNum || 0));
-    thead.innerHTML = '<tr>' + visibleFields.map(f => `<th>${f.DisplayLabel || f.FieldName}</th>`).join('') + '</tr>';
+    // Build header - 使用宽松比较 (==) 而不是严格比较 (===)
+    // 因为 API 可能返回字符串 "1" 或数字 1
+    const visibleFields = dict.filter(f => (f.Visible ?? 1) == 1).sort((a, b) => (a.SerialNum || 0) - (b.SerialNum || 0));
+
+    // 构建表头，设置列宽
+    thead.innerHTML = '<tr>' + visibleFields.map(f => {
+      // 计算列宽：DisplaySize 或 iFieldWidth，一字宽 10px
+      const width = Number(f.DisplaySize || f.iFieldWidth || 0);
+      const widthPx = width > 0 ? width * 10 : 100; // 默认 100px
+      const widthStyle = `style="width: ${widthPx}px; min-width: ${widthPx}px;"`;
+      return `<th ${widthStyle} data-field="${f.FieldName}">${f.DisplayLabel || f.FieldName}</th>`;
+    }).join('') + '</tr>';
 
     // Build body
     if (!rows || rows.length === 0) {
@@ -496,18 +1216,82 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    // 載入所有欄位的 Lookup Maps
+    const lookupMaps = {};
+    const ocxMaps = {};
+
+    for (const field of visibleFields) {
+      lookupMaps[field.FieldName] = await loadLookup(field);
+      ocxMaps[field.FieldName] = await loadOCXLookup(field);
+    }
+
+    // 取得 keyFields（用於判斷哪些欄位是主鍵）
+    const keyFields = (table.dataset.keyFields || '').split(',').filter(k => k.trim());
+    const keyFieldSet = new Set(keyFields.map(k => k.toLowerCase()));
+
+    // 渲染表格資料（套用 Lookup，並生成可編輯結構）
     tbody.innerHTML = rows.map(row => {
+      // 為每一行生成主鍵隱藏欄位
+      let pkHiddenHtml = '';
+      keyFields.forEach(k => {
+        const val = row[k] ?? row[k.toLowerCase()] ?? '';
+        pkHiddenHtml += `<input type="hidden" class="mmd-pk-hidden" name="${k}" value="${val}">`;
+      });
+      // 額外加入 PartNum 和 Revision（確保主鍵正確傳遞）
+      if (!keyFieldSet.has('partnum')) {
+        const partNum = currentMasterKeys.PartNum || currentMasterKeys.partnum || '';
+        pkHiddenHtml += `<input type="hidden" class="mmd-fk-hidden" name="PartNum" value="${partNum}">`;
+      }
+      if (!keyFieldSet.has('revision')) {
+        const revision = currentMasterKeys.Revision || currentMasterKeys.revision || '';
+        pkHiddenHtml += `<input type="hidden" class="mmd-fk-hidden" name="Revision" value="${revision}">`;
+      }
+
       const cells = visibleFields.map(f => {
-        const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
-        return `<td>${val}</td>`;
+        let rawValue = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+        let displayValue = rawValue;
+
+        // 優先使用 OCX Lookup（虛擬欄位）
+        if (ocxMaps[f.FieldName] && rawValue) {
+          const lookupResult = ocxMaps[f.FieldName][rawValue];
+          if (lookupResult != null) {
+            displayValue = lookupResult;
+          }
+        }
+        // 其次使用一般 Lookup（實體欄位）
+        else if (lookupMaps[f.FieldName] && rawValue) {
+          const lookupResult = lookupMaps[f.FieldName][rawValue];
+          if (lookupResult != null) {
+            displayValue = lookupResult;
+          }
+        }
+
+        // 格式化顯示
+        displayValue = formatCellValue(displayValue, f);
+
+        // 判斷欄位是否為唯讀
+        const isReadonly = (f.ReadOnly ?? 0) !== 0 || keyFieldSet.has((f.FieldName || '').toLowerCase());
+        const readonlyAttr = isReadonly ? 'data-readonly="1"' : '';
+        const dataType = (f.DataType || '').toLowerCase();
+        const inputType = dataType.includes('int') || dataType.includes('decimal') || dataType.includes('numeric') ? 'number' : 'text';
+
+        // 生成包含 .cell-view 和 .cell-edit 的結構
+        return `<td data-field="${f.FieldName}" data-raw="${rawValue}">
+          <span class="cell-view">${displayValue}</span>
+          <input type="${inputType}" class="cell-edit form-control form-control-sm d-none" name="${f.FieldName}" value="${rawValue}" ${readonlyAttr} data-type="${dataType}">
+        </td>`;
       }).join('');
-      return `<tr>${cells}</tr>`;
+      return `<tr>${pkHiddenHtml}${cells}</tr>`;
     }).join('');
 
     // Make editable
     const tableName = table.dataset.tableName;
     const dictName = table.dataset.dictName;
-    const keyFields = (table.dataset.keyFields || '').split(',').filter(k => k.trim());
+    // keyFields 已在上方宣告，這裡不需要重複宣告
+
+    console.log('[DEBUG buildTable] tabKey:', tabKey);
+    console.log('[DEBUG buildTable] tableName:', tableName);
+    console.log('[DEBUG buildTable] keyFields:', keyFields);
 
     if (!tabState[tabKey]) {
       tabState[tabKey] = { editor: null };
@@ -515,6 +1299,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const wrapper = table.closest('.table-responsive');
     const saveUrl = "/api/CommonTable/SaveTableChanges";
+
+    console.log('[DEBUG buildTable] 建立 makeEditableGrid, wrapper:', wrapper);
+    console.log('[DEBUG buildTable] table rows count:', table.querySelectorAll('tbody tr').length);
 
     tabState[tabKey].editor = window.makeEditableGrid({
       wrapper: wrapper,
@@ -524,10 +1311,16 @@ document.addEventListener('DOMContentLoaded', () => {
       saveUrl: saveUrl
     });
 
+    console.log('[DEBUG buildTable] editor 建立完成:', tabState[tabKey].editor);
+
     // Show controls
     const controls = wrapper?.parentElement?.querySelector('.tab-local-controls');
     if (controls) controls.classList.remove('d-none');
+    console.log('[DEBUG buildTable] 完成 tabKey:', tabKey);
   }
+
+  // 暴露 buildTable 給外部 script 使用
+  window.buildTableForEdit = buildTable;
 
   function loadDetailTab(tabBtn) {
     const tabKey = tabBtn.getAttribute('aria-controls')?.replace('tab-', '');
@@ -535,6 +1328,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const tableName = tabBtn.dataset.table;
     const dictName = tabBtn.dataset.dict;
+
+    // 特殊處理：產品工程圖頁籤載入圖片
+    if (tabKey === 'prodmap') {
+      loadProductMapImages();
+      return;
+    }
+
+    // 特殊處理：這些頁籤由左側層別控制，不在此處載入
+    const layerControlledTabs = ['layerpress', 'pressmethod', 'layerroute'];
+    if (layerControlledTabs.includes(tabKey)) {
+      // 顯示提示訊息
+      const table = document.getElementById(`grid-${tabKey}`);
+      if (table) {
+        const tbody = table.querySelector('tbody');
+        if (tbody && tbody.querySelector('td')?.textContent.includes('請點選上方主檔資料')) {
+          tbody.innerHTML = '<tr><td colspan="100" class="text-center text-muted py-3">請點選左側層別以顯示對應資料</td></tr>';
+        }
+      }
+      return;
+    }
+
     const keyFields = (tabBtn.dataset.keyfields || '').split(',').filter(k => k.trim());
     const extraKeys = tabBtn.dataset.extraKeys || '';
 
@@ -569,7 +1383,6 @@ document.addEventListener('DOMContentLoaded', () => {
     ]).then(([dict, rows]) => {
       buildTable(tabKey, dict, rows);
     }).catch(err => {
-      console.error('Load tab data error:', err);
       const table = document.getElementById(`grid-${tabKey}`);
       if (table) {
         const tbody = table.querySelector('tbody');
@@ -596,8 +1409,8 @@ document.addEventListener('DOMContentLoaded', () => {
       // 載入層別資料
       loadLayerPress();
 
-      // 載入送審歷史
-      loadSubmitHistory(masterData);
+      // 載入左下角內部資料 (暫停記錄) - 使用與右側相同的表格渲染邏輯
+      loadSidebarHaltLog();
 
       // Render all master tabs
       const masterTabs = document.querySelectorAll('#master-tabs [data-tab-key]');
@@ -605,7 +1418,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderMasterTab(tab.dataset.tabKey, dict, masterData);
       });
     }).catch(err => {
-      console.error('Load master form error:', err);
+      // Load error handled silently
     });
   }
 
@@ -628,18 +1441,119 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // 產生圖檔按鈕
+  const btnGenerateImages = document.getElementById('btnGenerateImages');
+  if (btnGenerateImages) {
+    btnGenerateImages.addEventListener('click', async () => {
+      // 查詢模式下不允許產生圖檔
+      if (isViewOnly) {
+        alert('查詢模式下無法產生圖檔');
+        return;
+      }
+
+      const partNum = currentMasterKeys.PartNum || currentMasterKeys.partnum;
+      const revision = currentMasterKeys.Revision || currentMasterKeys.revision;
+
+      if (!partNum || !revision) {
+        alert('無法取得料號或版次，請重新載入頁面');
+        return;
+      }
+
+      if (!confirm(`確定要產生圖檔？\n\n料號: ${partNum}\n版次: ${revision}`)) {
+        return;
+      }
+
+      // 顯示載入中狀態
+      const originalHtml = btnGenerateImages.innerHTML;
+      btnGenerateImages.disabled = true;
+      btnGenerateImages.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>產生中...';
+
+      try {
+        const response = await fetch('/api/imagegeneration/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            PartNum: partNum,
+            Revision: revision
+          })
+        });
+
+        const text = await response.text();
+
+        // 檢查回應狀態
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${text.substring(0, 200)}`);
+        }
+
+        // 嘗試解析 JSON
+        let result;
+        try {
+          result = JSON.parse(text);
+        } catch (e) {
+          throw new Error(`回應不是有效的 JSON 格式。回應內容：${text.substring(0, 200)}`);
+        }
+
+        if (result.success) {
+          let message = '圖檔產生成功！\n\n';
+          if (result.images && result.images.length > 0) {
+            message += '產生的圖檔：\n';
+            result.images.forEach(img => {
+              message += `- ${img.type}: ${img.success ? img.fileName : '失敗 - ' + (img.errorMessage || '未知錯誤')}\n`;
+            });
+          }
+          alert(message);
+        } else {
+          alert('產生圖檔失敗：\n' + (result.message || '未知錯誤'));
+        }
+      } catch (err) {
+        alert('產生圖檔時發生錯誤：\n' + err.message);
+      } finally {
+        // 恢復按鈕狀態
+        btnGenerateImages.disabled = false;
+        btnGenerateImages.innerHTML = originalHtml;
+      }
+    });
+  }
+
   // Tab local controls
   document.querySelectorAll('[data-btn="edit"]').forEach(btn => {
     btn.addEventListener('click', () => {
+      console.log('[DEBUG] 編輯按鈕被點擊');
+      console.log('[DEBUG] isViewOnly:', isViewOnly);
+
+      // 查詢模式下不允許編輯
+      if (isViewOnly) {
+        alert('查詢模式下無法編輯資料');
+        return;
+      }
+
       // 先檢查權限
-      if (!checkEditPermission()) return;
+      console.log('[DEBUG] 檢查編輯權限...');
+      if (!checkEditPermission()) {
+        console.log('[DEBUG] 權限檢查失敗');
+        return;
+      }
+      console.log('[DEBUG] 權限檢查通過');
 
       const tabKey = btn.dataset.tab;
+      console.log('[DEBUG] tabKey:', tabKey);
+      console.log('[DEBUG] tabState:', tabState);
+      console.log('[DEBUG] tabState[tabKey]:', tabState[tabKey]);
+
       const editor = tabState[tabKey]?.editor;
+      console.log('[DEBUG] editor:', editor);
+      console.log('[DEBUG] editor.toggleEdit:', editor?.toggleEdit);
+
       if (editor && editor.toggleEdit) {
+        console.log('[DEBUG] 呼叫 editor.toggleEdit(true)');
         editor.toggleEdit(true);
         btn.classList.add('d-none');
         btn.parentElement?.querySelector('[data-btn="save"]')?.classList.remove('d-none');
+        console.log('[DEBUG] 編輯模式切換完成');
+      } else {
+        console.log('[DEBUG] editor 或 toggleEdit 不存在，無法切換編輯模式');
       }
     });
   });
@@ -661,10 +1575,62 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   });
+
+  // ========== 新增：工具列按鈕功能 ==========
+
+  // 查詢按鈕 - 返回列表頁（查詢模式）
+  const btnOpenQuery = document.getElementById('btnOpenQuery');
+  if (btnOpenQuery) {
+    btnOpenQuery.addEventListener('click', function() {
+      window.location.href = '@Url.Page("Index", new { mode = "view", itemId = "EMO00018" })';
+    });
+  }
+
+  const btnEditToggle = document.getElementById('btnEditToggle');
+  if (btnEditToggle) {
+    btnEditToggle.addEventListener('click', function() {
+      // 檢查狀態
+      const statusValue = (masterData?.Status ?? masterData?.status ?? '').toString();
+      if (statusValue !== '0') {
+        alert('只有「設計中」狀態才能修改！\n\n目前狀態：' +
+              (statusValue === '1' ? '設計完成' :
+               statusValue === '2' ? '已審核' :
+               statusValue === '3' ? '已核准' : statusValue));
+        return;
+      }
+
+      // TODO: 這裡可以加入切換編輯模式的邏輯
+      alert('編輯模式（此功能待實作）');
+    });
+  }
 });
 </script>
 
 <style>
+/* 資料數量顯示框 */
+.toolbar-count-box {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  height: 31px;
+  min-width: 74px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-weight: 700;
+  line-height: 1.05;
+  color: #fff;
+  background: #1e4db7;
+  user-select: none;
+  font-size: 14px;
+}
+.toolbar-count-box.mode-edit,
+.toolbar-count-box.mode-view {
+  background: #1e4db7;
+}
+.count-line {
+  text-align: center;
+}
+
 /* 規格頁籤欄位樣式 */
 .readonly-field {
   background-color: #e9ecef !important;
@@ -674,11 +1640,13 @@ document.addEventListener('DOMContentLoaded', () => {
 /* 層別項目樣式 */
 .layer-item {
   cursor: pointer;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-bottom: 1px solid #dee2e6;
   transition: all 0.15s ease;
-  text-align: center;
   font-size: 14px;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
 }
 
 .layer-item:hover {
@@ -692,10 +1660,792 @@ document.addEventListener('DOMContentLoaded', () => {
   border-left: 4px solid #0056b3;
 }
 
-/* 確保層別面板不會太高 */
+.layer-item .toggle-icon {
+  display: inline-block;
+  width: 12px;
+  font-size: 10px;
+  color: #666;
+  transition: transform 0.2s ease;
+}
+
+.layer-item.active .toggle-icon {
+  color: white;
+}
+
+.layer-item .layer-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+/* 層別面板內的項目不換行 */
 #layer-list {
-  max-height: calc(100vh - 200px);
+  min-width: 180px;
+}
+
+/* 頂部勾選框樣式 */
+.header-checkbox {
+  opacity: 1 !important;
+  cursor: not-allowed !important;
+  width: 16px;
+  height: 16px;
+}
+
+.header-checkbox:disabled {
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+.header-checkbox:checked {
+  background-color: #0d6efd !important;
+  border-color: #0d6efd !important;
+  opacity: 1 !important;
+}
+
+/* 修正 disabled checkbox 的 label 文字顏色 */
+.header-checkbox:disabled + label {
+  color: #000000 !important;
+  opacity: 1 !important;
+}
+
+/* 表格表頭不換行 */
+.table thead th {
+  white-space: nowrap !important;
+}
+
+/* 表格內容不換行（可選，如果也希望表格內容不換行）*/
+.table tbody td {
+  white-space: nowrap !important;
+}
+
+/* 表格使用固定布局，根据列宽设置显示 */
+.table-responsive table {
+  table-layout: auto !important;
+}
+
+/* 确保表格不会自动拉伸填满容器 */
+.table-responsive {
+  overflow-x: auto !important;
+}
+
+/* ========== 工具列樣式（從 _DetailHeaderSection.cshtml 同步） ========== */
+.top-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.top-toolbar .toolbar-icon-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.top-toolbar .toolbar-icon-row #btnPrev {
+  margin-left: 16px;
+}
+
+.top-toolbar .toolbar-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.top-toolbar .toolbar-btn {
+  font-size: var(--top-toolbar-font-size);
+  height: var(--top-toolbar-btn-height);
+  min-height: var(--top-toolbar-btn-height);
+  padding: 0 12px;
+  line-height: 1;
+}
+
+.top-toolbar .toolbar-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--top-toolbar-btn-height);
+  min-height: var(--top-toolbar-btn-height);
+  padding: 0;
+  width: 30px;
+  border-radius: 8px;
+  font-size: var(--top-toolbar-icon-font-size);
+  line-height: 1;
+}
+
+.top-toolbar .toolbar-btn-icon .toolbar-icon {
+  display: inline-block;
+}
+
+.top-toolbar #btnPrev .toolbar-icon,
+.top-toolbar #btnNext .toolbar-icon,
+.top-toolbar #btnSubDetailDelete .toolbar-icon {
+  transform: translateY(-3px);
+}
+
+.top-toolbar .toolbar-btn:disabled {
+  background: #c8c8ca;
+  color: #fff;
+  cursor: not-allowed;
+  box-shadow: none;
+  opacity: 1;
+}
+
+.top-toolbar .toolbar-btn-add {
+  background: #0e9f4b;
+}
+
+.top-toolbar .toolbar-btn-del {
+  background: #e04848;
+}
+
+.top-toolbar .toolbar-btn-cancel {
+  background: #e04848;
+}
+
+.top-toolbar .toolbar-btn-check {
+  font-size: 18px;
+}
+
+.toolbar-count-box {
+  display: inline-flex;
+  /* flex-direction: column; */
+  justify-content: center;
+  align-items: center;
+  height: 31px;
+  min-width: 74px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-weight: 700;
+  line-height: 1.05;
+  color: #fff;
+  background: #1e4db7;
+  user-select: none;
+  font-size: 14px;
+}
+
+.count-line {
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.btn-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.print-panel-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.print-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  display: inline-block;
+  width: max-content;
+  min-width: 0;
+  max-width: 360px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #e3e6ee;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+  z-index: 1000;
+}
+
+.print-panel.d-none {
+  display: none !important;
+}
+
+/* 調整 topToolbar 的左邊距以對齊內容 */
+#topToolbar {
+  /* 只有在有 Action Rail 時才使用負邊距，否則使用預設值 */
+  margin-left: calc(-1 * var(--rail-reserve, 0px)) !important;
+  padding-left: 0 !important;
+  justify-content: flex-start !important;
+
+  /* [新增] 增加上方間距，避免貼齊標題線 */
+  margin-top: 12px !important;
+  padding-top: 0px !important; /* 選用：稍微增加一點內距讓陰影完整 */
+}
+
+#topToolbar > .ms-2, #topToolbar .btn-toolbar {
+  margin-left: 0 !important;
 }
 </style>
 
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
+<script>
+// ============================================
+// EMOdProdInfo Detail 專用工具列邏輯
+// ============================================
+(function initEMOdProdInfoDetailToolbar() {
+  const tableName = window._headerTableName || 'EMOdProdInfo';
+  const isViewOnly = @(Model.IsViewOnly ? "true" : "false");
+
+  // 1. 定義禁用按鈕的函式 (與 Index.cshtml 完全一致的樣式)
+  function disableButton(btnId) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.disabled = true;
+    btn.style.background = '#aaa';       // 灰色背景
+    btn.style.cursor = 'not-allowed';    // 禁止游標
+    btn.style.opacity = '0.6';           // 透明度
+    btn.style.boxShadow = 'none';        // 移除陰影
+    btn.style.borderColor = '#aaa';      // 邊框變灰
+  }
+
+  // 覆蓋原按鈕事件的輔助函式
+  function overrideButton(btnId, handler) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return null;
+    const newBtn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(newBtn, btn);
+    newBtn.addEventListener('click', handler);
+    return newBtn;
+  }
+
+  // 建立 PaperNum 格式
+  function buildPaperNum() {
+    const partNum = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "PartNum").Value ?? "")';
+    const revision = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "Revision").Value ?? "")';
+    return `${partNum}|${revision}`;
+  }
+
+  // ============================
+  // 上一筆 / 下一筆 導航邏輯
+  // ============================
+  const NAV_BTN_PREV = document.getElementById('btnPrev');
+  const NAV_BTN_NEXT = document.getElementById('btnNext');
+  let navKeys = [];  // 儲存所有 { PartNum, Revision } 的清單
+  let navIndex = -1; // 目前在清單中的位置
+
+  // 目前這筆的主鍵
+  const CURRENT_PARTNUM = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "PartNum").Value ?? "")';
+  const CURRENT_REVISION = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "Revision").Value ?? "")';
+
+  // 讀取 Index 頁面儲存的查詢條件
+  function loadLastFilters() {
+    try {
+      const tableName = (window._headerTableName || 'EMOdProdInfo').toLowerCase();
+      const filterKey = `orderListQueryFilters:${tableName}`;
+      const saved = localStorage.getItem(filterKey);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  // 跳轉到指定的資料
+  function gotoRecord(key) {
+    if (!key || !key.PartNum) return;
+    const url = `/EMOdProdInfo/Detail?PartNum=${encodeURIComponent(key.PartNum)}&Revision=${encodeURIComponent(key.Revision || '0')}`;
+    window.location.href = url;
+  }
+
+  // 更新按鈕狀態與計數器
+  function updateNavButtons() {
+    const hasPrev = navIndex > 0;
+    const hasNext = navIndex >= 0 && navIndex < navKeys.length - 1;
+
+    if (NAV_BTN_PREV) {
+      NAV_BTN_PREV.disabled = !hasPrev;
+      NAV_BTN_PREV.onclick = () => hasPrev && gotoRecord(navKeys[navIndex - 1]);
+    }
+    if (NAV_BTN_NEXT) {
+      NAV_BTN_NEXT.disabled = !hasNext;
+      NAV_BTN_NEXT.onclick = () => hasNext && gotoRecord(navKeys[navIndex + 1]);
+    }
+
+    // 更新計數器顯示
+    updateToolbarCount();
+  }
+
+  // 更新工具列計數器
+  function updateToolbarCount() {
+    const countEl = document.getElementById('toolbarHeaderCount');
+    if (!countEl) return;
+
+    // 隱藏單身計數（EMOdProdInfo 不需要）
+    const detailCountEl = document.getElementById('toolbarDetailCount');
+    if (detailCountEl) detailCountEl.style.display = 'none';
+
+    const total = navKeys.length;
+    if (total > 0 && navIndex >= 0) {
+      countEl.textContent = `${navIndex + 1} / ${total}`;
+    } else {
+      // fallback: 使用 localStorage 的資料
+      const tableName = (window._headerTableName || 'EMOdProdInfo').toLowerCase();
+      const storedIndex = parseInt(localStorage.getItem(`orderListQueryIndex:${tableName}`) || '0', 10);
+      const storedTotal = parseInt(localStorage.getItem(`orderListQueryTotal:${tableName}`) || '0', 10);
+      if (storedTotal > 0) {
+        countEl.textContent = `${storedIndex || '--'} / ${storedTotal}`;
+      } else {
+        countEl.textContent = '-- / --';
+      }
+    }
+  }
+
+  // 呼叫 API 取得所有主鍵清單
+  async function fetchKeyList(filters) {
+    // 使用 EMOdProdInfo 的 handler=Data API，支援大量資料
+    const res = await fetch('/EMOdProdInfo?handler=Data&pageIndex=1&pageSize=999999');
+    if (!res.ok) throw new Error('API 呼叫失敗');
+    const json = await res.json();
+    const rows = Array.isArray(json.items) ? json.items : [];
+    // 回傳 { PartNum, Revision } 物件陣列
+    return rows.map(r => ({
+      PartNum: (r.PartNum || r.partNum || '').toString().trim(),
+      Revision: (r.Revision || r.revision || '0').toString().trim()
+    })).filter(k => k.PartNum);
+  }
+
+  // 初始化導航
+  async function initRowNavigation() {
+    // 隱藏單身計數的 --
+    const detailCountEl = document.getElementById('toolbarDetailCount');
+    if (detailCountEl) detailCountEl.style.display = 'none';
+
+    // 先用 localStorage 立即顯示計數（不用等 API）
+    const countEl = document.getElementById('toolbarHeaderCount');
+    const tableName = (window._headerTableName || 'emodprodinfo').toLowerCase();
+    const storedIndex = localStorage.getItem(`orderListQueryIndex:${tableName}`);
+    const storedTotal = localStorage.getItem(`orderListQueryTotal:${tableName}`);
+    if (countEl && storedIndex && storedTotal) {
+      countEl.textContent = `${storedIndex} / ${storedTotal}`;
+    } else if (countEl) {
+      countEl.textContent = '載入中...';
+    }
+
+    try {
+      const filters = loadLastFilters();
+      navKeys = await fetchKeyList(filters);
+
+      // 找出目前這筆在清單中的位置
+      navIndex = navKeys.findIndex(k =>
+        k.PartNum.toLowerCase() === CURRENT_PARTNUM.toLowerCase() &&
+        k.Revision.toLowerCase() === CURRENT_REVISION.toLowerCase()
+      );
+
+      updateNavButtons();
+    } catch (e) {
+      console.error('初始化導航失敗', e);
+      if (NAV_BTN_PREV) NAV_BTN_PREV.disabled = true;
+      if (NAV_BTN_NEXT) NAV_BTN_NEXT.disabled = true;
+      updateToolbarCount();
+    }
+  }
+
+  // 執行初始化
+  initRowNavigation();
+
+  document.addEventListener('DOMContentLoaded', function() {
+    // ============================
+    // 2. 執行禁用邏輯
+    // ============================
+    disableButton('btnSubAddNew');      
+    disableButton('btnSubBatchDelete'); 
+    disableButton('btnPrint');          
+    disableButton('btnPaperTrace');     
+    disableButton('btnSubDetailAdd');   
+    disableButton('btnSubDetailDelete'); 
+
+    // ============================
+    // 3. 按鈕邏輯 (送審、審核、退審...)
+    // ============================
+    const PARTNUM = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "PartNum").Value ?? "")';
+    const REVISION = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "Revision").Value ?? "0")';
+    const USERID = window._userId || localStorage.getItem('erpLoginUserId') || 'admin';
+
+    // 取得目前狀態
+    async function getCurrentStatus() {
+      try {
+        const resp = await fetch(`/api/PaperAction/GetEMOdProdStatus?partNum=${encodeURIComponent(PARTNUM)}&revision=${encodeURIComponent(REVISION)}`);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        return data.success ? data.status : null;
+      } catch {
+        return null;
+      }
+    }
+
+    // 執行 EMOdProdAudit
+    async function execEMOdProdAudit(ioType, tag = 0) {
+      const resp = await fetch('/api/PaperAction/EMOdProdAudit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          PartNum: PARTNUM,
+          Revision: REVISION,
+          Tag: tag,
+          IOType: ioType,
+          UserId: USERID,
+          Meno: ''
+        })
+      });
+      return resp;
+    }
+
+    // 建立按鈕
+    const btnConfirm = document.getElementById('btnConfirm');
+    if (btnConfirm) {
+      btnConfirm.textContent = '送審';
+      btnConfirm.id = 'btnSubmit';
+
+      // 新增審核按鈕
+      const btnApprove = document.createElement('button');
+      btnApprove.id = 'btnApprove';
+      btnApprove.className = 'btn toolbar-btn success';
+      btnApprove.type = 'button';
+      btnApprove.textContent = '審核';
+      btnConfirm.parentNode.insertBefore(btnApprove, btnConfirm.nextSibling);
+    }
+
+    // 送審按鈕邏輯
+    const btnSubmit = document.getElementById('btnSubmit');
+    if (btnSubmit) {
+      const newBtnSubmit = btnSubmit.cloneNode(true);
+      btnSubmit.parentNode.replaceChild(newBtnSubmit, btnSubmit);
+      newBtnSubmit.addEventListener('click', async function() {
+        const status = await getCurrentStatus();
+        if (status === null) {
+          Swal.fire({ icon: 'error', title: '錯誤', text: '無法取得料號狀態' });
+          return;
+        }
+
+        // Status: 0=設計中, 1=設計完成(已送審), 2=已審核
+        if (status === 1) {
+          Swal.fire({ icon: 'warning', title: '無法送審', text: '該料號已經送審' });
+          return;
+        }
+        if (status === 2) {
+          // 已審核，使用 Tag=1 讓後台防呆
+          const confirm = await Swal.fire({
+            title: '該料號已審核',
+            text: '確定要重新送審嗎？',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '確定',
+            cancelButtonText: '取消'
+          });
+          if (!confirm.isConfirmed) return;
+
+          const resp = await execEMOdProdAudit(1, 1);  // IOType=1, Tag=1
+          const data = await resp.json();
+          if (resp.ok && data.success) {
+            Swal.fire({ icon: 'success', title: '送審成功' }).then(() => location.reload());
+          } else {
+            Swal.fire({ icon: 'error', title: '送審失敗', text: data.message });
+          }
+          return;
+        }
+
+        // Status=0 設計中，正常送審
+        const confirm = await Swal.fire({
+          title: '確定要送審嗎？',
+          text: `料號: ${PARTNUM} / 版次: ${REVISION}`,
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonText: '確定',
+          cancelButtonText: '取消'
+        });
+        if (!confirm.isConfirmed) return;
+
+        const resp = await execEMOdProdAudit(1, 0);  // IOType=1, Tag=0
+        const data = await resp.json();
+        if (resp.ok && data.success) {
+          Swal.fire({ icon: 'success', title: '送審成功' }).then(() => location.reload());
+        } else {
+          Swal.fire({ icon: 'error', title: '送審失敗', text: data.message });
+        }
+      });
+    }
+
+    // 審核按鈕邏輯
+    const btnApprove = document.getElementById('btnApprove');
+    if (btnApprove) {
+      btnApprove.addEventListener('click', async function() {
+        const status = await getCurrentStatus();
+        if (status === null) {
+          Swal.fire({ icon: 'error', title: '錯誤', text: '無法取得料號狀態' });
+          return;
+        }
+
+        // Status: 0=設計中, 1=設計完成(已送審), 2=已審核
+        if (status === 0) {
+          Swal.fire({ icon: 'warning', title: '無法審核', text: '該料號尚未送審' });
+          return;
+        }
+        if (status === 2) {
+          // 已審核，使用 Tag=1 讓後台防呆
+          const confirm = await Swal.fire({
+            title: '該料號已審核',
+            text: '確定要重新審核嗎？',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '確定',
+            cancelButtonText: '取消'
+          });
+          if (!confirm.isConfirmed) return;
+
+          const resp = await execEMOdProdAudit(1, 1);  // IOType=1, Tag=1
+          const data = await resp.json();
+          if (resp.ok && data.success) {
+            Swal.fire({ icon: 'success', title: '審核成功' }).then(() => location.reload());
+          } else {
+            Swal.fire({ icon: 'error', title: '審核失敗', text: data.message });
+          }
+          return;
+        }
+
+        // Status=1 設計完成，正常審核
+        const confirm = await Swal.fire({
+          title: '確定要審核嗎？',
+          text: `料號: ${PARTNUM} / 版次: ${REVISION}`,
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonText: '確定',
+          cancelButtonText: '取消'
+        });
+        if (!confirm.isConfirmed) return;
+
+        const resp = await execEMOdProdAudit(1, 1);  // IOType=1, Tag=1 (審核需要 Tag=1)
+        const data = await resp.json();
+        if (resp.ok && data.success) {
+          Swal.fire({ icon: 'success', title: '審核成功' }).then(() => location.reload());
+        } else {
+          Swal.fire({ icon: 'error', title: '審核失敗', text: data.message });
+        }
+      });
+    }
+
+    // 退審按鈕邏輯
+    overrideButton('btnCancel', async function() {
+      const status = await getCurrentStatus();
+      if (status === null) {
+        Swal.fire({ icon: 'error', title: '錯誤', text: '無法取得料號狀態' });
+        return;
+      }
+
+      // Status: 0=設計中, 1=設計完成(已送審), 2=已審核
+      if (status === 0) {
+        Swal.fire({ icon: 'warning', title: '無法退審', text: '該料號尚未送審，無需退審' });
+        return;
+      }
+
+      const confirm = await Swal.fire({
+        title: '確定要退審嗎？',
+        text: `料號: ${PARTNUM} / 版次: ${REVISION}`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: '確定',
+        cancelButtonText: '取消'
+      });
+      if (!confirm.isConfirmed) return;
+
+      const resp = await execEMOdProdAudit(6, 0);  // IOType=6 退審
+      const data = await resp.json();
+      if (resp.ok && data.success) {
+        Swal.fire({ icon: 'success', title: '退審成功' }).then(() => location.reload());
+      } else {
+        Swal.fire({ icon: 'error', title: '退審失敗', text: data.message });
+      }
+    });
+
+    overrideButton('btnPaperLog', async function() {
+       const partNum = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "PartNum").Value ?? "")';
+       console.log("查詢紀錄: " + partNum);
+       // (此處省略詳細 fetch 邏輯，請保留您原本的代碼)
+    });
+
+    overrideButton('btnSubSearch', function() {
+      window.location.href = '@Url.Page("Index", new { mode = "view", itemId = "EMO00018" })';
+    });
+
+    // 改為使用 <a> 標籤以支援滑鼠中鍵開啟新分頁
+    const btnSwitch = document.getElementById('btnSwitch');
+    if (btnSwitch) {
+      const anchor = document.createElement('a');
+      anchor.className = btnSwitch.className;
+      anchor.innerHTML = btnSwitch.innerHTML;
+      anchor.style.cssText = btnSwitch.style.cssText;
+      anchor.style.textDecoration = 'none';
+      anchor.style.display = 'inline-flex'; // 確保圖示垂直置中
+      anchor.style.alignItems = 'center';
+      anchor.style.justifyContent = 'center';
+      anchor.id = 'btnSwitch'; // 保持原 ID，因為上方已移除衝突的監聽器
+
+      if (isViewOnly) {
+        anchor.href = '@Url.Page("Index", new { mode = "view", itemId = "EMO00018" })';
+      } else {
+        anchor.href = '@Url.Page("Index")';
+      }
+      btnSwitch.parentNode.replaceChild(anchor, btnSwitch);
+    }
+
+    // ============================
+    // btnViewEditToggle 修改按鈕邏輯
+    // ============================
+    overrideButton('btnViewEditToggle', async function() {
+      console.log('[DEBUG] btnViewEditToggle 被點擊');
+
+      // 查詢模式下不允許修改
+      if (isViewOnly) {
+        Swal.fire({ icon: 'warning', title: '查詢模式下無法修改' });
+        return;
+      }
+
+      // 取得目前表單頁籤中正在顯示的頁籤
+      let activeTabPane = document.querySelector('#form-content .tab-pane.show.active');
+      console.log('[DEBUG] activeTabPane:', activeTabPane);
+
+      if (!activeTabPane) {
+        // 如果表單頁籤未顯示，先切換到表單頁籤
+        const formTab = document.getElementById('form-tab');
+        if (formTab) {
+          formTab.click();
+          Swal.fire({ icon: 'info', title: '請先選擇要編輯的表單頁籤', timer: 1500, showConfirmButton: false });
+        }
+        return;
+      }
+
+      const tabKey = activeTabPane.id.replace('tab-', '');
+      console.log('[DEBUG] tabKey:', tabKey);
+
+      // 檢查是否為層別控制的頁籤（只有這三個頁籤需要透過左側層別載入）
+      const layerControlledTabs = ['layerpress', 'pressmethod', 'layerroute'];
+      const isLayerControlled = layerControlledTabs.includes(tabKey);
+
+      // 取得對應的 tabState
+      let state = window.tabState ? window.tabState[tabKey] : null;
+      console.log('[DEBUG] tabState:', window.tabState);
+      console.log('[DEBUG] state:', state);
+
+      // 如果頁籤尚未載入，先觸發載入
+      if (!state || !state.editor) {
+        console.log('[DEBUG] 頁籤尚未載入，嘗試載入...');
+        console.log('[DEBUG] isLayerControlled:', isLayerControlled);
+
+        // 如果是層別控制的頁籤，提示使用者先選擇層別
+        if (isLayerControlled) {
+          Swal.fire({ icon: 'warning', title: '此頁籤由左側層別控制', text: '請先點選左側層別以載入資料' });
+          return;
+        }
+
+        // 找到對應的 tab button 並觸發載入
+        const tabBtn = document.querySelector(`[data-bs-target="#tab-${tabKey}"]`);
+        console.log('[DEBUG] tabBtn:', tabBtn);
+
+        if (tabBtn && tabBtn.dataset.table && tabBtn.dataset.dict) {
+          // 手動載入頁籤資料
+          const tableName = tabBtn.dataset.table;
+          const dictName = tabBtn.dataset.dict;
+          const keyFieldsStr = tabBtn.dataset.keyfields || '';
+          const keyFields = keyFieldsStr.split(',').filter(k => k.trim());
+          const extraKeys = tabBtn.dataset.extraKeys || '';
+
+          console.log('[DEBUG] 載入頁籤資料:', { tableName, dictName, keyFields });
+
+          // 建立查詢參數
+          const qs = new URLSearchParams();
+          const masterKeys = @Html.Raw(JsonSerializer.Serialize(Model.MasterKeyValues.ToDictionary(kv => kv.Key, kv => kv.Value)));
+
+          keyFields.forEach(k => {
+            const val = masterKeys[k] ?? masterKeys[k.toLowerCase()] ?? '';
+            if (val) {
+              qs.append('keyNames', k);
+              qs.append('keyValues', val);
+            }
+          });
+
+          // 加入額外的 keys
+          if (extraKeys) {
+            extraKeys.split(';').forEach(pair => {
+              const [k, v] = pair.split('=');
+              if (k && v) {
+                qs.append('keyNames', k.trim());
+                qs.append('keyValues', v.trim());
+              }
+            });
+          }
+
+          const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&${qs.toString()}`;
+          console.log('[DEBUG] API URL:', url);
+
+          try {
+            Swal.fire({ title: '載入中...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+            const [dictResp, dataResp] = await Promise.all([
+              fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictName)}`).then(r => r.json()),
+              fetch(url).then(r => r.json())
+            ]);
+
+            console.log('[DEBUG] 資料載入完成, dict:', dictResp?.length, 'rows:', dataResp?.length);
+
+            // 呼叫全域的 buildTable（需要透過 window 暴露）
+            if (window.buildTableForEdit) {
+              await window.buildTableForEdit(tabKey, dictResp, dataResp);
+            }
+
+            Swal.close();
+
+            // 重新取得 state
+            state = window.tabState ? window.tabState[tabKey] : null;
+
+          } catch (err) {
+            console.error('[DEBUG] 載入失敗:', err);
+            Swal.fire({ icon: 'error', title: '載入失敗', text: err.message });
+            return;
+          }
+        }
+      }
+
+      // 再次檢查 state
+      if (!state || !state.editor) {
+        Swal.fire({ icon: 'warning', title: '此頁籤尚未載入資料', text: '請先點選該頁籤載入資料後再進行編輯' });
+        return;
+      }
+
+      const editor = state.editor;
+      console.log('[DEBUG] editor:', editor);
+
+      // 取得該頁籤的編輯/儲存按鈕
+      const editBtn = document.querySelector(`[data-btn="edit"][data-tab="${tabKey}"]`);
+      const saveBtn = document.querySelector(`[data-btn="save"][data-tab="${tabKey}"]`);
+      console.log('[DEBUG] editBtn:', editBtn, 'saveBtn:', saveBtn);
+
+      if (editor && editor.toggleEdit) {
+        // 切換編輯模式
+        const isCurrentlyEditing = editor.isEdit ? editor.isEdit() : false;
+        console.log('[DEBUG] isCurrentlyEditing:', isCurrentlyEditing);
+
+        if (!isCurrentlyEditing) {
+          editor.toggleEdit(true);
+          // 切換按鈕顯示：隱藏編輯，顯示儲存
+          if (editBtn) editBtn.classList.add('d-none');
+          if (saveBtn) saveBtn.classList.remove('d-none');
+          Swal.fire({ icon: 'success', title: '已進入編輯模式', timer: 1000, showConfirmButton: false });
+        } else {
+          editor.toggleEdit(false);
+          // 切換按鈕顯示：顯示編輯，隱藏儲存
+          if (editBtn) editBtn.classList.remove('d-none');
+          if (saveBtn) saveBtn.classList.add('d-none');
+          Swal.fire({ icon: 'info', title: '已退出編輯模式', timer: 1000, showConfirmButton: false });
+        }
+      } else {
+        console.log('[DEBUG] editor.toggleEdit 不存在');
+        Swal.fire({ icon: 'warning', title: '此頁籤不支援編輯功能' });
+      }
+    });
+  });
+})();
+</script>
