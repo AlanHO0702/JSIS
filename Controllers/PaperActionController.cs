@@ -1416,5 +1416,167 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         }
 
         #endregion
+
+        #region EMOdProdAudit - 工程資料審核
+
+        public class EMOdProdAuditRequest
+        {
+            public string PartNum { get; set; } = "";
+            public string Revision { get; set; } = "0";
+            public int Tag { get; set; } = 0;
+            public int IOType { get; set; } = 1;  // 1=審核, 6=退審
+            public string UserId { get; set; } = "Admin";
+            public string Meno { get; set; } = "";
+        }
+
+        /// <summary>
+        /// 取得 EMOdProdInfo 的 Status 狀態
+        /// </summary>
+        [HttpGet("GetEMOdProdStatus")]
+        public async Task<IActionResult> GetEMOdProdStatus([FromQuery] string partNum, [FromQuery] string revision = "0")
+        {
+            if (string.IsNullOrWhiteSpace(partNum))
+                return BadRequest(new { success = false, message = "PartNum 不可為空" });
+
+            var connStr = _config.GetConnectionString("DefaultConnection");
+            using var conn = new SqlConnection(connStr);
+
+            try
+            {
+                await conn.OpenAsync();
+
+                const string sql = @"
+                    SELECT Status
+                    FROM EMOdProdInfo WITH (NOLOCK)
+                    WHERE PartNum = @PartNum AND Revision = @Revision";
+
+                using var cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@PartNum", partNum.Trim());
+                cmd.Parameters.AddWithValue("@Revision", revision?.Trim() ?? "0");
+
+                var result = await cmd.ExecuteScalarAsync();
+                if (result == null || result == DBNull.Value)
+                    return NotFound(new { success = false, message = "找不到該料號" });
+
+                var status = Convert.ToInt32(result);
+                return Ok(new { success = true, status });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// 執行 EMOdProdAudit 存儲過程（送審/審核/退審）
+        /// 送審(Tag=0): EMOdUpdateDesigner → EMOdFieldCheck → EMOdEditCheck → EMOdNotValueShow → EMOdProductAuditChkValue → EMOdProdAudit
+        /// 審核(Tag=1): EMOdFieldCheck → EMOdEditCheck → EMOdNotValueShow → EMOdProductAuditChkValue → EMOdProdAudit
+        /// 退審(IOType=6): EMOdProdAudit
+        /// </summary>
+        [HttpPost("EMOdProdAudit")]
+        public async Task<IActionResult> EMOdProdAudit([FromBody] EMOdProdAuditRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.PartNum))
+                return BadRequest(new { success = false, message = "PartNum 不可為空" });
+
+            var connStr = _config.GetConnectionString("DefaultConnection");
+            using var conn = new SqlConnection(connStr);
+
+            try
+            {
+                await conn.OpenAsync();
+
+                var partNum = req.PartNum.Trim();
+                var revision = req.Revision?.Trim() ?? "0";
+                var userId = string.IsNullOrWhiteSpace(req.UserId) ? "Admin" : req.UserId.Trim();
+
+                // 退審只需執行 EMOdProdAudit
+                if (req.IOType == 6)
+                {
+                    await ExecEMOdProdAuditAsync(conn, partNum, revision, req.Tag, req.IOType, userId, req.Meno ?? "");
+                    return Ok(new { success = true, message = "已成功執行退審" });
+                }
+
+                // 送審 (Tag=0): 需執行 EMOdUpdateDesigner
+                if (req.Tag == 0)
+                {
+                    await ExecSpAsync(conn, "EMOdUpdateDesigner", cmd =>
+                    {
+                        cmd.Parameters.AddWithValue("@PartNum", partNum);
+                        cmd.Parameters.AddWithValue("@Revision", revision);
+                        cmd.Parameters.AddWithValue("@UserId", userId);
+                        cmd.Parameters.AddWithValue("@ParamType", 2);  // 2=送審
+                    });
+                }
+
+                // 送審/審核共用檢查流程
+                // 1. EMOdFieldCheck
+                await ExecSpAsync(conn, "EMOdFieldCheck", cmd =>
+                {
+                    cmd.Parameters.AddWithValue("@PartNum", partNum);
+                    cmd.Parameters.AddWithValue("@Revision", revision);
+                    cmd.Parameters.AddWithValue("@S", "1");  // 1=審核品號時
+                });
+
+                // 2. EMOdEditCheck
+                await ExecSpAsync(conn, "EMOdEditCheck", cmd =>
+                {
+                    cmd.Parameters.AddWithValue("@PartNum", partNum);
+                    cmd.Parameters.AddWithValue("@Revision", revision);
+                });
+
+                // 3. EMOdNotValueShow
+                await ExecSpAsync(conn, "EMOdNotValueShow", cmd =>
+                {
+                    cmd.Parameters.AddWithValue("@PartNum", partNum);
+                    cmd.Parameters.AddWithValue("@Revision", revision);
+                });
+
+                // 4. EMOdProductAuditChkValue
+                await ExecSpAsync(conn, "EMOdProductAuditChkValue", cmd =>
+                {
+                    cmd.Parameters.AddWithValue("@PartNum", partNum);
+                    cmd.Parameters.AddWithValue("@Revision", revision);
+                });
+
+                // 5. EMOdProdAudit
+                await ExecEMOdProdAuditAsync(conn, partNum, revision, req.Tag, req.IOType, userId, req.Meno ?? "");
+
+                var actionName = req.Tag == 0 ? "送審" : "審核";
+                return Ok(new { success = true, message = $"已成功執行{actionName}" });
+            }
+            catch (SqlException ex)
+            {
+                // 處理 SP 中的 RAISERROR
+                return BadRequest(new { success = false, message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        private static async Task ExecSpAsync(SqlConnection conn, string spName, Action<SqlCommand> addParams)
+        {
+            using var cmd = new SqlCommand(spName, conn);
+            cmd.CommandType = CommandType.StoredProcedure;
+            addParams(cmd);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        private static async Task ExecEMOdProdAuditAsync(SqlConnection conn, string partNum, string revision, int tag, int ioType, string userId, string meno)
+        {
+            using var cmd = new SqlCommand("EMOdProdAudit", conn);
+            cmd.CommandType = CommandType.StoredProcedure;
+            cmd.Parameters.AddWithValue("@PartNum", partNum);
+            cmd.Parameters.AddWithValue("@Revision", revision);
+            cmd.Parameters.AddWithValue("@Tag", tag);
+            cmd.Parameters.AddWithValue("@IOType", ioType);
+            cmd.Parameters.AddWithValue("@UserId", userId);
+            cmd.Parameters.AddWithValue("@Meno", meno);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        #endregion
     }
 }

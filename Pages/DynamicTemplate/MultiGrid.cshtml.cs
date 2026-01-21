@@ -56,12 +56,16 @@ namespace PcbErpApi.Pages.CUR
             //查這個 Item 底下要顯示哪些表
             var setups = await _ctx.CurdOcxtableSetUp.AsNoTracking()
                 .Where(x => x.ItemId == itemId)
-                .OrderBy(x => x.TableKind)
-                .ThenBy(x => x.TableName)
                 .ToListAsync();//把上面這個查詢「真正送去資料庫執行」，然後把結果裝成 List<CurdOcxtableSetUp>。Async 代表是「非同步」版本，所以前面要 await。
 
             if (setups.Count == 0)
                 return NotFound($"CURdOCXTableSetUp not found for item {itemId}.");
+
+            // 自訂排序：Master 類型優先，然後 Detail 類型，最後其他類型
+            setups = setups.OrderBy(x => GetTableKindSortOrder(x.TableKind))
+                          .ThenBy(x => x.TableKind)
+                          .ThenBy(x => x.TableName)
+                          .ToList();
 
             var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int idx = 0;
@@ -119,6 +123,36 @@ namespace PcbErpApi.Pages.CUR
 
             ActiveTabKey = DetermineActiveTab(tab, Tabs);
             return Page();
+        }
+
+        private static int GetTableKindSortOrder(string? tableKind)
+        {
+            if (string.IsNullOrWhiteSpace(tableKind))
+                return 999; // 空值排最後
+
+            var kind = tableKind.Trim();
+
+            // Master 類型排第一優先 (0-99)
+            if (kind.StartsWith("Master", StringComparison.OrdinalIgnoreCase))
+            {
+                // 提取數字部分，例如 Master1 -> 1, Master2 -> 2
+                var numberPart = Regex.Match(kind, @"\d+$").Value;
+                if (int.TryParse(numberPart, out var num))
+                    return num; // Master1=1, Master2=2, ...
+                return 0; // Master (沒數字) = 0
+            }
+
+            // Detail 類型排第二優先 (100-199)
+            if (kind.StartsWith("Detail", StringComparison.OrdinalIgnoreCase))
+            {
+                var numberPart = Regex.Match(kind, @"\d+$").Value;
+                if (int.TryParse(numberPart, out var num))
+                    return 100 + num; // Detail1=101, Detail2=102, ...
+                return 100; // Detail (沒數字) = 100
+            }
+
+            // 其他類型排最後 (200+)
+            return 200;
         }
 
         private string BuildTabKey(string? tableKind, string tableName, int index, HashSet<string> seen)

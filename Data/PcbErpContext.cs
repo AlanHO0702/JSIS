@@ -7,8 +7,12 @@ namespace PcbErpApi.Data
     {
         public PcbErpContext(DbContextOptions<PcbErpContext> options) : base(options) { }
         public DbSet<SpodOrderMain> SpodOrderMain => Set<SpodOrderMain>();
-        
+
         public DbSet<SPOdMPSOutMain> SPOdMPSOutMain => Set<SPOdMPSOutMain>();
+        public DbSet<FosdOrderMain> FosdOrderMain => Set<FosdOrderMain>();
+        public DbSet<FosdOrderSub> FosdOrderSub => Set<FosdOrderSub>();
+        public DbSet<FosdReceiveMain> FosdReceiveMain => Set<FosdReceiveMain>();
+        public DbSet<FosdReceiveSub> FosdReceiveSub => Set<FosdReceiveSub>();
         public DbSet<SpodPoKind> SpodPoKind => Set<SpodPoKind>();
 
         public DbSet<CurdUser> CurdUser => Set<CurdUser>();
@@ -51,6 +55,8 @@ namespace PcbErpApi.Data
         public virtual DbSet<CurdNoticeBoard> CurdNoticeBoards { get; set; }
          public virtual DbSet<SpodClassArea> SpodClassAreas { get; set; }
         public virtual DbSet<CurdNoticeBoardUser> CurdNoticeBoardUsers { get; set; }
+        public virtual DbSet<EmodProdMap> EmodProdMaps { get; set; }
+        public virtual DbSet<EmodLayerPress> EmodLayerPresses { get; set; }
         public IEnumerable<object> TabConfigs { get; internal set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -1240,6 +1246,19 @@ namespace PcbErpApi.Data
             modelBuilder.Entity<CURdTableField>().ToTable("CURdTableField");
 
             modelBuilder.Entity<SpodOrderSub>()
+            .HasKey(x => new { x.PaperNum, x.Item });
+
+            // FOSd委外出廠/回廠單據設定
+            modelBuilder.Entity<FosdOrderMain>()
+            .HasKey(x => x.PaperNum);
+
+            modelBuilder.Entity<FosdOrderSub>()
+            .HasKey(x => new { x.PaperNum, x.Item });
+
+            modelBuilder.Entity<FosdReceiveMain>()
+            .HasKey(x => x.PaperNum);
+
+            modelBuilder.Entity<FosdReceiveSub>()
             .HasKey(x => new { x.PaperNum, x.Item });
 
             modelBuilder.Entity<CURdSysParams>(e =>
@@ -2511,6 +2530,61 @@ namespace PcbErpApi.Data
                 prop.SetPrecision(24);
                 prop.SetScale(8);
             }
+
+            // 配置 EmodProdMap
+            modelBuilder.Entity<EmodProdMap>(entity =>
+            {
+                entity.ToTable("EMOdProdMap");
+                entity.HasKey(e => new { e.PartNum, e.Revision, e.MapKindNo, e.SerialNum });
+
+                entity.Property(e => e.PartNum)
+                    .HasMaxLength(50)
+                    .IsRequired();
+
+                entity.Property(e => e.Revision)
+                    .HasMaxLength(10)
+                    .IsRequired();
+
+                entity.Property(e => e.MapData)
+                    .HasColumnType("ntext");
+            });
+
+            // 配置 EmodLayerPress
+            modelBuilder.Entity<EmodLayerPress>(entity =>
+            {
+                entity.ToTable("EMOdLayerPress");
+                entity.HasKey(e => new { e.PartNum, e.Revision, e.LayerId });
+
+                entity.Property(e => e.PartNum)
+                    .HasMaxLength(50)
+                    .IsRequired();
+
+                entity.Property(e => e.Revision)
+                    .HasMaxLength(10)
+                    .IsRequired();
+
+                entity.Property(e => e.LayerId)
+                    .HasMaxLength(20)
+                    .IsRequired();
+
+                entity.Property(e => e.MapData_1)
+                    .HasColumnType("ntext");
+
+                entity.Property(e => e.MapData_2)
+                    .HasColumnType("ntext");
+
+                entity.Property(e => e.MapData_3)
+                    .HasColumnType("ntext");
+
+                entity.Property(e => e.MatCode)
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.MatName)
+                    .HasMaxLength(200);
+
+                entity.Property(e => e.Thickness)
+                    .HasPrecision(18, 6);
+            });
 
             OnModelCreatingPartial(modelBuilder);
         }

@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
+using PcbErpApi.Helpers;
 
 namespace PcbErpApi.Pages.EMOdProdInfo
 {
@@ -31,16 +32,42 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             _logger = logger;
         }
 
-        public string ItemId => "EMO00004";
-        public string PageTitle => "工程資料維護";
+        [FromQuery(Name = "mode")]
+        public string? Mode { get; set; }
+
+        [FromQuery(Name = "itemId")]
+        public string? RequestedItemId { get; set; }
+
+        // 判斷是否為查詢模式
+        public bool IsViewOnly
+        {
+            get
+            {
+                // 優先順序1: 明確的 mode 參數
+                if (!string.IsNullOrEmpty(Mode))
+                    return string.Equals(Mode, "view", StringComparison.OrdinalIgnoreCase);
+
+                // 優先順序2: 根據 ItemId 判斷（查詢作業代碼）
+                if (RequestedItemId == "EMO00018")
+                    return true;
+
+                // 預設為維護模式
+                return false;
+            }
+        }
+
+        public string ItemId => IsViewOnly ? "EMO00018" : "EMO00004";
+        public string PageTitle => IsViewOnly ? "EMO00018 工程資料查詢" : "EMO00004 工程資料維護";
         public string TableName { get; private set; } = DataTable;
         public string DictTableName { get; private set; } = DictTable;
         public int PageNumber { get; private set; } = 1;
         public int PageSize { get; private set; } = 50;
         public int TotalCount { get; private set; }
+        public int TotalPages => (int)Math.Ceiling((TotalCount) / (double)PageSize);
         public List<Dictionary<string, object?>> Items { get; private set; } = new();
         public List<CURdTableField> FieldDictList { get; private set; } = new();
-        public List<CURdTableField> TableFields { get; private set; } = new();
+        public List<TableFieldViewModel> TableFields { get; private set; } = new();
+        public List<QueryFieldViewModel> QueryFields { get; private set; } = new();
         public List<string> KeyFields { get; private set; } = new();
 
         // AJAX API：只回傳資料 JSON
@@ -77,19 +104,51 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             }
         }
 
-        public async Task OnGetAsync([FromQuery(Name = "pageIndex")] int pageIndex = 1, int pageSize = 50, string? sortBy = null, string? sortDir = null)
+        public async Task OnGetAsync(int page = 1, int pageIndex = 1, int pageSize = 50, string? sortBy = null, string? sortDir = null)
         {
-            PageNumber = pageIndex <= 0 ? 1 : pageIndex;
+            // 支援 page 和 pageIndex 兩種參數名稱
+            var effectivePage = page > 1 ? page : pageIndex;
+            PageNumber = effectivePage <= 0 ? 1 : effectivePage;
             PageSize = pageSize <= 0 ? 50 : pageSize;
             ViewData["Title"] = PageTitle;
             ViewData["SortBy"] = sortBy;
             ViewData["SortDir"] = sortDir;
+            ViewData["IsViewOnly"] = IsViewOnly;
 
             FieldDictList = await LoadFieldDictAsync(DictTableName);
             await ApplyLangDisplaySizeAsync(DictTableName, FieldDictList);
+
+            // 建立查詢欄位列表
+            QueryFields = FieldDictList
+                .Where(f => f.iShowWhere == 1)
+                .OrderBy(f => f.SerialNum ?? 0)
+                .Select(f => new QueryFieldViewModel
+                {
+                    ColumnName = f.FieldName ?? "",
+                    ColumnCaption = f.DisplayLabel ?? f.FieldName ?? "",
+                    DataType = GetDataTypeCode(f.DataType),
+                    ControlType = 0,
+                    DefaultEqual = "like",
+                    SortOrder = f.SerialNum
+                })
+                .ToList();
+
             TableFields = FieldDictList
                 .Where(f => f.Visible == 1)
                 .OrderBy(f => f.SerialNum ?? 0)
+                .Select(f => new TableFieldViewModel
+                {
+                    FieldName = f.FieldName,
+                    DisplayLabel = f.DisplayLabel,
+                    SerialNum = f.SerialNum ?? 0,
+                    Visible = f.Visible == 1,
+                    iShowWhere = f.iShowWhere,
+                    DataType = f.DataType,
+                    FormatStr = f.FormatStr,
+                    LookupResultField = f.LookupResultField,
+                    ReadOnly = f.ReadOnly,
+                    DisplaySize = f.DisplaySize
+                })
                 .ToList();
 
             // 主鍵設定：PartNum + Revision
@@ -124,25 +183,42 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             ViewData["FieldDictList"] = FieldDictList;
             ViewData["Fields"] = TableFields;
             ViewData["KeyFields"] = KeyFields;
+            ViewData["QueryFields"] = QueryFields;
             ViewData["OrderBy"] = orderBy;
             ViewData["QueryStringRaw"] = Request.QueryString.Value ?? string.Empty;
+            ViewData["KeyFieldName"] = "PartNum";
+            ViewData["PagedQueryUrl"] = "/api/DynamicTable/PagedQuery";
+            ViewData["AddApiUrl"] = $"/api/{TableName}";
+            ViewData["PaginationVm"] = new PaginationModel
+            {
+                PageNumber = PageNumber,
+                TotalPages = TotalPages,
+                RouteUrl = Url.Page("/EMOdProdInfo/Index") ?? "/EMOdProdInfo"
+            };
             try
             {
                 ViewData["OCXLookups"] = _dictService.GetOCXLookups(DictTableName);
+                var lookupMaps = _dictService.GetOCXLookups(DictTableName);
+                ViewData["LookupDisplayMap"] = LookupDisplayHelper.BuildLookupDisplayMap(
+                    Items,
+                    lookupMaps,
+                    item => GetDictValue(item, "PartNum")
+                );
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "GetOCXLookups failed for {Table}", DictTableName);
+                ViewData["LookupDisplayMap"] = new Dictionary<string, Dictionary<string, string>>();
             }
 
-            ViewData["CustomButtons"] = BuildCustomButtonsHtml();
+            // ViewData["CustomButtons"] = BuildCustomButtonsHtml(); // 已移除「詳細」按鈕
         }
 
-        private HtmlString BuildCustomButtonsHtml()
-        {
-            const string btn = "<button type='button' class='btn btn-outline-secondary btn-sm' data-custom-btn='1' data-button-name='openDetail'>詳細</button>";
-            return new HtmlString(btn);
-        }
+        // private HtmlString BuildCustomButtonsHtml()
+        // {
+        //     const string btn = "<button type='button' class='btn btn-outline-secondary btn-sm' data-custom-btn='1' data-button-name='openDetail'>詳細</button>";
+        //     return new HtmlString(btn);
+        // }
 
         private async Task<List<Dictionary<string, object?>>> LoadRowsAsync(string tableName, string? filter, string? orderBy, int page, int pageSize, List<SqlParameter>? filterParams)
         {
@@ -380,6 +456,29 @@ SELECT FieldName, DisplaySize
                 clone.Direction = p.Direction;
                 yield return clone;
             }
+        }
+
+        private static string GetDictValue(Dictionary<string, object?> dict, string field)
+        {
+            if (dict == null) return string.Empty;
+            var hit = dict.FirstOrDefault(kv => kv.Key.Equals(field, StringComparison.OrdinalIgnoreCase));
+            return hit.Equals(default(KeyValuePair<string, object?>)) ? string.Empty : hit.Value?.ToString() ?? string.Empty;
+        }
+
+        private static int GetDataTypeCode(string? dataType)
+        {
+            if (string.IsNullOrWhiteSpace(dataType)) return 0;
+            var dt = dataType.ToLowerInvariant();
+
+            // 1 = Date/DateTime
+            if (dt.Contains("date") || dt.Contains("time")) return 1;
+
+            // 2 = Number
+            if (dt.Contains("int") || dt.Contains("decimal") || dt.Contains("numeric") ||
+                dt.Contains("float") || dt.Contains("money") || dt.Contains("number")) return 2;
+
+            // 0 = String (default)
+            return 0;
         }
     }
 }
