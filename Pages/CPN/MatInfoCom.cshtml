@@ -1299,12 +1299,14 @@
       return dictTableName;
     })();
 
-    const dictPanelTableName = (() => {
-      const id = (itemId || '').toUpperCase();
-      if (id === 'MG000008' || id === 'CPN00006') return 'MGN_MINdMatInfo2PNL';
-      if (id === 'MG000002' || id === 'CPN00007') return 'MGN_MINdMatInfo40PNL';
-      return dictTableName;
-    })();
+  const dictPanelTableName = (() => {
+    const id = (itemId || '').toUpperCase();
+    if (id === 'MG000008' || id === 'CPN00006') return 'MGN_MINdMatInfo2PNL';
+    if (id === 'MG000002' || id === 'CPN00007') return 'MGN_MINdMatInfo40PNL';
+    return dictTableName;
+  })();
+  const useCommonTable = dictTableName.trim().toLowerCase() !== 'mindmatinfo';
+  const commonKeyFields = ['PartNum', 'Revision'];
 
   const tabDictTableMap = new Map([
     ['基本資料', dictPanelTableName],
@@ -1344,6 +1346,62 @@
     'dlengthmax', 'dwidthmax', 'dheightmax', 'dvolumemax', 'dpackqntymax',
     'dvolumeaddon'
   ]);
+
+  const layoutFieldKeys = [
+    'iLayRow', 'iLayColumn', 'iLabHeight', 'iLabTop', 'iLabLeft', 'iLabWidth',
+    'iFieldHeight', 'iFieldTop', 'iFieldLeft', 'iFieldWidth'
+  ];
+  const layoutShowWhereKey = 'iShowWhere';
+
+  function getFieldKey(row) {
+    return (row?.FieldName || row?.fieldName || '').toString().trim().toLowerCase();
+  }
+
+  function mergePanelFields(baseRows, panelRows) {
+    const baseList = Array.isArray(baseRows) ? baseRows : [];
+    const panelList = Array.isArray(panelRows) ? panelRows : [];
+    if (!panelList.length) return baseList;
+
+    const shouldApplyLayoutValue = (val) => {
+      if (val === null || val === undefined || val === '') return false;
+      const num = Number(val);
+      return Number.isFinite(num) && num > 0;
+    };
+
+    const panelMap = new Map();
+    panelList.forEach((row) => {
+      const key = getFieldKey(row);
+      if (key) panelMap.set(key, row);
+    });
+
+    const seen = new Set();
+    const merged = baseList.map((row) => {
+      const key = getFieldKey(row);
+      if (!key) return row;
+      seen.add(key);
+      const panel = panelMap.get(key);
+      if (!panel) return row;
+      const next = { ...row };
+      layoutFieldKeys.forEach((k) => {
+        const v = getRowValue(panel, k);
+        if (shouldApplyLayoutValue(v)) next[k] = v;
+      });
+      const showWhere = getRowValue(panel, layoutShowWhereKey);
+      if (showWhere !== null && showWhere !== undefined && showWhere !== '') {
+        next[layoutShowWhereKey] = showWhere;
+      }
+      const baseLabel = (getRowValue(next, 'DisplayLabel') ?? '').toString().trim();
+      const panelLabel = (getRowValue(panel, 'DisplayLabel') ?? '').toString().trim();
+      if (!baseLabel && panelLabel) next.DisplayLabel = panelLabel;
+      if (getRowValue(next, 'Visible') == null && getRowValue(panel, 'Visible') != null)
+        next.Visible = getRowValue(panel, 'Visible');
+      if (getRowValue(next, 'ReadOnly') == null && getRowValue(panel, 'ReadOnly') != null)
+        next.ReadOnly = getRowValue(panel, 'ReadOnly');
+      return next;
+    });
+
+    return merged;
+  }
 
   const preferredColumns = [
     'Partnum', 'MatName', 'Unit', 'EngGauge', 'Grade', 'MatClass', 'Revision',
@@ -1870,6 +1928,22 @@
         { name: 'TradeNotes' },
         { name: 'ShipNotes' }
       ],
+      mapRows: async (rows) => {
+        if (!rows.length) return rows;
+        const lookupMap = await loadCustCompanyLookup();
+        if (!lookupMap || lookupMap.size === 0) return rows;
+        return rows.map((row) => {
+          const next = { ...row };
+          const companyIdRaw = getRowValue(row, 'CompanyId');
+          const shortNameRaw = getRowValue(row, 'ShortName');
+          const companyId = companyIdRaw == null ? '' : String(companyIdRaw).trim();
+          const shortName = shortNameRaw == null ? '' : String(shortNameRaw).trim();
+          if (!shortName && companyId && lookupMap.has(companyId)) {
+            next.ShortName = lookupMap.get(companyId);
+          }
+          return next;
+        });
+      },
       toolbar: {
         first: btnCustFirst,
         prev: btnCustPrev,
@@ -2219,12 +2293,14 @@
   }
 
   async function loadFormDict() {
-    if (formDictCache.fields) return formDictCache.fields;
+    if (formDictCache.fields && formDictCache.fields.length) return formDictCache.fields;
     try {
       const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictPanelTableName)}&lang=TW`);
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-      formDictCache.fields = Array.isArray(data) ? data : [];
+      const fields = Array.isArray(data) ? data : [];
+      if (!fields.length) return fields;
+      formDictCache.fields = fields;
       formDictTypeMap.clear();
       formDictCache.fields.forEach((f) => {
         const key = (f.FieldName || f.fieldName || '').toString().trim().toLowerCase();
@@ -2235,9 +2311,8 @@
       applyPanelDict(formDictCache.fields);
       return formDictCache.fields;
     } catch (err) {
-      formDictCache.fields = [];
       formDictTypeMap.clear();
-      return formDictCache.fields;
+      return [];
     }
   }
 
@@ -2777,6 +2852,27 @@
     });
   }
 
+  async function fetchCommonRecord(partnum, revision) {
+    if (!partnum || !revision) return null;
+    const params = new URLSearchParams();
+    params.set('table', dictTableName);
+    params.append('keyNames', commonKeyFields[0]);
+    params.append('keyValues', partnum);
+    params.append('keyNames', commonKeyFields[1]);
+    params.append('keyValues', revision);
+    const res = await fetch(`/api/CommonTable/ByKeys?${params.toString()}`);
+    if (!res.ok) return null;
+    const rows = await res.json();
+    return Array.isArray(rows) ? rows[0] : null;
+  }
+
+  async function refreshCommonRecord(partnum, revision) {
+    const row = await fetchCommonRecord(partnum, revision);
+    if (!row) return;
+    fillForm(row);
+    currentRecord = row;
+  }
+
   function selectRecord(item, index) {
     if (!item) return;
     fillForm(item);
@@ -2789,6 +2885,9 @@
     currentIndex = (index ?? 0) + 1;
     updateCount();
     scheduleRender();
+    if (useCommonTable) {
+      refreshCommonRecord(currentKey.partnum, currentKey.revision);
+    }
   }
 
   function ensureIndexLoaded(index) {
@@ -2868,7 +2967,10 @@
     if (page < 1 || loadedPages.has(page)) return;
     loadedPages.add(page);
     try {
-      const res = await fetch(`/api/MindMatInfo/paged?page=${page}&pageSize=${pageSize}`);
+      const url = useCommonTable
+        ? `/api/CommonTable/Paged?table=${encodeURIComponent(dictTableName)}&page=${page}&pageSize=${pageSize}`
+        : `/api/MindMatInfo/paged?page=${page}&pageSize=${pageSize}`;
+      const res = await fetch(url);
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       const rows = Array.isArray(data?.data) ? data.data : [];
@@ -2969,6 +3071,38 @@
       return false;
     }
 
+    if (useCommonTable) {
+      if (isNew) {
+        const exists = await fetchCommonRecord(partnum, revision);
+        if (exists) {
+          notify('error', '料號已存在');
+          return false;
+        }
+      }
+      const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          TableName: dictTableName,
+          KeyFields: commonKeyFields,
+          Data: [data]
+        })
+      });
+      if (!resp.ok) {
+        notify('error', await resp.text());
+        return false;
+      }
+      const result = await resp.json();
+      const failed = (result?.results || []).find(r => r && r.ok === false);
+      if (failed) {
+        notify('error', failed.reason || failed.error || '儲存失敗');
+        return false;
+      }
+      notify('success', isNew ? '新增完成' : '儲存完成');
+      await loadData();
+      return true;
+    }
+
     if (isNew) {
       const resp = await fetch('/api/MindMatInfo', {
         method: 'POST',
@@ -3013,6 +3147,35 @@
       ? (await window.Swal.fire({ icon: 'warning', title: '確定要刪除?', showCancelButton: true })).isConfirmed
       : confirm('確定要刪除?');
     if (!ok) return;
+
+    if (useCommonTable) {
+      const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          TableName: dictTableName,
+          KeyFields: commonKeyFields,
+          Data: [{
+            PartNum: currentKey.partnum,
+            Revision: currentKey.revision,
+            __delete: true
+          }]
+        })
+      });
+      if (!resp.ok) {
+        notify('error', await resp.text());
+        return;
+      }
+      const result = await resp.json();
+      const failed = (result?.results || []).find(r => r && r.ok === false);
+      if (failed) {
+        notify('error', failed.reason || failed.error || '刪除失敗');
+        return;
+      }
+      notify('success', '刪除完成');
+      await loadData();
+      return;
+    }
 
     const url = `/api/MindMatInfo/${encodeURIComponent(currentKey.partnum)}/${encodeURIComponent(currentKey.revision)}`;
     const resp = await fetch(url, { method: 'DELETE' });
