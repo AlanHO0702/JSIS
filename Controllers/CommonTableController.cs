@@ -708,6 +708,72 @@ ORDER BY idx.index_id, ic.key_ordinal";
         return list.Count == 0 ? "" : " ORDER BY " + string.Join(", ", list);
     }
 
+    // 新增：Query(table, top, orderBy?, orderDir?, 其他欄位參數) → 支援動態查詢條件
+    [HttpGet]
+    public async Task<IActionResult> Query([FromQuery] string table, [FromQuery] int top = 200, [FromQuery] string? orderBy = null, [FromQuery] string? orderDir = "ASC")
+    {
+        if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required");
+
+        var tblOk = await TableExistsAsync(table);
+        if (!tblOk) return NotFound($"Table '{table}' not found.");
+
+        // 收集其他查詢參數（排除 table, top, orderBy, orderDir）
+        var excludeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "table", "top", "orderBy", "orderDir" };
+        var filterParams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var qp in Request.Query)
+        {
+            if (excludeKeys.Contains(qp.Key)) continue;
+            var val = qp.Value.ToString();
+            if (!string.IsNullOrWhiteSpace(val))
+            {
+                filterParams[qp.Key] = val;
+            }
+        }
+
+        var whereParts = new List<string>();
+        var parameters = new List<SqlParameter> { new SqlParameter("@top", top) };
+        int paramIdx = 0;
+
+        foreach (var kv in filterParams)
+        {
+            var col = kv.Key;
+            var val = kv.Value;
+
+            var colOk = await ColumnExistsAsync(table, col);
+            if (!colOk) continue; // 忽略不存在的欄位
+
+            var pName = $"@p{paramIdx++}";
+            // 支援模糊查詢（如果值包含 %）
+            if (val.Contains('%'))
+            {
+                whereParts.Add($"[{col}] LIKE {pName}");
+                parameters.Add(new SqlParameter(pName, val));
+            }
+            else
+            {
+                // 預設使用 LIKE '%value%' 模糊查詢
+                whereParts.Add($"[{col}] LIKE {pName}");
+                parameters.Add(new SqlParameter(pName, $"%{val}%"));
+            }
+        }
+
+        var whereSql = whereParts.Count > 0 ? " WHERE " + string.Join(" AND ", whereParts) : "";
+        var orderSql = await BuildOrderBySqlAsync(table, orderBy, orderDir);
+        var sql = $"SELECT TOP (@top) * FROM [{table}]{whereSql}{orderSql}";
+
+        var dt = new DataTable();
+        await using var conn = (SqlConnection)_context.Database.GetDbConnection();
+        await conn.OpenAsync();
+        await using (var cmd = new SqlCommand(sql, conn))
+        {
+            parameters.ForEach(p => cmd.Parameters.Add(p));
+            await using var rd = await cmd.ExecuteReaderAsync();
+            dt.Load(rd);
+        }
+        return Ok(ToDictList(dt));
+    }
+
     private Task<bool> TableExistsAsync(string name)
     {
         const string sql = "SELECT 1 FROM sys.objects WHERE name = @n AND type IN ('U','V')";

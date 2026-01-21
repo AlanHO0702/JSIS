@@ -5,6 +5,9 @@ namespace WebRazor.Models
         /// <summary>唯一 DOM Id（同頁放多組時避免衝突）</summary>
         public string DomId { get; set; } = $"md_{Guid.NewGuid():N}";
 
+        /// <summary>ItemId（用於查詢等功能）</summary>
+        public string ItemId { get; set; } = "";
+
         /// <summary>主/明細資料表名稱（拿來打 CommonTable API）</summary>
         public string MasterTable { get; set; } = "";
         public string DetailTable { get; set; } = "";

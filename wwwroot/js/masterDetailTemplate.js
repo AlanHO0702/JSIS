@@ -478,6 +478,29 @@
   };
 
   // ------------------------------
+  // 🧩 從 URL 讀取查詢參數
+  // ------------------------------
+  const getQueryParams = (excludeKeys = []) => {
+    const params = new URLSearchParams(window.location.search);
+    const result = {};
+    const excludeSet = new Set(excludeKeys.map(k => k.toLowerCase()));
+    params.forEach((v, k) => {
+      // 排除分頁參數和系統參數
+      if (excludeSet.has(k.toLowerCase())) return;
+      if (k.toLowerCase() === 'pageindex' || k.toLowerCase() === 'pagesize') return;
+      if (k.toLowerCase() === 'tab') return;
+      result[k] = v;
+    });
+    return result;
+  };
+
+  const buildQueryString = (params) => {
+    const pairs = Object.entries(params).filter(([k, v]) => v != null && v !== '');
+    if (!pairs.length) return '';
+    return '&' + pairs.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+  };
+
+  // ------------------------------
   // 🧩 初始化單一 MasterDetail
   // ------------------------------
   const initOne = async (cfg) => {
@@ -486,6 +509,9 @@
 
     const masterName = cfg.MasterDict || cfg.MasterTable;
     const detailName = cfg.DetailDict || cfg.DetailTable;
+
+    // 讀取 URL 查詢參數
+    const urlQueryParams = getQueryParams();
 
     const mHead = root.querySelector(`#${cfg.DomId}-m-head`);
     const mBody = root.querySelector(`#${cfg.DomId}-m-body`);
@@ -500,6 +526,10 @@
     const confirmBtn= document.getElementById(`${cfg.DomId}-btnConfirm`);
     const cancelBtn = document.getElementById(`${cfg.DomId}-btnCancel`);
     const editBtn   = document.getElementById(`${cfg.DomId}-btnEdit`);
+
+    const masterKeyFields = (cfg.MasterKeyFields && cfg.MasterKeyFields.length)
+      ? cfg.MasterKeyFields
+      : (cfg.KeyMap || []).map(k => k.Master).filter(Boolean);
 
     let masterData = [];
     let detailData = [];
@@ -591,7 +621,7 @@
         cfg.ShowRowNumber,
         onMasterClick,
         cfg,
-        [], // master key 由 editableGrid 處理
+        masterKeyFields,
         window._mdEditing || addMode,
         false
       );
@@ -609,6 +639,12 @@
       firstEditable?.focus();
     };
 
+    // Detail 列點擊高亮
+    const onDetailClick = (tr, row) => {
+      Array.from(dBody.children).forEach(x => x.classList.remove("selected"));
+      tr.classList.add("selected");
+    };
+
     const renderDetail = () => {
       dBody.innerHTML = "";
       buildBody(
@@ -616,7 +652,7 @@
         dDict,
         detailData,
         false,
-        () => {},
+        onDetailClick,
         cfg,
         cfg.DetailKeyFields || [],
         window._mdEditing || addMode,
@@ -730,12 +766,21 @@
     cancelBtn?.addEventListener("click", cancelAdd);
 
     // 主檔資料
+    // 如果有 URL 查詢參數，使用 Query API；否則使用 TopRows API
+    const queryStr = buildQueryString(urlQueryParams);
+    const hasQueryParams = Object.keys(urlQueryParams).length > 0;
+
     const masterUrl =
       cfg.MasterApi?.trim()
-        ? cfg.MasterApi
-        : `/api/CommonTable/TopRows?table=${encodeURIComponent(cfg.MasterTable)}&top=${cfg.MasterTop || 200}`
-          + (cfg.MasterOrderBy ? `&orderBy=${encodeURIComponent(cfg.MasterOrderBy)}` : "")
-          + (cfg.MasterOrderDir ? `&orderDir=${encodeURIComponent(cfg.MasterOrderDir)}` : "");
+        ? cfg.MasterApi + (cfg.MasterApi.includes('?') ? queryStr : (queryStr ? '?' + queryStr.substring(1) : ''))
+        : hasQueryParams
+          ? `/api/CommonTable/Query?table=${encodeURIComponent(cfg.MasterTable)}&top=${cfg.MasterTop || 200}`
+              + (cfg.MasterOrderBy ? `&orderBy=${encodeURIComponent(cfg.MasterOrderBy)}` : "")
+              + (cfg.MasterOrderDir ? `&orderDir=${encodeURIComponent(cfg.MasterOrderDir)}` : "")
+              + queryStr
+          : `/api/CommonTable/TopRows?table=${encodeURIComponent(cfg.MasterTable)}&top=${cfg.MasterTop || 200}`
+              + (cfg.MasterOrderBy ? `&orderBy=${encodeURIComponent(cfg.MasterOrderBy)}` : "")
+              + (cfg.MasterOrderDir ? `&orderDir=${encodeURIComponent(cfg.MasterOrderDir)}` : "");
 
     const masterRows = await fetch(masterUrl).then(r => r.json());
 
@@ -786,7 +831,7 @@
     // 畫主檔
     masterData = Array.isArray(masterRows) ? masterRows : [];
     if (!cfg.MasterOrderBy) {
-      masterData = sortByKeys(masterData, mDict, cfg.MasterKeyFields || []);
+      masterData = sortByKeys(masterData, mDict, masterKeyFields);
     }
     renderMaster();
     const first = mBody.querySelector("tr");
