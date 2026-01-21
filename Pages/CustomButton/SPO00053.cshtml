@@ -14,24 +14,11 @@
     ViewData["SourceTab2Label"] = "(本位幣)收款";
     ViewData["BankTabLabel"] = "銀存收款";
     ViewData["BillTabLabel"] = "票據收款";
-    // OtherTabLabel 不需要，因為 ShowOtherTab = false
 
     // 來源 Grid 欄位標籤
     ViewData["CashAmountLabel"] = "現金收款";
     ViewData["BankAmountLabel"] = "銀存收款";
     ViewData["BillAmountLabel"] = "票據收款";
-    // OtherAmountLabel 不需要
-
-    // 票據 Grid 欄位標籤
-    ViewData["BillIdLabel"] = "票據號碼";
-    ViewData["BillAmountFieldLabel"] = "本位幣金額";
-    ViewData["PayBankIdLabel"] = "開票銀行";
-    ViewData["PayAccountIdLabel"] = "開票帳戶";
-    ViewData["RecvBankIdLabel"] = "收票銀行";
-    ViewData["RecvAccountIdLabel"] = "收票帳戶";
-    ViewData["BillAccIdLabel"] = "票據科目";
-    ViewData["BillTypeIdLabel"] = "票別";
-    ViewData["DueDateLabel"] = "到期日";
 }
 
 @await Html.PartialAsync("_APRdAdvanceDtl", Model, ViewData)
@@ -60,6 +47,9 @@
         return { ...init, headers };
     };
 
+    // Modal 實例
+    let advanceModal = null;
+
     // 收款明細維護主邏輯
     const openRecvDtl = async (ctx) => {
         const paperNum = readPaperNum(ctx);
@@ -73,42 +63,69 @@
         }
 
         // 1. 驗證必要欄位 (客戶編號、幣別匯率)
-        const checkResp = await fetch(`/api/AdvanceDtl/Check?moduleType=${MODULE_TYPE}&paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
-        const checkData = await checkResp.json();
-        if (!checkData.ok) {
-            Swal.fire({ icon: 'warning', title: checkData.error || '資料驗證失敗' });
-            hidePanel();
-            return;
+        try {
+            const checkResp = await fetch(`/api/AdvanceDtl/Check?moduleType=${MODULE_TYPE}&paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
+            if (!checkResp.ok) {
+                return Swal.fire({ icon: 'error', title: `API 錯誤: ${checkResp.status}` });
+            }
+            const checkData = await checkResp.json();
+            if (!checkData.ok) {
+                return Swal.fire({ icon: 'warning', title: checkData.error || '資料驗證失敗' });
+            }
+
+            // 儲存 strikeMode (本位幣沖帳) 狀態
+            const strikeMode = checkData.strikeMode || 0;
+
+            // 顯示 Modal
+            showModal();
+
+            // 初始化共用管理器
+            if (window.AdvanceDtlManager) {
+                window.AdvanceDtlManager.init(DOM_ID, paperNum);
+            }
+
+            // 2. 載入主檔資料
+            await loadMasterData(paperNum, cfg);
+
+            // 3. 載入來源資料
+            await loadSourceData(paperNum, cfg);
+
+            // 4. 載入銀行下拉選項
+            await loadBankOptions(paperNum, cfg);
+
+            // 5. 載入票據資料
+            await loadBillData(paperNum, cfg);
+
+            // 注意: 收款明細沒有其他科目明細和手續費
+
+            // 6. 如果有勾選本位幣沖帳 (strikeMode = 1)，自動切換到本位幣頁籤
+            if (strikeMode === 1 && window.AdvanceDtlManager) {
+                // 稍微延遲以確保 DOM 已渲染
+                setTimeout(() => {
+                    window.AdvanceDtlManager.switchToNtTab(DOM_ID);
+                }, 100);
+            }
+        } catch (err) {
+            console.error('openRecvDtl error:', err);
+            return Swal.fire({ icon: 'error', title: '載入資料失敗', text: err.message });
         }
-
-        // 顯示面板
-        showPanel();
-
-        // 2. 載入主檔資料
-        await loadMasterData(paperNum, cfg);
-
-        // 3. 載入來源資料
-        await loadSourceData(paperNum, cfg);
-
-        // 4. 載入銀行下拉選項
-        await loadBankOptions(paperNum, cfg);
-
-        // 5. 載入票據資料
-        await loadBillData(paperNum, cfg);
-
-        // 注意: 收款明細沒有其他科目明細和手續費
     };
 
-    // 顯示面板
-    const showPanel = () => {
-        const wrapper = document.getElementById(DOM_ID);
-        if (wrapper) wrapper.style.display = 'block';
+    // 顯示 Modal
+    const showModal = () => {
+        const modalEl = document.getElementById(`${DOM_ID}-modal`);
+        if (!modalEl) return;
+        if (!advanceModal) {
+            advanceModal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
+        }
+        advanceModal.show();
     };
 
-    // 隱藏面板
-    const hidePanel = () => {
-        const wrapper = document.getElementById(DOM_ID);
-        if (wrapper) wrapper.style.display = 'none';
+    // 隱藏 Modal
+    const hideModal = () => {
+        if (advanceModal) {
+            advanceModal.hide();
+        }
     };
 
     // 載入主檔資料
@@ -261,6 +278,7 @@
                 return Swal.fire({ icon: 'error', title: sumData.error || '彙總失敗' });
             }
 
+            hideModal();
             await Swal.fire({ icon: 'success', title: '完成', timer: 1000, showConfirmButton: false });
             // 沖帳明細更新會在 Modal 關閉事件中觸發
         } catch (err) {
@@ -285,6 +303,8 @@
                 }
             });
         }
+
+        // 重新整理事件由共用模板 AdvanceDtlManager 自動處理
     });
 
     // 註冊按鈕處理函式

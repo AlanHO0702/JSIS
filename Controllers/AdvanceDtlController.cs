@@ -61,7 +61,9 @@ public class AdvanceDtlController : ControllerBase
             AutoCountProc: "SPOdRecvAutoCount",
             InsertSumProc: "SPOdRecvSubInsSum",
             PayBankIdProc: "SPOdRecvBankIdGet",
-            RecvBankIdProc: "SPOdRecvBankIdGet"
+            RecvBankIdProc: "SPOdRecvBankIdGet",
+            CompanyIdColumn: "CustomerId",
+            HasIsIn: false
         )
     };
 
@@ -75,7 +77,9 @@ public class AdvanceDtlController : ControllerBase
         string AutoCountProc,
         string InsertSumProc,
         string PayBankIdProc,
-        string RecvBankIdProc
+        string RecvBankIdProc,
+        string CompanyIdColumn = "CompanyId",  // 客戶/廠商編號欄位名稱
+        bool HasIsIn = true                     // 是否有 IsIn 欄位
     );
 
     /// <summary>
@@ -96,10 +100,12 @@ public class AdvanceDtlController : ControllerBase
         {
             await conn.OpenAsync();
 
-            var sql = $@"
-                SELECT CompanyId, IsIn, RateToNT, StrikeMode
-                FROM [{cfg.MainTable}] WITH (NOLOCK)
-                WHERE PaperNum = @paperNum";
+            // 根據模組配置決定查詢欄位
+            var selectColumns = cfg.HasIsIn
+                ? $"{cfg.CompanyIdColumn}, IsIn, RateToNT, StrikeMode"
+                : $"{cfg.CompanyIdColumn}, RateToNT, StrikeMode";
+
+            var sql = $"SELECT {selectColumns} FROM [{cfg.MainTable}] WITH (NOLOCK) WHERE PaperNum = @paperNum";
 
             await using var cmd = new SqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@paperNum", paperNum);
@@ -108,9 +114,9 @@ public class AdvanceDtlController : ControllerBase
             if (!await reader.ReadAsync())
                 return Ok(new { ok = false, error = "找不到單據資料" });
 
-            var companyId = reader["CompanyId"]?.ToString() ?? "";
+            var companyId = reader[cfg.CompanyIdColumn]?.ToString() ?? "";
             var rateToNT = reader["RateToNT"] == DBNull.Value ? 0 : Convert.ToDouble(reader["RateToNT"]);
-            var isIn = reader["IsIn"] == DBNull.Value ? 0 : Convert.ToInt32(reader["IsIn"]);
+            var isIn = cfg.HasIsIn && reader["IsIn"] != DBNull.Value ? Convert.ToInt32(reader["IsIn"]) : 0;
             var strikeMode = reader["StrikeMode"] == DBNull.Value ? 0 : Convert.ToInt32(reader["StrikeMode"]);
 
             if (string.IsNullOrWhiteSpace(companyId))

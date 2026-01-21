@@ -1,0 +1,198 @@
+unit SendEInvDLL;
+
+interface
+
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, TempPublic, DB, ADODB, Buttons, ExtCtrls,JSdMultSelect,JSdLookupCombo,
+  Wwdatsrc, JSdTable, StdCtrls, Grids, Wwdbigrd, Wwdbgrid, JSdDBGrid, ComCtrls,
+  DBCtrls, ToolWin, wwdbdatetimepicker, TempBasDLL, XMLIntf, XMLDoc, unit_DLL;
+
+type
+  TfrmSPOdSendEInvDLL = class(TfrmTempPublic)
+    pnlOk: TPanel;
+    pnlOkRight: TPanel;
+    btnOK: TBitBtn;
+    btnCancel: TBitBtn;
+    procedure btnOKClick(Sender: TObject);
+    procedure btnCancelClick(Sender: TObject);
+    procedure btnGetParamsClick(Sender: TObject);
+  private
+    procedure SendEInv;
+    { Private declarations }
+  public
+    var sPaperId_Now: String;
+    var sPaperNum_Now: String;
+    var sType_Now: String;
+    { Public declarations }
+  end;
+
+var
+  frmSPOdSendEInvDLL: TfrmSPOdSendEInvDLL;
+
+implementation
+
+{$R *.dfm}
+
+procedure TfrmSPOdSendEInvDLL.btnCancelClick(Sender: TObject);
+begin
+  inherited;
+  Close;
+end;
+
+procedure TfrmSPOdSendEInvDLL.btnGetParamsClick(Sender: TObject);
+begin
+  inherited;
+  qryGetTranData.Locate('SeqNum', 1, [loPartialKey]);
+  sPaperId_Now := qryGetTranData.Fields[1].AsString;
+  qryGetTranData.Locate('SeqNum', 2, [loPartialKey]);
+  sPaperNum_Now := qryGetTranData.Fields[1].AsString;
+  qryGetTranData.Locate('SeqNum', 3, [loPartialKey]);
+  sType_Now := qryGetTranData.Fields[1].AsString;
+  btnOKClick(Sender);
+  btnCancelClick(Sender);
+end;
+
+procedure TfrmSPOdSendEInvDLL.btnOKClick(Sender: TObject);
+begin
+  inherited;
+  with qryExec do
+  begin
+    qryExec.Close;
+    SQL.Clear;
+    SQL.Add('select Value from CURdSysParams(nolock) '
+      +'where SystemId=''SPO'' and ParamId=''EInvXMLRev'' '
+      +'and IsNull(Value,'''')<>''''');
+    Open;
+    if RecordCount>0 then
+    begin
+      SendEInv;
+    end;
+
+    //2024.01.31  增加關貿判斷
+    qryExec.Close;
+    SQL.Clear;
+    SQL.Add('select Value from CURdSysParams(nolock) '
+      +'where SystemId=''SPO'' and ParamId=''EInvTradeVan'' '
+      +'and IsNull(Value,'''')<>''''');
+    Open;
+    if FieldbyName('value').Asstring='1' then
+    begin
+      SendEInv;
+    end;
+  end;
+
+end;
+
+procedure TfrmSPOdSendEInvDLL.SendEInv;
+var document: IXMLDocument;
+    SavePath, sFilePath: String;
+    //2022.01.28
+    i:Integer;
+    sXML:String;
+begin
+  inherited;
+
+  with qryExec do
+  begin
+      qryExec.Close;
+      SQL.Clear;
+      SQL.Add('select Value from CURdSysParams where SystemId=''SPO'''
+        +' and ParamId=''EInvPath''');
+      Open;
+      SavePath:=FieldbyName('Value').AsString;
+
+       //2024.01.31  增加關貿判斷
+      qryExec.Close;
+      SQL.Clear;
+      SQL.Add('select Value from CURdSysParams(nolock) '
+        +'where SystemId=''SPO'' and ParamId=''EInvTradeVan'' '
+        +'and IsNull(Value,'''')<>''''');
+      Open;
+      if FieldbyName('value').Asstring='1' then
+      begin
+        SavePath:='';
+      end;
+
+      qryExec.Close;
+      SQL.Clear;
+      SQL.Add('exec SPOdEInvReSendTypeChk '''+sPaperId_Now+''','
+       +''''+sPaperNum_Now+''','+sType_Now);
+      try
+        Open;
+      except
+        on E: Exception do
+        begin
+          MsgDlgJS(E.Message, mtInformation, [mbOk], 0);
+          Exit;
+        end;
+      end;
+      showmessage(SavePath+FieldbyName('UploadPath').AsString);
+      if FieldbyName('UploadPath').AsString<>'' then
+      begin
+          //=========================================================
+          sFilePath:=SavePath+FieldbyName('UploadPath').AsString
+            +sPaperNum_Now+'.XML';
+          document := TXMLDocument.Create(nil);
+          try
+            //2022.01.28
+            sXML:=FieldbyName('XMLCode').AsString;
+            for i := 1 to 19 do
+            begin
+              if FieldbyName('XMLCode'+IntToStr(i)).AsString<>'' then
+              begin
+                sXML:=sXML + FieldbyName('XMLCode'+IntToStr(i)).AsString;
+              end
+              else
+                Break;
+            end;
+            sXML:=sXML + FieldbyName('XMLCode20').AsString;
+            {//2021.12.29
+            document.LoadFromXML(FieldbyName('XMLCode').AsString
+                                +FieldbyName('XMLCode2').AsString
+                                +FieldbyName('XMLCode3').AsString);
+            document.SaveToFile(SavePath+FieldbyName('UploadPath').AsString
+              +sPaperNum_Now+'.XML'); }
+            document.LoadFromXML(sXML);
+
+            document.SaveToFile(SavePath+FieldbyName('UploadPath').AsString
+              +sPaperNum_Now+'.XML');
+
+          except
+            on E: Exception do
+            begin
+              qryExec.Close;
+              SQL.Clear;
+              SQL.Add('exec SPOdClearEInvField '''+sPaperId_Now+''','
+                +''''+sPaperNum_Now+''',0');
+              ExecSql;
+              MsgDlgJS(E.Message, mtInformation, [mbOk], 0);
+              Exit;
+            end;
+          end;
+          //prcDoReOpen;
+
+          //2019.11.04 Fix
+          if not FileExists(SavePath+FieldbyName('UploadPath').AsString
+              +sPaperNum_Now+'.XML') then
+          begin
+            qryExec.Close;
+            SQL.Clear;
+            SQL.Add('exec SPOdClearEInvField '''+sPaperId_Now+''','
+              +''''+sPaperNum_Now+''',0');
+            ExecSql;
+            MsgDlgJS('檔案上傳無效，請重新執行!!', mtInformation, [mbOk], 0);
+            Exit;
+          end;
+
+          //2018.10.15
+          qryExec.Close;
+          SQL.Clear;
+          SQL.Add('exec SPOdClearEInvField '''+sPaperId_Now+''','
+            +''''+sPaperNum_Now+''',1');
+          ExecSql;
+      end;
+  end;
+end;
+
+end.

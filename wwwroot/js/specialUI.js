@@ -5,15 +5,105 @@
     'use strict';
 
     // ==========================================
+    // 共用設定檔 - 只需指定 moduleType，後端會自動對應資料表
+    // config 可設定：
+    //   moduleType: 模組類型（必填）- advance / advancerev
+    //   masterTabLabel: 主檔頁籤標籤（預設：沖帳明細）
+    //   foreignTabLabel: 外幣頁籤標籤（預設：(外幣)預收付）
+    //   localTabLabel: 本位幣頁籤標籤（預設：(本位幣)預收付）
+    //   bankTabLabel: 銀存頁籤標籤（預設：銀存預收付）
+    //   billTabLabel: 票據頁籤標籤（預設：票據預收付）
+    //   otherTabLabel: 其他頁籤標籤（預設：其他預收付）
+    // 可用的 moduleType:
+    //   - advance: 預收付款 (APRdAdvanceMain, APRdAdvanceSource, APRdAdvanceBill...)
+    //   - advancerev: 預收付沖銷 (APRdAdvanceRevMain, APRdAdvanceRevSource...)
+    // ==========================================
+    const SharedConfigs = {
+        // 預收付帳款單設定
+        AdvanceDtl: {
+            debitLabel: '借方金額',
+            creditLabel: '貸方金額',
+            masterTabLabel: '沖帳明細',
+            foreignTabLabel: '(外幣)預收付',
+            localTabLabel: '(本位幣)預收付',
+            bankTabLabel: '銀存預收付',
+            billTabLabel: '票據預收付',
+            otherTabLabel: '其他預收付',
+            moduleType: 'advance'  // 後端自動對應: APRdAdvanceMain, APRdAdvanceSource, APRdAdvanceBill...
+        },
+        // 預收付退款單設定
+        AdvanceRevDtl: {
+            debitLabel: '借方金額',
+            creditLabel: '貸方金額',
+            masterTabLabel: '退款明細',
+            foreignTabLabel: '(外幣)退款金額',
+            localTabLabel: '(本位幣)退款金額',
+            bankTabLabel: '銀存退款',
+            billTabLabel: '票據退款',
+            otherTabLabel: '其他退款',
+            moduleType: 'advancerev'  // 後端自動對應: APRdAdvanceRevMain, APRdAdvanceRevSource...
+        }
+        // === 在此新增共用設定 ===
+    };
+
+    // ==========================================
+    // 特殊介面設定檔（根據 ItemId 對應設定）
+    // 可直接寫設定，或引用 SharedConfigs
+    // ==========================================
+    window.SpecialUIConfigs = {
+        // 方式一：多個 ItemId 引用同一個共用設定
+        'AP000004': SharedConfigs.AdvanceDtl,      // 預收付帳款單
+        'AP000010': SharedConfigs.AdvanceDtl,      // 預收付帳款單
+        'ARM00010': SharedConfigs.AdvanceRevDtl,   // 預收付退款單
+        'APR00065': SharedConfigs.AdvanceRevDtl    // 預收付退款單
+
+        // 方式二：引用共用設定並覆寫部分屬性
+        // 'APR00068': Object.assign({}, SharedConfigs.apAdvance, {
+        //     debitLabel: '自訂借方',
+        //     creditLabel: '自訂貸方'
+        // }),
+
+        // 方式三：完全獨立的設定
+        // 'AP000010': {
+        //     debitLabel: '借方金額',
+        //     creditLabel: '貸方金額'
+        // },
+
+        // === 在此新增您的設定 ===
+
+    };
+
+    // ==========================================
+    // 取得指定 ItemId 的設定（合併預設值）
+    // ==========================================
+    window.getSpecialUIConfig = function(itemId, baseConfig) {
+        const itemConfig = window.SpecialUIConfigs[itemId] || {};
+        // 合併：baseConfig (資料庫設定) + itemConfig (JS設定)，JS設定優先
+        return Object.assign({}, baseConfig || {}, itemConfig);
+    };
+
+    // ==========================================
     // 特殊介面元件庫
     // ==========================================
     window.SpecialUIComponents = {
 
         // ==========================================
         // 借貸總額元件（用於收付傳票等作業）
+        // config 可設定：
+        //   debitLabel: 借方標籤名稱（預設：借方金額）
+        //   creditLabel: 貸方標籤名稱（預設：貸方金額）
+        //   apiUrl: 自訂 API 路徑（預設：/api/SpecialUI/GetPayRecvAmount）
+        //   debitField: API 回傳的借方欄位名稱（預設：amountD）
+        //   creditField: API 回傳的貸方欄位名稱（預設：amountC）
         // ==========================================
         PayRecvSummary: {
+            _config: {},
+
             render: function(config) {
+                this._config = config || {};
+                const debitLabel = this._config.debitLabel || '借方金額';
+                const creditLabel = this._config.creditLabel || '貸方金額';
+
                 const html = `
                     <div class="special-ui-panel pay-recv-summary" style="
                         border-top: 1px solid #ddd;
@@ -22,7 +112,7 @@
                         margin-top: 10px;
                     ">
                         <div style="text-align: right;">
-                            <label style="font-weight: bold;">借方金額：</label>
+                            <label style="font-weight: bold;">${debitLabel}：</label>
                             <span id="lbDAmount" class="amount-display" style="
                                 font-size: 16px;
                                 color: #000000;
@@ -30,7 +120,7 @@
                                 display: inline-block;
                                 text-align: left;
                             ">0.00</span>
-                            <label style="font-weight: bold; margin-left: 10px;">貸方金額：</label>
+                            <label style="font-weight: bold; margin-left: 10px;">${creditLabel}：</label>
                             <span id="lbCAmount" class="amount-display" style="
                                 font-size: 16px;
                                 color: #000000;
@@ -45,6 +135,7 @@
             },
 
             init: function(itemId, config) {
+                this._config = config || {};
                 const detailTable = config.detailTableName || '';
 
                 // 綁定事件 - 監聽單身資料變更
@@ -83,20 +174,25 @@
                     return;
                 }
 
+                // 取得自訂設定
+                const apiUrl = this._config.apiUrl || '/api/SpecialUI/GetPayRecvAmount';
+                const debitField = this._config.debitField || 'amountD';
+                const creditField = this._config.creditField || 'amountC';
+
                 // 呼叫 API 計算借貸總額
                 $.ajax({
-                    url: '/api/SpecialUI/GetPayRecvAmount',
+                    url: apiUrl,
                     method: 'POST',
                     data: {
                         paperNum: paperNum,
                         tableName: detailTable
                     },
                     success: function(data) {
-                        const debitAmount = (data.amountD || 0).toLocaleString('en-US', {
+                        const debitAmount = (data[debitField] || 0).toLocaleString('en-US', {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2
                         });
-                        const creditAmount = (data.amountC || 0).toLocaleString('en-US', {
+                        const creditAmount = (data[creditField] || 0).toLocaleString('en-US', {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2
                         });
@@ -163,17 +259,17 @@
             }
         },
 
-        // ==========================================
-        // 沖帳明細元件（用於預收付款沖帳等作業）
-        // 直接整合到模板的主檔/明細頁籤中
-        // ==========================================
         StrikeDetail: {
+            _config: {},
+
             // 不渲染獨立容器，改為整合到模板頁籤
             render: function(config) {
+                this._config = config || {};
                 return '';
             },
 
             init: function(itemId, config) {
+                this._config = config || {};
                 // 注入頁籤到現有模板結構
                 this.injectIntoExistingTabs();
                 // 綁定事件
@@ -186,6 +282,12 @@
             // 注入頁籤到現有的主檔/明細頁籤結構
             // ==========================================
             injectIntoExistingTabs: function() {
+                const cfg = this._config;
+                // 取得標籤設定（可自訂）
+                const masterTabLabel = cfg.masterTabLabel || '沖帳明細';
+                const foreignTabLabel = cfg.foreignTabLabel || '(外幣)預收付';
+                const localTabLabel = cfg.localTabLabel || '(本位幣)預收付';
+
                 // === 1. 注入主檔頁籤（沖帳明細 - 預收付源頭）到 #headerTabs ===
                 const headerTabs = $('#headerTabs');
                 const headerTabContent = headerTabs.closest('form').find('.tab-content').first();
@@ -196,7 +298,7 @@
                         <li class="nav-item" role="presentation">
                             <button class="nav-link" id="tab-strike-master-tab" data-bs-toggle="tab"
                                 data-bs-target="#tab-strike-master-content" type="button" role="tab">
-                                沖帳明細
+                                ${masterTabLabel}
                             </button>
                         </li>
                     `;
@@ -211,13 +313,13 @@
                                     <li class="nav-item" role="presentation">
                                         <button class="nav-link active" id="source-foreign-tab" data-bs-toggle="tab"
                                             data-bs-target="#source-foreign-pane" type="button" role="tab">
-                                            (外幣)預收付
+                                            ${foreignTabLabel}
                                         </button>
                                     </li>
                                     <li class="nav-item" role="presentation">
                                         <button class="nav-link" id="source-local-tab" data-bs-toggle="tab"
                                             data-bs-target="#source-local-pane" type="button" role="tab">
-                                            (本位幣)預收付
+                                            ${localTabLabel}
                                         </button>
                                     </li>
                                 </ul>
@@ -267,6 +369,12 @@
                 const detailTabs = $('.multi-tab-detail .nav-tabs').first();
                 const detailTabContent = $('.multi-tab-detail .tab-content').first();
 
+                // 取得明細頁籤標籤設定
+                const detailTabLabel = cfg.detailTabLabel || '沖帳明細';
+                const bankTabLabel = cfg.bankTabLabel || '銀存預收付';
+                const billTabLabel = cfg.billTabLabel || '票據預收付';
+                const otherTabLabel = cfg.otherTabLabel || '其他預收付';
+
                 if (detailTabs.length && detailTabContent.length) {
                     /* ===== 主頁籤：沖帳明細 ===== */
                     detailTabs.append(`
@@ -277,7 +385,7 @@
                                 data-bs-target="#content-strike-main"
                                 type="button"
                                 role="tab">
-                                沖帳明細
+                                ${detailTabLabel}
                             </button>
                         </li>
                     `);
@@ -298,14 +406,14 @@
 
                     const subTabs = $('#content-strike-main .strike-sub-tabs');
                     const subContent = $('#content-strike-main .strike-sub-content');
-                    
+
                     // 新增明細頁籤按鈕 - 銀存預收付
                     const bankTabBtn = `
                         <li class="nav-item" role="presentation">
                             <button class="nav-link" id="tab-strike-bank"
                                 data-bs-toggle="tab" data-bs-target="#content-strike-bank"
                                 data-tab-id="strike-bank" type="button" role="tab">
-                                銀存預收付
+                                ${bankTabLabel}
                             </button>
                         </li>
                     `;
@@ -317,7 +425,7 @@
                             <button class="nav-link" id="tab-strike-bill"
                                 data-bs-toggle="tab" data-bs-target="#content-strike-bill"
                                 data-tab-id="strike-bill" type="button" role="tab">
-                                票據預收付
+                                ${billTabLabel}
                             </button>
                         </li>
                     `;
@@ -329,7 +437,7 @@
                             <button class="nav-link" id="tab-strike-other"
                                 data-bs-toggle="tab" data-bs-target="#content-strike-other"
                                 data-tab-id="strike-other" type="button" role="tab">
-                                其他預收付
+                                ${otherTabLabel}
                             </button>
                         </li>
                     `;
@@ -506,16 +614,19 @@
                     return;
                 }
 
-                // 使用通用 API 載入來源和票據資料
-                this.loadTableData('APRdAdvanceSource', paperNum, this.renderSourceGrids.bind(this));
-                this.loadTableData('APRdAdvanceBill', paperNum, this.renderBillGrid.bind(this));
-                // 使用 AdvanceDtl API 載入其他預收付和手續費（直接抓資料庫）
-                this.loadAdvanceDtlData('GetOtherAcc', 'advance', paperNum, this.renderOtherAccDtlGrid.bind(this));
-                this.loadAdvanceDtlData('GetStrikePost', 'advance', paperNum, this.renderStrikePostGrid.bind(this));
-                this.loadBankInfo(paperNum);
+                const cfg = this._config;
+                // 取得模組類型設定（後端會自動對應正確的資料表）
+                const moduleType = cfg.moduleType || 'advance';
+
+                // 統一使用 AdvanceDtl API 載入所有資料（透過 moduleType 自動對應資料表）
+                this.loadAdvanceDtlData('GetSource', moduleType, paperNum, this.renderSourceGrids.bind(this));
+                this.loadAdvanceDtlData('GetBill', moduleType, paperNum, this.renderBillGrid.bind(this));
+                this.loadAdvanceDtlData('GetOtherAcc', moduleType, paperNum, this.renderOtherAccDtlGrid.bind(this));
+                this.loadAdvanceDtlData('GetStrikePost', moduleType, paperNum, this.renderStrikePostGrid.bind(this));
+                this.loadAdvanceDtlData('GetMaster', moduleType, paperNum, this.renderBankInfo.bind(this));
             },
 
-            // 使用 AdvanceDtl API 載入資料（直接抓資料庫，不需資料辭典）
+            // 使用 AdvanceDtl API 載入資料（透過 moduleType 自動對應資料表）
             loadAdvanceDtlData: function(apiMethod, moduleType, paperNum, callback) {
                 $.ajax({
                     url: '/api/AdvanceDtl/' + apiMethod,
@@ -525,8 +636,15 @@
                         paperNum: paperNum
                     },
                     success: function(resp) {
-                        if (resp && resp.ok && resp.rows) {
-                            callback(resp.rows);
+                        if (resp && resp.ok) {
+                            // GetMaster 回傳 data（單筆物件），其他回傳 rows（陣列）
+                            if (resp.data !== undefined) {
+                                callback(resp.data);
+                            } else if (resp.rows) {
+                                callback(resp.rows);
+                            } else {
+                                callback([]);
+                            }
                         } else {
                             callback([]);
                         }
@@ -714,32 +832,16 @@
                 });
             },
 
-            loadBankInfo: function(paperNum) {
-                // 從單頭資料取得銀行資訊（使用通用 API）
-                const self = this;
-                $.ajax({
-                    url: '/api/DynamicTable/ByPaperNum',
-                    method: 'GET',
-                    data: {
-                        table: 'APRdAdvanceMas',
-                        paperNum: paperNum,
-                        top: 1
-                    },
-                    success: function(data) {
-                        if (data && data.length > 0) {
-                            $('#txtBankId').val(self.getField(data[0], 'BankId') || '');
-                            $('#txtAccountId').val(self.getField(data[0], 'AccountId') || '');
-                        } else {
-                            $('#txtBankId').val('');
-                            $('#txtAccountId').val('');
-                        }
-                    },
-                    error: function(xhr, status, error) {
-                        console.error('載入銀行資訊失敗:', error);
-                        $('#txtBankId').val('');
-                        $('#txtAccountId').val('');
-                    }
-                });
+            // 渲染銀行資訊（從 GetMaster API 回傳的資料）
+            renderBankInfo: function(data) {
+                // GetMaster 回傳的是單筆物件，不是陣列
+                if (data && typeof data === 'object') {
+                    $('#txtBankId').val(this.getField(data, 'BankId') || '');
+                    $('#txtAccountId').val(this.getField(data, 'AccountId') || '');
+                } else {
+                    $('#txtBankId').val('');
+                    $('#txtAccountId').val('');
+                }
             },
 
             formatNumber: function(value) {
@@ -769,7 +871,7 @@
     // 動態載入特殊介面的主函式
     // 支援多個特殊介面，用逗號分隔，例如: 'PayRecvSummary,StrikeDetail'
     // ==========================================
-    window.loadSpecialUI = function(itemId, specialUIType, specialUIConfig, detailTableName) {
+    window.loadSpecialUI = function(itemId, specialUIType, specialUIConfig, detailTableName, masterTableName, paperNum) {
         // 檢查是否有指定特殊介面類型
         if (!specialUIType) {
             return;
@@ -782,11 +884,11 @@
             return;
         }
 
-        // 解析設定
-        let config = {};
+        // 解析資料庫傳入的設定
+        let dbConfig = {};
         if (specialUIConfig) {
             try {
-                config = typeof specialUIConfig === 'string'
+                dbConfig = typeof specialUIConfig === 'string'
                     ? JSON.parse(specialUIConfig)
                     : specialUIConfig;
             } catch (e) {
@@ -794,8 +896,11 @@
             }
         }
 
-        // 加入單身表名稱到設定中
-        config.detailTableName = detailTableName;
+        // 根據 ItemId 取得 JS 設定並合併（JS 設定優先於資料庫設定）
+        const config = window.getSpecialUIConfig(itemId, dbConfig);
+
+        // 加入表名稱到設定中（將 Main 替換為 Sub）
+        config.detailTableName = masterTableName.replace('Main', 'Sub');
 
         // 支援多個特殊介面（逗號分隔）
         const types = specialUIType.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t; });
