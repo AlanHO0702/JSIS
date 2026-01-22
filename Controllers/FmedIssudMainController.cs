@@ -32,14 +32,22 @@ namespace PcbErpApi.Controllers
         {
             var query = _context.FmedIssueMain.AsQueryable();
 
+            // 建立快取 key（根據過濾條件）
+            var cacheKey = "FMEdIssueMain";
             if (!string.IsNullOrWhiteSpace(PaperNum))
+            {
                 query = query.Where(x => x.PaperNum.Contains(PaperNum));
+                cacheKey += $"_P_{PaperNum}";
+            }
 
             if (!string.IsNullOrWhiteSpace(PartNum))
+            {
                 query = query.Where(x => x.PartNum.Contains(PartNum));
+                cacheKey += $"_N_{PartNum}";
+            }
 
             var orderedQuery = query.OrderByDescending(o => o.PaperDate);
-            var result = await _pagedService.GetPagedAsync(orderedQuery, page, pageSize);
+            var result = await _pagedService.GetPagedAsync(orderedQuery, page, pageSize, cacheKey);
             return Ok(new { totalCount = result.TotalCount, data = result.Data });
         }
 

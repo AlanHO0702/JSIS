@@ -1,4 +1,5 @@
 using System.Data;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -662,6 +663,8 @@ SELECT TOP 1 RunSQLAfterAdd
 
             try
             {
+                var sw = Stopwatch.StartNew();
+
                 var sqlPaged = new StringBuilder();
                 sqlPaged.Append($"SELECT * FROM [{realTable}] t0 WITH (NOLOCK) {whereSql} ");
                 sqlPaged.Append($"ORDER BY {orderSql} ");
@@ -683,7 +686,9 @@ SELECT TOP 1 RunSQLAfterAdd
                     var obj = await cmd.ExecuteScalarAsync();
                     totalCount = obj == null || obj == DBNull.Value ? 0 : Convert.ToInt32(obj);
                 }
+                var countTime = sw.ElapsedMilliseconds;
 
+                sw.Restart();
                 // data
                 await using (var cmd = new SqlCommand(sqlPaged.ToString(), conn))
                 {
@@ -699,7 +704,9 @@ SELECT TOP 1 RunSQLAfterAdd
                         result.Add(dict);
                     }
                 }
+                var dataTime = sw.ElapsedMilliseconds;
 
+                sw.Restart();
                 // lookup（失敗不要影響主要資料回傳）
                 // 當前端已有快取 (SkipLookup=true) 時，跳過耗時的 lookup 查詢
                 Dictionary<string, Dictionary<string, string>> lookupMapData = new();
@@ -757,6 +764,10 @@ SELECT TOP 1 RunSQLAfterAdd
                         lookupMapData = new();
                     }
                 }
+                var lookupTime = sw.ElapsedMilliseconds;
+
+                _logger.LogInformation("[PagedQuery] {Table} Page={Page} | Count={CountMs}ms | Data={DataMs}ms | Lookup={LookupMs}ms (Skip:{SkipLookup}) | Total={TotalMs}ms",
+                    dictTable, page, countTime, dataTime, lookupTime, req.SkipLookup, countTime + dataTime + lookupTime);
 
                 return Ok(new { totalCount, data = result, lookupMapData });
             }
