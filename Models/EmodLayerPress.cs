@@ -11,7 +11,7 @@ namespace PcbErpApi.Models
         public string PartNum { get; set; } = string.Empty;
 
         /// <summary>
-        /// 版次
+        /// 版序
         /// </summary>
         public string Revision { get; set; } = string.Empty;
 

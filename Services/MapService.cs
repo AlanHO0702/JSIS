@@ -48,7 +48,7 @@ namespace PcbErpApi.Services
 
                 if (!exists)
                 {
-                    // 列出所有可能的料號和版次組合（前10筆）
+                    // 列出所有可能的料號和版序組合（前10筆）
                     var available = await _context.EmodProdMaps
                         .Select(m => new { m.PartNum, m.Revision, m.MapKindNo })
                         .Take(10)
