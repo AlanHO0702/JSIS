@@ -582,6 +582,22 @@
     };
   };
 
+  const applyTopToolbarVisibility = () => {
+    const id = (itemId || '').toUpperCase();
+    if (id !== 'MG000002' && id !== 'CPN00007') return;
+    const keep = new Set([btnTabPrev, btnTabNext, btnQuery, btnAdd, btnDelete, btnEdit]);
+    const all = [
+      btnTabPrev, btnTabNext, btnQuery, btnEdit, btnCancel, btnAdd,
+      btnToFormal, btnDetail, btnHistory, btnToEmo, btnDelete, btnSave
+    ];
+    all.forEach((btn) => {
+      if (!btn) return;
+      btn.style.display = keep.has(btn) ? '' : 'none';
+    });
+    if (btnCopyPN4YX) btnCopyPN4YX.style.display = 'none';
+    if (btnUpdateCustPn) btnUpdateCustPn.style.display = 'none';
+  };
+
   const custLookupState = {
     map: null,
     loading: null
@@ -2814,6 +2830,7 @@
   setEditMode(false);
   applyTabDictTables();
   applyCustTabLabel();
+  applyTopToolbarVisibility();
   applyTabVisibility();
   setActiveTabContext(document.querySelector('.matinfo-tabs .nav-link.active'));
   initBrowseResizer();
