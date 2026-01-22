@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
+using PcbErpApi.Services;
 
 namespace PcbErpApi.Pages.CUR
 {
@@ -20,12 +21,14 @@ namespace PcbErpApi.Pages.CUR
     {
         private readonly PcbErpContext _ctx;
         private readonly ITableDictionaryService _dictService;
+        private readonly IBreadcrumbService _breadcrumbService;
         private readonly ILogger<MultiGridModel> _logger;
 
-        public MultiGridModel(PcbErpContext ctx, ITableDictionaryService dictService, ILogger<MultiGridModel> logger)
+        public MultiGridModel(PcbErpContext ctx, ITableDictionaryService dictService, IBreadcrumbService breadcrumbService, ILogger<MultiGridModel> logger)
         {
             _ctx = ctx;
             _dictService = dictService;
+            _breadcrumbService = breadcrumbService;
             _logger = logger;
         }
 
@@ -53,6 +56,16 @@ namespace PcbErpApi.Pages.CUR
             ItemId = item.ItemId;
             ItemName = item.ItemName;
             ViewData["Title"] = PageTitle;
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(item.SuperId))
+                    ViewData["Breadcrumbs"] = await _breadcrumbService.BuildBreadcrumbsAsync(item.SuperId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Build breadcrumbs failed for {ItemId}", ItemId);
+            }
             //查這個 Item 底下要顯示哪些表
             var setups = await _ctx.CurdOcxtableSetUp.AsNoTracking()
                 .Where(x => x.ItemId == itemId)

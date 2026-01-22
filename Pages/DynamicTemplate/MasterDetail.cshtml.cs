@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
+using PcbErpApi.Services;
 using WebRazor.Models;
 
 namespace PcbErpApi.Pages.CUR
@@ -16,11 +17,13 @@ namespace PcbErpApi.Pages.CUR
     public class MasterDetailModel : PageModel
     {
         private readonly PcbErpContext _ctx;
+        private readonly IBreadcrumbService _breadcrumbService;
         private readonly ILogger<MasterDetailModel> _logger;
 
-        public MasterDetailModel(PcbErpContext ctx, ILogger<MasterDetailModel> logger)
+        public MasterDetailModel(PcbErpContext ctx, IBreadcrumbService breadcrumbService, ILogger<MasterDetailModel> logger)
         {
             _ctx = ctx;
+            _breadcrumbService = breadcrumbService;
             _logger = logger;
         }
 
@@ -50,6 +53,21 @@ namespace PcbErpApi.Pages.CUR
 
             ViewData["Title"] = string.IsNullOrWhiteSpace(ItemName) ? ItemId : $"{ItemId}{ItemName}";
             ViewData["DictTableName"] = Config?.MasterDict ?? Config?.MasterTable;
+
+            try
+            {
+                var superId = await _ctx.CurdSysItems.AsNoTracking()
+                    .Where(x => x.ItemId == ItemId)
+                    .Select(x => x.SuperId)
+                    .SingleOrDefaultAsync();
+
+                if (!string.IsNullOrWhiteSpace(superId))
+                    ViewData["Breadcrumbs"] = await _breadcrumbService.BuildBreadcrumbsAsync(superId);
+            }
+            catch (System.Exception ex)
+            {
+                _logger.LogError(ex, "Build breadcrumbs failed for {ItemId}", ItemId);
+            }
 
             try
             {
