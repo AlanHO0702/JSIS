@@ -81,6 +81,8 @@
     border-radius: 8px;
     background: #fff;
     overflow: hidden;
+    --browse-row-height: 24px;
+    --browse-head-height: 30px;
   }
   .matinfo-browse.is-hidden {
     display: none;
@@ -97,7 +99,7 @@
   .matinfo-scroll-body {
     overflow-x: auto;
     overflow-y: auto;
-    max-height: 360px;
+    height: calc(var(--browse-head-height) + (var(--browse-row-height) + 2px) * 11 + 34px);
   }
   .matinfo-browse table {
     width: max-content;
@@ -109,17 +111,33 @@
     background: #f2f6ff;
     color: #204a87;
     text-align: left;
-    padding: 6px 8px;
+    padding: 4px 8px;
     border-bottom: 1px solid #b7c2d4;
     border-right: 1px solid #b7c2d4;
     white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    height: var(--browse-head-height);
+  }
+  .matinfo-browse thead th.sortable {
+    cursor: pointer;
+  }
+  .matinfo-browse thead th.sorted-asc::after {
+    content: " ▲";
+    font-size: 0.75em;
+  }
+  .matinfo-browse thead th.sorted-desc::after {
+    content: " ▼";
+    font-size: 0.75em;
   }
   .matinfo-browse tbody td {
-    padding: 6px 8px;
+    padding: 2px 8px;
     border-bottom: 1px solid #c4cede;
     border-right: 1px solid #c4cede;
     border-top: 1px solid #c4cede;
     white-space: nowrap;
+    height: var(--browse-row-height);
   }
   .matinfo-browse thead th:last-child,
   .matinfo-browse tbody td:last-child {
@@ -188,9 +206,7 @@
     margin-bottom: 8px;
   }
   .matinfo-section-title {
-    font-weight: 700;
-    color: #1d3b6b;
-    margin-bottom: 6px;
+    display: none;
   }
   .matinfo-grid {
     display: grid;
@@ -1275,7 +1291,9 @@
     let loadedPages = new Set();
     let isSearchMode = false;
     let pendingSelectIndex = null;
-    let rowHeight = 28;
+    let rowHeight = 24;
+    let sortKey = null;
+    let sortDir = 'asc';
     let renderScheduled = false;
     const pageSize = 200;
     const bufferRows = 8;
@@ -1304,6 +1322,10 @@
     if (id === 'MG000008' || id === 'CPN00006') return 'MGN_MINdMatInfo2PNL';
     if (id === 'MG000002' || id === 'CPN00007') return 'MGN_MINdMatInfo40PNL';
     return dictTableName;
+  })();
+  const custTabLabel = (() => {
+    const id = (itemId || '').toUpperCase();
+    return (id === 'MG000008' || id === 'CPN00006') ? '客戶料號' : '廠商料號';
   })();
   const useCommonTable = dictTableName.trim().toLowerCase() !== 'mindmatinfo';
   const commonKeyFields = ['PartNum', 'Revision'];
@@ -1459,6 +1481,23 @@
       const table = tabDictTableMap.get(name || '');
       if (table) btn.dataset.dictTable = table;
     });
+  };
+
+  const applyCustTabLabel = () => {
+    const btn = document.querySelector('.matinfo-tabs [data-bs-target="#tab-cust"]');
+    if (btn) {
+      btn.textContent = custTabLabel;
+      btn.setAttribute('aria-label', custTabLabel);
+    }
+    const pane = document.querySelector('#tab-cust');
+    if (pane) {
+      const title = pane.querySelector('.matinfo-section-title');
+      if (title) title.textContent = custTabLabel;
+    }
+    const emptyCell = document.querySelector('#tab-cust tbody td');
+    if (emptyCell && (emptyCell.textContent || '').includes('尚未接')) {
+      emptyCell.textContent = `尚未接${custTabLabel}資料`;
+    }
   };
 
   const setActiveTabContext = (btn) => {
@@ -2818,11 +2857,48 @@
     theadRow.innerHTML = columns
       .map((col) => {
         const style = col.width ? ` style="width:${col.width}"` : '';
-        const cls = isCheckboxColumn(col) ? 'col-checkbox' : '';
+        const cls = [
+          isCheckboxColumn(col) ? 'col-checkbox' : '',
+          col.key ? 'sortable' : ''
+        ].filter(Boolean).join(' ');
         const classAttr = cls ? ` class="${cls}"` : '';
-        return `<th${classAttr}${style}>${col.label ?? col.key}</th>`;
+        const keyAttr = col.key ? ` data-key="${col.key}"` : '';
+        return `<th${classAttr}${style}${keyAttr}>${col.label ?? col.key}</th>`;
       })
       .join('');
+    applySortIndicators();
+  }
+
+  function applySortIndicators() {
+    if (!theadRow) return;
+    theadRow.querySelectorAll('th').forEach((th) => {
+      th.classList.remove('sorted-asc', 'sorted-desc');
+      const key = th.dataset.key;
+      if (key && sortKey && key.toLowerCase() === sortKey.toLowerCase()) {
+        th.classList.add(sortDir === 'desc' ? 'sorted-desc' : 'sorted-asc');
+      }
+    });
+  }
+
+  function compareSort(a, b) {
+    if (a == null && b == null) return 0;
+    if (a == null) return sortDir === 'asc' ? -1 : 1;
+    if (b == null) return sortDir === 'asc' ? 1 : -1;
+    const na = Number(a);
+    const nb = Number(b);
+    const bothNum = Number.isFinite(na) && Number.isFinite(nb);
+    if (bothNum) return sortDir === 'asc' ? na - nb : nb - na;
+    const sa = String(a);
+    const sb = String(b);
+    const cmp = sa.localeCompare(sb, 'zh-Hant');
+    return sortDir === 'asc' ? cmp : -cmp;
+  }
+
+  function sortSearchRows() {
+    if (!sortKey) return;
+    const key = sortKey;
+    dataCache.sort((a, b) => compareSort(getValue(a, key), getValue(b, key)));
+    scheduleRender();
   }
 
   function updateCount() {
@@ -2838,7 +2914,7 @@
     loadedPages = new Set();
     isSearchMode = false;
     pendingSelectIndex = null;
-    rowHeight = 28;
+    rowHeight = 24;
     columns = [];
     updateCount();
   }
@@ -2967,9 +3043,20 @@
     if (page < 1 || loadedPages.has(page)) return;
     loadedPages.add(page);
     try {
-      const url = useCommonTable
-        ? `/api/CommonTable/Paged?table=${encodeURIComponent(dictTableName)}&page=${page}&pageSize=${pageSize}`
-        : `/api/MindMatInfo/paged?page=${page}&pageSize=${pageSize}`;
+      const url = (() => {
+        if (useCommonTable) {
+          const params = new URLSearchParams();
+          params.set('table', dictTableName);
+          params.set('page', String(page));
+          params.set('pageSize', String(pageSize));
+          if (sortKey) {
+            params.set('orderBy', sortKey);
+            params.set('orderDir', sortDir);
+          }
+          return `/api/CommonTable/Paged?${params.toString()}`;
+        }
+        return `/api/MindMatInfo/paged?page=${page}&pageSize=${pageSize}`;
+      })();
       const res = await fetch(url);
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
@@ -3008,7 +3095,11 @@
       syncScroll(browseScrollTop, browseScrollBody);
     }
     updateCount();
-    scheduleRender();
+    if (sortKey) {
+      sortSearchRows();
+    } else {
+      scheduleRender();
+    }
     if (list.length > 0) {
       selectRowAt(0);
     } else {
@@ -3055,6 +3146,27 @@
 
   browseScrollBody?.addEventListener('scroll', () => {
     scheduleRender();
+  });
+
+  theadRow?.addEventListener('click', (e) => {
+    const th = e.target.closest('th');
+    const key = th?.dataset?.key;
+    if (!key) return;
+    if (sortKey && sortKey.toLowerCase() === key.toLowerCase()) {
+      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      sortKey = key;
+      sortDir = 'asc';
+    }
+    applySortIndicators();
+    if (isSearchMode) {
+      sortSearchRows();
+      selectRowAt(0);
+      return;
+    }
+    if (!useCommonTable) return;
+    resetVirtualState();
+    loadPage(1);
   });
 
   async function saveRecord() {
@@ -3494,6 +3606,7 @@
 
   setEditMode(false);
   applyTabDictTables();
+  applyCustTabLabel();
   applyTabVisibility();
   setActiveTabContext(document.querySelector('.matinfo-tabs .nav-link.active'));
   loadData();
