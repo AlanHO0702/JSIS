@@ -577,6 +577,8 @@ function updateToolbarHeaderCountForRow(row) {
 }
 
 function doQuery(page = 1) {
+  const t0 = performance.now();
+
   // 深拷貝 filters，避免修改原始 lastQueryFilters 中的物件
   let filters = lastQueryFilters.map(f => ({ ...f }));
   let hasPage = false, hasSize = false;
@@ -608,8 +610,6 @@ function doQuery(page = 1) {
   const cachedLookup = sessionStorage.getItem(lookupCacheKey);
   const skipLookup = !!cachedLookup && !!window._lookupMapData;
 
-  console.log(`[doQuery] table=${tableName}, page=${page}, skipLookup=${skipLookup}, cachedLookup=${cachedLookup}, hasLookupMapData=${!!window._lookupMapData}`);
-
   http('/api/DynamicTable/PagedQuery', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -626,11 +626,18 @@ function doQuery(page = 1) {
       if (skipLookup && (!window._lookupMapData || Object.keys(window._lookupMapData).length === 0)) {
         sessionStorage.removeItem(lookupCacheKey);
       }
+
       renderTable(result.data);
       renderPagination(result.totalCount, @Model.PageSize, page);
       renderOrderCount(result.totalCount, @Model.PageSize, page);
+
+      const totalTime = (performance.now() - t0).toFixed(0);
+      console.log(`[分頁查詢] ${window._tableName} 第${page}頁 | ${totalTime}ms | 快取:${skipLookup ? '是' : '否'}`);
     })
-    .catch(err => Swal.fire({ icon:'error', title:'查詢失敗', text: String(err) }));
+    .catch(err => {
+      console.log(`[分頁查詢] 失敗 | ${(performance.now() - t0).toFixed(0)}ms | ${err}`);
+      Swal.fire({ icon:'error', title:'查詢失敗', text: String(err) });
+    });
 
 }
 

@@ -644,16 +644,21 @@ SELECT TOP 1 RunSQLAfterAdd
                         whereSql = startsWithAndOr ? $"{whereSql} {extra}" : $"{whereSql} AND {extra}";
                 }
             }
+            // EMOdProdInfo 優先用 PartNum 排序（主鍵有索引），其他表用 PaperDate/PaperNum
             var orderSql =
-                fieldSet.Contains("PaperDate")
-                    ? (fieldSet.Contains("PaperNum")
-                        ? "[PaperDate] DESC, [PaperNum] DESC"
-                        : "[PaperDate] DESC")
-                    : fieldSet.Contains("Item")
-                        ? "[Item]"
-                        : fieldSet.Contains("PaperNum")
-                            ? "[PaperNum]"
-                            : "1";
+                dictTable.Equals("EMOdProdInfo", StringComparison.OrdinalIgnoreCase) && fieldSet.Contains("PartNum")
+                    ? "[PartNum]"
+                    : fieldSet.Contains("PaperDate")
+                        ? (fieldSet.Contains("PaperNum")
+                            ? "[PaperDate] DESC, [PaperNum] DESC"
+                            : "[PaperDate] DESC")
+                        : fieldSet.Contains("Item")
+                            ? "[Item]"
+                            : fieldSet.Contains("PaperNum")
+                                ? "[PaperNum]"
+                                : fieldSet.Contains("PartNum")
+                                    ? "[PartNum]"
+                                    : "1";
 
             try
             {
