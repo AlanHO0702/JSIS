@@ -39,6 +39,11 @@ namespace PcbErpApi.Controllers
             public string? ItemId { get; set; }
             public List<FilterItem> Filters { get; set; } = new();
             public bool SkipLookup { get; set; } = false;  // 前端已有快取時跳過 lookup 查詢
+
+            // Keyset 分頁用（游標）
+            public string? CursorDate { get; set; }      // 上一頁最後一筆的 PaperDate
+            public string? CursorKey { get; set; }       // 上一頁最後一筆的 PaperNum/PartNum
+            public string? Direction { get; set; }       // "next" 或 "prev"
         }
 
         public class PaperTypeOption
@@ -646,29 +651,120 @@ SELECT TOP 1 RunSQLAfterAdd
                 }
             }
             // EMOdProdInfo 優先用 PartNum 排序（主鍵有索引），其他表用 PaperDate/PaperNum
-            var orderSql =
-                dictTable.Equals("EMOdProdInfo", StringComparison.OrdinalIgnoreCase) && fieldSet.Contains("PartNum")
-                    ? "[PartNum]"
-                    : fieldSet.Contains("PaperDate")
-                        ? (fieldSet.Contains("PaperNum")
-                            ? "[PaperDate] DESC, [PaperNum] DESC"
-                            : "[PaperDate] DESC")
-                        : fieldSet.Contains("Item")
-                            ? "[Item]"
-                            : fieldSet.Contains("PaperNum")
-                                ? "[PaperNum]"
-                                : fieldSet.Contains("PartNum")
-                                    ? "[PartNum]"
-                                    : "1";
+            // 決定排序欄位和主鍵欄位
+            string orderField1, orderField2, keyField;
+            bool isDescending = true;
+            bool hasTwoOrderFields = false;
+
+            if (dictTable.Equals("EMOdProdInfo", StringComparison.OrdinalIgnoreCase) && fieldSet.Contains("PartNum"))
+            {
+                orderField1 = "PartNum";
+                orderField2 = "";
+                keyField = "PartNum";
+                isDescending = false; // PartNum 用升序
+            }
+            else if (fieldSet.Contains("PaperDate"))
+            {
+                orderField1 = "PaperDate";
+                orderField2 = fieldSet.Contains("PaperNum") ? "PaperNum" : "";
+                keyField = fieldSet.Contains("PaperNum") ? "PaperNum" : "PaperDate";
+                hasTwoOrderFields = !string.IsNullOrEmpty(orderField2);
+            }
+            else if (fieldSet.Contains("Item"))
+            {
+                orderField1 = "Item";
+                orderField2 = "";
+                keyField = "Item";
+                isDescending = false;
+            }
+            else if (fieldSet.Contains("PaperNum"))
+            {
+                orderField1 = "PaperNum";
+                orderField2 = "";
+                keyField = "PaperNum";
+                isDescending = false;
+            }
+            else if (fieldSet.Contains("PartNum"))
+            {
+                orderField1 = "PartNum";
+                orderField2 = "";
+                keyField = "PartNum";
+                isDescending = false;
+            }
+            else
+            {
+                orderField1 = "";
+                orderField2 = "";
+                keyField = "";
+            }
+
+            var orderSql = string.IsNullOrEmpty(orderField1)
+                ? "1"
+                : hasTwoOrderFields
+                    ? $"[{orderField1}] DESC, [{orderField2}] DESC"
+                    : isDescending ? $"[{orderField1}] DESC" : $"[{orderField1}]";
 
             try
             {
                 var sw = Stopwatch.StartNew();
 
+                // 判斷是否使用 Keyset 分頁
+                var useKeyset = !string.IsNullOrEmpty(req.CursorDate) || !string.IsNullOrEmpty(req.CursorKey);
+                var isNext = string.Equals(req.Direction, "next", StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(req.Direction);
+
                 var sqlPaged = new StringBuilder();
-                sqlPaged.Append($"SELECT * FROM [{realTable}] t0 WITH (NOLOCK) {whereSql} ");
-                sqlPaged.Append($"ORDER BY {orderSql} ");
-                sqlPaged.Append($"OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY;");
+
+                if (useKeyset && !string.IsNullOrEmpty(orderField1))
+                {
+                    // Keyset 分頁：用 WHERE 條件取代 OFFSET
+                    var cursorConditions = new List<string>();
+
+                    if (hasTwoOrderFields && !string.IsNullOrEmpty(req.CursorDate) && !string.IsNullOrEmpty(req.CursorKey))
+                    {
+                        // 雙欄位排序 (PaperDate DESC, PaperNum DESC)
+                        if (isNext)
+                        {
+                            // 下一頁：找比 cursor 更小的
+                            cursorConditions.Add($"([{orderField1}] < @cursorDate OR ([{orderField1}] = @cursorDate AND [{orderField2}] < @cursorKey))");
+                        }
+                        else
+                        {
+                            // 上一頁：找比 cursor 更大的（反向查詢後再反轉）
+                            cursorConditions.Add($"([{orderField1}] > @cursorDate OR ([{orderField1}] = @cursorDate AND [{orderField2}] > @cursorKey))");
+                        }
+                        parameters.Add(new SqlParameter("@cursorDate", DateTime.TryParse(req.CursorDate, out var cd) ? cd : (object)req.CursorDate));
+                        parameters.Add(new SqlParameter("@cursorKey", req.CursorKey));
+                    }
+                    else if (!string.IsNullOrEmpty(req.CursorKey))
+                    {
+                        // 單欄位排序
+                        var cursorOp = isNext ? (isDescending ? "<" : ">") : (isDescending ? ">" : "<");
+                        cursorConditions.Add($"[{orderField1}] {cursorOp} @cursorKey");
+                        parameters.Add(new SqlParameter("@cursorKey", req.CursorKey));
+                    }
+
+                    var keysetWhere = cursorConditions.Count > 0 ? string.Join(" AND ", cursorConditions) : "";
+                    var fullWhere = string.IsNullOrEmpty(whereSql)
+                        ? (string.IsNullOrEmpty(keysetWhere) ? "" : $"WHERE {keysetWhere}")
+                        : (string.IsNullOrEmpty(keysetWhere) ? whereSql : $"{whereSql} AND {keysetWhere}");
+
+                    // 上一頁需要反向排序後再反轉結果
+                    var actualOrderSql = isNext
+                        ? orderSql
+                        : (hasTwoOrderFields
+                            ? $"[{orderField1}] ASC, [{orderField2}] ASC"
+                            : (isDescending ? $"[{orderField1}] ASC" : $"[{orderField1}] DESC"));
+
+                    sqlPaged.Append($"SELECT TOP {pageSize} * FROM [{realTable}] t0 WITH (NOLOCK) {fullWhere} ");
+                    sqlPaged.Append($"ORDER BY {actualOrderSql};");
+                }
+                else
+                {
+                    // 傳統 OFFSET 分頁（跳頁或第一頁）
+                    sqlPaged.Append($"SELECT * FROM [{realTable}] t0 WITH (NOLOCK) {whereSql} ");
+                    sqlPaged.Append($"ORDER BY {orderSql} ");
+                    sqlPaged.Append($"OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY;");
+                }
 
                 var sqlCount = $"SELECT COUNT(1) FROM [{realTable}] t0 WITH (NOLOCK) {whereSql};";
 
@@ -766,10 +862,74 @@ SELECT TOP 1 RunSQLAfterAdd
                 }
                 var lookupTime = sw.ElapsedMilliseconds;
 
-                _logger.LogInformation("[PagedQuery] {Table} Page={Page} | Count={CountMs}ms | Data={DataMs}ms | Lookup={LookupMs}ms (Skip:{SkipLookup}) | Total={TotalMs}ms",
-                    dictTable, page, countTime, dataTime, lookupTime, req.SkipLookup, countTime + dataTime + lookupTime);
+                // 上一頁查詢結果需要反轉（因為是反向排序取得的）
+                var useKeyset2 = !string.IsNullOrEmpty(req.CursorDate) || !string.IsNullOrEmpty(req.CursorKey);
+                var isNext2 = string.Equals(req.Direction, "next", StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(req.Direction);
+                if (useKeyset2 && !isNext2 && result.Count > 0)
+                {
+                    result.Reverse();
+                }
 
-                return Ok(new { totalCount, data = result, lookupMapData });
+                // 計算 cursor 供下次分頁使用
+                string? nextCursorDate = null, nextCursorKey = null;
+                string? prevCursorDate = null, prevCursorKey = null;
+
+                if (result.Count > 0 && !string.IsNullOrEmpty(orderField1))
+                {
+                    // 下一頁 cursor = 最後一筆
+                    var lastRow = result[^1];
+                    if (hasTwoOrderFields)
+                    {
+                        if (lastRow.TryGetValue(orderField1, out var lastDate))
+                            nextCursorDate = lastDate is DateTime dt ? dt.ToString("yyyy-MM-dd HH:mm:ss") : lastDate?.ToString();
+                        if (lastRow.TryGetValue(orderField2, out var lastKey))
+                            nextCursorKey = lastKey?.ToString();
+                    }
+                    else
+                    {
+                        if (lastRow.TryGetValue(orderField1, out var lastKey))
+                            nextCursorKey = lastKey?.ToString();
+                    }
+
+                    // 上一頁 cursor = 第一筆
+                    var firstRow = result[0];
+                    if (hasTwoOrderFields)
+                    {
+                        if (firstRow.TryGetValue(orderField1, out var firstDate))
+                            prevCursorDate = firstDate is DateTime dt ? dt.ToString("yyyy-MM-dd HH:mm:ss") : firstDate?.ToString();
+                        if (firstRow.TryGetValue(orderField2, out var firstKey))
+                            prevCursorKey = firstKey?.ToString();
+                    }
+                    else
+                    {
+                        if (firstRow.TryGetValue(orderField1, out var firstKey))
+                            prevCursorKey = firstKey?.ToString();
+                    }
+                }
+
+                var serverTotal = countTime + dataTime + lookupTime;
+                _logger.LogInformation("[PagedQuery] {Table} Page={Page} | Count={CountMs}ms | Data={DataMs}ms | Lookup={LookupMs}ms (Skip:{SkipLookup}) | Keyset:{UseKeyset} | Total={TotalMs}ms",
+                    dictTable, page, countTime, dataTime, lookupTime, req.SkipLookup, useKeyset2, serverTotal);
+
+                return Ok(new
+                {
+                    totalCount,
+                    data = result,
+                    lookupMapData,
+                    // Keyset cursor
+                    nextCursor = new { date = nextCursorDate, key = nextCursorKey },
+                    prevCursor = new { date = prevCursorDate, key = prevCursorKey },
+                    // 後端效能資訊
+                    serverTiming = new
+                    {
+                        countMs = countTime,
+                        dataMs = dataTime,
+                        lookupMs = lookupTime,
+                        totalMs = serverTotal,
+                        useKeyset = useKeyset2,
+                        skipLookup = req.SkipLookup
+                    }
+                });
             }
             catch (Exception ex)
             {
