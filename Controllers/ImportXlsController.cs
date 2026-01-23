@@ -16,12 +16,15 @@ public class ImportXlsController : ControllerBase
         _connStr = config.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
     }
-
     [HttpPost("PriceTable")]
-    public async Task<IActionResult> ImportPriceTableAsync([FromForm] IFormFile? file, [FromForm] string? itemId)
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> ImportPriceTableAsync([FromForm] ImportPriceTableRequest request)
     {
+        var file = request.File;
+        var itemId = request.ItemId;
+
         if (file == null || file.Length == 0)
-            return BadRequest(new { ok = false, error = "請選擇 Excel 檔案。" });
+            return BadRequest(new { ok = false, error = "Please select an Excel file." });
 
         var safeItemId = string.IsNullOrWhiteSpace(itemId) ? "SPO00040" : itemId.Trim();
 
@@ -30,35 +33,35 @@ public class ImportXlsController : ControllerBase
 
         var dictTableName = await LoadDictTableNameAsync(conn, safeItemId);
         if (string.IsNullOrWhiteSpace(dictTableName))
-            return BadRequest(new { ok = false, error = "查無對應的資料字典設定。" });
+            return BadRequest(new { ok = false, error = "Missing dictionary setup." });
 
         var importDictTable = $"{dictTableName}_4IMP";
         var realTableName = await LoadRealTableNameAsync(conn, importDictTable);
         if (string.IsNullOrWhiteSpace(realTableName))
-            return BadRequest(new { ok = false, error = "未設定匯入所使用的資料辭典(_4IMP)。" });
+            return BadRequest(new { ok = false, error = "Missing import dictionary (_4IMP)." });
 
         var fields = await LoadImportFieldsAsync(conn, importDictTable);
         if (fields.Count == 0)
-            return BadRequest(new { ok = false, error = "匯入欄位設定為空。" });
+            return BadRequest(new { ok = false, error = "Import field setup is empty." });
 
         using var stream = file.OpenReadStream();
         using var workbook = new XLWorkbook(stream);
         var sheet = workbook.Worksheets.FirstOrDefault();
         if (sheet == null)
-            return BadRequest(new { ok = false, error = "Excel 沒有可用的工作表。" });
+            return BadRequest(new { ok = false, error = "Excel has no worksheet." });
 
         var headerRow = sheet.FirstRowUsed();
         if (headerRow == null)
-            return BadRequest(new { ok = false, error = "Excel 無標題列。" });
+            return BadRequest(new { ok = false, error = "Excel has no header row." });
 
         var headerCells = headerRow.CellsUsed();
         var columnMap = BuildColumnMap(headerCells, fields);
         if (columnMap.Count == 0)
-            return BadRequest(new { ok = false, error = "Excel 欄位無法對應匯入字典。" });
+            return BadRequest(new { ok = false, error = "No matching import columns." });
 
         var lastRowNumber = sheet.LastRowUsed()?.RowNumber() ?? headerRow.RowNumber();
         if (lastRowNumber <= headerRow.RowNumber())
-            return BadRequest(new { ok = false, error = "沒有資料列可匯入。" });
+            return BadRequest(new { ok = false, error = "No data rows to import." });
 
         var insertColumns = columnMap.Select(m => m.FieldName).ToList();
         var colList = string.Join(", ", insertColumns.Select(QuoteIdentifier));
@@ -117,12 +120,12 @@ public class ImportXlsController : ControllerBase
 
         var dictTableName = await LoadDictTableNameAsync(conn, safeItemId);
         if (string.IsNullOrWhiteSpace(dictTableName))
-            return BadRequest("查無對應的資料字典設定。");
+            return BadRequest("Missing dictionary setup.");
 
         var importDictTable = $"{dictTableName}_4IMP";
         var fields = await LoadImportFieldsAsync(conn, importDictTable);
         if (fields.Count == 0)
-            return BadRequest("匯入欄位設定為空。");
+            return BadRequest("Import field setup is empty.");
 
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add("ImportTemplate");
@@ -139,6 +142,11 @@ public class ImportXlsController : ControllerBase
 
         var fileName = $"{safeItemId}_ImportTemplate.xlsx";
         return File(ms.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+    }
+    public sealed class ImportPriceTableRequest
+    {
+        public IFormFile? File { get; set; }
+        public string? ItemId { get; set; }
     }
 
     private sealed record ImportField(string FieldName, string DisplayLabel);
