@@ -1,0 +1,120 @@
+@*
+    SA000005 - 銷貨折讓單
+    對應 Delphi: SendEInvDLL.pas
+    自訂按鈕功能:
+      - btnC10: 補傳發票存證 (Type=0)
+*@
+@model dynamic
+
+<script>
+(() => {
+    window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+    const PAPER_ID = 'APRdCertifMain';
+
+    const readPaperNum = (ctx) => {
+        const v = (ctx?.paperNum || window._paperNum || '').toString().trim();
+        if (v) return v;
+        if (typeof window.getPaperNum === 'function') {
+            try { return (window.getPaperNum() || '').toString().trim(); } catch { /* ignore */ }
+        }
+        return '';
+    };
+
+    const withJwtHeaders = (init = {}) => {
+        const jwt = localStorage.getItem('jwtId');
+        const headers = Object.assign({}, init.headers || {});
+        if (jwt) headers['X-JWTID'] = jwt;
+        return { ...init, headers };
+    };
+
+    /**
+     * 補傳發票存證 / 補傳作廢存證
+     * param {object} ctx - 按鈕上下文
+     * param {number} type - 0: 補傳發票存證, 1: 補傳作廢存證
+     */
+    const sendEInvReSend = async (ctx, type) => {
+        const paperNum = readPaperNum(ctx);
+        if (!paperNum) {
+            return Swal.fire({ icon: 'info', title: '沒有單號' });
+        }
+
+        const actionName = type === 0 ? '補傳發票存證' : '補傳作廢存證';
+
+        // 確認對話框
+        const confirmResult = await Swal.fire({
+            icon: 'question',
+            title: actionName,
+            text: `確定要執行${actionName}?`,
+            showCancelButton: true,
+            confirmButtonText: '確定',
+            cancelButtonText: '取消'
+        });
+
+        if (!confirmResult.isConfirmed) {
+            return;
+        }
+
+        // 顯示載入中
+        Swal.fire({
+            title: '處理中...',
+            text: `正在執行${actionName}`,
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+
+        try {
+            const response = await fetch('/api/EInv/SendEInvReSend', withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    PaperId: PAPER_ID,
+                    PaperNum: paperNum,
+                    Type: type
+                })
+            }));
+
+            const data = await response.json();
+
+            if (response.ok && data.ok) {
+                await Swal.fire({
+                    icon: 'success',
+                    title: '完成',
+                    text: data.message || `${actionName}完成`
+                });
+
+                // 重新整理頁面資料
+                if (typeof window.prcDoReOpen === 'function') {
+                    window.prcDoReOpen();
+                }
+            } else {
+                await Swal.fire({
+                    icon: 'error',
+                    title: '執行失敗',
+                    text: data.error || data.message || `${actionName}失敗`
+                });
+            }
+        } catch (err) {
+            console.error(`${actionName} error:`, err);
+            await Swal.fire({
+                icon: 'error',
+                title: '執行錯誤',
+                text: err.message || '發生未知錯誤'
+            });
+        }
+    };
+
+    // btnC10: 補傳發票存證 (Type=0)
+    const sendInvoiceCertif = async (ctx) => {
+        await sendEInvReSend(ctx, 0);
+    };
+
+    // 註冊按鈕處理函式
+    window.ActionRailCustomHandlers['SA000005'] = {
+        btnC10: sendInvoiceCertif,   // 補傳發票存證
+    };
+})();
+</script>
