@@ -908,8 +908,6 @@ SELECT TOP 1 RunSQLAfterAdd
                 }
 
                 var serverTotal = countTime + dataTime + lookupTime;
-                _logger.LogInformation("[PagedQuery] {Table} Page={Page} | Count={CountMs}ms | Data={DataMs}ms | Lookup={LookupMs}ms (Skip:{SkipLookup}) | Keyset:{UseKeyset} | Total={TotalMs}ms",
-                    dictTable, page, countTime, dataTime, lookupTime, req.SkipLookup, useKeyset2, serverTotal);
 
                 return Ok(new
                 {
