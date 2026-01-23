@@ -9,9 +9,11 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using PcbErpApi.Data;
 using PcbErpApi.Helpers;
 using PcbErpApi.Models;
+using PcbErpApi.Services;
 
 namespace PcbErpApi.Pages.DynamicTemplate
 {
@@ -21,13 +23,17 @@ namespace PcbErpApi.Pages.DynamicTemplate
         private readonly ITableDictionaryService _dictService;
         private readonly HttpClient _http;
         private readonly IWebHostEnvironment _env;
+        private readonly IBreadcrumbService _breadcrumbService;
+        private readonly ILogger<PaperDetailModel> _logger;
 
-        public PaperDetailModel(PcbErpContext ctx, ITableDictionaryService dictService, IHttpClientFactory httpClientFactory, IWebHostEnvironment env)
+        public PaperDetailModel(PcbErpContext ctx, ITableDictionaryService dictService, IHttpClientFactory httpClientFactory, IWebHostEnvironment env, IBreadcrumbService breadcrumbService, ILogger<PaperDetailModel> logger)
         {
             _ctx = ctx;
             _dictService = dictService;
             _http = httpClientFactory.CreateClient("MyApiClient");
             _env = env;
+            _breadcrumbService = breadcrumbService;
+            _logger = logger;
         }
 
         public string ItemId { get; private set; } = string.Empty;
@@ -72,11 +78,21 @@ namespace PcbErpApi.Pages.DynamicTemplate
 
             var sysItem = await _ctx.CurdSysItems.AsNoTracking()
                 .Where(x => x.ItemId == itemId)
-                .Select(x => new { x.ItemId, x.ItemName, x.SpecialUIType, x.SpecialUIConfig })
+                .Select(x => new { x.ItemId, x.ItemName, x.SpecialUIType, x.SpecialUIConfig, x.SuperId })
                 .FirstOrDefaultAsync();
             ItemName = sysItem?.ItemName ?? string.Empty;
             SpecialUIType = sysItem?.SpecialUIType;
             SpecialUIConfig = sysItem?.SpecialUIConfig;
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(sysItem?.SuperId))
+                    ViewData["Breadcrumbs"] = await _breadcrumbService.BuildBreadcrumbsAsync(sysItem.SuperId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Build breadcrumbs failed for {ItemId}", ItemId);
+            }
 
             var setupList = await _ctx.CurdOcxtableSetUp.AsNoTracking()
                 .Where(x => x.ItemId == itemId)

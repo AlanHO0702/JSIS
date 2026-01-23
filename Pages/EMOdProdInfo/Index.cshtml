@@ -291,7 +291,39 @@
       window.location.href = '/EMOdProdInfo/Detail?' + buildQueryString(keys);
     });
 
-    // 3.4 送審/審核按鈕 (待實作區)
+    // 3.4 送審/審核/退審 按鈕區
+    // ============================
+    // 輔助函數：取得目前狀態
+    async function getCurrentStatus(partNum, revision) {
+      try {
+        const resp = await fetch(`/api/PaperAction/GetEMOdProdStatus?partNum=${encodeURIComponent(partNum)}&revision=${encodeURIComponent(revision)}`);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        return data.success ? data.status : null;
+      } catch {
+        return null;
+      }
+    }
+
+    // 輔助函數：執行 EMOdProdAudit
+    async function execEMOdProdAudit(partNum, revision, ioType, tag = 0) {
+      const userId = window._userId || localStorage.getItem('erpLoginUserId') || 'admin';
+      const resp = await fetch('/api/PaperAction/EMOdProdAudit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          PartNum: partNum,
+          Revision: revision,
+          Tag: tag,
+          IOType: ioType,
+          UserId: userId,
+          Meno: ''
+        })
+      });
+      return resp;
+    }
+
+    // 建立按鈕
     const btnConfirm = document.getElementById('btnConfirm');
     if (btnConfirm) {
       btnConfirm.textContent = '送審';
@@ -316,7 +348,46 @@
           Swal.fire({ icon: 'warning', title: '請先選擇一筆工程資料' });
           return;
         }
-        Swal.fire({ icon: 'info', title: '送審功能待實作', text: keys.PartNum });
+
+        const partNum = keys.PartNum;
+        const revision = keys.Revision || '0';
+        const status = await getCurrentStatus(partNum, revision);
+
+        if (status === null) {
+          Swal.fire({ icon: 'error', title: '錯誤', text: '無法取得料號狀態' });
+          return;
+        }
+
+        // Status: 0=設計中, 1=設計完成(已送審), 2=已審核
+        if (status === 1) {
+          Swal.fire({ icon: 'warning', title: '該料號已送審' });
+          return;
+        }
+        if (status === 2) {
+          Swal.fire({ icon: 'warning', title: '該料號已審核' });
+          return;
+        }
+
+        // Status=0 設計中，正常送審
+        const confirm = await Swal.fire({
+          title: '確定要送審嗎？',
+          text: `料號: ${partNum} / 版序: ${revision}`,
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonText: '確定',
+          cancelButtonText: '取消'
+        });
+        if (!confirm.isConfirmed) return;
+
+        const resp = await execEMOdProdAudit(partNum, revision, 1, 0);  // IOType=1, Tag=0
+        const data = await resp.json();
+        if (resp.ok && data.success) {
+          Swal.fire({ icon: 'success', title: '送審成功' }).then(() => {
+            if (typeof doQuery === 'function') doQuery();
+          });
+        } else {
+          Swal.fire({ icon: 'error', title: '送審失敗', text: data.message });
+        }
       });
     }
 
@@ -329,7 +400,46 @@
           Swal.fire({ icon: 'warning', title: '請先選擇一筆工程資料' });
           return;
         }
-        Swal.fire({ icon: 'info', title: '審核功能待實作', text: keys.PartNum });
+
+        const partNum = keys.PartNum;
+        const revision = keys.Revision || '0';
+        const status = await getCurrentStatus(partNum, revision);
+
+        if (status === null) {
+          Swal.fire({ icon: 'error', title: '錯誤', text: '無法取得料號狀態' });
+          return;
+        }
+
+        // Status: 0=設計中, 1=設計完成(已送審), 2=已審核
+        if (status === 0) {
+          Swal.fire({ icon: 'warning', title: '該料號尚未送審' });
+          return;
+        }
+        if (status === 2) {
+          Swal.fire({ icon: 'warning', title: '該料號已審核' });
+          return;
+        }
+
+        // Status=1 設計完成，正常審核
+        const confirm = await Swal.fire({
+          title: '確定要審核嗎？',
+          text: `料號: ${partNum} / 版序: ${revision}`,
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonText: '確定',
+          cancelButtonText: '取消'
+        });
+        if (!confirm.isConfirmed) return;
+
+        const resp = await execEMOdProdAudit(partNum, revision, 1, 1);  // IOType=1, Tag=1 (審核需要 Tag=1)
+        const data = await resp.json();
+        if (resp.ok && data.success) {
+          Swal.fire({ icon: 'success', title: '審核成功' }).then(() => {
+            if (typeof doQuery === 'function') doQuery();
+          });
+        } else {
+          Swal.fire({ icon: 'error', title: '審核失敗', text: data.message });
+        }
       });
     }
 
@@ -340,7 +450,41 @@
         Swal.fire({ icon: 'warning', title: '請先選擇一筆工程資料' });
         return;
       }
-      Swal.fire({ icon: 'info', title: '退審功能待實作' });
+
+      const partNum = keys.PartNum;
+      const revision = keys.Revision || '0';
+      const status = await getCurrentStatus(partNum, revision);
+
+      if (status === null) {
+        Swal.fire({ icon: 'error', title: '錯誤', text: '無法取得料號狀態' });
+        return;
+      }
+
+      // Status: 0=設計中, 1=設計完成(已送審), 2=已審核
+      if (status === 0) {
+        Swal.fire({ icon: 'warning', title: '無法退審', text: '該料號尚未送審，無需退審' });
+        return;
+      }
+
+      const confirm = await Swal.fire({
+        title: '確定要退審嗎？',
+        text: `料號: ${partNum} / 版序: ${revision}`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: '確定',
+        cancelButtonText: '取消'
+      });
+      if (!confirm.isConfirmed) return;
+
+      const resp = await execEMOdProdAudit(partNum, revision, 6, 0);  // IOType=6 退審
+      const data = await resp.json();
+      if (resp.ok && data.success) {
+        Swal.fire({ icon: 'success', title: '退審成功' }).then(() => {
+          if (typeof doQuery === 'function') doQuery();
+        });
+      } else {
+        Swal.fire({ icon: 'error', title: '退審失敗', text: data.message });
+      }
     });
 
     // 3.6 紀錄按鈕

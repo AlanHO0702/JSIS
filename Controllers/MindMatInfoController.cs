@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
@@ -43,11 +43,15 @@ public class MindMatInfoController : ControllerBase
 
     // GET: api/MindMatInfo/paged?page=1&pageSize=50
     [HttpGet("paged")]
-    public async Task<IActionResult> GetPaged(int page = 1, int pageSize = 50)
+    public async Task<IActionResult> GetPaged(int page = 1, int pageSize = 50, int? mb = null)
     {
         var query = _context.MindMatInfo
             .OrderByDescending(x => x.Partnum)
             .ThenByDescending(x => x.Revision);
+        if (mb.HasValue)
+            query = query.Where(x => x.MB == mb.Value)
+                .OrderByDescending(x => x.Partnum)
+                .ThenByDescending(x => x.Revision);
 
         var totalCount = await query.CountAsync();
         if (pageSize <= 0)

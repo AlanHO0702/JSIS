@@ -587,7 +587,8 @@ ORDER BY idx.index_id, ic.key_ordinal";
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 50,
             [FromQuery] string? orderBy = null,
-            [FromQuery] string? orderDir = "DESC")
+            [FromQuery] string? orderDir = "DESC",
+            [FromQuery] int? mb = null)
         {
             if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required");
         var actualTable = await ResolveActualTableNameAsync(table);
@@ -595,11 +596,19 @@ ORDER BY idx.index_id, ic.key_ordinal";
             var tblOk = await TableExistsAsync(actualTable);
             if (!tblOk) return NotFound($"Table '{table}' not found.");
 
+            var whereSql = string.Empty;
+            if (mb.HasValue && await ColumnExistsAsync(actualTable, "MB"))
+            {
+                whereSql = " WHERE [MB] = @mb";
+            }
+
             var totalCount = 0;
             await using (var cntConn = new SqlConnection(_connStr))
             {
                 await cntConn.OpenAsync();
-                await using var cntCmd = new SqlCommand($"SELECT COUNT(1) FROM [{actualTable}]", cntConn);
+                await using var cntCmd = new SqlCommand($"SELECT COUNT(1) FROM [{actualTable}]{whereSql}", cntConn);
+                if (whereSql.Length > 0)
+                    cntCmd.Parameters.AddWithValue("@mb", mb!.Value);
                 totalCount = Convert.ToInt32(await cntCmd.ExecuteScalarAsync());
             }
 
@@ -612,8 +621,10 @@ ORDER BY idx.index_id, ic.key_ordinal";
                 var allDt = new DataTable();
                 await using var connAll = new SqlConnection(_connStr);
                 await connAll.OpenAsync();
-                await using (var cmdAll = new SqlCommand($"SELECT * FROM [{actualTable}]{orderSql}", connAll))
+                await using (var cmdAll = new SqlCommand($"SELECT * FROM [{actualTable}]{whereSql}{orderSql}", connAll))
                 {
+                    if (whereSql.Length > 0)
+                        cmdAll.Parameters.AddWithValue("@mb", mb!.Value);
                     await using var rd = await cmdAll.ExecuteReaderAsync();
                     allDt.Load(rd);
                 }
@@ -624,13 +635,15 @@ ORDER BY idx.index_id, ic.key_ordinal";
                 orderSql = " ORDER BY (SELECT 1)";
 
             var offset = Math.Max(0, (page - 1) * pageSize);
-            var sql = $"SELECT * FROM [{actualTable}]{orderSql} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY";
+            var sql = $"SELECT * FROM [{actualTable}]{whereSql}{orderSql} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY";
 
             var dt = new DataTable();
             await using var conn = new SqlConnection(_connStr);
             await conn.OpenAsync();
             await using (var cmd = new SqlCommand(sql, conn))
             {
+                if (whereSql.Length > 0)
+                    cmd.Parameters.AddWithValue("@mb", mb!.Value);
                 cmd.Parameters.AddWithValue("@offset", offset);
                 cmd.Parameters.AddWithValue("@pageSize", pageSize);
                 await using var rd = await cmd.ExecuteReaderAsync();

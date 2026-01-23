@@ -577,10 +577,13 @@ function updateToolbarHeaderCountForRow(row) {
 }
 
 function doQuery(page = 1) {
+  const t0 = performance.now();
+
   // 深拷貝 filters，避免修改原始 lastQueryFilters 中的物件
   let filters = lastQueryFilters.map(f => ({ ...f }));
   let hasPage = false, hasSize = false;
   const itemId = (window._itemId || window._singleItemId || '').toString().trim();
+  const tableName = (window._tableName || '').toLowerCase();
 
   filters.forEach(f => {
     // 使用不區分大小寫的比較
@@ -602,19 +605,39 @@ function doQuery(page = 1) {
   }
   history.replaceState(null, '', url.toString());
 
+  // 檢查 sessionStorage 是否已有 lookup 快取（關閉分頁才會消失）
+  const lookupCacheKey = `lookupCache:${tableName}`;
+  const cachedLookup = sessionStorage.getItem(lookupCacheKey);
+  const skipLookup = !!cachedLookup && !!window._lookupMapData;
+
   http('/api/DynamicTable/PagedQuery', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table: window._tableName, itemId, filters })
+    body: JSON.stringify({ table: window._tableName, itemId, filters, skipLookup })
   }, '讀取資料中…')
     .then(r => r.json())
     .then(result => {
-      window._lookupMapData = result.lookupMapData;
+      // 如果後端有回傳 lookup 資料，存入快取
+      if (result.lookupMapData && Object.keys(result.lookupMapData).length > 0) {
+        window._lookupMapData = result.lookupMapData;
+        sessionStorage.setItem(lookupCacheKey, '1');
+      }
+      // 如果跳過 lookup 但記憶體中沒有資料，清除快取標記讓下次重新取得
+      if (skipLookup && (!window._lookupMapData || Object.keys(window._lookupMapData).length === 0)) {
+        sessionStorage.removeItem(lookupCacheKey);
+      }
+
       renderTable(result.data);
       renderPagination(result.totalCount, @Model.PageSize, page);
       renderOrderCount(result.totalCount, @Model.PageSize, page);
+
+      const totalTime = (performance.now() - t0).toFixed(0);
+      console.log(`[分頁查詢] ${window._tableName} 第${page}頁 | ${totalTime}ms | 快取:${skipLookup ? '是' : '否'}`);
     })
-    .catch(err => Swal.fire({ icon:'error', title:'查詢失敗', text: String(err) }));
+    .catch(err => {
+      console.log(`[分頁查詢] 失敗 | ${(performance.now() - t0).toFixed(0)}ms | ${err}`);
+      Swal.fire({ icon:'error', title:'查詢失敗', text: String(err) });
+    });
 
 }
 
@@ -746,13 +769,22 @@ document.addEventListener("DOMContentLoaded", function () {
       return f;
     });
 
+  // 優先從 URL 讀取 page 參數（Detail 返回時會帶），沒有則用第 1 頁
+  const urlPageParam = new URLSearchParams(window.location.search).get('page');
+  const initialPage = urlPageParam ? parseInt(urlPageParam, 10) : 1;
+
   if (cleaned.length) {
     lastQueryFilters = cleaned;
     restoreSearchFormSafe(formEl, cleaned);
-    doQuery(state.pageNumber || 1);
+    doQuery(initialPage);
   } else {
-    renderTable(@Html.Raw(Json.Serialize(Model.Items)));
-    renderOrderCount(@Model.TotalCount, @Model.PageSize, @Model.PageNumber);
+    // 沒有查詢條件時，如果 URL 有 page 參數也要查詢
+    if (urlPageParam && initialPage > 1) {
+      doQuery(initialPage);
+    } else {
+      renderTable(@Html.Raw(Json.Serialize(Model.Items)));
+      renderOrderCount(@Model.TotalCount, @Model.PageSize, @Model.PageNumber);
+    }
   }
 
   // 切換（檢查是否允許修改）

@@ -14,6 +14,7 @@ using Microsoft.Extensions.Logging;
 using System.Text.Encodings.Web;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
+using PcbErpApi.Services;
 using ClosedXML.Excel;
 
 namespace PcbErpApi.Pages.CUR
@@ -23,12 +24,14 @@ namespace PcbErpApi.Pages.CUR
         private readonly PcbErpContext _ctx;
         private readonly ITableDictionaryService _dictService;
         private readonly ILogger<SingleGridModel> _logger;
+        private readonly IBreadcrumbService _breadcrumbService;
 
-        public SingleGridModel(PcbErpContext ctx, ITableDictionaryService dictService, ILogger<SingleGridModel> logger)
+        public SingleGridModel(PcbErpContext ctx, ITableDictionaryService dictService, ILogger<SingleGridModel> logger, IBreadcrumbService breadcrumbService)
         {
             _ctx = ctx;
             _dictService = dictService;
             _logger = logger;
+            _breadcrumbService = breadcrumbService;
         }
 
         public string TableName { get; private set; } = string.Empty;
@@ -37,6 +40,9 @@ namespace PcbErpApi.Pages.CUR
         public string? ItemName { get; private set; }
         public string PageTitle => string.IsNullOrWhiteSpace(ItemName) ? ItemId : $"{ItemId}{ItemName}";
         public string HeaderText => string.IsNullOrWhiteSpace(ItemName) ? ItemId : ItemName!;
+
+        // 麵包屑導航資訊
+        public List<BreadcrumbItem> Breadcrumbs { get; private set; } = new();
 
         public int PageNumber { get; private set; } = 1;
         public int PageSize { get; private set; } = 50;
@@ -72,6 +78,10 @@ namespace PcbErpApi.Pages.CUR
             ItemId = item.ItemId;
             ItemName = item.ItemName;
             ViewData["Title"] = PageTitle;
+
+            // 建立麵包屑導航
+            Breadcrumbs = await _breadcrumbService.BuildBreadcrumbsAsync(item.SuperId);
+            ViewData["Breadcrumbs"] = Breadcrumbs;
 
             var setup = await _ctx.CurdOcxtableSetUp.AsNoTracking()
                 .Where(x => x.ItemId == itemId)
