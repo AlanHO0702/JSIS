@@ -2894,7 +2894,7 @@ if (editBtn) {
   window.__setHeaderEditMode = setHeaderEditMode;
 
   editBtn.addEventListener('click', async function () {
-    const headerTableName = window._headerTableName;
+    const headerTableName = window._headerRealTableName || window._headerTableName || window._tableName;
     const paperNum = window._paperNum || (typeof PAGE !== 'undefined' ? PAGE.paperNum : null);
     console.log('[修改按鈕] headerTableName:', headerTableName, 'paperNum:', paperNum);
 
@@ -2971,6 +2971,26 @@ if (editBtn) {
       const shouldReject = await showRejectConfirmDialog({ message, rejectRequiresNotes, rejectMessage });
       if (!shouldReject.confirmed) return;
 
+      // 建立共用 context，讓 beforeCancel 和 afterCancel 可以共享資料
+      const hookContext = {
+        tableName: headerTableName,
+        paperNum: paperNum,
+        userId: window._userId || localStorage.getItem('erpLoginUserId') || 'admin',
+        source: 'editButton' // 標記來源為修改按鈕
+      };
+
+      // Hook: beforeCancel
+      if (typeof window.executeInherited === 'function') {
+        const beforeHook = await window.executeInherited('beforeCancel', hookContext);
+        if (!beforeHook.ok) {
+          if (beforeHook.reason === 'hook-canceled') return;
+          if (beforeHook.reason === 'hook-error') {
+            await Swal.fire({ icon: 'error', title: 'Hook 執行失敗', text: beforeHook.error?.message || String(beforeHook.error) });
+            return;
+          }
+        }
+      }
+
       // 執行退審
       const rejectResp = await fetch('/api/PaperAction/RejectForEdit', {
         method: 'POST',
@@ -2989,6 +3009,13 @@ if (editBtn) {
         const errData = await rejectResp.json().catch(() => ({}));
         await Swal.fire({ icon: 'error', title: '退審失敗', text: errData.message || '無法完成退審操作' });
         return;
+      }
+
+      // Hook: afterCancel
+      if (typeof window.executeInherited === 'function') {
+        const rejectData = await rejectResp.clone().json().catch(() => ({}));
+        hookContext.result = rejectData;
+        await window.executeInherited('afterCancel', hookContext);
       }
 
       // 退審成功，重新載入頁面並自動進入編輯模式
