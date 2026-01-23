@@ -57,6 +57,7 @@ namespace PcbErpApi.Data
         public virtual DbSet<CurdNoticeBoardUser> CurdNoticeBoardUsers { get; set; }
         public virtual DbSet<EmodProdMap> EmodProdMaps { get; set; }
         public virtual DbSet<EmodLayerPress> EmodLayerPresses { get; set; }
+
         public IEnumerable<object> TabConfigs { get; internal set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -101,7 +102,7 @@ namespace PcbErpApi.Data
                     .IsUnicode(false);
             });
 
-            // FMEdIssuePO 複�?主鍵?�置
+            // FMEdIssuePO 複�?主鍵?�置
             modelBuilder.Entity<FmedIssuePo>(entity =>
             {
                 entity.HasKey(e => new { e.PaperNum, e.Item });
@@ -292,13 +293,13 @@ namespace PcbErpApi.Data
             });
 
 
-            // FMEdIssueMat 複�?主鍵?�置
+            // FMEdIssueMat 複�?主鍵?�置
             modelBuilder.Entity<FmedIssueMat>(entity =>
             {
                 entity.HasKey(e => new { e.PaperNum, e.Item });
             });
 
-            // FMEdIssueLayer 複�?主鍵?�置
+            // FMEdIssueLayer 複�?主鍵?�置
             modelBuilder.Entity<FmedIssueLayer>(entity =>
             {
                 entity.HasKey(e => new { e.PaperNum, e.Item });
@@ -718,7 +719,7 @@ namespace PcbErpApi.Data
             entity.Property(e => e.LotNotes)
                 .HasMaxLength(12)
                 .IsUnicode(false)
-                .HasDefaultValue("�@");
+                .HasDefaultValue("�@");
             entity.Property(e => e.McutNum)
                 .HasMaxLength(16)
                 .IsUnicode(false);
@@ -1238,10 +1239,10 @@ namespace PcbErpApi.Data
             mindMatInfo.ToTable(tb => tb.UseSqlOutputClause(false));
 
             modelBuilder.Entity<CURdTableField>()
-            .HasKey(e => new { e.TableName, e.FieldName }); // ?�裡?��?你�?�??複�?主鍵欄�?
+            .HasKey(e => new { e.TableName, e.FieldName }); // ?�裡?��?你�?�??複�?主鍵欄�?
 
             modelBuilder.Entity<CURdOCXTableFieldLK>()
-            .HasKey(e => new { e.TableName, e.FieldName, e.KeyFieldName, e.KeySelfName }); // ?�裡?��?你�?�??複�?主鍵欄�?
+            .HasKey(e => new { e.TableName, e.FieldName, e.KeyFieldName, e.KeySelfName }); // ?�裡?��?你�?�??複�?主鍵欄�?
 
             modelBuilder.Entity<CURdTableField>().ToTable("CURdTableField");
 
@@ -1263,13 +1264,13 @@ namespace PcbErpApi.Data
 
             modelBuilder.Entity<CURdSysParams>(e =>
             {
-                e.HasKey(x => new { x.SystemId, x.ParamId });   // ??複�?主鍵
+                e.HasKey(x => new { x.SystemId, x.ParamId });   // ??複�?主鍵
 
-                // （可?��??��?保險?��?定長�?
+                // （可?��??��?保險?��?定長�?
                 e.Property(x => x.SystemId).HasMaxLength(8).IsRequired();
                 e.Property(x => x.ParamId).HasMaxLength(24).IsRequired();
 
-                e.ToTable(tb => tb.HasTrigger("CURdSysParams_tIU")); // ??EF ?�改?�普??UPDATE
+                e.ToTable(tb => tb.HasTrigger("CURdSysParams_tIU")); // ??EF ?�改?�普??UPDATE
 
             });
 
@@ -1355,22 +1356,22 @@ namespace PcbErpApi.Data
             });
                 modelBuilder.Entity<SpodPoKind>(entity =>
             {
-                // 資�?庫�?實�?表�?：SPODPoKind  （照�?SQL ?��?字�?
+                // 資�?庫�?實�?表�?：SPODPoKind  （照�?SQL ?��?字�?
                 entity.ToTable("SPODPoKind");
 
                 // PK_SPOdPoKind clustered, unique, primary key located on PRIMARY PoKind, UseId
                 entity.HasKey(e => new { e.PoKind, e.UseId });
 
-                // PoKind int not null（�?設就?�以，�?一定�??�設定�?
+                // PoKind int not null（�?設就?�以，�?一定�??�設定�?
 
                 entity.Property(e => e.PoKindName)
                     .HasMaxLength(100);          // nvarchar(100)
 
                 entity.Property(e => e.UseId)
                     .HasMaxLength(8)
-                    .IsUnicode(false)            // char(8)，�???nvarchar
+                    .IsUnicode(false)            // char(8)，�???nvarchar
                     .IsFixedLength()
-                    .HasDefaultValue("A001");    // 如�?資�?庫�??�設?�就一起寫
+                    .HasDefaultValue("A001");    // 如�?資�?庫�??�設?�就一起寫
 
                 entity.Property(e => e.LotNotes)
                     .HasMaxLength(12)
@@ -1683,7 +1684,7 @@ namespace PcbErpApi.Data
                     .IsUnicode(false);
                 entity.Property(e => e.BProcNameEng).HasMaxLength(200);
 
-                // Ignore ?�於 lookup ?��?位�?不在資�?表中�?
+                // Ignore ?�於 lookup ?��?位�?不在資�?表中�?
                 entity.Ignore(e => e.BPTypeNameM);
             });
 
@@ -2302,7 +2303,7 @@ namespace PcbErpApi.Data
             modelBuilder.Entity<UpdateDictFieldInput>().HasNoKey();
             modelBuilder.Entity<AddItemRequest>().HasNoKey();
 
-            // ?��?每�?entity ??decimal 欄�??��??��?設�? HasPrecision
+            // ?��?每�?entity ??decimal 欄�??��??��?設�? HasPrecision
 
             modelBuilder.Entity<AddItemRequest>(entity =>
             {
