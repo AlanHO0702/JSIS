@@ -208,8 +208,12 @@ namespace PcbErpApi.Controllers
                         }
                         foreach (var sp in setPairs)
                         {
-                            if (insertSeen.Add(sp.Col.Name))
-                                insertPairs.Add(sp);
+                            if (!insertSeen.Add(sp.Col.Name)) continue;
+                            // ★ INSERT 時跳過空值欄位（非 Key 欄位），讓 SQL Server 使用預設值
+                            var isKey = keyNames?.Contains(sp.Col.Name, StringComparer.OrdinalIgnoreCase) ?? false;
+                            if (!isKey && (sp.Value == null || sp.Value == DBNull.Value || (sp.Value is string s && string.IsNullOrEmpty(s))))
+                                continue;
+                            insertPairs.Add(sp);
                         }
 
                         if (insertPairs.Count > 0)

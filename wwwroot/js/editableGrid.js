@@ -1,5 +1,5 @@
-﻿// /wwwroot/js/editableGrid.js
-// 霈?table ?舀蝪⊥???蝺刻摩 / 瑼Ｚ? / ?脣? ?
+// /wwwroot/js/editableGrid.js
+// 通用 table 可編輯/儲存/刪除功能
 (function () {
 
   window.makeEditableGrid = function (options) {
@@ -22,11 +22,11 @@
       };
     }
 
-    // ===== ???=====
+    // ===== 狀態 =====
     let editing = false;
     function isEdit() { return editing; }
 
-    // ===== 蝺刻摩 / 瑼Ｚ? ?? =====
+    // ===== 編輯模式切換 =====
     function toggleEdit(toEdit) {
       editing = !!toEdit;
       wrapper.classList.toggle("edit-mode", editing);
@@ -40,7 +40,16 @@
 
           if (editing) {
 
-            // ?脣蝺刻摩甈?嚗???defaultValue
+            // ★ 進入編輯模式時，從 viewChk 同步 checked 狀態到 inp（確保狀態一致）
+            if (inp.type === "checkbox") {
+              const viewChk = span.querySelector('input[type="checkbox"]');
+              if (viewChk) {
+                inp.checked = viewChk.checked;
+                inp.value = viewChk.checked ? "1" : "0";
+              }
+            }
+
+            // 記錄進入編輯時的 defaultValue
             inp.defaultValue = inp.type === "checkbox"
               ? (inp.checked ? "1" : "0")
               : inp.value;
@@ -63,7 +72,7 @@
 
           } else {
 
-            // ?憿舐內甈?
+            // 退出編輯模式
             if (inp.type === "checkbox") {
               let viewChk = span.querySelector('input[type="checkbox"]');
               if (!viewChk) {
@@ -88,29 +97,29 @@
       });
     }
 
-    // ===== ?園?撌桃 =====
+    // ===== 收集變更 =====
     function collectChanges() {
 
       const list = [];
 
       table.querySelectorAll("tbody tr").forEach(tr => {
 
-        // ===== ?芷???芷?KeyFields + __delete =====
+        // ===== 刪除列：只送 KeyFields + __delete =====
         if (tr.dataset.state === "deleted") {
           const rowDel = {};
-          // ??閰血? cell-edit ???踹? DOM ??憛?hidden嚗?
+          // 先從 cell-edit 收集（含 DOM 上的 hidden）
           tr.querySelectorAll(".cell-edit").forEach(inp => {
             if (!inp.name) return;
             if (keyFieldSet.has((inp.name || "").toLowerCase())) {
               rowDel[inp.name] = inp.type === "checkbox" ? (inp.checked ? "1" : "0") : (inp.value ?? "");
             }
           });
-          // ?? hidden PK / FK
+          // 再檢查 hidden PK / FK
           tr.querySelectorAll(".mmd-pk-hidden, .mmd-fk-hidden").forEach(inp => {
             if (!inp.name) return;
             if (rowDel[inp.name] === undefined || rowDel[inp.name] === "") rowDel[inp.name] = inp.value ?? "";
           });
-          // ?敺? KeyFields嚗?撩嚗?
+          // 補齊 KeyFields
           keyFieldSet.forEach(k => {
             const has = Object.keys(rowDel).some(n => (n || "").toLowerCase() === k);
             if (has) return;
@@ -151,7 +160,7 @@
         if (!hasDiff) return;
         const rowAll = {};
 
-        // 蝺刻摩甈?
+        // 編輯欄位
         tr.querySelectorAll(".cell-edit").forEach(inp => {
             if (!inp.name) return;
             const dataType = inp.dataset.type || "";
@@ -165,7 +174,7 @@
             }
         });
 
-        // 蝣箔??菜?雿?摰葆?潘??亥撓?交?蝛綽??岫敺???span ??data-raw ??
+        // 補齊 keyFields
         keyFieldSet.forEach(k => {
           const inp = Array.from(tr.querySelectorAll('.cell-edit')).find(i => (i.name || '').toLowerCase() === k);
           const span = inp?.previousElementSibling;
@@ -175,7 +184,7 @@
           }
         });
 
-        // PK ?梯?甈?
+        // PK 隱藏欄位
         tr.querySelectorAll(".mmd-pk-hidden").forEach(inp => {
           if (!inp.name) return;
           if (rowAll[inp.name] === undefined || rowAll[inp.name] === "") {
@@ -183,7 +192,7 @@
           }
         });
 
-        // FK ?梯?甈? (KeyMap)
+        // FK 隱藏欄位 (KeyMap)
         tr.querySelectorAll(".mmd-fk-hidden").forEach(inp => {
           if (!inp.name) return;
           if (rowAll[inp.name] === undefined || rowAll[inp.name] === "") {
@@ -197,7 +206,7 @@
       return list;
     }
 
-    // ===== ?脣? =====
+    // ===== 儲存 =====
     async function saveChanges() {
 
       if (!tableName) {
@@ -236,7 +245,7 @@
         return { ok:false, skipped:false, text:msg, raw:json };
       }
 
-      // ??敺??郊 defaultValue
+      // 儲存成功，更新 defaultValue
       table.querySelectorAll(".cell-edit").forEach(inp => {
         inp.defaultValue = inp.type === "checkbox"
           ? (inp.checked ? "1" : "0")
@@ -246,9 +255,9 @@
         }
       });
 
-      // ?芷????敺宏??
+      // 刪除列：移除 DOM
       table.querySelectorAll('tbody tr[data-state="deleted"]').forEach(tr => tr.remove());
-      // ?啣?????敺圾?斤???閮?
+      // 新增列：移除標記
       table.querySelectorAll('tbody tr[data-state="added"]').forEach(tr => {
         delete tr.dataset.state;
         tr.classList.remove("table-warning");
@@ -257,15 +266,89 @@
       return { ok:true, skipped:false, text:"OK", raw:json };
     }
 
-    // ===== 撠? API =====
+    // ===== 刪除選中的列 =====
+    async function deleteRows() {
+      if (!editing) return { ok: false, text: "請先進入編輯模式" };
+
+      const selected = table.querySelector("tbody tr.selected");
+      if (!selected) return { ok: false, text: "請先選擇要刪除的資料列" };
+
+      // 如果是新增的列（還沒存到資料庫），直接移除
+      if (selected.dataset.state === "added") {
+        selected.remove();
+        return { ok: true, text: "已移除未儲存的新增列" };
+      }
+
+      // 收集 key 欄位值
+      const rowDel = {};
+      selected.querySelectorAll(".cell-edit").forEach(inp => {
+        if (!inp.name) return;
+        if (keyFieldSet.has((inp.name || "").toLowerCase())) {
+          rowDel[inp.name] = inp.type === "checkbox" ? (inp.checked ? "1" : "0") : (inp.value ?? "");
+        }
+      });
+      // 也檢查 hidden PK / FK
+      selected.querySelectorAll(".mmd-pk-hidden, .mmd-fk-hidden").forEach(inp => {
+        if (!inp.name) return;
+        if (rowDel[inp.name] === undefined || rowDel[inp.name] === "") rowDel[inp.name] = inp.value ?? "";
+      });
+      rowDel.__delete = true;
+
+      if (!tableName) {
+        return { ok: false, text: "tableName 未設定" };
+      }
+
+      // 直接呼叫 API 刪除
+      const payload = { TableName: tableName, Data: [rowDel] };
+      if (keyFields.length) payload.KeyFields = keyFields;
+
+      let resp, txt;
+      try {
+        resp = await fetch(saveUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        txt = await resp.text();
+      } catch (err) {
+        console.error("deleteRows error:", err);
+        return { ok: false, text: String(err) };
+      }
+
+      let json = null;
+      try { json = txt ? JSON.parse(txt) : null; } catch {}
+
+      if (!resp.ok || (json && json.success === false)) {
+        const msg = (json && (json.message || json.error)) || txt || "刪除失敗";
+        return { ok: false, text: msg };
+      }
+
+      // 刪除成功，從 DOM 移除該列
+      const nextRow = selected.nextElementSibling || selected.previousElementSibling;
+      selected.remove();
+
+      // 選擇下一列或上一列
+      if (nextRow && nextRow.tagName === "TR") {
+        table.querySelectorAll("tbody tr").forEach(tr => tr.classList.remove("selected"));
+        nextRow.classList.add("selected");
+      }
+
+      return { ok: true, text: "刪除成功" };
+    }
+
+    // ===== 新增一列（預設不做事，讓 masterDetailTemplate.js 處理） =====
+    function insertRows() {
+      return { ok: true, skipped: true, text: "由外部處理" };
+    }
+
+    // ===== 匯出 API =====
     return {
       isEdit,
       toggleEdit,
-      saveChanges
+      saveChanges,
+      deleteRows,
+      insertRows
     };
   };
 
 })();
-
-
-

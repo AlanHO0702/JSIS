@@ -584,8 +584,16 @@ SELECT TOP 1 RunSQLAfterAdd
                 return string.IsNullOrWhiteSpace(alt) ? null : alt;
             }
 
+            var queryMeta = await LoadQueryFieldMetaAsync(req.ItemId, dictTable, realTable);
+            var metaMap = queryMeta
+                .GroupBy(x => NormalizeFilterField(x.ColumnName ?? ""), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            var setupMap = await LoadTableSetupMapAsync(req.ItemId);
+
             int page = 1, pageSize = 50;
-            var conditions = new List<string>();
+            var masterConditions = new List<string>();
+            var detailGroups = new Dictionary<string, DetailGroup>(StringComparer.OrdinalIgnoreCase);
             var parameters = new List<SqlParameter>();
             int pIndex = 0;
 
@@ -604,23 +612,59 @@ SELECT TOP 1 RunSQLAfterAdd
 
                 if (string.IsNullOrWhiteSpace(f.Field) || string.IsNullOrWhiteSpace(f.Value))
                     continue;
-                var realField = ResolveFieldName(f.Field);
-                if (string.IsNullOrWhiteSpace(realField))
-                    continue; // 忽略未知欄位/別名
 
-                var op = NormalizeOp(f.Op);
-                var paramName = $"@p{pIndex++}";
-                if (op == "LIKE")
-                    parameters.Add(new SqlParameter(paramName, $"%{f.Value}%"));
-                else
-                    parameters.Add(new SqlParameter(paramName, f.Value));
-                conditions.Add($"[{realField}] {op} {paramName}");
+                var normKey = NormalizeFilterField(f.Field);
+                metaMap.TryGetValue(normKey, out var meta);
+
+                var isDetail = meta != null && IsDetailField(meta, dictTable);
+                if (!isDetail)
+                {
+                    var realField = ResolveFieldName(f.Field);
+                    if (string.IsNullOrWhiteSpace(realField))
+                        continue; // 忽略未知欄位/別名
+
+                    var op = NormalizeOp(string.IsNullOrWhiteSpace(f.Op) ? meta?.DefaultEqual : f.Op);
+                    var masterCondition = BuildMasterConditionSql(realField, op, f.Value, parameters, ref pIndex);
+                    if (!string.IsNullOrWhiteSpace(masterCondition))
+                        masterConditions.Add(masterCondition);
+                    continue;
+                }
+
+                var detailInfo = ResolveDetailInfo(meta!, setupMap, dictTable);
+                if (detailInfo == null) continue;
+
+                var detailField = await ResolveDetailFieldAsync(detailInfo.DictTable, f.Field);
+                if (string.IsNullOrWhiteSpace(detailField)) continue;
+
+                var opDetail = NormalizeOp(string.IsNullOrWhiteSpace(f.Op) ? meta?.DefaultEqual : f.Op);
+                var detailCondition = BuildConditionSql(detailField, opDetail, f.Value, parameters, ref pIndex);
+                if (string.IsNullOrWhiteSpace(detailCondition)) continue;
+
+                var groupKey = $"{detailInfo.RealTable}|{detailInfo.MasterKey}|{detailInfo.DetailKey}";
+                if (!detailGroups.TryGetValue(groupKey, out var group))
+                {
+                    group = new DetailGroup
+                    {
+                        RealTable = detailInfo.RealTable,
+                        MasterKey = detailInfo.MasterKey,
+                        DetailKey = detailInfo.DetailKey
+                    };
+                    detailGroups[groupKey] = group;
+                }
+                group.Conditions.Add(detailCondition);
             }
 
             if (page <= 0) page = 1;
             if (pageSize <= 0 || pageSize > 1000) pageSize = 50;
 
-            var whereSql = conditions.Count > 0 ? $"WHERE {string.Join(" AND ", conditions)}" : "";
+            var detailConditions = detailGroups.Values
+                .Where(g => g.Conditions.Count > 0)
+                .Select(g =>
+                    $"t0.[{g.MasterKey}] IN (SELECT DISTINCT [{g.DetailKey}] FROM [{g.RealTable}] t1 WITH (NOLOCK) WHERE 1=1 AND {string.Join(" AND ", g.Conditions)})")
+                .ToList();
+
+            var allConditions = masterConditions.Concat(detailConditions).ToList();
+            var whereSql = allConditions.Count > 0 ? $"WHERE {string.Join(" AND ", allConditions)}" : "";
             string? filterSql = null;
             if (!string.IsNullOrWhiteSpace(req.ItemId))
             {
@@ -968,6 +1012,315 @@ SELECT TOP (@top) {selectCols}
             }
         }
 
+        private sealed class QueryFieldMeta
+        {
+            public string ColumnName { get; set; } = "";
+            public string? TableName { get; set; }
+            public string? TableKind { get; set; }
+            public string? AliasName { get; set; }
+            public string? DefaultEqual { get; set; }
+        }
+
+        private sealed class TableSetupMeta
+        {
+            public string DictTable { get; set; } = "";
+            public string RealTable { get; set; } = "";
+            public string TableKind { get; set; } = "";
+            public string? MdKey { get; set; }
+            public string? LocateKeys { get; set; }
+        }
+
+        private sealed class DetailGroup
+        {
+            public string RealTable { get; set; } = "";
+            public string MasterKey { get; set; } = "";
+            public string DetailKey { get; set; } = "";
+            public List<string> Conditions { get; } = new();
+        }
+
+        private static bool IsDetailField(QueryFieldMeta meta, string masterDictTable)
+        {
+            if (!string.IsNullOrWhiteSpace(meta.TableKind))
+            {
+                if (meta.TableKind.StartsWith("Detail", StringComparison.OrdinalIgnoreCase)) return true;
+                if (meta.TableKind.StartsWith("SubDetail", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            if (!string.IsNullOrWhiteSpace(meta.TableName) &&
+                !meta.TableName.Equals(masterDictTable, StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (!string.IsNullOrWhiteSpace(meta.AliasName) &&
+                !meta.AliasName.Equals("t0", StringComparison.OrdinalIgnoreCase))
+                return true;
+            return false;
+        }
+
+        private static string NormalizeFilterFieldName(string field)
+        {
+            if (string.IsNullOrWhiteSpace(field)) return field;
+            var s = field.Trim();
+            s = Regex.Replace(s, @"(?:_?(From|To))$", "", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"[_\-]?\d+$", "", RegexOptions.IgnoreCase);
+            return s;
+        }
+
+        private static string? GetFirstKey(string? mdKey, string? locateKeys)
+        {
+            var raw = string.IsNullOrWhiteSpace(mdKey) ? locateKeys : mdKey;
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            foreach (var part in raw.Split(new[] { ';', ',', '|'}, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var s = part.Trim();
+                if (!string.IsNullOrWhiteSpace(s)) return s;
+            }
+            return null;
+        }
+
+        private sealed class DetailInfo
+        {
+            public string DictTable { get; set; } = "";
+            public string RealTable { get; set; } = "";
+            public string MasterKey { get; set; } = "PaperNum";
+            public string DetailKey { get; set; } = "PaperNum";
+        }
+
+        private DetailInfo? ResolveDetailInfo(QueryFieldMeta meta, Dictionary<string, TableSetupMeta> setupMap, string masterDictTable)
+        {
+            var detailDict = meta.TableName ?? "";
+            var detailKind = meta.TableKind ?? "";
+
+            if (string.IsNullOrWhiteSpace(detailDict) && !string.IsNullOrWhiteSpace(detailKind))
+            {
+                if (setupMap.TryGetValue(detailKind, out var setup))
+                    detailDict = setup.DictTable;
+            }
+
+            if (string.IsNullOrWhiteSpace(detailDict)) return null;
+
+            var masterSetup = setupMap.Values.FirstOrDefault(x =>
+                x.TableKind.StartsWith("Master", StringComparison.OrdinalIgnoreCase));
+            var masterKey = GetFirstKey(masterSetup?.MdKey, masterSetup?.LocateKeys) ?? "PaperNum";
+
+            var detailSetup = setupMap.Values.FirstOrDefault(x =>
+                x.TableKind.Equals(detailKind, StringComparison.OrdinalIgnoreCase)) ??
+                setupMap.Values.FirstOrDefault(x =>
+                    x.DictTable.Equals(detailDict, StringComparison.OrdinalIgnoreCase));
+
+            var detailKey = GetFirstKey(detailSetup?.MdKey, detailSetup?.LocateKeys) ?? masterKey;
+            var realTable = detailSetup?.RealTable ?? detailDict;
+
+            return new DetailInfo
+            {
+                DictTable = detailDict,
+                RealTable = realTable,
+                MasterKey = masterKey,
+                DetailKey = detailKey
+            };
+        }
+
+        private async Task<List<QueryFieldMeta>> LoadQueryFieldMetaAsync(string? itemId, string dictTable, string realTable)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+            {
+                return await _ctx.CURdPaperSelected
+                    .AsNoTracking()
+                    .Where(x => x.TableName == dictTable)
+                    .Select(x => new QueryFieldMeta
+                    {
+                        ColumnName = x.ColumnName,
+                        TableName = x.TableName,
+                        TableKind = x.TableKind,
+                        AliasName = x.AliasName,
+                        DefaultEqual = x.DefaultEqual
+                    })
+                    .ToListAsync();
+            }
+
+            var cs = _ctx.Database.GetConnectionString();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+            var paperId = await ResolvePaperIdAsync(conn, itemId);
+            if (string.IsNullOrWhiteSpace(paperId)) paperId = realTable;
+
+            var list = await _ctx.CURdPaperSelected
+                .AsNoTracking()
+                .Where(x => x.PaperId == paperId)
+                .Select(x => new QueryFieldMeta
+                {
+                    ColumnName = x.ColumnName,
+                    TableName = x.TableName,
+                    TableKind = x.TableKind,
+                    AliasName = x.AliasName,
+                    DefaultEqual = x.DefaultEqual
+                })
+                .ToListAsync();
+
+            if (list.Count == 0)
+            {
+                list = await _ctx.CURdPaperSelected
+                    .AsNoTracking()
+                    .Where(x => x.TableName == dictTable)
+                    .Select(x => new QueryFieldMeta
+                    {
+                        ColumnName = x.ColumnName,
+                        TableName = x.TableName,
+                        TableKind = x.TableKind,
+                        AliasName = x.AliasName,
+                        DefaultEqual = x.DefaultEqual
+                    })
+                    .ToListAsync();
+            }
+
+            return list;
+        }
+
+        private async Task<Dictionary<string, TableSetupMeta>> LoadTableSetupMapAsync(string? itemId)
+        {
+            var map = new Dictionary<string, TableSetupMeta>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(itemId)) return map;
+
+            var setups = await _ctx.CurdOcxtableSetUp
+                .AsNoTracking()
+                .Where(x => x.ItemId == itemId)
+                .ToListAsync();
+
+            if (setups.Count == 0) return map;
+
+            var tableNames = setups.Select(x => x.TableName).Where(t => !string.IsNullOrWhiteSpace(t)).Distinct().ToList();
+            var tableNameSet = new HashSet<string>(tableNames, StringComparer.OrdinalIgnoreCase);
+            var realTableRows = await _ctx.CurdTableNames
+                .AsNoTracking()
+                .Select(x => new { x.TableName, x.RealTableName })
+                .ToListAsync();
+
+            var realMap = realTableRows
+                .Where(x => tableNameSet.Contains(x.TableName))
+                .ToDictionary(
+                x => x.TableName,
+                x => string.IsNullOrWhiteSpace(x.RealTableName) ? x.TableName : x.RealTableName,
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var s in setups)
+            {
+                if (string.IsNullOrWhiteSpace(s.TableKind) || string.IsNullOrWhiteSpace(s.TableName)) continue;
+                if (map.ContainsKey(s.TableKind)) continue;
+                map[s.TableKind] = new TableSetupMeta
+                {
+                    DictTable = s.TableName,
+                    RealTable = realMap.TryGetValue(s.TableName, out var r) ? r : s.TableName,
+                    TableKind = s.TableKind,
+                    MdKey = s.Mdkey,
+                    LocateKeys = s.LocateKeys
+                };
+            }
+
+            return map;
+        }
+
+        private async Task<string?> ResolveDetailFieldAsync(string dictTable, string rawField)
+        {
+            if (string.IsNullOrWhiteSpace(dictTable) || string.IsNullOrWhiteSpace(rawField)) return null;
+            var fieldList = await _ctx.CURdTableFields
+                .AsNoTracking()
+                .Where(f => f.TableName == dictTable)
+                .Select(f => f.FieldName)
+                .ToListAsync();
+
+            var fieldMap = fieldList
+                .Where(f => !string.IsNullOrWhiteSpace(f))
+                .GroupBy(f => f, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            if (fieldMap.TryGetValue(rawField.Trim(), out var exact)) return exact;
+            var norm = NormalizeFilterFieldName(rawField);
+            if (fieldMap.TryGetValue(norm, out var n2)) return n2;
+            var alt = fieldMap.Keys.FirstOrDefault(k => k.Equals(norm, StringComparison.OrdinalIgnoreCase));
+            return string.IsNullOrWhiteSpace(alt) ? null : alt;
+        }
+
+        private static string? BuildConditionSql(string field, string op, string value, List<SqlParameter> parameters, ref int pIndex)
+        {
+            if (string.IsNullOrWhiteSpace(field) || string.IsNullOrWhiteSpace(value)) return null;
+            var cleanOp = NormalizeOp(op);
+            var trimmed = value.Trim();
+
+            if (cleanOp == "LIKE")
+            {
+                var paramName = $"@p{pIndex++}";
+                parameters.Add(new SqlParameter(paramName, $"%{value}%"));
+                return $"t1.[{field}] LIKE {paramName}";
+            }
+
+            if (cleanOp == "IN" || cleanOp == "NOT IN")
+            {
+                if ((trimmed.StartsWith("(") && trimmed.EndsWith(")")) ||
+                    trimmed.StartsWith("select", StringComparison.OrdinalIgnoreCase))
+                {
+                    return $"t1.[{field}] {cleanOp} {trimmed}";
+                }
+
+                var parts = trimmed.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(p => p.Trim())
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .ToList();
+                if (parts.Count == 0) return null;
+
+                var paramNames = new List<string>();
+                foreach (var part in parts)
+                {
+                    var pName = $"@p{pIndex++}";
+                    parameters.Add(new SqlParameter(pName, part));
+                    paramNames.Add(pName);
+                }
+                return $"t1.[{field}] {cleanOp} ({string.Join(",", paramNames)})";
+            }
+
+            var param = $"@p{pIndex++}";
+            parameters.Add(new SqlParameter(param, value));
+            return $"t1.[{field}] {cleanOp} {param}";
+        }
+
+        private static string? BuildMasterConditionSql(string field, string op, string value, List<SqlParameter> parameters, ref int pIndex)
+        {
+            if (string.IsNullOrWhiteSpace(field) || string.IsNullOrWhiteSpace(value)) return null;
+            var cleanOp = NormalizeOp(op);
+            var trimmed = value.Trim();
+
+            if (cleanOp == "LIKE")
+            {
+                var paramName = $"@p{pIndex++}";
+                parameters.Add(new SqlParameter(paramName, $"%{value}%"));
+                return $"[{field}] LIKE {paramName}";
+            }
+
+            if (cleanOp == "IN" || cleanOp == "NOT IN")
+            {
+                if ((trimmed.StartsWith("(") && trimmed.EndsWith(")")) ||
+                    trimmed.StartsWith("select", StringComparison.OrdinalIgnoreCase))
+                {
+                    return $"[{field}] {cleanOp} {trimmed}";
+                }
+
+                var parts = trimmed.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(p => p.Trim())
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .ToList();
+                if (parts.Count == 0) return null;
+
+                var paramNames = new List<string>();
+                foreach (var part in parts)
+                {
+                    var pName = $"@p{pIndex++}";
+                    parameters.Add(new SqlParameter(pName, part));
+                    paramNames.Add(pName);
+                }
+                return $"[{field}] {cleanOp} ({string.Join(",", paramNames)})";
+            }
+
+            var param = $"@p{pIndex++}";
+            parameters.Add(new SqlParameter(param, value));
+            return $"[{field}] {cleanOp} {param}";
+        }
+
         private static string NormalizeOp(string op)
         {
             if (string.IsNullOrWhiteSpace(op)) return "=";
@@ -976,6 +1329,8 @@ SELECT TOP (@top) {selectCols}
             {
                 "CONTAINS" => "LIKE",
                 "LIKE" => "LIKE",
+                "IN" => "IN",
+                "NOT IN" => "NOT IN",
                 ">=" => ">=",
                 "<=" => "<=",
                 ">" => ">",

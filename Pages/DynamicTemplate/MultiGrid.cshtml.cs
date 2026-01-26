@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -37,6 +38,8 @@ namespace PcbErpApi.Pages.CUR
         public string PageTitle => string.IsNullOrWhiteSpace(ItemName) ? ItemId : $"{ItemId}{ItemName}";
         public List<GridTabViewModel> Tabs { get; private set; } = new();
         public string ActiveTabKey { get; private set; } = string.Empty;
+        public List<CustomButtonRow> CustomButtons { get; private set; } = new();
+        public HtmlString CustomButtonsHtml { get; private set; } = HtmlString.Empty;
 
         public async Task<IActionResult> OnGetAsync(string itemId, string? tab = null)
         {
@@ -65,6 +68,16 @@ namespace PcbErpApi.Pages.CUR
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Build breadcrumbs failed for {ItemId}", ItemId);
+            }
+            try
+            {
+                CustomButtons = await LoadCustomButtonsAsync(ItemId);
+                if (CustomButtons.Count > 0)
+                    CustomButtonsHtml = BuildCustomButtonsHtml(CustomButtons);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load custom buttons for {ItemId}", ItemId);
             }
             //查這個 Item 底下要顯示哪些表
             var setups = await _ctx.CurdOcxtableSetUp.AsNoTracking()
@@ -590,6 +603,113 @@ SELECT FieldName, DisplaySize
             }
         }
 
+        private async Task<List<CustomButtonRow>> LoadCustomButtonsAsync(string itemId)
+        {
+            var list = new List<CustomButtonRow>();
+            if (string.IsNullOrWhiteSpace(itemId)) return list;
+
+            var cs = GetConnStr();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            var schema = await DetectButtonSchemaAsync(conn);
+
+            var sql = $@"
+SELECT ItemId, SerialNum, ButtonName,
+       CustCaption,
+       {(schema.hasCaptionE ? "CustCaptionE" : "CAST('' AS nvarchar(1)) AS CustCaptionE")},
+       CustHint,
+       {(schema.hasHintE ? "CustHintE" : "CAST('' AS nvarchar(1)) AS CustHintE")},
+       OCXName, CoClassName, SpName,
+       {(schema.hasSearchTemplate ? "SearchTemplate" : "CAST('' AS nvarchar(1)) AS SearchTemplate")},
+       {(schema.hasDialogCaption ? "DialogCaption" : "CAST('' AS nvarchar(1)) AS DialogCaption")},
+       bVisible, {schema.chkCol} AS ChkCanUpdate, bNeedNum, DesignType,
+       {(schema.hasNeedInEdit ? "bNeedInEdit" : "0 AS bNeedInEdit")}
+  FROM CURdOCXItemCustButton WITH (NOLOCK)
+ WHERE ItemId = @itemId
+ ORDER BY SerialNum, ButtonName;";
+
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@itemId", itemId);
+
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                list.Add(new CustomButtonRow
+                {
+                    ItemId = rd["ItemId"]?.ToString() ?? string.Empty,
+                    SerialNum = TryToInt(rd["SerialNum"]),
+                    ButtonName = rd["ButtonName"]?.ToString() ?? string.Empty,
+                    CustCaption = rd["CustCaption"]?.ToString() ?? string.Empty,
+                    CustCaptionE = rd["CustCaptionE"]?.ToString() ?? string.Empty,
+                    CustHint = rd["CustHint"]?.ToString() ?? string.Empty,
+                    CustHintE = rd["CustHintE"]?.ToString() ?? string.Empty,
+                    OCXName = rd["OCXName"]?.ToString() ?? string.Empty,
+                    CoClassName = rd["CoClassName"]?.ToString() ?? string.Empty,
+                    SpName = rd["SpName"]?.ToString() ?? string.Empty,
+                    SearchTemplate = rd["SearchTemplate"]?.ToString() ?? string.Empty,
+                    DialogCaption = rd["DialogCaption"]?.ToString() ?? string.Empty,
+                    bVisible = TryToInt(rd["bVisible"]),
+                    ChkCanUpdate = TryToInt(rd["ChkCanUpdate"]),
+                    bNeedNum = TryToInt(rd["bNeedNum"]),
+                    DesignType = TryToInt(rd["DesignType"]),
+                    bNeedInEdit = TryToInt(rd["bNeedInEdit"])
+                });
+            }
+            return list;
+        }
+
+        private async Task<(bool hasCaptionE, bool hasHintE, bool hasSearchTemplate, bool hasDialogCaption, bool hasNeedInEdit, string chkCol)> DetectButtonSchemaAsync(SqlConnection conn)
+        {
+            var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            const string sql = "SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CURdOCXItemCustButton')";
+
+            await using (var cmd = new SqlCommand(sql, conn))
+            await using (var rd = await cmd.ExecuteReaderAsync())
+            {
+                while (await rd.ReadAsync())
+                    cols.Add(rd.GetString(0));
+            }
+
+            var hasCapE = cols.Contains("CustCaptionE");
+            var hasHintE = cols.Contains("CustHintE");
+            var hasSearchTemplate = cols.Contains("SearchTemplate");
+            var hasDialogCaption = cols.Contains("DialogCaption");
+            var hasNeedInEdit = cols.Contains("bNeedInEdit");
+            var chkCol = cols.Contains("ChkCanUpdate") ? "ChkCanUpdate"
+                       : cols.Contains("ChkCanbUpdate") ? "ChkCanbUpdate"
+                       : "ChkCanUpdate";
+            return (hasCapE, hasHintE, hasSearchTemplate, hasDialogCaption, hasNeedInEdit, chkCol);
+        }
+
+        private static HtmlString BuildCustomButtonsHtml(IEnumerable<CustomButtonRow> rows)
+        {
+            if (rows == null) return HtmlString.Empty;
+            var sb = new StringBuilder();
+
+            foreach (var b in rows)
+            {
+                if (!b.bVisible.HasValue || b.bVisible.Value != 1) continue;
+                if (string.IsNullOrWhiteSpace(b.ButtonName)) continue;
+
+                var caption = string.IsNullOrWhiteSpace(b.CustCaption) ? b.ButtonName : b.CustCaption;
+                var hint = b.CustHint ?? string.Empty;
+
+                sb.Append("<button type='button' class='btn btn-outline-secondary btn-sm' data-custom-btn='1'");
+                sb.Append(" data-button-name='").Append(System.Net.WebUtility.HtmlEncode(b.ButtonName)).Append('\'');
+                sb.Append(" data-item-id='").Append(System.Net.WebUtility.HtmlEncode(b.ItemId ?? string.Empty)).Append('\'');
+                sb.Append(" data-search-template='").Append(System.Net.WebUtility.HtmlEncode(b.SearchTemplate ?? string.Empty)).Append('\'');
+                sb.Append(" data-design-type='").Append(System.Net.WebUtility.HtmlEncode(b.DesignType?.ToString() ?? string.Empty)).Append('\'');
+                sb.Append(" data-dialog-caption='").Append(System.Net.WebUtility.HtmlEncode(b.DialogCaption ?? string.Empty)).Append('\'');
+                sb.Append(" data-b-need-in-edit='").Append(System.Net.WebUtility.HtmlEncode(b.bNeedInEdit?.ToString() ?? "0")).Append('\'');
+                sb.Append(" title='").Append(System.Net.WebUtility.HtmlEncode(hint)).Append("'>");
+                sb.Append("<i class='bi bi-gear me-1'></i>").Append(System.Net.WebUtility.HtmlEncode(caption));
+                sb.Append("</button>");
+            }
+
+            return new HtmlString(sb.ToString());
+        }
+
         public class GridTabViewModel
         {
             public GridTabViewModel(string tabKey, string tabLabel, string dictTableName, string tableName)
@@ -623,6 +743,27 @@ SELECT FieldName, DisplaySize
         {
             public string? RealName { get; set; }
             public string? DisplayLabel { get; set; }
+        }
+
+        public class CustomButtonRow
+        {
+            public string ItemId { get; set; } = string.Empty;
+            public int? SerialNum { get; set; }
+            public string ButtonName { get; set; } = string.Empty;
+            public string CustCaption { get; set; } = string.Empty;
+            public string CustCaptionE { get; set; } = string.Empty;
+            public string CustHint { get; set; } = string.Empty;
+            public string CustHintE { get; set; } = string.Empty;
+            public string OCXName { get; set; } = string.Empty;
+            public string CoClassName { get; set; } = string.Empty;
+            public string SpName { get; set; } = string.Empty;
+            public string SearchTemplate { get; set; } = string.Empty;
+            public string DialogCaption { get; set; } = string.Empty;
+            public int? bVisible { get; set; }
+            public int? ChkCanUpdate { get; set; }
+            public int? bNeedNum { get; set; }
+            public int? DesignType { get; set; }
+            public int? bNeedInEdit { get; set; }
         }
     }
 }

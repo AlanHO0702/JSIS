@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+using PcbErpApi.Data;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using System;
 
@@ -10,10 +13,12 @@ using System;
 public class DictSetupApiController : ControllerBase
 {
     private readonly string _connStr;
-    public DictSetupApiController(IConfiguration config)
+    private readonly PcbErpContext _ctx;
+    public DictSetupApiController(IConfiguration config, PcbErpContext ctx)
     {
         _connStr = config.GetConnectionString("DefaultConnection") 
             ?? throw new ArgumentNullException("DefaultConnection string is missing in configuration.");
+        _ctx = ctx;
     }
 
     // ===== 共用 =====
@@ -476,6 +481,369 @@ UPDATE CURdPaperPaper
     {
         public string FieldMust { get; set; } = "";
         public string ShowError { get; set; } = "";
+    }
+
+    public class QueryEqualRow
+    {
+        public string Value { get; set; } = "";
+        public string Text { get; set; } = "";
+    }
+
+    [HttpGet("QueryEquals")]
+    public async Task<IActionResult> GetQueryEquals([FromQuery] int all = 0)
+    {
+        var list = new List<QueryEqualRow>();
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        var view = all == 1 ? "CURdV_EqualALL" : "CURdV_Equal";
+        var sql = $"SELECT sEqual FROM {view} WITH (NOLOCK) ORDER BY iOrderby";
+
+        await using var cmd = new SqlCommand(sql, conn);
+        await using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            var eq = rd["sEqual"]?.ToString() ?? "";
+            if (string.IsNullOrWhiteSpace(eq)) continue;
+            list.Add(new QueryEqualRow { Value = eq, Text = eq });
+        }
+
+        if (list.Count == 0)
+        {
+            list.AddRange(new[]
+            {
+                new QueryEqualRow { Value = "=", Text = "=" },
+                new QueryEqualRow { Value = ">=", Text = ">=" },
+                new QueryEqualRow { Value = "<=", Text = "<=" },
+                new QueryEqualRow { Value = "like", Text = "like" }
+            });
+        }
+
+        return Ok(list);
+    }
+
+    public class PaperSelectedRow
+    {
+        public string PaperId { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string? AliasName { get; set; }
+        public string ColumnName { get; set; } = "";
+        public string ColumnCaption { get; set; } = "";
+        public int DataType { get; set; }
+        public int SortOrder { get; set; }
+        public string? DefaultValue { get; set; }
+        public string DefaultEqual { get; set; } = "";
+        public int? ControlType { get; set; }
+        public string? CommandText { get; set; }
+        public int? DefaultType { get; set; }
+        public string? EditMask { get; set; }
+        public string? SuperId { get; set; }
+        public string? ParamValue { get; set; }
+        public int? ParamType { get; set; }
+        public int? IReadOnly { get; set; }
+        public int? IVisible { get; set; }
+        public string? TableKind { get; set; }
+    }
+
+    public class PaperSelectedPayload
+    {
+        public string ItemId { get; set; } = "";
+        public string Table { get; set; } = "";
+        public List<PaperSelectedRow> Items { get; set; } = new();
+    }
+
+    [HttpGet("PaperSelectedList")]
+    public async Task<IActionResult> GetPaperSelected([FromQuery] string itemId, [FromQuery] string table, [FromQuery] string? equal = null, [FromQuery] string lang = "TW")
+    {
+        if (string.IsNullOrWhiteSpace(itemId) || string.IsNullOrWhiteSpace(table))
+            return BadRequest("itemId and table are required.");
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        var dictTable = table.Trim();
+        var realTable = await ResolveRealTableNameAsync(conn, dictTable) ?? dictTable;
+        var paperId = await ResolvePaperIdAsync(conn, itemId, dictTable, realTable) ?? realTable;
+
+        var selectedRows = await _ctx.CURdPaperSelected
+            .AsNoTracking()
+            .Where(x => x.PaperId == paperId)
+            .OrderBy(x => x.SortOrder)
+            .ToListAsync();
+
+        if (selectedRows.Count == 0)
+        {
+            selectedRows = await _ctx.CURdPaperSelected
+                .AsNoTracking()
+                .Where(x => x.TableName == dictTable)
+                .OrderBy(x => x.SortOrder)
+                .ToListAsync();
+        }
+
+        var allFields = await LoadPaperDictSelectAsync(conn, itemId, equal, lang);
+
+        var selected = selectedRows.Select(x => new PaperSelectedRow
+        {
+            PaperId = x.PaperId,
+            TableName = x.TableName,
+            AliasName = x.AliasName,
+            ColumnName = x.ColumnName,
+            ColumnCaption = x.ColumnCaption,
+            DataType = x.DataType,
+            SortOrder = x.SortOrder,
+            DefaultValue = x.DefaultValue,
+            DefaultEqual = x.DefaultEqual,
+            ControlType = x.ControlType,
+            CommandText = x.CommandText,
+            DefaultType = x.DefaultType,
+            EditMask = x.EditMask,
+            SuperId = x.SuperId,
+            ParamValue = x.ParamValue,
+            ParamType = x.ParamType,
+            IReadOnly = x.IReadOnly,
+            IVisible = x.IVisible,
+            TableKind = x.TableKind
+        }).ToList();
+
+        return Ok(new
+        {
+            paperId,
+            dictTable,
+            selected,
+            allFields
+        });
+    }
+
+    [HttpPost("PaperSelected")]
+    public async Task<IActionResult> SavePaperSelected([FromBody] PaperSelectedPayload payload)
+    {
+        if (payload == null || string.IsNullOrWhiteSpace(payload.ItemId) || string.IsNullOrWhiteSpace(payload.Table))
+            return BadRequest("itemId and table are required.");
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        var dictTable = payload.Table.Trim();
+        var realTable = await ResolveRealTableNameAsync(conn, dictTable) ?? dictTable;
+        var paperId = await ResolvePaperIdAsync(conn, payload.ItemId, dictTable, realTable) ?? realTable;
+
+        await using var tx = await conn.BeginTransactionAsync();
+        try
+        {
+            await using (var del = new SqlCommand("DELETE FROM CURdPaperSelected WHERE PaperId = @paperId", conn, (SqlTransaction)tx))
+            {
+                del.Parameters.AddWithValue("@paperId", paperId);
+                await del.ExecuteNonQueryAsync();
+            }
+
+            var insertSql = @"
+INSERT INTO CURdPaperSelected
+    (PaperId, TableName, AliasName, ColumnName, ColumnCaption, DataType, SortOrder,
+     DefaultValue, DefaultEqual, ControlType, CommandText, DefaultType, EditMask,
+     SuperId, ParamValue, ParamType, iReadOnly, iVisible, TableKind)
+VALUES
+    (@PaperId, @TableName, @AliasName, @ColumnName, @ColumnCaption, @DataType, @SortOrder,
+     @DefaultValue, @DefaultEqual, @ControlType, @CommandText, @DefaultType, @EditMask,
+     @SuperId, @ParamValue, @ParamType, @IReadOnly, @IVisible, @TableKind);";
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var order = 1;
+            foreach (var item in payload.Items ?? new())
+            {
+                if (string.IsNullOrWhiteSpace(item.ColumnName)) continue;
+                var key = $"{item.TableName}|{item.ColumnName}|{item.DefaultEqual}";
+                if (!seen.Add(key)) continue;
+
+                await using var ins = new SqlCommand(insertSql, conn, (SqlTransaction)tx);
+                ins.Parameters.AddWithValue("@PaperId", paperId);
+                ins.Parameters.AddWithValue("@TableName", string.IsNullOrWhiteSpace(item.TableName) ? dictTable : item.TableName);
+                ins.Parameters.AddWithValue("@AliasName", (object?)item.AliasName ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@ColumnName", item.ColumnName);
+                ins.Parameters.AddWithValue("@ColumnCaption", item.ColumnCaption ?? item.ColumnName);
+                ins.Parameters.AddWithValue("@DataType", item.DataType);
+                ins.Parameters.AddWithValue("@SortOrder", item.SortOrder > 0 ? item.SortOrder : order++);
+                ins.Parameters.AddWithValue("@DefaultValue", (object?)item.DefaultValue ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@DefaultEqual", string.IsNullOrWhiteSpace(item.DefaultEqual) ? "=" : item.DefaultEqual);
+                ins.Parameters.AddWithValue("@ControlType", (object?)item.ControlType ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@CommandText", (object?)item.CommandText ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@DefaultType", (object?)item.DefaultType ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@EditMask", (object?)item.EditMask ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@SuperId", (object?)item.SuperId ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@ParamValue", (object?)item.ParamValue ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@ParamType", (object?)item.ParamType ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@IReadOnly", (object?)item.IReadOnly ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@IVisible", (object?)item.IVisible ?? 1);
+                ins.Parameters.AddWithValue("@TableKind", (object?)item.TableKind ?? DBNull.Value);
+                await ins.ExecuteNonQueryAsync();
+            }
+
+            await tx.CommitAsync();
+            return Ok(new { ok = true });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return StatusCode(500, new { ok = false, error = ex.Message });
+        }
+    }
+
+    [HttpGet("QueryFieldOptions")]
+    public async Task<IActionResult> GetQueryFieldOptions(
+        [FromQuery] string itemId,
+        [FromQuery] string table,
+        [FromQuery] string column,
+        [FromQuery] string? superValue = null)
+    {
+        if (string.IsNullOrWhiteSpace(itemId) || string.IsNullOrWhiteSpace(table) || string.IsNullOrWhiteSpace(column))
+            return BadRequest("itemId, table, column are required.");
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        var dictTable = table.Trim();
+        var realTable = await ResolveRealTableNameAsync(conn, dictTable) ?? dictTable;
+        var paperId = await ResolvePaperIdAsync(conn, itemId, dictTable, realTable) ?? realTable;
+
+        var cmdText = await LoadQueryCommandTextAsync(conn, paperId, dictTable, column);
+        if (string.IsNullOrWhiteSpace(cmdText)) return NotFound();
+
+        var raw = cmdText.Trim();
+        if (raw.Contains("@@@@@", StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(superValue))
+                return Ok(Array.Empty<object>());
+            raw = raw.Replace("@@@@@", "@p0", StringComparison.Ordinal);
+        }
+        if (!raw.StartsWith("select", StringComparison.OrdinalIgnoreCase))
+            return BadRequest("Only SELECT is allowed");
+
+        await using var cmd = new SqlCommand(raw, conn);
+        if (raw.Contains("@p0", StringComparison.Ordinal))
+        {
+            if (DateTime.TryParse(superValue, out var dt))
+                cmd.Parameters.AddWithValue("@p0", dt);
+            else
+                cmd.Parameters.AddWithValue("@p0", superValue ?? string.Empty);
+        }
+
+        var list = new List<object>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+
+        var ordValue = -1;
+        var ordText = -1;
+        for (int i = 0; i < reader.FieldCount; i++)
+        {
+            var name = reader.GetName(i);
+            if (ordValue == -1 && name.Equals("value", StringComparison.OrdinalIgnoreCase)) ordValue = i;
+            if (ordText == -1 && name.Equals("text", StringComparison.OrdinalIgnoreCase)) ordText = i;
+            if (ordValue == -1 && name.Equals("item", StringComparison.OrdinalIgnoreCase)) ordValue = i;
+            if (ordText == -1 && name.Equals("itemname", StringComparison.OrdinalIgnoreCase)) ordText = i;
+        }
+        if (ordValue == -1 && reader.FieldCount > 0) ordValue = 0;
+        if (ordText == -1 && reader.FieldCount > 1) ordText = 1;
+        if (ordText == -1) ordText = ordValue;
+
+        while (await reader.ReadAsync())
+        {
+            var value = reader.IsDBNull(ordValue) ? "" : reader.GetValue(ordValue)?.ToString() ?? "";
+            var text = reader.IsDBNull(ordText) ? "" : reader.GetValue(ordText)?.ToString() ?? "";
+            list.Add(new { value, text });
+        }
+
+        return Ok(list);
+    }
+
+    private static async Task<string?> ResolveRealTableNameAsync(SqlConnection conn, string dictTableName)
+    {
+        const string sql = @"
+SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
+  FROM CURdTableName WITH (NOLOCK)
+ WHERE TableName = @tbl";
+
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@tbl", dictTableName ?? string.Empty);
+        var result = await cmd.ExecuteScalarAsync();
+        return result == null || result == DBNull.Value ? null : result.ToString();
+    }
+
+    private static async Task<string?> ResolvePaperIdAsync(SqlConnection conn, string itemId, string dictTable, string realTable)
+    {
+        if (!string.IsNullOrWhiteSpace(itemId))
+        {
+            await using (var cmdMaster = new SqlCommand(@"
+SELECT TOP 1 TableName
+  FROM CURdOCXTableSetUp WITH (NOLOCK)
+ WHERE ItemId = @itemId
+   AND (TableKind = 'Master1' OR TableKind LIKE 'Master%')
+ ORDER BY TableKind;", conn))
+            {
+                cmdMaster.Parameters.AddWithValue("@itemId", itemId);
+                var masterObj = await cmdMaster.ExecuteScalarAsync();
+                if (masterObj != null && masterObj != DBNull.Value)
+                {
+                    var dict = masterObj.ToString();
+                    var real = await ResolveRealTableNameAsync(conn, dict ?? "");
+                    if (!string.IsNullOrWhiteSpace(real)) return real;
+                }
+            }
+
+            await using var cmd = new SqlCommand(@"
+SELECT TOP 1 PaperId
+  FROM CURdSysItems WITH (NOLOCK)
+ WHERE ItemId = @itemId;", conn);
+            cmd.Parameters.AddWithValue("@itemId", itemId ?? string.Empty);
+            var paperIdObj = await cmd.ExecuteScalarAsync();
+            if (paperIdObj != null && paperIdObj != DBNull.Value)
+                return paperIdObj.ToString();
+        }
+
+        return string.IsNullOrWhiteSpace(realTable) ? dictTable : realTable;
+    }
+
+    private static async Task<string?> LoadQueryCommandTextAsync(SqlConnection conn, string paperId, string dictTable, string column)
+    {
+        const string sql = @"
+SELECT TOP 1 CommandText
+  FROM CURdPaperSelected WITH (NOLOCK)
+ WHERE (PaperId = @paperId OR TableName = @dictTable)
+   AND ColumnName = @col;";
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@paperId", paperId ?? string.Empty);
+        cmd.Parameters.AddWithValue("@dictTable", dictTable ?? string.Empty);
+        cmd.Parameters.AddWithValue("@col", column ?? string.Empty);
+        var obj = await cmd.ExecuteScalarAsync();
+        return obj == null || obj == DBNull.Value ? null : obj.ToString();
+    }
+
+    private static async Task<List<PaperSelectedRow>> LoadPaperDictSelectAsync(
+        SqlConnection conn,
+        string itemId,
+        string? equal,
+        string lang)
+    {
+        var list = new List<PaperSelectedRow>();
+        var eq = string.IsNullOrWhiteSpace(equal) ? "" : equal.Trim();
+        await using var cmd = new SqlCommand("exec CURdOCXPaperDictSelect @ItemId, @Equal, 0, @LanguageId", conn);
+        cmd.Parameters.AddWithValue("@ItemId", itemId ?? string.Empty);
+        cmd.Parameters.AddWithValue("@Equal", eq ?? string.Empty);
+        cmd.Parameters.AddWithValue("@LanguageId", string.IsNullOrWhiteSpace(lang) ? "TW" : lang);
+
+        await using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            list.Add(new PaperSelectedRow
+            {
+                PaperId = rd["PaperId"]?.ToString() ?? "",
+                TableName = rd["TableName"]?.ToString() ?? "",
+                AliasName = rd["AliasName"]?.ToString(),
+                ColumnName = rd["ColumnName"]?.ToString() ?? "",
+                ColumnCaption = rd["ColumnCaption"]?.ToString() ?? "",
+                DataType = TryToInt(rd["DataType"]) ?? 0,
+                SortOrder = TryToInt(rd["SortOrder"]) ?? 0,
+                DefaultEqual = rd["DefaultEqual"]?.ToString() ?? ""
+            });
+        }
+        return list;
     }
 
     // GET /api/DictSetupApi/InqMust?paperId=...

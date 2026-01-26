@@ -1,9 +1,7 @@
 @model List<QueryFieldViewModel>
+@using System.Text.Json
 @{
-    var condOps = new List<SelectListItem> {
-        new("=", "="), new(">=", ">="), new("<=", "<="), new("like", "like")
-    };
-    int colCount = 3;
+    var fieldsJson = JsonSerializer.Serialize(Model ?? new List<QueryFieldViewModel>());
 }
 
 <form id="searchForm" method="post" class="modal-content query-modal-content">
@@ -13,84 +11,336 @@
     </div>
     <div class="modal-body">
         <div class="container-fluid">
-            @for (int i = 0; i < Model.Count; i += colCount)
-            {
-                <div class="row">
-                    @for (int j = 0; j < colCount && i + j < Model.Count; j++)
-                    {
-                        var field = Model[i + j];
-                        // 1. 這裡直接產生唯一 key
-                        var inputName = field.ColumnName + field.SortOrder;
-                        var condName = "Cond_" + field.ColumnName + field.SortOrder;
-                        <div class="col-12 col-sm-6 col-md-4 mb-3">
-                            <label>@field.ColumnCaption</label>
-                            <div class="d-flex align-items-center gap-2">
-                                <!-- 條件符號下拉 -->
-                                <select name="@condName" class="form-select query-op" style="font-weight:bold">
-                                    @foreach(var op in condOps)
-                                    {
-                                        if (field.DefaultEqual == op.Value)
-                                        {
-                                            <option value="@op.Value" selected>@op.Text</option>
-                                        }  
-                                        else
-                                        {
-                                            <option value="@op.Value">@op.Text</option>
-                                        }
-                                    }
-                                </select>
-                                @if (field.ControlType == 2)
-                                {
-                                    var options = ViewData[$"Option_{field.ColumnName}"] as List<SelectListItem> ?? new();
-                                    <select name="@inputName" class="form-select query-input">
-                                        <option value="">--請選擇--</option>
-                                        @foreach(var opt in options)
-                                        if (field.DefaultValue == opt.Value)
-                                            {
-                                                <option value="@opt.Value" selected>@opt.Text</option>
-                                            }
-                                            else
-                                            {
-                                                <option value="@opt.Value">@opt.Text</option>
-                                            }
-                                        }
-                                    </select>
-                                }
-                                else if (field.DataType == 1)
-                                {
-                                    <input type="date" name="@inputName" class="form-control query-input" value="@field.DefaultValue" />
-                                }
-                                //else if (field.DataType == 2)
-                                //{
-                                    //<input type="number" name="@inputName" class="form-control" value="@field.DefaultValue" />
-                                //}
-                                else
-                                {
-                                    <input type="text" name="@inputName" class="form-control query-input" value="@field.DefaultValue" />
-                                }
-                            </div>
-                        </div>
-                    }
-                </div>
-            }
+            <div class="row g-2 query-field-grid"></div>
         </div>
     </div>
-    <div class="modal-footer">
-        <button type="submit" class="btn btn-primary">查詢</button>
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+    <div class="modal-footer query-footer">
+        <div class="query-footer-left">
+            <button id="btnQueryFieldSelect" class="btn btn-outline-secondary btn-sm" type="button">進階</button>
+            <button id="btnQueryDefault" class="btn btn-outline-secondary btn-sm" type="button">預設</button>
+        </div>
+        <div class="query-footer-right">
+            <button type="submit" class="btn btn-primary">查詢</button>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        </div>
     </div>
 </form>
 
 <style>
-    .query-modal-content .modal-header { cursor: move; user-select: none; }
+    .query-modal-content .modal-header { cursor: move; user-select: none; padding: 6px 12px; }
     .query-modal-content .modal-header :is(button, input, select, textarea, a) { cursor: default; }
-    .query-modal-content .query-op { flex: 0 0 72px; min-width: 72px; max-width: 72px; }
-    .query-modal-content .query-input { flex: 1 1 0; min-width: 0; }
-    .query-modal-content .modal-body .d-flex { flex-wrap: nowrap; }
+    .query-modal-content .query-op { flex: 0 0 76px; min-width: 76px; max-width: 76px; }
+    .query-modal-content .query-input { flex: 0 0 140px; min-width: 140px; max-width: 140px; }
+    .query-modal-content .modal-body { padding: 10px 12px; }
+    .query-modal-content .modal-header { display: flex; align-items: center; gap: 10px; }
+    .query-modal-content .modal-title { margin: 0; }
+    .query-modal-content .query-footer { display: flex; align-items: center; justify-content: space-between; }
+    .query-modal-content .query-footer-left { display: flex; gap: 6px; }
+    .query-modal-content .query-footer-right { display: flex; gap: 8px; }
+    .query-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 6px; column-gap: 16px; }
+    .query-field-grid > .query-item { box-sizing: border-box; }
+    .query-field-grid .query-item { display: flex; }
+    .query-field-grid .query-row { display: flex; align-items: center; gap: 8px; }
+    .query-field-grid .col-md-6:nth-child(2n) .query-row { justify-content: flex-end; }
+    .query-field-grid .col-md-6:nth-child(2n+1) .query-row { justify-content: flex-start; }
+    .query-field-grid .query-label {
+        flex: 0 0 110px;
+        text-align: right;
+        font-size: var(--field-label-size);
+        line-height: 1.2;
+        margin: 0;
+        white-space: nowrap;
+    }
+    @@media (max-width: 991.98px) {
+        .query-field-grid { grid-template-columns: 1fr; }
+    }
+    .query-field-grid .query-input,
+    .query-field-grid .query-op {
+        height: 24px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+        font-size: var(--field-value-size);
+    }
 </style>
 
 <script>
-    // 讓查詢視窗可拖曳（拖曳區：modal-header）
+(() => {
+    const formEl = document.getElementById("searchForm");
+    const gridEl = formEl?.querySelector(".query-field-grid");
+    if (!formEl || !gridEl) return;
+    const busyFetch = (input, init, msg) => {
+        if (typeof window.busyFetch === "function") return window.busyFetch(input, init, msg);
+        return fetch(input, init);
+    };
+    const modalEl = formEl.closest(".modal");
+    if (modalEl && modalEl.parentElement !== document.body) {
+        document.body.appendChild(modalEl);
+    }
+
+    const fallbackFields = @Html.Raw(fieldsJson);
+    let cachedFields = null;
+    let cachedEquals = null;
+    let building = false;
+
+    const normalizeKey = (v) => (v || "").toString().trim().replace(/^@@+/, "").toLowerCase();
+
+    const getItemId = () => (window._itemId || window._singleItemId || "").toString().trim();
+    const getTable = () => (window._dictTableName || window._tableName || "").toString().trim();
+
+    const getUserId = () => (localStorage.getItem("erpLoginUserId") || window._userId || "").toString().trim();
+    const getUseId = () => (localStorage.getItem("erpLoginBUId") || window.DEFAULT_USEID || window._useId || "A001").toString().trim();
+
+    const applyDefaultByType = (field) => {
+        const defType = Number(field.defaultType ?? field.DefaultType ?? 0);
+        if (defType === 2) return getUserId();
+        if (defType === 3) return getUseId();
+        return field.defaultValue ?? field.DefaultValue ?? field.paramValue ?? field.ParamValue ?? "";
+    };
+
+    const applyEditMask = (value, field) => {
+        if (typeof window.normalizeForDateInput === "function") {
+            const fake = { type: "date", dataset: { field: field.columnName || field.ColumnName || "" } };
+            return window.normalizeForDateInput(fake, value);
+        }
+        return value;
+    };
+
+    const fetchEquals = async () => {
+        if (cachedEquals) return cachedEquals;
+        try {
+            const res = await busyFetch("/api/DictSetupApi/QueryEquals", null, "載入查詢條件…");
+            if (!res.ok) throw new Error(await res.text());
+            const list = await res.json();
+            cachedEquals = Array.isArray(list) ? list : [];
+        } catch {
+            cachedEquals = [
+                { value: "=", text: "=" },
+                { value: ">=", text: ">=" },
+                { value: "<=", text: "<=" },
+                { value: "like", text: "like" }
+            ];
+        }
+        return cachedEquals;
+    };
+
+    const loadQueryFields = async () => {
+        if (cachedFields) return cachedFields;
+        const itemId = getItemId();
+        const table = getTable();
+        if (!itemId || !table) {
+            cachedFields = Array.isArray(fallbackFields) ? fallbackFields : [];
+            return cachedFields;
+        }
+        try {
+            const url = `/api/DictSetupApi/PaperSelectedList?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(table)}`;
+            const res = await busyFetch(url, null, "載入查詢條件…");
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            cachedFields = Array.isArray(data?.selected) ? data.selected : (Array.isArray(fallbackFields) ? fallbackFields : []);
+        } catch {
+            cachedFields = Array.isArray(fallbackFields) ? fallbackFields : [];
+        }
+        return cachedFields;
+    };
+
+    const loadOptions = async (columnName, superValue) => {
+        const itemId = getItemId();
+        const table = getTable();
+        if (!itemId || !table) return [];
+        const extra = superValue ? `&superValue=${encodeURIComponent(superValue)}` : "";
+        const url = `/api/DictSetupApi/QueryFieldOptions?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(table)}&column=${encodeURIComponent(columnName)}${extra}`;
+        const res = await busyFetch(url, null, "載入選項…");
+        if (!res.ok) return [];
+        const data = await res.json();
+        return Array.isArray(data) ? data : [];
+    };
+
+    const buildOptionList = (selectEl, options, defaultValue) => {
+        selectEl.innerHTML = "";
+        const emptyOpt = document.createElement("option");
+        emptyOpt.value = "";
+        emptyOpt.textContent = "";
+        selectEl.appendChild(emptyOpt);
+
+        if (Array.isArray(options)) {
+            options.forEach(opt => {
+                const o = document.createElement("option");
+                const val = opt.value ?? opt.Value ?? "";
+                const text = opt.text ?? opt.Text ?? "";
+                o.value = val;
+                o.textContent = text ? `${val} ${text}`.trim() : val;
+                if (text && text !== val) o.title = text;
+                selectEl.appendChild(o);
+            });
+        }
+
+        if (defaultValue && !Array.from(selectEl.options).some(o => o.value === defaultValue)) {
+            const o = document.createElement("option");
+            o.value = defaultValue;
+            o.textContent = defaultValue;
+            selectEl.appendChild(o);
+        }
+        if (defaultValue != null) selectEl.value = defaultValue;
+    };
+
+    const buildField = async (field, equals, index) => {
+        const colName = field.columnName || field.ColumnName || "";
+        if (!colName) return;
+
+        const sortOrder = field.sortOrder ?? field.SortOrder ?? index + 1;
+        const key = `${colName}${sortOrder}`;
+        const caption = field.columnCaption || field.ColumnCaption || colName;
+
+        const wrap = document.createElement("div");
+        wrap.className = "query-item";
+
+        const row = document.createElement("div");
+        row.className = "query-row";
+
+        const label = document.createElement("label");
+        label.className = "query-label text-muted";
+        label.textContent = caption;
+
+        const opSelect = document.createElement("select");
+        opSelect.name = `Cond_${key}`;
+        opSelect.className = "form-select query-op";
+        opSelect.style.fontWeight = "bold";
+        equals.forEach(eq => {
+            const opt = document.createElement("option");
+            opt.value = eq.value ?? eq.Value ?? eq;
+            opt.textContent = eq.text ?? eq.Text ?? eq;
+            opSelect.appendChild(opt);
+        });
+
+        const defEqRaw = (field.defaultEqual || field.DefaultEqual || "").toString();
+        const defEq = defEqRaw.toLowerCase();
+        if (defEq && !Array.from(opSelect.options).some(o => o.value.toLowerCase() === defEq)) {
+            const opt = document.createElement("option");
+            opt.value = defEqRaw;
+            opt.textContent = defEqRaw;
+            opSelect.appendChild(opt);
+        }
+        if (defEq) {
+            const hit = Array.from(opSelect.options).find(o => o.value.toLowerCase() === defEq);
+            if (hit) opSelect.value = hit.value;
+        }
+
+        const controlType = Number(field.controlType ?? field.ControlType ?? 0);
+        const dataType = Number(field.dataType ?? field.DataType ?? 0);
+        const commandText = (field.commandText || field.CommandText || "").toString();
+        const superId = (field.superId || field.SuperId || "").toString();
+        const readOnly = Number(field.iReadOnly ?? field.IReadOnly ?? field.readOnly ?? 0) === 1;
+
+        let input;
+        if (controlType === 1 || controlType === 2 || commandText) {
+            const select = document.createElement("select");
+            select.className = "form-select query-input";
+            select.dataset.param = normalizeKey(colName);
+            select.dataset.column = colName;
+            if (superId) select.dataset.super = normalizeKey(superId);
+            input = select;
+        } else {
+            const inp = document.createElement("input");
+            inp.className = "form-control query-input";
+            inp.type = dataType === 1 ? "date" : "text";
+            input = inp;
+        }
+
+        input.name = key;
+        input.dataset.field = colName;
+        input.dataset.key = key;
+        input.dataset.column = colName;
+        if (field.tableName || field.TableName) input.dataset.tableName = field.tableName || field.TableName;
+        if (field.aliasName || field.AliasName) input.dataset.aliasName = field.aliasName || field.AliasName;
+        if (readOnly) input.readOnly = true;
+
+        row.appendChild(label);
+        row.appendChild(opSelect);
+        row.appendChild(input);
+        wrap.appendChild(row);
+        gridEl.appendChild(wrap);
+
+        const defaultVal = applyEditMask(applyDefaultByType(field), field);
+        if (input.tagName === "SELECT") {
+            const superValue = superId ? readSuperValue(superId) : "";
+            const opts = await loadOptions(colName, superValue);
+            buildOptionList(input, opts, defaultVal);
+        } else if (defaultVal) {
+            input.value = defaultVal;
+        }
+
+        if (input.tagName === "SELECT") {
+            input.addEventListener("focus", async () => {
+                const superValue = superId ? readSuperValue(superId) : "";
+                const opts = await loadOptions(colName, superValue);
+                buildOptionList(input, opts, input.value || defaultVal);
+            });
+        }
+    };
+
+    const readSuperValue = (superId) => {
+        const key = normalizeKey(superId);
+        if (!key) return "";
+        const el = formEl.querySelector(`[data-param="${key}"]`);
+        if (el && (el.value ?? "") !== "") return el.value ?? "";
+        const byName = formEl.querySelector(`[name="${CSS.escape(key)}"]`);
+        if (byName && (byName.value ?? "") !== "") return byName.value ?? "";
+        return "";
+    };
+
+    const wireSuperChange = () => {
+        const selects = Array.from(formEl.querySelectorAll("select[data-super]"));
+        const bySuper = new Map();
+        selects.forEach(sel => {
+            const key = sel.dataset.super || "";
+            if (!key) return;
+            if (!bySuper.has(key)) bySuper.set(key, []);
+            bySuper.get(key).push(sel);
+        });
+
+        bySuper.forEach((children, superKey) => {
+            const superEl = formEl.querySelector(`[data-param="${superKey}"]`) || formEl.querySelector(`[name="${CSS.escape(superKey)}"]`);
+            if (!superEl) return;
+            superEl.addEventListener("change", async () => {
+                for (const child of children) {
+                    const col = child.dataset.column || "";
+                    const opts = await loadOptions(col, superEl.value || "");
+                    buildOptionList(child, opts, "");
+                }
+            });
+        });
+    };
+
+    const buildForm = async () => {
+        if (building) return;
+        building = true;
+        gridEl.innerHTML = "";
+        const [fields, equals] = await Promise.all([loadQueryFields(), fetchEquals()]);
+        if (!Array.isArray(fields) || fields.length === 0) {
+            building = false;
+            return;
+        }
+        for (let i = 0; i < fields.length; i++) {
+            await buildField(fields[i], equals, i);
+        }
+        wireSuperChange();
+        building = false;
+    };
+
+    window.QueryFieldsManager = {
+        refresh: async () => {
+            cachedFields = null;
+            await buildForm();
+        },
+        load: buildForm
+    };
+
+    if (modalEl) {
+        modalEl.addEventListener("shown.bs.modal", () => {
+            buildForm().catch(() => {});
+        });
+    }
+
     (function enableQueryModalDrag() {
         const content = document.querySelector('.query-modal-content');
         if (!content) return;
@@ -146,7 +396,6 @@
             let left = startLeft + dx;
             let top = startTop + dy;
 
-            // 允許拖到畫面外，但保留一點點可抓回來
             const keepVisibleX = 120;
             const keepVisibleY = 80;
             const minLeft = -(w - keepVisibleX);
@@ -168,10 +417,10 @@
         header.addEventListener('pointerup', end);
         header.addEventListener('pointercancel', end);
 
-        // 關掉 modal 時恢復 bootstrap 原本的定位（避免下次開啟偏移）
         if (modal) {
             modal.addEventListener('hidden.bs.modal', resetDialogStyle);
             modal.addEventListener('show.bs.modal', resetDialogStyle);
         }
     })();
+})();
 </script>
