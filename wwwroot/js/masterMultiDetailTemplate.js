@@ -490,7 +490,7 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
       const fk = document.createElement("input");
       fk.type = "hidden";
       fk.name = k.Detail;     // Detail 的欄位名稱
-      fk.value = row[k.Detail];
+      fk.value = getRowValue(row, k.Detail);
       fk.className = "mmd-fk-hidden";
       tr.append(fk);
     });
@@ -499,24 +499,58 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
     fields.forEach(f => {
       const td = document.createElement("td");
 
-      let raw = row[f.FieldName];
-      if (!raw && f.KeySelfName) raw = row[f.KeySelfName];
+      // ★ 修正：使用 getRowValue 處理大小寫，且只有 undefined 時才取 KeySelfName（避免 0 被當成 falsy）
+      let raw = getRowValue(row, f.FieldName);
+      if (raw === "" && f.KeySelfName) raw = getRowValue(row, f.KeySelfName);
 
       let display = raw;
       if (oc[f.FieldName]?.[raw] != null) display = oc[f.FieldName][raw];
       else if (lk[f.FieldName]?.[raw] != null) display = lk[f.FieldName][raw];
 
+      // ★ 是否顯示為勾選框 (ComboStyle==1)
+      const isCheckbox = String(f.ComboStyle ?? "").trim() === "1";
+      if (isCheckbox) td.classList.add("text-center", "align-middle");
+
       const span = document.createElement("span");
       span.className = "cell-view";
-      span.textContent = fmtCell(display, DICT.fmt(f), DICT.type(f));
+      if (isCheckbox) span.classList.add("d-inline-flex", "justify-content-center", "w-100");
 
       const inp = document.createElement("input");
-      inp.className = "form-control form-control-sm cell-edit d-none";
-      inp.value = display;
-      inp.dataset.raw = raw;
+      inp.className = isCheckbox ? "form-check-input checkbox-dark cell-edit d-none mx-auto" : "form-control form-control-sm cell-edit d-none";
       inp.name = f.FieldName;
 
-  // ★★★ 修正：如果該欄位是 PK (IsKey)，或者是唯讀，或者是關聯鍵，都必須鎖定不可編輯 ★★★
+      if (isCheckbox) {
+        // ★ 支援多種格式：true/1/"1"/"true"/"True"/bit 欄位
+        const checked = raw === true || raw === 1 || raw === "1" ||
+                        (typeof raw === "string" && raw.toLowerCase() === "true");
+        const viewChk = document.createElement("input");
+        viewChk.type = "checkbox";
+        viewChk.disabled = true;
+        viewChk.tabIndex = -1;
+        viewChk.className = "form-check-input checkbox-dark";
+        viewChk.checked = checked;
+        span.appendChild(viewChk);
+
+        inp.type = "checkbox";
+        inp.checked = checked;
+        inp.value = checked ? "1" : "0";
+        inp.dataset.raw = inp.value;
+
+        // ★ 同步 viewChk 與 inp 的狀態（確保編輯模式切換時同步）
+        const syncCheckbox = () => {
+          inp.value = inp.checked ? "1" : "0";
+          inp.dataset.raw = inp.value;
+          viewChk.checked = inp.checked;
+        };
+        inp.addEventListener("change", syncCheckbox);
+        inp.addEventListener("click", syncCheckbox);
+      } else {
+        span.textContent = fmtCell(display, DICT.fmt(f), DICT.type(f));
+        inp.value = display == null ? "" : display;
+        inp.dataset.raw = raw == null ? "" : raw;
+      }
+
+      // ★★★ 修正：如果該欄位是 PK (IsKey)，或者是唯讀，或者是關聯鍵，都必須鎖定不可編輯 ★★★
       if (DICT.readonly(f) || f.KeySelfName || (DICT.isKey(f) && tr.dataset.state !== "added")) {
         inp.readOnly = true;
         td.classList.add("mmd-readonly-cell");
@@ -547,6 +581,23 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
 
     const mHead = root.querySelector(`#${cfg.DomId}-m-head`);
     const mBody = root.querySelector(`#${cfg.DomId}-m-body`);
+    const btnFirst = document.getElementById(`${cfg.DomId}-btnFirst`);
+    const btnPrev = document.getElementById(`${cfg.DomId}-btnPrev`);
+    const btnNext = document.getElementById(`${cfg.DomId}-btnNext`);
+    const btnLast = document.getElementById(`${cfg.DomId}-btnLast`);
+    const btnEdit = document.getElementById(`${cfg.DomId}-btnEdit`);
+    const btnAdd = document.getElementById(`${cfg.DomId}-btnAdd`);
+    const btnSave = document.getElementById(`${cfg.DomId}-btnSave`);
+    const btnDelete = document.getElementById(`${cfg.DomId}-btnDelete`);
+    const btnCancel = document.getElementById(`${cfg.DomId}-btnCancel`);
+    const queryBtn = document.getElementById(`${cfg.DomId}-btnQuery`);
+    const countBox = document.getElementById(`${cfg.DomId}-countBox`);
+    const modeLabel = document.getElementById(`${cfg.DomId}-modeLabel`);
+    const countLabel = document.getElementById(`${cfg.DomId}-countLabel`);
+    const queryModalEl = document.getElementById(`${cfg.DomId}-queryModal`);
+    const queryForm = document.getElementById(`${cfg.DomId}-queryForm`);
+    const btnClearQuery = document.getElementById(`${cfg.DomId}-btnClearQuery`);
+    const btnQuerySubmit = document.getElementById(`${cfg.DomId}-btnQuerySubmit`);
 
     // ★ UI 初始化：計數器、拖曳器等
     const layoutMode = cfg.Layout;
@@ -616,7 +667,16 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
     }
 
     const activeTarget = { type: "master", index: -1 };
+    const masterIndicator = root.querySelector(`#${cfg.DomId}-masterIndicator`);
+    const detailIndicators = Array.from(root.querySelectorAll(`[id^="${cfg.DomId}-detailIndicator-"]`));
+    const detailIndicatorPrefix = `${cfg.DomId}-detailIndicator-`;
     let lastMasterRow = null;
+    let lastDetailRow = null;
+    window._mmdSelectedRows = window._mmdSelectedRows || {};
+    if (!window._mmdSelectedRows[cfg.DomId]) {
+      window._mmdSelectedRows[cfg.DomId] = { master: null, details: {} };
+    }
+    const selectedBucket = window._mmdSelectedRows[cfg.DomId];
 
 // ======================================================================
 //   切換 Master → 重新載入全部明細
@@ -640,7 +700,11 @@ const loadAllDetails = async (row) => {
     });
     tbody._lastQueryCtx = ctx;
 
-    const rows = await fetchByKeys(d.DetailTable, names, values);
+    const rowsRaw = await fetchByKeys(d.DetailTable, names, values);
+    const itemKey = (detailDicts[i] || [])
+      .map(f => f.FieldName)
+      .find(n => normalizeKeyName(n) === "item");
+    const rows = sortRowsByItemIfNeeded(rowsRaw, itemKey ? [itemKey] : []);
 
     // ★ 為 Detail 表格添加 row click 事件處理，實現 Focus 功能
     await buildBody(tbody, detailDicts[i], rows, (row, tr) => {
@@ -650,6 +714,11 @@ const loadAllDetails = async (row) => {
       tr.classList.add("selected");
       activeTarget.type = "detail";
       activeTarget.index = i;
+      updateCountPanel();
+      lastDetailRow = row;
+      selectedBucket.details[i] = row;
+      selectedBucket.lastDetailRow = row;
+      selectedBucket.lastDetailIndex = i;
 
       // ★★★ Detail Focus 聯動功能 ★★★
       if (cfg.EnableDetailFocusCascade) {
@@ -663,6 +732,31 @@ const loadAllDetails = async (row) => {
         }
       }
     }, true);
+
+    // ★ 當 detail 沒有資料時，放一列空白佔位列，讓使用者可以點擊聚焦到單身區塊
+    if (rows.length === 0 && tbody.querySelectorAll("tr").length === 0) {
+      const dict = detailDicts[i] || [];
+      const visibleCols = dict.filter(f => (f.Visible ?? 1) === 1).length || 1;
+      const placeholderTr = document.createElement("tr");
+      placeholderTr.className = "mmd-placeholder-row";
+      placeholderTr.style.cursor = "pointer";
+      placeholderTr.dataset.placeholder = "1";
+      const td = document.createElement("td");
+      td.colSpan = visibleCols;
+      td.className = "text-center text-muted";
+      td.style.padding = "8px";
+      td.innerHTML = "<small>（點擊此處後可使用上方 + 按鈕新增資料）</small>";
+      placeholderTr.appendChild(td);
+      const detailIndex = i; // 閉包變數
+      placeholderTr.addEventListener("click", () => {
+        activeTarget.type = "detail";
+        activeTarget.index = detailIndex;
+        tbody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
+        placeholderTr.classList.add("selected");
+        updateCountPanel();
+      });
+      tbody.appendChild(placeholderTr);
+    }
 
     // if (window._mmdEditing && tbody._editorInstance) {
     //   tbody._editorInstance.rebind();
@@ -709,20 +803,50 @@ const loadAllDetails = async (row) => {
       });
       tbody._lastQueryCtx = ctx;
 
-      const rows = await fetchByKeys(nextDetail.DetailTable, names, values);
+      const rowsRaw = await fetchByKeys(nextDetail.DetailTable, names, values);
+      const itemKey = (detailDicts[nextIndex] || [])
+        .map(f => f.FieldName)
+        .find(n => normalizeKeyName(n) === "item");
+      const rows = sortRowsByItemIfNeeded(rowsRaw, itemKey ? [itemKey] : []);
 
       // 載入下一層 Detail 的資料，同時保留 Focus 聯動功能
       await buildBody(tbody, detailDicts[nextIndex], rows, (row, tr) => {
         tbody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
-        tr.classList.add("selected");
-        activeTarget.type = "detail";
-        activeTarget.index = nextIndex;
+      tr.classList.add("selected");
+      activeTarget.type = "detail";
+      activeTarget.index = nextIndex;
+      updateCountPanel();
 
         // 遞迴：如果還有下一層，繼續聯動
         if (cfg.EnableDetailFocusCascade) {
           loadNextDetailFromFocus(nextIndex, row);
         }
       }, true);
+
+      // ★ 當 detail 沒有資料時，放一列空白佔位列
+      if (rows.length === 0 && tbody.querySelectorAll("tr").length === 0) {
+        const dict = detailDicts[nextIndex] || [];
+        const visibleCols = dict.filter(f => (f.Visible ?? 1) === 1).length || 1;
+        const placeholderTr = document.createElement("tr");
+        placeholderTr.className = "mmd-placeholder-row";
+        placeholderTr.style.cursor = "pointer";
+        placeholderTr.dataset.placeholder = "1";
+        const td = document.createElement("td");
+        td.colSpan = visibleCols;
+        td.className = "text-center text-muted";
+        td.style.padding = "8px";
+        td.innerHTML = "<small>（點擊此處後可使用上方 + 按鈕新增資料）</small>";
+        placeholderTr.appendChild(td);
+        const detailIndex = nextIndex;
+        placeholderTr.addEventListener("click", () => {
+          activeTarget.type = "detail";
+          activeTarget.index = detailIndex;
+          tbody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
+          placeholderTr.classList.add("selected");
+          updateCountPanel();
+        });
+        tbody.appendChild(placeholderTr);
+      }
 
       // 編輯模式處理
       if (window._mmdEditing && tbody._editorInstance) {
@@ -759,7 +883,11 @@ const loadAllDetails = async (row) => {
         });
         tbody._lastQueryCtx = ctx;
 
-        const rows = await fetchByKeys(nextDetail.DetailTable, names, values);
+        const rowsRaw = await fetchByKeys(nextDetail.DetailTable, names, values);
+        const itemKey = (detailDicts[nextIndex] || [])
+          .map(f => f.FieldName)
+          .find(n => normalizeKeyName(n) === "item");
+        const rows = sortRowsByItemIfNeeded(rowsRaw, itemKey ? [itemKey] : []);
 
         // 載入 SubDetail 的資料（不需要遞迴，因為迴圈已經處理所有層級）
         await buildBody(tbody, detailDicts[nextIndex], rows, (row, tr) => {
@@ -767,8 +895,38 @@ const loadAllDetails = async (row) => {
           tr.classList.add("selected");
           activeTarget.type = "detail";
           activeTarget.index = nextIndex;
+          updateCountPanel();
+          lastDetailRow = row;
+          selectedBucket.details[nextIndex] = row;
+          selectedBucket.lastDetailRow = row;
+          selectedBucket.lastDetailIndex = nextIndex;
           // ★ 不再遞迴聯動，避免串聯式連動
         }, true);
+
+        // ★ 當 detail 沒有資料時，放一列空白佔位列
+        if (rows.length === 0 && tbody.querySelectorAll("tr").length === 0) {
+          const dict = detailDicts[nextIndex] || [];
+          const visibleCols = dict.filter(f => (f.Visible ?? 1) === 1).length || 1;
+          const placeholderTr = document.createElement("tr");
+          placeholderTr.className = "mmd-placeholder-row";
+          placeholderTr.style.cursor = "pointer";
+          placeholderTr.dataset.placeholder = "1";
+          const td = document.createElement("td");
+          td.colSpan = visibleCols;
+          td.className = "text-center text-muted";
+          td.style.padding = "8px";
+          td.innerHTML = "<small>（點擊此處後可使用上方 + 按鈕新增資料）</small>";
+          placeholderTr.appendChild(td);
+          const detailIndex = nextIndex;
+          placeholderTr.addEventListener("click", () => {
+            activeTarget.type = "detail";
+            activeTarget.index = detailIndex;
+            tbody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
+            placeholderTr.classList.add("selected");
+            updateCountPanel();
+          });
+          tbody.appendChild(placeholderTr);
+        }
 
         // 編輯模式處理
         if (window._mmdEditing && tbody._editorInstance) {
@@ -791,18 +949,15 @@ const loadAllDetails = async (row) => {
       tr.classList.add("selected");
       activeTarget.type = "master";
       activeTarget.index = -1;
+      updateCountPanel();
       lastMasterRow = row;
+      selectedBucket.master = row;
       await loadAllDetails(row);
     }, false);
 
     // ==============================================================================
     //   EditableGrid 初始化（含自動偵測 PK）
     // ==============================================================================
-    const btnEdit = document.getElementById(`${cfg.DomId}-btnEdit`);
-    const btnAdd = document.getElementById(`${cfg.DomId}-btnAdd`);
-    const btnSave = document.getElementById(`${cfg.DomId}-btnSave`);
-    const btnDelete = document.getElementById(`${cfg.DomId}-btnDelete`);
-    const btnCancel = document.getElementById(`${cfg.DomId}-btnCancel`);
 
     // === 1. Master PK ===
     const masterPK = masterKeyFields;
@@ -876,15 +1031,73 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
                 activeTarget.type = "detail";
                 activeTarget.index = Number(m[1]);
             }
+            updateCountPanel();
         });
     });
+
+    const getSelectableRows = (tbody) => {
+      if (!tbody) return [];
+      return Array.from(tbody.querySelectorAll("tr")).filter(r => {
+        const text = (r.textContent || "").trim();
+        return !text.includes("請點選") && !text.includes("載入中");
+      });
+    };
+
+    function updateCountPanel() {
+      if (!countLabel) return;
+      const active = getActive();
+      const tbody = active?.tbody;
+      const rows = getSelectableRows(tbody);
+      const total = rows.length;
+      const selected = tbody?.querySelector("tr.selected");
+      const idx = selected ? rows.indexOf(selected) + 1 : 0;
+      countLabel.textContent = `${idx} / ${total}`;
+      if (masterIndicator) {
+        masterIndicator.classList.toggle("active", activeTarget.type === "master");
+      }
+      if (detailIndicators.length) {
+        const activeIndex = activeTarget.type === "detail" ? Number(activeTarget.index) : -1;
+        detailIndicators.forEach((el) => {
+          const raw = (el.id || "").slice(detailIndicatorPrefix.length);
+          const idxVal = Number(raw);
+          el.classList.toggle("active", idxVal === activeIndex);
+        });
+      }
+    }
+
+    let isDirty = false;
+
+    const setDirty = (dirty) => {
+      isDirty = !!dirty;
+      if (!window._mmdEditing) return;
+      if (btnSave) btnSave.disabled = !isDirty;
+      if (btnCancel) btnCancel.disabled = !isDirty;
+    };
+
+    const setModePanel = (editing) => {
+      if (modeLabel) modeLabel.textContent = editing ? "編輯模式" : "瀏覽模式";
+      if (countBox) {
+        countBox.classList.toggle("mode-edit", editing);
+        countBox.classList.toggle("mode-view", !editing);
+      }
+      if (btnEdit) {
+        btnEdit.innerHTML = editing
+          ? '<i class="bi bi-eye"></i>瀏覽'
+          : '<i class="bi bi-pencil-square"></i>修改';
+      }
+      // 按鈕啟用/禁用邏輯
+      if (btnAdd) btnAdd.disabled = !editing;
+      if (btnDelete) btnDelete.disabled = !editing;
+      if (btnSave) btnSave.disabled = !editing || !isDirty;
+      if (btnCancel) btnCancel.disabled = !editing || !isDirty;
+    };
 
     const setEditMode = (toEdit) => {
       const on = !!toEdit;
       window._mmdEditing = on;
       masterEditor.toggleEdit(on);
       detailEditors.forEach(ed => ed.toggleEdit(on));
-      if (btnEdit) btnEdit.textContent = on ? "檢視" : "編輯";
+      setModePanel(on);
       root.classList.toggle("mmd-editing", on);
     };
 
@@ -903,6 +1116,93 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
 
     const clearSelected = (tbody) => {
       tbody?.querySelectorAll?.('tr')?.forEach?.(x => x.classList.remove("selected"));
+    };
+
+    const navigateRow = (direction) => {
+      const t = getActive();
+      const tbody = t?.tbody;
+      if (!tbody) return;
+      const rows = getSelectableRows(tbody);
+      if (rows.length === 0) return;
+      const current = tbody.querySelector("tr.selected");
+      let idx = current ? rows.indexOf(current) : -1;
+
+      switch (direction) {
+        case "first": idx = 0; break;
+        case "prev": idx = Math.max(0, idx - 1); break;
+        case "next": idx = Math.min(rows.length - 1, idx + 1); break;
+        case "last": idx = rows.length - 1; break;
+      }
+
+      rows.forEach(r => r.classList.remove("selected"));
+      if (rows[idx]) {
+        rows[idx].classList.add("selected");
+        rows[idx].click();
+        try { rows[idx].scrollIntoView({ block: "center", behavior: "auto" }); } catch { }
+      }
+      updateCountPanel();
+    };
+
+    let pendingAddedRow = null;
+    let pendingAddedTarget = null;
+
+    const normalizeKeyName = (name) => (name || "").toString().trim().toLowerCase();
+
+    const getInputValueByName = (tr, name) => {
+      if (!tr || !name) return "";
+      const want = normalizeKeyName(name);
+      const inputs = tr.querySelectorAll("input");
+      for (const inp of inputs) {
+        const key = normalizeKeyName(inp.name);
+        if (key === want) return inp.value ?? "";
+      }
+      return "";
+    };
+
+    const captureKeyValues = (tr, keyFields) => {
+      const values = {};
+      (keyFields || []).forEach(k => {
+        const v = getInputValueByName(tr, k);
+        if (v !== "") values[k] = v;
+      });
+      return values;
+    };
+
+    const findRowByKeys = (tbody, keyValues) => {
+      if (!tbody || !keyValues) return null;
+      const keys = Object.keys(keyValues);
+      if (!keys.length) return null;
+      const rows = Array.from(tbody.querySelectorAll("tr"));
+      return rows.find(tr => {
+        if (!tr.querySelector("input")) return false;
+        return keys.every(k => {
+          const got = getInputValueByName(tr, k);
+          return String(got ?? "").trim() === String(keyValues[k] ?? "").trim();
+        });
+      }) || null;
+    };
+
+    const sortRowsByItemIfNeeded = (rows, keyFields) => {
+      const itemKey = (keyFields || []).find(k => normalizeKeyName(k) === "item");
+      if (!itemKey) return rows;
+      const getRowValue = (row, field) => {
+        if (!row || !field) return "";
+        const want = normalizeKeyName(field);
+        const hit = Object.keys(row).find(k => normalizeKeyName(k) === want);
+        return hit ? row[hit] : "";
+      };
+      const toNum = (v) => {
+        const n = parseFloat(String(v ?? "").trim());
+        return Number.isFinite(n) ? n : null;
+      };
+      return rows.slice().sort((a, b) => {
+        const av = getRowValue(a, itemKey);
+        const bv = getRowValue(b, itemKey);
+        const an = toNum(av);
+        const bn = toNum(bv);
+        if (an != null && bn != null) return an - bn;
+        return String(av ?? "").localeCompare(String(bv ?? ""));
+      });
     };
 
     const addRowTo = (target) => {
@@ -1000,15 +1300,48 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
         const td = document.createElement("td");
         const raw = defaults[f.FieldName] ?? "";
 
+        // ★ 是否顯示為勾選框 (ComboStyle==1)
+        const isCheckbox = String(f.ComboStyle ?? "").trim() === "1";
+        if (isCheckbox) td.classList.add("text-center", "align-middle");
+
         const span = document.createElement("span");
         span.className = "cell-view d-none";
-        span.textContent = "";
+        if (isCheckbox) span.classList.add("d-inline-flex", "justify-content-center", "w-100");
 
         const inp = document.createElement("input");
-        inp.className = "form-control form-control-sm cell-edit";
-        inp.value = (raw ?? "").toString();
-        inp.dataset.raw = (raw ?? "").toString();
         inp.name = f.FieldName;
+
+        if (isCheckbox) {
+          // ★ 支援多種格式：true/1/"1"/"true"/"True"/bit 欄位
+          const checked = raw === true || raw === 1 || raw === "1" ||
+                          (typeof raw === "string" && raw.toLowerCase() === "true");
+          const viewChk = document.createElement("input");
+          viewChk.type = "checkbox";
+          viewChk.disabled = true;
+          viewChk.tabIndex = -1;
+          viewChk.className = "form-check-input checkbox-dark";
+          viewChk.checked = checked;
+          span.appendChild(viewChk);
+
+          inp.type = "checkbox";
+          inp.className = "form-check-input checkbox-dark cell-edit mx-auto";
+          inp.checked = checked;
+          inp.value = checked ? "1" : "0";
+          inp.dataset.raw = inp.value;
+
+          // ★ 同步 viewChk 與 inp 的狀態
+          const syncCheckbox = () => {
+            inp.value = inp.checked ? "1" : "0";
+            inp.dataset.raw = inp.value;
+            viewChk.checked = inp.checked;
+          };
+          inp.addEventListener("change", syncCheckbox);
+          inp.addEventListener("click", syncCheckbox);
+        } else {
+          inp.className = "form-control form-control-sm cell-edit";
+          inp.value = (raw ?? "").toString();
+          inp.dataset.raw = (raw ?? "").toString();
+        }
 
         if (DICT.readonly(f) || f.KeySelfName || (DICT.isKey(f) && tr.dataset.state !== "added")) {
           inp.readOnly = true;
@@ -1017,7 +1350,7 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
 
         td.append(span);
         td.append(inp);
-        if (isDetail && isDateType(DICT.type(f))) {
+        if (target.type === "detail" && isDateType(DICT.type(f))) {
           attachDatePicker(td, inp);
         }
         tr.appendChild(td);
@@ -1030,10 +1363,16 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
         activeTarget.index = target.index;
       });
 
+      // ★ 移除佔位列（如果有的話）
+      tbody.querySelectorAll('tr[data-placeholder="1"]').forEach(p => p.remove());
+
       clearSelected(tbody);
       tr.classList.add("selected");
       if (tbody.firstChild) tbody.insertBefore(tr, tbody.firstChild);
       else tbody.appendChild(tr);
+      updateCountPanel();
+      pendingAddedRow = tr;
+      pendingAddedTarget = { type: target.type, index: target.index };
 
       try { tr.scrollIntoView({ block: "nearest" }); } catch { }
       const firstEditable = Array.from(tr.querySelectorAll("input.cell-edit"))
@@ -1046,6 +1385,19 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
     };
 
     const saveAll = async () => {
+      const focusTarget = pendingAddedRow && pendingAddedTarget
+        ? {
+            type: pendingAddedTarget.type,
+            index: pendingAddedTarget.index,
+            keyValues: captureKeyValues(
+              pendingAddedRow,
+              pendingAddedTarget.type === "detail"
+                ? (detailKeyFields[pendingAddedTarget.index] || [])
+                : masterPK
+            )
+          }
+        : null;
+
       const rMaster = await masterEditor.saveChanges();
       const rDetails = await Promise.all(detailEditors.map(ed => ed.saveChanges()));
 
@@ -1062,6 +1414,44 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
 
       Swal?.fire({ icon: "success", title: "儲存完成", timer: 900, showConfirmButton: false });
       setEditMode(false);
+      pendingAddedRow = null;
+      pendingAddedTarget = null;
+
+      if (focusTarget?.keyValues && Object.keys(focusTarget.keyValues).length) {
+        if (focusTarget.type === "master") {
+          const rows = cfg.MasterApi
+            ? await fetch(cfg.MasterApi).then(r => r.json())
+            : await fetchTopRows(cfg.MasterTable, cfg.MasterTop || 200);
+          const sortedRows = sortRowsByItemIfNeeded(rows, masterPK);
+          await buildBody(mBody, masterDict, sortedRows, async (row, tr) => {
+            Array.from(mBody.children).forEach(x => x.classList.remove("selected"));
+            tr.classList.add("selected");
+            activeTarget.type = "master";
+            activeTarget.index = -1;
+            updateCountPanel();
+            lastMasterRow = row;
+            selectedBucket.master = row;
+            await loadAllDetails(row);
+          }, false);
+
+          const tr = findRowByKeys(mBody, focusTarget.keyValues);
+          if (tr) {
+            tr.click();
+            try { tr.scrollIntoView({ block: "center", behavior: "auto" }); } catch { }
+          }
+        } else if (focusTarget.type === "detail") {
+          const masterRow = selectedBucket.master || lastMasterRow;
+          if (masterRow) {
+            await loadAllDetails(masterRow);
+            const tbody = document.getElementById(`${cfg.DomId}-detail-${focusTarget.index}-body`);
+            const tr = findRowByKeys(tbody, focusTarget.keyValues);
+            if (tr) {
+              tr.click();
+              try { tr.scrollIntoView({ block: "center", behavior: "auto" }); } catch { }
+            }
+          }
+        }
+      }
       return { ok: true, skipped: false };
     };
 
@@ -1186,6 +1576,99 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       deleteSubDetailRow
     };
 
+    btnFirst?.addEventListener("click", () => navigateRow("first"));
+    btnPrev?.addEventListener("click", () => navigateRow("prev"));
+    btnNext?.addEventListener("click", () => navigateRow("next"));
+    btnLast?.addEventListener("click", () => navigateRow("last"));
+
+    // 查詢功能（若未提供 ItemId 則停用）
+    const itemId = cfg.ItemId || window._mmdItemId || "";
+    const masterTable = cfg.MasterTable || cfg.Master || "";
+    let queryFieldsLoaded = false;
+
+    if (queryBtn && (!itemId || !masterTable)) {
+      queryBtn.disabled = true;
+      queryBtn.title = "未設定 ItemId";
+    }
+
+    async function loadQueryFields() {
+      if (queryFieldsLoaded) return;
+      if (!itemId || !masterTable) return;
+      try {
+        const res = await fetch(`/api/DictSetupApi/QueryFields?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(masterTable)}&lang=TW`);
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        const list = Array.isArray(data) && data.length ? data : [];
+        buildQueryForm(list);
+        queryFieldsLoaded = true;
+      } catch (err) {
+        console.warn("load query fields failed", err);
+      }
+    }
+
+    function buildQueryForm(fields) {
+      if (!queryForm) return;
+      queryForm.innerHTML = "";
+
+      fields.forEach(f => {
+        const colName = f.columnName || f.ColumnName || "";
+        if (!colName) return;
+        const caption = f.columnCaption || f.ColumnCaption || colName;
+        const defVal = f.defaultValue || f.DefaultValue || "";
+        const defEq = (f.defaultEqual || f.DefaultEqual || "").toString().toLowerCase();
+        const dtRaw = f.dataType ?? f.DataType;
+        const dt = Number(dtRaw);
+
+        const wrap = document.createElement("div");
+        wrap.className = "col-md-4 col-sm-6";
+        const label = document.createElement("label");
+        label.className = "form-label text-muted";
+        label.textContent = caption;
+        const input = document.createElement("input");
+        input.className = "form-control form-control-sm";
+        input.name = colName;
+        if (dt === 1) input.type = "date";
+        else if (dt === 2) input.type = "number";
+        else input.type = "text";
+        if (defVal) input.value = defVal;
+        if (defEq === "like") input.placeholder = "模糊查詢";
+
+        wrap.appendChild(label);
+        wrap.appendChild(input);
+        queryForm.appendChild(wrap);
+      });
+    }
+
+    queryBtn?.addEventListener("click", async () => {
+      await loadQueryFields();
+      if (queryModalEl && window.bootstrap) {
+        const modal = bootstrap.Modal.getOrCreateInstance(queryModalEl);
+        modal.show();
+      }
+    });
+
+    btnClearQuery?.addEventListener("click", () => {
+      if (queryForm) {
+        Array.from(queryForm.elements).forEach(el => {
+          if (el.tagName === "INPUT") el.value = "";
+        });
+      }
+    });
+
+    btnQuerySubmit?.addEventListener("click", () => {
+      if (!queryForm) return;
+      const url = new URL(window.location.href);
+      Array.from(queryForm.elements).forEach(el => {
+        if (el.tagName === "INPUT" && el.name) {
+          const val = el.value?.trim() ?? "";
+          if (val) url.searchParams.set(el.name, val);
+          else url.searchParams.delete(el.name);
+        }
+      });
+      url.searchParams.set("pageIndex", "1");
+      window.location.href = url.toString();
+    });
+
     // 統一按鈕行為：使用通用 toolbar controller（與 MultiGrid 共用）
     if (window.createGridController) {
       window.createGridController({
@@ -1199,6 +1682,7 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
         customAdd: () => {
           ensureEditMode();
           const row = addRowTo(getActive());
+          if (row) setDirty(true);
           return row || false;
         },
         customSave: async () => { await saveAll(); },
@@ -1207,9 +1691,41 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
         onCancelEdit: async () => { location.reload(); }
       });
     } else {
+      let pendingRow = null;
+
       btnEdit?.addEventListener("click", () => setEditMode(!masterEditor.isEdit()));
-      btnSave?.addEventListener("click", async () => { await saveAll(); });
+      btnAdd?.addEventListener("click", () => {
+        ensureEditMode();
+        if (pendingRow?.remove) pendingRow.remove();
+        const row = addRowTo(getActive());
+        if (row) {
+          pendingRow = row;
+          setDirty(true);
+        }
+      });
+      btnDelete?.addEventListener("click", async () => { await deleteSelected(); });
+      btnSave?.addEventListener("click", async () => { await saveAll(); pendingRow = null; });
+      btnCancel?.addEventListener("click", async () => {
+        if (pendingRow?.remove) {
+          pendingRow.remove();
+          pendingRow = null;
+          return;
+        }
+        location.reload();
+      });
     }
+
+    // 監聽 input/change 事件追蹤異動狀態
+    root.addEventListener('input', (e) => {
+      if (e.target.closest('.cell-edit')) setDirty(true);
+    });
+    root.addEventListener('change', (e) => {
+      if (e.target.closest('.cell-edit')) setDirty(true);
+    });
+
+    setModePanel(false);
+    setDirty(false);
+    updateCountPanel();
   };
 
   // ==============================================================================

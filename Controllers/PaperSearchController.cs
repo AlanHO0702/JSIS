@@ -60,6 +60,7 @@ public class PaperSearchController : ControllerBase
         public int? ReplaceExists { get; set; }
         public string DialogCaption { get; set; } = string.Empty;
         public int? AllowSelCount { get; set; }
+        public int? IGetHadExists { get; set; }
         public List<SearchParamRow> SearchParams { get; set; } = new();
         public List<InsKeyRow> InsertKeys { get; set; } = new();
     }
@@ -216,53 +217,38 @@ public class PaperSearchController : ControllerBase
             paramValues[paramName] = value;
         }
 
-        await using var cmd = new SqlCommand(spName, conn)
-        {
-            CommandType = CommandType.StoredProcedure,
-            CommandTimeout = 180
-        };
-
-        SqlCommandBuilder.DeriveParameters(cmd);
-        foreach (SqlParameter spParam in cmd.Parameters)
-        {
-            if (spParam.Direction == ParameterDirection.ReturnValue) continue;
-            if (paramValues.TryGetValue(spParam.ParameterName, out var val))
-                spParam.Value = CoerceParamValue(spParam, val);
-            else
-                spParam.Value = CoerceParamValue(spParam, string.Empty);
-        }
-
-        var allSets = new List<List<Dictionary<string, object?>>>();
-        await using var rdr = await cmd.ExecuteReaderAsync();
-        do
-        {
-            var rows = new List<Dictionary<string, object?>>();
-            while (await rdr.ReadAsync())
-            {
-                var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-                for (int i = 0; i < rdr.FieldCount; i++)
-                    row[rdr.GetName(i)] = rdr.IsDBNull(i) ? null : rdr.GetValue(i);
-                rows.Add(row);
-            }
-            allSets.Add(rows);
-        } while (await rdr.NextResultAsync());
-
-        var pickedRows = allSets.FirstOrDefault(s => s.Count > 0)
-            ?? allSets.FirstOrDefault()
-            ?? new List<Dictionary<string, object?>>();
+        var availableRows = await ExecuteSearchOnceAsync(conn, spName, paramValues, setHadExists: false);
+        var selectedRows = (cfg.IGetHadExists ?? 0) == 1
+            ? await ExecuteSearchOnceAsync(conn, spName, paramValues, setHadExists: true)
+            : new List<Dictionary<string, object?>>();
 
         if (debug == 1)
         {
+            await using var cmd = new SqlCommand(spName, conn)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = 180
+            };
+
+            SqlCommandBuilder.DeriveParameters(cmd);
+            foreach (SqlParameter spParam in cmd.Parameters)
+            {
+                if (spParam.Direction == ParameterDirection.ReturnValue) continue;
+                if (paramValues.TryGetValue(spParam.ParameterName, out var val))
+                    spParam.Value = CoerceParamValue(spParam, val);
+                else
+                    spParam.Value = CoerceParamValue(spParam, string.Empty);
+            }
             var echo = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             foreach (SqlParameter spParam in cmd.Parameters)
             {
                 if (spParam.Direction == ParameterDirection.ReturnValue) continue;
                 echo[spParam.ParameterName] = spParam.Value == DBNull.Value ? null : spParam.Value;
             }
-            return Ok(new { ok = true, data = pickedRows, debugParams = echo });
+            return Ok(new { ok = true, data = availableRows, selected = selectedRows, debugParams = echo });
         }
 
-        return Ok(new { ok = true, data = pickedRows });
+        return Ok(new { ok = true, data = availableRows, selected = selectedRows });
     }
 
     [HttpPost("Confirm")]
@@ -624,10 +610,12 @@ public class PaperSearchController : ControllerBase
 
     private async Task<ButtonConfigDto?> LoadButtonConfigAsync(SqlConnection conn, string itemId, string buttonName, SqlTransaction? tx = null)
     {
-        var sql = @"
+        var hasGetHadExists = await DetectButtonSchemaAsync(conn, tx);
+        var sql = $@"
 SELECT TOP 1 ItemId, ButtonName, ISNULL(DesignType,0) AS DesignType,
        SpName, ExecSpName, SearchTemplate, MultiSelectDD,
-       ReplaceExists, DialogCaption, AllowSelCount
+       ReplaceExists, DialogCaption, AllowSelCount,
+       {(hasGetHadExists ? "iGetHadExists" : "0")} AS iGetHadExists
   FROM CURdOCXItemCustButton WITH (NOLOCK)
  WHERE ItemId=@itemId AND ButtonName=@btn;";
 
@@ -649,8 +637,87 @@ SELECT TOP 1 ItemId, ButtonName, ISNULL(DesignType,0) AS DesignType,
             MultiSelectDd = rd["MultiSelectDD"]?.ToString() ?? string.Empty,
             ReplaceExists = TryToInt(rd["ReplaceExists"]),
             DialogCaption = rd["DialogCaption"]?.ToString() ?? string.Empty,
-            AllowSelCount = TryToInt(rd["AllowSelCount"])
+            AllowSelCount = TryToInt(rd["AllowSelCount"]),
+            IGetHadExists = TryToInt(rd["iGetHadExists"])
         };
+    }
+
+    private async Task<bool> DetectButtonSchemaAsync(SqlConnection conn, SqlTransaction? tx = null)
+    {
+        var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        const string sql = "SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CURdOCXItemCustButton')";
+
+        await using (var cmd = new SqlCommand(sql, conn, tx))
+        await using (var rd = await cmd.ExecuteReaderAsync())
+        {
+            while (await rd.ReadAsync())
+                cols.Add(rd.GetString(0));
+        }
+
+        return cols.Contains("iGetHadExists");
+    }
+
+    private async Task<List<Dictionary<string, object?>>> ExecuteSearchOnceAsync(
+        SqlConnection conn,
+        string spName,
+        Dictionary<string, object?> paramValues,
+        bool setHadExists)
+    {
+        await using var cmd = new SqlCommand(spName, conn)
+        {
+            CommandType = CommandType.StoredProcedure,
+            CommandTimeout = 180
+        };
+
+        SqlCommandBuilder.DeriveParameters(cmd);
+        foreach (SqlParameter spParam in cmd.Parameters)
+        {
+            if (spParam.Direction == ParameterDirection.ReturnValue) continue;
+            if (paramValues.TryGetValue(spParam.ParameterName, out var val))
+                spParam.Value = CoerceParamValue(spParam, val);
+            else
+                spParam.Value = CoerceParamValue(spParam, string.Empty);
+        }
+
+        if (setHadExists)
+            ApplyGetHadExistsFlag(cmd, paramValues);
+
+        var rows = new List<Dictionary<string, object?>>();
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < rdr.FieldCount; i++)
+                row[rdr.GetName(i)] = rdr.IsDBNull(i) ? null : rdr.GetValue(i);
+            rows.Add(row);
+        }
+        return rows;
+    }
+
+    private static void ApplyGetHadExistsFlag(SqlCommand cmd, Dictionary<string, object?> paramValues)
+    {
+        SqlParameter? match = null;
+        SqlParameter? last = null;
+        foreach (SqlParameter p in cmd.Parameters)
+        {
+            if (p.Direction == ParameterDirection.ReturnValue) continue;
+            last = p;
+            var name = NormalizeInputKey(p.ParameterName);
+            if (name.Contains("hadexists") || name.Contains("gethad"))
+            {
+                match = p;
+                break;
+            }
+        }
+
+        if (match != null)
+        {
+            match.Value = 1;
+            return;
+        }
+
+        if (last != null && !paramValues.ContainsKey(last.ParameterName))
+            last.Value = 1;
     }
 
     private async Task<List<SearchParamRow>> LoadSearchParamsAsync(SqlConnection conn, string itemId, string buttonName, SqlTransaction? tx = null)

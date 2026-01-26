@@ -1,4 +1,5 @@
 using System.Text;
+using System.Data;
 using System.Text.Json.Serialization;
 using System.Net.Http.Json;
 using System.Linq;
@@ -95,8 +96,23 @@ namespace PcbErpApi.Pages.DynamicTemplate
             // 不顯示英文表頭
             PageTitle = string.Empty;
 
-            QueryFields = _ctx.CURdPaperSelected
-                .Where(x => x.TableName == DictTableName && x.IVisible == 1)
+            var queryRows = await _ctx.CURdPaperSelected
+                .AsNoTracking()
+                .Where(x => x.PaperId == MasterTable)
+                .ToListAsync();
+
+            if (queryRows.Count == 0)
+            {
+                queryRows = await _ctx.CURdPaperSelected
+                    .AsNoTracking()
+                    .Where(x => x.TableName == DictTableName)
+                    .ToListAsync();
+            }
+
+            await ResolveQueryDefaultsAsync(queryRows);
+
+            QueryFields = queryRows
+                .Where(x => x.IVisible == 1)
                 .OrderBy(x => x.SortOrder)
                 .Select(x => new QueryFieldViewModel
                 {
@@ -107,7 +123,15 @@ namespace PcbErpApi.Pages.DynamicTemplate
                     EditMask = x.EditMask,
                     DefaultValue = x.DefaultValue,
                     DefaultEqual = x.DefaultEqual,
-                    SortOrder = x.SortOrder
+                    SortOrder = x.SortOrder,
+                    CommandText = x.CommandText,
+                    DefaultType = x.DefaultType,
+                    SuperId = x.SuperId,
+                    ParamValue = x.ParamValue,
+                    IReadOnly = x.IReadOnly,
+                    TableKind = x.TableKind,
+                    AliasName = x.AliasName,
+                    TableName = x.TableName
                 })
                 .ToList();
             ViewData["QueryFields"] = QueryFields;
@@ -228,6 +252,34 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
 
             var result = await cmd.ExecuteScalarAsync();
             return result == null || result == DBNull.Value ? null : result.ToString();
+        }
+
+        private async Task ResolveQueryDefaultsAsync(List<CurdPaperSelected> rows)
+        {
+            if (rows == null || rows.Count == 0) return;
+            var cs = _ctx.Database.GetConnectionString();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            foreach (var row in rows)
+            {
+                if (row.DefaultType != 1) continue;
+                if (string.IsNullOrWhiteSpace(row.DefaultValue)) continue;
+                var sql = row.DefaultValue.Trim();
+                if (!sql.StartsWith("select", StringComparison.OrdinalIgnoreCase)) continue;
+
+                try
+                {
+                    await using var cmd = new SqlCommand(sql, conn);
+                    cmd.CommandType = CommandType.Text;
+                    var result = await cmd.ExecuteScalarAsync();
+                    row.DefaultValue = result == null || result == DBNull.Value ? "" : result.ToString();
+                }
+                catch
+                {
+                    row.DefaultValue = row.DefaultValue ?? "";
+                }
+            }
         }
 
         private static HashSet<string> BuildKeySet(string? mdKey, string? locateKeys)
