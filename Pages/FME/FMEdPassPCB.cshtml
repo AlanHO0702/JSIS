@@ -58,10 +58,12 @@
                         <div class="card-body py-2">
                             <div class="row g-2 align-items-center">
                                 <div class="col-auto">
-                                    <label class="col-form-label">原始批號</label>
+                                    <button type="button" class="btn btn-primary btn-sm" id="btnOpenWipQuery" title="開啟 WIP 現帳查詢">
+                                        原始批號
+                                    </button>
                                 </div>
                                 <div class="col-md-4">
-                                    <input type="text" class="form-control form-control-sm" id="txtLotNum" placeholder="輸入批號...">
+                                    <input type="text" class="form-control form-control-sm" id="txtLotNum" placeholder="輸入批號或點左側按鈕查詢...">
                                 </div>
                                 <div class="col-auto">
                                     <button type="button" class="btn btn-primary btn-sm" id="btnImport">
@@ -305,6 +307,86 @@
     </div>
 </div>
 
+<!-- WIP 現帳查詢 Modal -->
+<div class="modal fade" id="modalWipQuery" tabindex="-1" aria-labelledby="modalWipQueryLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2 bg-light">
+                <h6 class="modal-title" id="modalWipQueryLabel">
+                    <i class="bi bi-search"></i> WIP 現帳查詢
+                </h6>
+                <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-2">
+                <!-- 查詢條件 -->
+                <div class="row g-2 mb-2">
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm mb-0">批號</label>
+                        <input type="text" class="form-control form-control-sm" id="wipLotNum" placeholder="支援 * 模糊查詢">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm mb-0">階段</label>
+                        <input type="text" class="form-control form-control-sm" id="wipLayerId">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm mb-0">DateCode</label>
+                        <input type="text" class="form-control form-control-sm" id="wipDateCode">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm mb-0">製程</label>
+                        <input type="text" class="form-control form-control-sm" id="wipProcCode">
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <button type="button" class="btn btn-primary btn-sm me-1" id="btnWipSearch">
+                            <i class="bi bi-search"></i> 查詢
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnWipClear">
+                            <i class="bi bi-eraser"></i> 清除
+                        </button>
+                    </div>
+                </div>
+                <!-- 查詢結果 -->
+                <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                    <table class="table table-sm table-bordered table-hover mb-0" id="tblWipResult">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th style="width: 180px;">批號</th>
+                                <th>料號</th>
+                                <th>版序</th>
+                                <th>訂單種類</th>
+                                <th>製程</th>
+                                <th>製程名稱</th>
+                                <th>階段</th>
+                                <th>階段名稱</th>
+                                <th>型狀</th>
+                                <th>DateCode</th>
+                                <th>存量</th>
+                                <th>狀態</th>
+                                <th>曾經外包</th>
+                                <th>暫停</th>
+                                <th>預計</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- 動態載入 -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="mt-2 text-muted small">
+                    <span id="wipResultCount">共 0 筆</span>
+                    <span class="ms-3 text-info">提示：雙擊列可選擇批號</span>
+                </div>
+            </div>
+            <div class="modal-footer py-1">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary btn-sm" id="btnWipSelect">
+                    <i class="bi bi-check-lg"></i> 選擇
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @section Styles {
 <style>
     .pass-pcb-container {
@@ -376,6 +458,35 @@
         position: sticky;
         top: 0;
         z-index: 1;
+    }
+
+    /* WIP Modal 樣式 */
+    #modalWipQuery .modal-body {
+        background-color: #fafafa;
+    }
+
+    #tblWipResult tbody tr {
+        cursor: pointer;
+    }
+
+    #tblWipResult tbody tr.selected {
+        background-color: #0d6efd !important;
+        color: white;
+    }
+
+    #tblWipResult tbody tr:hover:not(.selected) {
+        background-color: #e7f1ff;
+    }
+
+    /* 原始批號查詢按鈕樣式 */
+    #btnOpenWipQuery {
+        padding: 0.25rem 0.5rem;
+    }
+
+    #btnOpenWipQuery:hover {
+        background-color: #0d6efd;
+        color: white;
+        border-color: #0d6efd;
     }
 </style>
 }
@@ -457,9 +568,51 @@
         $('#txtPQnty, #txtSQnty').change(function () {
             calculateQuantities();
         });
+
+        // === WIP 現帳查詢相關事件 ===
+        // 點擊「原始批號」按鈕開啟 WIP 查詢
+        $('#btnOpenWipQuery').click(function () {
+            openWipQueryModal();
+        });
+
+        // WIP 查詢按鈕
+        $('#btnWipSearch').click(function () {
+            searchWipLots();
+        });
+
+        // WIP 清除按鈕
+        $('#btnWipClear').click(function () {
+            $('#wipLotNum, #wipLayerId, #wipDateCode, #wipProcCode').val('');
+            $('#tblWipResult tbody').empty();
+            $('#wipResultCount').text('共 0 筆');
+        });
+
+        // WIP 查詢條件 Enter 鍵
+        $('#wipLotNum, #wipLayerId, #wipDateCode, #wipProcCode').keydown(function (e) {
+            if (e.keyCode === 13) {
+                e.preventDefault();
+                searchWipLots();
+            }
+        });
+
+        // WIP 結果表格行選擇
+        $('#tblWipResult tbody').on('click', 'tr', function () {
+            $(this).siblings().removeClass('selected');
+            $(this).addClass('selected');
+        });
+
+        // WIP 結果表格雙擊選擇
+        $('#tblWipResult tbody').on('dblclick', 'tr', function () {
+            selectWipLot();
+        });
+
+        // WIP 選擇按鈕
+        $('#btnWipSelect').click(function () {
+            selectWipLot();
+        });
     }
 
-    // 匯入批號 - 查詢批號資訊並顯示
+    // 匯入批號 - 呼叫 FMEdPassChoiceLotPCB SP 取得批號資訊
     function importLot() {
         let lotNum = $('#txtLotNum').val().trim();
         if (!lotNum) {
@@ -468,13 +621,15 @@
             return;
         }
 
-        // 呼叫 API 查詢批號資訊
+        // 呼叫 API (對應 Delphi 的 prcImport)
         $.ajax({
-            url: '/api/FMEdPassPCB/lotinfo',
+            url: '/api/FMEdPassPCB/import',
             type: 'POST',
             contentType: 'application/json',
             data: JSON.stringify({
                 lotNum: lotNum,
+                inStock: 0,      // 0=一般過帳
+                paperNum: '',    // 空字串，SP會檢查重複
                 userId: currentUserId
             }),
             success: function (resp) {
@@ -488,29 +643,31 @@
                 }
             },
             error: function (xhr) {
-                alert('查詢失敗: ' + (xhr.responseJSON?.message || xhr.responseText));
+                // SP 的 RAISERROR 會回傳在這裡 (如: 批號暫扣、報廢中等)
+                alert(xhr.responseJSON?.message || '查詢失敗');
                 $('#txtLotNum').focus().select();
             }
         });
     }
 
     // 填入批號資訊到表單
-    // FMEdPassChoiceLotPCB SP 回傳欄位:
-    // LotNum, PartNum, Revision, ProcCode, LayerId, POP, Qnty, StockId,
-    // AftProc, AftLayer, AftPOP, PQnty, SQnty, UQnty,
-    // IsShowPQnty, IsXOut, AftProcType, POType, DateCode, GoodPCS, etc.
+    // FMEdPassChoiceLotPCB SP 回傳欄位 (來自 #Result_81023A):
+    // - 基本: LotNum, PartNum, Revision, ProcCode, LayerId, POP, Qnty, StockId
+    // - 下站: AftProc, AftLayer, AftPOP
+    // - 數量: PQnty, SQnty, UQnty
+    // - 旗標: ProcType, IsShowPQnty, IsXOut, IsDateCode, IsStorage, AftProcType
+    // - 其他: POType, DateCode, GoodPCS, MatchCount, LLPCS, LPCS, etc.
+    // Controller 會補充 Lookup 欄位: ProcName, AftProcName, LayerName, AftLayerName, POPName, AftPOPName
     function fillLotInfo(info) {
-        // Debug: 顯示所有回傳欄位
-        console.log('=== lotInfo 回傳資料 (from FMEdPassChoiceLotPCB) ===');
-        console.log(JSON.stringify(info, null, 2));
-        console.log('所有欄位名稱:', Object.keys(info));
+        console.log('=== lotInfo (FMEdPassChoiceLotPCB) ===');
+        console.log('欄位:', Object.keys(info));
 
-        // 使用忽略大小寫的方式取值
+        // 忽略大小寫取值的輔助函數
         function getVal(obj, key) {
             if (!obj) return '';
             var lowerKey = key.toLowerCase();
             for (var k in obj) {
-                if (k.toLowerCase() === lowerKey) return obj[k] || '';
+                if (k.toLowerCase() === lowerKey) return obj[k] ?? '';
             }
             return '';
         }
@@ -523,68 +680,46 @@
             return v === '' ? 0 : parseInt(v) || 0;
         }
 
-        // 料號、版序 (SP 回傳: PartNum, Revision)
-        $('#txtPartNum').val(getVal(info, 'PartNum') || getVal(info, 'PartNo'));
-        $('#txtRevision').val(getVal(info, 'Revision') || getVal(info, 'Rev') || getVal(info, 'RevNum'));
+        // === 料號、版序 ===
+        $('#txtPartNum').val(getVal(info, 'PartNum'));
+        $('#txtRevision').val(getVal(info, 'Revision'));
 
-        // 目前製程 (SP 回傳: ProcCode, 需透過 Lookup 取得 ProcName)
-        // SP 本身可能不會回傳 ProcName，但會回傳 ProcCode
-        var procCode = getVal(info, 'ProcCode');
-        var procName = getVal(info, 'ProcName') || procCode;
-        $('#txtProcName').val(procName);
+        // === 製程 (Controller 已補 Lookup) ===
+        $('#txtProcName').val(getVal(info, 'ProcName') || getVal(info, 'ProcCode'));
+        $('#txtAftProcName').val(getVal(info, 'AftProcName') || getVal(info, 'AftProc'));
 
-        // 下站製程 (SP 回傳: AftProc, AftProcName 透過 Lookup)
-        var aftProc = getVal(info, 'AftProc');
-        var aftProcName = getVal(info, 'AftProcName') || aftProc;
-        $('#txtAftProcName').val(aftProcName);
+        // === 階段 (Controller 已補 Lookup) ===
+        $('#txtLayerName').val(getVal(info, 'LayerName') || getVal(info, 'LayerId'));
+        $('#txtAftLayerName').val(getVal(info, 'AftLayerName') || getVal(info, 'AftLayer'));
 
-        // 階段 (SP 回傳: LayerId, LayerName 透過 Lookup)
-        var layerId = getVal(info, 'LayerId');
-        var layerName = getVal(info, 'LayerName') || layerId;
-        $('#txtLayerName').val(layerName);
+        // === 型狀 (Controller 已補 Lookup) ===
+        $('#txtPopName').val(getVal(info, 'POPName') || getVal(info, 'POP'));
+        $('#txtAftPopName').val(getVal(info, 'AftPOPName') || getVal(info, 'AftPOP'));
 
-        // 過帳階段 (SP 回傳: AftLayer, AftLayerName 透過 Lookup)
-        var aftLayer = getVal(info, 'AftLayer');
-        var aftLayerName = getVal(info, 'AftLayerName') || aftLayer;
-        $('#txtAftLayerName').val(aftLayerName);
-
-        // 型狀 (SP 回傳: POP, PnPName 透過 Lookup)
-        var pop = getVal(info, 'POP');
-        var popName = getVal(info, 'PnPName') || getVal(info, 'POPName') || pop;
-        $('#txtPopName').val(popName);
-
-        // 過帳型狀 (SP 回傳: AftPOP, AftPOPName 透過 Lookup)
-        var aftPOP = getVal(info, 'AftPOP');
-        var aftPopName = getVal(info, 'AftPOPName') || aftPOP;
-        $('#txtAftPopName').val(aftPopName);
-
-        // 原始數量 (SP 回傳: Qnty - 這是 RestQnty/存量)
-        var qnty = getNumVal(info, 'Qnty') || getNumVal(info, 'RestQnty') || getNumVal(info, 'Qty') || getNumVal(info, 'BalQnty');
+        // === 原始數量 (SP 回傳 Qnty) ===
+        var qnty = getNumVal(info, 'Qnty');
         $('#txtQnty').val(qnty);
 
-        // X報數 (目前 SP 可能沒有直接回傳，先嘗試)
-        $('#txtXOutQnty').val(getNumVal(info, 'XOutQnty') || getNumVal(info, 'XOut') || 0);
+        // === 過帳良品數 (依 IsShowPQnty 旗標決定) ===
+        // Delphi 邏輯 (PassPCB.pas:2102-2105):
+        //   if IsShowPQnty = 1 then PQnty := SP.PQnty else PQnty := 0
+        var isShowPQnty = getIntVal(info, 'IsShowPQnty');
+        var pQnty = (isShowPQnty === 1) ? getNumVal(info, 'PQnty') : 0;
+        $('#txtPQnty').val(pQnty);
 
-        // 產品類別 (SP 回傳: POType)
+        // === 報廢數 (SP 直接回傳 SQnty) ===
+        $('#txtSQnty').val(getNumVal(info, 'SQnty'));
+
+        // === 產品類別 ===
         var poType = getIntVal(info, 'POType');
         var poTypeText = poType === 0 ? '正常' : (poType === 1 ? '樣品' : (poType === 2 ? '試產' : poType));
         $('#txtPoType').val(poTypeText);
 
-        // 預設過帳數 (SP 回傳: IsShowPQnty, PQnty)
-        // Delphi 原始邏輯 (PassPCB.pas 第 2102-2105 行):
-        //   if IsShowPQnty = 1 then PQnty := SP.PQnty else PQnty := 0
-        var isShowPQnty = getIntVal(info, 'IsShowPQnty');
-        if (isShowPQnty === 1) {
-            // 使用 SP 回傳的 PQnty
-            $('#txtPQnty').val(getNumVal(info, 'PQnty'));
-        } else {
-            // 依 Delphi 原始邏輯，IsShowPQnty != 1 時，過帳數預設為 0
-            $('#txtPQnty').val(0);
-        }
-        // 報廢數 = SP 的 SQnty (PassPCB.pas 第 2113 行)
-        $('#txtSQnty').val(getNumVal(info, 'SQnty'));
+        // === X報數 (尚未實作，預設0) ===
+        $('#txtXOutQnty').val(0);
 
-        // 顯示/隱藏報廢明細區塊 (SP 回傳: IsXOut, AftProcType)
+        // === 報廢明細區塊顯示控制 ===
+        // 依 Delphi 邏輯: IsXOut=1 或 AftProcType=990(成品) 時顯示
         var isXOut = getIntVal(info, 'IsXOut');
         var aftProcType = getIntVal(info, 'AftProcType');
         if (isXOut === 1 || aftProcType === 990) {
@@ -593,18 +728,12 @@
             $('#pnlDefect').hide();
         }
 
-        // DateCode
-        var dateCode = getVal(info, 'DateCode');
-        if (dateCode) {
-            console.log('DateCode:', dateCode);
-        }
-
-        // 完成良品PCS數
-        var goodPCS = getIntVal(info, 'GoodPCS');
-        console.log('GoodPCS:', goodPCS);
+        // Debug 資訊
+        console.log('Qnty:', qnty, 'PQnty:', pQnty, 'IsShowPQnty:', isShowPQnty);
+        console.log('GoodPCS:', getIntVal(info, 'GoodPCS'));
     }
 
-    // 執行過帳 - 呼叫 SP，SP 會自動產生單號
+    // 執行過帳 - 建立單號並呼叫 FMEdPassResult SP
     function executePass() {
         // 驗證
         if (!lotInfo) {
@@ -620,28 +749,54 @@
             return;
         }
 
-        // 收集畫面資料
+        // 忽略大小寫取值
+        function getVal(key) {
+            if (!lotInfo) return '';
+            var lowerKey = key.toLowerCase();
+            for (var k in lotInfo) {
+                if (k.toLowerCase() === lowerKey) return lotInfo[k] ?? '';
+            }
+            return '';
+        }
+        function getNumVal(key) {
+            var v = getVal(key);
+            return v === '' ? 0 : parseFloat(v) || 0;
+        }
+        function getIntVal(key) {
+            var v = getVal(key);
+            return v === '' ? 0 : parseInt(v) || 0;
+        }
+
+        // 收集畫面資料 (對應 Controller 的 ExecutePassRequest)
         var passData = {
+            // 基本資訊
             lotNum: lotNum,
             userId: currentUserId,
+
+            // 從 lotInfo 帶入 (SP 回傳的欄位)
+            partNum: getVal('PartNum'),
+            revision: getVal('Revision'),
+            procCode: getVal('ProcCode'),
+            layerId: getVal('LayerId'),
+            pop: getIntVal('POP'),
+            stockId: getVal('StockId'),
+            aftProc: getVal('AftProc'),
+            aftLayer: getVal('AftLayer'),
+            aftPOP: getIntVal('AftPOP'),
+
+            // 數量 (從畫面取得，可能被使用者修改)
+            qnty: getNumVal('Qnty'),
             pQnty: parseFloat($('#txtPQnty').val()) || 0,
             sQnty: parseFloat($('#txtSQnty').val()) || 0,
             uQnty: 0,
-            scrapStrXOutQnty: parseFloat($('#txtScrapStrXOutQnty').val()) || 0,
+            xOutQnty: parseFloat($('#txtScrapStrXOutQnty').val()) || 0,
+
+            // 其他
+            dateCode: getVal('DateCode'),
             notes: $('#txtNotes').val(),
-            // 從 lotInfo 帶入的資料
-            partNum: lotInfo.PartNum || lotInfo.partNum,
-            revision: lotInfo.Revision || lotInfo.revision,
-            procCode: lotInfo.ProcCode || lotInfo.procCode,
-            layerId: lotInfo.LayerId || lotInfo.layerId,
-            pop: lotInfo.POP || lotInfo.pop,
-            aftProc: lotInfo.AftProc || lotInfo.aftProc,
-            aftLayer: lotInfo.AftLayer || lotInfo.aftLayer,
-            aftPop: lotInfo.AftPOP || lotInfo.aftPop,
-            stockId: lotInfo.StockId || lotInfo.stockId,
-            // 多報明細
+
+            // 明細資料
             xOutList: collectXOutData(),
-            // 報廢明細
             defectList: collectDefectData()
         };
 
@@ -807,6 +962,144 @@
         var pQnty = parseFloat($('#txtPQnty').val()) || 0;
         var sQnty = parseFloat($('#txtSQnty').val()) || 0;
         // 可加入驗證: pQnty + sQnty 不可超過 qnty
+    }
+
+    // ========== WIP 現帳查詢功能 ==========
+
+    // 開啟 WIP 查詢 Modal
+    function openWipQueryModal() {
+        // 清空查詢條件和結果
+        $('#wipLotNum, #wipLayerId, #wipDateCode, #wipProcCode').val('');
+        $('#tblWipResult tbody').empty();
+        $('#wipResultCount').text('共 0 筆');
+
+        // 開啟 Modal
+        var modal = new bootstrap.Modal(document.getElementById('modalWipQuery'));
+        modal.show();
+
+        // 聚焦到批號輸入框
+        setTimeout(function () {
+            $('#wipLotNum').focus();
+        }, 300);
+    }
+
+    // 查詢 WIP 現帳
+    function searchWipLots() {
+        var queryData = {
+            lotNum: $('#wipLotNum').val().trim(),
+            layerId: $('#wipLayerId').val().trim(),
+            dateCode: $('#wipDateCode').val().trim(),
+            procCode: $('#wipProcCode').val().trim(),
+            inStock: 0  // 0=一般過帳
+        };
+
+        // 顯示載入中
+        $('#tblWipResult tbody').html('<tr><td colspan="15" class="text-center py-3"><i class="bi bi-hourglass-split"></i> 查詢中...</td></tr>');
+
+        $.ajax({
+            url: '/api/FMEdPassPCB/wip-query',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(queryData),
+            success: function (resp) {
+                if (resp.success) {
+                    renderWipResult(resp.data);
+                    $('#wipResultCount').text('共 ' + resp.total + ' 筆');
+                } else {
+                    $('#tblWipResult tbody').html('<tr><td colspan="15" class="text-center text-danger">' + (resp.message || '查詢失敗') + '</td></tr>');
+                    $('#wipResultCount').text('共 0 筆');
+                }
+            },
+            error: function (xhr) {
+                $('#tblWipResult tbody').html('<tr><td colspan="15" class="text-center text-danger">查詢失敗: ' + (xhr.responseJSON?.message || '未知錯誤') + '</td></tr>');
+                $('#wipResultCount').text('共 0 筆');
+            }
+        });
+    }
+
+    // 渲染 WIP 查詢結果
+    function renderWipResult(data) {
+        var tbody = $('#tblWipResult tbody');
+        tbody.empty();
+
+        if (!data || data.length === 0) {
+            tbody.html('<tr><td colspan="15" class="text-center text-muted py-3">無符合條件的資料</td></tr>');
+            return;
+        }
+
+        // 輔助函數
+        function getVal(obj, key) {
+            if (!obj) return '';
+            var lowerKey = key.toLowerCase();
+            for (var k in obj) {
+                if (k.toLowerCase() === lowerKey) return obj[k] ?? '';
+            }
+            return '';
+        }
+
+        data.forEach(function (item) {
+            // 狀態轉換
+            var lotStatus = parseInt(getVal(item, 'LotStatus')) || 0;
+            var statusText = lotStatus === 0 ? '正常' : (lotStatus === 1 ? '重工' : (lotStatus === 2 ? '報廢' : lotStatus));
+
+            // 訂單種類
+            var poType = parseInt(getVal(item, 'POType')) || 0;
+            var poTypeText = poType === 0 ? '正常' : (poType === 1 ? '樣品' : (poType === 2 ? '試產' : poType));
+
+            var tr = $('<tr>').data('lotInfo', item);
+            tr.append($('<td>').text(getVal(item, 'LotNum')));
+            tr.append($('<td>').text(getVal(item, 'PartNum')));
+            tr.append($('<td>').text(getVal(item, 'Revision')));
+            tr.append($('<td>').text(poTypeText));
+            tr.append($('<td>').text(getVal(item, 'ProcCode')));
+            tr.append($('<td>').text(getVal(item, 'ProcName') || getVal(item, 'ProcCode')));
+            tr.append($('<td>').text(getVal(item, 'LayerId')));
+            tr.append($('<td>').text(getVal(item, 'LayerName') || getVal(item, 'LayerId')));
+            tr.append($('<td>').text(getVal(item, 'POP')));
+            tr.append($('<td>').text(getVal(item, 'DateCode')));
+            tr.append($('<td>').text(getVal(item, 'Qnty')));
+            tr.append($('<td>').text(statusText));
+            tr.append($('<td>').text(getVal(item, 'iSCed') == 1 ? '是' : ''));
+            tr.append($('<td>').text(getVal(item, 'Halted') == 1 ? '是' : ''));
+            tr.append($('<td>').text(getVal(item, 'ExpStkTime') || ''));
+            tbody.append(tr);
+        });
+    }
+
+    // 選擇 WIP 批號
+    function selectWipLot() {
+        var selectedRow = $('#tblWipResult tbody tr.selected');
+        if (selectedRow.length === 0) {
+            alert('請先選擇一筆批號');
+            return;
+        }
+
+        var selectedLotInfo = selectedRow.data('lotInfo');
+        if (!selectedLotInfo) {
+            alert('無法取得批號資料');
+            return;
+        }
+
+        // 取得批號
+        var lotNum = '';
+        for (var k in selectedLotInfo) {
+            if (k.toLowerCase() === 'lotnum') {
+                lotNum = selectedLotInfo[k];
+                break;
+            }
+        }
+
+        if (!lotNum) {
+            alert('無法取得批號');
+            return;
+        }
+
+        // 關閉 Modal
+        bootstrap.Modal.getInstance(document.getElementById('modalWipQuery')).hide();
+
+        // 將批號填入並執行匯入
+        $('#txtLotNum').val(lotNum);
+        importLot();
     }
 </script>
 }
