@@ -127,7 +127,7 @@ public class TestSchemaController : ControllerBase
     public async Task<ActionResult> GetSample(string tableName)
     {
         var connStr = _config.GetConnectionString("DefaultConnection");
-        var result = new List<Dictionary<string, object>>();
+        var result = new List<Dictionary<string, object?>>();
 
         using var conn = new SqlConnection(connStr);
         await conn.OpenAsync();
@@ -138,7 +138,7 @@ public class TestSchemaController : ControllerBase
         using var reader = await cmd.ExecuteReaderAsync();
         if (await reader.ReadAsync())
         {
-            var row = new Dictionary<string, object>();
+            var row = new Dictionary<string, object?>();
             for (int i = 0; i < reader.FieldCount; i++)
             {
                 row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);

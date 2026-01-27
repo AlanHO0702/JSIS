@@ -459,7 +459,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             return list;
         }
 
-        private async Task<Dictionary<string, LookupMeta>> LoadLookupMetaAsync(string dictTableName)
+        private Task<Dictionary<string, LookupMeta>> LoadLookupMetaAsync(string dictTableName)
         {
             var result = new Dictionary<string, LookupMeta>(StringComparer.OrdinalIgnoreCase);
             try
@@ -479,7 +479,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             {
                 _logger.LogWarning(ex, "GetOCXLookups failed for {Table}", dictTableName);
             }
-            return result;
+            return Task.FromResult(result);
         }
 
         private static Dictionary<string, string> BuildLookupMap(object? raw)
@@ -491,7 +491,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
                 {
                     var k = key?.ToString() ?? "";
                     if (string.IsNullOrWhiteSpace(k)) continue;
-                    map[k] = dict[key]?.ToString() ?? "";
+                    map[k] = dict[k]?.ToString() ?? "";
                 }
             }
             return map;
@@ -846,7 +846,7 @@ SELECT FieldName, DisplayLabel, SerialNum, Visible, DataType, DisplaySize, ReadO
             {
                 list.Add(new CURdTableField
                 {
-                    TableName = dictTableName,
+                    TableName = dictTableName ?? string.Empty,
                     FieldName = rd["FieldName"]?.ToString() ?? string.Empty,
                     DisplayLabel = rd["DisplayLabel"] as string,
                     SerialNum = rd["SerialNum"] == DBNull.Value ? null : Convert.ToInt32(rd["SerialNum"]),
