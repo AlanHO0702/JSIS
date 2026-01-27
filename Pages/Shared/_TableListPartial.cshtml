@@ -632,10 +632,8 @@ function doQuery(page = 1) {
       renderOrderCount(result.totalCount, @Model.PageSize, page);
 
       const totalTime = (performance.now() - t0).toFixed(0);
-      console.log(`[分頁查詢] ${window._tableName} 第${page}頁 | ${totalTime}ms | 快取:${skipLookup ? '是' : '否'}`);
     })
     .catch(err => {
-      console.log(`[分頁查詢] 失敗 | ${(performance.now() - t0).toFixed(0)}ms | ${err}`);
       Swal.fire({ icon:'error', title:'查詢失敗', text: String(err) });
     });
 
@@ -760,6 +758,7 @@ document.addEventListener("DOMContentLoaded", function () {
   // 檢查 URL 是否有查詢參數（從單身頁查詢跳轉過來）
   const urlParams = new URLSearchParams(window.location.search);
   const urlPageParam = urlParams.get('page');
+  const useStoredQuery = urlParams.get('useStoredQuery') === '1';
   const initialPage = urlPageParam ? parseInt(urlPageParam, 10) : 1;
 
   // 獲取查詢欄位配置（用於讀取默認比對條件）
@@ -778,7 +777,7 @@ document.addEventListener("DOMContentLoaded", function () {
   // 從 URL 提取查詢參數（排除 page 和 pageSize）
   const urlFilters = [];
   for (const [key, value] of urlParams.entries()) {
-    if (key !== 'page' && key !== 'pageSize' && value) {
+    if (key !== 'page' && key !== 'pageSize' && key !== 'useStoredQuery' && value) {
       const fieldConfig = queryFieldsMap.get(key.toLowerCase());
       const defaultOp = fieldConfig?.defaultEqual || 'like';
       urlFilters.push({
@@ -792,7 +791,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // 優先使用 URL 參數，如果有的話
   let finalFilters = [];
-  if (urlFilters.length > 0) {
+  if (!useStoredQuery && urlFilters.length > 0) {
     // URL 有查詢參數，使用 URL 參數並保存到 localStorage
     finalFilters = urlFilters;
     const tn = ("@tableName" || '').toString().trim().toLowerCase();
@@ -863,7 +862,6 @@ document.addEventListener("DOMContentLoaded", function () {
       }
 
       const result = await checkResp.json();
-      console.log('[列表頁修改按鈕] CheckCanEdit 結果:', result);
 
       // 支援 PascalCase (C# 預設) 和 camelCase
       const canEdit = result.CanEdit ?? result.canEdit;

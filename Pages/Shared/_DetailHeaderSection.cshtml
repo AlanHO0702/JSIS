@@ -2027,8 +2027,6 @@ const backToMainTpl = (PAGE.queryRedirectUrl || '').trim()
 const subTpl = (PAGE.detailRouteTemplate || '').replace(/\{PaperNum\}/gi, '{0}');
 const finalSwitchTpl = backToMainTpl || subTpl;
 
-console.debug('[Switch template]', finalSwitchTpl);
-console.debug('[Sub template for new]', subTpl);
 
 new ToolbarHandler({
   searchBtnId: "btnSubSearch",
@@ -2047,7 +2045,8 @@ new ToolbarHandler({
   renderPagination: null,
   renderOrderCount: null,
   restoreSearchForm: null,
-  queryRedirectUrl: PAGE.queryRedirectUrl
+  queryRedirectUrl: PAGE.queryRedirectUrl,
+  forceStoredQueryOnRedirect: true
 });
 
 // 單身頁 → 主頁 切換
@@ -2261,7 +2260,6 @@ async function saveMultiTabChanges(options) {
           const statusMap = {0:'作業中', 1:'已確認', 2:'作廢中', 3:'審核中', 4:'已結案'};
           const statusName = statusMap[currentFinished] || `代碼:${currentFinished}`;
 
-          console.log('?? [儲存] 資料庫狀態已變更，無法儲存');
           await Swal.fire({
             icon: 'warning',
             title: '單據狀態已變更',
@@ -2285,7 +2283,7 @@ async function saveMultiTabChanges(options) {
 
   // 收集所有已修改的列資料（僅限當前單號）
   const currentPaperNum = window._paperNum || PAGE.paperNum;
-  console.log('?? [儲存] 當前單號:', currentPaperNum);
+
 
   const allChanges = [];
   const tables = document.querySelectorAll('.multi-tab-detail .table-container');
@@ -2304,10 +2302,8 @@ async function saveMultiTabChanges(options) {
       const isAdded = (row.dataset.state || '').toString().toLowerCase() === 'added';
       // ? 關鍵修正：只處理當前單號的資料
       const rowPaperNum = row.dataset.paperNum;
-      console.log(`?? [儲存] 檢查列: rowPaperNum="${rowPaperNum}", currentPaperNum="${currentPaperNum}", state="${row.dataset.state}"`);
 
       if (rowPaperNum && rowPaperNum !== currentPaperNum) {
-        console.log(`?? [儲存] 跳過不同單號的列: ${rowPaperNum} (當前: ${currentPaperNum})`);
         continue;
       }
 
@@ -2361,7 +2357,6 @@ async function saveMultiTabChanges(options) {
       // ? 確保 PaperNum 和 Item 一定存在（從 dataset 取得主鍵值）
       if (!rowData.PaperNum && rowPaperNum) {
         rowData.PaperNum = rowPaperNum;
-        console.log(`?? [儲存] 明確加入 PaperNum: ${rowPaperNum}`);
       }
 
       const rowItem = row.dataset.item;
@@ -2370,10 +2365,7 @@ async function saveMultiTabChanges(options) {
         const itemNum = Number(rowItem);
         if (!isNaN(itemNum)) {
           rowData.Item = itemNum;
-          console.log(`?? [儲存] 明確加入 Item: ${itemNum}`);
         } else {
-          rowData.Item = rowItem;
-          console.log(`?? [儲存] 明確加入 Item: ${rowItem}`);
         }
       }
 
@@ -2386,13 +2378,11 @@ async function saveMultiTabChanges(options) {
 
       // 確保有資料再加入，並且顯示完整的 rowData 內容
       if (Object.keys(rowData).length > 0) {
-        console.log(`?? [儲存] 收集的完整列資料:`, JSON.stringify(rowData, null, 2));
         changes.push(rowData);
       }
     }
 
     if (changes.length > 0) {
-      console.log(`?? [儲存] ${tableName} 收集到 ${changes.length} 筆變更`);
       allChanges.push({ tableName, changes });
     }
   }
@@ -2405,7 +2395,6 @@ async function saveMultiTabChanges(options) {
   }
 
   if (allChanges.length === 0) {
-    console.log('?? [儲存] 沒有變更需要儲存');
     return { ok: true, hasChanges: false };
   }
 
@@ -2425,7 +2414,6 @@ async function saveMultiTabChanges(options) {
     };
 
     for (const { tableName, changes, keyFields: keyFieldsOverride } of allChanges) {
-      console.log(`?? [儲存] 儲存 ${tableName}:`, changes);
 
       // 取得主鍵欄位（從第一筆資料推斷）
       const firstRow = changes[0];
@@ -2467,7 +2455,6 @@ async function saveMultiTabChanges(options) {
           const reasons = badRows.map(r => r.reason || r.skip || '儲存失敗');
           saveErrors.push(`${tableName}: ${reasons.join('; ')}`);
         }
-        console.log(`? [儲存] ${tableName} 儲存完成:`, result);
 
         // 儲存成功後，將所有已修改列的狀態改為 unchanged，並同步更新 view 顯示值
         const container = document.querySelector(`.table-container[data-dict-table="${tableName}"]`);
@@ -2501,7 +2488,6 @@ async function saveMultiTabChanges(options) {
                   }
 
                   viewSpan.textContent = displayValue;
-                  console.log(`?? [儲存] 同步更新 ${fieldName}: "${displayValue}"`);
                 }
               }
             });
@@ -2914,11 +2900,9 @@ if (editBtn) {
   editBtn.addEventListener('click', async function () {
     const headerTableName = window._headerTableName;
     const paperNum = window._paperNum || (typeof PAGE !== 'undefined' ? PAGE.paperNum : null);
-    console.log('[修改按鈕] headerTableName:', headerTableName, 'paperNum:', paperNum);
 
     // 如果是從「編輯模式」切回「檢視模式」（保留），則儲存單身資料
     if (isEdit) {
-      console.log('[保留按鈕] 開始儲存單身資料...');
       const detailSave = await saveMultiTabChanges();
       if (!detailSave.ok) return;
       setHeaderEditMode(false);
@@ -2952,7 +2936,6 @@ if (editBtn) {
       }
 
       const result = await checkResp.json();
-      console.log('[修改按鈕] CheckCanEdit 結果:', result);
 
       // 支援 PascalCase (C# 預設) 和 camelCase
       const canEdit = result.CanEdit ?? result.canEdit;

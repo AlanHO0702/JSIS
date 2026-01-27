@@ -67,24 +67,24 @@
                 </div>
                 <div class="modal-body">
                     <div class="row g-3">
-                        <div class="col-7">
+                        <div class="col-8">
                             <div class="qf-default-table-wrap">
-                                <table class="table table-sm table-striped mb-0">
+                                <table class="table table-sm table-striped mb-0 qf-default-table">
                                     <thead>
                                         <tr>
-                                            <th style="width:60px">序號</th>
+                                            <th style="width:45px">序號</th>
                                             <th style="width:140px">表格名稱</th>
-                                            <th style="width:80px">別名</th>
-                                            <th style="width:160px">欄位名稱</th>
-                                            <th>欄位顯示名稱</th>
-                                            <th style="width:110px">條件</th>
+                                            <th style="width:55px">別名</th>
+                                            <th style="width:130px">欄位名稱</th>
+                                            <th class="qf-col-caption">欄位顯示名稱</th>
+                                            <th class="qf-col-cond">條件</th>
                                         </tr>
                                     </thead>
                                     <tbody id="qfDefaultBody"></tbody>
                                 </table>
                             </div>
                         </div>
-                        <div class="col-5">
+                        <div class="col-4">
                             <div class="qf-default-editor">
                                 <div class="qf-default-group">
                                     <div class="qf-default-title">
@@ -122,15 +122,15 @@
 }
 
 <script>
-document.addEventListener("DOMContentLoaded", function () {
+const initQueryFieldModals = () => {
     const fetcher = (input, init, msg) => {
         if (typeof window.http === "function") return window.http(input, init);
         if (typeof window.busyFetch === "function") return window.busyFetch(input, init, msg);
         return fetch(input, init);
     };
 
-    if (!window.__queryFieldModalInit) {
-        window.__queryFieldModalInit = true;
+    if (!window.__queryFieldModalInitV2) {
+        window.__queryFieldModalInitV2 = true;
         const qfModalEl = document.getElementById("queryFieldSelectModal");
         const qfDefaultModalEl = document.getElementById("queryDefaultModal");
         const qfAllEl = document.getElementById("qfAllFields");
@@ -152,6 +152,7 @@ document.addEventListener("DOMContentLoaded", function () {
         let pendingOpen = null;
         let currentDefaultRow = null;
         let defaultItems = [];
+        let dragItem = null;
 
         const defaultTypeOptions = [
             { value: 0, text: "固定常數" },
@@ -166,7 +167,7 @@ document.addEventListener("DOMContentLoaded", function () {
             defaultTypeOptions.forEach(opt => {
                 const o = document.createElement("option");
                 o.value = String(opt.value);
-                o.textContent = opt.text;
+                o.textContent = `${opt.value} ${opt.text}`;
                 qfDefaultTypeEl.appendChild(o);
             });
         };
@@ -289,7 +290,12 @@ document.addEventListener("DOMContentLoaded", function () {
             const selected = Array.isArray(data.selected) ? data.selected : [];
             const allFields = Array.isArray(data.allFields) ? data.allFields : [];
 
-            const selectedKey = new Set(selected.map(x => (x.columnName || x.ColumnName || "").toLowerCase()));
+            // 改用「欄位名稱+條件」作為唯一識別 key
+            const selectedKey = new Set(selected.map(x => {
+                const col = (x.columnName || x.ColumnName || "").toLowerCase();
+                const eq = (x.defaultEqual || x.DefaultEqual || "").toLowerCase();
+                return `${col}|${eq}`;
+            }));
 
             const getFieldName = (item) => {
                 const caption = item.columnCaption || item.ColumnCaption || item.columnName || item.ColumnName || "";
@@ -299,18 +305,68 @@ document.addEventListener("DOMContentLoaded", function () {
             };
             const getTableName = (item) => (item.tableName || item.TableName || "").toString();
 
+            // 在欄位名稱後面加上條件
+            const getFieldNameWithCondition = (item) => {
+                const baseName = getFieldName(item);
+                const condition = (item.defaultEqual || item.DefaultEqual || "").toString();
+                return condition ? `${baseName} ${condition}` : baseName;
+            };
+
             selected.forEach(item => {
-                const fieldName = getFieldName(item);
+                const fieldName = getFieldNameWithCondition(item);
                 const tableName = getTableName(item);
                 qfSelectedEl.appendChild(buildItem(item, fieldName, tableName));
             });
 
             allFields.forEach(item => {
-                const key = (item.columnName || item.ColumnName || "").toLowerCase();
-                if (!key || selectedKey.has(key)) return;
-                const fieldName = getFieldName(item);
+                const col = (item.columnName || item.ColumnName || "").toLowerCase();
+                const eq = (item.defaultEqual || item.DefaultEqual || "").toLowerCase();
+                const key = `${col}|${eq}`;
+                if (!col || selectedKey.has(key)) return;
+                const fieldName = getFieldNameWithCondition(item);
                 const tableName = getTableName(item);
                 qfAllEl.appendChild(buildItem(item, fieldName, tableName));
+            });
+
+            enableDragSort(qfSelectedEl);
+            applyDragToItems(qfSelectedEl);
+        };
+
+        const applyDragToItems = (listEl) => {
+            if (!listEl) return;
+            listEl.querySelectorAll(".qf-item").forEach(item => {
+                if (item.dataset.draggableApplied === "1") return;
+                item.dataset.draggableApplied = "1";
+                item.setAttribute("draggable", "true");
+                item.addEventListener("dragstart", (e) => {
+                    dragItem = item;
+                    item.classList.add("dragging");
+                    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+                });
+                item.addEventListener("dragend", () => {
+                    item.classList.remove("dragging");
+                    dragItem = null;
+                });
+            });
+        };
+
+        const enableDragSort = (listEl) => {
+            if (!listEl || listEl.dataset.dragSortBound === "1") return;
+            listEl.dataset.dragSortBound = "1";
+            listEl.addEventListener("dragover", (e) => {
+                if (!dragItem) return;
+                e.preventDefault();
+                const target = e.target.closest(".qf-item");
+                if (!target || target === dragItem || target.parentElement !== listEl) return;
+                const rect = target.getBoundingClientRect();
+                const shouldInsertAfter = (e.clientY - rect.top) > rect.height / 2;
+                listEl.insertBefore(dragItem, shouldInsertAfter ? target.nextSibling : target);
+            });
+            listEl.addEventListener("drop", (e) => {
+                if (!dragItem) return;
+                e.preventDefault();
+                dragItem.classList.remove("dragging");
+                dragItem = null;
             });
         };
 
@@ -374,16 +430,29 @@ document.addEventListener("DOMContentLoaded", function () {
         const saveSelected = async (items) => {
             const itemId = getItemId();
             const table = getDictTable();
-            if (!itemId || !table) return false;
+            console.log('[QueryFieldModals] 保存預設設定, itemId:', itemId, 'table:', table, 'items:', items.length);
+            if (!itemId || !table) {
+                console.error('[QueryFieldModals] 缺少 itemId 或 table，無法保存');
+                return false;
+            }
             const res = await fetcher("/api/DictSetupApi/PaperSelected", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ itemId, table, items })
             }, "儲存查詢設定…");
-            if (!res.ok) return false;
+            if (!res.ok) {
+                console.error('[QueryFieldModals] 保存失敗, status:', res.status);
+                return false;
+            }
+            console.log('[QueryFieldModals] 保存成功，清除快取');
             qfCache = null;
             if (window.QueryFieldsManager && typeof window.QueryFieldsManager.refresh === "function") {
-                window.QueryFieldsManager.refresh().catch(() => {});
+                console.log('[QueryFieldModals] 呼叫 QueryFieldsManager.refresh()');
+                window.QueryFieldsManager.refresh().catch((err) => {
+                    console.error('[QueryFieldModals] refresh 失敗:', err);
+                });
+            } else {
+                console.warn('[QueryFieldModals] QueryFieldsManager.refresh 不存在');
             }
             return true;
         };
@@ -432,6 +501,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 tdEq.textContent = (eqText?.text ?? eqText?.Text ?? eqText?.value ?? eqText ?? defEqRaw ?? defEq).toString();
 
                 tr.dataset.columnName = name;
+                tr.dataset.tableName = tableName;
                 tr.dataset.defaultEqual = defEqRaw || "";
                 tr.dataset.defaultValue = item.defaultValue || item.DefaultValue || "";
                 tr.dataset.defaultType = String(defType ?? 0);
@@ -505,10 +575,23 @@ document.addEventListener("DOMContentLoaded", function () {
             modal.show();
         };
 
+        const blurActiveIfInside = (container) => {
+            const active = document.activeElement;
+            if (active && container && container.contains(active)) {
+                active.blur();
+            }
+        };
+
+        searchModalEl?.addEventListener("hide.bs.modal", () => {
+            blurActiveIfInside(searchModalEl);
+        });
+
         const openQueryModal = async (which) => {
             pendingOpen = which;
-            const searchModal = searchModalEl ? bootstrap.Modal.getInstance(searchModalEl) : null;
-            if (searchModal) {
+            const searchModal = searchModalEl ? bootstrap.Modal.getOrCreateInstance(searchModalEl) : null;
+            const searchIsShown = !!searchModalEl?.classList.contains("show");
+            if (searchModal && searchIsShown) {
+                blurActiveIfInside(searchModalEl);
                 reopenSearchOnClose = true;
                 searchModal.hide();
                 return;
@@ -549,17 +632,24 @@ document.addEventListener("DOMContentLoaded", function () {
             const map = new Map();
             qfDefaultBody.querySelectorAll("tr").forEach(tr => {
                 const name = tr.dataset.columnName || tr.querySelector("select")?.dataset?.columnName || "";
+                const tableName = tr.dataset.tableName || "";
                 const eq = tr.dataset.defaultEqual || tr.querySelector("select")?.value || "";
                 const val = tr.dataset.defaultValue || tr.querySelector("input")?.value || "";
                 const defType = tr.dataset.defaultType || "0";
                 const cmd = tr.dataset.commandText || "";
                 const superId = tr.dataset.superId || "";
                 const controlType = tr.dataset.controlType || "0";
-                if (name) map.set(name.toLowerCase(), { eq, val, defType, cmd, superId, controlType });
+                if (name) {
+                    const key = `${tableName}|${name}|${eq}`.toLowerCase();
+                    map.set(key, { eq, val, defType, cmd, superId, controlType });
+                }
             });
             if (qfSelectedEl) {
                 qfSelectedEl.querySelectorAll(".qf-item").forEach(item => {
-                    const key = (item.dataset.columnName || item.dataset.value || "").toLowerCase();
+                    const name = item.dataset.columnName || item.dataset.value || "";
+                    const tableName = item.dataset.tableName || "";
+                    const eq = item.dataset.defaultEqual || "";
+                    const key = `${tableName}|${name}|${eq}`.toLowerCase();
                     const hit = map.get(key);
                     if (!hit) return;
                     item.dataset.defaultEqual = hit.eq;
@@ -572,10 +662,16 @@ document.addEventListener("DOMContentLoaded", function () {
             }
 
             if (Array.isArray(defaultItems)) {
+                let updateCount = 0;
                 defaultItems.forEach(item => {
-                    const key = (item.columnName || item.ColumnName || "").toString().toLowerCase();
+                    const name = (item.columnName || item.ColumnName || "").toString();
+                    const tableName = (item.tableName || item.TableName || "").toString();
+                    const eq = (item.defaultEqual || item.DefaultEqual || "").toString();
+                    const key = `${tableName}|${name}|${eq}`.toLowerCase();
                     const hit = map.get(key);
                     if (!hit) return;
+                    updateCount++;
+                    console.log(`[QueryFieldModals] 更新欄位 ${key}: defType ${item.defaultType ?? item.DefaultType} -> ${hit.defType}`);
                     item.defaultEqual = hit.eq;
                     item.DefaultEqual = hit.eq;
                     item.defaultValue = hit.val;
@@ -639,7 +735,13 @@ document.addEventListener("DOMContentLoaded", function () {
             await renderFieldSelect();
         });
     }
-});
+};
+
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initQueryFieldModals);
+} else {
+    initQueryFieldModals();
+}
 </script>
 
 <style>
@@ -736,12 +838,18 @@ document.addEventListener("DOMContentLoaded", function () {
     outline: none;
     }
     .query-field-select-modal .qf-item {
-    display: flex;
-    padding: 4px 8px;
-    cursor: pointer;
-    border-bottom: 1px solid #f0f0f0;
-    user-select: none;
-    }
+      display: flex;
+      padding: 4px 8px;
+      cursor: pointer;
+      border-bottom: 1px solid #f0f0f0;
+      user-select: none;
+      }
+    .query-field-select-modal .qf-list .qf-item[draggable="true"] {
+      cursor: move;
+      }
+    .query-field-select-modal .qf-item.dragging {
+      opacity: 0.6;
+      }
     .query-field-select-modal .qf-item:hover {
     background: #f8f9fa;
     }
@@ -777,40 +885,63 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     #queryDefaultModal .modal-content {
     border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    max-height: 80vh;
     }
     #queryDefaultModal .modal-header {
     padding: 6px 12px;
     }
     #queryDefaultModal .modal-body {
     padding: 10px 12px;
-    max-height: 70vh;
-    overflow: auto;
+    overflow: hidden;
+    flex: 1 1 auto;
+    min-height: 0;
     }
     #queryDefaultModal .qf-default-table-wrap {
     border: 1px solid #e5e7eb;
     border-radius: 6px;
     overflow: auto;
-    max-height: 62vh;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 55vh;
     }
     #queryDefaultModal .qf-default-editor {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 3px;
+    height: 100%;
     }
     #queryDefaultModal .qf-default-group {
     border: 1px solid #e5e7eb;
     border-radius: 6px;
-    padding: 6px;
+    padding: 4px 6px;
     background: #fff;
+    display: flex;
+    flex-direction: column;
+    }
+    #queryDefaultModal .qf-default-group:has(#qfDefaultValue) {
+    flex: 1;
+    min-height: 0;
+    }
+    #queryDefaultModal .modal-body .row {
+    align-items: stretch;
+    height: 100%;
+    min-height: 0;
+    }
+    #queryDefaultModal .modal-body .row > [class^="col-"] {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     }
     #queryDefaultModal .qf-default-title {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     color: #475569;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
     }
     #queryDefaultModal .qf-default-inline {
     display: inline-flex;
@@ -828,25 +959,58 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     #queryDefaultModal #qfDefaultCommandText,
     #queryDefaultModal #qfDefaultValue {
-    min-height: 140px;
+    min-height: 70px;
+    resize: vertical;
+    }
+    #queryDefaultModal #qfDefaultValue {
+    flex: 1;
+    height: 100%;
+    }
+    #queryDefaultModal #qfDefaultValue::-webkit-scrollbar {
+    width: 6px;
+    }
+    #queryDefaultModal #qfDefaultValue::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
     }
     #queryDefaultModal table {
     border-collapse: separate;
-    border-spacing: 0;
+    border-spacing: 0 2px;
+    table-layout: fixed;
+    width: 100%;
+    }
+    #queryDefaultModal .qf-col-caption {
+    width: 140px;
+    }
+    #queryDefaultModal .qf-col-cond {
+    width: 110px;
     }
     #queryDefaultModal thead th {
     font-size: 12px;
     padding: 4px 6px;
     background: #f1f5f9;
     border-bottom: 1px solid #e2e8f0;
+    border-right: 1px solid #e5e7eb;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    }
+    #queryDefaultModal thead th:last-child {
+    border-right: none;
     }
     #queryDefaultModal tbody td {
     font-size: 12px;
-    padding: 2px 6px;
-    line-height: 1.2;
+    padding: 3px 6px;
+    line-height: 1.25;
     border-bottom: 1px solid #e5e7eb;
+    border-right: 1px solid #e5e7eb;
     vertical-align: middle;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    }
+    #queryDefaultModal tbody td:last-child {
+    border-right: none;
     }
     #queryDefaultModal tbody tr.qf-default-selected {
     background: #dbeafe !important;
@@ -859,8 +1023,11 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     #queryDefaultModal .form-select.form-select-sm,
     #queryDefaultModal .form-control.form-control-sm {
-    font-size: 12px;
-    height: 24px;
+    font-size: 11px;
+    height: 22px;
     padding: 2px 6px;
+    }
+    #queryDefaultModal .qf-default-textarea {
+    font-size: 11px;
     }
 </style>
