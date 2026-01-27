@@ -54,3 +54,5 @@
             qfDefaultModalEl: !!qfDefaultModalEl,
             searchModalEl: !!searchModalEl
         });
+    });
+})();
