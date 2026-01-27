@@ -1561,6 +1561,7 @@ table.table tbody td{background:#f3f3f3!important}
   // 收集變更（只傳送鍵欄位 + 真正有變更的欄位）
   function collectChanges() {
     const list = [];
+    const tblName = "@tableName".toString().toLowerCase();
     document.querySelectorAll("#mainGrid tbody tr").forEach(tr => {
       const changed = {};
       const keys = {};
@@ -1594,6 +1595,12 @@ table.table tbody td{background:#f3f3f3!important}
       if (!hasDiff) return;
 
       // 合併鍵欄位 + 變更欄位
+      if (tblName === "mphdpricetable" || tblName === "spodpricetable") {
+        const hasUseId = Object.keys(keys).some(k => k.toLowerCase() === "useid");
+        if (!hasUseId) {
+          keys["UseId"] = getLoginUserId();
+        }
+      }
       list.push({ ...keys, ...changed });
     });
     return list;
@@ -1839,11 +1846,41 @@ table.table tbody td{background:#f3f3f3!important}
       if (only.querySelector("td[colspan]")) tbody.innerHTML = "";
     }
       const tr = buildEmptyRow(fields);
+      applyDefaultNewRowValues(tr);
       tbody.insertBefore(tr, tbody.firstChild);
       selectRow(tr);
       tr.scrollIntoView({ block: "center" });
       setDirty(true);
     }
+
+  function getLoginUserId() {
+    const v = (window._userId || localStorage.getItem('erpLoginUserId') || '').toString().trim();
+    return v || 'admin';
+  }
+
+  function setCellValue(tr, fieldName, value, keepDefaultEmpty = false) {
+    const inputs = Array.from(tr.querySelectorAll('.cell-edit'));
+    const inp = inputs.find(i => (i.name || '').toLowerCase() === fieldName.toLowerCase());
+    if (!inp) return;
+    const val = value == null ? "" : String(value);
+    inp.value = val;
+    if (!keepDefaultEmpty) inp.defaultValue = val;
+    const span = inp.closest("td")?.querySelector(".cell-view");
+    if (span) span.textContent = val;
+  }
+
+  function applyDefaultNewRowValues(tr) {
+    const tbl = "@tableName".toString().toLowerCase();
+    if (tbl !== "mphdpricetable" && tbl !== "spodpricetable") return;
+
+    setCellValue(tr, "Revision", 0);
+    setCellValue(tr, "UseId", getLoginUserId());
+    const isInVal = tbl === "spodpricetable" ? 0 : 1;
+    setCellValue(tr, "IsIn", isInVal, true);
+    if (tbl === "spodpricetable") {
+      setCellValue(tr, "Qnty", 1);
+    }
+  }
 
   function cancelEdit() {
     if (!isEdit) return;
