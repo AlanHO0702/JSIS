@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Services;
 using PcbErpApi.Services.MapData;
+using System.IO;
 
 namespace PcbErpApi.Controllers
 {
@@ -83,7 +84,16 @@ namespace PcbErpApi.Controllers
                 }
 
                 var bytes = System.IO.File.ReadAllBytes(path);
-                return File(bytes, "image/jpeg");
+                var ext = Path.GetExtension(path).ToLowerInvariant();
+                var contentType = ext switch
+                {
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".png" => "image/png",
+                    ".bmp" => "image/bmp",
+                    ".wmf" => "image/wmf",
+                    _ => "application/octet-stream"
+                };
+                return File(bytes, contentType);
             }
             catch (Exception ex)
             {

@@ -121,7 +121,8 @@ public class StoredProcController : ControllerBase
 
     public StoredProcController(IConfiguration cfg, PcbErpContext db)
     {
-        _cs = cfg.GetConnectionString("Default")
+        _cs = cfg.GetConnectionString("DefaultConnection")
+              ?? cfg.GetConnectionString("Default")
               ?? db?.Database.GetDbConnection().ConnectionString
               ?? throw new InvalidOperationException("找不到 ConnectionStrings:Default 或 DbContext 連線字串");
     }
@@ -139,6 +140,7 @@ public class StoredProcController : ControllerBase
         if (string.IsNullOrWhiteSpace(req?.Key) || !_registry.TryGetValue(req.Key, out var def))
             return BadRequest(new { ok = false, error = "未知的作業代碼" });
 
+        var procName = def.ProcName;
         var args = req.Args ?? new();
         foreach (var p in def.RequiredParams)
             if (!args.ContainsKey(p))
@@ -165,7 +167,7 @@ public class StoredProcController : ControllerBase
 
             tx = (SqlTransaction)await conn.BeginTransactionAsync();
 
-            await using var cmd = new SqlCommand(def.ProcName, conn, tx)
+            await using var cmd = new SqlCommand(procName, conn, tx)
             {
                 CommandType = CommandType.StoredProcedure,
                 CommandTimeout = 120
@@ -208,6 +210,7 @@ public class StoredProcController : ControllerBase
         catch (Exception ex)
         {
             if (tx != null) { try { await tx.RollbackAsync(); } catch { } }
+            Console.WriteLine($"[StoredProc.Query][Error] {ex}");
             return StatusCode(500, new { ok = false, error = ex.GetBaseException().Message });
         }
     }
@@ -220,6 +223,7 @@ public class StoredProcController : ControllerBase
         if (string.IsNullOrWhiteSpace(req?.Key) || !_registry.TryGetValue(req.Key, out var def))
             return BadRequest(new { ok = false, error = "未知的作業代碼" });
 
+        var procName = def.ProcName;
         var args = req.Args ?? new();
         foreach (var p in def.RequiredParams)
             if (!args.ContainsKey(p))
@@ -233,7 +237,7 @@ public class StoredProcController : ControllerBase
             await conn.OpenAsync();
             tx = (SqlTransaction)await conn.BeginTransactionAsync();
 
-            await using var cmd = new SqlCommand(def.ProcName, conn, tx)
+            await using var cmd = new SqlCommand(procName, conn, tx)
             {
                 CommandType = CommandType.StoredProcedure,
                 CommandTimeout = 120
@@ -271,27 +275,30 @@ public class StoredProcController : ControllerBase
 
             // 使用 ExecuteReaderAsync 讀取結果集
             var results = new List<Dictionary<string, object>>();
-            await using var reader = await cmd.ExecuteReaderAsync();
 
-            // 讀取第一個結果集的所有行
-            while (await reader.ReadAsync())
+            // 使用 using 塊確保 reader 在提交事務前完全釋放
+            await using (var reader = await cmd.ExecuteReaderAsync())
             {
-                var row = new Dictionary<string, object>();
-                for (int i = 0; i < reader.FieldCount; i++)
+                // 讀取第一個結果集的所有行
+                while (await reader.ReadAsync())
                 {
-                    var name = reader.GetName(i);
-                    var value = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                    row[name] = value;
+                    var row = new Dictionary<string, object>();
+                    for (int i = 0; i < reader.FieldCount; i++)
+                    {
+                        var name = reader.GetName(i);
+                        var value = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        row[name] = value;
+                    }
+                    results.Add(row);
                 }
-                results.Add(row);
-            }
 
-            // 確保讀取完所有結果集，避免 DataReader 保持打開狀態
-            while (await reader.NextResultAsync())
-            {
-                // 消耗其他結果集，但不處理它們
-                while (await reader.ReadAsync()) { }
-            }
+                // 確保讀取完所有結果集，避免 DataReader 保持打開狀態
+                while (await reader.NextResultAsync())
+                {
+                    // 消耗其他結果集，但不處理它們
+                    while (await reader.ReadAsync()) { }
+                }
+            }  // reader 在此處被釋放
 
             await tx.CommitAsync();
             return Ok(results); // 直接返回結果陣列
@@ -299,7 +306,16 @@ public class StoredProcController : ControllerBase
         catch (Exception ex)
         {
             if (tx != null) { try { await tx.RollbackAsync(); } catch { } }
-            return StatusCode(500, new { ok = false, error = ex.GetBaseException().Message });
+            Console.WriteLine($"[StoredProc.Query][Error] Proc={procName} Args={JsonSerializer.Serialize(args)}");
+            Console.WriteLine($"[StoredProc.Query][Error] {ex}");
+            if (ex is SqlException sqlEx)
+            {
+                foreach (SqlError err in sqlEx.Errors)
+                {
+                    Console.WriteLine($"[StoredProc.Query][SqlError] Number={err.Number} Proc={err.Procedure} Line={err.LineNumber} Message={err.Message}");
+                }
+            }
+            return StatusCode(500, new { ok = false, error = ex.GetBaseException().Message, proc = procName });
         }
     }
 
@@ -307,10 +323,9 @@ public class StoredProcController : ControllerBase
     public async Task<IActionResult> ExecByButton([FromBody] ExecByButtonRequest req)
     {
         if (string.IsNullOrWhiteSpace(req?.ItemId) ||
-            string.IsNullOrWhiteSpace(req.ButtonName) ||
-            string.IsNullOrWhiteSpace(req.PaperNum))
+            string.IsNullOrWhiteSpace(req.ButtonName))
         {
-            return BadRequest(new { ok = false, error = "ItemId/ButtonName/PaperNum 為必填" });
+            return BadRequest(new { ok = false, error = "ItemId/ButtonName 為必填" });
         }
 
         await using var conn = new SqlConnection(_cs);
@@ -333,7 +348,8 @@ public class StoredProcController : ControllerBase
                 return BadRequest(new { ok = false, error = "找不到 SP 名稱" });
 
             var spName = QuoteIdentifier(spNameRaw);
-            var paramDefs = await LoadButtonParamsAsync(conn, tx, req.ItemId, req.ButtonName);
+            var opKind = GetOpKind(req.Args);
+            var paramDefs = await LoadButtonParamsAsync(conn, tx, req.ItemId, req.ButtonName, opKind);
 
             var tableMap = await LoadTableMapAsync(conn, tx, req.ItemId);
 
@@ -369,7 +385,7 @@ public class StoredProcController : ControllerBase
     }
 
     private sealed record ButtonRow(string ItemId, string ButtonName, int DesignType, string? SpName, string? ExecSpName);
-    private sealed record ButtonParamRow(int SeqNum, int? ParamType, string? TableKind, string? ParamFieldName);
+    private sealed record ButtonParamRow(int SeqNum, int? ParamType, string? TableKind, string? ParamFieldName, string? ClientTblName);
     private sealed record TableKindMap(string Kind, string TableName);
 
     private static string NormalizeIdentifier(string name)
@@ -417,15 +433,19 @@ SELECT TOP 1 ItemId, ButtonName, ISNULL(DesignType,0) AS DesignType, SpName, Exe
         );
     }
 
-    private async Task<List<ButtonParamRow>> LoadButtonParamsAsync(SqlConnection conn, SqlTransaction tx, string itemId, string buttonName)
+    private async Task<List<ButtonParamRow>> LoadButtonParamsAsync(SqlConnection conn, SqlTransaction tx, string itemId, string buttonName, int opKind)
     {
+        var list = new List<ButtonParamRow>();
+        if (await TryLoadButtonParamsByProc(conn, tx, itemId, buttonName, opKind, list))
+        {
+            return list;
+        }
         const string sql = @"
 SELECT SeqNum, ParamType, TableKind, ParamFieldName
   FROM CURdOCXItmCusBtnParam WITH (NOLOCK)
  WHERE ItemId = @itemId AND ButtonName = @buttonName
  ORDER BY SeqNum, Seq;";
 
-        var list = new List<ButtonParamRow>();
         await using var cmd = new SqlCommand(sql, conn, tx);
         cmd.Parameters.AddWithValue("@itemId", itemId);
         cmd.Parameters.AddWithValue("@buttonName", buttonName);
@@ -436,10 +456,59 @@ SELECT SeqNum, ParamType, TableKind, ParamFieldName
                 SeqNum: Convert.ToInt32(rd["SeqNum"] ?? 0),
                 ParamType: rd["ParamType"] == DBNull.Value ? null : Convert.ToInt32(rd["ParamType"]),
                 TableKind: rd["TableKind"]?.ToString(),
-                ParamFieldName: rd["ParamFieldName"]?.ToString()
+                ParamFieldName: rd["ParamFieldName"]?.ToString(),
+                ClientTblName: null
             ));
         }
         return list;
+    }
+
+    private static int GetOpKind(Dictionary<string, object>? args)
+    {
+        if (args == null) return 1;
+        var entry = args.FirstOrDefault(k => string.Equals(k.Key, "opKind", StringComparison.OrdinalIgnoreCase));
+        if (entry.Key == null) return 1;
+        var v = entry.Value;
+        if (v is JsonElement je)
+        {
+            if (je.ValueKind == JsonValueKind.Number && je.TryGetInt32(out var n)) return n;
+            if (je.ValueKind == JsonValueKind.String && int.TryParse(je.GetString(), out var ns)) return ns;
+        }
+        return int.TryParse(v?.ToString(), out var n2) ? n2 : 1;
+    }
+
+    private static async Task<bool> TryLoadButtonParamsByProc(
+        SqlConnection conn,
+        SqlTransaction tx,
+        string itemId,
+        string buttonName,
+        int opKind,
+        List<ButtonParamRow> list)
+    {
+        const string sql = "exec CURdOCXItmCusBtnParamGet @p1, @p2, @p3";
+        try
+        {
+            await using var cmd = new SqlCommand(sql, conn, tx);
+            cmd.Parameters.AddWithValue("@p1", itemId);
+            cmd.Parameters.AddWithValue("@p2", buttonName);
+            cmd.Parameters.AddWithValue("@p3", opKind);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                list.Add(new ButtonParamRow(
+                    SeqNum: Convert.ToInt32(rd["SeqNum"] ?? 0),
+                    ParamType: rd["ParamType"] == DBNull.Value ? null : Convert.ToInt32(rd["ParamType"]),
+                    TableKind: rd["TableKind"]?.ToString(),
+                    ParamFieldName: rd["ParamFieldName"]?.ToString(),
+                    ClientTblName: rd["ClientTblName"]?.ToString()
+                ));
+            }
+            return list.Count > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task<Dictionary<string, string>> LoadTableMapAsync(SqlConnection conn, SqlTransaction tx, string itemId)
@@ -487,10 +556,13 @@ SELECT TableKind, TableName
         {
             case 0: // 欄位值
             {
+                if (string.IsNullOrWhiteSpace(p.ParamFieldName)) return null;
+                var rowValue = ReadFieldFromArgs(args, p.ClientTblName, p.TableKind, p.ParamFieldName);
+                if (rowValue != null) return rowValue;
                 var tableKind = NormalizeTableKind(p.TableKind);
                 if (string.IsNullOrWhiteSpace(tableKind)) tableKind = "Master1";
                 var tableName = ResolveTableName(tableMap, tableKind);
-                if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(p.ParamFieldName)) return null;
+                if (string.IsNullOrWhiteSpace(tableName)) return null;
                 return await ReadFieldValueAsync(conn, tx, tableName, p.ParamFieldName!, paperNum);
             }
             case 1: // 常數
@@ -506,6 +578,66 @@ SELECT TableKind, TableName
             default:
                 return null;
         }
+    }
+
+    private static object? ReadFieldFromArgs(
+        Dictionary<string, object>? args,
+        string? clientTblName,
+        string? tableKind,
+        string fieldName)
+    {
+        if (args == null) return null;
+        var masterRow = GetArgValue(args, "masterRow");
+        var detailRow = GetArgValue(args, "detailRow");
+
+        object? row = null;
+        var name = (clientTblName ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            row = GetArgValue(args, name);
+            if (row == null)
+            {
+                if (name.Contains("master", StringComparison.OrdinalIgnoreCase) || name.Contains("mas", StringComparison.OrdinalIgnoreCase))
+                    row = masterRow;
+                else if (name.Contains("detail", StringComparison.OrdinalIgnoreCase) || name.Contains("dtl", StringComparison.OrdinalIgnoreCase))
+                    row = detailRow;
+            }
+        }
+        if (row == null && !string.IsNullOrWhiteSpace(tableKind))
+        {
+            var k = tableKind.Trim();
+            if (k.StartsWith("Master", StringComparison.OrdinalIgnoreCase)) row = masterRow;
+            else if (k.StartsWith("Detail", StringComparison.OrdinalIgnoreCase)) row = detailRow;
+        }
+        if (row == null) return null;
+        return ReadFieldFromRow(row, fieldName);
+    }
+
+    private static object? GetArgValue(Dictionary<string, object> args, string key)
+    {
+        var hit = args.FirstOrDefault(k => string.Equals(k.Key, key, StringComparison.OrdinalIgnoreCase));
+        return hit.Key == null ? null : hit.Value;
+    }
+
+    private static object? ReadFieldFromRow(object row, string fieldName)
+    {
+        if (row is JsonElement je)
+        {
+            if (je.ValueKind != JsonValueKind.Object) return null;
+            foreach (var prop in je.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, fieldName, StringComparison.OrdinalIgnoreCase))
+                    return ToClr(prop.Value);
+            }
+            return null;
+        }
+        if (row is Dictionary<string, object> dict)
+        {
+            foreach (var kv in dict)
+                if (string.Equals(kv.Key, fieldName, StringComparison.OrdinalIgnoreCase))
+                    return kv.Value;
+        }
+        return null;
     }
 
     private static string? ResolveTableName(Dictionary<string, string> tableMap, string tableKind)
@@ -542,6 +674,7 @@ SELECT TableKind, TableName
         var safeField = QuoteIdentifier(fieldName);
         if (string.IsNullOrWhiteSpace(safeTable) || string.IsNullOrWhiteSpace(safeField)) return null;
 
+        if (string.IsNullOrWhiteSpace(paperNum)) return null;
         var sql = $"SELECT TOP 1 {safeField} FROM {safeTable} WITH (NOLOCK) WHERE [PaperNum] = @paperNum";
         await using var cmd = new SqlCommand(sql, conn, tx);
         cmd.Parameters.AddWithValue("@paperNum", paperNum ?? string.Empty);

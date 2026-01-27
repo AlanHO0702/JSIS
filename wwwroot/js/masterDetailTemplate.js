@@ -87,6 +87,7 @@
   // 🧩 欄寬存取（拖曳後寫回辭典 + localStorage）
   // -----------------------------
   const WIDTH_SAVE_URL = "/api/TableFieldLayout/SaveDetailLayout";
+  const WIDTH_SAVE_API = "/api/DictSetupApi/FieldWidth/Save";
   const normalizeTableName = (name) => (name || "").replace(/^dbo\./i, "").trim().toLowerCase();
   const savedWidthKey = (table) => `colwidth:${normalizeTableName(table)}`;
 
@@ -120,6 +121,21 @@
     } catch { /* ignore */ }
   };
 
+  const persistWidthField = async (table, field, width) => {
+    if (!table || !field || !Number.isFinite(width)) return;
+    try {
+      await fetch(WIDTH_SAVE_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tableName: normalizeTableName(table),
+          fieldName: field,
+          widthPx: Math.round(width)
+        })
+      });
+    } catch { /* ignore */ }
+  };
+
   const enableColumnResize = (tableEl, tableName) => {
     if (!tableEl || !tableName) return;
     const ths = Array.from(tableEl.querySelectorAll("thead th"));
@@ -137,7 +153,7 @@
       }
     });
 
-    let isDown = false, startX = 0, startW = 0, th = null;
+    let isDown = false, startX = 0, startW = 0, th = null, activeField = "";
     let saveTimer = null;
     const debounceSave = () => {
       clearTimeout(saveTimer);
@@ -153,6 +169,7 @@
         th = h;
         startX = e.pageX;
         startW = th.getBoundingClientRect().width;
+        activeField = th.dataset.field || "";
         document.body.classList.add("resizing");
         th.classList.add("resizing");
       });
@@ -170,8 +187,13 @@
       isDown = false;
       document.body.classList.remove("resizing");
       th?.classList.remove("resizing");
+      if (th && activeField) {
+        const w = th.getBoundingClientRect().width;
+        persistWidthField(tableName, activeField, w);
+      }
       debounceSave();
       th = null;
+      activeField = "";
     });
   };
 
@@ -306,6 +328,7 @@
 
     rows.forEach((row, idx) => {
       const tr = document.createElement("tr");
+      tr.__rowData = row;
       tr.style.cursor = "pointer";
       if (row && row.__state) {
         tr.dataset.state = row.__state;
@@ -477,6 +500,75 @@
     });
   };
 
+  const parseDateValue = (val) => {
+    if (val == null) return NaN;
+    if (typeof val === "object") {
+      val = val.value ?? val.Value ?? "";
+    }
+    const str = String(val || "").trim();
+    if (!str) return NaN;
+    const direct = Date.parse(str);
+    if (Number.isFinite(direct)) return direct;
+    const match = str.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+    if (match) {
+      const year = Number(match[1]);
+      const month = Number(match[2]) - 1;
+      const day = Number(match[3]);
+      const hour = Number(match[4] || 0);
+      const min = Number(match[5] || 0);
+      const sec = Number(match[6] || 0);
+      return new Date(year, month, day, hour, min, sec).getTime();
+    }
+    return NaN;
+  };
+
+  const getRowValue = (row, fieldName) => {
+    if (!row || !fieldName) return "";
+    const key = Object.keys(row).find(k => k.toLowerCase() === fieldName.toLowerCase());
+    return key ? row[key] : "";
+  };
+
+  const getSortKey = (val, dataType) => {
+    if (val == null || val === "") return { type: "empty", value: "" };
+    if (isDateType(dataType)) {
+      const d = parseDateValue(val);
+      if (Number.isFinite(d)) return { type: "date", value: d };
+    }
+    const str = String(val).trim();
+    const num = Number(str.replace(/,/g, ""));
+    if (Number.isFinite(num) && /^-?\d+(\.\d+)?$/.test(str.replace(/,/g, ""))) {
+      return { type: "number", value: num };
+    }
+    if (/[\/:\-]/.test(str)) {
+      const d = parseDateValue(str);
+      if (Number.isFinite(d)) return { type: "date", value: d };
+    }
+    return { type: "string", value: str.toLowerCase() };
+  };
+
+  const compareSortKey = (a, b, order) => {
+    if (a.type === "empty" && b.type === "empty") return 0;
+    if (a.type === "empty") return 1;
+    if (b.type === "empty") return -1;
+    const dir = order === "desc" ? -1 : 1;
+    if (a.type === b.type && (a.type === "number" || a.type === "date")) {
+      return (a.value - b.value) * dir;
+    }
+    return a.value > b.value ? dir : a.value < b.value ? -dir : 0;
+  };
+
+  const sortRowsByField = (rows, fieldName, dict, order) => {
+    if (!rows || !rows.length) return rows;
+    const col = dict.find(d => (d.FieldName || "").toLowerCase() === fieldName.toLowerCase());
+    const dataType = col ? DICT_MAP.dataType(col) : null;
+    const mapped = rows.map(row => {
+      const raw = getRowValue(row, fieldName);
+      return { row, key: getSortKey(raw, dataType) };
+    });
+    mapped.sort((a, b) => compareSortKey(a.key, b.key, order));
+    return mapped.map(x => x.row);
+  };
+
   // ------------------------------
   // 🧩 從 URL 讀取查詢參數
   // ------------------------------
@@ -582,6 +674,39 @@
     enableColumnResize(masterTbl, masterName);
     enableColumnResize(detailTbl, detailName);
 
+    const bindHeaderSort = (tableEl, dict, isMaster) => {
+      if (!tableEl) return;
+      const head = tableEl.querySelector("thead");
+      if (!head) return;
+      head.querySelectorAll("th").forEach(th => {
+        th.style.cursor = "default";
+        th.title = "點擊排序";
+        th.addEventListener("click", (e) => {
+          if (e.target?.classList?.contains("md-col-resizer")) return;
+          const field = th.dataset.field;
+          if (!field) return;
+          const current = th.dataset.sortOrder || "desc";
+          const nextOrder = current === "desc" ? "asc" : "desc";
+          head.querySelectorAll("th").forEach(h => { h.dataset.sortOrder = ""; });
+          th.dataset.sortOrder = nextOrder;
+
+          if (isMaster) {
+            masterData = sortRowsByField(masterData, field, dict, nextOrder);
+            currentMasterRow = null;
+            renderMaster();
+            const first = mBody.querySelector("tr");
+            first?.click();
+          } else {
+            detailData = sortRowsByField(detailData, field, dict, nextOrder);
+            renderDetail();
+          }
+        });
+      });
+    };
+
+    bindHeaderSort(masterTbl, mDict, true);
+    bindHeaderSort(detailTbl, dDict, false);
+
     const ensureEditMode = () => {
       if (!window._mdEditing) return false;
       if (window._masterEditor) window._masterEditor.toggleEdit(true);
@@ -643,6 +768,8 @@
     const onDetailClick = (tr, row) => {
       Array.from(dBody.children).forEach(x => x.classList.remove("selected"));
       tr.classList.add("selected");
+      const evt = new CustomEvent("md-detail-selected", { detail: { domId: cfg.DomId, rowData: row } });
+      document.dispatchEvent(evt);
     };
 
     const renderDetail = () => {
@@ -658,6 +785,28 @@
         window._mdEditing || addMode,
         true
       );
+
+      // ★ 當 detail 沒有資料時，放一列空白佔位列，讓使用者可以點擊聚焦到單身區塊
+      if (detailData.length === 0 && dBody.querySelectorAll("tr").length === 0) {
+        const visibleCols = dDict.filter(f => (f.Visible ?? 1) === 1).length || 1;
+        const placeholderTr = document.createElement("tr");
+        placeholderTr.className = "md-placeholder-row";
+        placeholderTr.style.cursor = "pointer";
+        placeholderTr.dataset.placeholder = "1";
+        const td = document.createElement("td");
+        td.colSpan = visibleCols;
+        td.className = "text-center text-muted";
+        td.style.padding = "8px";
+        td.innerHTML = "<small>（點擊此處後可使用上方 + 按鈕新增資料）</small>";
+        placeholderTr.appendChild(td);
+        placeholderTr.addEventListener("click", () => {
+          setArea("detail");
+          Array.from(dBody.children).forEach(x => x.classList.remove("selected"));
+          placeholderTr.classList.add("selected");
+        });
+        dBody.appendChild(placeholderTr);
+      }
+
       if (window._detailEditor && (window._mdEditing || addMode)) {
         window._detailEditor.toggleEdit(false);
         window._detailEditor.toggleEdit(true);
@@ -735,6 +884,29 @@
       if (savingAdd) return;
       savingAdd = true;
       ensureEditMode();
+
+      // ★ 儲存前記住新增列的 key 值，以便儲存後定位
+      const getInputValue = (tr, fieldName) => {
+        if (!tr || !fieldName) return "";
+        const want = fieldName.toLowerCase();
+        const inp = Array.from(tr.querySelectorAll("input")).find(i => (i.name || "").toLowerCase() === want);
+        return inp?.value ?? "";
+      };
+      const addedMasterTr = mBody.querySelector('tr[data-state="added"]');
+      const addedMasterKeys = {};
+      if (addedMasterTr) {
+        masterKeyFields.forEach(k => {
+          addedMasterKeys[k] = getInputValue(addedMasterTr, k);
+        });
+      }
+      const addedDetailTr = dBody.querySelector('tr[data-state="added"]');
+      const addedDetailKeys = {};
+      if (addedDetailTr && cfg.DetailKeyFields) {
+        cfg.DetailKeyFields.forEach(k => {
+          addedDetailKeys[k] = getInputValue(addedDetailTr, k);
+        });
+      }
+
       const me = window._masterEditor;
       const de = window._detailEditor;
       const r1 = me ? await me.saveChanges() : { ok: true, skipped: true };
@@ -749,11 +921,44 @@
 
       setAddMode(false);
       // 重新載入主檔，確保鍵值與資料同步
-      const masterRows = await fetch(masterUrl).then(r => r.json());
-      masterData = Array.isArray(masterRows) ? masterRows : [];
+      const freshMasterRows = await fetch(masterUrl).then(r => r.json());
+      masterData = Array.isArray(freshMasterRows) ? freshMasterRows : [];
       renderMaster();
-      const first = mBody.querySelector("tr");
-      if (first) first.click();
+
+      // ★ 儲存後找到剛剛新增的那一筆並選中
+      const findRowByKeys = (rows, keyFields, keyValues) => {
+        if (!rows?.length || !keyFields?.length || !Object.keys(keyValues).length) return null;
+        return rows.find(row => {
+          return keyFields.every(k => {
+            const rowVal = String(row[k] ?? "").trim();
+            const targetVal = String(keyValues[k] ?? "").trim();
+            return rowVal === targetVal;
+          });
+        }) || null;
+      };
+
+      let targetRow = null;
+      if (Object.keys(addedMasterKeys).length > 0) {
+        targetRow = findRowByKeys(masterData, masterKeyFields, addedMasterKeys);
+      }
+      if (!targetRow && currentMasterRow) {
+        targetRow = findRowByKeys(masterData, masterKeyFields, currentMasterRow);
+      }
+
+      if (targetRow) {
+        const targetTr = Array.from(mBody.querySelectorAll("tr")).find(tr => tr.__rowData === targetRow);
+        if (targetTr) {
+          targetTr.click();
+          try { targetTr.scrollIntoView({ block: "center", behavior: "auto" }); } catch {}
+        } else {
+          const first = mBody.querySelector("tr");
+          if (first) first.click();
+        }
+      } else {
+        const first = mBody.querySelector("tr");
+        if (first) first.click();
+      }
+
       Swal.fire({ icon: "success", title: "新增完成", timer: 1000, showConfirmButton: false });
       savingAdd = false;
     };
@@ -828,14 +1033,79 @@
       document.dispatchEvent(evt);
     }
 
+    const pickMasterRowByKeys = (rows, prevRow) => {
+      if (!prevRow || !rows?.length) return null;
+      const keys = masterKeyFields.length
+        ? masterKeyFields
+        : (cfg.KeyMap || []).map(k => k.Master).filter(Boolean);
+      if (!keys.length) return null;
+      const prevKey = keys.map(k => String(getRowValue(prevRow, k) ?? "")).join("|");
+      return rows.find(r => keys.map(k => String(getRowValue(r, k) ?? "")).join("|") === prevKey) || null;
+    };
+
+    const refreshData = async () => {
+      try {
+        const freshRows = await fetch(masterUrl).then(r => r.json());
+        masterData = Array.isArray(freshRows) ? freshRows : [];
+        if (!cfg.MasterOrderBy) {
+          masterData = sortByKeys(masterData, mDict, masterKeyFields);
+        }
+        renderMaster();
+
+        const matched = pickMasterRowByKeys(masterData, currentMasterRow);
+        const targetRow = matched || masterData[0] || null;
+        if (!targetRow) {
+          dBody.innerHTML = `<tr><td class="text-center text-muted p-3">請點選上方一筆資料</td></tr>`;
+          return;
+        }
+
+        const tr = Array.from(mBody.querySelectorAll("tr")).find(r => r.__rowData === targetRow)
+          || mBody.querySelector("tr");
+        if (tr) {
+          await onMasterClick(tr, targetRow);
+        }
+      } catch (err) {
+        console.warn("masterDetail refresh failed", err);
+      }
+    };
+
     // 畫主檔
     masterData = Array.isArray(masterRows) ? masterRows : [];
     if (!cfg.MasterOrderBy) {
       masterData = sortByKeys(masterData, mDict, masterKeyFields);
     }
     renderMaster();
-    const first = mBody.querySelector("tr");
-    if (first) first.click();
+
+    // ★ 檢查 sessionStorage 是否有儲存前記住的選中列
+    let targetTr = null;
+    const savedKeysJson = sessionStorage.getItem(`md-selected-${cfg.DomId}`);
+    if (savedKeysJson) {
+      sessionStorage.removeItem(`md-selected-${cfg.DomId}`); // 用完就刪
+      try {
+        const savedKeys = JSON.parse(savedKeysJson);
+        const targetRow = masterData.find(row => {
+          return masterKeyFields.every(k => {
+            const rowVal = String(row[k] ?? "").trim();
+            const savedVal = String(savedKeys[k] ?? "").trim();
+            return rowVal === savedVal;
+          });
+        });
+        if (targetRow) {
+          targetTr = Array.from(mBody.querySelectorAll("tr")).find(tr => tr.__rowData === targetRow);
+        }
+      } catch {}
+    }
+
+    if (targetTr) {
+      targetTr.click();
+      try { targetTr.scrollIntoView({ block: "center", behavior: "auto" }); } catch {}
+    } else {
+      const first = mBody.querySelector("tr");
+      if (first) first.click();
+    }
+
+    window.MasterDetailRefresh = window.MasterDetailRefresh || {};
+    window.MasterDetailRefresh[cfg.DomId] = refreshData;
   };
 
   // -------------------------------------------------

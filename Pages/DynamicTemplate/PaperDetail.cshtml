@@ -37,22 +37,38 @@
     }
 
     .erp-detail-container{
-        margin-left: var(--rail-reserve) !important;
-        margin-right: 3vw !important;
-        padding: 12px 0 !important;
+        margin: 0 !important;
+        padding: 6px 8px !important;
+        padding-left: calc(var(--rail-reserve)) !important;
+        background: var(--page-bg) !important;
     }
 
-    /* toolbar 往回補，維持視覺對齊 */
+    /* toolbar 往回補，維持視覺對齊，並延伸到全寬 */
     #topToolbar{
-        margin-left: calc(-1 * var(--rail-reserve)) !important;
+        margin-left: calc(-1 * var(--rail-reserve) + 12px) !important;
         padding-left: 0 !important;
         justify-content: flex-start !important;
+        position: sticky;
+        top: calc(var(--app-toolbar-height, 56px) + 4px);
+        z-index: 1200;
+        width: calc(100% + var(--rail-reserve) - 20px) !important;
+        max-width: none !important;
     }
     #topToolbar > .ms-2, #topToolbar .btn-toolbar{ margin-left: 0 !important; }
 
     /* 確保頁籤不會被左側按鈕擋住 */
     #headerTabs{ position: relative; z-index: 1; margin-left: 0 !important; }
     .multi-tab-detail{ margin-left: 0 !important; padding-left: 0 !important; }
+
+    /* 左側自訂按鈕區：縮小高度和間距 */
+    .action-rail {
+        gap: 1px !important;
+    }
+    .action-rail .fab {
+        padding: 5px 8px !important;
+        font-size: 0.88rem !important;
+        min-height: 0 !important;
+    }
     </style>
 }
 
@@ -75,6 +91,95 @@
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
 <script src="~/js/specialUI.js" asp-append-version="true"></script>
 
+<style>
+/* =====================================================
+   PaperDetail 專用樣式：整頁不滾動，單身區塊自己有捲軸
+   ===================================================== */
+
+/* 鎖定整頁不滾動 */
+html.paper-page,
+html.paper-page body,
+html.paper-page body.with-toolbar {
+    height: 100% !important;
+    max-height: 100vh !important;
+    overflow: hidden !important;
+}
+
+/* 主容器：使用 flex 佈局分配空間 */
+html.paper-page .erp-detail-container {
+    display: flex !important;
+    flex-direction: column !important;
+    height: calc(100vh - var(--app-toolbar-height, 56px)) !important;
+    min-height: 0 !important;
+    max-height: calc(100vh - var(--app-toolbar-height, 56px)) !important;
+    overflow: hidden !important;
+}
+
+/* Toolbar：在 flex 容器內關閉 sticky */
+html.paper-page .erp-detail-container #topToolbar {
+    position: relative !important;
+    top: auto !important;
+    flex-shrink: 0 !important;
+    flex-grow: 0 !important;
+}
+
+/* 單頭區域：固定高度，不伸縮 */
+html.paper-page .erp-detail-container .action-rail,
+html.paper-page .erp-detail-container form.erp-header-form {
+    flex-shrink: 0 !important;
+    flex-grow: 0 !important;
+}
+
+/* 單身區域：填滿剩餘空間 */
+html.paper-page .erp-detail-container .multi-tab-detail {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+/* Tab 標籤列：固定不滾動 */
+html.paper-page .multi-tab-detail .nav-tabs {
+    flex-shrink: 0 !important;
+}
+
+/* Tab 內容區：填滿空間，自己有捲軸 */
+html.paper-page .multi-tab-detail .tab-content {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    position: relative !important;
+}
+
+/* 隱藏非活動的分頁，避免高度疊加 */
+html.paper-page .multi-tab-detail .tab-pane {
+    display: none !important;
+}
+
+html.paper-page .multi-tab-detail .tab-pane.show.active {
+    display: block !important;
+    height: 100% !important;
+}
+
+/* table-container：填滿 tab-pane */
+html.paper-page .multi-tab-detail .table-container {
+    height: 100% !important;
+}
+
+/* 表格 wrapper：填滿並可捲動，讓表頭固定 */
+html.paper-page .multi-tab-detail .erp-table-wrapper {
+    height: 100% !important;
+    max-height: none !important;
+    overflow: auto !important;
+}
+</style>
+
+<script>
+// 為 html 加上特定 class，讓樣式只影響此頁面
+document.documentElement.classList.add('paper-page');
+</script>
+
 <script>
     // 載入特殊介面
     window._specialUIConfig = {
@@ -82,6 +187,7 @@
         specialUIType: "@(Model.SpecialUIType ?? "")",
         specialUIConfig: @Html.Raw(string.IsNullOrWhiteSpace(Model.SpecialUIConfig) ? "null" : Model.SpecialUIConfig),
         detailTableName: "@(Model.DetailDictTable ?? Model.DictTableName ?? "")",
+        masterTableName: "@(Model.MasterTable ?? "")",
         paperNum: "@(Model.PaperNum ?? "")"
     };
 
@@ -91,7 +197,9 @@
                 window._specialUIConfig.itemId,
                 window._specialUIConfig.specialUIType,
                 window._specialUIConfig.specialUIConfig,
-                window._specialUIConfig.detailTableName
+                window._specialUIConfig.detailTableName,
+                window._specialUIConfig.masterTableName,
+                window._specialUIConfig.paperNum
             );
         }
     });

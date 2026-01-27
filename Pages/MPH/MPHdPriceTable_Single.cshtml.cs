@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using System.Text;
 using ClosedXML.Excel;
 using Microsoft.AspNetCore.Html;
@@ -10,17 +10,17 @@ using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
 
-namespace PcbErpApi.Pages.SPO
+namespace PcbErpApi.Pages.MPH
 {
-    public class SPO00040Model : PageModel
+    public class MPH00052Model : PageModel
     {
         private readonly PcbErpContext _ctx;
         private readonly ITableDictionaryService _dictService;
-        private readonly ILogger<SPO00040Model> _logger;
+        private readonly ILogger<MPH00052Model> _logger;
 
-        private const string DefaultItemId = "SPO00040";
+        private const string DefaultItemId = "MPH00052";
 
-        public SPO00040Model(PcbErpContext ctx, ITableDictionaryService dictService, ILogger<SPO00040Model> logger)
+        public MPH00052Model(PcbErpContext ctx, ITableDictionaryService dictService, ILogger<MPH00052Model> logger)
         {
             _ctx = ctx;
             _dictService = dictService;
@@ -136,7 +136,7 @@ namespace PcbErpApi.Pages.SPO
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Load SPO00040 data failed (AJAX)");
+                _logger.LogError(ex, "Load MPH00052 data failed (AJAX)");
                 return new JsonResult(new { success = false, error = ex.Message });
             }
         }
@@ -620,7 +620,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
 
             if (mode != 1)
             {
-                const string sqlCus = @"SELECT CompanyId, ShortName FROM dbo.AJNdCustomer WITH (NOLOCK) ORDER BY CompanyId";
+                const string sqlCus = @"SELECT CompanyId, ShortName FROM dbo.AJNdMTLSupplier WITH (NOLOCK) ORDER BY CompanyId";
                 await using (var cmd = new SqlCommand(sqlCus, conn))
                 await using (var rd = await cmd.ExecuteReaderAsync())
                 {
@@ -1069,3 +1069,4 @@ SELECT ItemId, SerialNum, ButtonName,
         }
     }
 }
+

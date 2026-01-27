@@ -9,9 +9,9 @@
     var pageMap = new Dictionary<string, string> {
         {"SPO00013","/SPO/SPO00013" },  // 銷售價格表
         {"SPO00040", "/SPO/SPO00040"},// 銷售價格表(單一grid)
+        {"MPH00052", "/MPH/MPH00052"},// 採購價格表(單一grid)
         {"CUR00012", "/CUR/CURdSysParams"},
         {"CURH0002", "/CUR/CURdReportOrderBasPage"},
-        {"CUR00007", "/CUR/CURdGroups"},
         {"CURH0003", "/CUR/CURdV_SysProcess"},
         {"CUR00004", "/CUR/NoticeBoard"},
         {"MP000022", "/CCS/MP000022"},
@@ -207,6 +207,32 @@ body {
     color: #155cb5;
     text-decoration: underline;
 }
+/* 拖曳相關樣式 */
+.draggable-item {
+    cursor: grab;
+}
+.draggable-item:active {
+    cursor: grabbing;
+}
+.draggable-item.dragging {
+    opacity: 0.5;
+    background: #e3f0ff;
+}
+.favorite-drop-zone {
+    transition: all 0.2s ease;
+    min-height: 100px;
+}
+.favorite-drop-zone.drag-over {
+    background: #e7f1fd;
+    border: 2px dashed #2766b5;
+    border-radius: 8px;
+}
+.favorite-drop-hint {
+    color: #999;
+    text-align: center;
+    padding: 20px;
+    font-size: 0.95rem;
+}
 </style>
 
 <div class="container py-4">
@@ -289,15 +315,22 @@ body {
                                
                             var hint = ResolveItemHint(item);
 
-                            <li class="list-group-item d-flex justify-content-between align-items-center" id="li-@item.ItemId">
+                            <li class="list-group-item d-flex justify-content-between align-items-center draggable-item"
+                                id="li-@item.ItemId"
+                                draggable="true"
+                                data-itemid="@item.ItemId"
+                                data-itemname="@item.ItemName"
+                                data-superid="@item.SuperId"
+                                data-classname="@(item.ClassName ?? string.Empty)"
+                                data-powertype="@(item.PowerType?.ToString() ?? string.Empty)"
+                                data-link="@(link ?? "")">
 
                             @if (!string.IsNullOrEmpty(link)) {
                                 <a href="@link" title="@hint" style="flex:1">@item.ItemId - @item.ItemName</a>
                             } else {
                                 <a href="javascript:void(0)" title="@hint" class="dyn-link" data-itemid="@item.ItemId" data-itemname="@item.ItemName" data-superid="@item.SuperId" style="flex:1" onclick="resolveAndGo('@item.ItemId','@item.ItemName','@item.SuperId')">@item.ItemId - @item.ItemName</a>
                             }
-                                <button class="btn btn-outline-warning btn-sm"
-                                        onclick="addToFavorite('@item.ItemId', '@item.ItemName', '@item.SuperId', '@(item.ClassName ?? string.Empty)', '@(item.PowerType?.ToString() ?? string.Empty)')">★</button>
+                                <button class="btn btn-outline-primary btn-sm" title="開啟新視窗" onclick="openInNewWindow('@item.ItemId','@item.ItemName','@item.SuperId','@(item.ClassName ?? string.Empty)','@(item.PowerType?.ToString() ?? string.Empty)')">⧉</button>
                             </li>
                         }
                     }
@@ -311,8 +344,9 @@ body {
         </div>
          <!-- 我的最愛區塊 -->
         <div class="col-12 col-md-4 mb-4">
-            <div class="erp-card" style="min-height: 300px;">
+            <div class="erp-card favorite-drop-zone" id="favorite-drop-zone" style="min-height: 300px;">
                 <h5 class="erp-list-title mb-3">★ 我的最愛</h5>
+                <div id="favorite-drop-hint" class="favorite-drop-hint">拖曳功能項目到此處加入我的最愛</div>
                 <ul id="favorite-list" class="list-group erp-list-group"></ul>
             </div>
         </div>
@@ -327,9 +361,9 @@ body {
     const pageMap = {
     "SPO00013": "/SPO/SPO00013",
     "SPO00040": "/SPO/SPO00040",
+    "MPH00052": "/MPH/MPH00052",
     "CUR00012": "/CUR/CURdSysParams",
     "CURH0002": "/CUR/CURdReportOrderBasPage",
-    "CUR00007": "/CUR/CURdGroups",
     "CURH0003": "/CUR/CURdV_SysProcess",
     "CUR00004": "/CUR/NoticeBoard",
     "FPE00004": "/EMOdProcInfo/Index",
@@ -628,19 +662,32 @@ body {
 
         function renderFavorites() {
         const list = document.getElementById('favorite-list');
+        const hint = document.getElementById('favorite-drop-hint');
         const favs = getFavorites();
         list.innerHTML = '';
+
+        // 顯示或隱藏提示文字
+        if (hint) {
+            hint.style.display = favs.length === 0 ? 'block' : 'none';
+        }
+
         favs.forEach(f => {
             let li = document.createElement('li');
             li.className = "list-group-item d-flex justify-content-between align-items-center";
             li.setAttribute('data-itemid', f.itemId);
+            li.setAttribute('data-itemname', f.itemName);
+            li.setAttribute('data-superid', f.superId || '');
+            li.setAttribute('data-classname', f.className || '');
+            li.setAttribute('data-powertype', f.powerType || '');
             const hard = pageMap[f.itemId];
             const localHint = getLocalHint(f.itemId, f.className, f.powerType);
+            // 點擊在原視窗開啟，按鈕開啟新視窗
             const linkHtml = hard
-                ? `<a href="${hard}" title="${hard}" style="cursor:pointer">${f.itemId} - ${f.itemName}</a>`
-                : `<a href="javascript:void(0)" title="${localHint || '未設定'}" onmouseenter="loadHintOnHover(this,'${f.itemId}','${f.className || ''}','${f.powerType || ''}')" style="cursor:pointer" onclick="resolveAndGo('${f.itemId}','${f.itemName}','${f.superId || ''}','${f.className || ''}','${f.powerType || ''}')">${f.itemId} - ${f.itemName}</a>`;
+                ? `<a href="${hard}" title="${hard}" style="cursor:pointer;flex:1">${f.itemId} - ${f.itemName}</a>`
+                : `<a href="javascript:void(0)" title="${localHint || '未設定'}" onmouseenter="loadHintOnHover(this,'${f.itemId}','${f.className || ''}','${f.powerType || ''}')" style="cursor:pointer;flex:1" onclick="resolveAndGo('${f.itemId}','${f.itemName}','${f.superId || ''}','${f.className || ''}','${f.powerType || ''}')">${f.itemId} - ${f.itemName}</a>`;
             li.innerHTML = `${linkHtml}
-                <button class="btn btn-outline-danger btn-sm" onclick="removeFavorite('${f.itemId}')">✕</button>`;
+                <button class="btn btn-outline-primary btn-sm" title="開啟新視窗" onclick="openInNewWindow('${f.itemId}','${f.itemName}','${f.superId || ''}','${f.className || ''}','${f.powerType || ''}')">⧉</button>
+                <button class="btn btn-outline-danger btn-sm ms-1" title="移除" onclick="removeFavorite('${f.itemId}')">✕</button>`;
             list.appendChild(li);
         });
         enableFavoriteSortable();
@@ -664,8 +711,142 @@ body {
                 }
             });
         }
+        // 開啟新視窗的函數 (用於我的最愛項目)
+        async function openInNewWindow(itemId, itemName, superId, className, powerType) {
+            const hard = pageMap[itemId];
+            if (hard) {
+                window.open(hard, '_blank');
+                return;
+            }
+
+            const localMeta = { ClassName: className, PowerType: powerType };
+            const localLink = resolveCompanyLinkFromMeta(localMeta);
+            if (localLink) {
+                window.open(localLink, '_blank');
+                return;
+            }
+
+            try {
+                const metaUrl = `/api/report/item-meta/${itemId}`;
+                const res = await fetch(metaUrl);
+                if (!res.ok) throw new Error('not found');
+                const meta = await res.json();
+
+                const companyLink = resolveCompanyLinkFromMeta(meta);
+                if (companyLink) {
+                    window.open(companyLink, '_blank');
+                    return;
+                }
+
+                const itemType = Number(meta.itemType ?? meta.ItemType);
+                const outputType = Number(meta.outputType ?? meta.OutputType);
+                const pickStr = (obj, keys) => {
+                    for (const k of keys) {
+                        if (obj && obj[k] !== undefined && obj[k] !== null) return obj[k];
+                    }
+                    return '';
+                };
+                const ocxRaw = pickStr(meta, [
+                    'ocxtemplete','Ocxtemplete','OCXTemplete','ocxTemplete','OCXTemplete',
+                    'ocxTemplate','OCXTemplate','ocxtemplate','OCXTEMPLATE',
+                    'OCX','ocx'
+                ]);
+                const ocx = String(ocxRaw).trim().toLowerCase();
+                let url = '';
+                if (itemType === 2 && outputType === 0) url = `/Report/Direct/${itemId}`;
+                else if (itemType === 2 && outputType === 6) url = `/Report/Generic/${itemId}`;
+                else if (itemType === 6 && (ocx === 'jsdpaper3ldll.dll' || ocx.includes('jsdpaper3ldll'))) url = `/DynamicTemplate/Paper3L/${itemId}`;
+                else if (itemType === 6 && (ocx === 'jsdpaperorgdll.dll' || ocx.includes('jsdpaperorgdll'))) url = `/DynamicTemplate/Paper/${itemId}`;
+                else if (itemType === 6 && (ocx === 'jsdsinglegriddll.dll' || ocx.includes('jsdsinglegriddll'))) url = `/CUR/SingleGrid/${itemId}`;
+                else if (itemType === 6 && (ocx === 'jsdgriddll.dll' || ocx.includes('jsdgriddll'))) url = `/CUR/MultiGrid/${itemId}`;
+                else if (itemType === 6 && (ocx === 'jsdmasdtldll.dll' || ocx.includes('jsdmasdtldll'))) url = `/CUR/MasterDetail/${itemId}`;
+                else if (itemType === 6 && (ocx === 'jsdmasmultidtldll.dll' || ocx.includes('jsdmasmultidtldll'))) url = `/CUR/MasterMultiDetail/${itemId}`;
+
+                if (url) {
+                    window.open(url, '_blank');
+                    return;
+                }
+            } catch (err) {
+                console.warn('openInNewWindow meta error', err);
+            }
+            alert(`找不到對應的頁面: ${itemId}`);
+        }
+
+        // 拖曳功能
+        function initDragAndDrop() {
+            const dropZone = document.getElementById('favorite-drop-zone');
+            const level2List = document.getElementById('level2-list');
+
+            if (!dropZone) return;
+
+            // 使用事件委派處理拖曳事件 (在 document 層級捕捉)
+            document.addEventListener('dragstart', handleDragStart, false);
+            document.addEventListener('dragend', handleDragEnd, false);
+
+            // Drop zone 事件
+            dropZone.addEventListener('dragover', handleDragOver);
+            dropZone.addEventListener('dragenter', handleDragEnter);
+            dropZone.addEventListener('dragleave', handleDragLeave);
+            dropZone.addEventListener('drop', handleDrop);
+        }
+
+        function handleDragStart(e) {
+            // 找到最近的 .draggable-item 元素
+            const item = e.target.closest('.draggable-item');
+            if (!item) return;
+
+            item.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'copy';
+            e.dataTransfer.setData('text/plain', JSON.stringify({
+                itemId: item.dataset.itemid,
+                itemName: item.dataset.itemname,
+                superId: item.dataset.superid || '',
+                className: item.dataset.classname || '',
+                powerType: item.dataset.powertype || ''
+            }));
+        }
+
+        function handleDragEnd(e) {
+            const item = e.target.closest('.draggable-item');
+            if (item) item.classList.remove('dragging');
+            document.getElementById('favorite-drop-zone')?.classList.remove('drag-over');
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+        }
+
+        function handleDragEnter(e) {
+            e.preventDefault();
+            document.getElementById('favorite-drop-zone')?.classList.add('drag-over');
+        }
+
+        function handleDragLeave(e) {
+            // 檢查是否真的離開 drop zone (不是進入子元素)
+            const dropZone = document.getElementById('favorite-drop-zone');
+            if (dropZone && !dropZone.contains(e.relatedTarget)) {
+                dropZone.classList.remove('drag-over');
+            }
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            document.getElementById('favorite-drop-zone')?.classList.remove('drag-over');
+
+            try {
+                const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+                if (data.itemId) {
+                    addToFavorite(data.itemId, data.itemName, data.superId, data.className, data.powerType);
+                }
+            } catch (err) {
+                console.warn('handleDrop error', err);
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             renderFavorites();
+            initDragAndDrop();
         });
 
     // fallback: ensure dyn-link click is always handled (capture phase), even if earlier listeners failed

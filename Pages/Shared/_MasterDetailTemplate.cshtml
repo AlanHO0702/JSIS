@@ -41,7 +41,7 @@
   </div>
 
   <!-- 單頭 Master -->
-  <div class="card shadow-sm border-0 rounded-4 mb-3 md-master-card" data-area="master">
+  <div class="card shadow-sm border-0 rounded-4 mb-1 md-master-card" data-area="master">
     <div class="card-header bg-light fw-bold d-flex align-items-center gap-2">
       <span class="area-indicator" id="@domId-masterIndicator"></span>
       @masterTitle
@@ -239,6 +239,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 儲存
   saveBtn?.addEventListener('click', async () => {
+    // ★ 儲存前記住選中列的 key 值，以便重載後定位
+    const getSelectedKeys = (tbody, keyFields) => {
+      const selected = tbody?.querySelector('tr.selected');
+      if (!selected || !keyFields?.length) return null;
+      const keys = {};
+      keyFields.forEach(k => {
+        const inp = Array.from(selected.querySelectorAll('input')).find(i => (i.name || '').toLowerCase() === k.toLowerCase());
+        if (inp) keys[k] = inp.value ?? '';
+      });
+      return Object.keys(keys).length > 0 ? keys : null;
+    };
+
+    const masterKeyFields = window._mdConfigs?.[domId]?.MasterKeyFields ||
+                            (window._mdConfigs?.[domId]?.KeyMap || []).map(k => k.Master).filter(Boolean);
+    const selectedMasterKeys = getSelectedKeys(masterBody, masterKeyFields);
+    if (selectedMasterKeys) {
+      sessionStorage.setItem(`md-selected-${domId}`, JSON.stringify(selectedMasterKeys));
+    }
+
     const r1 = await masterEditor.saveChanges();
     const r2 = await detailEditor.saveChanges();
 
@@ -278,6 +297,11 @@ document.addEventListener('DOMContentLoaded', () => {
   addBtn?.addEventListener('click', async () => {
     if (!isEdit) return;
     const editor = getActiveEditor();
+    // 如果 editor 沒有 insertRows 方法，表示由 masterDetailTemplate.js 處理新增
+    if (typeof editor?.insertRows !== 'function') {
+      // 讓 masterDetailTemplate.js 的 handler 處理
+      return;
+    }
     try {
       const r = await editor.insertRows();
       if (r && r.ok === false) {
@@ -295,6 +319,11 @@ document.addEventListener('DOMContentLoaded', () => {
   deleteBtn?.addEventListener('click', async () => {
     if (!isEdit) return;
     const editor = getActiveEditor();
+    // 如果 editor 沒有 deleteRows 方法，表示由 masterDetailTemplate.js 處理刪除
+    if (typeof editor?.deleteRows !== 'function') {
+      // 讓 masterDetailTemplate.js 的 handler 處理
+      return;
+    }
 
     const confirm = await Swal.fire({
       icon: 'warning',
@@ -340,6 +369,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (rows[idx]) {
       rows[idx].classList.add('selected');
       rows[idx].click(); // 觸發原本的選取邏輯
+      try { rows[idx].scrollIntoView({ block: 'center', behavior: 'auto' }); } catch { }
     }
     updateCountPanel();
   };
@@ -501,6 +531,10 @@ document.addEventListener('DOMContentLoaded', () => {
   width: 100%;
   margin-bottom: 8px;
   border-radius: 10px;
+  background: #f6f7f9;
+  border: 1px solid #d8dee8;
+  padding: 6px 8px;
+  box-shadow: 0 1px 2px rgba(20, 40, 80, 0.06);
 }
 .md-toolbar-new {
   --top-toolbar-icon-font-size: 20px;
@@ -522,19 +556,32 @@ document.addEventListener('DOMContentLoaded', () => {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: #2564b3;
-  color: #fff;
-  border: none;
+  background: #fff;
+  color: #2a4a7a;
+  border: 1px solid #b9c7de;
   border-radius: 11px;
   font-size: var(--top-toolbar-font-size);
   font-weight: 500;
   padding: 5px 10px;
-  box-shadow: 0 2px 10px 0 #c5d9f1;
-  transition: background .18s, transform .11s;
+  box-shadow: none;
+  transition: background .18s, transform .11s, border-color .18s, color .18s;
   cursor: pointer;
 }
 .toolbar-btn:hover, .toolbar-btn:focus {
-  transform: translateY(-1px) scale(1.03);
+  background: #eef3fb;
+  border-color: #9fb2d2;
+  transform: translateY(-1px) scale(1.02);
+}
+.toolbar-btn.primary {
+  background: #2564b3;
+  border-color: #2564b3;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(37, 100, 179, 0.25);
+}
+.toolbar-btn.primary:hover, .toolbar-btn.primary:focus {
+  background: #215aa2;
+  border-color: #215aa2;
+  color: #fff;
 }
 .toolbar-btn i {
   font-size: 1.08em;
@@ -557,6 +604,10 @@ document.addEventListener('DOMContentLoaded', () => {
   border-radius: 8px;
   font-size: var(--top-toolbar-icon-font-size);
   line-height: 1;
+  background: #fff;
+  border: 1px solid #b9c7de;
+  color: #2a4a7a;
+  box-shadow: none;
 }
 .top-toolbar .toolbar-icon {
   display: inline-block;
@@ -568,54 +619,65 @@ document.addEventListener('DOMContentLoaded', () => {
   line-height: 1;
 }
 .top-toolbar .toolbar-btn:disabled {
-  background: #9aa7bb;
+  background: #f1f3f7 !important;
+  border-color: #c5ccd8 !important;
+  color: #9aa7bb !important;
   cursor: not-allowed;
   box-shadow: none;
-  opacity: 0.7;
+  opacity: 0.8;
 }
-.top-toolbar .toolbar-btn-add {
-  background: #0e9f4b;
+.top-toolbar .toolbar-btn-icon.toolbar-btn-add:not(:disabled) {
+  background: #f7fcf9;
+  border-color: #7ccfa1;
+  color: #1f7a45;
 }
-.top-toolbar .toolbar-btn-del {
-  background: #e04848;
-}
-.top-toolbar .toolbar-btn-cancel {
-  background: #e04848;
+.top-toolbar .toolbar-btn-icon.toolbar-btn-del:not(:disabled),
+.top-toolbar .toolbar-btn-icon.toolbar-btn-cancel:not(:disabled) {
+  background: #fff4f4;
+  border-color: #e08a8a;
+  color: #b33939;
 }
 .top-toolbar .toolbar-btn-check, .top-toolbar .toolbar-btn-cancel {
   font-size: 18px;
 }
 
-/* 狀態面板 */
+/* 狀態面板（badge 資訊樣式） */
 .toolbar-count-box {
   display: inline-flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  height: var(--top-toolbar-btn-height, 36px);
-  min-width: 74px;
-  padding: 2px 8px;
+  min-width: 64px;
+  padding: 4px 10px;
   border-radius: 6px;
-  font-weight: 700;
-  line-height: 1.05;
-  color: #fff;
+  font-weight: 600;
+  line-height: 1.15;
   user-select: none;
+  border: 1px solid transparent;
 }
 .toolbar-count-box .count-line {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
+}
+.toolbar-count-box .count-line:first-child {
+  font-size: 0.68rem;
+  opacity: 0.85;
 }
 .toolbar-count-box.mode-view {
-  background: #1e4db7;
+  background: #e8f0fe;
+  color: #1a56db;
+  border-color: #c6d9f7;
 }
 .toolbar-count-box.mode-edit {
-  background: #f00000;
+  background: #fee8e8;
+  color: #c81e1e;
+  border-color: #f5c6c6;
 }
 
 /* 區域指示燈 */
 .area-indicator {
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: #ccc;
   transition: background .2s;
@@ -625,13 +687,15 @@ document.addEventListener('DOMContentLoaded', () => {
   box-shadow: 0 0 6px #0d6efd;
 }
 .md-detail-card .area-indicator.active {
-  background: #198754;
-  box-shadow: 0 0 6px #198754;
+  background: #64748b;
+  box-shadow: 0 0 6px #64748b;
 }
 
-/* 單頭/單身卡片 */
+/* 單頭/單身卡片（加強分隔） */
 .md-master-card {
   flex: 0 0 auto;
+  border: 1px solid #dbeafe !important;
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.08);
 }
 .md-master-scroll {
   max-height: var(--md-master-max);
@@ -642,6 +706,8 @@ document.addEventListener('DOMContentLoaded', () => {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 2px 6px rgba(100, 116, 139, 0.06);
 }
 .md-detail-card .card-body {
   flex: 1 1 0;
@@ -679,11 +745,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /* 表格樣式（與 SingleGrid 一致） */
 .md-wrapper table.table {
-  table-layout: fixed;
+  table-layout: auto;
   border-collapse: collapse !important;
   font-size: .85rem;
   width: max-content !important;
-  min-width: 100%;
+  min-width: 0;
 }
 .md-wrapper table th,
 .md-wrapper table td {
@@ -696,6 +762,7 @@ document.addEventListener('DOMContentLoaded', () => {
   padding: 2px 6px !important;
   background: var(--md-head-bg);
   color: var(--md-head-text);
+  position: relative;
 }
 .md-wrapper .table-hover tbody tr:hover {
   background: #f1f5ff !important;
@@ -736,6 +803,13 @@ document.addEventListener('DOMContentLoaded', () => {
   background: transparent !important;
   vertical-align: middle !important;
   margin: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+.md-wrapper .cell-edit.form-control:focus {
+  outline: none !important;
+  box-shadow: none !important;
+  border: none !important;
 }
 
 /* 勾選框大小固定（編輯模式與瀏覽模式一致） */
@@ -783,31 +857,54 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /* 選取列高亮 */
 .md-wrapper tbody tr.selected td {
-  background: #fff3cd !important;
-  border-color: #ffc107 !important;
+  background: #d1e7ff !important;
+  border-color: transparent !important;
 }
 .md-wrapper tbody tr.selected {
-  background: #fff3cd !important;
-  box-shadow: inset 0 0 0 2px #ffc107;
+  background: #d1e7ff !important;
+}
+/* 編輯模式下選中行 */
+.md-wrapper.edit-mode tbody tr.selected td {
+  background: #d1e7ff !important;
+  border-color: transparent !important;
+}
+.md-wrapper.edit-mode tbody tr.selected td.readonly-td {
+  background: #d1e7ff !important;
 }
 .md-wrapper tbody tr:hover td {
-  background: #f5f5dc !important;
+  background: #e8f4ff !important;
 }
 .md-wrapper tbody tr:hover:not(.selected) td {
-  background: #f9f2d7 !important;
+  background: #e8f4ff !important;
 }
 /* 點擊時的過渡效果 */
 .md-wrapper tbody tr {
   transition: background 0.15s ease;
+  outline: none !important;
+}
+.md-wrapper tbody tr:focus {
+  outline: none !important;
 }
 .md-wrapper tbody tr td {
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-/* 卡片標題 */
+/* 卡片標題（精簡高度） */
 .md-wrapper .card-header {
-  font-size: .85rem !important;
-  padding: 6px 10px !important;
+  font-size: .8rem !important;
+  padding: 4px 10px !important;
+  border-bottom: 2px solid transparent;
+  position: relative;
+}
+.md-master-card .card-header {
+  background: linear-gradient(to bottom, #f0f4f8, #e8eef5) !important;
+  border-bottom-color: #3b82f6;
+  color: #1e40af;
+}
+.md-detail-card .card-header {
+  background: linear-gradient(to bottom, #f8fafc, #f1f5f9) !important;
+  border-bottom-color: #94a3b8;
+  color: #475569;
 }
 
 /* Sticky 表頭 */
@@ -833,5 +930,34 @@ document.addEventListener('DOMContentLoaded', () => {
 .checkbox-dark {
   accent-color: #2c3e50;
   border: 1px solid #2c3e50 !important;
+}
+
+/* 自訂按鈕樣式（統一高度圓角，降低權重） */
+.md-custom-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--top-toolbar-btn-height, 36px);
+  min-height: var(--top-toolbar-btn-height, 36px);
+  padding: 0 12px;
+  font-size: .85rem;
+  font-weight: 500;
+  white-space: nowrap;
+  background: #fff;
+  color: #475569;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid #cbd5e1;
+  box-shadow: none;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.md-custom-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #1e40af;
+}
+.md-custom-btn:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 1px;
 }
 </style>

@@ -13,6 +13,11 @@
     var keyFieldName = ViewData["KeyFieldName"]?.ToString() ?? "PaperNum";
     var queryRedirectUrl = ViewData["QueryRedirectUrl"]?.ToString() ?? "";
     var DeleteApiUrl = ViewData["DeleteApiUrl"]?.ToString() ?? "";
+    var headerPaperNum = "";
+    if (headerData is IDictionary<string, object> headerDict && headerDict.TryGetValue("PaperNum", out var pn))
+    {
+        headerPaperNum = pn?.ToString() ?? "";
+    }
     static int NormalizeShowWhere(int? v)
     {
         // 有些單據字典的 iShowWhere 會是 0（代表第一頁），若過濾會導致單頭整段消失
@@ -89,6 +94,7 @@
 <script>
     // ✅ 將 Finished 狀態暴露給前端 JavaScript
     window._headerTableName = '@headerTableName';
+    window._headerRealTableName = '@(ViewData["HeaderRealTableName"] ?? Model.HeaderTableName ?? "")';
     window._finishedStatus = @(finishedValue?.ToString() ?? "null");
     window._paperNum = '@PaperNum';
     window._customButtons = @Html.Raw(JsonSerializer.Serialize(customButtonMeta));
@@ -96,12 +102,14 @@
 
 <div id="topToolbar" class="top-toolbar" data-dict-table="@headerTableName">
     <div class="toolbar-icon-row" role="group" aria-label="row-nav-and-sub-detail">
-        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnPrev" title="上一筆" aria-label="上一筆"><span class="toolbar-icon">&laquo;</span></button>
-        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnNext" title="下一筆" aria-label="下一筆"><span class="toolbar-icon">&raquo;</span></button>
-        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add" id="btnSubDetailAdd" title="新增第二/第三階項次" aria-label="新增第二或第三階項次"><span class="toolbar-icon">+</span></button>
-        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-del" id="btnSubDetailDelete" title="刪減第二/第三階項次" aria-label="刪減第二或第三階項次"><span class="toolbar-icon">-</span></button>
-        <button type="submit" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add toolbar-btn-check" id="btnSaveHeader" form="orderHeaderForm" title="儲存" aria-label="儲存"><span class="toolbar-icon">✓</span></button>
-        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-cancel toolbar-btn-check" id="btnCancelChanges" title="取消變更" aria-label="取消變更"><span class="toolbar-icon">&times;</span></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnFirst" title="第一筆" aria-label="第一筆"><i class="bi bi-chevron-bar-left"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnPrev" title="上一筆" aria-label="上一筆"><i class="bi bi-chevron-left"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnNext" title="下一筆" aria-label="下一筆"><i class="bi bi-chevron-right"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnLast" title="最後一筆" aria-label="最後一筆"><i class="bi bi-chevron-bar-right"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add" id="btnSubDetailAdd" title="新增第二/第三階項次" aria-label="新增第二或第三階項次" disabled><span class="toolbar-icon">+</span></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-del" id="btnSubDetailDelete" title="刪減第二/第三階項次" aria-label="刪減第二或第三階項次" disabled><span class="toolbar-icon">-</span></button>
+        <button type="submit" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add toolbar-btn-check" id="btnSaveHeader" form="orderHeaderForm" title="儲存" aria-label="儲存" disabled><span class="toolbar-icon">✓</span></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-cancel toolbar-btn-check" id="btnCancelChanges" title="取消變更" aria-label="取消變更" disabled><span class="toolbar-icon">&times;</span></button>
     </div>
     <div class="toolbar-main">
     <div>
@@ -116,7 +124,7 @@
     </div>
     <div class="toolbar-right">
         <div class="btn-group">
-            <button id="btnToolbarActions" type="button" class="btn toolbar-btn dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+            <button id="btnToolbarActions" type="button" class="btn toolbar-btn secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
                 <i class="bi bi-grid-3x3-gap"></i>功能
             </button>
             <ul class="dropdown-menu">
@@ -409,6 +417,7 @@
     }
     window.__unsavedChanges = false;
     captureHeaderInitValues();
+    if (typeof window.updateSaveCheckButtons === 'function') window.updateSaveCheckButtons();
     return true;
   }
 
@@ -2009,7 +2018,7 @@ const PAGE = {
 window.__DICT_OPEN__ = false;
 
 // 讓其它工具可以取到目前單號
-window.selectedPaperNum = '@(Model.HeaderData["PaperNum"] ?? "")';
+window.selectedPaperNum = '@headerPaperNum';
 
 const PAGE_PAPER_NUM = ("@PaperNum" || "").trim();
 const KEY_FIELD = ("@(keyFieldName ?? "PaperNum")" || "PaperNum").trim();
@@ -2683,15 +2692,26 @@ if (editBtn) {
   }
 
   function applyToolbarEditState(editing) {
-    const editOnlyIds = ['btnSubDetailAdd', 'btnSubDetailDelete', 'btnSaveHeader', 'btnCancelChanges'];
-    editOnlyIds.forEach(id => {
+    // +- 按鈕：編輯模式時立即亮起
+    const addDeleteIds = ['btnSubDetailAdd', 'btnSubDetailDelete'];
+    addDeleteIds.forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
       el.disabled = !editing;
       el.classList.toggle('disabled', !editing);
     });
 
-    const viewOnlyIds = ['btnSubSearch', 'btnSwitch', 'btnSubAddNew', 'btnPrint', 'btnPaperTrace', 'btnPaperLog', 'btnCancel', 'btnPrev', 'btnNext', 'btnEditNotes', 'btnEditMoney'];
+    // 勾叉按鈕：編輯模式 + 有異動時才亮起
+    const saveCheckIds = ['btnSaveHeader', 'btnCancelChanges'];
+    const hasChanges = !!window.__unsavedChanges;
+    saveCheckIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.disabled = !editing || !hasChanges;
+      el.classList.toggle('disabled', !editing || !hasChanges);
+    });
+
+    const viewOnlyIds = ['btnSubSearch', 'btnSwitch', 'btnSubAddNew', 'btnPrint', 'btnPaperTrace', 'btnPaperLog', 'btnCancel', 'btnFirst', 'btnPrev', 'btnNext', 'btnLast', 'btnEditNotes', 'btnEditMoney'];
     viewOnlyIds.forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -2885,6 +2905,7 @@ if (editBtn) {
             tr.dataset.state = 'modified';
           }
           window.__unsavedChanges = true;
+          if (typeof window.updateSaveCheckButtons === 'function') window.updateSaveCheckButtons();
         });
       });
     }
@@ -3874,10 +3895,12 @@ document.addEventListener('keyup', (e) => {
 });
 
 // ============================
-// 上一筆 / 下一筆
+// 第一筆 / 上一筆 / 下一筆 / 最後一筆
 // ============================
+const NAV_BTN_FIRST = document.getElementById('btnFirst');
 const NAV_BTN_PREV = document.getElementById('btnPrev');
 const NAV_BTN_NEXT = document.getElementById('btnNext');
+const NAV_BTN_LAST = document.getElementById('btnLast');
 let navIds = [], navIndex = -1;
 const headerCountEl = document.getElementById('toolbarHeaderCount');
 const detailCountEl = document.getElementById('toolbarDetailCount');
@@ -3899,8 +3922,14 @@ function loadLastFilters() {
 function getDetailBasePath() { return location.pathname.replace(/\/[^\/]+$/, "/"); }
 function gotoPaper(pn) { if (!pn) return; localStorage.setItem("lastViewedPaperNum", pn); location.href = getDetailBasePath() + pn; }
 function updateNavButtons() {
+  const hasFirst = navIndex > 0;
   const hasPrev = navIndex > 0;
   const hasNext = navIndex >= 0 && navIndex < navIds.length - 1;
+  const hasLast = navIndex >= 0 && navIndex < navIds.length - 1;
+  if (NAV_BTN_FIRST) {
+    NAV_BTN_FIRST.disabled = !hasFirst;
+    NAV_BTN_FIRST.onclick = () => hasFirst && gotoPaper(navIds[0]);
+  }
   if (NAV_BTN_PREV) {
     NAV_BTN_PREV.disabled = !hasPrev;
     NAV_BTN_PREV.onclick = () => hasPrev && gotoPaper(navIds[navIndex - 1]);
@@ -3908,6 +3937,10 @@ function updateNavButtons() {
   if (NAV_BTN_NEXT) {
     NAV_BTN_NEXT.disabled = !hasNext;
     NAV_BTN_NEXT.onclick = () => hasNext && gotoPaper(navIds[navIndex + 1]);
+  }
+  if (NAV_BTN_LAST) {
+    NAV_BTN_LAST.disabled = !hasLast;
+    NAV_BTN_LAST.onclick = () => hasLast && gotoPaper(navIds[navIds.length - 1]);
   }
   updateToolbarCounts();
 }
@@ -3948,8 +3981,10 @@ async function initRowNavigation() {
     navIndex = navIds.findIndex(x => (x || '').toString().trim().toLowerCase() === cur);
     updateNavButtons();
   } catch {
+    if (NAV_BTN_FIRST) NAV_BTN_FIRST.disabled = true;
     if (NAV_BTN_PREV) NAV_BTN_PREV.disabled = true;
     if (NAV_BTN_NEXT) NAV_BTN_NEXT.disabled = true;
+    if (NAV_BTN_LAST) NAV_BTN_LAST.disabled = true;
   }
 }
 initRowNavigation();
@@ -4378,10 +4413,37 @@ function getHeaderValueByLabel(labelText) {
   }
 
   window.__unsavedChanges = false;
+
+  // 更新勾叉按鈕狀態的函數
+  function updateSaveCheckButtons() {
+    const isEditing = !!window.__headerIsEdit;
+    const hasChanges = !!window.__unsavedChanges;
+    const saveCheckIds = ['btnSaveHeader', 'btnCancelChanges'];
+    saveCheckIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.disabled = !isEditing || !hasChanges;
+      el.classList.toggle('disabled', !isEditing || !hasChanges);
+    });
+  }
+  window.updateSaveCheckButtons = updateSaveCheckButtons;
+
 document.addEventListener('input', (e) => {
-  if (e.target.closest('.erp-header-form')) window.__unsavedChanges = true;
+  if (e.target.closest('.erp-header-form')) {
+    window.__unsavedChanges = true;
+    updateSaveCheckButtons();
+  }
 });
-window.addEventListener('pageshow', () => { window.__unsavedChanges = false; });
+document.addEventListener('change', (e) => {
+  if (e.target.closest('.erp-header-form') || e.target.closest('.multi-tab-detail')) {
+    window.__unsavedChanges = true;
+    updateSaveCheckButtons();
+  }
+});
+window.addEventListener('pageshow', () => {
+  window.__unsavedChanges = false;
+  updateSaveCheckButtons();
+});
 
   const cancelChangesBtn = document.getElementById('btnCancelChanges');
   if (cancelChangesBtn) {
@@ -4403,6 +4465,7 @@ window.addEventListener('pageshow', () => { window.__unsavedChanges = false; });
         if (wasEdit) window.__setHeaderEditMode(true);
       }
       window.__unsavedChanges = false;
+      updateSaveCheckButtons();
     });
   }
 </script>
@@ -4411,8 +4474,13 @@ window.addEventListener('pageshow', () => { window.__unsavedChanges = false; });
 /* =========================================
    A) 全局/版面
    ========================================= */
-body { background: #f7f9fb !important; }
-.erp-detail-container { min-height: 100vh; padding: 12px 0; margin-left: 3vw; margin-right: 3vw; }
+body { background: var(--page-bg) !important; }
+.erp-detail-container {
+  min-height: 100vh;
+  padding: 6px 8px;
+  margin: 0;
+  background: var(--page-bg);
+}
 
 /* =========================================
    B) Header 表單 & Tabs
@@ -4421,6 +4489,12 @@ body { background: #f7f9fb !important; }
 .erp-header-form select,
 .erp-header-form textarea,
 .erp-header-form input { font-size: var(--field-value-size); }
+
+.erp-header-form{
+  background: transparent;
+  border-radius: 10px;
+  padding: 0 8px 8px;
+}
 
 /* 單頭/單身寬度與左側間距一致 */
 .erp-header-form,
@@ -4510,6 +4584,12 @@ body { background: #f7f9fb !important; }
   padding-left: var(--detail-left-pad);
   margin-bottom: 14px;
   border-radius: 10px;
+  background: transparent;
+  border: 1px solid #c7d0e0;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  padding-right: 8px;
+  box-shadow: 0 1px 2px rgba(20, 40, 80, 0.06);
   transition: background-color 0.2s ease;
 }
 .top-toolbar .toolbar-icon-row{
@@ -4517,8 +4597,15 @@ body { background: #f7f9fb !important; }
   gap: 4px;
   align-items: center;
 }
-.top-toolbar .toolbar-icon-row #btnPrev{
-  margin-left: 16px;
+.top-toolbar .toolbar-icon-row #btnFirst{
+  margin-left: 6px;
+}
+/* 導航按鈕圖標縮小 */
+.top-toolbar #btnFirst i,
+.top-toolbar #btnPrev i,
+.top-toolbar #btnNext i,
+.top-toolbar #btnLast i {
+  font-size: 16px;
 }
 .top-toolbar .toolbar-main{
   display: flex;
@@ -4563,25 +4650,27 @@ body { background: #f7f9fb !important; }
 .top-toolbar .toolbar-btn-icon .toolbar-icon{
   display: inline-block;
 }
-.top-toolbar #btnPrev .toolbar-icon,
-.top-toolbar #btnNext .toolbar-icon,
 .top-toolbar #btnSubDetailDelete .toolbar-icon{
   transform: translateY(-3px);
 }
 .top-toolbar .toolbar-btn:disabled{
-  background: #9aa7bb;
+  background: #f1f3f7;
+  border-color: #c5ccd8;
+  color: #9aa7bb;
   cursor: not-allowed;
   box-shadow: none;
-  opacity: 0.7;
+  opacity: 0.8;
 }
 .top-toolbar .toolbar-btn-add{
-  background: #0e9f4b;
+  background: #f7fcf9;
+  border-color: #7ccfa1;
+  color: #1f7a45;
 }
-.top-toolbar .toolbar-btn-del{
-  background: #e04848;
-}
+.top-toolbar .toolbar-btn-del,
 .top-toolbar .toolbar-btn-cancel{
-  background: #e04848;
+  background: #fff4f4;
+  border-color: #e08a8a;
+  color: #b33939;
 }
 .top-toolbar .toolbar-btn-check,
 .top-toolbar .toolbar-btn-cancel{
@@ -4610,6 +4699,17 @@ body { background: #f7f9fb !important; }
 }
 .top-toolbar .dropdown-toggle::after{
   display: none;
+}
+
+#topToolbar{
+  position: sticky;
+  top: calc(var(--app-toolbar-height, 56px) + 4px);
+  z-index: 1200;
+  margin-left: calc(-1 * var(--rail-reserve) + 24px);
+  padding-left: 24px;
+}
+body.modal-open #topToolbar{
+  z-index: 500; /* avoid covering bootstrap modals */
 }
 
 .toolbar-count-box{
@@ -4892,6 +4992,9 @@ body.shift-resize .draggable-field.ui-resizable .ui-resizable-se{
   z-index: 900;
   overflow-y: auto;
   overflow-x: visible;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
 }
 
 body.with-toolbar .action-rail{

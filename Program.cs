@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using PcbErpApi;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
+using PcbErpApi.Services;
 
 // 建立 WebApplication 的建構器，負責設定與註冊服務
 var builder = WebApplication.CreateBuilder(args);
@@ -63,6 +64,7 @@ builder.Services.AddDbContext<PcbErpContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddScoped<ITableDictionaryService, TableDictionaryService>();
+builder.Services.AddScoped<IBreadcrumbService, BreadcrumbService>();
 
 builder.Services.AddScoped<PaginationService>();
 

@@ -29,6 +29,7 @@ namespace WebRazor.Models
     public class MasterMultiDetailConfig
     {
         public string DomId { get; set; }
+        public string ItemId { get; set; }
         public string MasterTitle { get; set; }
         public string MasterTable { get; set; }
         public string MasterDict { get; set; }
