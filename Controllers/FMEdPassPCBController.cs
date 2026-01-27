@@ -30,60 +30,84 @@ public class FMEdPassPCBController : ControllerBase
     /// 匯入批號 - 呼叫 FMEdPassChoiceLotPCB SP 取得批號資訊
     /// 對應 Delphi prcImport 程序
     /// </summary>
-    [HttpPost("import")]
-    public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
+[HttpPost("import")]
+public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
+{
+    try
     {
-        try
+        if (string.IsNullOrWhiteSpace(request.LotNum))
+            return BadRequest(new { success = false, message = "請輸入批號" });
+
+        var cs = _context.Database.GetConnectionString();
+        await using var conn = new SqlConnection(cs);
+        await conn.OpenAsync();
+
+        // 準備儲存資料的容器
+        Dictionary<string, object?>? lotInfo = null;
+        var xOutList = new List<Dictionary<string, object?>>();
+        var defectList = new List<Dictionary<string, object?>>();
+
+        await using (var cmd = new SqlCommand("exec FMEdPassChoiceLotPCB @LotNum, @InStock, @PaperNum", conn))
         {
-            if (string.IsNullOrWhiteSpace(request.LotNum))
-                return BadRequest(new { success = false, message = "請輸入批號" });
+            cmd.Parameters.AddWithValue("@LotNum", request.LotNum.Trim());
+            cmd.Parameters.AddWithValue("@InStock", request.InStock);
+            cmd.Parameters.AddWithValue("@PaperNum", request.PaperNum ?? "");
 
-            var cs = _context.Database.GetConnectionString();
-            await using var conn = new SqlConnection(cs);
-            await conn.OpenAsync();
-
-            // 呼叫 FMEdPassChoiceLotPCB SP (3個參數)
-            // exec FMEdPassChoiceLotPCB @LotNum, @InStock, @PaperNum
-            Dictionary<string, object?>? lotInfo = null;
-
-            await using (var cmd = new SqlCommand("exec FMEdPassChoiceLotPCB @LotNum, @InStock, @PaperNum", conn))
+            try
             {
-                cmd.Parameters.AddWithValue("@LotNum", request.LotNum.Trim());
-                cmd.Parameters.AddWithValue("@InStock", request.InStock);  // 0=一般, 1=入庫, 255=不限
-                cmd.Parameters.AddWithValue("@PaperNum", request.PaperNum ?? "");
+                await using var rd = await cmd.ExecuteReaderAsync();
 
-                try
+                // 1. 讀取第一張表：批號主資訊 (Result Set 1)
+                if (await rd.ReadAsync())
                 {
-                    await using var rd = await cmd.ExecuteReaderAsync();
-                    if (await rd.ReadAsync())
+                    lotInfo = ReadRowToDictionary(rd);
+                }
+
+                // 2. 嘗試讀取第二張表：多報明細 (Result Set 2)
+                if (await rd.NextResultAsync())
+                {
+                    while (await rd.ReadAsync())
                     {
-                        lotInfo = ReadRowToDictionary(rd);
+                        xOutList.Add(ReadRowToDictionary(rd));
                     }
                 }
-                catch (SqlException sqlEx)
+
+                // 3. 嘗試讀取第三張表：報廢明細 (Result Set 3)
+                if (await rd.NextResultAsync())
                 {
-                    // SP 會用 RAISERROR 回傳錯誤訊息 (如: 批號暫扣、報廢中 等)
-                    _logger.LogWarning("FMEdPassChoiceLotPCB 回傳錯誤: {Message}", sqlEx.Message);
-                    return BadRequest(new { success = false, message = sqlEx.Message });
+                    while (await rd.ReadAsync())
+                    {
+                        defectList.Add(ReadRowToDictionary(rd));
+                    }
                 }
             }
-
-            if (lotInfo == null || lotInfo.Count == 0)
-                return BadRequest(new { success = false, message = "無此批號!!" });
-
-            // 補充 Lookup 欄位 (ProcName, AftProcName, LayerName, POPName 等)
-            await EnrichWithLookupFields(conn, lotInfo);
-
-            _logger.LogInformation("匯入批號成功: {LotNum}, 欄位數: {Count}", request.LotNum, lotInfo.Count);
-
-            return Ok(new { success = true, lotInfo });
+            catch (SqlException sqlEx)
+            {
+                _logger.LogWarning("FMEdPassChoiceLotPCB 回傳錯誤: {Message}", sqlEx.Message);
+                return BadRequest(new { success = false, message = sqlEx.Message });
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "匯入批號失敗: {LotNum}", request.LotNum);
-            return BadRequest(new { success = false, message = ex.Message });
-        }
+
+        if (lotInfo == null || lotInfo.Count == 0)
+            return BadRequest(new { success = false, message = "無此批號!!" });
+
+        // 將明細表塞入 lotInfo 中，讓前端可以拿到
+        lotInfo["XOutList"] = xOutList;
+        lotInfo["DefectList"] = defectList;
+
+        // 補充 Lookup 欄位
+        await EnrichWithLookupFields(conn, lotInfo);
+
+        return Ok(new { success = true, lotInfo });
     }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "匯入批號失敗: {LotNum}", request.LotNum);
+        return BadRequest(new { success = false, message = ex.Message });
+    }
+}
+
+
 
     /// <summary>
     /// 補充 Lookup 欄位 (製程名稱、階段名稱、型狀名稱)
@@ -155,6 +179,25 @@ public class FMEdPassPCBController : ControllerBase
                 aftPOP);
             if (!string.IsNullOrEmpty(aftPOPName))
                 lotInfo["AftPOPName"] = aftPOPName;
+        }
+
+        // 7. 產品類別 & 允收X報數 (PartNum → ProdStyle, AllowXOutQnty from MINdMatInfo)
+        var partNum = GetStringValue(lotInfo, "PartNum");
+        if (!string.IsNullOrEmpty(partNum))
+        {
+            await using var cmd = new SqlCommand(
+                "SELECT ProdStyle, AllowXOutQnty FROM MINdMatInfo WITH(NOLOCK) WHERE PartNum = @Code", conn);
+            cmd.Parameters.AddWithValue("@Code", partNum);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            if (await rd.ReadAsync())
+            {
+                var prodStyle = rd["ProdStyle"]?.ToString()?.Trim();
+                if (!string.IsNullOrEmpty(prodStyle))
+                    lotInfo["ProdStyle"] = prodStyle;
+
+                if (!rd.IsDBNull(rd.GetOrdinal("AllowXOutQnty")))
+                    lotInfo["AllowXOutQnty"] = Convert.ToInt32(rd["AllowXOutQnty"]);
+            }
         }
     }
 
@@ -382,9 +425,14 @@ public class FMEdPassPCBController : ControllerBase
             // @sCondition 格式: " and ProcCode='P6300'" 或 " and LotNum like 'L%'"
             var condition = BuildWipCondition(request);
 
-            // Debug: 記錄實際執行的 SQL
+            // Debug: 記錄實際執行的 SQL 和查詢條件
             var sqlDebug = $"exec FMEdPassChoice4LotPass '{condition}', {request.InStock}, '{request.DateCode ?? ""}'";
-            _logger.LogInformation("WIP查詢開始，SQL: {SQL}", sqlDebug);
+            _logger.LogInformation("WIP查詢開始");
+            _logger.LogInformation("  查詢條件: LotNum={LotNum}, PartNum={PartNum}, Revision={Revision}, ProcCode={ProcCode}, LayerId={LayerId}",
+                request.LotNum ?? "(空)", request.PartNum ?? "(空)", request.Revision ?? "(空)",
+                request.ProcCode ?? "(空)", request.LayerId ?? "(空)");
+            _logger.LogInformation("  產生的 SQL 條件: {Condition}", condition);
+            _logger.LogInformation("  完整 SQL: {SQL}", sqlDebug);
 
             var list = new List<Dictionary<string, object?>>();
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -398,30 +446,23 @@ public class FMEdPassPCBController : ControllerBase
 
                 await using var rd = await cmd.ExecuteReaderAsync();
 
-                // 限制最多回傳 500 筆，避免前端卡住
-                int maxRows = 500;
-                int rowCount = 0;
-                while (await rd.ReadAsync() && rowCount < maxRows)
+                while (await rd.ReadAsync())
                 {
                     var row = ReadRowToDictionary(rd);
                     list.Add(row);
-                    rowCount++;
                 }
             }
 
             sw.Stop();
             _logger.LogInformation("WIP查詢 SP 執行完成，耗時: {Elapsed}ms, 筆數: {Count}", sw.ElapsedMilliseconds, list.Count);
 
-            // 補充 Lookup 欄位 (製程名稱等) - 只處理前 500 筆
+            // 批次補充 Lookup 欄位 (一次查詢所有對照資料)
             sw.Restart();
-            foreach (var item in list)
-            {
-                await EnrichWithLookupFields(conn, item);
-            }
+            await BatchEnrichWithLookupFields(conn, list);
             sw.Stop();
             _logger.LogInformation("WIP查詢 Lookup 完成，耗時: {Elapsed}ms", sw.ElapsedMilliseconds);
 
-            var warningMsg = list.Count >= 500 ? " (已達上限500筆，請縮小查詢範圍)" : "";
+            var warningMsg = "";
 
             return Ok(new {
                 success = true,
@@ -448,42 +489,236 @@ public class FMEdPassPCBController : ControllerBase
         // 批號篩選
         if (!string.IsNullOrWhiteSpace(request.LotNum))
         {
+            var lotNum = SqlEscape(request.LotNum.Trim());
             // 支援模糊查詢
             if (request.LotNum.Contains("*") || request.LotNum.Contains("%"))
             {
-                var pattern = request.LotNum.Replace("*", "%");
+                var pattern = lotNum.Replace("*", "%");
                 conditions.Add($" and LotNum like '{pattern}'");
             }
             else
             {
-                conditions.Add($" and LotNum like '{request.LotNum}%'");
+                conditions.Add($" and LotNum like '{lotNum}%'");
             }
         }
 
         // 料號篩選
         if (!string.IsNullOrWhiteSpace(request.PartNum))
         {
-            conditions.Add($" and t1.PartNum like '{request.PartNum}%'");
+            var partNum = SqlEscape(request.PartNum.Trim());
+            conditions.Add($" and t1.PartNum like '{partNum}%'");
         }
 
-        // 製程篩選
+        // 版序篩選
+        if (!string.IsNullOrWhiteSpace(request.Revision))
+        {
+            var revision = SqlEscape(request.Revision.Trim());
+            conditions.Add($" and t1.Revision like '{revision}%'");
+        }
+
+        // 製程篩選 (支援製程代碼或製程名稱)
         if (!string.IsNullOrWhiteSpace(request.ProcCode))
         {
-            conditions.Add($" and t1.ProcCode = '{request.ProcCode}'");
+            var procInput = SqlEscape(request.ProcCode.Trim());
+            // 判斷輸入的是中文還是英文
+            bool isChinese = System.Text.RegularExpressions.Regex.IsMatch(request.ProcCode, @"[\u4e00-\u9fa5]");
+
+            if (isChinese)
+            {
+                // 輸入中文，查詢製程名稱
+                conditions.Add($" and exists (select 1 from EMOdProcInfo WITH(NOLOCK) where ProcCode = t1.ProcCode and ProcName like N'{procInput}%')");
+            }
+            else
+            {
+                // 輸入英文，查詢製程代碼
+                conditions.Add($" and t1.ProcCode like '{procInput}%'");
+            }
         }
 
         // 階段篩選
         if (!string.IsNullOrWhiteSpace(request.LayerId))
         {
-            conditions.Add($" and t1.LayerId = '{request.LayerId}'");
+            var layerId = SqlEscape(request.LayerId.Trim());
+            conditions.Add($" and t1.LayerId = '{layerId}'");
         }
 
         return string.Join("", conditions);
     }
 
+    /// <summary>
+    /// 跳脫 SQL 字串中的單引號，防止 SQL 注入
+    /// </summary>
+    private string SqlEscape(string input)
+    {
+        return input.Replace("'", "''");
+    }
+
     #endregion
 
     #region Helper Methods
+
+    /// <summary>
+    /// 批次補充 Lookup 欄位 (一次查詢所有對照資料，避免逐筆查詢)
+    /// </summary>
+    private async Task BatchEnrichWithLookupFields(SqlConnection conn, List<Dictionary<string, object?>> items)
+    {
+        if (items.Count == 0) return;
+
+        // 1. 收集所有不重複的 Code
+        var procCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var layerIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pops = new HashSet<int>();
+        var partNums = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var poTypes = new HashSet<int>();
+
+        foreach (var item in items)
+        {
+            var procCode = GetStringValue(item, "ProcCode");
+            var aftProc = GetStringValue(item, "AftProc");
+            var layerId = GetStringValue(item, "LayerId");
+            var aftLayer = GetStringValue(item, "AftLayer");
+            var pop = GetIntValue(item, "POP");
+            var aftPop = GetIntValue(item, "AftPOP");
+            var partNum = GetStringValue(item, "PartNum");
+            var poType = GetIntValue(item, "POType");
+
+            if (!string.IsNullOrEmpty(procCode)) procCodes.Add(procCode);
+            if (!string.IsNullOrEmpty(aftProc)) procCodes.Add(aftProc);
+            if (!string.IsNullOrEmpty(layerId)) layerIds.Add(layerId);
+            if (!string.IsNullOrEmpty(aftLayer)) layerIds.Add(aftLayer);
+            if (pop > 0) pops.Add(pop);
+            if (aftPop > 0) pops.Add(aftPop);
+            if (!string.IsNullOrEmpty(partNum)) partNums.Add(partNum);
+            if (poType >= 0) poTypes.Add(poType);
+        }
+
+        // 2. 批次查詢建立對照表
+        var procNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var layerNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var popNameMap = new Dictionary<int, string>();
+        var prodStyleMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var poTypeNameMap = new Dictionary<int, string>();
+
+        // 查詢製程名稱
+        if (procCodes.Count > 0)
+        {
+            var inClause = string.Join(",", procCodes.Select(c => $"'{c.Replace("'", "''")}'"));
+            await using var cmd = new SqlCommand($"SELECT ProcCode, ProcName FROM EMOdProcInfo WITH(NOLOCK) WHERE ProcCode IN ({inClause})", conn);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var code = rd["ProcCode"]?.ToString()?.Trim() ?? "";
+                var name = rd["ProcName"]?.ToString()?.Trim() ?? "";
+                if (!string.IsNullOrEmpty(code)) procNameMap[code] = name;
+            }
+        }
+
+        // 查詢階段名稱
+        if (layerIds.Count > 0)
+        {
+            var inClause = string.Join(",", layerIds.Select(c => $"'{c.Replace("'", "''")}'"));
+            await using var cmd = new SqlCommand($"SELECT LayerId, LayerName FROM EMOdProdLayer WITH(NOLOCK) WHERE LayerId IN ({inClause})", conn);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var code = rd["LayerId"]?.ToString()?.Trim() ?? "";
+                var name = rd["LayerName"]?.ToString()?.Trim() ?? "";
+                if (!string.IsNullOrEmpty(code)) layerNameMap[code] = name;
+            }
+        }
+
+        // 查詢型狀名稱
+        if (pops.Count > 0)
+        {
+            var inClause = string.Join(",", pops);
+            await using var cmd = new SqlCommand($"SELECT POP, POPName FROM EMOdPOP WITH(NOLOCK) WHERE POP IN ({inClause})", conn);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var pop = Convert.ToInt32(rd["POP"]);
+                var name = rd["POPName"]?.ToString()?.Trim() ?? "";
+                popNameMap[pop] = name;
+            }
+        }
+
+        // 查詢產品類別 & 允收X報數 (MINdMatInfo.ProdStyle, AllowXOutQnty)
+        var allowXOutQntyMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (partNums.Count > 0)
+        {
+            var inClause = string.Join(",", partNums.Select(c => $"'{c.Replace("'", "''")}'"));
+            await using var cmd = new SqlCommand($"SELECT PartNum, ProdStyle, AllowXOutQnty FROM MINdMatInfo WITH(NOLOCK) WHERE PartNum IN ({inClause})", conn);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var pn = rd["PartNum"]?.ToString()?.Trim() ?? "";
+                var style = rd["ProdStyle"]?.ToString()?.Trim() ?? "";
+                if (!string.IsNullOrEmpty(pn))
+                {
+                    prodStyleMap[pn] = style;
+                    if (!rd.IsDBNull(rd.GetOrdinal("AllowXOutQnty")))
+                        allowXOutQntyMap[pn] = Convert.ToInt32(rd["AllowXOutQnty"]);
+                }
+            }
+        }
+
+        // 查詢訂單種類名稱 (FMEdPoType.POTypeName)
+        if (poTypes.Count > 0)
+        {
+            var inClause = string.Join(",", poTypes);
+            await using var cmd = new SqlCommand($"SELECT POType, POTypeName FROM FMEdPoType WITH(NOLOCK) WHERE POType IN ({inClause})", conn);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var poType = Convert.ToInt32(rd["POType"]);
+                var name = rd["POTypeName"]?.ToString()?.Trim() ?? "";
+                poTypeNameMap[poType] = name;
+            }
+        }
+
+        // 3. 套用對照表到每筆資料
+        foreach (var item in items)
+        {
+            var procCode = GetStringValue(item, "ProcCode");
+            var aftProc = GetStringValue(item, "AftProc");
+            var layerId = GetStringValue(item, "LayerId");
+            var aftLayer = GetStringValue(item, "AftLayer");
+            var pop = GetIntValue(item, "POP");
+            var aftPop = GetIntValue(item, "AftPOP");
+
+            if (!string.IsNullOrEmpty(procCode) && procNameMap.TryGetValue(procCode, out var procName))
+                item["ProcName"] = procName;
+
+            if (!string.IsNullOrEmpty(aftProc) && procNameMap.TryGetValue(aftProc, out var aftProcName))
+                item["AftProcName"] = aftProcName;
+
+            if (!string.IsNullOrEmpty(layerId) && layerNameMap.TryGetValue(layerId, out var layerName))
+                item["LayerName"] = layerName;
+
+            if (!string.IsNullOrEmpty(aftLayer) && layerNameMap.TryGetValue(aftLayer, out var aftLayerName))
+                item["AftLayerName"] = aftLayerName;
+
+            if (pop > 0 && popNameMap.TryGetValue(pop, out var popName))
+                item["POPName"] = popName;
+
+            if (aftPop > 0 && popNameMap.TryGetValue(aftPop, out var aftPopName))
+                item["AftPOPName"] = aftPopName;
+
+            // 產品類別 & 允收X報數
+            var partNum = GetStringValue(item, "PartNum");
+            if (!string.IsNullOrEmpty(partNum))
+            {
+                if (prodStyleMap.TryGetValue(partNum, out var prodStyle))
+                    item["ProdStyle"] = prodStyle;
+                if (allowXOutQntyMap.TryGetValue(partNum, out var allowXOutQnty))
+                    item["AllowXOutQnty"] = allowXOutQnty;
+            }
+
+            // 訂單種類名稱
+            var poType = GetIntValue(item, "POType");
+            if (poTypeNameMap.TryGetValue(poType, out var poTypeName))
+                item["POTypeName"] = poTypeName;
+        }
+    }
 
     /// <summary>
     /// 將 DataReader 的一列轉成 Dictionary (忽略大小寫)
@@ -592,6 +827,9 @@ public class FMEdPassPCBController : ControllerBase
 
         /// <summary>料號</summary>
         public string? PartNum { get; set; }
+
+        /// <summary>版序</summary>
+        public string? Revision { get; set; }
 
         /// <summary>製程代碼</summary>
         public string? ProcCode { get; set; }
