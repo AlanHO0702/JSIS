@@ -36,7 +36,7 @@ public class DictSetupApiController : ControllerBase
         public string MDKey { get; set; }
         public string LocateKeys { get; set; }
         public string OrderByField { get; set; }
-        public string FilterSQL { get; set; }
+        public string? FilterSQL { get; set; }
         public string RunSQLAfterAdd { get; set; }
     }
 
@@ -250,13 +250,13 @@ UPDATE CURdTableFieldLang
     // ===== C. 報表設定（CURdPaperPaper）=====
     public class PaperRow
     {
-        public string PaperId { get; set; }
+        public string? PaperId { get; set; }
         public int? SerialNum { get; set; }
-        public string ItemName { get; set; }
+        public string? ItemName { get; set; }
         public int? Enabled { get; set; }
-        public string Notes { get; set; }
-        public string ClassName { get; set; }
-        public string ObjectName { get; set; }
+        public string? Notes { get; set; }
+        public string? ClassName { get; set; }
+        public string? ObjectName { get; set; }
         public int? LinkType { get; set; }
         public int? DisplayType { get; set; }
         public int? OutputType { get; set; }
@@ -264,7 +264,7 @@ UPDATE CURdTableFieldLang
         public int? ShowTree { get; set; }
         public int? TableIndex { get; set; }
         public int? ItemCount { get; set; }
-        public string PrintItemId { get; set; }
+        public string? PrintItemId { get; set; }
     }
 
     // GET /api/DictSetupApi/Report/{paperId}

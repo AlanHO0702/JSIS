@@ -36,7 +36,7 @@ namespace PcbErpApi.Controllers
                 query = query.Where(x => x.PaperNum.Contains(PaperNum));
 
             if (!string.IsNullOrWhiteSpace(PartNum))
-                query = query.Where(x => x.PartNum.Contains(PartNum));
+                query = query.Where(x => x.PartNum != null && x.PartNum.Contains(PartNum));
 
             var orderedQuery = query.OrderByDescending(o => o.PaperDate);
             var result = await _pagedService.GetPagedAsync(orderedQuery, page, pageSize);

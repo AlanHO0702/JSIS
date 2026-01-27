@@ -16,6 +16,7 @@ using WebRazor.Models;
 
 namespace PcbErpApi.Pages.EMOdProdInfo
 {
+    [IgnoreAntiforgeryToken]
     public class DetailModel : PageModel
     {
         private readonly PcbErpContext _ctx;
@@ -151,16 +152,16 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             return Page();
         }
 
-        private async Task<List<CURdTableField>> LoadFieldDictAsync(string dictTableName)
+        private Task<List<CURdTableField>> LoadFieldDictAsync(string dictTableName)
         {
             try
             {
-                return _dictService.GetFieldDict(dictTableName, typeof(EmodProdInfo));
+                return Task.FromResult(_dictService.GetFieldDict(dictTableName, typeof(EmodProdInfo)));
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "GetFieldDict failed for {Table}", dictTableName);
-                return new List<CURdTableField>();
+                return Task.FromResult(new List<CURdTableField>());
             }
         }
 
@@ -481,7 +482,6 @@ SELECT ItemId, SerialNum, ButtonName,
         /// <summary>
         /// 產生圖檔 POST Handler
         /// </summary>
-        [IgnoreAntiforgeryToken]
         public async Task<IActionResult> OnPostGenerateImagesAsync(string? partNum, string? revision)
         {
             try

@@ -553,7 +553,7 @@ ORDER BY idx.index_id, ic.key_ordinal";
             return t is "image" or "varbinary" or "binary" or "rowversion" or "timestamp";
         }
 
-        private static object ConvertValueByDbType(object? value, string dbType)
+        private static object? ConvertValueByDbType(object? value, string dbType)
         {
             if (value == null || value == DBNull.Value) return DBNull.Value;
             var s = value.ToString() ?? string.Empty;

@@ -1,7 +1,7 @@
 public class TableFieldViewModel
 {
-    public string FieldName { get; set; }
-    public string DisplayLabel { get; set; }
+    public string? FieldName { get; set; }
+    public string? DisplayLabel { get; set; }
     public int? iShowWhere { get; set; }
     public int? iLayRow { get; set; }
     public int? iLayColumn { get; set; }

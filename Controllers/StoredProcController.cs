@@ -274,7 +274,7 @@ public class StoredProcController : ControllerBase
                         cmd.Parameters.AddWithValue("@" + p, ToClr(v) ?? DBNull.Value);
 
             // 使用 ExecuteReaderAsync 讀取結果集
-            var results = new List<Dictionary<string, object>>();
+            var results = new List<Dictionary<string, object?>>();
 
             // 使用 using 塊確保 reader 在提交事務前完全釋放
             await using (var reader = await cmd.ExecuteReaderAsync())
@@ -282,7 +282,7 @@ public class StoredProcController : ControllerBase
                 // 讀取第一個結果集的所有行
                 while (await reader.ReadAsync())
                 {
-                    var row = new Dictionary<string, object>();
+                    var row = new Dictionary<string, object?>();
                     for (int i = 0; i < reader.FieldCount; i++)
                     {
                         var name = reader.GetName(i);
@@ -773,14 +773,14 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             }
 
             // 執行查詢
-            var results = new List<Dictionary<string, object>>();
+            var results = new List<Dictionary<string, object?>>();
 
             // 使用 using 塊確保 reader 在提交事務前完全釋放
             await using (var reader = await cmd.ExecuteReaderAsync())
             {
                 while (await reader.ReadAsync())
                 {
-                    var row = new Dictionary<string, object>();
+                    var row = new Dictionary<string, object?>();
                     for (int i = 0; i < reader.FieldCount; i++)
                     {
                         var name = reader.GetName(i);

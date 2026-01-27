@@ -35,20 +35,23 @@ namespace PcbErpApi.Helpers
 
         // 產生單頭 lookup display 字典
 public static Dictionary<string, string> BuildHeaderLookupMap(
-    object headerData,
-    IEnumerable<dynamic> lookupMaps
+    object? headerData,
+    IEnumerable<dynamic>? lookupMaps
 )
 {
     var dict = new Dictionary<string, string>();
     if (headerData == null || lookupMaps == null)
         return dict;
 
-    IDictionary<string, object> d = headerData as IDictionary<string, object>;
+    IDictionary<string, object>? d = headerData as IDictionary<string, object>;
 
     foreach (var map in lookupMaps)
     {
-        object keyValueObj = null;
-        string foundKey = null;
+        object? keyValueObj = null;
+        string? foundKey = null;
+        string? fieldName = map.FieldName;
+        if (string.IsNullOrWhiteSpace(fieldName))
+            continue;
 
         if (d != null)
         {
@@ -72,7 +75,7 @@ public static Dictionary<string, string> BuildHeaderLookupMap(
 
         if (lookupValues.TryGetValue(keyValue, out var display))
         {
-            dict[map.FieldName] = display;
+            dict[fieldName] = display;
         }
         else
         {
@@ -80,7 +83,7 @@ public static Dictionary<string, string> BuildHeaderLookupMap(
             {
                 if (string.Equals(kv.Key, keyValue, StringComparison.OrdinalIgnoreCase))
                 {
-                    dict[map.FieldName] = kv.Value;
+                    dict[fieldName] = kv.Value;
                     break;
                 }
             }
@@ -92,15 +95,15 @@ public static Dictionary<string, string> BuildHeaderLookupMap(
 }
 
     public static Dictionary<string, string> BuildHeaderLookupMapFromStandard(
-        object headerData,
-        IEnumerable<TableFieldViewModel> fields,
-        DbConnection conn)
+        object? headerData,
+        IEnumerable<TableFieldViewModel>? fields,
+        DbConnection? conn)
     {
         var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (headerData == null || fields == null || conn == null)
             return dict;
 
-        IDictionary<string, object> dataDict = headerData as IDictionary<string, object>;
+        IDictionary<string, object>? dataDict = headerData as IDictionary<string, object>;
 
         static bool IsSafeName(string name)
             => Regex.IsMatch(name ?? "", @"^[A-Za-z0-9_]+$");
@@ -117,7 +120,7 @@ public static Dictionary<string, string> BuildHeaderLookupMap(
             return string.Join(".", parts.Select(p => Esc(p.Trim('[', ']'))));
         }
 
-        static bool TryGetValueIgnoreCase(IDictionary<string, object> dict, string key, out object value)
+        static bool TryGetValueIgnoreCase(IDictionary<string, object> dict, string key, out object? value)
         {
             if (dict.TryGetValue(key, out value)) return true;
             var hit = dict.Keys.FirstOrDefault(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
@@ -134,7 +137,8 @@ public static Dictionary<string, string> BuildHeaderLookupMap(
         {
             foreach (var field in fields)
             {
-                if (field == null) continue;
+                if (field == null || string.IsNullOrWhiteSpace(field.FieldName)) continue;
+                var fieldName = field.FieldName;
                 var lookupTable = field.LookupTable;
                 var lookupKey = field.LookupKeyField;
                 var lookupResult = field.LookupResultField;
@@ -146,15 +150,15 @@ public static Dictionary<string, string> BuildHeaderLookupMap(
                 if (!IsSafeTable(lookupTable) || !IsSafeName(lookupKey))
                     continue;
 
-                object keyValueObj = null;
+                object? keyValueObj = null;
                 if (dataDict != null)
                 {
-                    if (!TryGetValueIgnoreCase(dataDict, field.FieldName, out keyValueObj))
+                    if (!TryGetValueIgnoreCase(dataDict, fieldName, out keyValueObj))
                         continue;
                 }
                 else
                 {
-                    keyValueObj = headerData.GetType().GetProperty(field.FieldName)?.GetValue(headerData);
+                    keyValueObj = headerData.GetType().GetProperty(fieldName)?.GetValue(headerData);
                 }
 
                 var keyValue = keyValueObj?.ToString();
@@ -189,7 +193,7 @@ public static Dictionary<string, string> BuildHeaderLookupMap(
                         parts.Add(val);
                 }
                 if (parts.Count == 0) continue;
-                dict[field.FieldName] = string.Join(" - ", parts);
+                dict[fieldName] = string.Join(" - ", parts);
             }
         }
         finally
@@ -217,6 +221,7 @@ public static Dictionary<string, string> BuildHeaderLookupMap(
             var result = new Dictionary<string, Dictionary<string, string>>();
             foreach (var item in items)
             {
+                if (item == null) continue;
                 var rowKey = keySelector(item);
                 if (string.IsNullOrEmpty(rowKey)) continue;
 

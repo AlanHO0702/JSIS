@@ -94,16 +94,16 @@ namespace PcbErpApi.Pages.CCS
             return Page();
         }
 
-        private async Task<List<CURdTableField>> LoadFieldDictAsync(string dictTableName)
+        private Task<List<CURdTableField>> LoadFieldDictAsync(string dictTableName)
         {
             try
             {
-                return _dictService.GetFieldDict(dictTableName, typeof(object));
+                return Task.FromResult(_dictService.GetFieldDict(dictTableName, typeof(object)));
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "GetFieldDict failed for {Table}", dictTableName);
-                return new List<CURdTableField>();
+                return Task.FromResult(new List<CURdTableField>());
             }
         }
 

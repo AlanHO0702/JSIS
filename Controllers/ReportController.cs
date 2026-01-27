@@ -50,7 +50,10 @@ namespace PcbErpApi.Controllers
             if (!renderPayload.@params.ContainsKey("PaperNum") && !string.IsNullOrWhiteSpace(req.PaperNum))
                 renderPayload.@params["PaperNum"] = req.PaperNum;
 
-            using var http = new HttpClient { BaseAddress = new Uri(_config["ReportApi:CrystalUrl"]) };
+            var baseUrl = _config["ReportApi:CrystalUrl"];
+            if (string.IsNullOrWhiteSpace(baseUrl))
+                return StatusCode(500, "ReportApi:CrystalUrl is not configured.");
+            using var http = new HttpClient { BaseAddress = new Uri(baseUrl) };
             var resp = await http.PostAsJsonAsync("/api/report/render", renderPayload);
             if (!resp.IsSuccessStatusCode)
                 return StatusCode((int)resp.StatusCode, await resp.Content.ReadAsStringAsync());
