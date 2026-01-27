@@ -14,7 +14,7 @@
     var queryRedirectUrl = ViewData["QueryRedirectUrl"]?.ToString() ?? "";
     var DeleteApiUrl = ViewData["DeleteApiUrl"]?.ToString() ?? "";
     var headerPaperNum = "";
-    if (headerData is IDictionary<string, object> headerDict && headerDict.TryGetValue("PaperNum", out var pn))
+    if (TryGetHeaderValue(headerData, "PaperNum", out var pn))
     {
         headerPaperNum = pn?.ToString() ?? "";
     }
@@ -33,16 +33,16 @@
             || t.StartsWith("money") || t.StartsWith("smallmoney")
             || t.StartsWith("float") || t.StartsWith("real");
     }
-    static bool IsNumberValue(object? raw)
+    static bool TryGetHeaderValue(object? data, string? fieldName, out object? value)
     {
-        if (raw == null) return false;
-        if (raw is sbyte or byte or short or ushort or int or uint or long or ulong
-            or float or double or decimal) return true;
-        var s = raw.ToString();
-        if (string.IsNullOrWhiteSpace(s)) return false;
-        s = s.Replace(",", "");
-        return decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out _)
-            || decimal.TryParse(s, NumberStyles.Any, CultureInfo.CurrentCulture, out _);
+        value = null;
+        if (data == null || string.IsNullOrWhiteSpace(fieldName)) return false;
+        if (data is IDictionary<string, object> dict)
+            return dict.TryGetValue(fieldName, out value);
+        var prop = data.GetType().GetProperty(fieldName);
+        if (prop == null) return false;
+        value = prop.GetValue(data);
+        return true;
     }
     static string NormalizeEditColor(string? raw)
     {
@@ -77,17 +77,11 @@
     // ✅ 取得單頭表名稱和 Finished 狀態（針對 FmedIssueMain）
     string headerTableName = Model.HeaderTableName ?? "";
     int? finishedValue = null;
-    if (headerTableName == "FMEdIssueMain" && headerData != null && headerData.ContainsKey("Finished"))
+    if (headerTableName == "FMEdIssueMain" && TryGetHeaderValue(headerData, "Finished", out var finishedObj))
     {
-        var finishedObj = headerData["Finished"];
-        if (finishedObj != null)
-        {
-            int finishedTemp;
-            if (int.TryParse(finishedObj.ToString(), out finishedTemp))
-            {
-                finishedValue = finishedTemp;
-            }
-        }
+        int finishedTemp;
+        if (int.TryParse(finishedObj?.ToString(), out finishedTemp))
+            finishedValue = finishedTemp;
     }
 }
 
@@ -117,7 +111,7 @@
             SearchBtnId = "btnSubSearch",
             AddBtnId = "btnSubAddNew",
             DeleteBtnId = "btnSubBatchDelete",
-            QueryFields = ViewData["QueryFields"] as List<QueryFieldViewModel>,
+            QueryFields = ViewData["QueryFields"] as List<QueryFieldViewModel> ?? new List<QueryFieldViewModel>(),
             ModalId = "searchModal",
             ReportSpName = ViewData["ReportSpName"]?.ToString() ?? ""   // 👈 從外層再傳進來
         })
@@ -1805,12 +1799,15 @@
                         style="position: relative">
                         @foreach (var field in tab.Value)
                         {
-                            object rawValue = null;
-                            headerData?.TryGetValue(field.FieldName, out rawValue);
+                            object? rawValue = null;
+                            if (TryGetHeaderValue(headerData, field.FieldName, out var raw))
+                                rawValue = raw;
                             string displayText = "";
 
                             // 1. lookup 優先顯示
-                            if (headerLookupMap != null && headerLookupMap.TryGetValue(field.FieldName, out var lookupVal))
+                            if (headerLookupMap != null
+                                && !string.IsNullOrWhiteSpace(field.FieldName)
+                                && headerLookupMap.TryGetValue(field.FieldName, out var lookupVal))
                             {
                                 displayText = FormatHelper.FormatValue(lookupVal, field.DataType, field.FormatStr);
                             }
@@ -1848,9 +1845,10 @@
                             var hasLookupSetting = !string.IsNullOrWhiteSpace(field.LookupTable)
                                 && !string.IsNullOrWhiteSpace(field.LookupKeyField)
                                 && !string.IsNullOrWhiteSpace(field.LookupResultField);
-                            var hasLookupDisplay = headerLookupMap != null && headerLookupMap.ContainsKey(field.FieldName);
+                            var fieldName = field.FieldName ?? "";
+                            var hasLookupDisplay = headerLookupMap != null && headerLookupMap.ContainsKey(fieldName);
                             var lookupResultType = "";
-                            if (headerLookupTypeMap != null && headerLookupTypeMap.TryGetValue(field.FieldName, out var rt))
+                            if (headerLookupTypeMap != null && headerLookupTypeMap.TryGetValue(fieldName, out var rt))
                             {
                                 lookupResultType = rt ?? "";
                             }
@@ -2044,7 +2042,7 @@ new ToolbarHandler({
   // 動態單據的作廢：走 PaperAction（避免找不到 /api/{Table}/{PaperNum} controller 而 404）
   paperAction: { url: '/api/PaperAction/DoAction', paperId: "@Model.HeaderTableName", eoc: 0, aftFinished: 2 },
   detailRouteTemplate: subTpl,  // 使用單身頁路徑，新增後跳轉到單身頁
-  tableName: "@tableName",
+  tableName: PAGE.headerTable || "@tableName",  // 優先使用主表（單頭）進行查詢
   renderTable: null,
   renderPagination: null,
   renderOrderCount: null,

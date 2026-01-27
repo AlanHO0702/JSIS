@@ -250,7 +250,7 @@ namespace PcbErpApi.Pages.CUR
             }
         }
 
-        private async Task<Dictionary<string, TableDictionaryService.OCXLookupMap>> GetLookupMapAsync(string dictTableName)
+        private Task<Dictionary<string, TableDictionaryService.OCXLookupMap>> GetLookupMapAsync(string dictTableName)
         {
             var result = new Dictionary<string, TableDictionaryService.OCXLookupMap>(StringComparer.OrdinalIgnoreCase);
             try
@@ -267,7 +267,7 @@ namespace PcbErpApi.Pages.CUR
                 _logger.LogError(ex, "GetOCXLookups failed for {Table}", dictTableName);
             }
 
-            return result;
+            return Task.FromResult(result);
         }
 
         private async Task<TableMeta?> GetTableMetaAsync(string dictTableName)
@@ -553,7 +553,7 @@ SELECT FieldName, DisplayLabel, SerialNum, Visible, DataType, DisplaySize, ReadO
             {
                 list.Add(new CURdTableField
                 {
-                    TableName = dictTableName,
+                    TableName = dictTableName ?? string.Empty,
                     FieldName = rd["FieldName"]?.ToString() ?? string.Empty,
                     DisplayLabel = rd["DisplayLabel"] as string,
                     SerialNum = rd["SerialNum"] == DBNull.Value ? null : Convert.ToInt32(rd["SerialNum"]),

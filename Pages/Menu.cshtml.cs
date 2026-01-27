@@ -60,7 +60,7 @@ namespace PcbErpApi.Pages
             foreach (var i in allItems)
             {
                 i.ItemId = i.ItemId.Trim();
-                i.SystemId = i.SystemId?.Trim().ToUpperInvariant();
+                i.SystemId = (i.SystemId ?? string.Empty).Trim().ToUpperInvariant();
                 i.SuperId = i.SuperId?.Trim();
                 i.SWebMenuId = i.SWebMenuId?.Trim();
                 i.SWebSuperMenuId = i.SWebSuperMenuId?.Trim();

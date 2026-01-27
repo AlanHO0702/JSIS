@@ -747,7 +747,7 @@ SELECT FieldName, DisplayLabel, SerialNum, Visible, DataType, DisplaySize, ReadO
             {
                 list.Add(new CURdTableField
                 {
-                    TableName = dictTableName,
+                    TableName = dictTableName ?? string.Empty,
                     FieldName = rd["FieldName"]?.ToString() ?? string.Empty,
                     DisplayLabel = rd["DisplayLabel"] as string,
                     SerialNum = rd["SerialNum"] == DBNull.Value ? null : Convert.ToInt32(rd["SerialNum"]),

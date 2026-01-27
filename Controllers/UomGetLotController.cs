@@ -74,11 +74,11 @@ public class UomGetLotController : ControllerBase
                 (SqlTransaction)tx,
                 req.ItemId,
                 req.ButtonName,
-                req.PaperNum,
-                req.DetailItem,
+                req.PaperNum ?? string.Empty,
+                req.DetailItem ?? string.Empty,
                 systemId,
                 userId,
-                useId);
+                useId ?? string.Empty);
 
             await tx.CommitAsync();
             return Ok(new { ok = true, spId, partNum, needQnty, tranParams });
@@ -560,13 +560,20 @@ SELECT SeqNum, TableKind, ParamFieldName, ISNULL(ParamType,0) AS ParamType
 
         if (list.Count == 0) return new List<object>();
 
-        var tableMap = await LoadTableMapAsync(conn, tx, itemId);
+        var tableMap = await LoadTableMapAsync(conn, tx, itemId ?? string.Empty);
         var result = new List<object>();
         foreach (var p in list)
         {
             object? value = p.ParamType switch
             {
-                0 => await ReadFieldByKindAsync(conn, tx, tableMap, p.TableKind, p.ParamFieldName, paperNum, detailItem),
+                0 => await ReadFieldByKindAsync(
+                    conn,
+                    tx,
+                    tableMap,
+                    p.TableKind,
+                    p.ParamFieldName,
+                    paperNum ?? string.Empty,
+                    detailItem ?? string.Empty),
                 1 => p.ParamFieldName ?? string.Empty,
                 2 => string.IsNullOrWhiteSpace(userId) ? string.Empty : userId,
                 3 => string.IsNullOrWhiteSpace(useId) ? string.Empty : useId,

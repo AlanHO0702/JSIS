@@ -13,7 +13,8 @@ public class ExcelReportController : ControllerBase
     [HttpGet("download")]
     public IActionResult Download()
     {
-        string connStr = _config.GetConnectionString("DefaultConnection"); // 你 appsettings.json 裡的
+        string connStr = _config.GetConnectionString("DefaultConnection")
+            ?? throw new ArgumentNullException("DefaultConnection string is missing in configuration.");
 
         string sql = @"
 SELECT '傑偲資訊有限公司','','','','','','','','','',''

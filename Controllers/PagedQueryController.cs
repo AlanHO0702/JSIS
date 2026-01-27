@@ -112,7 +112,9 @@ namespace PcbErpApi.Controllers
             }
 
             var entityType = dbSetProp.PropertyType.GenericTypeArguments.First();
-            var query = (IQueryable)dbSetProp.GetValue(_context);
+            var queryObj = dbSetProp.GetValue(_context);
+            if (queryObj is not IQueryable query)
+                return StatusCode(500, $"DbSet '{dbSetName}' did not return a queryable.");
 
             // 2) 在這裡才用 entityType 來建立 filterConditions（映射別名 → 真欄位名）
             var filterConditions = filters
@@ -134,10 +136,14 @@ namespace PcbErpApi.Controllers
 
             // 3) 套 where
             var whereMethod = typeof(DynamicQueryHelper)
-                .GetMethod(nameof(DynamicQueryHelper.ApplyDynamicWhere))
-                .MakeGenericMethod(entityType);
-
-            query = (IQueryable)whereMethod.Invoke(null, new object[] { query, filterConditions });
+                .GetMethod(nameof(DynamicQueryHelper.ApplyDynamicWhere));
+            if (whereMethod == null)
+                return StatusCode(500, "DynamicQueryHelper.ApplyDynamicWhere not found.");
+            var typedWhereMethod = whereMethod.MakeGenericMethod(entityType);
+            var whereResult = typedWhereMethod.Invoke(null, new object[] { query, filterConditions });
+            if (whereResult is not IQueryable whereQuery)
+                return StatusCode(500, "Failed to apply filters.");
+            query = whereQuery;
 
             // 4) 排序
             var orderField = entityType.GetProperty("PaperDate") != null ? "PaperDate"
@@ -148,25 +154,40 @@ namespace PcbErpApi.Controllers
             if (orderField != null)
             {
                 var orderMethod = typeof(PagedQueryController)
-                    .GetMethod(nameof(OrderByField))
-                    .MakeGenericMethod(entityType);
-
-                query = (IQueryable)orderMethod.Invoke(null, new object[] { query, orderField, true });
+                    .GetMethod(nameof(OrderByField));
+                if (orderMethod == null)
+                    return StatusCode(500, "OrderByField not found.");
+                var typedOrderMethod = orderMethod.MakeGenericMethod(entityType);
+                var orderResult = typedOrderMethod.Invoke(null, new object[] { query, orderField, true });
+                if (orderResult is not IQueryable orderQuery)
+                    return StatusCode(500, "Failed to apply ordering.");
+                query = orderQuery;
             }
 
             // 5) 分頁
             var pagedMethod = typeof(PaginationService)
-                .GetMethod(nameof(PaginationService.GetPagedAsync))
-                .MakeGenericMethod(entityType);
-
-            var task = (Task)pagedMethod.Invoke(_pagedService, new object[] { query, pageNumber, pageSizeNumber });
+                .GetMethod(nameof(PaginationService.GetPagedAsync));
+            if (pagedMethod == null)
+                return StatusCode(500, "PaginationService.GetPagedAsync not found.");
+            var typedPagedMethod = pagedMethod.MakeGenericMethod(entityType);
+            var taskObj = typedPagedMethod.Invoke(_pagedService, new object[] { query, pageNumber, pageSizeNumber });
+            if (taskObj is not Task task)
+                return StatusCode(500, "Failed to execute pagination.");
             await task.ConfigureAwait(false);
 
             var resultProp = task.GetType().GetProperty("Result");
+            if (resultProp == null)
+                return StatusCode(500, "Pagination result not available.");
             var result = resultProp.GetValue(task);
+            if (result == null)
+                return StatusCode(500, "Pagination result is null.");
             var dataProp = result.GetType().GetProperty("Data");
-            var data = (IEnumerable<object>)dataProp.GetValue(result);
-            var totalCount = (int)result.GetType().GetProperty("TotalCount").GetValue(result);
+            if (dataProp == null)
+                return StatusCode(500, "Pagination data not available.");
+            var data = dataProp.GetValue(result) as IEnumerable<object> ?? Enumerable.Empty<object>();
+            var totalCountProp = result.GetType().GetProperty("TotalCount");
+            var totalCountObj = totalCountProp?.GetValue(result);
+            var totalCount = totalCountObj is int count ? count : 0;
 
             // 6) lookup 與欄位
             var tableDictService = new TableDictionaryService(_context);
@@ -184,11 +205,13 @@ namespace PcbErpApi.Controllers
 
             var formattedData = data.Select(item =>
             {
-                var dict = new Dictionary<string, object>();
+                var dict = new Dictionary<string, object?>();
                 foreach (var field in fields)
                 {
-                    var rawValue = GetValue(item, field.FieldName);
-                    dict[field.FieldName] = FormatHelper.FormatValue(rawValue, field.DataType, field.FormatStr);
+                    var fieldName = field.FieldName;
+                    if (string.IsNullOrWhiteSpace(fieldName)) continue;
+                    var rawValue = GetValue(item, fieldName);
+                    dict[fieldName] = FormatHelper.FormatValue(rawValue, field.DataType, field.FormatStr);
                 }
                 return dict;
             }).ToList();
@@ -240,7 +263,7 @@ namespace PcbErpApi.Controllers
                 return s;
             }
 
-            string? ResolveFieldName(string rawField)
+            string? ResolveFieldName(string? rawField)
             {
                 if (string.IsNullOrWhiteSpace(rawField)) return null;
                 if (fieldMap.TryGetValue(rawField.Trim(), out var exact)) return exact;
@@ -252,7 +275,7 @@ namespace PcbErpApi.Controllers
                 return string.IsNullOrWhiteSpace(alt) ? null : alt;
             }
 
-            static string NormalizeOp(string op)
+            static string NormalizeOp(string? op)
             {
                 if (string.IsNullOrWhiteSpace(op)) return "=";
                 return op.ToLowerInvariant() switch
@@ -362,8 +385,10 @@ namespace PcbErpApi.Controllers
                     var dict = new Dictionary<string, object?>();
                     foreach (var field in fields)
                     {
-                        if (row.TryGetValue(field.FieldName, out var rawValue))
-                            dict[field.FieldName] = FormatHelper.FormatValue(rawValue, field.DataType, field.FormatStr);
+                        var fieldName = field.FieldName;
+                        if (string.IsNullOrWhiteSpace(fieldName)) continue;
+                        if (row.TryGetValue(fieldName, out var rawValue))
+                            dict[fieldName] = FormatHelper.FormatValue(rawValue, field.DataType, field.FormatStr);
                     }
                     // 也把不在 fields 裡的欄位加進去（例如 PaperNum）
                     foreach (var kv in row)
@@ -391,9 +416,9 @@ namespace PcbErpApi.Controllers
             }
         }
 
-        private object GetValue(object item, string fieldName)
+        private object? GetValue(object item, string fieldName)
         {
-            if (item is IDictionary<string, object> dict && dict.TryGetValue(fieldName, out var val))
+            if (item is IDictionary<string, object?> dict && dict.TryGetValue(fieldName, out var val))
                 return val;
 
             var prop = item.GetType().GetProperty(fieldName);

@@ -466,14 +466,19 @@ function openPaperTypeModal(types) {
       filters.push({ Field: 'pageSize', Op: '', Value: String(this.pageSize) });
 
       this.lastQueryFilters = filters.slice();
-      try { localStorage.setItem('orderListQueryFilters', JSON.stringify(filters)); } catch {}
+
+      // 保存查詢條件（帶表名的鍵，與導航功能保持一致）
+      const tn = (this.tableName || '').toString().trim().toLowerCase();
+      const filterKey = tn ? `orderListQueryFilters:${tn}` : 'orderListQueryFilters';
+      try { localStorage.setItem(filterKey, JSON.stringify(filters)); } catch {}
+      try { localStorage.setItem('orderListQueryFilters', JSON.stringify(filters)); } catch {}  // 保留舊鍵作為備用
       try { localStorage.setItem('orderListPageNumber', '1'); } catch {}
 
       if (typeof this.restoreSearchForm === 'function') {
         this.restoreSearchForm(document.getElementById(this.formId), filters);
       }
 
-      // 轉跳查詢（List 頁用）
+      // 轉跳查詢（統一處理：列表頁或單身頁都跳轉到列表頁）
       if (this.queryRedirectUrl) {
         const params = new URLSearchParams();
         filters.forEach(f => {
@@ -481,6 +486,16 @@ function openPaperTypeModal(types) {
           if (f.Value != null && f.Value !== '') params.append(f.Field, f.Value);
         });
         window.location.href = this.queryRedirectUrl + '?' + params.toString();
+        return;
+      }
+
+      // 如果沒有 queryRedirectUrl 但沒有渲染函數（單身頁面），提示用戶
+      if (!this.renderTable) {
+        await Swal.fire({
+          icon: 'warning',
+          title: '無法執行查詢',
+          text: '頁面配置錯誤，請聯繫系統管理員'
+        });
         return;
       }
 
