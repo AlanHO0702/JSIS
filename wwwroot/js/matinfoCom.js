@@ -2186,6 +2186,24 @@
     }
   }
 
+  async function searchByAddedPartnum(partnum) {
+    const pn = (partnum || '').toString().trim();
+    if (!pn) return false;
+    const payload = { PartNumB: pn, PartNumE: pn, Limit: 200 };
+    if (defaultMbFilter === 0 || defaultMbFilter === 1) payload.MB = defaultMbFilter;
+    const res = await fetch('/api/MatInfoSearch/Search', withJwtHeaders({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }));
+    if (!res.ok) return false;
+    const respJson = await res.json();
+    const rows = Array.isArray(respJson) ? respJson : (respJson?.data || respJson?.Data || []);
+    if (!Array.isArray(rows) || rows.length === 0) return false;
+    await renderRows(rows, rows.length);
+    return true;
+  }
+
   tbody?.addEventListener('click', (e) => {
     const row = e.target.closest('tr.matinfo-row');
     if (!row) return;
@@ -2815,7 +2833,9 @@
       }
     }
   }
-  document.addEventListener('matinfo:add:done', () => {
+  document.addEventListener('matinfo:add:done', async (e) => {
+    const partnum = e.detail?.partnum;
+    if (await searchByAddedPartnum(partnum)) return;
     loadData();
   });
   document.addEventListener('matinfo:search:done', (e) => {
