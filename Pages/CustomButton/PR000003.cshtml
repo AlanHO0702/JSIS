@@ -1,0 +1,972 @@
+@*
+    PR000003 - 應收帳款立帳單
+    對應 Delphi: PRSelectDLL.pas / PRSelectDLL.dfm
+    自訂按鈕功能:
+      - 選擇可審核之憑證加入應收帳款立帳單
+      - 支援多選 (左右選擇器模式)
+      - 支援條件篩選
+    介面：套用 PaperSearch 風格
+*@
+@model dynamic
+
+<style>
+  #pr-sel-modal .paper-search-dialog { --bs-modal-width: 1200px; --bs-modal-margin: 0; margin-top: 12vh; }
+  #pr-sel-modal .paper-search-modal { height: calc(88vh); display: flex; flex-direction: column; }
+  #pr-sel-modal.modal.show { align-items: flex-start; }
+  #pr-sel-modal .modal-header { padding: 6px 12px; cursor: move; user-select: none; }
+  #pr-sel-modal .modal-header :is(button, input, select, textarea, a) { cursor: default; }
+  #pr-sel-modal .modal-title { font-size: 16px; line-height: 1.2; }
+  #pr-sel-modal .modal-body { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 8px 12px; }
+  #pr-sel-modal .modal-footer { position: sticky; bottom: 0; background: #fff; z-index: 3; display: flex; align-items: center; gap: 12px; padding: 6px 12px; }
+  #pr-sel-modal .paper-search-picker { flex: 1 1 auto; min-height: 0; display: flex; gap: 4px; margin-left: 0; margin-right: 0; }
+  #pr-sel-modal .paper-search-picker > div { padding-left: 0; padding-right: 0; }
+  #pr-sel-modal .paper-search-col { display: flex; flex-direction: column; min-width: 0; }
+  #pr-sel-modal .paper-search-col-left { flex: 7 1 0; }
+  #pr-sel-modal .paper-search-col-right { flex: 3 1 0; }
+  #pr-sel-modal .paper-search-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #pr-sel-modal .paper-search-title { font-weight: 600; color: #475569; font-size: 13px; }
+  #pr-sel-modal .paper-search-count { font-size: 12px; color: #64748b; }
+  #pr-sel-modal .paper-search-scroll { flex: 1 1 0; min-height: 0; overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; }
+  #pr-sel-modal .paper-search-transfer { flex: 0 0 56px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: .6rem; }
+  #pr-sel-modal .paper-search-transfer .btn {
+    width: 28px; height: 28px; padding: 0;
+    border: 1px solid currentColor; border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  #pr-sel-modal .paper-search-transfer .btn:hover { border-color: currentColor; box-shadow: none; }
+  #pr-sel-modal .paper-search-transfer .material-symbols-outlined { font-size: 28px; line-height: 1; }
+  #pr-sel-modal thead th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+  #pr-sel-modal table { border-collapse: collapse; width: 100%; }
+  #pr-sel-modal th, #pr-sel-modal td { border: 1px solid #dee2e6; vertical-align: middle; }
+  #pr-sel-modal .paper-search-scroll th,
+  #pr-sel-modal .paper-search-scroll td { white-space: nowrap; font-size: var(--field-value-size); padding: 2px 6px; line-height: 1.15; }
+  #pr-sel-modal .paper-search-scroll thead th { position: sticky; top: 0; background: #f8fafc; z-index: 2; font-size: var(--field-label-size); }
+  #pr-sel-modal .paper-search-scroll tbody tr { cursor: pointer; }
+  #pr-sel-modal .paper-search-scroll tbody tr.selected,
+  #pr-sel-modal .paper-search-scroll tbody tr.selected > td { background: #dbeafe !important; }
+  #pr-sel-modal .paper-search-form {
+    display: flex; flex-direction: column; gap: 6px;
+    position: relative; padding-right: 100px; margin-bottom: 8px;
+  }
+  #pr-sel-modal .paper-search-form .ps-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 260px);
+    grid-template-rows: repeat(4, minmax(0, auto));
+    grid-auto-flow: column;
+    gap: 4px 10px;
+    justify-content: start; align-items: start;
+  }
+  #pr-sel-modal .paper-search-form .ps-field { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  #pr-sel-modal .paper-search-form .ps-label {
+    white-space: nowrap; margin: 0; flex: 0 0 90px;
+    text-align: right; font-size: var(--field-label-size); line-height: 1.2;
+  }
+  #pr-sel-modal .paper-search-form .ps-control {
+    flex: 1 1 auto; min-width: 0; font-size: var(--field-value-size);
+    height: 24px; padding: 2px 6px; border: 1px solid #ced4da; border-radius: 4px;
+  }
+  #pr-sel-modal .paper-search-form .ps-control:disabled {
+    background-color: #e9ecef; color: #495057; cursor: not-allowed;
+  }
+  #pr-sel-modal .paper-search-form .ps-actions {
+    display: flex; justify-content: flex-end; align-items: center;
+    position: absolute; top: 0; right: 0; margin: 0;
+  }
+  #pr-sel-modal .ps-summary { display: flex; gap: 20px; font-size: 13px; margin-left: auto; margin-right: 12px; }
+  #pr-sel-modal .ps-summary-item { display: flex; gap: 6px; }
+  #pr-sel-modal .ps-summary-label { color: #475569; font-weight: 600; }
+  #pr-sel-modal .ps-summary-value { color: #1e293b; font-weight: 700; }
+  @@media (max-width: 991.98px) {
+    #pr-sel-modal .paper-search-dialog { --bs-modal-width: 100vw; --bs-modal-margin: 0; }
+    #pr-sel-modal .paper-search-modal { border-radius: 0; }
+  }
+</style>
+
+<div class="modal fade" id="pr-sel-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl paper-search-dialog">
+    <div class="modal-content paper-search-modal">
+      <div class="modal-header">
+        <h5 class="modal-title">可立帳之憑證</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <!-- 搜尋條件 -->
+        <form class="paper-search-form">
+          <div class="ps-grid">
+            <div class="ps-field">
+              <label class="ps-label">客廠名稱</label>
+              <select class="ps-control" id="pr-sel-company"></select>
+            </div>
+            <div class="ps-field">
+              <label class="ps-label">帳款型態</label>
+              <select class="ps-control" id="pr-sel-isin" disabled></select>
+            </div>
+            <div class="ps-field">
+              <label class="ps-label">公司別</label>
+              <select class="ps-control" id="pr-sel-useid" disabled></select>
+            </div>
+            <div class="ps-field" id="pr-sel-emp-field">
+              <label class="ps-label">請購人</label>
+              <select class="ps-control" id="pr-sel-emp"></select>
+            </div>
+
+            <div class="ps-field">
+              <label class="ps-label">起始憑證日期</label>
+              <input type="date" class="ps-control" id="pr-sel-paper-date-b">
+            </div>
+            <div class="ps-field">
+              <label class="ps-label">結束憑證日期</label>
+              <input type="date" class="ps-control" id="pr-sel-paper-date-e">
+            </div>
+            <div class="ps-field">
+              <label class="ps-label">收付日期</label>
+              <input type="date" class="ps-control" id="pr-sel-expect-date">
+            </div>
+            <div class="ps-field" id="pr-sel-user-field">
+              <label class="ps-label" id="pr-sel-user-label">作業者</label>
+              <select class="ps-control" id="pr-sel-user"></select>
+            </div>
+
+            <div class="ps-field">
+              <label class="ps-label">憑證號碼</label>
+              <input type="text" class="ps-control" id="pr-sel-paper-num">
+            </div>
+            <div class="ps-field">
+              <label class="ps-label">來源單號</label>
+              <input type="text" class="ps-control" id="pr-sel-sour-num">
+            </div>
+            <div class="ps-field">
+              <label class="ps-label">幣別</label>
+              <select class="ps-control" id="pr-sel-money"></select>
+            </div>
+            <div class="ps-field" id="pr-sel-depart-field" style="display: none;">
+              <label class="ps-label">部門</label>
+              <select class="ps-control" id="pr-sel-depart"></select>
+            </div>
+          </div>
+          <div class="ps-actions">
+            <button type="button" class="btn btn-primary btn-sm" id="pr-sel-btn-find">資料重取</button>
+          </div>
+        </form>
+
+        <!-- 多選區域 -->
+        <div class="row paper-search-picker">
+          <!-- 左側：可審核之憑證 -->
+          <div class="paper-search-col paper-search-col-left">
+            <div class="paper-search-title-row">
+              <div class="paper-search-title">可審核之憑證</div>
+              <div class="paper-search-count" id="pr-sel-source-count">0</div>
+            </div>
+            <div class="paper-search-scroll">
+              <table class="table table-sm table-striped mb-0">
+                <thead>
+                  <tr>
+                    <th>客廠代碼</th>
+                    <th>客廠名稱</th>
+                    <th>來源單號</th>
+                    <th>發票號碼</th>
+                    <th>憑證日期</th>
+                    <th>幣別</th>
+                    <th>匯率</th>
+                    <th>付款日期</th>
+                    <th>付款方式</th>
+                    <th>未稅總額</th>
+                    <th>稅額</th>
+                    <th>總金額</th>
+                    <th>原幣總額</th>
+                    <th>憑證單號</th>
+                    <th>來源</th>
+                  </tr>
+                </thead>
+                <tbody id="pr-sel-source-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 中間按鈕 -->
+          <div class="paper-search-transfer">
+            <button class="btn btn-outline-primary" type="button" id="pr-sel-btn-add" title="加入選定">
+              <span class="material-symbols-outlined">keyboard_arrow_right</span>
+            </button>
+            <button class="btn btn-outline-primary" type="button" id="pr-sel-btn-add-all" title="全部加入">
+              <span class="material-symbols-outlined">keyboard_double_arrow_right</span>
+            </button>
+            <button class="btn btn-outline-secondary" type="button" id="pr-sel-btn-remove" title="移除選定">
+              <span class="material-symbols-outlined">keyboard_arrow_left</span>
+            </button>
+            <button class="btn btn-outline-secondary" type="button" id="pr-sel-btn-remove-all" title="全部移除">
+              <span class="material-symbols-outlined">keyboard_double_arrow_left</span>
+            </button>
+          </div>
+
+          <!-- 右側：選定審核之憑證 -->
+          <div class="paper-search-col paper-search-col-right">
+            <div class="paper-search-title-row">
+              <div class="paper-search-title">選定審核之憑證</div>
+              <div class="paper-search-count" id="pr-sel-target-count">0</div>
+            </div>
+            <div class="paper-search-scroll">
+              <table class="table table-sm table-striped mb-0">
+                <thead>
+                  <tr>
+                    <th>客廠代碼</th>
+                    <th>客廠名稱</th>
+                    <th>來源單號</th>
+                    <th>發票號碼</th>
+                    <th>憑證日期</th>
+                    <th>幣別</th>
+                    <th>匯率</th>
+                    <th>付款日期</th>
+                    <th>付款方式</th>
+                    <th>未稅總額</th>
+                    <th>稅額</th>
+                    <th>總金額</th>
+                    <th>原幣總額</th>
+                    <th>憑證單號</th>
+                    <th>來源</th>
+                  </tr>
+                </thead>
+                <tbody id="pr-sel-target-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部區域 -->
+      <div class="modal-footer">
+        <div class="ps-summary">
+          <div class="ps-summary-item">
+            <span class="ps-summary-label">合計總金額：</span>
+            <span class="ps-summary-value" id="pr-sel-total-amount">0</span>
+          </div>
+          <div class="ps-summary-item">
+            <span class="ps-summary-label">合計原幣總額：</span>
+            <span class="ps-summary-value" id="pr-sel-total-amount-og">0</span>
+          </div>
+        </div>
+        <button type="button" class="btn btn-success" id="pr-sel-btn-ok">確定</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+    window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+    const ITEM_ID = 'APRdPayRecvMain';
+    const DOM_PREFIX = 'pr-sel';
+
+    // 狀態管理
+    const state = {
+        paperNum: '',
+        paperType: 0,
+        useId: '',
+        companyId: '',
+        isIn: '',
+        sourceRows: [],
+        targetRows: [],
+        selectedSourceIndices: new Set(),
+        selectedTargetIndices: new Set(),
+        showDepart: false,
+        shipToMode: false,
+        existingDetailPaperNums: []  // 記錄開啟時已存在於資料庫的明細憑證號碼
+    };
+
+    // DOM 元素
+    const els = {};
+    const elIds = [
+        'modal', 'company', 'paper-date-b', 'paper-date-e', 'paper-num',
+        'sour-num', 'expect-date', 'money', 'isin', 'useid', 'emp', 'user',
+        'depart', 'btn-find', 'source-body', 'target-body',
+        'btn-add', 'btn-add-all', 'btn-remove', 'btn-remove-all',
+        'total-amount', 'total-amount-og', 'btn-ok',
+        'emp-field', 'user-field', 'user-label', 'depart-field',
+        'source-count', 'target-count'
+    ];
+
+    const readPaperNum = (ctx) => {
+        const v = (ctx?.paperNum || window._paperNum || '').toString().trim();
+        if (v) return v;
+        if (typeof window.getPaperNum === 'function') {
+            try { return (window.getPaperNum() || '').toString().trim(); } catch { /* ignore */ }
+        }
+        return '';
+    };
+
+    const withJwtHeaders = (init = {}) => {
+        const jwt = localStorage.getItem('jwtId');
+        const headers = Object.assign({}, init.headers || {});
+        if (jwt) headers['X-JWTID'] = jwt;
+        return { ...init, headers };
+    };
+
+    const notify = async (type, message) => {
+        if (window.Swal) {
+            const icon = type === 'error' ? 'error' : (type === 'success' ? 'success' : 'info');
+            await window.Swal.fire({ icon, title: message });
+            return;
+        }
+        alert(message);
+    };
+
+    const formatDate = (val) => {
+        if (!val) return '';
+        const d = new Date(val);
+        if (isNaN(d.getTime())) return '';
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
+    const formatNumber = (val) => {
+        if (val === null || val === undefined || val === '') return '0';
+        const n = parseFloat(val);
+        return isNaN(n) ? '0' : n.toLocaleString('zh-TW', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    };
+
+    const initElements = () => {
+        elIds.forEach(id => {
+            els[id] = document.getElementById(`${DOM_PREFIX}-${id}`);
+        });
+    };
+
+    // Modal 處理
+    let modal = null;
+    let manualBackdrop = null;
+
+    const forceShowModal = () => {
+        if (!els.modal) return;
+        els.modal.classList.add('show');
+        els.modal.style.display = 'block';
+        els.modal.style.zIndex = '1055';
+        els.modal.removeAttribute('aria-hidden');
+        els.modal.setAttribute('aria-modal', 'true');
+        if (!manualBackdrop) {
+            manualBackdrop = document.createElement('div');
+            manualBackdrop.className = 'modal-backdrop fade show';
+            document.body.appendChild(manualBackdrop);
+        }
+    };
+
+    const forceHideModal = () => {
+        if (!els.modal) return;
+        els.modal.classList.remove('show');
+        els.modal.style.display = 'none';
+        els.modal.setAttribute('aria-hidden', 'true');
+        els.modal.removeAttribute('aria-modal');
+        if (manualBackdrop) {
+            manualBackdrop.remove();
+            manualBackdrop = null;
+        }
+    };
+
+    const showModal = () => {
+        if (modal) {
+            modal.show();
+            if (!els.modal.classList.contains('show')) {
+                forceShowModal();
+            }
+            return;
+        }
+        forceShowModal();
+    };
+
+    const hideModal = () => {
+        if (modal) {
+            modal.hide();
+            return;
+        }
+        forceHideModal();
+    };
+
+    // 載入下拉選項
+    const loadOptions = async () => {
+        // 帳款型態
+        const isInResp = await fetch('/api/PRSelect/IsInOptions', withJwtHeaders());
+        if (isInResp.ok) {
+            const rows = await isInResp.json();
+            els.isin.innerHTML = '<option value=""></option>' + (rows || []).map(r =>
+                `<option value="${r.value}">${r.value} ${r.text}</option>`
+            ).join('');
+        }
+
+        // 公司別
+        const useIdResp = await fetch('/api/PRSelect/UseIdOptions', withJwtHeaders());
+        if (useIdResp.ok) {
+            const rows = await useIdResp.json();
+            els.useid.innerHTML = '<option value=""></option>' + (rows || []).map(r =>
+                `<option value="${r.value}">${r.value} ${r.text}</option>`
+            ).join('');
+        }
+
+        // 客廠名稱
+        const companyResp = await fetch('/api/PRSelect/CompanyOptions', withJwtHeaders());
+        if (companyResp.ok) {
+            const rows = await companyResp.json();
+            els.company.innerHTML = '<option value=""></option>' + (rows || []).map(r =>
+                `<option value="${r.value}">${r.value} ${r.text}</option>`
+            ).join('');
+        }
+
+        // 幣別
+        const moneyResp = await fetch('/api/PRSelect/MoneyOptions', withJwtHeaders());
+        if (moneyResp.ok) {
+            const rows = await moneyResp.json();
+            els.money.innerHTML = '<option value=""></option>' + (rows || []).map(r =>
+                `<option value="${r.value}">${r.text}</option>`
+            ).join('');
+        }
+
+        // 請購人
+        const empResp = await fetch('/api/PRSelect/EmpOptions', withJwtHeaders());
+        if (empResp.ok) {
+            const rows = await empResp.json();
+            els.emp.innerHTML = '<option value=""></option>' + (rows || []).map(r =>
+                `<option value="${r.value}">${r.value} ${r.text}</option>`
+            ).join('');
+        }
+
+        // 作業者
+        const userResp = await fetch('/api/PRSelect/UserOptions', withJwtHeaders());
+        if (userResp.ok) {
+            const rows = await userResp.json();
+            els.user.innerHTML = '<option value=""></option>' + (rows || []).map(r =>
+                `<option value="${r.value}">${r.value} ${r.text}</option>`
+            ).join('');
+        }
+
+        // 部門
+        const departResp = await fetch('/api/PRSelect/DepartOptions', withJwtHeaders());
+        if (departResp.ok) {
+            const rows = await departResp.json();
+            els.depart.innerHTML = '<option value=""></option>' + (rows || []).map(r =>
+                `<option value="${r.value}">${r.value} ${r.text}</option>`
+            ).join('');
+        }
+    };
+
+    // 載入主檔資料 (對應 btnGetParamsClick)
+    const loadMainData = async (paperNum) => {
+        const resp = await fetch(`/api/PRSelect/GetMainData?paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
+        if (!resp.ok) {
+            await notify('error', '載入主檔資料失敗');
+            return false;
+        }
+        const data = await resp.json();
+        if (!data.ok) {
+            if (data.error) await notify('warning', data.error);
+            return false;
+        }
+
+        state.paperType = data.paperType || 0;
+        state.useId = data.useId || '';
+        state.companyId = data.companyId || '';
+        state.isIn = data.isIn?.toString() || '';
+        state.showDepart = data.showDepart || false;
+        state.shipToMode = data.shipToMode || false;
+
+        // 設定預設值
+        if (state.companyId) els.company.value = state.companyId;
+        if (state.useId) {
+            els.useid.value = state.useId;
+        }
+        if (state.isIn) els.isin.value = state.isIn;
+        if (data.expectDate) els['expect-date'].value = formatDate(data.expectDate);
+        if (data.paperDate) els['paper-date-e'].value = formatDate(data.paperDate);
+
+        // 控制可見性
+        if (state.companyId !== 'A001') {
+            els['emp-field'].style.display = 'none';
+            els['user-field'].style.display = 'none';
+        } else {
+            els['emp-field'].style.display = '';
+            els['user-field'].style.display = '';
+        }
+
+        if (state.showDepart) {
+            els['depart-field'].style.display = '';
+            if (state.shipToMode && state.isIn === '0') {
+                els['user-label'].textContent = '出貨欄頭';
+                // 載入出貨欄頭選項
+                const shipToResp = await fetch(`/api/PRSelect/ShipToOptions?companyId=${encodeURIComponent(state.companyId)}`, withJwtHeaders());
+                if (shipToResp.ok) {
+                    const rows = await shipToResp.json();
+                    els.user.innerHTML = '<option value=""></option>' + (rows || []).map(r =>
+                        `<option value="${r.value}">${r.text}</option>`
+                    ).join('');
+                }
+            }
+        } else {
+            els['depart-field'].style.display = 'none';
+        }
+
+        // IsIn=1 時隱藏來源單號欄位 (對應 Delphi 的 SourceColumns[2].Width:=0)
+        // 此處用 CSS 控制
+
+        return true;
+    };
+
+    // 載入已選取的資料 (對應 qrySelected)
+    // 只記錄已存在的明細憑證號碼用於排除，不顯示在畫面上
+    const loadSelectedData = async (paperNum) => {
+        const resp = await fetch(`/api/PRSelect/GetSelected?paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data.ok && Array.isArray(data.rows)) {
+            // 只記錄已存在於資料庫的明細憑證號碼，搜尋時需排除這些
+            // 不顯示在右側，一開始畫面左右都是空的
+            state.existingDetailPaperNums = data.rows.map(r => r.PaperNum);
+        }
+    };
+
+    // 查詢可選憑證 (對應 btFindClick)
+    const doSearch = async () => {
+        const condition = {
+            isIn: els.isin.value,
+            useId: els.useid.value,
+            companyId: els.company.value,
+            paperDateB: els['paper-date-b'].value,
+            paperDateE: els['paper-date-e'].value,
+            expectDate: els['expect-date'].value,
+            paperNum: els['paper-num'].value,
+            sourNum: els['sour-num'].value,
+            moneyCode: els.money.value,
+            pettyEmpId: els.emp.value,
+            pettyUserId: els.user.value,
+            departId: els.depart.value,
+            paperType: state.paperType,
+            mainPaperNum: state.paperNum,
+            shipToMode: state.shipToMode,
+            excludePaperNums: state.existingDetailPaperNums  // 排除已存在明細的憑證
+        };
+
+        // 按下搜尋後，清空左側和右側顯示
+        state.sourceRows = [];
+        state.targetRows = [];
+        state.selectedSourceIndices.clear();
+        state.selectedTargetIndices.clear();
+        renderSourceTable();
+        renderTargetTable();
+        updateSummary();
+
+        const resp = await fetch('/api/PRSelect/Search', withJwtHeaders({
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(condition)
+        }));
+
+        if (!resp.ok) {
+            await notify('error', '查詢失敗');
+            return;
+        }
+
+        const data = await resp.json();
+        if (!data.ok) {
+            await notify('error', data.error || '查詢失敗');
+            return;
+        }
+
+        state.sourceRows = data.rows || [];
+
+        renderSourceTable();
+        updateSummary();
+    };
+
+    // 更新表格行樣式（不重建 DOM）
+    const updateRowStyles = (bodyElement, selectedIndices) => {
+        if (!bodyElement) return;
+        const rows = bodyElement.querySelectorAll('tr');
+        rows.forEach((tr, idx) => {
+            if (selectedIndices.has(idx)) {
+                tr.classList.add('selected');
+            } else {
+                tr.classList.remove('selected');
+            }
+        });
+    };
+
+    // 通用的表格渲染函數
+    const renderTable = (bodyElement, dataRows, selectedIndices) => {
+        if (!bodyElement) return;
+
+        bodyElement.innerHTML = dataRows.map((r, idx) => `
+            <tr data-index="${idx}" class="${selectedIndices.has(idx) ? 'selected' : ''}">
+                <td>${r.CompanyId || ''}</td>
+                <td>${r.ShortName || ''}</td>
+                <td>${r.OutNum || ''}</td>
+                <td>${r.InvoiceNum || ''}</td>
+                <td>${formatDate(r.PaperDate)}</td>
+                <td>${r.MoneyName || ''}</td>
+                <td>${r.RateToNT || ''}</td>
+                <td>${formatDate(r.ExpectDate)}</td>
+                <td>${r.PayWayName || ''}</td>
+                <td style="text-align:right;">${formatNumber(r.SubTotal)}</td>
+                <td style="text-align:right;">${formatNumber(r.Tax)}</td>
+                <td style="text-align:right;">${formatNumber(r.TotalAmount)}</td>
+                <td style="text-align:right;">${formatNumber(r.TotalAmountOg)}</td>
+                <td>${r.PaperNum || ''}</td>
+                <td>${r.PaperName || ''}</td>
+            </tr>
+        `).join('');
+    };
+
+    // 渲染來源表格
+    const renderSourceTable = () => {
+        renderTable(els['source-body'], state.sourceRows, state.selectedSourceIndices);
+    };
+
+    // 渲染目標表格
+    const renderTargetTable = () => {
+        renderTable(els['target-body'], state.targetRows, state.selectedTargetIndices);
+    };
+
+    // 更新合計與計數
+    const updateSummary = () => {
+        let total = 0;
+        let totalOg = 0;
+        state.targetRows.forEach(r => {
+            total += parseFloat(r.TotalAmount) || 0;
+            totalOg += parseFloat(r.TotalAmountOg) || 0;
+        });
+        els['total-amount'].textContent = formatNumber(total);
+        els['total-amount-og'].textContent = formatNumber(totalOg);
+        // 更新計數顯示
+        if (els['source-count']) els['source-count'].textContent = state.sourceRows.length;
+        if (els['target-count']) els['target-count'].textContent = state.targetRows.length;
+    };
+
+    // 加入選定
+    const addSelected = () => {
+        const toAdd = [];
+        state.selectedSourceIndices.forEach(idx => {
+            const row = state.sourceRows[idx];
+            if (row && !state.targetRows.some(t => t.PaperNum === row.PaperNum)) {
+                toAdd.push({ ...row });
+            }
+        });
+        state.targetRows.push(...toAdd);
+
+        // 從來源移除已加入的項目
+        const remaining = state.sourceRows.filter((_, idx) => !state.selectedSourceIndices.has(idx));
+        state.sourceRows = remaining;
+        state.selectedSourceIndices.clear();
+
+        renderSourceTable();
+        renderTargetTable();
+        updateSummary();
+    };
+
+    // 全部加入
+    const addAll = () => {
+        state.sourceRows.forEach(row => {
+            if (!state.targetRows.some(t => t.PaperNum === row.PaperNum)) {
+                state.targetRows.push({ ...row });
+            }
+        });
+        state.sourceRows = [];
+        state.selectedSourceIndices.clear();
+
+        renderSourceTable();
+        renderTargetTable();
+        updateSummary();
+    };
+
+    // 移除選定
+    const removeSelected = () => {
+        const toRemove = [];
+        state.selectedTargetIndices.forEach(idx => {
+            const row = state.targetRows[idx];
+            if (row) toRemove.push({ ...row });
+        });
+
+        // 從目標移除
+        const remaining = state.targetRows.filter((_, idx) => !state.selectedTargetIndices.has(idx));
+        state.targetRows = remaining;
+        state.selectedTargetIndices.clear();
+
+        // 加回來源
+        state.sourceRows.push(...toRemove);
+
+        renderSourceTable();
+        renderTargetTable();
+        updateSummary();
+    };
+
+    // 全部移除
+    const removeAll = () => {
+        state.sourceRows.push(...state.targetRows);
+        state.targetRows = [];
+        state.selectedTargetIndices.clear();
+
+        renderSourceTable();
+        renderTargetTable();
+        updateSummary();
+    };
+    
+    // 確定按鈕 (對應 btnOKClick)
+    const doConfirm = async () => {
+        if (state.targetRows.length === 0) {
+            await notify('info', '請選擇要加入的憑證');
+            return;
+        }
+
+        try {
+            const resp = await fetch('/api/PRSelect/Confirm', withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    paperNum: state.paperNum,
+                    rows: state.targetRows.map(r => r.PaperNum)
+                })
+            }));
+
+            // 動態載入資料
+            const raw = await resp.text();
+            let data; try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
+            if (!resp.ok || !data.ok) {
+                await Swal.fire({ icon: 'error', title: '匯入失敗', text: data.error || `HTTP ${resp.status}` });
+                return;
+            }
+
+            // 關閉 modal
+            if (window.bootstrap && els.modal) {
+                try { bootstrap.Modal.getOrCreateInstance(els.modal).hide(); } catch {}
+            }
+
+            // 刷新單頭和單身的資料(使用頁面中已定義的函數)
+            if (typeof window.__refreshHeaderData === "function") {
+                try { await window.__refreshHeaderData(); } catch {}
+            }
+            if (typeof window.__refreshMultiTab === "function") {
+                try { await window.__refreshMultiTab(); } catch {}
+            }
+        } catch (err) {
+            console.error('Confirm error:', err);
+            await Swal.fire({ icon: 'error', title: '執行錯誤', text: err.message });
+        }
+    };
+
+    // 清除表單
+    const clearForm = () => {
+        els.company.value = '';
+        els['paper-date-b'].value = '';
+        els['paper-date-e'].value = '';
+        els['paper-num'].value = '';
+        els['sour-num'].value = '';
+        els['expect-date'].value = '';
+        els.money.value = '';
+        els.emp.value = '';
+        els.user.value = '';
+        els.depart.value = '';
+
+        state.sourceRows = [];
+        state.targetRows = [];
+        state.selectedSourceIndices.clear();
+        state.selectedTargetIndices.clear();
+
+        renderSourceTable();
+        renderTargetTable();
+        updateSummary();
+    };
+
+    // 事件是否已綁定的標記
+    let eventsBound = false;
+
+    // 開啟對話框
+    const openPRSelect = async (ctx) => {
+        // 確保 DOM 元素與事件已初始化
+        if (!els.modal || !eventsBound) {
+            initEvents();
+        }
+
+        const paperNum = readPaperNum(ctx);
+        if (!paperNum) {
+            return Swal.fire({ icon: 'info', title: '沒有單號' });
+        }
+
+        state.paperNum = paperNum;
+        clearForm();
+
+        try {
+            await loadOptions();
+            const success = await loadMainData(paperNum);
+            if (!success) {
+                return;
+            }
+            await loadSelectedData(paperNum);
+            showModal();
+        } catch (err) {
+            console.error('openPRSelect error:', err);
+            await Swal.fire({ icon: 'error', title: '載入失敗', text: err.message });
+        }
+    };
+
+    // 綁定表格事件
+    const bindTableEvents = () => {
+        if (!els['source-body'] || !els['target-body']) return;
+
+        // 表格點擊選擇事件 (來源)
+        els['source-body'].addEventListener('click', (e) => {
+            const tr = e.target.closest('tr');
+            if (!tr) return;
+            const idx = parseInt(tr.dataset.index, 10);
+            if (isNaN(idx)) return;
+
+            if (e.ctrlKey || e.metaKey) {
+                if (state.selectedSourceIndices.has(idx)) {
+                    state.selectedSourceIndices.delete(idx);
+                } else {
+                    state.selectedSourceIndices.add(idx);
+                }
+            } else if (e.shiftKey && state.selectedSourceIndices.size > 0) {
+                const lastIdx = Math.max(...state.selectedSourceIndices);
+                const minIdx = Math.min(idx, lastIdx);
+                const maxIdx = Math.max(idx, lastIdx);
+                for (let i = minIdx; i <= maxIdx; i++) {
+                    state.selectedSourceIndices.add(i);
+                }
+            } else {
+                state.selectedSourceIndices.clear();
+                state.selectedSourceIndices.add(idx);
+            }
+            // 只更新樣式，不重建 DOM
+            updateRowStyles(els['source-body'], state.selectedSourceIndices);
+        });
+
+        // 表格點擊選擇事件 (目標)
+        els['target-body'].addEventListener('click', (e) => {
+            const tr = e.target.closest('tr');
+            if (!tr) return;
+            const idx = parseInt(tr.dataset.index, 10);
+            if (isNaN(idx)) return;
+
+            if (e.ctrlKey || e.metaKey) {
+                if (state.selectedTargetIndices.has(idx)) {
+                    state.selectedTargetIndices.delete(idx);
+                } else {
+                    state.selectedTargetIndices.add(idx);
+                }
+            } else if (e.shiftKey && state.selectedTargetIndices.size > 0) {
+                const lastIdx = Math.max(...state.selectedTargetIndices);
+                const minIdx = Math.min(idx, lastIdx);
+                const maxIdx = Math.max(idx, lastIdx);
+                for (let i = minIdx; i <= maxIdx; i++) {
+                    state.selectedTargetIndices.add(i);
+                }
+            } else {
+                state.selectedTargetIndices.clear();
+                state.selectedTargetIndices.add(idx);
+            }
+            // 只更新樣式，不重建 DOM
+            updateRowStyles(els['target-body'], state.selectedTargetIndices);
+        });
+
+        // 雙擊快速加入/移除
+        els['source-body'].addEventListener('dblclick', (e) => {
+            const tr = e.target.closest('tr');
+            if (!tr) return;
+            const idx = parseInt(tr.dataset.index, 10);
+            if (isNaN(idx)) return;
+            state.selectedSourceIndices.clear();
+            state.selectedSourceIndices.add(idx);
+            addSelected();
+        });
+
+        els['target-body'].addEventListener('dblclick', (e) => {
+            const tr = e.target.closest('tr');
+            if (!tr) return;
+            const idx = parseInt(tr.dataset.index, 10);
+            if (isNaN(idx)) return;
+            state.selectedTargetIndices.clear();
+            state.selectedTargetIndices.add(idx);
+            removeSelected();
+        });
+    };
+
+    // 初始化事件
+    const initEvents = () => {
+        initElements();
+
+        if (!els.modal) return;
+        if (eventsBound) return;
+        eventsBound = true;
+
+        // Modal 初始化
+        if (window.bootstrap?.Modal) {
+            modal = window.bootstrap.Modal.getOrCreateInstance(els.modal, { backdrop: 'static' });
+        }
+
+        // 拖曳功能
+        const headerEl = els.modal.querySelector('.modal-header');
+        const dialogEl = els.modal.querySelector('.modal-dialog');
+        if (headerEl && dialogEl) {
+            let dragging = false;
+            let startX = 0, startY = 0, origX = 0, origY = 0;
+
+            headerEl.addEventListener('mousedown', (e) => {
+                dragging = true;
+                const rect = dialogEl.getBoundingClientRect();
+                startX = e.clientX;
+                startY = e.clientY;
+                origX = rect.left;
+                origY = rect.top;
+                dialogEl.style.position = 'fixed';
+                dialogEl.style.left = `${origX}px`;
+                dialogEl.style.top = `${origY}px`;
+                dialogEl.style.transform = 'none';
+                dialogEl.style.margin = '0';
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!dragging) return;
+                dialogEl.style.left = `${origX + e.clientX - startX}px`;
+                dialogEl.style.top = `${origY + e.clientY - startY}px`;
+            });
+
+            document.addEventListener('mouseup', () => { dragging = false; });
+        }
+
+        // 按鈕事件
+        els['btn-find']?.addEventListener('click', doSearch);
+        els['btn-add']?.addEventListener('click', addSelected);
+        els['btn-add-all']?.addEventListener('click', addAll);
+        els['btn-remove']?.addEventListener('click', removeSelected);
+        els['btn-remove-all']?.addEventListener('click', removeAll);
+        els['btn-ok']?.addEventListener('click', doConfirm);
+
+        // 綁定表格事件
+        bindTableEvents();
+
+        // Modal 關閉事件
+        els.modal.addEventListener('hidden.bs.modal', () => {
+            forceHideModal();
+        });
+        els.modal.querySelectorAll('[data-bs-dismiss="modal"], .btn-close').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                if (!modal) forceHideModal();
+            });
+        });
+    };
+
+    // DOM 載入後初始化 (支援動態載入)
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initEvents);
+    } else {
+        // DOM 已經載入完成，直接執行初始化
+        initEvents();
+    }
+
+    // 註冊按鈕處理函式
+    window.ActionRailCustomHandlers['PR000003'] = {
+        btnC1: openPRSelect  // 可立帳之憑證選擇
+    };
+
+    // 也可透過全域函式呼叫
+    window.PRSelectHandler = { open: openPRSelect };
+})();
+</script>
