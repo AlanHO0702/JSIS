@@ -4,7 +4,7 @@ using System.Text.Json;
 
 public static class FormatHelper
 {
-    public static string FormatValue(object rawValue, string dataType, string formatStr)
+    public static string FormatValue(object? rawValue, string? dataType, string? formatStr)
     {
         if (rawValue == null) return "";
 
@@ -141,7 +141,7 @@ public static class FormatHelper
         return formatted.Substring(0, end + 1);
     }
 
-    private static string NormalizeDataType(string dataType, object rawValue)
+    private static string NormalizeDataType(string? dataType, object rawValue)
     {
         // 1) 先依 rawValue 型別推斷
         if (rawValue is DateTime) return "date";

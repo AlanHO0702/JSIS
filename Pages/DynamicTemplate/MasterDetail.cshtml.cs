@@ -99,7 +99,13 @@ SELECT ItemId, SerialNum, ButtonName,
        CustHint,
        {(schema.hasHintE ? "CustHintE" : "CAST('' AS nvarchar(1)) AS CustHintE")},
        OCXName, CoClassName, SpName,
-       bVisible, {schema.chkCol} AS ChkCanUpdate, bNeedNum, DesignType
+       {(schema.hasSearchTemplate ? "SearchTemplate" : "CAST('' AS nvarchar(1)) AS SearchTemplate")},
+       {(schema.hasDialogCaption ? "DialogCaption" : "CAST('' AS nvarchar(1)) AS DialogCaption")},
+       bVisible, {schema.chkCol} AS ChkCanUpdate, bNeedNum, DesignType,
+       {(schema.hasNeedInEdit ? "bNeedInEdit" : "0 AS bNeedInEdit")},
+       {(schema.hasMultiSelectDD ? "MultiSelectDD" : "CAST('' AS nvarchar(1)) AS MultiSelectDD")},
+       {(schema.hasAllowSelCount ? "AllowSelCount" : "0 AS AllowSelCount")},
+       {(schema.hasReplaceExists ? "ReplaceExists" : "0 AS ReplaceExists")}
   FROM CURdOCXItemCustButton WITH (NOLOCK)
  WHERE ItemId = @itemId
  ORDER BY SerialNum, ButtonName;";
@@ -122,17 +128,23 @@ SELECT ItemId, SerialNum, ButtonName,
                     OCXName = rd["OCXName"]?.ToString() ?? string.Empty,
                     CoClassName = rd["CoClassName"]?.ToString() ?? string.Empty,
                     SpName = rd["SpName"]?.ToString() ?? string.Empty,
+                    SearchTemplate = rd["SearchTemplate"]?.ToString() ?? string.Empty,
+                    DialogCaption = rd["DialogCaption"]?.ToString() ?? string.Empty,
                     bVisible = TryToInt(rd["bVisible"]),
                     ChkCanUpdate = TryToInt(rd["ChkCanUpdate"]),
                     bNeedNum = TryToInt(rd["bNeedNum"]),
-                    DesignType = TryToInt(rd["DesignType"])
+                    DesignType = TryToInt(rd["DesignType"]),
+                    bNeedInEdit = TryToInt(rd["bNeedInEdit"]),
+                    MultiSelectDD = rd["MultiSelectDD"]?.ToString() ?? string.Empty,
+                    AllowSelCount = TryToInt(rd["AllowSelCount"]),
+                    ReplaceExists = TryToInt(rd["ReplaceExists"])
                 });
             }
 
             return list;
         }
 
-        private async Task<(bool hasCaptionE, bool hasHintE, string chkCol)> DetectButtonSchemaAsync(SqlConnection conn)
+        private async Task<(bool hasCaptionE, bool hasHintE, bool hasSearchTemplate, bool hasDialogCaption, bool hasNeedInEdit, bool hasMultiSelectDD, bool hasAllowSelCount, bool hasReplaceExists, string chkCol)> DetectButtonSchemaAsync(SqlConnection conn)
         {
             var cols = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
             const string sql = "SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CURdOCXItemCustButton')";
@@ -146,10 +158,16 @@ SELECT ItemId, SerialNum, ButtonName,
 
             var hasCapE = cols.Contains("CustCaptionE");
             var hasHintE = cols.Contains("CustHintE");
+            var hasSearchTemplate = cols.Contains("SearchTemplate");
+            var hasDialogCaption = cols.Contains("DialogCaption");
+            var hasNeedInEdit = cols.Contains("bNeedInEdit");
+            var hasMultiSelectDD = cols.Contains("MultiSelectDD");
+            var hasAllowSelCount = cols.Contains("AllowSelCount");
+            var hasReplaceExists = cols.Contains("ReplaceExists");
             var chkCol = cols.Contains("ChkCanUpdate") ? "ChkCanUpdate"
                        : cols.Contains("ChkCanbUpdate") ? "ChkCanbUpdate"
                        : "ChkCanUpdate";
-            return (hasCapE, hasHintE, chkCol);
+            return (hasCapE, hasHintE, hasSearchTemplate, hasDialogCaption, hasNeedInEdit, hasMultiSelectDD, hasAllowSelCount, hasReplaceExists, chkCol);
         }
 
         private static HtmlString BuildCustomButtonsHtml(IEnumerable<CustomButtonRow> rows)
@@ -165,11 +183,18 @@ SELECT ItemId, SerialNum, ButtonName,
                 var caption = string.IsNullOrWhiteSpace(b.CustCaption) ? b.ButtonName : b.CustCaption;
                 var hint = b.CustHint ?? string.Empty;
 
-                sb.Append("<button type='button' class='btn btn-outline-secondary btn-sm me-1' data-custom-btn='1'");
+                sb.Append("<button type='button' class='md-custom-btn' data-custom-btn='1'");
                 sb.Append(" data-button-name='").Append(System.Net.WebUtility.HtmlEncode(b.ButtonName)).Append('\'');
                 sb.Append(" data-item-id='").Append(System.Net.WebUtility.HtmlEncode(b.ItemId ?? string.Empty)).Append('\'');
+                sb.Append(" data-search-template='").Append(System.Net.WebUtility.HtmlEncode(b.SearchTemplate ?? string.Empty)).Append('\'');
+                sb.Append(" data-design-type='").Append(System.Net.WebUtility.HtmlEncode(b.DesignType?.ToString() ?? string.Empty)).Append('\'');
+                sb.Append(" data-dialog-caption='").Append(System.Net.WebUtility.HtmlEncode(b.DialogCaption ?? string.Empty)).Append('\'');
+                sb.Append(" data-b-need-in-edit='").Append(System.Net.WebUtility.HtmlEncode(b.bNeedInEdit?.ToString() ?? "0")).Append('\'');
+                sb.Append(" data-multi-select-dd='").Append(System.Net.WebUtility.HtmlEncode(b.MultiSelectDD ?? string.Empty)).Append('\'');
+                sb.Append(" data-allow-sel-count='").Append(System.Net.WebUtility.HtmlEncode(b.AllowSelCount?.ToString() ?? "0")).Append('\'');
+                sb.Append(" data-replace-exists='").Append(System.Net.WebUtility.HtmlEncode(b.ReplaceExists?.ToString() ?? "0")).Append('\'');
                 sb.Append(" title='").Append(System.Net.WebUtility.HtmlEncode(hint)).Append("'>");
-                sb.Append("<i class='bi bi-gear me-1'></i>").Append(System.Net.WebUtility.HtmlEncode(caption));
+                sb.Append(System.Net.WebUtility.HtmlEncode(caption));
                 sb.Append("</button>");
             }
 
@@ -194,10 +219,16 @@ SELECT ItemId, SerialNum, ButtonName,
             public string OCXName { get; set; } = string.Empty;
             public string CoClassName { get; set; } = string.Empty;
             public string SpName { get; set; } = string.Empty;
+            public string SearchTemplate { get; set; } = string.Empty;
+            public string DialogCaption { get; set; } = string.Empty;
             public int? bVisible { get; set; }
             public int? ChkCanUpdate { get; set; }
             public int? bNeedNum { get; set; }
             public int? DesignType { get; set; }
+            public int? bNeedInEdit { get; set; }
+            public string MultiSelectDD { get; set; } = string.Empty;
+            public int? AllowSelCount { get; set; }
+            public int? ReplaceExists { get; set; }
         }
     }
 }

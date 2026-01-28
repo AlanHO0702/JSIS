@@ -403,7 +403,7 @@ public class OrderHeaderApiController : ControllerBase
             }
 
             // 回傳最新資料
-            var latestMain = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            var latestMain = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             using (var cmd = new SqlCommand(
                 $"SELECT * FROM [{headerTable}] WHERE [{headerKey}]=@__key", conn, tran))
             {
@@ -416,7 +416,7 @@ public class OrderHeaderApiController : ControllerBase
                 }
             }
 
-            var latestSubs = new List<Dictionary<string, object>>();
+            var latestSubs = new List<Dictionary<string, object?>>();
             if (!string.IsNullOrWhiteSpace(detailTable) && detailMeta != null)
             {
                 using var cmd = new SqlCommand(
@@ -426,7 +426,7 @@ public class OrderHeaderApiController : ControllerBase
                 using var rd = await cmd.ExecuteReaderAsync();
                 while (await rd.ReadAsync())
                 {
-                    var row = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                    var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
                     for (int i = 0; i < rd.FieldCount; i++)
                         row[rd.GetName(i)] = rd.IsDBNull(i) ? null : rd.GetValue(i);
                     latestSubs.Add(row);
@@ -444,7 +444,7 @@ public class OrderHeaderApiController : ControllerBase
     }
 
     // ===== 參數型別綁定（保險再轉一次） =====
-    private SqlParameter MakeTypedParam(string name, object value, string dbType)
+    private SqlParameter MakeTypedParam(string name, object? value, string dbType)
     {
         dbType = (dbType ?? "").ToLowerInvariant();
 
@@ -477,7 +477,7 @@ public class OrderHeaderApiController : ControllerBase
 
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
-    private object ConvertJsonToDbType(object newVal, string dbType)
+    private object? ConvertJsonToDbType(object? newVal, string dbType)
     {
         if (newVal == null) return null;
         dbType = (dbType ?? "").ToLowerInvariant();
@@ -485,7 +485,7 @@ public class OrderHeaderApiController : ControllerBase
         if (newVal is JsonElement je)
         {
             if (je.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return null;
-            string s = je.ValueKind switch
+            string? s = je.ValueKind switch
             {
                 JsonValueKind.String => je.GetString(),
                 JsonValueKind.Number => je.ToString(),
@@ -507,7 +507,7 @@ public class OrderHeaderApiController : ControllerBase
         return dbType is "char" or "nchar" or "varchar" or "nvarchar" or "text" or "ntext";
     }
 
-    private object ParseStringForDbType(string s, string dbType)
+    private object? ParseStringForDbType(string? s, string dbType)
     {
         if (string.IsNullOrWhiteSpace(s))
             return IsStringDbType(dbType) ? "" : null;
@@ -803,7 +803,7 @@ public class OrderHeaderApiController : ControllerBase
                 if (cols.Contains(col, StringComparer.OrdinalIgnoreCase)) continue;
                 if (!defaults.ContainsKey(col) && nullable[col]) continue;
 
-                object val = null;
+                object? val = null;
 
                 // 1️⃣ 優先使用自訂預設表中的設定值
                 if (defaults.TryGetValue(col, out var preset))

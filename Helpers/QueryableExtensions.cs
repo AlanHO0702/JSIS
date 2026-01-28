@@ -11,6 +11,8 @@ namespace PcbErpApi.Helpers // 你的 namespace
             var param = Expression.Parameter(typeof(T));
             var property = Expression.Property(param, propName);
             var method = typeof(string).GetMethod("Contains", new[] { typeof(string) });
+            if (method == null)
+                throw new InvalidOperationException("string.Contains(string) method not found.");
             var valueExpr = Expression.Constant(value, typeof(string));
             var body = Expression.Call(property, method, valueExpr);
             var lambda = Expression.Lambda<Func<T, bool>>(body, param);

@@ -1,9 +1,12 @@
-using ClosedXML.Excel;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using System.Data;
+using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Linq;
+using NPOI.HSSF.UserModel;
+using NPOI.SS.UserModel;
+using NPOI.XSSF.UserModel;
 
 [ApiController]
 [Route("api/[controller]")]
@@ -44,23 +47,60 @@ public class ImportXlsController : ControllerBase
         if (fields.Count == 0)
             return BadRequest(new { ok = false, error = "Import field setup is empty." });
 
-        using var stream = file.OpenReadStream();
-        using var workbook = new XLWorkbook(stream);
-        var sheet = workbook.Worksheets.FirstOrDefault();
+        using var ms = new MemoryStream();
+        await file.CopyToAsync(ms);
+        ms.Position = 0;
+
+        var fileName = file.FileName ?? string.Empty;
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(ext) && ext != ".xls" && ext != ".xlsx")
+            return BadRequest(new { ok = false, error = "Only .xls or .xlsx is supported." });
+
+        IWorkbook? workbook = null;
+        try
+        {
+            if (ext == ".xls")
+            {
+                workbook = new HSSFWorkbook(ms);
+            }
+            else if (ext == ".xlsx")
+            {
+                workbook = new XSSFWorkbook(ms);
+            }
+            else
+            {
+                try
+                {
+                    workbook = new XSSFWorkbook(ms);
+                }
+                catch
+                {
+                    ms.Position = 0;
+                    workbook = new HSSFWorkbook(ms);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { ok = false, error = $"Invalid Excel file. {ex.Message}" });
+        }
+
+        var sheet = workbook.NumberOfSheets > 0 ? workbook.GetSheetAt(0) : null;
         if (sheet == null)
             return BadRequest(new { ok = false, error = "Excel has no worksheet." });
 
-        var headerRow = sheet.FirstRowUsed();
+        var headerRow = GetFirstNonEmptyRow(sheet);
         if (headerRow == null)
             return BadRequest(new { ok = false, error = "Excel has no header row." });
 
-        var headerCells = headerRow.CellsUsed();
+        var headerCells = GetHeaderCells(headerRow);
         var columnMap = BuildColumnMap(headerCells, fields);
         if (columnMap.Count == 0)
             return BadRequest(new { ok = false, error = "No matching import columns." });
 
-        var lastRowNumber = sheet.LastRowUsed()?.RowNumber() ?? headerRow.RowNumber();
-        if (lastRowNumber <= headerRow.RowNumber())
+        var headerRowIndex = headerRow.RowNum;
+        var lastRowIndex = sheet.LastRowNum;
+        if (lastRowIndex <= headerRowIndex)
             return BadRequest(new { ok = false, error = "No data rows to import." });
 
         var insertColumns = columnMap.Select(m => m.FieldName).ToList();
@@ -72,9 +112,9 @@ public class ImportXlsController : ControllerBase
         await using var tx = await conn.BeginTransactionAsync();
         try
         {
-            for (var r = headerRow.RowNumber() + 1; r <= lastRowNumber; r++)
+            for (var r = headerRowIndex + 1; r <= lastRowIndex; r++)
             {
-                var row = sheet.Row(r);
+                var row = sheet.GetRow(r);
                 if (row == null) continue;
 
                 var values = new object?[columnMap.Count];
@@ -82,7 +122,7 @@ public class ImportXlsController : ControllerBase
 
                 for (var i = 0; i < columnMap.Count; i++)
                 {
-                    var cell = row.Cell(columnMap[i].ColumnNumber);
+                    var cell = row.GetCell(columnMap[i].ColumnIndex);
                     var value = ConvertCellValue(cell);
                     values[i] = value ?? DBNull.Value;
                     if (value != null && value != DBNull.Value && value.ToString() != string.Empty)
@@ -111,7 +151,7 @@ public class ImportXlsController : ControllerBase
     }
 
     [HttpGet("PriceTable/Template")]
-    public async Task<IActionResult> DownloadTemplateAsync([FromQuery] string? itemId)
+    public async Task<IActionResult> DownloadTemplateAsync([FromQuery] string? itemId, [FromQuery] string? format = null)
     {
         var safeItemId = string.IsNullOrWhiteSpace(itemId) ? "SPO00040" : itemId.Trim();
 
@@ -127,21 +167,33 @@ public class ImportXlsController : ControllerBase
         if (fields.Count == 0)
             return BadRequest("Import field setup is empty.");
 
-        using var workbook = new XLWorkbook();
-        var sheet = workbook.Worksheets.Add("ImportTemplate");
+        var fmt = (format ?? string.Empty).Trim().ToLowerInvariant();
+        if (!string.IsNullOrEmpty(fmt) && fmt != "xls" && fmt != "xlsx")
+            return BadRequest("Only xls or xlsx is supported.");
+
+        var useXls = fmt == "xls";
+        IWorkbook workbook = useXls ? new HSSFWorkbook() : new XSSFWorkbook();
+        var sheet = workbook.CreateSheet("ImportTemplate");
+        var headerRow = sheet.CreateRow(0);
+        var headerStyle = CreateHeaderStyle(workbook);
         for (var i = 0; i < fields.Count; i++)
         {
             var header = string.IsNullOrWhiteSpace(fields[i].DisplayLabel) ? fields[i].FieldName : fields[i].DisplayLabel;
-            sheet.Cell(1, i + 1).Value = header;
+            var cell = headerRow.CreateCell(i);
+            cell.SetCellValue(header);
+            if (headerStyle != null) cell.CellStyle = headerStyle;
         }
-        sheet.Row(1).Style.Font.Bold = true;
 
         await using var ms = new MemoryStream();
-        workbook.SaveAs(ms);
+        workbook.Write(ms);
         ms.Position = 0;
 
-        var fileName = $"{safeItemId}_ImportTemplate.xlsx";
-        return File(ms.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+        var fileExt = useXls ? "xls" : "xlsx";
+        var contentType = useXls
+            ? "application/vnd.ms-excel"
+            : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        var fileName = $"{safeItemId}_ImportTemplate.{fileExt}";
+        return File(ms.ToArray(), contentType, fileName);
     }
     public sealed class ImportPriceTableRequest
     {
@@ -150,9 +202,10 @@ public class ImportXlsController : ControllerBase
     }
 
     private sealed record ImportField(string FieldName, string DisplayLabel);
-    private sealed record ColumnMap(int ColumnNumber, string FieldName);
+    private sealed record ColumnHeader(int ColumnIndex, string Header);
+    private sealed record ColumnMap(int ColumnIndex, string FieldName);
 
-    private static List<ColumnMap> BuildColumnMap(IEnumerable<IXLCell> headerCells, List<ImportField> fields)
+    private static List<ColumnMap> BuildColumnMap(IEnumerable<ColumnHeader> headerCells, List<ImportField> fields)
     {
         var fieldByName = fields.ToDictionary(f => f.FieldName.Trim(), f => f.FieldName, StringComparer.OrdinalIgnoreCase);
         var fieldByLabel = fields
@@ -162,7 +215,7 @@ public class ImportXlsController : ControllerBase
         var map = new List<ColumnMap>();
         foreach (var cell in headerCells)
         {
-            var header = cell.GetString().Trim();
+            var header = cell.Header.Trim();
             if (string.IsNullOrWhiteSpace(header)) continue;
 
             if (!fieldByName.TryGetValue(header, out var fieldName) &&
@@ -171,23 +224,81 @@ public class ImportXlsController : ControllerBase
                 continue;
             }
 
-            map.Add(new ColumnMap(cell.Address.ColumnNumber, fieldName));
+            map.Add(new ColumnMap(cell.ColumnIndex, fieldName));
         }
 
         return map;
     }
 
-    private static object? ConvertCellValue(IXLCell cell)
+    private static object? ConvertCellValue(ICell? cell)
     {
-        if (cell == null || cell.IsEmpty()) return null;
+        if (cell == null) return null;
+        var type = cell.CellType == CellType.Formula ? cell.CachedFormulaResultType : cell.CellType;
 
-        return cell.DataType switch
+        return type switch
         {
-            XLDataType.Number => cell.GetValue<decimal>(),
-            XLDataType.DateTime => cell.GetDateTime(),
-            XLDataType.Boolean => cell.GetBoolean(),
-            _ => cell.GetString()
+            CellType.Numeric => DateUtil.IsCellDateFormatted(cell)
+                ? cell.DateCellValue
+                : Convert.ToDecimal(cell.NumericCellValue),
+            CellType.Boolean => cell.BooleanCellValue,
+            CellType.String => cell.StringCellValue,
+            CellType.Blank => null,
+            _ => cell.ToString()
         };
+    }
+
+    private static IRow? GetFirstNonEmptyRow(ISheet sheet)
+    {
+        for (var i = sheet.FirstRowNum; i <= sheet.LastRowNum; i++)
+        {
+            var row = sheet.GetRow(i);
+            if (row == null) continue;
+            if (RowHasValue(row)) return row;
+        }
+        return null;
+    }
+
+    private static bool RowHasValue(IRow row)
+    {
+        var start = row.FirstCellNum;
+        var end = row.LastCellNum;
+        if (start < 0 || end <= 0) return false;
+        for (var c = start; c < end; c++)
+        {
+            var cell = row.GetCell(c);
+            if (cell == null) continue;
+            var type = cell.CellType == CellType.Formula ? cell.CachedFormulaResultType : cell.CellType;
+            if (type == CellType.Blank) continue;
+            if (type == CellType.String && string.IsNullOrWhiteSpace(cell.StringCellValue)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private static List<ColumnHeader> GetHeaderCells(IRow row)
+    {
+        var list = new List<ColumnHeader>();
+        var formatter = new DataFormatter(CultureInfo.InvariantCulture);
+        var start = row.FirstCellNum;
+        var end = row.LastCellNum;
+        if (start < 0 || end <= 0) return list;
+        for (var c = start; c < end; c++)
+        {
+            var cell = row.GetCell(c);
+            if (cell == null) continue;
+            var text = formatter.FormatCellValue(cell) ?? string.Empty;
+            list.Add(new ColumnHeader(c, text));
+        }
+        return list;
+    }
+
+    private static ICellStyle? CreateHeaderStyle(IWorkbook workbook)
+    {
+        var font = workbook.CreateFont();
+        font.IsBold = true;
+        var style = workbook.CreateCellStyle();
+        style.SetFont(font);
+        return style;
     }
 
     private static string QuoteIdentifier(string name)

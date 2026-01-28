@@ -14,7 +14,7 @@ public class FMEdIssueSubModel : TableDetailModel<FmedIssuePo>
     #region 單頭/單身資料屬性
 
     // 單頭資料（API 回傳 Dictionary 格式）
-    public new Dictionary<string, object>? HeaderData { get; set; }
+    public new Dictionary<string, object?>? HeaderData { get; set; }
 
     // 單頭欄位設定清單（含位置與顯示設定）
     public new List<TableFieldViewModel>? HeaderTableFields { get; set; }
@@ -62,7 +62,7 @@ public class FMEdIssueSubModel : TableDetailModel<FmedIssuePo>
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
         // Step 1：取得單頭資料
-        HeaderData = await _httpClient.GetFromJsonAsync<Dictionary<string, object>>(
+        HeaderData = await _httpClient.GetFromJsonAsync<Dictionary<string, object?>>(
             $"{baseUrl}/api/FMEdIssueMain/{PaperNum}"
         );
 

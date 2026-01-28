@@ -80,6 +80,7 @@ namespace PcbErpApi.Pages.CUR
                 var cfg = new MasterMultiDetailConfig
                 {
                     DomId = BuildDomId(itemId),
+                    ItemId = itemId,
                     MasterTitle = masterMeta?.DisplayLabel ?? master.TableName,
                     MasterTable = masterTableName,
                     MasterDict = master.TableName,

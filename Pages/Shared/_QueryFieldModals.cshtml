@@ -1,0 +1,1033 @@
+@if (ViewData["QueryFieldModalsRendered"] == null)
+{
+    ViewData["QueryFieldModalsRendered"] = true;
+    <div class="modal fade" id="queryFieldSelectModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content query-field-select-modal">
+                <div class="modal-header">
+                    <h5 class="modal-title">設定查詢項目</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="qf-top-row">
+                        <div class="qf-config">
+                            <label class="qf-config-label">比對條件</label>
+                            <select id="qfEqual" class="form-select form-select-sm qf-config-select"></select>
+                        </div>
+                        <div class="qf-order">
+                            <button id="qfUp" class="btn btn-outline-secondary btn-sm" type="button">上移</button>
+                            <button id="qfDown" class="btn btn-outline-secondary btn-sm" type="button">下移</button>
+                        </div>
+                    </div>
+                    <div class="qf-main-row">
+                        <div class="qf-panel">
+                            <div class="qf-title">可用欄位</div>
+                            <div class="qf-table-wrap">
+                                <table class="qf-table">
+                                    <thead>
+                                        <tr><th class="qf-col-field">欄位名稱</th><th class="qf-col-table">表格名稱</th></tr>
+                                    </thead>
+                                </table>
+                                <div id="qfAllFields" class="qf-list" tabindex="0"></div>
+                            </div>
+                        </div>
+                        <div class="qf-actions">
+                            <button id="qfAdd" class="btn btn-outline-primary qf-action-btn" type="button">▶</button>
+                            <button id="qfAddAll" class="btn btn-outline-primary qf-action-btn" type="button">▶▶</button>
+                            <button id="qfRemove" class="btn btn-outline-secondary qf-action-btn" type="button">◀</button>
+                            <button id="qfRemoveAll" class="btn btn-outline-secondary qf-action-btn" type="button">◀◀</button>
+                        </div>
+                        <div class="qf-panel">
+                            <div class="qf-title">已選欄位</div>
+                            <div class="qf-table-wrap">
+                                <table class="qf-table">
+                                    <thead>
+                                        <tr><th class="qf-col-field">欄位名稱</th><th class="qf-col-table">表格名稱</th></tr>
+                                    </thead>
+                                </table>
+                                <div id="qfSelectedFields" class="qf-list" tabindex="0"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="qfSave" class="btn btn-success">確定</button>
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="queryDefaultModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content query-default-modal">
+                <div class="modal-header">
+                    <h5 class="modal-title">預設設定</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-8">
+                            <div class="qf-default-table-wrap">
+                                <table class="table table-sm table-striped mb-0 qf-default-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:45px">序號</th>
+                                            <th style="width:140px">表格名稱</th>
+                                            <th style="width:55px">別名</th>
+                                            <th style="width:130px">欄位名稱</th>
+                                            <th class="qf-col-caption">欄位顯示名稱</th>
+                                            <th class="qf-col-cond">條件</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="qfDefaultBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="qf-default-editor">
+                                <div class="qf-default-group">
+                                    <div class="qf-default-title">
+                                        <span>下拉選單 .SQL</span>
+                                        <label class="form-check qf-default-inline">
+                                            <input id="qfDefaultControlType" class="form-check-input" type="checkbox">
+                                            <span class="form-check-label">啟用</span>
+                                        </label>
+                                    </div>
+                                    <textarea id="qfDefaultCommandText" class="form-control form-control-sm qf-default-textarea" rows="5"></textarea>
+                                </div>
+                                <div class="qf-default-group">
+                                    <div class="qf-default-title">預設型態</div>
+                                    <select id="qfDefaultType" class="form-select form-select-sm"></select>
+                                </div>
+                                <div class="qf-default-group">
+                                    <div class="qf-default-title">預設值 .SQL</div>
+                                    <textarea id="qfDefaultValue" class="form-control form-control-sm qf-default-textarea" rows="5"></textarea>
+                                </div>
+                                <div class="qf-default-group">
+                                    <div class="qf-default-title">上層參數</div>
+                                    <input id="qfDefaultSuperId" class="form-control form-control-sm" type="text">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="qfDefaultSave" class="btn btn-success">確定</button>
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<script>
+const initQueryFieldModals = () => {
+    const fetcher = (input, init, msg) => {
+        if (typeof window.http === "function") return window.http(input, init);
+        if (typeof window.busyFetch === "function") return window.busyFetch(input, init, msg);
+        return fetch(input, init);
+    };
+
+    if (!window.__queryFieldModalInitV2) {
+        window.__queryFieldModalInitV2 = true;
+        const qfModalEl = document.getElementById("queryFieldSelectModal");
+        const qfDefaultModalEl = document.getElementById("queryDefaultModal");
+        const qfAllEl = document.getElementById("qfAllFields");
+        const qfSelectedEl = document.getElementById("qfSelectedFields");
+        const qfDefaultBody = document.getElementById("qfDefaultBody");
+        const qfDefaultTypeEl = document.getElementById("qfDefaultType");
+        const qfDefaultValueEl = document.getElementById("qfDefaultValue");
+        const qfDefaultCommandEl = document.getElementById("qfDefaultCommandText");
+        const qfDefaultSuperIdEl = document.getElementById("qfDefaultSuperId");
+        const qfDefaultControlEl = document.getElementById("qfDefaultControlType");
+        const btnQfSelect = document.getElementById("btnQueryFieldSelect");
+        const btnQfDefault = document.getElementById("btnQueryDefault");
+        const btnQfSave = document.getElementById("qfSave");
+        const btnQfDefaultSave = document.getElementById("qfDefaultSave");
+
+        let qfCache = null;
+        let qfEquals = null;
+        let reopenSearchOnClose = false;
+        let pendingOpen = null;
+        let currentDefaultRow = null;
+        let defaultItems = [];
+        let dragItem = null;
+
+        const defaultTypeOptions = [
+            { value: 0, text: "固定常數" },
+            { value: 1, text: "SQL指令" },
+            { value: 2, text: "登入帳號" },
+            { value: 3, text: "公司代號" }
+        ];
+
+        const ensureDefaultTypeOptions = () => {
+            if (!qfDefaultTypeEl) return;
+            if (qfDefaultTypeEl.options.length) return;
+            defaultTypeOptions.forEach(opt => {
+                const o = document.createElement("option");
+                o.value = String(opt.value);
+                o.textContent = `${opt.value} ${opt.text}`;
+                qfDefaultTypeEl.appendChild(o);
+            });
+        };
+
+        const setDefaultEditorFromRow = (tr) => {
+            if (!tr) return;
+            ensureDefaultTypeOptions();
+            currentDefaultRow = tr;
+            const defType = tr.dataset.defaultType ?? "0";
+            const defVal = tr.dataset.defaultValue ?? "";
+            const cmd = tr.dataset.commandText ?? "";
+            const superId = tr.dataset.superId ?? "";
+            const controlType = tr.dataset.controlType ?? "0";
+            if (qfDefaultTypeEl) qfDefaultTypeEl.value = String(defType);
+            if (qfDefaultValueEl) qfDefaultValueEl.value = defVal;
+            if (qfDefaultCommandEl) qfDefaultCommandEl.value = cmd;
+            if (qfDefaultSuperIdEl) qfDefaultSuperIdEl.value = superId;
+            if (qfDefaultControlEl) qfDefaultControlEl.checked = String(controlType) === "1";
+        };
+
+        const writeDefaultEditorToRow = () => {
+            if (!currentDefaultRow) return;
+            if (qfDefaultTypeEl) currentDefaultRow.dataset.defaultType = qfDefaultTypeEl.value || "0";
+            if (qfDefaultValueEl) currentDefaultRow.dataset.defaultValue = qfDefaultValueEl.value ?? "";
+            if (qfDefaultCommandEl) currentDefaultRow.dataset.commandText = qfDefaultCommandEl.value ?? "";
+            if (qfDefaultSuperIdEl) currentDefaultRow.dataset.superId = qfDefaultSuperIdEl.value ?? "";
+            if (qfDefaultControlEl) currentDefaultRow.dataset.controlType = qfDefaultControlEl.checked ? "1" : "0";
+        };
+
+        const searchModalEl = document.getElementById("searchModal") || document.getElementById("singleGridQueryModal") || document.getElementById("multiGridQueryModal");
+        if (qfModalEl && qfModalEl.parentElement !== document.body) document.body.appendChild(qfModalEl);
+        if (qfDefaultModalEl && qfDefaultModalEl.parentElement !== document.body) document.body.appendChild(qfDefaultModalEl);
+
+        const getItemId = () => (window._itemId || window._singleItemId || "").toString().trim();
+        const getDictTable = () => (window._dictTableName || window._tableName || "").toString().trim();
+
+        const fetchEquals = async () => {
+            if (qfEquals) return qfEquals;
+            try {
+                const res = await fetcher("/api/DictSetupApi/QueryEquals?all=1", null, "載入比對條件…");
+                if (!res.ok) throw new Error(await res.text());
+                const list = await res.json();
+                qfEquals = Array.isArray(list) ? list : [];
+            } catch {
+                qfEquals = [
+                    { value: "=", text: "=" },
+                    { value: ">=", text: ">=" },
+                    { value: "<=", text: "<=" },
+                    { value: "like", text: "like" }
+                ];
+            }
+            return qfEquals;
+        };
+
+        const loadPaperSelected = async (equalValue = null) => {
+            if (qfCache && equalValue == null) return qfCache;
+            const itemId = getItemId();
+            const table = getDictTable();
+            if (!itemId || !table) return null;
+            const eq = equalValue != null ? `&equal=${encodeURIComponent(equalValue)}` : "";
+            const res = await fetcher(`/api/DictSetupApi/PaperSelectedList?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(table)}${eq}`, null, "載入查詢項目…");
+            if (!res.ok) return null;
+            const data = await res.json();
+            if (equalValue == null) qfCache = data || null;
+            return data || null;
+        };
+
+        const buildItem = (item, fieldName, tableName) => {
+            const div = document.createElement("div");
+            div.className = "qf-item";
+            div.dataset.value = item.columnName || item.ColumnName || "";
+            div.dataset.columnName = item.columnName || item.ColumnName || "";
+            div.dataset.columnCaption = item.columnCaption || item.ColumnCaption || "";
+            div.dataset.tableName = item.tableName || item.TableName || "";
+            div.dataset.aliasName = item.aliasName || item.AliasName || "";
+            div.dataset.dataType = item.dataType ?? item.DataType ?? "";
+            div.dataset.defaultEqual = item.defaultEqual || item.DefaultEqual || "";
+            div.dataset.defaultValue = item.defaultValue || item.DefaultValue || "";
+            div.dataset.controlType = item.controlType ?? item.ControlType ?? "";
+            div.dataset.commandText = item.commandText || item.CommandText || "";
+            div.dataset.defaultType = item.defaultType ?? item.DefaultType ?? "";
+            div.dataset.editMask = item.editMask || item.EditMask || "";
+            div.dataset.superId = item.superId || item.SuperId || "";
+            div.dataset.paramValue = item.paramValue || item.ParamValue || "";
+            div.dataset.paramType = item.paramType ?? item.ParamType ?? "";
+            div.dataset.iReadOnly = item.iReadOnly ?? item.IReadOnly ?? "";
+            div.dataset.iVisible = item.iVisible ?? item.IVisible ?? "";
+            div.dataset.tableKind = item.tableKind || item.TableKind || "";
+
+            const fieldSpan = document.createElement("span");
+            fieldSpan.className = "qf-item-field";
+            fieldSpan.textContent = fieldName;
+
+            const tableSpan = document.createElement("span");
+            tableSpan.className = "qf-item-table";
+            tableSpan.textContent = tableName;
+
+            div.appendChild(fieldSpan);
+            div.appendChild(tableSpan);
+
+            div.addEventListener("click", (e) => {
+                if (!e.ctrlKey && !e.shiftKey) {
+                    div.parentElement.querySelectorAll(".qf-item.selected").forEach(el => el.classList.remove("selected"));
+                }
+                div.classList.toggle("selected");
+            });
+
+            return div;
+        };
+
+        const renderFieldSelect = async () => {
+            if (!qfAllEl || !qfSelectedEl) return;
+            qfAllEl.innerHTML = "";
+            qfSelectedEl.innerHTML = "";
+
+            const currentEqual = document.getElementById("qfEqual")?.value || "";
+            const data = await loadPaperSelected(currentEqual || null);
+            if (!data) return;
+
+            const selected = Array.isArray(data.selected) ? data.selected : [];
+            const allFields = Array.isArray(data.allFields) ? data.allFields : [];
+
+            // 改用「欄位名稱+條件」作為唯一識別 key
+            const selectedKey = new Set(selected.map(x => {
+                const col = (x.columnName || x.ColumnName || "").toLowerCase();
+                const eq = (x.defaultEqual || x.DefaultEqual || "").toLowerCase();
+                return `${col}|${eq}`;
+            }));
+
+            const getFieldName = (item) => {
+                const caption = item.columnCaption || item.ColumnCaption || item.columnName || item.ColumnName || "";
+                const alias = (item.aliasName || item.AliasName || "").toString();
+                const prefix = alias ? `${alias}.` : "";
+                return `${prefix}${caption}`.trim();
+            };
+            const getTableName = (item) => (item.tableName || item.TableName || "").toString();
+
+            // 在欄位名稱後面加上條件
+            const getFieldNameWithCondition = (item) => {
+                const baseName = getFieldName(item);
+                const condition = (item.defaultEqual || item.DefaultEqual || "").toString();
+                return condition ? `${baseName} ${condition}` : baseName;
+            };
+
+            selected.forEach(item => {
+                const fieldName = getFieldNameWithCondition(item);
+                const tableName = getTableName(item);
+                qfSelectedEl.appendChild(buildItem(item, fieldName, tableName));
+            });
+
+            allFields.forEach(item => {
+                const col = (item.columnName || item.ColumnName || "").toLowerCase();
+                const eq = (item.defaultEqual || item.DefaultEqual || "").toLowerCase();
+                const key = `${col}|${eq}`;
+                if (!col || selectedKey.has(key)) return;
+                const fieldName = getFieldNameWithCondition(item);
+                const tableName = getTableName(item);
+                qfAllEl.appendChild(buildItem(item, fieldName, tableName));
+            });
+
+            enableDragSort(qfSelectedEl);
+            applyDragToItems(qfSelectedEl);
+        };
+
+        const applyDragToItems = (listEl) => {
+            if (!listEl) return;
+            listEl.querySelectorAll(".qf-item").forEach(item => {
+                if (item.dataset.draggableApplied === "1") return;
+                item.dataset.draggableApplied = "1";
+                item.setAttribute("draggable", "true");
+                item.addEventListener("dragstart", (e) => {
+                    dragItem = item;
+                    item.classList.add("dragging");
+                    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+                });
+                item.addEventListener("dragend", () => {
+                    item.classList.remove("dragging");
+                    dragItem = null;
+                });
+            });
+        };
+
+        const enableDragSort = (listEl) => {
+            if (!listEl || listEl.dataset.dragSortBound === "1") return;
+            listEl.dataset.dragSortBound = "1";
+            listEl.addEventListener("dragover", (e) => {
+                if (!dragItem) return;
+                e.preventDefault();
+                const target = e.target.closest(".qf-item");
+                if (!target || target === dragItem || target.parentElement !== listEl) return;
+                const rect = target.getBoundingClientRect();
+                const shouldInsertAfter = (e.clientY - rect.top) > rect.height / 2;
+                listEl.insertBefore(dragItem, shouldInsertAfter ? target.nextSibling : target);
+            });
+            listEl.addEventListener("drop", (e) => {
+                if (!dragItem) return;
+                e.preventDefault();
+                dragItem.classList.remove("dragging");
+                dragItem = null;
+            });
+        };
+
+        const moveItems = (fromEl, toEl, moveAll = false) => {
+            if (!fromEl || !toEl) return;
+            const items = moveAll
+                ? Array.from(fromEl.querySelectorAll(".qf-item"))
+                : Array.from(fromEl.querySelectorAll(".qf-item.selected"));
+            items.forEach(item => {
+                item.classList.remove("selected");
+                toEl.appendChild(item);
+            });
+        };
+
+        const moveOrder = (listEl, dir) => {
+            if (!listEl) return;
+            const selected = Array.from(listEl.querySelectorAll(".qf-item.selected"));
+            if (selected.length === 0) return;
+            const all = Array.from(listEl.querySelectorAll(".qf-item"));
+            if (dir < 0) {
+                selected.forEach(item => {
+                    const idx = all.indexOf(item);
+                    if (idx > 0) listEl.insertBefore(item, all[idx - 1]);
+                });
+            } else {
+                for (let i = selected.length - 1; i >= 0; i--) {
+                    const item = selected[i];
+                    const idx = all.indexOf(item);
+                    if (idx >= 0 && idx < all.length - 1) {
+                        listEl.insertBefore(all[idx + 1], item);
+                    }
+                }
+            }
+        };
+
+        const collectSelectedPayload = () => {
+            if (!qfSelectedEl) return [];
+            const list = Array.from(qfSelectedEl.querySelectorAll(".qf-item"));
+            return list.map((item, idx) => ({
+                columnName: item.dataset.columnName || item.dataset.value,
+                columnCaption: item.dataset.columnCaption || item.dataset.columnName || item.dataset.value,
+                tableName: item.dataset.tableName || getDictTable(),
+                aliasName: item.dataset.aliasName || "",
+                dataType: Number(item.dataset.dataType || 0),
+                sortOrder: idx + 1,
+                defaultEqual: item.dataset.defaultEqual || "like",
+                defaultValue: item.dataset.defaultValue || "",
+                controlType: Number(item.dataset.controlType || 0),
+                commandText: item.dataset.commandText || "",
+                defaultType: Number(item.dataset.defaultType || 0),
+                editMask: item.dataset.editMask || "",
+                superId: item.dataset.superId || "",
+                paramValue: item.dataset.paramValue || "",
+                paramType: Number(item.dataset.paramType || 0),
+                iReadOnly: Number(item.dataset.iReadOnly || 0),
+                iVisible: Number(item.dataset.iVisible || 1),
+                tableKind: item.dataset.tableKind || ""
+            }));
+        };
+
+        const saveSelected = async (items) => {
+            const itemId = getItemId();
+            const table = getDictTable();
+            console.log('[QueryFieldModals] 保存預設設定, itemId:', itemId, 'table:', table, 'items:', items.length);
+            if (!itemId || !table) {
+                console.error('[QueryFieldModals] 缺少 itemId 或 table，無法保存');
+                return false;
+            }
+            const res = await fetcher("/api/DictSetupApi/PaperSelected", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ itemId, table, items })
+            }, "儲存查詢設定…");
+            if (!res.ok) {
+                console.error('[QueryFieldModals] 保存失敗, status:', res.status);
+                return false;
+            }
+            console.log('[QueryFieldModals] 保存成功，清除快取');
+            qfCache = null;
+            if (window.QueryFieldsManager && typeof window.QueryFieldsManager.refresh === "function") {
+                console.log('[QueryFieldModals] 呼叫 QueryFieldsManager.refresh()');
+                window.QueryFieldsManager.refresh().catch((err) => {
+                    console.error('[QueryFieldModals] refresh 失敗:', err);
+                });
+            } else {
+                console.warn('[QueryFieldModals] QueryFieldsManager.refresh 不存在');
+            }
+            return true;
+        };
+
+        const renderDefaultTable = async () => {
+            if (!qfDefaultBody) return;
+            qfDefaultBody.innerHTML = "";
+            const data = await loadPaperSelected();
+            if (!data) return;
+            const selected = Array.isArray(data.selected) ? data.selected : [];
+            const equals = await fetchEquals();
+            defaultItems = selected;
+
+            selected.forEach((item, idx) => {
+                const tr = document.createElement("tr");
+                const name = item.columnName || item.ColumnName || "";
+                const caption = item.columnCaption || item.ColumnCaption || name;
+                const defType = item.defaultType ?? item.DefaultType ?? 0;
+                const cmdText = item.commandText || item.CommandText || "";
+                const superId = item.superId || item.SuperId || "";
+                const controlType = item.controlType ?? item.ControlType ?? 0;
+                const sortOrder = item.sortOrder ?? item.SortOrder ?? "";
+                const tableName = (item.tableName || item.TableName || "").toString();
+                const aliasName = (item.aliasName || item.AliasName || "").toString();
+
+                tr.dataset.idx = String(idx);
+
+                const tdOrder = document.createElement("td");
+                tdOrder.textContent = String(sortOrder ?? "");
+                const tdTable = document.createElement("td");
+                tdTable.textContent = tableName;
+                const tdAlias = document.createElement("td");
+                tdAlias.textContent = aliasName;
+                const tdField = document.createElement("td");
+                tdField.textContent = name;
+                const tdCaption = document.createElement("td");
+                tdCaption.textContent = caption;
+
+                const tdEq = document.createElement("td");
+                const defEqRaw = (item.defaultEqual || item.DefaultEqual || "").toString();
+                const defEq = defEqRaw.toLowerCase();
+                const eqText = equals.find(eq => {
+                    const val = (eq.value ?? eq.Value ?? eq).toString().toLowerCase();
+                    return val === defEq;
+                });
+                tdEq.textContent = (eqText?.text ?? eqText?.Text ?? eqText?.value ?? eqText ?? defEqRaw ?? defEq).toString();
+
+                tr.dataset.columnName = name;
+                tr.dataset.tableName = tableName;
+                tr.dataset.defaultEqual = defEqRaw || "";
+                tr.dataset.defaultValue = item.defaultValue || item.DefaultValue || "";
+                tr.dataset.defaultType = String(defType ?? 0);
+                tr.dataset.commandText = cmdText;
+                tr.dataset.superId = superId;
+                tr.dataset.controlType = String(controlType ?? 0);
+
+                tr.addEventListener("click", (e) => {
+                    if (e.target?.closest("select, input, textarea")) return;
+                    qfDefaultBody.querySelectorAll("tr.qf-default-selected").forEach(el => el.classList.remove("qf-default-selected"));
+                    tr.classList.add("qf-default-selected");
+                    setDefaultEditorFromRow(tr);
+                });
+
+                tr.appendChild(tdOrder);
+                tr.appendChild(tdTable);
+                tr.appendChild(tdAlias);
+                tr.appendChild(tdField);
+                tr.appendChild(tdCaption);
+                tr.appendChild(tdEq);
+                qfDefaultBody.appendChild(tr);
+            });
+            const preferredKey = currentDefaultRow?.dataset?.columnName || "";
+            const match = preferredKey
+                ? Array.from(qfDefaultBody.querySelectorAll("tr")).find(tr => (tr.dataset.columnName || "").toLowerCase() === preferredKey.toLowerCase())
+                : null;
+            const target = match || qfDefaultBody.querySelector("tr");
+            if (target) {
+                qfDefaultBody.querySelectorAll("tr.qf-default-selected").forEach(el => el.classList.remove("qf-default-selected"));
+                target.classList.add("qf-default-selected");
+                setDefaultEditorFromRow(target);
+            }
+        };
+
+        qfDefaultBody?.addEventListener("click", (e) => {
+            const tr = e.target.closest("tr");
+            if (!tr) return;
+            qfDefaultBody.querySelectorAll("tr.qf-default-selected").forEach(el => el.classList.remove("qf-default-selected"));
+            tr.classList.add("qf-default-selected");
+            setDefaultEditorFromRow(tr);
+        });
+
+        const ensureEqualOptions = async () => {
+            const sel = document.getElementById("qfEqual");
+            if (!sel) return;
+            if (sel.options.length) return;
+            const equals = await fetchEquals();
+            const allOpt = document.createElement("option");
+            allOpt.value = "";
+            allOpt.textContent = "全部";
+            sel.appendChild(allOpt);
+            equals.forEach(eq => {
+                const text = (eq.text ?? eq.Text ?? eq).toString();
+                const value = eq.value ?? eq.Value ?? eq;
+                if (text === "全部" || value === "") return;
+                const opt = document.createElement("option");
+                opt.value = value;
+                opt.textContent = text;
+                sel.appendChild(opt);
+            });
+            const defaultValue = "=";
+            const hit = Array.from(sel.options).find(o => o.value === defaultValue);
+            sel.value = hit ? defaultValue : (sel.options[0]?.value ?? "");
+        };
+
+        const showModalAfterCleanup = (which) => {
+            const target = which === "default" ? qfDefaultModalEl : qfModalEl;
+            if (!target || !window.bootstrap) return;
+            document.querySelectorAll(".modal-backdrop").forEach(b => b.remove());
+            const modal = bootstrap.Modal.getOrCreateInstance(target);
+            modal.show();
+        };
+
+        const blurActiveIfInside = (container) => {
+            const active = document.activeElement;
+            if (active && container && container.contains(active)) {
+                active.blur();
+            }
+        };
+
+        searchModalEl?.addEventListener("hide.bs.modal", () => {
+            blurActiveIfInside(searchModalEl);
+        });
+
+        const openQueryModal = async (which) => {
+            pendingOpen = which;
+            const searchModal = searchModalEl ? bootstrap.Modal.getOrCreateInstance(searchModalEl) : null;
+            const searchIsShown = !!searchModalEl?.classList.contains("show");
+            if (searchModal && searchIsShown) {
+                blurActiveIfInside(searchModalEl);
+                reopenSearchOnClose = true;
+                searchModal.hide();
+                return;
+            }
+            showModalAfterCleanup(which);
+        };
+
+        btnQfSelect?.addEventListener("click", async () => {
+            await ensureEqualOptions();
+            await renderFieldSelect();
+            await openQueryModal("field");
+        });
+
+        btnQfDefault?.addEventListener("click", async () => {
+            ensureDefaultTypeOptions();
+            await renderDefaultTable();
+            await openQueryModal("default");
+        });
+
+        document.getElementById("qfAdd")?.addEventListener("click", () => moveItems(qfAllEl, qfSelectedEl));
+        document.getElementById("qfAddAll")?.addEventListener("click", () => moveItems(qfAllEl, qfSelectedEl, true));
+        document.getElementById("qfRemove")?.addEventListener("click", () => moveItems(qfSelectedEl, qfAllEl));
+        document.getElementById("qfRemoveAll")?.addEventListener("click", () => moveItems(qfSelectedEl, qfAllEl, true));
+        document.getElementById("qfUp")?.addEventListener("click", () => moveOrder(qfSelectedEl, -1));
+        document.getElementById("qfDown")?.addEventListener("click", () => moveOrder(qfSelectedEl, 1));
+
+        btnQfSave?.addEventListener("click", async () => {
+            const items = collectSelectedPayload();
+            const ok = await saveSelected(items);
+            if (ok && qfModalEl && window.bootstrap) {
+                bootstrap.Modal.getOrCreateInstance(qfModalEl).hide();
+            }
+        });
+
+        btnQfDefaultSave?.addEventListener("click", async () => {
+            if (!qfDefaultBody) return;
+            writeDefaultEditorToRow();
+            const map = new Map();
+            qfDefaultBody.querySelectorAll("tr").forEach(tr => {
+                const name = tr.dataset.columnName || tr.querySelector("select")?.dataset?.columnName || "";
+                const tableName = tr.dataset.tableName || "";
+                const eq = tr.dataset.defaultEqual || tr.querySelector("select")?.value || "";
+                const val = tr.dataset.defaultValue || tr.querySelector("input")?.value || "";
+                const defType = tr.dataset.defaultType || "0";
+                const cmd = tr.dataset.commandText || "";
+                const superId = tr.dataset.superId || "";
+                const controlType = tr.dataset.controlType || "0";
+                if (name) {
+                    const key = `${tableName}|${name}|${eq}`.toLowerCase();
+                    map.set(key, { eq, val, defType, cmd, superId, controlType });
+                }
+            });
+            if (qfSelectedEl) {
+                qfSelectedEl.querySelectorAll(".qf-item").forEach(item => {
+                    const name = item.dataset.columnName || item.dataset.value || "";
+                    const tableName = item.dataset.tableName || "";
+                    const eq = item.dataset.defaultEqual || "";
+                    const key = `${tableName}|${name}|${eq}`.toLowerCase();
+                    const hit = map.get(key);
+                    if (!hit) return;
+                    item.dataset.defaultEqual = hit.eq;
+                    item.dataset.defaultValue = hit.val;
+                    item.dataset.defaultType = hit.defType;
+                    item.dataset.commandText = hit.cmd;
+                    item.dataset.superId = hit.superId;
+                    item.dataset.controlType = hit.controlType;
+                });
+            }
+
+            if (Array.isArray(defaultItems)) {
+                let updateCount = 0;
+                defaultItems.forEach(item => {
+                    const name = (item.columnName || item.ColumnName || "").toString();
+                    const tableName = (item.tableName || item.TableName || "").toString();
+                    const eq = (item.defaultEqual || item.DefaultEqual || "").toString();
+                    const key = `${tableName}|${name}|${eq}`.toLowerCase();
+                    const hit = map.get(key);
+                    if (!hit) return;
+                    updateCount++;
+                    console.log(`[QueryFieldModals] 更新欄位 ${key}: defType ${item.defaultType ?? item.DefaultType} -> ${hit.defType}`);
+                    item.defaultEqual = hit.eq;
+                    item.DefaultEqual = hit.eq;
+                    item.defaultValue = hit.val;
+                    item.DefaultValue = hit.val;
+                    item.defaultType = Number(hit.defType ?? 0);
+                    item.DefaultType = Number(hit.defType ?? 0);
+                    item.commandText = hit.cmd;
+                    item.CommandText = hit.cmd;
+                    item.superId = hit.superId;
+                    item.SuperId = hit.superId;
+                    item.controlType = Number(hit.controlType ?? 0);
+                    item.ControlType = Number(hit.controlType ?? 0);
+                });
+            }
+
+            const items = Array.isArray(defaultItems) && defaultItems.length
+                ? defaultItems
+                : collectSelectedPayload();
+            const ok = await saveSelected(items);
+            if (ok && qfDefaultModalEl && window.bootstrap) {
+                bootstrap.Modal.getOrCreateInstance(qfDefaultModalEl).hide();
+            }
+        });
+
+        qfModalEl?.addEventListener("hidden.bs.modal", () => {
+            if (!reopenSearchOnClose) return;
+            reopenSearchOnClose = false;
+            if (searchModalEl && window.bootstrap) {
+                bootstrap.Modal.getOrCreateInstance(searchModalEl).show();
+            }
+        });
+        qfDefaultModalEl?.addEventListener("hidden.bs.modal", () => {
+            if (!reopenSearchOnClose) return;
+            reopenSearchOnClose = false;
+            if (searchModalEl && window.bootstrap) {
+                bootstrap.Modal.getOrCreateInstance(searchModalEl).show();
+            }
+        });
+
+        [qfDefaultTypeEl, qfDefaultValueEl, qfDefaultCommandEl, qfDefaultSuperIdEl, qfDefaultControlEl].forEach(el => {
+            el?.addEventListener("change", () => {
+                writeDefaultEditorToRow();
+            });
+            el?.addEventListener("input", () => {
+                writeDefaultEditorToRow();
+            });
+        });
+
+        searchModalEl?.addEventListener("hidden.bs.modal", async () => {
+            if (!pendingOpen) return;
+            const which = pendingOpen;
+            pendingOpen = null;
+            if (which === "field") {
+                await ensureEqualOptions();
+                await renderFieldSelect();
+            }
+            showModalAfterCleanup(which);
+        });
+
+        document.getElementById("qfEqual")?.addEventListener("change", async () => {
+            await renderFieldSelect();
+        });
+    }
+};
+
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initQueryFieldModals);
+} else {
+    initQueryFieldModals();
+}
+</script>
+
+<style>
+    .query-field-select-modal .qf-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    }
+    .query-field-select-modal .qf-config {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    }
+    .query-field-select-modal .qf-config-label {
+    min-width: 60px;
+    text-align: right;
+    }
+    .query-field-select-modal .qf-config-select {
+    width: 100px;
+    }
+    .query-field-select-modal .qf-order {
+    display: flex;
+    gap: 6px;
+    }
+    .query-field-select-modal .qf-main-row {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+    }
+    .query-field-select-modal .qf-panel {
+    flex: 1;
+    min-width: 0;
+    }
+    .query-field-select-modal .qf-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 2px;
+    flex-shrink: 0;
+    }
+    .query-field-select-modal .qf-action-btn {
+    width: 42px;
+    height: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    }
+    .query-field-select-modal .qf-title {
+    font-weight: 600;
+    margin-bottom: 6px;
+    }
+    .query-field-select-modal .modal-header {
+    padding: 6px 12px;
+    }
+    .query-field-select-modal .qf-table-wrap {
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    overflow: hidden;
+    }
+    .query-field-select-modal .qf-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    margin: 0;
+    }
+    .query-field-select-modal .qf-table thead {
+    background: #e9ecef;
+    }
+    .query-field-select-modal .qf-table th {
+    padding: 6px 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #495057;
+    text-align: left;
+    border-bottom: 1px solid #ced4da;
+    }
+    .query-field-select-modal .qf-col-field {
+    width: 55%;
+    }
+    .query-field-select-modal .qf-col-table {
+    width: 45%;
+    }
+    .query-field-select-modal .qf-list {
+    height: 300px;
+    overflow-y: auto;
+    background: #fff;
+    }
+    .query-field-select-modal .qf-list:focus {
+    outline: none;
+    }
+    .query-field-select-modal .qf-item {
+      display: flex;
+      padding: 4px 8px;
+      cursor: pointer;
+      border-bottom: 1px solid #f0f0f0;
+      user-select: none;
+      }
+    .query-field-select-modal .qf-list .qf-item[draggable="true"] {
+      cursor: move;
+      }
+    .query-field-select-modal .qf-item.dragging {
+      opacity: 0.6;
+      }
+    .query-field-select-modal .qf-item:hover {
+    background: #f8f9fa;
+    }
+    .query-field-select-modal .qf-item.selected {
+    background: #0d6efd;
+    color: #fff;
+    }
+    .query-field-select-modal .qf-item.selected .qf-item-table {
+    color: #fff;
+    }
+    .query-field-select-modal .qf-item-field {
+    width: 55%;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    }
+    .query-field-select-modal .qf-item-table {
+    width: 45%;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    }
+    #queryFieldSelectModal,
+    #queryDefaultModal {
+    z-index: 10960;
+    }
+
+    /* 預設設定視窗：放大、分隔清楚、字體/高度縮小 */
+    #queryDefaultModal .modal-dialog {
+    --bs-modal-width: 980px;
+    }
+    #queryDefaultModal .modal-content {
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    max-height: 80vh;
+    }
+    #queryDefaultModal .modal-header {
+    padding: 6px 12px;
+    }
+    #queryDefaultModal .modal-body {
+    padding: 10px 12px;
+    overflow: hidden;
+    flex: 1 1 auto;
+    min-height: 0;
+    }
+    #queryDefaultModal .qf-default-table-wrap {
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    overflow: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 55vh;
+    }
+    #queryDefaultModal .qf-default-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    height: 100%;
+    }
+    #queryDefaultModal .qf-default-group {
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 4px 6px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    }
+    #queryDefaultModal .qf-default-group:has(#qfDefaultValue) {
+    flex: 1;
+    min-height: 0;
+    }
+    #queryDefaultModal .modal-body .row {
+    align-items: stretch;
+    height: 100%;
+    min-height: 0;
+    }
+    #queryDefaultModal .modal-body .row > [class^="col-"] {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    }
+    #queryDefaultModal .qf-default-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: #475569;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 3px;
+    }
+    #queryDefaultModal .qf-default-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    }
+    #queryDefaultModal .qf-default-inline .form-check-input {
+    margin: 0;
+    }
+    #queryDefaultModal .qf-default-textarea {
+    font-size: 12px;
+    line-height: 1.2;
+    padding: 4px 6px;
+    }
+    #queryDefaultModal #qfDefaultCommandText,
+    #queryDefaultModal #qfDefaultValue {
+    min-height: 70px;
+    resize: vertical;
+    }
+    #queryDefaultModal #qfDefaultValue {
+    flex: 1;
+    height: 100%;
+    }
+    #queryDefaultModal #qfDefaultValue::-webkit-scrollbar {
+    width: 6px;
+    }
+    #queryDefaultModal #qfDefaultValue::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+    }
+    #queryDefaultModal table {
+    border-collapse: separate;
+    border-spacing: 0 2px;
+    table-layout: fixed;
+    width: 100%;
+    }
+    #queryDefaultModal .qf-col-caption {
+    width: 140px;
+    }
+    #queryDefaultModal .qf-col-cond {
+    width: 110px;
+    }
+    #queryDefaultModal thead th {
+    font-size: 12px;
+    padding: 4px 6px;
+    background: #f1f5f9;
+    border-bottom: 1px solid #e2e8f0;
+    border-right: 1px solid #e5e7eb;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    }
+    #queryDefaultModal thead th:last-child {
+    border-right: none;
+    }
+    #queryDefaultModal tbody td {
+    font-size: 12px;
+    padding: 3px 6px;
+    line-height: 1.25;
+    border-bottom: 1px solid #e5e7eb;
+    border-right: 1px solid #e5e7eb;
+    vertical-align: middle;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    }
+    #queryDefaultModal tbody td:last-child {
+    border-right: none;
+    }
+    #queryDefaultModal tbody tr.qf-default-selected {
+    background: #dbeafe !important;
+    }
+    #queryDefaultModal tbody tr.qf-default-selected > td {
+    background: #dbeafe !important;
+    }
+    #queryDefaultModal tbody tr {
+    cursor: pointer;
+    }
+    #queryDefaultModal .form-select.form-select-sm,
+    #queryDefaultModal .form-control.form-control-sm {
+    font-size: 11px;
+    height: 22px;
+    padding: 2px 6px;
+    }
+    #queryDefaultModal .qf-default-textarea {
+    font-size: 11px;
+    }
+</style>
