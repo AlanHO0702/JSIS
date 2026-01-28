@@ -238,6 +238,37 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
             var cs = _context.Database.GetConnectionString();
             await using var conn = new SqlConnection(cs);
             await conn.OpenAsync();
+
+            // 讀取系統參數 (對應 PassPCB.pas 各項檢查)
+            var procNeedDateCode = await GetSysParamInt(conn, "ProcNeedDateCode");
+            var cmpValueAftPass = await GetSysParamInt(conn, "CmpValueAftPass");
+            var passUseNHParam = await GetSysParamInt(conn, "PassUseNHParam");
+            var passUseTranPQnty = await GetSysParamInt(conn, "PassUseTranPQnty");
+            var wipInStk2AssInStk = await GetSysParamInt(conn, "WIPInStk2AssInStk");
+
+            // 檢查 DateCode 是否需要 (對應 PassPCB.pas 第742-750行)
+            // 修改：同時檢查系統參數 + 製程設定中的 IsDateCode
+            if (procNeedDateCode == 1)
+            {
+                // 查詢下站製程的 IsDateCode 設定
+                int isDateCode = 0;
+                await using (var cmd = new SqlCommand(@"
+                    SELECT IsDateCode FROM EMOdProcInfo WITH(NOLOCK)
+                    WHERE ProcCode = @AftProc", conn))
+                {
+                    cmd.Parameters.AddWithValue("@AftProc", request.AftProc ?? "");
+                    var result = await cmd.ExecuteScalarAsync();
+                    if (result != null && result != DBNull.Value)
+                        isDateCode = Convert.ToInt32(result);
+                }
+
+                // 只有當製程設定中 IsDateCode = 1 時，才要求輸入 DateCode
+                if (isDateCode == 1 && string.IsNullOrWhiteSpace(request.DateCode))
+                {
+                    return BadRequest(new { success = false, message = "過帳失敗: 請輸入DateCode" });
+                }
+            }
+
             await using var tran = conn.BeginTransaction();
 
             try
@@ -270,7 +301,7 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
                     return BadRequest(new { success = false, message = "取單號失敗" });
                 }
 
-                // 3. 建立主檔
+                // 3. 建立主檔 (Status=0, Finished=0, FlowStatus=0 先建立未完成狀態)
                 await using (var cmd = new SqlCommand(@"
                     INSERT INTO FMEdPassMain (PaperNum, PaperDate, UserId, BuildDate, Status, Finished, UseId, FlowStatus)
                     VALUES (@PaperNum, GETDATE(), @UserId, GETDATE(), 0, 0, 'FME00021', 0)", conn, tran))
@@ -358,7 +389,40 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
                     }
                 }
 
-                // 7. 呼叫過帳結果 SP
+                // 7. 檢查下站製程是否為檢驗站 (對應 PassPCB.pas 第757-765行)
+                int isCheckPass = 0;
+                await using (var cmd = new SqlCommand(@"
+                    SELECT IsCheckPass FROM EMOdProcInfo WITH(NOLOCK)
+                    WHERE ProcCode = @AftProc", conn, tran))
+                {
+                    cmd.Parameters.AddWithValue("@AftProc", request.AftProc ?? "");
+                    var result = await cmd.ExecuteScalarAsync();
+                    if (result != null && result != DBNull.Value)
+                        isCheckPass = Convert.ToInt32(result);
+                }
+                _logger.LogInformation("過帳 {PaperNum}: 下站製程 {AftProc}, IsCheckPass={IsCheckPass}",
+                    paperNum, request.AftProc, isCheckPass);
+
+                // 7.1 多產倉預檢 (對應 PassPCB.pas 第774-784行)
+                if (passUseTranPQnty == 1)
+                {
+                    try
+                    {
+                        await using var cmd = new SqlCommand("FMEdLotXOutDivPreChk", conn, tran);
+                        cmd.CommandType = CommandType.StoredProcedure;
+                        cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+                        await cmd.ExecuteNonQueryAsync();
+                        _logger.LogInformation("多產倉預檢完成: {PaperNum}", paperNum);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "FMEdLotXOutDivPreChk 執行失敗: {PaperNum}", paperNum);
+                        // 如果預檢失敗，可能需要 rollback
+                        throw;
+                    }
+                }
+
+                // 8. 呼叫過帳結果 SP
                 string resultMessage = "過帳完成";
                 try
                 {
@@ -374,15 +438,52 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
                     _logger.LogWarning(spEx, "FMEdPassResult SP 執行失敗");
                 }
 
-                // 8. 更新主檔狀態
+                // 9. 更新主檔狀態為完成 (Finished=3, FlowStatus=31 表示已完成)
                 await using (var cmd = new SqlCommand(@"
                     UPDATE FMEdPassMain
-                    SET Finished = 1, FinishUser = @UserId, FinishDate = GETDATE()
+                    SET Finished = 3, FlowStatus = 31, FinishUser = @UserId, FinishDate = GETDATE()
                     WHERE PaperNum = @PaperNum", conn, tran))
                 {
                     cmd.Parameters.AddWithValue("@PaperNum", paperNum);
                     cmd.Parameters.AddWithValue("@UserId", request.UserId ?? "admin");
                     await cmd.ExecuteNonQueryAsync();
+                }
+
+                // 10. 過帳後額外處理 (根據系統參數)
+
+                // 10.1 合併分批自動過帳 (對應 PassPCB.pas 第922-930行)
+                // 注意：這個要在計算產能之前執行
+                try
+                {
+                    await using var cmd = new SqlCommand("FMEdMergDivAutoPass", conn, tran);
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+                    cmd.Parameters.AddWithValue("@UserId", request.UserId ?? "admin");
+                    await cmd.ExecuteNonQueryAsync();
+                    _logger.LogInformation("合併分批自動過帳完成: {PaperNum}", paperNum);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "FMEdMergDivAutoPass 執行失敗: {PaperNum}", paperNum);
+                    // 這個失敗不影響主流程，繼續執行
+                }
+
+                // 10.2 製程參數控管 + 過帳後計算產能 (對應 PassPCB.pas 第933-944行)
+                if (passUseNHParam == 1 && cmpValueAftPass == 1)
+                {
+                    try
+                    {
+                        await using var cmd = new SqlCommand("FMEdCmpValueAftPass", conn, tran);
+                        cmd.CommandType = CommandType.StoredProcedure;
+                        cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+                        cmd.Parameters.AddWithValue("@UserId", request.UserId ?? "admin");
+                        await cmd.ExecuteNonQueryAsync();
+                        _logger.LogInformation("過帳後計算產能完成: {PaperNum}", paperNum);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "FMEdCmpValueAftPass 執行失敗: {PaperNum}", paperNum);
+                    }
                 }
 
                 await tran.CommitAsync();
@@ -551,6 +652,46 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
     private string SqlEscape(string input)
     {
         return input.Replace("'", "''");
+    }
+
+    #endregion
+
+    #region System Parameter Helper
+
+    /// <summary>
+    /// 取得系統參數值
+    /// 表結構：SystemId(1), ParamId(2), Notes(3), Value(4), ParamType(5), ...
+    /// </summary>
+    private async Task<string> GetSysParam(SqlConnection conn, string paramId, SqlTransaction? tran = null)
+    {
+        try
+        {
+            var cmd = new SqlCommand(@"
+                SELECT Value FROM CURdSysParams WITH(NOLOCK)
+                WHERE ParamId = @ParamId", conn, tran);
+            cmd.Parameters.AddWithValue("@ParamId", paramId);
+
+            var result = await cmd.ExecuteScalarAsync();
+            if (result != null && result != DBNull.Value)
+            {
+                return result.ToString()?.Trim() ?? "0";
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "讀取系統參數失敗: {ParamId}", paramId);
+        }
+
+        return "0";
+    }
+
+    /// <summary>
+    /// 取得系統參數整數值
+    /// </summary>
+    private async Task<int> GetSysParamInt(SqlConnection conn, string paramId, SqlTransaction? tran = null)
+    {
+        var value = await GetSysParam(conn, paramId, tran);
+        return int.TryParse(value, out var result) ? result : 0;
     }
 
     #endregion

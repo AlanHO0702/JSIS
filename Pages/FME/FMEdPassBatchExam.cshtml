@@ -1,0 +1,610 @@
+@page "/FMEdPassBatchExam"
+@model PcbErpApi.Pages.FME.FMEdPassBatchExamModel
+@{
+    ViewData["Title"] = "批量過帳審核";
+    Layout = "~/Pages/Shared/_Layout.cshtml";
+}
+
+<div class="pass-batch-exam-container">
+    <!-- 顶部工具栏 -->
+    <div class="toolbar-section">
+        <div class="btn-group me-2">
+            <button type="button" class="btn btn-success btn-sm" id="btnApprove" title="審核確認">
+                <i class="bi bi-check-lg"></i> 審核
+            </button>
+            <button type="button" class="btn btn-warning btn-sm" id="btnReject" title="退審">
+                <i class="bi bi-arrow-counterclockwise"></i> 退審
+            </button>
+        </div>
+    </div>
+
+    <!-- 查询条件区 -->
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <div class="row g-2 align-items-center">
+                <div class="col-md-3">
+                    <label class="form-label form-label-sm mb-1">過入製程</label>
+                    <input type="text" class="form-control form-control-sm" id="txtProcCode" placeholder="輸入製程代碼">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label form-label-sm mb-1">批號(模糊)</label>
+                    <input type="text" class="form-control form-control-sm" id="txtLotNum" placeholder="輸入批號">
+                </div>
+                <div class="col-auto">
+                    <button type="button" class="btn btn-primary btn-sm mt-4" id="btnSearch">
+                        <i class="bi bi-search"></i> 重取
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 多选区域 -->
+    <div class="multi-select-container">
+        <div class="row g-2">
+            <!-- 左侧：待审核列表 -->
+            <div class="col-md-5">
+                <div class="card h-100">
+                    <div class="card-header py-1 bg-light">
+                        <span><i class="bi bi-list"></i> 待審核過帳單</span>
+                        <span class="badge bg-secondary ms-2" id="lblSourceCount">0</span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                            <table class="table table-sm table-hover table-bordered mb-0" id="tblSource">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th style="width: 50px;">
+                                            <input type="checkbox" class="form-check-input" id="chkSelectAll">
+                                        </th>
+                                        <th>製程代碼</th>
+                                        <th>製程名稱</th>
+                                        <th>品號</th>
+                                        <th>批號</th>
+                                        <th>數量</th>
+                                        <th>過帳單單號</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- 动态加载 -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 中间：操作按钮 -->
+            <div class="col-md-2 d-flex align-items-center justify-content-center">
+                <div class="btn-group-vertical">
+                    <button type="button" class="btn btn-outline-primary btn-sm mb-2" id="btnMoveRight" title="移至已選擇">
+                        <i class="bi bi-chevron-double-right"></i>
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnMoveLeft" title="移回待審核">
+                        <i class="bi bi-chevron-double-left"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 右侧：已选择列表 -->
+            <div class="col-md-5">
+                <div class="card h-100">
+                    <div class="card-header py-1 bg-light">
+                        <span><i class="bi bi-check-square"></i> 已選擇待審核的過帳單</span>
+                        <span class="badge bg-primary ms-2" id="lblTargetCount">0</span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                            <table class="table table-sm table-hover table-bordered mb-0" id="tblTarget">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th style="width: 50px;">
+                                            <input type="checkbox" class="form-check-input" id="chkSelectAllTarget">
+                                        </th>
+                                        <th>製程代碼</th>
+                                        <th>製程名稱</th>
+                                        <th>品號</th>
+                                        <th>批號</th>
+                                        <th>數量</th>
+                                        <th>過帳單單號</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- 动态加载 -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 明细区域 -->
+    <div class="card mt-3">
+        <div class="card-header py-1 bg-light">
+            <span><i class="bi bi-table"></i> 過帳明細</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive" style="max-height: 200px; overflow-y: auto;">
+                <table class="table table-sm table-bordered table-hover mb-0" id="tblDetail">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th>項次</th>
+                            <th>品號</th>
+                            <th>版序</th>
+                            <th>批號</th>
+                            <th>過出製程</th>
+                            <th>製程名稱</th>
+                            <th>階段</th>
+                            <th>型狀</th>
+                            <th>下站製程</th>
+                            <th>下站製程名稱</th>
+                            <th>下站階段</th>
+                            <th>下站型狀</th>
+                            <th>過帳數</th>
+                            <th>報廢數</th>
+                            <th>留存數</th>
+                            <th>本站新增單報數</th>
+                            <th>週期</th>
+                            <th>備註</th>
+                            <th>原始狀態</th>
+                            <th>拆批單號</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- 动态加载 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Styles {
+<style>
+    .pass-batch-exam-container {
+        padding: 10px 20px;
+        max-width: 1600px;
+        margin: 0 auto;
+    }
+
+    .toolbar-section {
+        display: flex;
+        align-items: center;
+        padding: 8px 0;
+        border-bottom: 1px solid #dee2e6;
+        margin-bottom: 10px;
+    }
+
+    .form-label-sm {
+        font-size: 0.8rem;
+        color: #6c757d;
+    }
+
+    .card-header {
+        background-color: #f8f9fa;
+        font-size: 0.9rem;
+        font-weight: 500;
+    }
+
+    .table th {
+        font-size: 0.8rem;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+
+    .table td {
+        font-size: 0.85rem;
+        vertical-align: middle;
+        white-space: nowrap;
+    }
+
+    .table tbody tr:hover {
+        background-color: #e7f1ff;
+    }
+
+    .table tbody tr.selected {
+        background-color: #cfe2ff;
+    }
+
+    .sticky-top {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+
+    .multi-select-container {
+        min-height: 400px;
+    }
+</style>
+}
+
+@section Scripts {
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script>
+    let currentUserId = '@Model.UserId';
+    let sourceData = [];  // 左侧数据
+    let targetData = [];  // 右侧数据
+
+    $(document).ready(function () {
+        initPage();
+        bindEvents();
+    });
+
+    function initPage() {
+        // 檢查權限
+        checkPermissions();
+    }
+
+    function bindEvents() {
+        // 查询按钮
+        $('#btnSearch').click(function () {
+            searchPassList();
+        });
+
+        // 查询条件 Enter 键
+        $('#txtProcCode, #txtLotNum').keydown(function (e) {
+            if (e.keyCode === 13) {
+                e.preventDefault();
+                searchPassList();
+            }
+        });
+
+        // 全选/取消全选
+        $('#chkSelectAll').change(function () {
+            $('#tblSource tbody input[type="checkbox"]').prop('checked', $(this).prop('checked'));
+        });
+
+        $('#chkSelectAllTarget').change(function () {
+            $('#tblTarget tbody input[type="checkbox"]').prop('checked', $(this).prop('checked'));
+        });
+
+        // 移动按钮
+        $('#btnMoveRight').click(function () {
+            moveToTarget();
+        });
+
+        $('#btnMoveLeft').click(function () {
+            moveToSource();
+        });
+
+        // 审核按钮
+        $('#btnApprove').click(function () {
+            approvePass();
+        });
+
+        // 退審按钮
+        $('#btnReject').click(function () {
+            rejectPass();
+        });
+
+        // 表格行点击事件（显示明细）
+        $('#tblSource tbody, #tblTarget tbody').on('click', 'tr', function () {
+            var paperNum = $(this).data('papernum');
+            if (paperNum) {
+                loadDetail(paperNum);
+            }
+        });
+    }
+
+    // 檢查權限
+    function checkPermissions() {
+        $.ajax({
+            url: '/api/FMEdPassBatchExam/check-permission',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ userId: currentUserId }),
+            success: function (resp) {
+                if (resp.success) {
+                    if (!resp.hasApprovePermission) {
+                        $('#btnApprove').prop('disabled', true).attr('title', '沒有審核權限');
+                    }
+                    if (!resp.hasRejectPermission) {
+                        $('#btnReject').prop('disabled', true).attr('title', '沒有退審權限');
+                    }
+                }
+            }
+        });
+    }
+
+    // 查詢待審核過帳單
+    function searchPassList() {
+        var queryData = {
+            userId: currentUserId,
+            procCode: $('#txtProcCode').val().trim(),
+            lineId: '',
+            lotNum: $('#txtLotNum').val().trim()
+        };
+
+        $.ajax({
+            url: '/api/FMEdPassBatchExam/query',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(queryData),
+            success: function (resp) {
+                if (resp.success && resp.data) {
+                    sourceData = resp.data;
+                    targetData = [];  // 清空右侧
+                    renderSourceTable();
+                    renderTargetTable();
+                    clearDetail();
+                } else {
+                    alert('查詢失敗');
+                }
+            },
+            error: function (xhr) {
+                alert('查詢失敗: ' + (xhr.responseJSON?.message || xhr.responseText));
+            }
+        });
+    }
+
+    // 渲染左側表格
+    function renderSourceTable() {
+        var tbody = $('#tblSource tbody');
+        tbody.empty();
+
+        if (sourceData.length === 0) {
+            tbody.html('<tr><td colspan="7" class="text-center text-muted">無待審核數據</td></tr>');
+            $('#lblSourceCount').text('0');
+            return;
+        }
+
+        sourceData.forEach(function (item) {
+            // Debug: 檢查數據
+            console.log('Item:', item);
+
+            var tr = $('<tr>').data('papernum', getVal(item, 'PaperNum'));
+            tr.append($('<td>').append($('<input type="checkbox" class="form-check-input">')));
+            tr.append($('<td>').text(getVal(item, 'ProcCode')));
+            tr.append($('<td>').text(getVal(item, 'ProcName')));
+            tr.append($('<td>').text(getVal(item, 'PartNum')));
+            tr.append($('<td>').text(getVal(item, 'LotNum')));
+
+            // 數量：可能是 Qnty, PQnty, 或其他名稱
+            var qnty = getVal(item, 'Qnty') || getVal(item, 'PQnty') || getVal(item, 'PassQnty') || '0';
+            console.log('Qnty value:', qnty);
+            tr.append($('<td>').text(qnty));
+
+            tr.append($('<td>').text(getVal(item, 'PaperNum')));
+            tbody.append(tr);
+        });
+
+        $('#lblSourceCount').text(sourceData.length);
+        $('#chkSelectAll').prop('checked', false);
+    }
+
+    // 渲染右側表格
+    function renderTargetTable() {
+        var tbody = $('#tblTarget tbody');
+        tbody.empty();
+
+        if (targetData.length === 0) {
+            tbody.html('<tr><td colspan="7" class="text-center text-muted">未選擇任何過帳單</td></tr>');
+            $('#lblTargetCount').text('0');
+            return;
+        }
+
+        targetData.forEach(function (item) {
+            var tr = $('<tr>').data('papernum', getVal(item, 'PaperNum'));
+            tr.append($('<td>').append($('<input type="checkbox" class="form-check-input">')));
+            tr.append($('<td>').text(getVal(item, 'ProcCode')));
+            tr.append($('<td>').text(getVal(item, 'ProcName')));
+            tr.append($('<td>').text(getVal(item, 'PartNum')));
+            tr.append($('<td>').text(getVal(item, 'LotNum')));
+
+            // 數量：可能是 Qnty, PQnty, 或其他名稱
+            var qnty = getVal(item, 'Qnty') || getVal(item, 'PQnty') || getVal(item, 'PassQnty') || '0';
+            tr.append($('<td>').text(qnty));
+
+            tr.append($('<td>').text(getVal(item, 'PaperNum')));
+            tbody.append(tr);
+        });
+
+        $('#lblTargetCount').text(targetData.length);
+        $('#chkSelectAllTarget').prop('checked', false);
+    }
+
+    // 移動到右側（已選擇）
+    function moveToTarget() {
+        var selectedItems = [];
+        $('#tblSource tbody tr').each(function () {
+            if ($(this).find('input[type="checkbox"]').prop('checked')) {
+                var paperNum = $(this).data('papernum');
+                var item = sourceData.find(x => getVal(x, 'PaperNum') === paperNum);
+                if (item) {
+                    selectedItems.push(item);
+                }
+            }
+        });
+
+        if (selectedItems.length === 0) {
+            alert('請先選擇要審核的過帳單');
+            return;
+        }
+
+        // 移動數據
+        targetData = targetData.concat(selectedItems);
+        sourceData = sourceData.filter(x => !selectedItems.includes(x));
+
+        renderSourceTable();
+        renderTargetTable();
+    }
+
+    // 移回左側（待審核）
+    function moveToSource() {
+        var selectedItems = [];
+        $('#tblTarget tbody tr').each(function () {
+            if ($(this).find('input[type="checkbox"]').prop('checked')) {
+                var paperNum = $(this).data('papernum');
+                var item = targetData.find(x => getVal(x, 'PaperNum') === paperNum);
+                if (item) {
+                    selectedItems.push(item);
+                }
+            }
+        });
+
+        if (selectedItems.length === 0) {
+            alert('請先選擇要移回的過帳單');
+            return;
+        }
+
+        // 移回數據
+        sourceData = sourceData.concat(selectedItems);
+        targetData = targetData.filter(x => !selectedItems.includes(x));
+
+        renderSourceTable();
+        renderTargetTable();
+    }
+
+    // 審核確認
+    function approvePass() {
+        if (targetData.length === 0) {
+            alert('請先選擇要審核的過帳單');
+            return;
+        }
+
+        if (!confirm('確定要審核 ' + targetData.length + ' 筆過帳單嗎？')) {
+            return;
+        }
+
+        var paperNums = targetData.map(x => getVal(x, 'PaperNum'));
+
+        $.ajax({
+            url: '/api/FMEdPassBatchExam/approve',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                userId: currentUserId,
+                paperNums: paperNums
+            }),
+            success: function (resp) {
+                if (resp.success) {
+                    alert(resp.message);
+                    // 清空右側，重新查詢左側
+                    targetData = [];
+                    searchPassList();
+                } else {
+                    alert('審核失敗: ' + resp.message);
+                }
+            },
+            error: function (xhr) {
+                alert('審核失敗: ' + (xhr.responseJSON?.message || xhr.responseText));
+            }
+        });
+    }
+
+    // 退審
+    function rejectPass() {
+        // 從左側選擇一筆進行退審
+        var selectedPaperNum = null;
+        $('#tblSource tbody tr').each(function () {
+            if ($(this).find('input[type="checkbox"]').prop('checked')) {
+                selectedPaperNum = $(this).data('papernum');
+                return false;  // break
+            }
+        });
+
+        if (!selectedPaperNum) {
+            alert('請先選擇要退審的過帳單（從左側待審核列表勾選）');
+            return;
+        }
+
+        if (!confirm('確定要將單號 ' + selectedPaperNum + ' 退審嗎？')) {
+            return;
+        }
+
+        $.ajax({
+            url: '/api/FMEdPassBatchExam/reject',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                userId: currentUserId,
+                paperNum: selectedPaperNum
+            }),
+            success: function (resp) {
+                if (resp.success) {
+                    alert(resp.message);
+                    searchPassList();
+                } else {
+                    alert('退審失敗: ' + resp.message);
+                }
+            },
+            error: function (xhr) {
+                alert('退審失敗: ' + (xhr.responseJSON?.message || xhr.responseText));
+            }
+        });
+    }
+
+    // 載入明細
+    function loadDetail(paperNum) {
+        $.ajax({
+            url: '/api/FMEdPassBatchExam/detail',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ paperNum: paperNum }),
+            success: function (resp) {
+                if (resp.success && resp.data) {
+                    renderDetailTable(resp.data);
+                }
+            },
+            error: function (xhr) {
+                console.error('載入明細失敗', xhr);
+            }
+        });
+    }
+
+    // 渲染明細表格
+    function renderDetailTable(data) {
+        var tbody = $('#tblDetail tbody');
+        tbody.empty();
+
+        if (data.length === 0) {
+            tbody.html('<tr><td colspan="20" class="text-center text-muted">無明細數據</td></tr>');
+            return;
+        }
+
+        console.log('Detail data:', data); // Debug: 查看明細資料
+
+        data.forEach(function (item) {
+            var tr = $('<tr>');
+            tr.append($('<td>').text(getVal(item, 'Item')));                    // 項次
+            tr.append($('<td>').text(getVal(item, 'PartNum')));                 // 品號
+            tr.append($('<td>').text(getVal(item, 'Revision')));                // 版序
+            tr.append($('<td>').text(getVal(item, 'LotNum')));                  // 批號
+            tr.append($('<td>').text(getVal(item, 'ProcCode')));                // 過出製程
+            tr.append($('<td>').text(getVal(item, 'ProcName')));                // 製程名稱 (可能缺少)
+            tr.append($('<td>').text(getVal(item, 'LayerId')));                 // 階段
+            tr.append($('<td>').text(getVal(item, 'POP')));                     // 型狀
+            tr.append($('<td>').text(getVal(item, 'AftProc')));                 // 下站製程
+            tr.append($('<td>').text(getVal(item, 'AftProcName')));             // 下站製程名稱 (可能缺少)
+            tr.append($('<td>').text(getVal(item, 'AftLayer')));                // 下站階段
+            tr.append($('<td>').text(getVal(item, 'AftPOP')));                  // 下站型狀
+            tr.append($('<td>').text(getVal(item, 'PQnty')));                   // 過帳數
+            tr.append($('<td>').text(getVal(item, 'SQnty')));                   // 報廢數
+            tr.append($('<td>').text(getVal(item, 'UQnty')));                   // 留存數
+            tr.append($('<td>').text(getVal(item, 'XOutQnty') || '0'));         // 本站新增單報數
+            tr.append($('<td>').text(getVal(item, 'Period') || getVal(item, 'Cycle'))); // 週期 (可能缺少)
+            tr.append($('<td>').text(getVal(item, 'Notes') || getVal(item, 'Memo'))); // 備註
+            tr.append($('<td>').text(getVal(item, 'LotStatusName') || getVal(item, 'OrgStatus') || getVal(item, 'OriginalStatus'))); // 原始狀態
+            tr.append($('<td>').text(getVal(item, 'DivPaperNum') || getVal(item, 'SplitPaperNum'))); // 拆批單號 (可能缺少)
+            tbody.append(tr);
+        });
+    }
+
+    // 清空明細
+    function clearDetail() {
+        $('#tblDetail tbody').html('<tr><td colspan="20" class="text-center text-muted">請點擊過帳單查看明細</td></tr>');
+    }
+
+    // 輔助函數：忽略大小寫取值
+    function getVal(obj, key) {
+        if (!obj) return '';
+        var lowerKey = key.toLowerCase();
+        for (var k in obj) {
+            if (k.toLowerCase() === lowerKey) return obj[k] ?? '';
+        }
+        return '';
+    }
+</script>
+}
