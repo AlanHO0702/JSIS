@@ -23,7 +23,7 @@ namespace PcbErpApi.Helpers
                 if (property == null) continue;
 
                 // 根據型別自動解析
-                object value = ParseValue(property.PropertyType, filter.Value);
+                object? value = ParseValue(property.PropertyType, filter.Value);
                 if (value == null) continue;
 
                 // 動態組 Where 條件
@@ -41,12 +41,14 @@ namespace PcbErpApi.Helpers
             var actualType = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
             var valExpr = Expression.Constant(value, actualType);
 
-            Expression body = null;
+            Expression? body = null;
 
             if (actualType == typeof(string))
             {
                 // string用string.Compare做大小比較
                 var compareMethod = typeof(string).GetMethod("Compare", new[] { typeof(string), typeof(string) });
+                if (compareMethod == null)
+                    throw new InvalidOperationException("string.Compare(string, string) method not found.");
                 var compareCall = Expression.Call(compareMethod, propExpr, valExpr);
                 var zero = Expression.Constant(0);
 
@@ -72,6 +74,8 @@ namespace PcbErpApi.Helpers
                         break;
                     case QueryOp.Contains:
                         var containsMethod = typeof(string).GetMethod("Contains", new[] { typeof(string) });
+                        if (containsMethod == null)
+                            throw new InvalidOperationException("string.Contains(string) method not found.");
                         body = Expression.Call(propExpr, containsMethod, valExpr);
                         break;
                     default:
@@ -108,12 +112,14 @@ namespace PcbErpApi.Helpers
                 }
             }
 
+            if (body == null)
+                throw new InvalidOperationException("Failed to build dynamic query expression.");
             var lambda = Expression.Lambda<Func<T, bool>>(body, param);
             return query.Where(lambda);
         }
 
         // 解析值
-        private static object ParseValue(Type targetType, string strVal)
+        private static object? ParseValue(Type targetType, string strVal)
         {
             try
             {

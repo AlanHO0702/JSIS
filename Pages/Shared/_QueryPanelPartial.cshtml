@@ -1,7 +1,7 @@
-@model List<QueryFieldViewModel>
+@model dynamic
 @using System.Text.Json
 @{
-    var fieldsJson = JsonSerializer.Serialize(Model ?? new List<QueryFieldViewModel>());
+    var fieldsJson = JsonSerializer.Serialize(Model ?? new List<object>());
 }
 
 <form id="searchForm" method="post" class="modal-content query-modal-content">
@@ -11,7 +11,7 @@
     </div>
     <div class="modal-body">
         <div class="container-fluid">
-            <div class="row g-2 query-field-grid"></div>
+            <div class="row g-1 query-field-grid"></div>
         </div>
     </div>
     <div class="modal-footer query-footer">
@@ -31,13 +31,13 @@
     .query-modal-content .modal-header :is(button, input, select, textarea, a) { cursor: default; }
     .query-modal-content .query-op { flex: 0 0 76px; min-width: 76px; max-width: 76px; }
     .query-modal-content .query-input { flex: 0 0 140px; min-width: 140px; max-width: 140px; }
-    .query-modal-content .modal-body { padding: 10px 12px; }
+    .query-modal-content .modal-body { padding: 10px 12px; max-height: 50vh; overflow-y: auto; }
     .query-modal-content .modal-header { display: flex; align-items: center; gap: 10px; }
     .query-modal-content .modal-title { margin: 0; }
     .query-modal-content .query-footer { display: flex; align-items: center; justify-content: space-between; }
     .query-modal-content .query-footer-left { display: flex; gap: 6px; }
     .query-modal-content .query-footer-right { display: flex; gap: 8px; }
-    .query-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 6px; column-gap: 16px; }
+    .query-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; }
     .query-field-grid > .query-item { box-sizing: border-box; }
     .query-field-grid .query-item { display: flex; }
     .query-field-grid .query-row { display: flex; align-items: center; gap: 8px; }
@@ -94,7 +94,25 @@
         const defType = Number(field.defaultType ?? field.DefaultType ?? 0);
         if (defType === 2) return getUserId();
         if (defType === 3) return getUseId();
-        return field.defaultValue ?? field.DefaultValue ?? field.paramValue ?? field.ParamValue ?? "";
+        const raw = field.defaultValue ?? field.DefaultValue;
+        return raw ?? "";
+    };
+
+    const looksLikeSqlDefault = (val) => {
+        if (typeof val !== "string") return false;
+        return /\bselect\b/i.test(val);
+    };
+
+    const isDatePlaceholder = (val) => {
+        if (val == null) return false;
+        const s = String(val).trim();
+        const lower = s.toLowerCase();
+        // 檢查常見的日期佔位符格式（包含中文「月」）
+        return lower === "yyyy/mm/dd" ||
+               lower === "yyyy-mm-dd" ||
+               lower === "yyyy/月/dd" ||
+               /^yyyy[\/-]mm[\/-]dd$/i.test(s) ||
+               /^yyyy[\/-]月[\/-]dd$/i.test(s);
     };
 
     const applyEditMask = (value, field) => {
@@ -103,6 +121,36 @@
             return window.normalizeForDateInput(fake, value);
         }
         return value;
+    };
+
+    const normalizeDateValue = (val) => {
+        if (val == null) return "";
+        const s = String(val).trim();
+        if (!s) return "";
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(s)) {
+            const [y, m, d] = s.split("/");
+            return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+        }
+        const m = s.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?:\s+(上午|下午))?(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+        if (m) {
+            const y = m[1];
+            const mo = m[2].padStart(2, "0");
+            const d = m[3].padStart(2, "0");
+            let hour = m[5] ? Number(m[5]) : 0;
+            const ap = m[4];
+            if (ap === "下午" && hour < 12) hour += 12;
+            if (ap === "上午" && hour === 12) hour = 0;
+            return `${y}-${mo}-${d}`;
+        }
+        const parsed = new Date(s);
+        if (!Number.isNaN(parsed.getTime())) {
+            const y = String(parsed.getFullYear());
+            const mo = String(parsed.getMonth() + 1).padStart(2, "0");
+            const d = String(parsed.getDate()).padStart(2, "0");
+            return `${y}-${mo}-${d}`;
+        }
+        return "";
     };
 
     const fetchEquals = async () => {
@@ -123,21 +171,89 @@
         return cachedEquals;
     };
 
+    const mergeResolvedDefaults = (selected, resolved) => {
+        if (!Array.isArray(selected) || !Array.isArray(resolved)) return selected;
+        const map = new Map();
+        resolved.forEach(r => {
+            const key = normalizeKey(r?.columnName ?? r?.ColumnName ?? "");
+            if (key) map.set(key, r);
+        });
+
+        // 檢查哪些欄位需要執行 SQL 但沒有在執行結果中
+        const sqlFields = selected.filter(item => {
+            const defType = Number(item.defaultType ?? item.DefaultType ?? 0);
+            const defVal = item?.defaultValue ?? item?.DefaultValue ?? "";
+            return defType === 1 && looksLikeSqlDefault(defVal);
+        });
+
+        const missingFields = sqlFields.filter(item => {
+            const key = normalizeKey(item?.columnName ?? item?.ColumnName ?? "");
+            return key && !map.has(key);
+        });
+        if (missingFields.length > 0) {
+            console.warn(`[QueryPanel] 以下 ${missingFields.length} 個欄位需要執行 SQL 但在執行結果中找不到:`, missingFields.map(f => f.columnName || f.ColumnName));
+        }
+
+        selected.forEach(item => {
+            const key = normalizeKey(item?.columnName ?? item?.ColumnName ?? "");
+            if (!key || !map.has(key)) return;
+            const hit = map.get(key);
+            const defType = Number(item.defaultType ?? item.DefaultType ?? hit?.defaultType ?? hit?.DefaultType ?? 0);
+            const resolvedVal = hit?.defaultValue ?? hit?.DefaultValue ?? "";
+            const currentVal = item?.defaultValue ?? item?.DefaultValue ?? "";
+
+            if (defType === 1 && resolvedVal !== "" && looksLikeSqlDefault(currentVal)) {
+                item.defaultValue = resolvedVal;
+                item.DefaultValue = resolvedVal;
+            } else if (!currentVal && resolvedVal) {
+                item.defaultValue = resolvedVal;
+                item.DefaultValue = resolvedVal;
+            }
+        });
+        return selected;
+    };
+
     const loadQueryFields = async () => {
-        if (cachedFields) return cachedFields;
+        if (cachedFields) {
+            return cachedFields;
+        }
         const itemId = getItemId();
         const table = getTable();
         if (!itemId || !table) {
+            console.warn('[QueryPanel] 缺少 itemId 或 table，使用 fallback 欄位');
             cachedFields = Array.isArray(fallbackFields) ? fallbackFields : [];
             return cachedFields;
         }
         try {
-            const url = `/api/DictSetupApi/PaperSelectedList?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(table)}`;
+            const url = `/api/DictSetupApi/PaperSelectedList?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(table)}&resolveDefault=1`;
             const res = await busyFetch(url, null, "載入查詢條件…");
             if (!res.ok) throw new Error(await res.text());
             const data = await res.json();
-            cachedFields = Array.isArray(data?.selected) ? data.selected : (Array.isArray(fallbackFields) ? fallbackFields : []);
-        } catch {
+            let selected = Array.isArray(data?.selected) ? data.selected : (Array.isArray(fallbackFields) ? fallbackFields : []);
+            // 顯示前 3 個欄位的 defaultType
+            selected.slice(0, 3).forEach(item => {
+            });
+            const needResolve = selected.some(f => {
+                const defType = Number(f?.defaultType ?? f?.DefaultType ?? 0);
+                const defVal = f?.defaultValue ?? f?.DefaultValue ?? "";
+                return defType === 1 && looksLikeSqlDefault(defVal);
+            });
+            if (needResolve) {
+                try {
+                    const res2 = await busyFetch(`/api/DictSetupApi/QueryFields?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(table)}&lang=TW`, null, "載入查詢預設值…");
+                    if (res2.ok) {
+                        const resolved = await res2.json();
+                        selected = mergeResolvedDefaults(selected, resolved);
+                    } else {
+                        console.error('[QueryPanel] QueryFields API 回應錯誤:', res2.status);
+                    }
+                } catch (err) {
+                    console.error('[QueryPanel] QueryFields API 呼叫失敗:', err);
+                }
+            }
+            cachedFields = selected;
+        } catch (err) {
+            console.error('[QueryPanel] 載入查詢欄位失敗:', err);
             cachedFields = Array.isArray(fallbackFields) ? fallbackFields : [];
         }
         return cachedFields;
@@ -260,13 +376,33 @@
         wrap.appendChild(row);
         gridEl.appendChild(wrap);
 
-        const defaultVal = applyEditMask(applyDefaultByType(field), field);
+        const rawDefaultVal = applyDefaultByType(field);
+        let defaultVal = applyEditMask(rawDefaultVal, field);
+        if (input.type === "date") {
+            defaultVal = normalizeDateValue(defaultVal);
+        }
+
+        
+
+        // 如果 defaultType=1（SQL指令）但預設值還是 SQL 字串，表示 SQL 沒有執行，不要填入
+        const defType = Number(field.defaultType ?? field.DefaultType ?? 0);
+        if (defType === 1 && looksLikeSqlDefault(defaultVal)) {
+            defaultVal = "";
+        }
+
+        // 如果是日期佔位符，清空
+        if (input.type === "date" && isDatePlaceholder(defaultVal)) {
+            defaultVal = "";
+        }
         if (input.tagName === "SELECT") {
             const superValue = superId ? readSuperValue(superId) : "";
             const opts = await loadOptions(colName, superValue);
             buildOptionList(input, opts, defaultVal);
         } else if (defaultVal) {
             input.value = defaultVal;
+        } else if (input.type === "date") {
+            // 確保日期欄位清空佔位符
+            input.value = "";
         }
 
         if (input.tagName === "SELECT") {
@@ -311,20 +447,37 @@
         });
     };
 
+    let buildPromise = null;
+
     const buildForm = async () => {
-        if (building) return;
-        building = true;
-        gridEl.innerHTML = "";
-        const [fields, equals] = await Promise.all([loadQueryFields(), fetchEquals()]);
-        if (!Array.isArray(fields) || fields.length === 0) {
-            building = false;
+        if (building) {
+            if (buildPromise) {
+                await buildPromise;
+            }
             return;
         }
-        for (let i = 0; i < fields.length; i++) {
-            await buildField(fields[i], equals, i);
-        }
-        wireSuperChange();
+        building = true;
+
+        buildPromise = (async () => {
+            gridEl.innerHTML = "";
+            try {
+                const [fields, equals] = await Promise.all([loadQueryFields(), fetchEquals()]);
+                if (!Array.isArray(fields) || fields.length === 0) {
+                    console.warn('[QueryPanel] 沒有查詢欄位，結束建立表單');
+                    return;
+                }
+                for (let i = 0; i < fields.length; i++) {
+                    await buildField(fields[i], equals, i);
+                }
+                wireSuperChange();
+            } catch (err) {
+                console.error('[QueryPanel] 建立查詢表單時發生錯誤:', err);
+            }
+        })();
+
+        await buildPromise;
         building = false;
+        buildPromise = null;
     };
 
     window.QueryFieldsManager = {
@@ -337,6 +490,8 @@
 
     if (modalEl) {
         modalEl.addEventListener("shown.bs.modal", () => {
+            // 清除快取，確保重新載入資料並執行 SQL
+            cachedFields = null;
             buildForm().catch(() => {});
         });
     }

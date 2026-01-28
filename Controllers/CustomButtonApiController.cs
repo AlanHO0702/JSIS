@@ -218,27 +218,27 @@ ORDER BY SerialNum, ButtonName;";
     
     // ====== DTOs ======
 public class SearchParamRow {
-    public string ItemId { get; set; }
-    public string ButtonName { get; set; }
-    public string ParamName { get; set; }
-    public string DisplayName { get; set; }
+    public string? ItemId { get; set; }
+    public string? ButtonName { get; set; }
+    public string? ParamName { get; set; }
+    public string? DisplayName { get; set; }
     public int?    ControlType { get; set; }
-    public string CommandText { get; set; }
-    public string DefaultValue { get; set; }
+    public string? CommandText { get; set; }
+    public string? DefaultValue { get; set; }
     public int?    DefaultType { get; set; }
-    public string EditMask { get; set; }
-    public string SuperId { get; set; }
+    public string? EditMask { get; set; }
+    public string? SuperId { get; set; }
     public int?    ParamSN { get; set; }
-    public string ParamValue { get; set; }
+    public string? ParamValue { get; set; }
     public int?    ParamType { get; set; }
     public int?    iReadOnly { get; set; }
     public int?    iVisible { get; set; }
 }
 
 public class InsKeyRow {
-    public string ItemId { get; set; }
-    public string ButtonName { get; set; }
-    public string KeyFieldName { get; set; }
+    public string? ItemId { get; set; }
+    public string? ButtonName { get; set; }
+    public string? KeyFieldName { get; set; }
     public int?    SeqNum { get; set; }
     public int?    PositionType { get; set; }
 }

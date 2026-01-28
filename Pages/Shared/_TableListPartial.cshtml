@@ -129,7 +129,7 @@
                 SearchBtnId = "btnSearch",
                 AddBtnId = "btnAddNew",
                 DeleteBtnId = "btnBatchDelete",
-                QueryFields = ViewData["QueryFields"] as List<QueryFieldViewModel>,
+                QueryFields = ViewData["QueryFields"] as List<QueryFieldViewModel> ?? new List<QueryFieldViewModel>(),
                 ModalId = "searchModal",
                 ReportSpName = ViewData["ReportSpName"]?.ToString() ?? "" 
             })
@@ -654,7 +654,6 @@ function doQuery(page = 1, direction = null) {
       );
     })
     .catch(err => {
-      console.log(`[分頁查詢] 失敗 | ${(performance.now() - t0).toFixed(0)}ms | ${err}`);
       Swal.fire({ icon:'error', title:'查詢失敗', text: String(err) });
     });
 }
@@ -769,25 +768,76 @@ document.addEventListener("DOMContentLoaded", function () {
 
   const state = loadQueryState();
   const formEl = document.getElementById('searchForm');
-  const cleaned = (state.filters || [])
-    .filter(f => {
-      if (!f) return false;
-      const isDate = /date/i.test(String(f.Field || ''));
-      return !(isDate && needDrop(f.Value)); 
-    })
-    .map(f => {
-      if (/date/i.test(String(f.Field || ''))) {
-        f.Value = normalizeForDateInput({ type: 'date' }, f.Value);
-      }
-      return f;
-    });
 
-  const urlPageParam = new URLSearchParams(window.location.search).get('page');
+  // 檢查 URL 是否有查詢參數（從單身頁查詢跳轉過來）
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlPageParam = urlParams.get('page');
+  const useStoredQuery = urlParams.get('useStoredQuery') === '1';
   const initialPage = urlPageParam ? parseInt(urlPageParam, 10) : 1;
 
-  if (cleaned.length) {
-    lastQueryFilters = cleaned;
-    restoreSearchFormSafe(formEl, cleaned);
+  // 獲取查詢欄位配置（用於讀取默認比對條件）
+  const queryFieldsConfig = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(ViewData["QueryFields"] as List<QueryFieldViewModel> ?? new List<QueryFieldViewModel>()));
+  const queryFieldsMap = new Map();
+  (queryFieldsConfig || []).forEach(f => {
+    const colName = (f.columnName || f.ColumnName || '').toLowerCase();
+    if (colName) {
+      queryFieldsMap.set(colName, {
+        defaultEqual: (f.defaultEqual || f.DefaultEqual || 'like').toString(),
+        dataType: f.dataType || f.DataType
+      });
+    }
+  });
+
+  // 從 URL 提取查詢參數（排除 page 和 pageSize）
+  const urlFilters = [];
+  for (const [key, value] of urlParams.entries()) {
+    if (key !== 'page' && key !== 'pageSize' && key !== 'useStoredQuery' && value) {
+      const fieldConfig = queryFieldsMap.get(key.toLowerCase());
+      const defaultOp = fieldConfig?.defaultEqual || 'like';
+      urlFilters.push({
+        Field: key,
+        Op: defaultOp,  // 使用欄位配置中的默認比對條件
+        Value: value,
+        Key: `${key}#0`
+      });
+    }
+  }
+
+  // 優先使用 URL 參數，如果有的話
+  let finalFilters = [];
+  if (!useStoredQuery && urlFilters.length > 0) {
+    // URL 有查詢參數，使用 URL 參數並保存到 localStorage
+    finalFilters = urlFilters;
+    const tn = ("@tableName" || '').toString().trim().toLowerCase();
+    const filterKey = tn ? `orderListQueryFilters:${tn}` : 'orderListQueryFilters';
+    const filtersWithPaging = [
+      ...urlFilters,
+      { Field: 'page', Op: '', Value: '1' },
+      { Field: 'pageSize', Op: '', Value: '50' }
+    ];
+    try {
+      localStorage.setItem(filterKey, JSON.stringify(filtersWithPaging));
+      localStorage.setItem('orderListQueryFilters', JSON.stringify(filtersWithPaging));
+    } catch {}
+  } else {
+    // 沒有 URL 參數，使用 localStorage 的查詢條件
+    finalFilters = (state.filters || [])
+      .filter(f => {
+        if (!f) return false;
+        const isDate = /date/i.test(String(f.Field || ''));
+        return !(isDate && needDrop(f.Value)); // 移除看起來像 SQL 的日期值
+      })
+      .map(f => {
+        if (/date/i.test(String(f.Field || ''))) {
+          f.Value = normalizeForDateInput({ type: 'date' }, f.Value);
+        }
+        return f;
+      });
+  }
+
+  if (finalFilters.length) {
+    lastQueryFilters = finalFilters;
+    restoreSearchFormSafe(formEl, finalFilters);
     doQuery(initialPage);
   } else {
     if (urlPageParam && initialPage > 1) {
@@ -822,7 +872,6 @@ document.addEventListener("DOMContentLoaded", function () {
       }
 
       const result = await checkResp.json();
-      console.log('[列表頁修改按鈕] CheckCanEdit 結果:', result);
 
       const canEdit = result.CanEdit ?? result.canEdit;
       const message = result.Message ?? result.message;

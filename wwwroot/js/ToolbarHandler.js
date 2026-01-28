@@ -146,6 +146,7 @@ function openPaperTypeModal(types) {
     this.lastQueryFilters    = [];
     this.getSelectedId       = opts.getSelectedId || (() => window.selectedPaperNum || null);
      this.queryRedirectUrl    = opts.queryRedirectUrl || null;
+     this.forceStoredQueryOnRedirect = opts.forceStoredQueryOnRedirect === true;
      this.paperAction         = opts.paperAction || null; // { url, paperId?, userId?, eoc, aftFinished }
 
      this.init();
@@ -179,7 +180,6 @@ function openPaperTypeModal(types) {
           try {
             const result = await beforeAddFn({ tableName: this.tableName, userId: window._userId || 'admin' });
             if (result === false) {
-              console.log('[新增] beforeAdd Hook 中止操作');
               return;
             }
           } catch (err) {
@@ -266,12 +266,9 @@ function openPaperTypeModal(types) {
 
       if (paperNum) {
         // 支援兩種格式的佔位符：{PaperNum} 和 {0}
-        console.log('[ToolbarHandler] detailRouteTemplate:', this.detailRouteTemplate);
-        console.log('[ToolbarHandler] paperNum:', paperNum);
         try { localStorage.setItem("afterSave", "1"); } catch {}
         let url = this.detailRouteTemplate.replace(/\{PaperNum\}/gi, paperNum);
         url = url.replace(/\{0\}/g, paperNum);
-        console.log('[ToolbarHandler] final URL:', url);
         window.location = url;
       } else {
         await Swal.fire({ icon: 'success', title: '新增成功，但未取得單號！' });
@@ -306,7 +303,6 @@ function openPaperTypeModal(types) {
             try {
               const result = await beforeDeleteFn({ tableName: this.tableName, paperNum: selectedId, userId: window._userId || 'admin' });
               if (result === false) {
-                console.log('[作廢] beforeDelete Hook 中止操作');
                 return;
               }
             } catch (err) {
@@ -466,21 +462,43 @@ function openPaperTypeModal(types) {
       filters.push({ Field: 'pageSize', Op: '', Value: String(this.pageSize) });
 
       this.lastQueryFilters = filters.slice();
-      try { localStorage.setItem('orderListQueryFilters', JSON.stringify(filters)); } catch {}
+
+      // 保存查詢條件（帶表名的鍵，與導航功能保持一致）
+      const tn = (this.tableName || '').toString().trim().toLowerCase();
+      const filterKey = tn ? `orderListQueryFilters:${tn}` : 'orderListQueryFilters';
+      try { localStorage.setItem(filterKey, JSON.stringify(filters)); } catch {}
+      try { localStorage.setItem('orderListQueryFilters', JSON.stringify(filters)); } catch {}  // 保留舊鍵作為備用
       try { localStorage.setItem('orderListPageNumber', '1'); } catch {}
 
       if (typeof this.restoreSearchForm === 'function') {
         this.restoreSearchForm(document.getElementById(this.formId), filters);
       }
 
-      // 轉跳查詢（List 頁用）
+      // 轉跳查詢（統一處理：列表頁或單身頁都跳轉到列表頁）
       if (this.queryRedirectUrl) {
-        const params = new URLSearchParams();
-        filters.forEach(f => {
-          if (['page','pageSize'].includes(f.Field)) return;
-          if (f.Value != null && f.Value !== '') params.append(f.Field, f.Value);
+        if (this.forceStoredQueryOnRedirect) {
+          const params = new URLSearchParams();
+          params.set('useStoredQuery', '1');
+          params.set('page', '1');
+          window.location.href = this.queryRedirectUrl + '?' + params.toString();
+        } else {
+          const params = new URLSearchParams();
+          filters.forEach(f => {
+            if (['page','pageSize'].includes(f.Field)) return;
+            if (f.Value != null && f.Value !== '') params.append(f.Field, f.Value);
+          });
+          window.location.href = this.queryRedirectUrl + '?' + params.toString();
+        }
+        return;
+      }
+
+      // 如果沒有 queryRedirectUrl 但沒有渲染函數（單身頁面），提示用戶
+      if (!this.renderTable) {
+        await Swal.fire({
+          icon: 'warning',
+          title: '無法執行查詢',
+          text: '頁面配置錯誤，請聯繫系統管理員'
         });
-        window.location.href = this.queryRedirectUrl + '?' + params.toString();
         return;
       }
 

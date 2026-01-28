@@ -53,7 +53,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
 
         public List<CURdTableField> FieldDictList { get; private set; } = new();
         public List<TableFieldViewModel> HeaderTableFields { get; private set; } = new();
-        public Dictionary<string, object> HeaderData { get; private set; } = new();
+        public Dictionary<string, object?> HeaderData { get; private set; } = new();
         public Dictionary<string, string> HeaderLookupMap { get; private set; } = new();
         public List<QueryFieldViewModel> QueryFields { get; private set; } = new();
         public List<ItemCustButtonRow> CustomButtons { get; private set; } = new();
@@ -358,7 +358,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             return result == null || result == DBNull.Value ? null : result.ToString();
         }
 
-        private async Task<Dictionary<string, object>> LoadHeaderAsync(string tableName, string paperNum)
+        private async Task<Dictionary<string, object?>> LoadHeaderAsync(string tableName, string paperNum)
         {
             var baseUrl = $"{Request.Scheme}://{Request.Host}";
             var url = $"{baseUrl}/api/DynamicTable/PagedQuery";
@@ -375,10 +375,10 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             };
             var resp = await _http.PostAsJsonAsync(url, payload);
             if (!resp.IsSuccessStatusCode)
-                return new Dictionary<string, object>();
+                return new Dictionary<string, object?>();
             var json = await resp.Content.ReadFromJsonAsync<DynamicTableResult>();
             var first = json?.data?.FirstOrDefault();
-            return first != null ? first : new Dictionary<string, object>();
+            return first ?? new Dictionary<string, object?>();
         }
 
         public class DynamicTableResult

@@ -1490,7 +1490,7 @@ SELECT TOP (@top) {selectCols}
             return $"[{field}] {cleanOp} {param}";
         }
 
-        private static string NormalizeOp(string op)
+        private static string NormalizeOp(string? op)
         {
             if (string.IsNullOrWhiteSpace(op)) return "=";
             var s = op.Trim().ToUpperInvariant();

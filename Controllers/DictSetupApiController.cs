@@ -36,7 +36,7 @@ public class DictSetupApiController : ControllerBase
         public string MDKey { get; set; }
         public string LocateKeys { get; set; }
         public string OrderByField { get; set; }
-        public string FilterSQL { get; set; }
+        public string? FilterSQL { get; set; }
         public string RunSQLAfterAdd { get; set; }
     }
 
@@ -250,13 +250,13 @@ UPDATE CURdTableFieldLang
     // ===== C. 報表設定（CURdPaperPaper）=====
     public class PaperRow
     {
-        public string PaperId { get; set; }
+        public string? PaperId { get; set; }
         public int? SerialNum { get; set; }
-        public string ItemName { get; set; }
+        public string? ItemName { get; set; }
         public int? Enabled { get; set; }
-        public string Notes { get; set; }
-        public string ClassName { get; set; }
-        public string ObjectName { get; set; }
+        public string? Notes { get; set; }
+        public string? ClassName { get; set; }
+        public string? ObjectName { get; set; }
         public int? LinkType { get; set; }
         public int? DisplayType { get; set; }
         public int? OutputType { get; set; }
@@ -264,7 +264,7 @@ UPDATE CURdTableFieldLang
         public int? ShowTree { get; set; }
         public int? TableIndex { get; set; }
         public int? ItemCount { get; set; }
-        public string PrintItemId { get; set; }
+        public string? PrintItemId { get; set; }
     }
 
     // GET /api/DictSetupApi/Report/{paperId}
@@ -553,7 +553,7 @@ UPDATE CURdPaperPaper
     }
 
     [HttpGet("PaperSelectedList")]
-    public async Task<IActionResult> GetPaperSelected([FromQuery] string itemId, [FromQuery] string table, [FromQuery] string? equal = null, [FromQuery] string lang = "TW")
+    public async Task<IActionResult> GetPaperSelected([FromQuery] string itemId, [FromQuery] string table, [FromQuery] string? equal = null, [FromQuery] string lang = "TW", [FromQuery] int resolveDefault = 0)
     {
         if (string.IsNullOrWhiteSpace(itemId) || string.IsNullOrWhiteSpace(table))
             return BadRequest("itemId and table are required.");
@@ -604,6 +604,24 @@ UPDATE CURdPaperPaper
             IVisible = x.IVisible,
             TableKind = x.TableKind
         }).ToList();
+
+        foreach (var row in selected)
+        {
+            if (row.DefaultType == 0 &&
+                row.ColumnName.Equals("FinishQnty", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(row.DefaultValue, "0", StringComparison.OrdinalIgnoreCase))
+            {
+                row.DefaultValue = null;
+            }
+        }
+
+        if (resolveDefault == 1)
+        {
+            foreach (var row in selected)
+            {
+                row.DefaultValue = await ResolveDefaultValueAsync(conn, row.DefaultValue, row.DefaultType);
+            }
+        }
 
         return Ok(new
         {
@@ -662,7 +680,10 @@ VALUES
                 ins.Parameters.AddWithValue("@ColumnCaption", item.ColumnCaption ?? item.ColumnName);
                 ins.Parameters.AddWithValue("@DataType", item.DataType);
                 ins.Parameters.AddWithValue("@SortOrder", item.SortOrder > 0 ? item.SortOrder : order++);
-                ins.Parameters.AddWithValue("@DefaultValue", (object?)item.DefaultValue ?? DBNull.Value);
+                object? defaultValueParam = string.IsNullOrWhiteSpace(item.DefaultValue)
+                    ? DBNull.Value
+                    : item.DefaultValue;
+                ins.Parameters.AddWithValue("@DefaultValue", defaultValueParam);
                 ins.Parameters.AddWithValue("@DefaultEqual", string.IsNullOrWhiteSpace(item.DefaultEqual) ? "=" : item.DefaultEqual);
                 ins.Parameters.AddWithValue("@ControlType", (object?)item.ControlType ?? DBNull.Value);
                 ins.Parameters.AddWithValue("@CommandText", (object?)item.CommandText ?? DBNull.Value);
@@ -675,6 +696,23 @@ VALUES
                 ins.Parameters.AddWithValue("@IVisible", (object?)item.IVisible ?? 1);
                 ins.Parameters.AddWithValue("@TableKind", (object?)item.TableKind ?? DBNull.Value);
                 await ins.ExecuteNonQueryAsync();
+
+                // 覆寫 trigger 可能改掉的 DefaultValue（例如空白被改成 0）
+                await using (var upd = new SqlCommand(@"
+UPDATE CURdPaperSelected
+   SET DefaultValue = @DefaultValue
+ WHERE PaperId = @PaperId
+   AND TableName = @TableName
+   AND ColumnName = @ColumnName
+   AND DefaultEqual = @DefaultEqual;", conn, (SqlTransaction)tx))
+                {
+                    upd.Parameters.AddWithValue("@DefaultValue", defaultValueParam);
+                    upd.Parameters.AddWithValue("@PaperId", paperId);
+                    upd.Parameters.AddWithValue("@TableName", string.IsNullOrWhiteSpace(item.TableName) ? dictTable : item.TableName);
+                    upd.Parameters.AddWithValue("@ColumnName", item.ColumnName);
+                    upd.Parameters.AddWithValue("@DefaultEqual", string.IsNullOrWhiteSpace(item.DefaultEqual) ? "=" : item.DefaultEqual);
+                    await upd.ExecuteNonQueryAsync();
+                }
             }
 
             await tx.CommitAsync();

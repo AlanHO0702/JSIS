@@ -58,7 +58,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
         public List<TableFieldViewModel> TableFields { get; private set; } = new();
         public List<TableFieldViewModel> HeaderTableFields { get; private set; } = new();
         public List<CURdTableField> FieldDictList { get; private set; } = new();
-        public Dictionary<string, object> HeaderData { get; private set; } = new();
+        public Dictionary<string, object?> HeaderData { get; private set; } = new();
         public Dictionary<string, Dictionary<string, string>> LookupDisplayMap { get; private set; } = new();
         public Dictionary<string, string> HeaderLookupMap { get; private set; } = new();
         public List<QueryFieldViewModel> QueryFields { get; private set; } = new();
@@ -408,7 +408,7 @@ SELECT ItemId, SerialNum, ButtonName,
             public int? IsUpdateMoney { get; set; }
         }
 
-        private async Task<Dictionary<string, object>> LoadHeaderAsync(string tableName, string paperNum)
+        private async Task<Dictionary<string, object?>> LoadHeaderAsync(string tableName, string paperNum)
         {
             var baseUrl = $"{Request.Scheme}://{Request.Host}";
             var url = $"{baseUrl}/api/DynamicTable/PagedQuery";
@@ -428,11 +428,11 @@ SELECT ItemId, SerialNum, ButtonName,
             {
                 var body = await resp.Content.ReadAsStringAsync();
                 DetailLoadError ??= $"Header API {resp.StatusCode} {resp.ReasonPhrase}: {body}";
-                return new Dictionary<string, object>();
+                return new Dictionary<string, object?>();
             }
             var json = await resp.Content.ReadFromJsonAsync<DynamicTableResult>();
             var first = json?.data?.FirstOrDefault();
-            return first != null ? first : new Dictionary<string, object>();
+            return first ?? new Dictionary<string, object?>();
         }
 
         private async Task<List<Dictionary<string, object?>>> LoadDetailAsync(string tableName, string paperNum)
