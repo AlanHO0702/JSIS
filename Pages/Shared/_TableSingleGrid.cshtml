@@ -364,7 +364,7 @@
         }
 
       <div class="table-fix-wrapper" data-dict-table="@dictTableName">
-        <table class="table table-bordered table-hover table-sm align-middle mb-0" id="mainGrid" data-dict-table="@dictTableName" style="table-layout:fixed;width:100%">
+        <table class="table table-bordered table-hover table-sm align-middle mb-0" id="mainGrid" data-dict-table="@dictTableName" style="table-layout:auto;width:auto">
           <colgroup>
             @foreach (var f in fields)
             {
@@ -537,7 +537,7 @@
  .table-wrapper{height:calc(100vh - var(--app-toolbar-height, 56px));display:flex;flex-direction:column}
  .table-wrapper>.card{flex:1;display:flex;flex-direction:column;min-height:0}
  .table-wrapper>.card>.card-body{flex:1;display:flex;flex-direction:column;min-height:0;padding-top:12px;padding-bottom:8px}
- table.table{table-layout:fixed!important;border-collapse:collapse!important;font-size:.85rem;width:100%}
+ table.table{table-layout:auto!important;border-collapse:collapse!important;font-size:.85rem;width:auto}
  table th,table td{vertical-align:middle!important;border:1px solid #dee2e6!important;padding:0!important;white-space:nowrap}
  table th{padding:2px 6px!important}
  .table-hover tbody tr:hover{background:#f1f5ff!important}
@@ -1653,7 +1653,7 @@ table.table tbody td{background:#f3f3f3!important}
   const pagerGoBtn = document.getElementById("pagerGoBtn");
   const btnOpenQuery = document.getElementById("btnOpenQuery");
   const queryModalEl = document.getElementById("singleGridQueryModal");
-  const queryForm = document.getElementById("singleGridQueryForm");
+  const queryForm = document.getElementById("searchForm");
   const btnQuerySubmit = document.getElementById("btnQuerySubmit");
   const fallbackQueryFields = @Html.Raw(JsonSerializer.Serialize(
     fields.Select(f => new {
@@ -1959,7 +1959,7 @@ table.table tbody td{background:#f3f3f3!important}
   }
 
   btnOpenQuery?.addEventListener("click", async () => {
-    await loadQueryFields();
+    // _QueryPanelPartial.cshtml 會在 modal shown 事件時自動建立查詢表單，不需要在這裡呼叫 loadQueryFields()
     if (queryModalEl && window.bootstrap) {
       const modal = bootstrap.Modal.getOrCreateInstance(queryModalEl);
       modal.show();
@@ -1984,7 +1984,7 @@ table.table tbody td{background:#f3f3f3!important}
       for (const rule of inqMustList) {
         const field = (rule.fieldMust || rule.FieldMust || "").toString();
         if (!field) continue;
-        const input = queryForm.querySelector(`[name="${CSS.escape(field)}"]`);
+        const input = queryForm.querySelector(`[data-field="${CSS.escape(field)}"]`);
         const value = input?.value?.toString().trim() ?? "";
         if (!value) {
           const msg = (rule.showError || rule.ShowError || "").toString();
@@ -1993,20 +1993,25 @@ table.table tbody td{background:#f3f3f3!important}
         }
       }
     }
-    const url = new URL(window.location.href);
-    // 保留 pageSize，其餘重新以 pageIndex=1
-    url.searchParams.delete("pageIndex");
-    url.searchParams.set("pageIndex", "1");
-    // 移除排序參數（排序已改用 AJAX，不需要在網址中）
-    url.searchParams.delete("sortBy");
-    url.searchParams.delete("sortDir");
 
-    // 收集查詢欄位
+    // 建立新的 URL，只保留路徑部分
+    const url = new URL(window.location.origin + window.location.pathname);
+
+    // 設定分頁參數
+    url.searchParams.set("pageIndex", "1");
+    const currentPageSize = new URLSearchParams(window.location.search).get("pageSize");
+    if (currentPageSize) {
+      url.searchParams.set("pageSize", currentPageSize);
+    }
+
+    // 收集查詢欄位（排除 Cond_ 開頭的運算符欄位和系統欄位）
     Array.from(queryForm.elements).forEach(el => {
-      if (!el.name) return;
-      const val = el.value?.toString() ?? "";
-      if (val) url.searchParams.set(el.name, val);
-      else url.searchParams.delete(el.name);
+      if (!el.name || el.name.startsWith("Cond_") || el.name === "__RequestVerificationToken") return;
+      const val = el.value?.toString().trim() ?? "";
+      if (!val) return; // 空值不加入
+      // 使用 data-field 屬性（純欄位名稱）而非 name（帶有 sortOrder 後綴）
+      const fieldName = el.dataset.field || el.name;
+      url.searchParams.set(fieldName, val);
     });
 
     window.location.href = url.toString();

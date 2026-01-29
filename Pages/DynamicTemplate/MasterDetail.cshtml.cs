@@ -80,6 +80,17 @@ namespace PcbErpApi.Pages.CUR
                 _logger.LogError(ex, "Load custom buttons failed for {ItemId}", ItemId);
             }
 
+            try
+            {
+                var toolbarVisibility = await LoadToolbarButtonVisibilityAsync(ItemId);
+                if (toolbarVisibility.Count > 0)
+                    ViewData["ToolbarButtonVisibility"] = toolbarVisibility;
+            }
+            catch (System.Exception ex)
+            {
+                _logger.LogError(ex, "Load toolbar button visibility failed for {ItemId}", ItemId);
+            }
+
             return Page();
         }
 
@@ -229,6 +240,54 @@ SELECT ItemId, SerialNum, ButtonName,
             public string MultiSelectDD { get; set; } = string.Empty;
             public int? AllowSelCount { get; set; }
             public int? ReplaceExists { get; set; }
+        }
+
+        private static async Task<(string? TableName, string? VisibleColumn)> ResolveToolbarButtonTableAsync(SqlConnection conn)
+        {
+            const string sql = @"
+SELECT TOP 1 t.name AS TableName,
+       c3.name AS VisibleColumn
+  FROM sys.tables t
+  JOIN sys.columns c1 ON c1.object_id = t.object_id AND c1.name = 'ItemId'
+  JOIN sys.columns c2 ON c2.object_id = t.object_id AND c2.name = 'ButtonName'
+  JOIN sys.columns c3 ON c3.object_id = t.object_id AND (c3.name = 'bVisiable' OR c3.name = 'bVisible')
+ ORDER BY CASE WHEN c3.name = 'bVisiable' THEN 0 ELSE 1 END, t.name;";
+            await using var cmd = new SqlCommand(sql, conn);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            if (!await rd.ReadAsync()) return (null, null);
+            return (rd["TableName"]?.ToString(), rd["VisibleColumn"]?.ToString());
+        }
+
+        private async Task<Dictionary<string, bool>> LoadToolbarButtonVisibilityAsync(string itemId)
+        {
+            var map = new Dictionary<string, bool>(System.StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(itemId)) return map;
+
+            var cs = _ctx.Database.GetConnectionString();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            var (tableName, visibleColumn) = await ResolveToolbarButtonTableAsync(conn);
+            if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(visibleColumn))
+                return map;
+
+            var sql = $@"
+SELECT ButtonName, [{visibleColumn}] AS IsVisible
+  FROM dbo.[{tableName}] WITH (NOLOCK)
+ WHERE ItemId = @itemId";
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@itemId", itemId);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var btn = rd["ButtonName"]?.ToString();
+                if (string.IsNullOrWhiteSpace(btn)) continue;
+                var raw = rd["IsVisible"];
+                var visible = raw != null && raw != System.DBNull.Value && int.TryParse(raw.ToString(), out var n) && n == 1;
+                map[btn] = visible;
+            }
+
+            return map;
         }
     }
 }
