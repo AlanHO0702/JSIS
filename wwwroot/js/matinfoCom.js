@@ -631,6 +631,17 @@
     if (!resp.ok) return new Map();
     const data = await resp.json();
     const map = new Map();
+    const setKeyVariants = (raw, label) => {
+      const base = String(raw);
+      if (!base) return;
+      map.set(base, label);
+      const trimmed = base.trim();
+      if (trimmed && trimmed !== base) map.set(trimmed, label);
+      if (trimmed) {
+        map.set(trimmed.toLowerCase(), label);
+        map.set(trimmed.toUpperCase(), label);
+      }
+    };
     (data || []).forEach((row) => {
       const rawKey = row?.key;
       if (rawKey == null) return;
@@ -642,9 +653,7 @@
         .filter((v) => v != null && typeof v !== 'object' && String(v).trim() !== '')
         .map((v) => String(v));
       const label = labelParts.join(' - ');
-      map.set(keyStr, label || keyStr);
-      const trimmed = keyStr.trim();
-      if (trimmed && trimmed !== keyStr) map.set(trimmed, label || trimmed);
+      setKeyVariants(keyStr, label || keyStr);
     });
     return map;
   }
