@@ -1,0 +1,124 @@
+@*
+    AP000013 - 應收折讓立帳單 (調用 PR000003 功能)
+    自訂按鈕功能: 選擇可審核之憑證加入應收帳款立帳單
+*@
+@model dynamic
+
+<script>
+(() => {
+    // 全域標記：正在載入中
+    window._PR000003_Loading = window._PR000003_Loading || false;
+
+    /**
+     * 動態載入 PR000003.cshtml 的功能
+     * returns {Promise<boolean>} 載入成功返回 true
+     */
+    const ensurePR000003Loaded = async () => {
+        // 如果已經載入完成，直接返回
+        if (typeof window.PRSelectHandler?.open === 'function') {
+            return true;
+        }
+
+        // 如果正在載入中，等待載入完成（最多等 10 秒）
+        if (window._PR000003_Loading) {
+            for (let i = 0; i < 100; i++) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                if (typeof window.PRSelectHandler?.open === 'function') {
+                    return true;
+                }
+            }
+            console.error('等待 PR000003 載入超時');
+            return false;
+        }
+
+        // 開始載入
+        window._PR000003_Loading = true;
+
+        try {
+            // 動態載入 PR000003.cshtml (透過 API)
+            const response = await fetch('/api/PRSelect/GetViewContent');
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const html = await response.text();
+
+            // 創建一個臨時容器來解析 HTML
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+
+            // 1. 先注入 style 標籤
+            const styles = tempDiv.querySelectorAll('style');
+            styles.forEach(style => {
+                document.head.appendChild(style.cloneNode(true));
+            });
+
+            // 2. 注入 modal HTML (排除 script 標籤)
+            const modalDiv = tempDiv.querySelector('#pr-sel-modal');
+            if (modalDiv) {
+                document.body.appendChild(modalDiv.cloneNode(true));
+            } else {
+                console.warn('找不到 #pr-sel-modal 元素');
+            }
+
+            // 3. 手動執行 script 內容
+            const scripts = tempDiv.querySelectorAll('script');
+
+            for (const script of scripts) {
+                const scriptContent = script.textContent || script.innerText;
+                if (scriptContent) {
+                    try {
+                        // 使用 eval 執行 script 內容（在全域作用域）
+                        (new Function(scriptContent))();
+                    } catch (err) {
+                        console.error('執行 script 失敗:', err);
+                        throw err;
+                    }
+                }
+            }
+
+            // 等待一小段時間，確保執行完成
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // 驗證載入是否成功
+            if (typeof window.PRSelectHandler?.open === 'function') {
+                return true;
+            } else {
+                console.error('PR000003.cshtml 載入後功能仍不可用');
+                return false;
+            }
+        } catch (error) {
+            console.error('載入 PR000003.cshtml 失敗:', error);
+            return false;
+        } finally {
+            window._PR000003_Loading = false;
+        }
+    };
+
+    // 註冊按鈕處理函式
+    window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+    window.ActionRailCustomHandlers['AP000013'] = {
+        btnC1: async (ctx) => {
+            // 確保 PR000003 的功能已載入（自動載入）
+            const loaded = await ensurePR000003Loaded();
+
+            if (loaded) {
+                // 功能已載入，調用開啟對話框
+                await window.PRSelectHandler.open(ctx);
+            } else {
+                // 載入失敗，顯示錯誤訊息
+                console.error('PR000003 功能載入失敗');
+                if (window.Swal) {
+                    await window.Swal.fire({
+                        icon: 'error',
+                        title: '功能載入失敗',
+                        text: '無法載入應收帳款立帳單功能，請重新整理頁面或聯繫系統管理員'
+                    });
+                } else {
+                    alert('功能載入失敗，請重新整理頁面或聯繫系統管理員');
+                }
+            }
+        }
+    };
+})();
+</script>

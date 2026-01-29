@@ -2,7 +2,9 @@
   const tbody = document.getElementById('matinfo-browse-body');
   const theadRow = document.getElementById('matinfo-browse-head');
   const form = document.querySelector('.matinfo-form');
-    const countEl = document.getElementById('matinfo-count');
+  const modeEl = document.getElementById('singleGridMode');
+  const countEl = document.getElementById('singleGridCount');
+  const countBox = document.getElementById('singleGridCountBox');
   const browseScrollTop = document.getElementById('matinfo-browse-scroll-top');
   const browseScrollBody = document.getElementById('matinfo-browse-scroll-body');
   const formScrollTop = document.getElementById('matinfo-form-scroll-top');
@@ -17,8 +19,10 @@
   const btnToEmo = document.getElementById('btnMatInfoToEmo');
   const btnDelete = document.getElementById('btnMatInfoDelete');
   const btnSave = document.getElementById('btnMatInfoSave');
+  const btnTabFirst = document.getElementById('btnMatInfoTabFirst');
   const btnTabPrev = document.getElementById('btnMatInfoTabPrev');
   const btnTabNext = document.getElementById('btnMatInfoTabNext');
+  const btnTabLast = document.getElementById('btnMatInfoTabLast');
   const unitTable = document.getElementById('matinfo-unit-table');
   const unitWrap = document.getElementById('matinfo-unit-wrap');
   const custTable = document.getElementById('matinfo-cust-table');
@@ -585,9 +589,9 @@
   const applyTopToolbarVisibility = () => {
     const id = (itemId || '').toUpperCase();
     if (id !== 'MG000002' && id !== 'CPN00007') return;
-    const keep = new Set([btnTabPrev, btnTabNext, btnQuery, btnAdd, btnDelete, btnEdit]);
+    const keep = new Set([btnTabFirst, btnTabPrev, btnTabNext, btnTabLast, btnQuery, btnAdd, btnDelete, btnEdit]);
     const all = [
-      btnTabPrev, btnTabNext, btnQuery, btnEdit, btnCancel, btnAdd,
+      btnTabFirst, btnTabPrev, btnTabNext, btnTabLast, btnQuery, btnEdit, btnCancel, btnAdd,
       btnToFormal, btnDetail, btnHistory, btnToEmo, btnDelete, btnSave
     ];
     all.forEach((btn) => {
@@ -627,6 +631,17 @@
     if (!resp.ok) return new Map();
     const data = await resp.json();
     const map = new Map();
+    const setKeyVariants = (raw, label) => {
+      const base = String(raw);
+      if (!base) return;
+      map.set(base, label);
+      const trimmed = base.trim();
+      if (trimmed && trimmed !== base) map.set(trimmed, label);
+      if (trimmed) {
+        map.set(trimmed.toLowerCase(), label);
+        map.set(trimmed.toUpperCase(), label);
+      }
+    };
     (data || []).forEach((row) => {
       const rawKey = row?.key;
       if (rawKey == null) return;
@@ -638,9 +653,7 @@
         .filter((v) => v != null && typeof v !== 'object' && String(v).trim() !== '')
         .map((v) => String(v));
       const label = labelParts.join(' - ');
-      map.set(keyStr, label || keyStr);
-      const trimmed = keyStr.trim();
-      if (trimmed && trimmed !== keyStr) map.set(trimmed, label || trimmed);
+      setKeyVariants(keyStr, label || keyStr);
     });
     return map;
   }
@@ -1202,6 +1215,11 @@
     isEditMode = !!enabled;
     setFormEditable(isEditMode);
     setButtonText(btnEdit, isEditMode ? '保留' : '修改');
+    if (modeEl) modeEl.textContent = isEditMode ? '編輯模式' : '瀏覽模式';
+    if (countBox) {
+      countBox.classList.toggle('mode-edit', isEditMode);
+      countBox.classList.toggle('mode-view', !isEditMode);
+    }
     if (isEditMode) {
       if (!preserveCancelSnapshot) {
         cancelSnapshot = getFormData();
@@ -1213,7 +1231,7 @@
     }
     if (btnSave) btnSave.hidden = isEditMode;
     if (btnCancel) btnCancel.hidden = !isEditMode;
-    const lockButtons = [btnQuery, btnAdd, btnToFormal, btnDetail, btnHistory, btnToEmo, btnDelete, btnSave, btnTabPrev, btnTabNext];
+    const lockButtons = [btnQuery, btnAdd, btnToFormal, btnDetail, btnHistory, btnToEmo, btnDelete, btnSave, btnTabFirst, btnTabPrev, btnTabNext, btnTabLast];
     lockButtons.forEach((btn) => { if (btn) btn.disabled = isEditMode; });
     document.querySelector('.matinfo-page')?.classList.toggle('is-edit-mode', isEditMode);
     detailGrids.forEach((grid) => grid.toggleEdit(isEditMode));
@@ -1562,9 +1580,11 @@
     el.classList.add('abs-item');
     if (extraClass) el.classList.add(extraClass);
     el.style.position = 'absolute';
+    const isField = el.matches && el.matches('input, select, textarea');
+    const fieldGap = isField ? 6 : 0;
     if (pos.top !== null) el.style.top = `${pos.top + topPad}px`;
-    if (pos.left !== null) el.style.left = `${pos.left}px`;
-    if (pos.width !== null) el.style.width = `${pos.width}px`;
+    if (pos.left !== null) el.style.left = `${pos.left + fieldGap}px`;
+    if (pos.width !== null) el.style.width = `${Math.max(0, pos.width - fieldGap)}px`;
     if (pos.height !== null) el.style.height = `${pos.height}px`;
     const estHeight = pos.height ?? (el.tagName === 'LABEL' ? 22 : 24);
     const estTop = (pos.top ?? 0) + topPad;
@@ -2006,6 +2026,7 @@
     detailGrids.forEach((grid) => grid.loadRows());
     currentIndex = (index ?? 0) + 1;
     updateCount();
+    ensureBrowseVisible(index ?? 0);
     scheduleRender();
     if (useCommonTable) {
       refreshCommonRecord(currentKey.partnum, currentKey.revision);
@@ -2027,6 +2048,38 @@
       return;
     }
     pendingSelectIndex = clamped;
+  }
+
+  function ensureBrowseVisible(index) {
+    if (!browseScrollBody || !Number.isFinite(index)) return;
+    const clamped = Math.max(0, Math.min(index, Math.max(0, totalCount - 1)));
+    const margin = 4;
+
+    const adjustByRect = () => {
+      const row = tbody?.querySelector(`tr.matinfo-row[data-index="${clamped}"]`);
+      if (!row) return false;
+      const bodyRect = browseScrollBody.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const topEdge = bodyRect.top + margin;
+      const bottomEdge = bodyRect.bottom - margin;
+      if (rowRect.top < topEdge) {
+        browseScrollBody.scrollTop -= (topEdge - rowRect.top);
+      } else if (rowRect.bottom > bottomEdge) {
+        browseScrollBody.scrollTop += (rowRect.bottom - bottomEdge);
+      }
+      return true;
+    };
+
+    // rough scroll first (in case the row isn't rendered yet), then refine by actual rect
+    const rowTop = clamped * rowHeight;
+    const rowBottom = rowTop + rowHeight;
+    const viewTop = browseScrollBody.scrollTop;
+    const viewBottom = viewTop + browseScrollBody.clientHeight;
+    if (rowTop < viewTop || rowBottom > viewBottom) {
+      const target = Math.max(0, rowTop - Math.max(margin, (browseScrollBody.clientHeight - rowHeight) / 2));
+      browseScrollBody.scrollTop = target;
+    }
+    requestAnimationFrame(() => { adjustByRect(); });
   }
 
   function renderVirtual() {
@@ -2184,6 +2237,24 @@
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="6">載入失敗：${err.message ?? err}</td></tr>`;
     }
+  }
+
+  async function searchByAddedPartnum(partnum) {
+    const pn = (partnum || '').toString().trim();
+    if (!pn) return false;
+    const payload = { PartNumB: pn, PartNumE: pn, Limit: 200 };
+    if (defaultMbFilter === 0 || defaultMbFilter === 1) payload.MB = defaultMbFilter;
+    const res = await fetch('/api/MatInfoSearch/Search', withJwtHeaders({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }));
+    if (!res.ok) return false;
+    const respJson = await res.json();
+    const rows = Array.isArray(respJson) ? respJson : (respJson?.data || respJson?.Data || []);
+    if (!Array.isArray(rows) || rows.length === 0) return false;
+    await renderRows(rows, rows.length);
+    return true;
   }
 
   tbody?.addEventListener('click', (e) => {
@@ -2461,12 +2532,18 @@
   const moveRow = (dir) => {
     if (totalCount <= 0) return;
     const activeIdx = Math.max(0, Math.min((currentIndex || 1) - 1, totalCount - 1));
-    const nextIdx = dir === 'prev' ? activeIdx - 1 : activeIdx + 1;
+    let nextIdx = activeIdx;
+    if (dir === 'prev') nextIdx = activeIdx - 1;
+    else if (dir === 'next') nextIdx = activeIdx + 1;
+    else if (dir === 'first') nextIdx = 0;
+    else if (dir === 'last') nextIdx = totalCount - 1;
     selectRowAt(nextIdx);
   };
 
+  btnTabFirst?.addEventListener('click', () => moveRow('first'));
   btnTabPrev?.addEventListener('click', () => moveRow('prev'));
   btnTabNext?.addEventListener('click', () => moveRow('next'));
+  btnTabLast?.addEventListener('click', () => moveRow('last'));
 
   btnHistory?.addEventListener('click', async () => {
     if (!currentKey || !currentKey.partnum) {
@@ -2815,7 +2892,9 @@
       }
     }
   }
-  document.addEventListener('matinfo:add:done', () => {
+  document.addEventListener('matinfo:add:done', async (e) => {
+    const partnum = e.detail?.partnum;
+    if (await searchByAddedPartnum(partnum)) return;
     loadData();
   });
   document.addEventListener('matinfo:search:done', (e) => {
