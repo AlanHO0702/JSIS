@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
+using PcbErpApi.Helpers;
 
 namespace PcbErpApi.Pages.EMOdProcInfo
 {
@@ -28,6 +29,7 @@ namespace PcbErpApi.Pages.EMOdProcInfo
         public List<EmodProcInfo> Items { get; set; } = new();
         public List<CURdTableField> FieldDictList { get; set; } = new();
         public List<CURdTableField> TableFields { get; set; } = new();
+        public List<QueryFieldViewModel> QueryFields { get; set; } = new();
 
         public async Task OnGetAsync(int page = 1, int pageSize = 99999)
         {
@@ -49,6 +51,19 @@ namespace PcbErpApi.Pages.EMOdProcInfo
             TableFields = FieldDictList
                 .Where(f => f.Visible == 1)
                 .OrderBy(f => f.SerialNum ?? 0)
+                .ToList();
+
+            // 查詢欄位 - 使用 iShowWhere = 1 的欄位
+            QueryFields = FieldDictList
+                .Where(f => f.iShowWhere == 1)
+                .OrderBy(f => f.SerialNum ?? 0)
+                .Select(f => new QueryFieldViewModel
+                {
+                    ColumnName = f.FieldName ?? "",
+                    ColumnCaption = f.DisplayLabel ?? f.FieldName ?? "",
+                    DataType = 0,  // 預設為文字類型
+                    ControlType = 0  // 預設為一般輸入框
+                })
                 .ToList();
 
             // 設定 ViewData

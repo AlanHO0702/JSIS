@@ -288,10 +288,10 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
                 {
                     cmdNum.Parameters.AddWithValue("@Table", "FMEdPassMain");
                     cmdNum.Parameters.AddWithValue("@p1", "");
-                    cmdNum.Parameters.AddWithValue("@p2", "F");
+                    cmdNum.Parameters.AddWithValue("@p2", "C");
                     cmdNum.Parameters.AddWithValue("@Date", sDate);
-                    cmdNum.Parameters.AddWithValue("@Head", "T");
-                    cmdNum.Parameters.AddWithValue("@UseId", "FME00021");
+                    cmdNum.Parameters.AddWithValue("@Head", "A");
+                    cmdNum.Parameters.AddWithValue("@UseId", request.UserId ?? "admin");
                     paperNum = (await cmdNum.ExecuteScalarAsync())?.ToString();
                 }
 
@@ -304,7 +304,7 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
                 // 3. 建立主檔 (Status=0, Finished=0, FlowStatus=0 先建立未完成狀態)
                 await using (var cmd = new SqlCommand(@"
                     INSERT INTO FMEdPassMain (PaperNum, PaperDate, UserId, BuildDate, Status, Finished, UseId, FlowStatus)
-                    VALUES (@PaperNum, GETDATE(), @UserId, GETDATE(), 0, 0, 'FME00021', 0)", conn, tran))
+                    VALUES (@PaperNum, GETDATE(), @UserId, GETDATE(), 0, 0, 'A001', 0)", conn, tran))
                 {
                     cmd.Parameters.AddWithValue("@PaperNum", paperNum);
                     cmd.Parameters.AddWithValue("@UserId", request.UserId ?? "admin");
@@ -423,15 +423,14 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
                 }
 
                 // 8. 呼叫過帳結果 SP
-                string resultMessage = "過帳完成";
                 try
                 {
                     await using var cmd = new SqlCommand("FMEdPassResult", conn, tran);
                     cmd.CommandType = CommandType.StoredProcedure;
                     cmd.Parameters.AddWithValue("@PaperNum", paperNum);
                     await using var rd = await cmd.ExecuteReaderAsync();
-                    if (await rd.ReadAsync() && !rd.IsDBNull(0))
-                        resultMessage = rd.GetString(0);
+                    // 讀取並關閉 DataReader (確保釋放資源)
+                    while (await rd.ReadAsync()) { }
                 }
                 catch (Exception spEx)
                 {
@@ -489,7 +488,7 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
                 await tran.CommitAsync();
 
                 _logger.LogInformation("過帳成功: {PaperNum}, 批號: {LotNum}", paperNum, request.LotNum);
-                return Ok(new { success = true, message = resultMessage, paperNum });
+                return Ok(new { success = true, message = $"已產生過帳單號: {paperNum}", paperNum });
             }
             catch
             {
@@ -626,13 +625,13 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
 
             if (isChinese)
             {
-                // 輸入中文，查詢製程名稱
-                conditions.Add($" and exists (select 1 from EMOdProcInfo WITH(NOLOCK) where ProcCode = t1.ProcCode and ProcName like N'{procInput}%')");
+                // 輸入中文，查詢製程名稱 (支援部分匹配)
+                conditions.Add($" and exists (select 1 from EMOdProcInfo WITH(NOLOCK) where ProcCode = t1.ProcCode and ProcName like N'%{procInput}%')");
             }
             else
             {
-                // 輸入英文，查詢製程代碼
-                conditions.Add($" and t1.ProcCode like '{procInput}%'");
+                // 輸入英文，查詢製程代碼 (支援部分匹配)
+                conditions.Add($" and t1.ProcCode like '%{procInput}%'");
             }
         }
 

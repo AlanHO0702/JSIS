@@ -195,10 +195,10 @@
                 </div>
             </div>
 
-            <!-- 報廢點數明細區 -->
+            <!-- 報廢缺點明細區 -->
             <div class="card mt-3" id="pnlDefect">
                 <div class="card-header py-1 d-flex justify-content-between align-items-center">
-                    <span><i class="bi bi-exclamation-triangle"></i> 報廢點數明細</span>
+                    <span><i class="bi bi-exclamation-triangle"></i> 報廢缺點明細</span>
                     <div class="btn-group btn-group-sm">
                         <button type="button" class="btn btn-outline-success btn-sm" id="btnAddDefect" title="新增">
                             <i class="bi bi-plus"></i>
@@ -757,23 +757,53 @@
         $('#txtXOutQnty').val(getIntVal(info, 'AllowXOutQnty'));
 
         // === ★ 修正重點 1：填入「多報明細」表格 ===
-        // 檢查後端是否有回傳 XOutList，如果有就呼叫 renderXOutTable
-        if (info.XOutList && info.XOutList.length > 0) {
+        // 自動產生多報明細 (根據 GoodPCS)
+        var goodPcs = getIntVal(info, 'GoodPCS') || getIntVal(info, 'LLPCS');
+        var allowXOutQnty = getIntVal(info, 'AllowXOutQnty');
+
+        if (goodPcs > 0 && allowXOutQnty > 0) {
+            // 自動產生 1~goodPcs 的多報明細
+            var xOutList = [];
+            for (var i = 1; i <= goodPcs; i++) {
+                xOutList.push({
+                    Item: i,
+                    Qnty: 0,
+                    OrgQnty: 0,
+                    IsFullScrap: (i === goodPcs) ? 1 : 0  // 最後一筆預設勾選整報
+                });
+            }
+            renderXOutTable(xOutList);
+        } else if (info.XOutList && info.XOutList.length > 0) {
+            // 如果後端有回傳,使用後端資料
             renderXOutTable(info.XOutList);
         } else {
             $('#tblXOut tbody').empty();
         }
 
         // === ★ 修正重點 2：填入「報廢明細」表格 ===
-        // 檢查後端是否有回傳 DefectList
-        if (info.DefectList && info.DefectList.length > 0) {
+        // 自動產生報廢缺點明細 (根據製程規範設定)
+        var isXOut = getIntVal(info, 'IsXOut');
+        var sqnty = getNumVal(info, 'SQnty');
+
+        // 如果是報廢批 (IsXOut=1) 且有報廢數,自動產生預設行
+        if (isXOut === 1 && sqnty > 0) {
+            // 自動產生一筆預設的報廢明細
+            var defectList = [{
+                SerialNum: 1,
+                ClassId: '',
+                DefectId: '',
+                DutyProc: '',
+                Qnty: sqnty  // 預設為報廢數
+            }];
+            renderDefectTable(defectList);
+        } else if (info.DefectList && info.DefectList.length > 0) {
+            // 如果後端有回傳,使用後端資料
             renderDefectTable(info.DefectList);
         } else {
             $('#tblDefect tbody').empty();
         }
 
         // === ★ 修正重點 3：控制顯示邏輯 ===
-        var isXOut = getIntVal(info, 'IsXOut');
         var aftProcType = getIntVal(info, 'AftProcType');
         
         // 原始邏輯：只有 (報廢批) 或 (成品入庫) 才顯示
@@ -929,6 +959,10 @@
             xOutList: collectXOutData(),
             defectList: collectDefectData()
         };
+
+        // Debug: 檢查傳送的 userId
+        console.log('過帳資料:', passData);
+        console.log('使用者ID:', currentUserId);
 
         // 呼叫過帳 API
         $.ajax({
@@ -1104,6 +1138,10 @@
         $('#tblWipResult tbody').empty();
         $('#wipResultCount').text('共 0 筆');
 
+        // 隱藏所有提示訊息
+        $('#msgWipLoading').hide();
+        $('#msgWipNoData').hide();
+
         // 開啟 Modal
         var modal = new bootstrap.Modal(document.getElementById('modalWipQuery'));
         modal.show();
@@ -1170,6 +1208,9 @@
     function renderWipResult(data) {
         var tbody = $('#tblWipResult tbody');
         tbody.empty();
+
+        // 確保隱藏「無資料」提示
+        $('#msgWipNoData').hide();
 
         if (!data || data.length === 0) {
             tbody.html('<tr><td colspan="27" class="text-center text-muted py-3">無符合條件的資料</td></tr>');
