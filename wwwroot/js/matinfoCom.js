@@ -130,32 +130,36 @@
   let kitGrid = null;
   const pageRoot = document.querySelector('.matinfo-page');
   const itemId = pageRoot?.dataset?.itemId || '';
+  const itemIdUpper = (itemId || '').toUpperCase();
+  const resizableItemIds = new Set(['MG000008', 'CPN00006', 'MG000002', 'CPN00007']);
+  const enableColumnResize = resizableItemIds.has(itemIdUpper);
+  const columnWidthStorageKey = enableColumnResize ? `matinfo:col-widths:${itemIdUpper}` : null;
     const dictTableName = (() => {
-      const id = (itemId || '').toUpperCase();
+      const id = itemIdUpper;
       if (id === 'MG000008' || id === 'CPN00006') return 'MGN_MINdMatInfo2';
       if (id === 'MG000002' || id === 'CPN00007') return 'MGN_MINdMatInfo40';
       return 'MINdMatInfo';
     })();
 
     const dictSearchTableName = (() => {
-      const id = (itemId || '').toUpperCase();
+      const id = itemIdUpper;
       if (id === 'MG000008' || id === 'CPN00006') return 'MGN_MINdMatInfo21';
       if (id === 'MG000002' || id === 'CPN00007') return 'MGN_MINdMatInfo41';
       return dictTableName;
     })();
 
   const dictPanelTableName = (() => {
-    const id = (itemId || '').toUpperCase();
+    const id = itemIdUpper;
     if (id === 'MG000008' || id === 'CPN00006') return 'MGN_MINdMatInfo2PNL';
     if (id === 'MG000002' || id === 'CPN00007') return 'MGN_MINdMatInfo40PNL';
     return dictTableName;
   })();
   const custTabLabel = (() => {
-    const id = (itemId || '').toUpperCase();
+    const id = itemIdUpper;
     return (id === 'MG000008' || id === 'CPN00006') ? '客戶料號' : '廠商料號';
   })();
   const defaultMbFilter = (() => {
-    const id = (itemId || '').toUpperCase();
+    const id = itemIdUpper;
     if (id === 'MG000008' || id === 'CPN00006') return 0;
     if (id === 'MG000002' || id === 'CPN00007') return 1;
     return null;
@@ -423,6 +427,8 @@
         const tr = document.createElement('tr');
         tr.innerHTML = `<td colspan="${cfg.columns.length}">沒有資料</td>`;
         tbodyEl.appendChild(tr);
+        applyDetailTableWidths(cfg.table);
+        attachDetailTableResizers(cfg.table);
         state.selectedIndex = -1;
         setToolbarEnabled();
         return;
@@ -458,6 +464,9 @@
         tr.addEventListener('click', () => selectRow(idx));
         tbodyEl.appendChild(tr);
       });
+
+      applyDetailTableWidths(cfg.table);
+      attachDetailTableResizers(cfg.table);
 
       if (state.selectedIndex < 0) {
         selectRow(0);
@@ -1885,6 +1894,217 @@
     }));
   }
 
+  function loadColumnWidthMap() {
+    if (!columnWidthStorageKey) return {};
+    try {
+      const raw = localStorage.getItem(columnWidthStorageKey);
+      if (!raw) return {};
+      const data = JSON.parse(raw);
+      return data && typeof data === 'object' ? data : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveColumnWidthMap(map) {
+    if (!columnWidthStorageKey) return;
+    try {
+      localStorage.setItem(columnWidthStorageKey, JSON.stringify(map));
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  function applyStoredColumnWidths() {
+    if (!enableColumnResize) return;
+    const widthMap = loadColumnWidthMap();
+    columns.forEach((col) => {
+      const key = col?.key;
+      const value = key ? Number(widthMap[key]) : null;
+      if (key && Number.isFinite(value) && value > 20) {
+        col.width = `${Math.round(value)}px`;
+      }
+    });
+  }
+
+  function updateColumnWidthAt(index, width, persist) {
+    if (!columns[index] || !theadRow) return;
+    const next = Math.max(40, Math.round(width));
+    columns[index].width = `${next}px`;
+    const th = theadRow.querySelectorAll('th')[index];
+    if (th) th.style.width = columns[index].width;
+    if (tbody) {
+      const rows = tbody.querySelectorAll('tr');
+      rows.forEach((row) => {
+        const cells = row.children;
+        if (!cells || !cells.length) return;
+        const cell = cells[index];
+        if (cell) cell.style.width = columns[index].width;
+      });
+    }
+    if (persist) {
+      const map = loadColumnWidthMap();
+      const key = columns[index].key;
+      if (key) {
+        map[key] = next;
+        saveColumnWidthMap(map);
+      }
+    }
+  }
+
+  function getDetailTableStorageKey(table) {
+    if (!enableColumnResize || !table) return null;
+    const key = table.dataset.resizeKey || table.id;
+    if (!key) return null;
+    return `matinfo:detail-col-widths:${itemIdUpper}:${key}`;
+  }
+
+  function ensureDetailResizeKey(table) {
+    if (!table || table.dataset.resizeKey) return;
+    if (table.id) {
+      table.dataset.resizeKey = table.id;
+      return;
+    }
+    const pane = table.closest('.tab-pane');
+    const paneId = pane?.id || 'pane';
+    const list = pane ? Array.from(pane.querySelectorAll('table')) : Array.from(document.querySelectorAll('.matinfo-form table'));
+    const idx = list.indexOf(table);
+    table.dataset.resizeKey = `${paneId}-${idx >= 0 ? idx : list.length}`;
+  }
+
+  function loadDetailWidthMap(table) {
+    const storageKey = getDetailTableStorageKey(table);
+    if (!storageKey) return {};
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return {};
+      const data = JSON.parse(raw);
+      return data && typeof data === 'object' ? data : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveDetailWidthMap(table, map) {
+    const storageKey = getDetailTableStorageKey(table);
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(map));
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  function applyDetailTableWidths(table) {
+    if (!enableColumnResize || !table) return;
+    const widthMap = loadDetailWidthMap(table);
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    if (!ths.length) return;
+    ths.forEach((th, idx) => {
+      const value = Number(widthMap[idx]);
+      if (!Number.isFinite(value) || value <= 20) return;
+      const width = `${Math.round(value)}px`;
+      th.style.width = width;
+      table.querySelectorAll('tbody tr').forEach((row) => {
+        const cell = row.children[idx];
+        if (cell) cell.style.width = width;
+      });
+    });
+  }
+
+  function updateDetailColumnWidth(table, index, width, persist) {
+    if (!enableColumnResize || !table) return;
+    const ths = table.querySelectorAll('thead th');
+    if (!ths || !ths[index]) return;
+    const next = Math.max(20, Math.round(width));
+    const th = ths[index];
+    const widthValue = `${next}px`;
+    th.style.width = widthValue;
+    table.querySelectorAll('tbody tr').forEach((row) => {
+      const cell = row.children[index];
+      if (cell) cell.style.width = widthValue;
+    });
+    if (persist) {
+      const map = loadDetailWidthMap(table);
+      map[index] = next;
+      saveDetailWidthMap(table, map);
+    }
+  }
+
+  function attachDetailTableResizers(table) {
+    if (!enableColumnResize || !table) return;
+    table.classList.add('matinfo-resizable');
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    if (!ths.length) return;
+    ths.forEach((th, idx) => {
+      const existing = th.querySelector('.col-resizer');
+      if (existing) return;
+      const handle = document.createElement('span');
+      handle.className = 'col-resizer';
+      handle.addEventListener('click', (e) => e.stopPropagation());
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const startX = e.clientX;
+        const startWidth = th.getBoundingClientRect().width || th.offsetWidth || 0;
+        const onMove = (ev) => {
+          const delta = ev.clientX - startX;
+          updateDetailColumnWidth(table, idx, startWidth + delta, false);
+        };
+        const onUp = () => {
+          const finalWidth = th.getBoundingClientRect().width || th.offsetWidth || startWidth;
+          updateDetailColumnWidth(table, idx, finalWidth, true);
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+      th.appendChild(handle);
+    });
+  }
+
+  function initDetailTableResizers() {
+    if (!enableColumnResize) return;
+    const tables = Array.from(document.querySelectorAll('.matinfo-form table'));
+    tables.forEach((table, idx) => {
+      if (!table.querySelector('thead th')) return;
+      ensureDetailResizeKey(table);
+      applyDetailTableWidths(table);
+      attachDetailTableResizers(table);
+    });
+  }
+
+  function attachColumnResizers() {
+    if (!enableColumnResize || !theadRow) return;
+    const ths = Array.from(theadRow.querySelectorAll('th'));
+    ths.forEach((th, idx) => {
+      const existing = th.querySelector('.col-resizer');
+      if (existing) existing.remove();
+      const handle = document.createElement('span');
+      handle.className = 'col-resizer';
+      handle.addEventListener('click', (e) => e.stopPropagation());
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const startX = e.clientX;
+        const startWidth = th.getBoundingClientRect().width || th.offsetWidth || 0;
+        const onMove = (ev) => {
+          const delta = ev.clientX - startX;
+          updateColumnWidthAt(idx, startWidth + delta, false);
+        };
+        const onUp = () => {
+          updateColumnWidthAt(idx, th.getBoundingClientRect().width || th.offsetWidth || startWidth, true);
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+      th.appendChild(handle);
+    });
+  }
+
   async function buildColumns(rows) {
     const dict = await loadDict();
     const keySet = new Set();
@@ -1919,6 +2139,7 @@
     } else {
       columns = buildColumnsFromData(rows);
     }
+    applyStoredColumnWidths();
 
     theadRow.innerHTML = columns
       .map((col) => {
@@ -1932,6 +2153,7 @@
         return `<th${classAttr}${style}${keyAttr}>${col.label ?? col.key}</th>`;
       })
       .join('');
+    attachColumnResizers();
     applySortIndicators();
   }
 
@@ -2121,7 +2343,8 @@
             col.readOnly ? 'col-readonly' : ''
           ].filter(Boolean).join(' ');
           const classAttr = cls ? ` class="${cls}"` : '';
-          return `<td${classAttr}>${formatCellHtml(col, getValue(item, col.key))}</td>`;
+          const style = col.width ? ` style="width:${col.width}"` : '';
+          return `<td${classAttr}${style}>${formatCellHtml(col, getValue(item, col.key))}</td>`;
         }).join('') +
         `</tr>`;
     }
@@ -2806,6 +3029,7 @@
 
   syncScroll(browseScrollTop, browseScrollBody);
   syncScroll(formScrollTop, formScrollBody);
+  initDetailTableResizers();
 
   document.querySelectorAll('[data-bs-toggle="tab"]').forEach((btn) => {
     btn.addEventListener('shown.bs.tab', () => {
@@ -2813,6 +3037,16 @@
       setActiveTabContext(btn);
       if (btn.dataset.bsTarget === '#tab-glyph') {
         showGlyphPreview(getSelectedMapPath(), false);
+      }
+      const pane = btn.dataset.bsTarget ? document.querySelector(btn.dataset.bsTarget) : null;
+      if (pane) {
+        const tables = Array.from(pane.querySelectorAll('table'));
+        tables.forEach((table) => {
+          if (!table.querySelector('thead th')) return;
+          ensureDetailResizeKey(table);
+          applyDetailTableWidths(table);
+          attachDetailTableResizers(table);
+        });
       }
     });
   });
