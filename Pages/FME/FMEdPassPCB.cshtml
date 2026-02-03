@@ -175,7 +175,7 @@
                             </div>
                         </div>
                         <div class="card-body p-0">
-                            <div class="table-responsive" style="max-height: 200px; overflow-y: auto;">
+                            <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
                                 <table class="table table-sm table-bordered table-hover mb-0" id="tblXOut">
                                     <thead class="table-light sticky-top">
                                         <tr>
@@ -191,39 +191,6 @@
                                 </table>
                             </div>
                         </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 報廢缺點明細區 -->
-            <div class="card mt-3" id="pnlDefect">
-                <div class="card-header py-1 d-flex justify-content-between align-items-center">
-                    <span><i class="bi bi-exclamation-triangle"></i> 報廢缺點明細</span>
-                    <div class="btn-group btn-group-sm">
-                        <button type="button" class="btn btn-outline-success btn-sm" id="btnAddDefect" title="新增">
-                            <i class="bi bi-plus"></i>
-                        </button>
-                        <button type="button" class="btn btn-outline-danger btn-sm" id="btnDelDefect" title="刪除">
-                            <i class="bi bi-trash"></i>
-                        </button>
-                    </div>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive" style="max-height: 150px; overflow-y: auto;">
-                        <table class="table table-sm table-bordered table-hover mb-0" id="tblDefect">
-                            <thead class="table-light sticky-top">
-                                <tr>
-                                    <th style="width: 50px;">序號</th>
-                                    <th>不良類別</th>
-                                    <th>不良代碼</th>
-                                    <th>責任製程</th>
-                                    <th style="width: 80px;">數量</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <!-- 動態載入 -->
-                            </tbody>
-                        </table>
                     </div>
                 </div>
             </div>
@@ -249,6 +216,39 @@
                                     <th>本站新增單報數</th>
                                     <th>DateCode</th>
                                     <th>完成良品PCS數</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- 動態載入 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 單報缺點明細區 -->
+            <div class="card mt-3" id="pnlXOutDefect" style="display: none;">
+                <div class="card-header py-1 d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-list-check"></i> 單報缺點明細</span>
+                    <div class="btn-group btn-group-sm">
+                        <button type="button" class="btn btn-outline-success btn-sm" id="btnAddXOutDefect" title="新增">
+                            <i class="bi bi-plus"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm" id="btnDelXOutDefect" title="刪除">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 200px; overflow-y: auto;">
+                        <table class="table table-sm table-bordered table-hover mb-0" id="tblXOutDefect">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width: 50px;">序號</th>
+                                    <th>不良類別</th>
+                                    <th>不良代碼</th>
+                                    <th>責任製程</th>
+                                    <th style="width: 80px;">數量</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -597,24 +597,32 @@
         });
 
         // 新增報廢明細
-        $('#btnAddDefect').click(function () {
-            addDefectRow();
+        $('#btnAddXOutDefect').click(function () {
+            addXOutDefectRow();
         });
 
-        // 刪除報廢明細
-        $('#btnDelDefect').click(function () {
-            deleteSelectedDefect();
+        // 刪除單報缺點明細
+        $('#btnDelXOutDefect').click(function () {
+            deleteSelectedXOutDefect();
         });
 
         // 表格行選擇
-        $('#tblXOut tbody, #tblDefect tbody, #tblSelectLot tbody').on('click', 'tr', function () {
+        $('#tblXOut tbody, #tblXOutDefect tbody, #tblSelectLot tbody').on('click', 'tr', function () {
             $(this).siblings().removeClass('selected');
             $(this).addClass('selected');
         });
 
-        // 數量變更自動計算
-        $('#txtPQnty, #txtSQnty').change(function () {
-            calculateQuantities();
+        // 數量變更自動計算 (失去焦點或按 Enter 時觸發)
+        $('#txtPQnty, #txtSQnty').on('blur', function () {
+            calculateQuantities(this);
+        });
+
+        // 支援 Enter 鍵觸發
+        $('#txtPQnty, #txtSQnty').on('keypress', function (e) {
+            if (e.which === 13) {  // Enter 鍵
+                calculateQuantities(this);
+                $(this).blur();  // 觸發失去焦點,讓使用者看到調整結果
+            }
         });
 
         // === WIP 現帳查詢相關事件 ===
@@ -757,27 +765,40 @@
         $('#txtXOutQnty').val(getIntVal(info, 'AllowXOutQnty'));
 
         // === ★ 修正重點 1：填入「多報明細」表格 ===
-        // 自動產生多報明細 (根據 GoodPCS)
+        // 計算每片SPNL的PCS數 = 完成良品PCS數 ÷ 過帳數
         var goodPcs = getIntVal(info, 'GoodPCS') || getIntVal(info, 'LLPCS');
+        var pcsPerSpnl = 0;
+
+        if (goodPcs > 0 && pQnty > 0) {
+            pcsPerSpnl = Math.floor(goodPcs / pQnty);  // 576 ÷ 72 = 8 PCS/SPNL
+        }
+
         var allowXOutQnty = getIntVal(info, 'AllowXOutQnty');
 
-        if (goodPcs > 0 && allowXOutQnty > 0) {
-            // 自動產生 1~goodPcs 的多報明細
+        // 根據計算出的 PCS/SPNL 產生多報明細
+        if (pcsPerSpnl > 0 && allowXOutQnty > 0) {
             var xOutList = [];
-            for (var i = 1; i <= goodPcs; i++) {
+            for (var i = 1; i <= pcsPerSpnl; i++) {
                 xOutList.push({
-                    Item: i,
+                    Item: i,  // 項次: 1, 2, 3, ..., pcsPerSpnl
                     Qnty: 0,
                     OrgQnty: 0,
-                    IsFullScrap: (i === goodPcs) ? 1 : 0  // 最後一筆預設勾選整報
+                    IsFullScrap: (i === pcsPerSpnl) ? 1 : 0  // 最後一筆勾選整報
                 });
             }
             renderXOutTable(xOutList);
+            console.log('產生多報明細:', pcsPerSpnl, '筆 (完成良品PCS:', goodPcs, '÷ 過帳數:', pQnty, '= 1 SPNL =', pcsPerSpnl, 'PCS)');
+        } else if (info.XOutDetailList && info.XOutDetailList.length > 0) {
+            // 使用 SP 回傳的資料
+            console.log('使用 FMEdPassSetXOut 回傳的多報明細:', info.XOutDetailList.length, '筆');
+            renderXOutTable(info.XOutDetailList);
         } else if (info.XOutList && info.XOutList.length > 0) {
-            // 如果後端有回傳,使用後端資料
+            // 使用原本的 XOutList
             renderXOutTable(info.XOutList);
         } else {
+            // 清空表格
             $('#tblXOut tbody').empty();
+            console.log('無法產生多報明細 (pcsPerSpnl:', pcsPerSpnl, ', allowXOutQnty:', allowXOutQnty, ')');
         }
 
         // === ★ 修正重點 2：填入「報廢明細」表格 ===
@@ -795,12 +816,12 @@
                 DutyProc: '',
                 Qnty: sqnty  // 預設為報廢數
             }];
-            renderDefectTable(defectList);
+            renderXOutDefectTable(defectList);
         } else if (info.DefectList && info.DefectList.length > 0) {
             // 如果後端有回傳,使用後端資料
-            renderDefectTable(info.DefectList);
+            renderXOutDefectTable(info.DefectList);
         } else {
-            $('#tblDefect tbody').empty();
+            $('#tblXOutDefect tbody').empty();
         }
 
         // === ★ 修正重點 3：控制顯示邏輯 ===
@@ -808,13 +829,13 @@
         
         // 原始邏輯：只有 (報廢批) 或 (成品入庫) 才顯示
         if (isXOut === 1 || aftProcType === 990) {
-             $('#pnlDefect').show();
+             $('#pnlXOutDefect').show();
         } else {
-             $('#pnlDefect').hide();
+             $('#pnlXOutDefect').hide();
         }
         
         // 【測試用】如果你想強制看到報廢區塊，可以把上面那幾行註解掉，改成下面這行：
-        // $('#pnlDefect').show(); 
+        // $('#pnlXOutDefect').show(); 
 
         // Debug 資訊
         console.log('Qnty:', qnty, 'PQnty:', pQnty, 'IsShowPQnty:', isShowPQnty);
@@ -883,14 +904,77 @@
         var isXOut = getIntVal(info, 'IsXOut');
         var aftProcType = getIntVal(info, 'AftProcType');
         if (isXOut === 1 || aftProcType === 990) {
-            $('#pnlDefect').show();
+            $('#pnlXOutDefect').show();
         } else {
-            $('#pnlDefect').hide();
+            $('#pnlXOutDefect').hide();
         }
+
+        // === 單報缺點明細區塊顯示控制 ===
+        // 當製程規範有設定 XOutNeedDefect=1 時顯示
+        var xOutNeedDefect = getIntVal(info, 'XOutNeedDefect');
+        if (xOutNeedDefect === 1) {
+            $('#pnlXOutDefect').show();
+            console.log('顯示單報缺點明細 (XOutNeedDefect=1)');
+        } else {
+            $('#pnlXOutDefect').hide();
+            console.log('隱藏單報缺點明細 (XOutNeedDefect=' + xOutNeedDefect + ')');
+        }
+
+        // === ★ 新增：填入「選擇批號」表格 ===
+        renderSelectLotTable(info);
 
         // Debug 資訊
         console.log('Qnty:', qnty, 'PQnty:', pQnty, 'IsShowPQnty:', isShowPQnty);
         console.log('GoodPCS:', getIntVal(info, 'GoodPCS'));
+    }
+
+    // 填入「選擇批號」表格
+    function renderSelectLotTable(info) {
+        var tbody = $('#tblSelectLot tbody');
+        tbody.empty();
+
+        // 內部輔助函式
+        function getVal(obj, key) {
+            if (!obj) return '';
+            var lowerKey = key.toLowerCase();
+            for (var k in obj) {
+                if (k.toLowerCase() === lowerKey) return obj[k] ?? '';
+            }
+            return '';
+        }
+        function getNumVal(obj, key) {
+            var v = getVal(obj, key);
+            return v === '' ? 0 : parseFloat(v) || 0;
+        }
+
+        // 取得欄位值
+        var lotNum = getVal(info, 'LotNum');
+        var layerName = getVal(info, 'LayerName') || getVal(info, 'LayerId');
+        var qnty = getNumVal(info, 'Qnty');
+        var pQnty = getNumVal(info, 'PQnty');
+        var sQnty = getNumVal(info, 'SQnty');
+        var uQnty = getNumVal(info, 'UQnty');
+        var xOutQnty = getNumVal(info, 'XOutQnty');
+        var dateCode = getVal(info, 'DateCode');
+        var goodPCS = getNumVal(info, 'GoodPCS');
+
+        // 建立表格列
+        var row = $('<tr></tr>');
+        row.append('<td class="text-center">1</td>');  // 項次
+        row.append('<td>' + (lotNum || '') + '</td>');  // 批號(F5)
+        row.append('<td>' + (layerName || '') + '</td>');  // 階段
+        row.append('<td class="text-end">' + qnty.toFixed(0) + '</td>');  // 原始數量
+        row.append('<td class="text-end">' + pQnty.toFixed(0) + '</td>');  // 過帳數
+        row.append('<td class="text-end">' + sQnty.toFixed(0) + '</td>');  // 報廢數
+        row.append('<td class="text-end">' + uQnty.toFixed(0) + '</td>');  // 留存數
+        row.append('<td class="text-end">' + xOutQnty.toFixed(0) + '</td>');  // 本站新增單報數
+        row.append('<td>' + (dateCode || '') + '</td>');  // DateCode
+        row.append('<td class="text-end">' + goodPCS.toFixed(0) + '</td>');  // 完成良品PCS數
+
+        tbody.append(row);
+
+        // 更新批號資訊標籤
+        $('#lblBatchInfo').text('批號: ' + lotNum);
     }
 
     // 執行過帳 - 建立單號並呼叫 FMEdPassResult SP
@@ -1006,7 +1090,7 @@
     // 收集報廢明細資料
     function collectDefectData() {
         var list = [];
-        $('#tblDefect tbody tr').each(function (idx) {
+        $('#tblXOutDefect tbody tr').each(function (idx) {
             var inputs = $(this).find('input');
             var classId = inputs.eq(0).val();
             var defectId = inputs.eq(1).val();
@@ -1036,8 +1120,8 @@
     }
 
     // 渲染報廢明細表格
-    function renderDefectTable(list) {
-        var tbody = $('#tblDefect tbody');
+    function renderXOutDefectTable(list) {
+        var tbody = $('#tblXOutDefect tbody');
         tbody.empty();
         if (list && list.length > 0) {
             list.forEach(function (item, idx) {
@@ -1073,9 +1157,9 @@
         });
     }
 
-    // 新增報廢明細行
-    function addDefectRow() {
-        var tbody = $('#tblDefect tbody');
+    // 新增單報缺點明細行
+    function addXOutDefectRow() {
+        var tbody = $('#tblXOutDefect tbody');
         var newSerial = tbody.find('tr').length + 1;
         var tr = $('<tr class="selected">');
         tr.append($('<td>').text(newSerial));
@@ -1087,10 +1171,10 @@
         tbody.append(tr);
     }
 
-    // 刪除選中的報廢明細
-    function deleteSelectedDefect() {
-        $('#tblDefect tbody tr.selected').remove();
-        $('#tblDefect tbody tr').each(function (idx) {
+    // 刪除選中的單報缺點明細
+    function deleteSelectedXOutDefect() {
+        $('#tblXOutDefect tbody tr.selected').remove();
+        $('#tblXOutDefect tbody tr').each(function (idx) {
             $(this).find('td:first').text(idx + 1);
         });
     }
@@ -1114,19 +1198,75 @@
         $('#txtPoType').val('');
         $('#txtNotes').val('');
         $('#tblXOut tbody').empty();
-        $('#tblDefect tbody').empty();
+        $('#tblXOutDefect tbody').empty();
         $('#tblSelectLot tbody').empty();
         $('#lblPaperNum').text('(過帳後產生)');
         $('#lblItem').text('1');
+        $('#pnlXOutDefect').hide();  // 隱藏單報缺點明細區
         lotInfo = null;
     }
 
-    // 計算數量
-    function calculateQuantities() {
+    // 互動式數量自動調整
+    // 修改過帳良品數 → 自動調整報廢數
+    // 修改報廢數 → 自動調整過帳良品數
+    function calculateQuantities(triggerElement) {
         var qnty = parseFloat($('#txtQnty').val()) || 0;
         var pQnty = parseFloat($('#txtPQnty').val()) || 0;
         var sQnty = parseFloat($('#txtSQnty').val()) || 0;
-        // 可加入驗證: pQnty + sQnty 不可超過 qnty
+
+        // 判斷是哪個欄位觸發變更
+        var isPQntyChanged = $(triggerElement).is('#txtPQnty');
+        var isSQntyChanged = $(triggerElement).is('#txtSQnty');
+
+        // === 互動式自動調整邏輯 ===
+
+        if (isPQntyChanged) {
+            // 使用者修改了過帳良品數
+
+            // 如果過帳良品數超過原始數量,自動調整為原始數量
+            if (pQnty > qnty) {
+                pQnty = qnty;
+                $('#txtPQnty').val(pQnty);
+            }
+
+            // 自動調整報廢數 = 原始數量 - 過帳良品數
+            sQnty = qnty - pQnty;
+            $('#txtSQnty').val(sQnty);
+
+        } else if (isSQntyChanged) {
+            // 使用者修改了報廢數
+
+            // 如果報廢數超過原始數量,自動調整為原始數量
+            if (sQnty > qnty) {
+                sQnty = qnty;
+                $('#txtSQnty').val(sQnty);
+            }
+
+            // 自動調整過帳良品數 = 原始數量 - 報廢數
+            pQnty = qnty - sQnty;
+            $('#txtPQnty').val(pQnty);
+        }
+
+        // === 同步更新「選擇批號」表格 ===
+        updateSelectLotTable(pQnty, sQnty);
+
+        return true;
+    }
+
+    // 更新「選擇批號」表格中的過帳數和報廢數
+    function updateSelectLotTable(pQnty, sQnty) {
+        var $row = $('#tblSelectLot tbody tr:first');
+        if ($row.length > 0) {
+            // 更新過帳數 (第5欄，索引4)
+            $row.find('td:eq(4)').text(pQnty.toFixed(0));
+            // 更新報廢數 (第6欄，索引5)
+            $row.find('td:eq(5)').text(sQnty.toFixed(0));
+
+            // 計算並更新留存數 = 原始數量 - 過帳數 - 報廢數
+            var qnty = parseFloat($('#txtQnty').val()) || 0;
+            var uQnty = qnty - pQnty - sQnty;
+            $row.find('td:eq(6)').text(uQnty.toFixed(0));
+        }
     }
 
     // ========== WIP 現帳查詢功能 ==========

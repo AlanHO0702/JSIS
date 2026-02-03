@@ -98,6 +98,13 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
         // 補充 Lookup 欄位
         await EnrichWithLookupFields(conn, lotInfo);
 
+        // 呼叫 FMEdPassSetXOut 取得多報明細 (根據料號的成型尺寸片數)
+        var xOutDetailList = await GetXOutDetailList(conn, request.LotNum, request.PaperNum ?? "");
+        if (xOutDetailList.Count > 0)
+        {
+            lotInfo["XOutDetailList"] = xOutDetailList;
+        }
+
         return Ok(new { success = true, lotInfo });
     }
     catch (Exception ex)
@@ -115,15 +122,24 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
     /// </summary>
     private async Task EnrichWithLookupFields(SqlConnection conn, Dictionary<string, object?> lotInfo)
     {
-        // 1. 目前製程名稱 (ProcCode → ProcName)
+        // 1. 目前製程名稱 (ProcCode → ProcName) 及製程規範參數
         var procCode = GetStringValue(lotInfo, "ProcCode");
         if (!string.IsNullOrEmpty(procCode))
         {
-            var procName = await LookupValue(conn,
-                "SELECT ProcName FROM EMOdProcInfo WITH(NOLOCK) WHERE ProcCode = @Code",
-                procCode);
-            if (!string.IsNullOrEmpty(procName))
-                lotInfo["ProcName"] = procName;
+            await using var cmd = new SqlCommand(
+                "SELECT ProcName, XOutNeedDefect FROM EMOdProcInfo WITH(NOLOCK) WHERE ProcCode = @Code", conn);
+            cmd.Parameters.AddWithValue("@Code", procCode);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            if (await rd.ReadAsync())
+            {
+                var procName = rd["ProcName"]?.ToString();
+                if (!string.IsNullOrEmpty(procName))
+                    lotInfo["ProcName"] = procName;
+
+                // 取得 XOutNeedDefect (單X需報廢明細)
+                if (rd["XOutNeedDefect"] != DBNull.Value)
+                    lotInfo["XOutNeedDefect"] = Convert.ToInt32(rd["XOutNeedDefect"]);
+            }
         }
 
         // 2. 下站製程名稱 (AftProc → AftProcName)
@@ -217,6 +233,37 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// 取得多報明細列表 (呼叫 FMEdPassSetXOut SP)
+    /// 根據料號的成型尺寸片數自動產生多報明細
+    /// </summary>
+    private async Task<List<Dictionary<string, object?>>> GetXOutDetailList(SqlConnection conn, string lotNum, string paperNum)
+    {
+        var list = new List<Dictionary<string, object?>>();
+
+        try
+        {
+            await using var cmd = new SqlCommand("exec FMEdPassSetXOut @LotNum, @PaperNum", conn);
+            cmd.Parameters.AddWithValue("@LotNum", lotNum);
+            cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var row = ReadRowToDictionary(rd);
+                list.Add(row);
+            }
+
+            _logger.LogInformation("FMEdPassSetXOut 回傳 {Count} 筆多報明細", list.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "取得多報明細失敗: {LotNum}", lotNum);
+        }
+
+        return list;
     }
 
     #endregion
