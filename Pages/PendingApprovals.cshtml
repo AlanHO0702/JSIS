@@ -2,6 +2,7 @@
 @using System.Reflection
 @using PcbErpApi.Helpers
 @using PcbErpApi.Models
+@using System.Text.Json
 @model PcbErpApi.Pages.PendingApprovalsModel
 @{
     Layout = "_Layout";
@@ -11,6 +12,14 @@
     var visibleFields = Model.TableFields
         .Where(f => ToBool(f.Visible, defaultValue: true))
         .Where(f => Model.PendingList.Columns.Contains(f.FieldName))
+        .ToList();
+
+    var visibleHistoryFields = (Model.FlowHistoryFields ?? new List<CURdTableField>())
+        .Where(f => ToBool(f.Visible, defaultValue: true))
+        .ToList();
+
+    var visibleCommentFields = (Model.FlowCommentFields ?? new List<CURdTableField>())
+        .Where(f => ToBool(f.Visible, defaultValue: true))
         .ToList();
 }
 
@@ -170,6 +179,21 @@
         }
         return true;
     }
+
+    private static string GetDictLabel(IEnumerable<CURdTableField>? fields, string fieldName, string fallback)
+    {
+        if (fields == null) return fallback;
+        foreach (var f in fields)
+        {
+            if (string.Equals(f.FieldName, fieldName, StringComparison.OrdinalIgnoreCase))
+            {
+                var label = f.DisplayLabel;
+                if (!string.IsNullOrWhiteSpace(label)) return label;
+                break;
+            }
+        }
+        return fallback;
+    }
 }
 
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
@@ -268,12 +292,15 @@ body {
     box-shadow: 0 2px 10px rgba(0,0,0,0.05);
     overflow: auto;
     max-width: 100%;
+    height: calc(100vh - 400px);
+    max-height: calc(100vh - 400px);
+    min-height: 200px;
 }
 .approval-table {
-    width: auto;
+    width: 100%;
     margin: 0;
     border-collapse: collapse;
-    table-layout: auto;
+    table-layout: fixed;
     font-size: .85rem;
 }
 .approval-table thead {
@@ -288,6 +315,12 @@ body {
     position: relative;
     vertical-align: middle;
     height: 24px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #f8f9fa;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .approval-table tbody td {
     padding: 2px 6px;
@@ -452,6 +485,159 @@ body {
     font-size: 18px;
     line-height: 1;
 }
+
+/* 審核詳細資料區塊樣式 */
+.detail-panels-container {
+    max-width: 100%;
+}
+/* 高度調整分隔線 */
+.height-resizer {
+    height: 8px;
+    background: linear-gradient(to bottom, #f0f2f5 0%, #e8eaed 50%, #f0f2f5 100%);
+    cursor: ns-resize;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+    border-top: 1px solid #ddd;
+    border-bottom: 1px solid #ddd;
+}
+.height-resizer:hover {
+    background: linear-gradient(to bottom, #e8eaed 0%, #d0d4d9 50%, #e8eaed 100%);
+}
+.height-resizer::before {
+    content: '';
+    width: 40px;
+    height: 3px;
+    background: #9ca3af;
+    border-radius: 2px;
+    opacity: 0.6;
+}
+.height-resizer:hover::before {
+    opacity: 1;
+    background: #6b7280;
+}
+.height-resizer.dragging {
+    background: linear-gradient(to bottom, #d0d4d9 0%, #b0b8c0 50%, #d0d4d9 100%);
+}
+.height-resizer.dragging::before {
+    background: #4a5568;
+}
+/* 寬度調整分隔線 */
+.width-resizer {
+    width: 8px;
+    background: linear-gradient(to right, #f0f2f5 0%, #e8eaed 50%, #f0f2f5 100%);
+    cursor: ew-resize;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+    border-left: 1px solid #ddd;
+    border-right: 1px solid #ddd;
+    flex-shrink: 0;
+}
+.width-resizer:hover {
+    background: linear-gradient(to right, #e8eaed 0%, #d0d4d9 50%, #e8eaed 100%);
+}
+.width-resizer::before {
+    content: '';
+    width: 3px;
+    height: 40px;
+    background: #9ca3af;
+    border-radius: 2px;
+    opacity: 0.6;
+}
+.width-resizer:hover::before {
+    opacity: 1;
+    background: #6b7280;
+}
+.width-resizer.dragging {
+    background: linear-gradient(to right, #d0d4d9 0%, #b0b8c0 50%, #d0d4d9 100%);
+}
+.width-resizer.dragging::before {
+    background: #4a5568;
+}
+.detail-panel {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    overflow: hidden;
+}
+.detail-panel-header {
+    background: #f6f7f9;
+    border-bottom: 1px solid #d8dee8;
+    padding: 6px 12px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #2a4a7a;
+}
+.detail-panel-title {
+    display: inline-flex;
+    align-items: center;
+}
+.detail-panel-body {
+    padding: 8px 12px;
+}
+.detail-panel-body textarea {
+    border: 1px solid #d8dee8;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    padding: 8px;
+}
+.detail-panel-body textarea:focus {
+    border-color: #4a90e2;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.1);
+}
+.detail-table {
+    margin-bottom: 0;
+    font-size: 0.85rem;
+    width: max-content;
+    min-width: 100%;
+}
+.detail-table thead th {
+    padding: 6px 8px;
+    font-weight: 600;
+    color: #555;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    white-space: nowrap;
+}
+.detail-table tbody td {
+    padding: 4px 8px;
+    border: 1px solid #dee2e6;
+    vertical-align: middle;
+}
+.nav-tabs {
+    border-bottom: 2px solid #d8dee8;
+    margin: 0;
+    padding: 0 12px;
+    background: #f6f7f9;
+}
+.nav-tabs .nav-link {
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #666;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 8px 16px;
+    margin-bottom: -2px;
+}
+.nav-tabs .nav-link:hover {
+    color: #2a4a7a;
+    border-bottom-color: #9fb2d2;
+}
+.nav-tabs .nav-link.active {
+    color: #2a4a7a;
+    background: transparent;
+    border-bottom-color: #4a90e2;
+    font-weight: 600;
+}
+.tab-content {
+    background: #fff;
+}
 </style>
 
 <div class="approval-container" data-current-userid="@Model.CurrentUserId">
@@ -570,6 +756,119 @@ body {
                 <p>所有簽核都已處理完成</p>
             </div>
         }
+    </div>
+
+    <!-- 高度調整分隔線 -->
+    <div class="height-resizer" id="heightResizer"></div>
+
+    <!-- 審核詳細資料區塊 -->
+    <div class="detail-panels-container mt-2">
+        <!-- 操作按鈕列 -->
+        <div class="mb-2" style="display: flex; gap: 8px;">
+            <button type="button" class="toolbar-btn" id="btnShowHistoryComments">顯示審核歷史及意見</button>
+            <button type="button" class="toolbar-btn" id="btnSaveHeight">儲存高度</button>
+        </div>
+
+        <div style="display: flex; gap: 0;">
+            <!-- 左邊：意見彙總、審核歷史、審核意見 Tab -->
+            <div id="leftPanel" style="flex: 0 0 auto; min-width: 200px;">
+                <div class="detail-panel">
+                    <ul class="nav nav-tabs" id="reviewTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="summary-tab" data-bs-toggle="tab" data-bs-target="#summary-panel" type="button" role="tab">意見彙總</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#history-panel" type="button" role="tab">審核歷史</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="comments-tab" data-bs-toggle="tab" data-bs-target="#comments-panel" type="button" role="tab">審核意見</button>
+                        </li>
+                    </ul>
+                    <div class="tab-content" id="reviewTabContent">
+                        <!-- 意見彙總 -->
+                        <div class="tab-pane fade show active" id="summary-panel" role="tabpanel">
+                            <div class="detail-panel-body" style="height: 200px; overflow: auto;">
+                                <textarea id="txtOpinionSummary" class="form-control" readonly style="resize: none; background: #f8f9fa; border: none; height: 100%;"></textarea>
+                            </div>
+                        </div>
+
+                        <!-- 審核歷史 -->
+                        <div class="tab-pane fade" id="history-panel" role="tabpanel">
+                            <div class="detail-panel-body" style="height: 200px; overflow: auto; padding: 0;">
+                                <table class="table table-sm table-bordered detail-table" id="historyTable" data-dict-table="CURdFlowAlongHis">
+                                    <thead class="table-light">
+                                        <tr>
+                                            @if (visibleHistoryFields.Count > 0)
+                                            {
+                                                foreach (var f in visibleHistoryFields)
+                                                {
+                                                    <th data-field="@f.FieldName">@(string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel)</th>
+                                                }
+                                            }
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- 審核歷史資料由 JavaScript 動態載入 -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- 審核意見 -->
+                        <div class="tab-pane fade" id="comments-panel" role="tabpanel">
+                            <div class="detail-panel-body" style="height: 200px; overflow: auto; padding: 0;">
+                                <table class="table table-sm table-bordered detail-table" id="commentsTable" data-dict-table="CURdFlowAlongComt">
+                                    <thead class="table-light">
+                                        <tr>
+                                            @if (visibleCommentFields.Count > 0)
+                                            {
+                                                foreach (var f in visibleCommentFields)
+                                                {
+                                                    <th data-field="@f.FieldName">@(string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel)</th>
+                                                }
+                                            }
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- 審核意見資料由 JavaScript 動態載入 -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 第一條垂直分隔線 -->
+            <div class="width-resizer" id="widthResizer1"></div>
+
+            <!-- 中間：意見 -->
+            <div id="middlePanel" style="flex: 0 0 auto; min-width: 150px;">
+                <div class="detail-panel mb-2">
+                    <div class="detail-panel-header">
+                        <span class="detail-panel-title">意見</span>
+                    </div>
+                    <div class="detail-panel-body" style="height: 200px; overflow: auto;">
+                        <textarea id="txtComments" class="form-control" style="resize: none; height: 100%; border: none;" placeholder="請輸入審核意見..."></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 第二條垂直分隔線 -->
+            <div class="width-resizer" id="widthResizer2"></div>
+
+            <!-- 右邊：備註 -->
+            <div id="rightPanel" style="flex: 1 1 auto; min-width: 150px;">
+                <div class="detail-panel mb-2">
+                    <div class="detail-panel-header">
+                        <span class="detail-panel-title">備註</span>
+                    </div>
+                    <div class="detail-panel-body" style="height: 200px; overflow: auto;">
+                        <textarea id="txtNotes" class="form-control" style="resize: none; height: 100%; border: none;" placeholder="請輸入備註..."></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -725,6 +1024,23 @@ body {
 <script src="~/js/fieldDictModal.js"></script>
 
 <script>
+const _flowHistoryFields = @Html.Raw(JsonSerializer.Serialize(
+    visibleHistoryFields.Select(f => new {
+        fieldName = f.FieldName,
+        displayLabel = f.DisplayLabel,
+        dataType = f.DataType,
+        formatStr = f.FormatStr
+    })
+));
+const _flowCommentFields = @Html.Raw(JsonSerializer.Serialize(
+    visibleCommentFields.Select(f => new {
+        fieldName = f.FieldName,
+        displayLabel = f.DisplayLabel,
+        dataType = f.DataType,
+        formatStr = f.FormatStr
+    })
+));
+
 function getCurrentUserId() {
     const container = document.querySelector('.approval-container');
     const serverUserId = container?.dataset?.currentUserid;
@@ -760,8 +1076,520 @@ document.querySelectorAll('.approval-table tbody tr').forEach((row, index) => {
         this.classList.add('selected');
         // 更新當前行號（從1開始）
         document.getElementById('currentRow').textContent = index + 1;
+
+        // 載入審核詳細資料
+        loadApprovalDetails(this);
     });
 });
+
+// 載入審核詳細資料
+async function loadApprovalDetails(row) {
+    const mailSeq = row.getAttribute('data-mailseq');
+    const prcSeq = row.getAttribute('data-prcseq');
+    const paperId = row.getAttribute('data-paperid');
+    const paperNum = row.getAttribute('data-papernum');
+
+    if (!mailSeq) {
+        console.warn('無法取得 MAILSEQ');
+        return;
+    }
+
+    try {
+        // 載入審核歷史
+        await loadReviewHistory(mailSeq, prcSeq);
+
+        // 載入審核意見
+        await loadReviewComments(paperId, paperNum);
+
+        // 載入意見彙總
+        await loadOpinionSummary(mailSeq);
+
+        // 載入意見和備註
+        await loadCommentsAndNotes(mailSeq);
+    } catch (error) {
+        console.error('載入審核詳細資料失敗:', error);
+    }
+}
+
+// 載入審核歷史
+async function loadReviewHistory(mailSeq, prcSeq) {
+    try {
+        const response = await fetch(`/api/Flow/ReviewHistory?mailSeq=${encodeURIComponent(mailSeq)}&prcSeq=${encodeURIComponent(prcSeq || '')}`);
+
+        if (!response.ok) {
+            throw new Error('載入審核歷史失敗');
+        }
+
+        const data = await response.json();
+        const tbody = document.querySelector('#historyTable tbody');
+
+        if (!tbody) return;
+
+        renderFlowTable(tbody, data, _flowHistoryFields, '無審核歷史資料');
+    } catch (error) {
+        console.error('載入審核歷史失敗:', error);
+        const tbody = document.querySelector('#historyTable tbody');
+        if (tbody) {
+            const colCount = (_flowHistoryFields && _flowHistoryFields.length) ? _flowHistoryFields.length : 1;
+            tbody.innerHTML = `<tr><td colspan="${colCount}" class="text-center text-danger">載入失敗</td></tr>`;
+        }
+    }
+}
+
+// 載入審核意見
+async function loadReviewComments(paperId, paperNum) {
+    try {
+        const response = await fetch(`/api/Flow/ReviewComments?paperId=${encodeURIComponent(paperId || '')}&paperNum=${encodeURIComponent(paperNum || '')}`);
+
+        if (!response.ok) {
+            throw new Error('載入審核意見失敗');
+        }
+
+        const data = await response.json();
+        const tbody = document.querySelector('#commentsTable tbody');
+
+        if (!tbody) return;
+
+        renderFlowTable(tbody, data, _flowCommentFields, '無審核意見資料');
+    } catch (error) {
+        console.error('載入審核意見失敗:', error);
+        const tbody = document.querySelector('#commentsTable tbody');
+        if (tbody) {
+            const colCount = (_flowCommentFields && _flowCommentFields.length) ? _flowCommentFields.length : 1;
+            tbody.innerHTML = `<tr><td colspan="${colCount}" class="text-center text-danger">載入失敗</td></tr>`;
+        }
+    }
+}
+
+// 載入意見彙總
+async function loadOpinionSummary(mailSeq) {
+    try {
+        const response = await fetch(`/api/Flow/OpinionSummary?mailSeq=${encodeURIComponent(mailSeq)}`);
+
+        if (!response.ok) {
+            throw new Error('載入意見彙總失敗');
+        }
+
+        const data = await response.json();
+        const textarea = document.getElementById('txtOpinionSummary');
+
+        if (textarea) {
+            textarea.value = data.summary || '';
+        }
+    } catch (error) {
+        console.error('載入意見彙總失敗:', error);
+        const textarea = document.getElementById('txtOpinionSummary');
+        if (textarea) {
+            textarea.value = '載入失敗';
+        }
+    }
+}
+
+// 載入意見和備註
+async function loadCommentsAndNotes(mailSeq) {
+    try {
+        const response = await fetch(`/api/Flow/CommentsAndNotes?mailSeq=${encodeURIComponent(mailSeq)}`);
+
+        if (!response.ok) {
+            throw new Error('載入意見和備註失敗');
+        }
+
+        const data = await response.json();
+
+        const txtComments = document.getElementById('txtComments');
+        const txtNotes = document.getElementById('txtNotes');
+
+        if (txtComments) {
+            txtComments.value = data.comments || '';
+            txtComments.dataset.mailseq = mailSeq;
+        }
+
+        if (txtNotes) {
+            txtNotes.value = data.notes || '';
+            txtNotes.dataset.mailseq = mailSeq;
+        }
+    } catch (error) {
+        console.error('載入意見和備註失敗:', error);
+    }
+}
+
+// 儲存意見和備註
+async function saveCommentsAndNotes(mailSeq, comments, notes) {
+    try {
+        const response = await fetch('/api/Flow/SaveCommentsAndNotes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                mailSeq: mailSeq,
+                comments: comments,
+                notes: notes
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('儲存意見和備註失敗');
+        }
+
+        console.log('意見和備註已儲存');
+        return true;
+    } catch (error) {
+        console.error('儲存意見和備註失敗:', error);
+        return false;
+    }
+}
+
+// 監聽意見和備註的變更（自動儲存）
+document.addEventListener('DOMContentLoaded', function() {
+    const txtComments = document.getElementById('txtComments');
+    const txtNotes = document.getElementById('txtNotes');
+
+    if (txtComments) {
+        txtComments.addEventListener('blur', async function() {
+            const mailSeq = this.dataset.mailseq;
+            if (mailSeq) {
+                const comments = this.value;
+                const notes = txtNotes?.value || '';
+                await saveCommentsAndNotes(mailSeq, comments, notes);
+            }
+        });
+    }
+
+    if (txtNotes) {
+        txtNotes.addEventListener('blur', async function() {
+            const mailSeq = this.dataset.mailseq;
+            if (mailSeq) {
+                const comments = txtComments?.value || '';
+                const notes = this.value;
+                await saveCommentsAndNotes(mailSeq, comments, notes);
+            }
+        });
+    }
+});
+
+// 顯示審核歷史及意見按鈕
+document.getElementById('btnShowHistoryComments')?.addEventListener('click', async function() {
+    const selectedRow = document.querySelector('.approval-table tbody tr.selected');
+
+    if (!selectedRow) {
+        await Swal.fire('提示', '請先選擇一筆資料', 'info');
+        return;
+    }
+
+    const paperId = (selectedRow.getAttribute('data-paperid') || '').trim();
+    const paperNum = (selectedRow.getAttribute('data-papernum') || '').trim();
+
+    if (!paperId || !paperNum) {
+        await Swal.fire('錯誤', '無法取得單據資訊', 'error');
+        return;
+    }
+
+    try {
+        // 載入完整審核歷史
+        const historyResponse = await fetch(`/api/Flow/PaperFlowHistory?paperId=${encodeURIComponent(paperId)}&paperNum=${encodeURIComponent(paperNum)}`);
+        if (historyResponse.ok) {
+            const historyData = await historyResponse.json();
+            const tbody = document.querySelector('#historyTable tbody');
+            if (tbody) {
+                renderFlowTable(tbody, historyData, _flowHistoryFields, '無審核歷史資料');
+            }
+        }
+
+        // 載入完整審核意見
+        const commentsResponse = await fetch(`/api/Flow/PaperFlowComments?paperId=${encodeURIComponent(paperId)}&paperNum=${encodeURIComponent(paperNum)}`);
+        if (commentsResponse.ok) {
+            const commentsData = await commentsResponse.json();
+            const tbody = document.querySelector('#commentsTable tbody');
+            if (tbody) {
+                renderFlowTable(tbody, commentsData, _flowCommentFields, '無審核意見資料');
+            }
+        }
+
+        // 切換到審核歷史頁籤
+        const historyTab = document.getElementById('history-tab');
+        if (historyTab) {
+            historyTab.click();
+        }
+
+    } catch (error) {
+        console.error('載入審核歷史及意見失敗:', error);
+        await Swal.fire('錯誤', '載入審核歷史及意見失敗', 'error');
+    }
+});
+
+function escapeHtml(text) {
+    const s = String(text ?? '');
+    return s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getItemValue(item, fieldName) {
+    if (!item || !fieldName) return '';
+    if (Object.prototype.hasOwnProperty.call(item, fieldName)) {
+        return item[fieldName];
+    }
+    const key = Object.keys(item).find(k => k.toLowerCase() === fieldName.toLowerCase());
+    if (key) return item[key];
+    return '';
+}
+
+function isDateField(field) {
+    const name = (field?.fieldName || '').toString().toLowerCase();
+    const dt = (field?.dataType || '').toString().toLowerCase();
+    if (name === 'flowtimes') return false;
+    return name.includes('date') || name.includes('time') || dt.includes('date') || dt.includes('time');
+}
+
+function formatValue(value, field) {
+    if (value == null) return '';
+    if (isDateField(field)) {
+        const d = new Date(value);
+        if (!isNaN(d.getTime())) {
+            const hasTime = (field?.fieldName || '').toString().toLowerCase().includes('time');
+            return hasTime ? d.toLocaleString('zh-TW') : d.toLocaleDateString('zh-TW');
+        }
+    }
+    return String(value);
+}
+
+function renderFlowTable(tbody, data, fields, emptyText) {
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const cols = Array.isArray(fields) ? fields : [];
+    const colCount = cols.length || 1;
+
+    if (!Array.isArray(data) || data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="${colCount}" class="text-center text-muted">${escapeHtml(emptyText)}</td></tr>`;
+        return;
+    }
+
+    data.forEach(item => {
+        const tr = document.createElement('tr');
+        if (cols.length === 0) {
+            tr.innerHTML = '<td class="text-center text-muted">無可顯示欄位</td>';
+        } else {
+            tr.innerHTML = cols.map(f => {
+                const raw = getItemValue(item, f.fieldName);
+                const text = escapeHtml(formatValue(raw, f));
+                return `<td>${text}</td>`;
+            }).join('');
+        }
+        tbody.appendChild(tr);
+    });
+}
+
+// 儲存高度按鈕
+document.getElementById('btnSaveHeight')?.addEventListener('click', async function() {
+    const userId = getCurrentUserId();
+
+    // 取得各區塊的尺寸
+    const leftPanel = document.getElementById('leftPanel');
+    const middlePanel = document.getElementById('middlePanel');
+    const detailPanelsContainer = document.querySelector('.detail-panels-container');
+
+    const flowHisCommtWidth = leftPanel?.offsetWidth || 0;
+    const flowCommtWidth = middlePanel?.offsetWidth || 0;
+    const flowDtlHeight = detailPanelsContainer?.offsetHeight || 0;
+
+    try {
+        const response = await fetch('/api/Flow/SavePanelSize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userId: userId,
+                flowHisCommtWidth: flowHisCommtWidth,
+                flowCommtWidth: flowCommtWidth,
+                flowDtlHeight: flowDtlHeight
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('儲存高度失敗');
+        }
+
+        await Swal.fire('成功', '儲存高度完成!', 'success');
+    } catch (error) {
+        console.error('儲存高度失敗:', error);
+        await Swal.fire('錯誤', '儲存高度失敗', 'error');
+    }
+});
+
+// 載入儲存的面板尺寸
+async function loadSavedPanelSize() {
+    const userId = getCurrentUserId();
+
+    try {
+        const response = await fetch(`/api/Flow/GetPanelSize?userId=${encodeURIComponent(userId)}`);
+
+        if (!response.ok) {
+            console.warn('無法載入儲存的面板尺寸');
+            return;
+        }
+
+        const data = await response.json();
+        const leftPanel = document.getElementById('leftPanel');
+        const middlePanel = document.getElementById('middlePanel');
+
+        // 套用儲存的寬度
+        if (data.flowHisCommtWidth > 0 && leftPanel) {
+            leftPanel.style.width = data.flowHisCommtWidth + 'px';
+        }
+
+        if (data.flowCommtWidth > 0 && middlePanel) {
+            middlePanel.style.width = data.flowCommtWidth + 'px';
+        }
+
+        console.log('已載入儲存的面板尺寸:', data);
+    } catch (error) {
+        console.error('載入面板尺寸失敗:', error);
+    }
+}
+
+// 高度調整拖曳功能
+(function initHeightResizer() {
+    const resizer = document.getElementById('heightResizer');
+    const tableContainer = document.querySelector('.approval-table-container');
+    const detailContainer = document.querySelector('.detail-panels-container');
+
+    if (!resizer || !tableContainer || !detailContainer) return;
+
+    let isDragging = false;
+    let startY = 0;
+    let startTableHeight = 0;
+
+    resizer.addEventListener('mousedown', function(e) {
+        isDragging = true;
+        startY = e.clientY;
+        startTableHeight = tableContainer.offsetHeight;
+
+        resizer.classList.add('dragging');
+        document.body.style.cursor = 'ns-resize';
+        document.body.style.userSelect = 'none';
+
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (!isDragging) return;
+
+        const deltaY = e.clientY - startY;
+        const newTableHeight = startTableHeight + deltaY;
+
+        // 設定最小高度限制（至少顯示幾行）
+        const minTableHeight = 200;
+        const minDetailHeight = 150;
+
+        // 計算可用的總高度
+        const containerHeight = window.innerHeight - 60; // 減去 header 高度
+        const maxTableHeight = containerHeight - minDetailHeight - 50; // 50 是其他元素的空間
+
+        if (newTableHeight >= minTableHeight && newTableHeight <= maxTableHeight) {
+            tableContainer.style.height = newTableHeight + 'px';
+            tableContainer.style.maxHeight = newTableHeight + 'px';
+        }
+
+        e.preventDefault();
+    });
+
+    document.addEventListener('mouseup', function() {
+        if (isDragging) {
+            isDragging = false;
+            resizer.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+
+    // 頁面載入時載入儲存的面板尺寸
+    loadSavedPanelSize();
+})();
+
+// 寬度調整拖曳功能
+(function initWidthResizers() {
+    const widthResizer1 = document.getElementById('widthResizer1');
+    const widthResizer2 = document.getElementById('widthResizer2');
+    const leftPanel = document.getElementById('leftPanel');
+    const middlePanel = document.getElementById('middlePanel');
+    const rightPanel = document.getElementById('rightPanel');
+
+    if (!widthResizer1 || !widthResizer2 || !leftPanel || !middlePanel || !rightPanel) return;
+
+    let isDragging = false;
+    let currentResizer = null;
+    let startX = 0;
+    let startLeftWidth = 0;
+    let startMiddleWidth = 0;
+
+    // 第一條分隔線（調整左邊和中間的寬度）
+    widthResizer1.addEventListener('mousedown', function(e) {
+        isDragging = true;
+        currentResizer = 1;
+        startX = e.clientX;
+        startLeftWidth = leftPanel.offsetWidth;
+
+        widthResizer1.classList.add('dragging');
+        document.body.style.cursor = 'ew-resize';
+        document.body.style.userSelect = 'none';
+
+        e.preventDefault();
+    });
+
+    // 第二條分隔線（調整中間和右邊的寬度）
+    widthResizer2.addEventListener('mousedown', function(e) {
+        isDragging = true;
+        currentResizer = 2;
+        startX = e.clientX;
+        startMiddleWidth = middlePanel.offsetWidth;
+
+        widthResizer2.classList.add('dragging');
+        document.body.style.cursor = 'ew-resize';
+        document.body.style.userSelect = 'none';
+
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (!isDragging) return;
+
+        const deltaX = e.clientX - startX;
+
+        if (currentResizer === 1) {
+            // 調整左邊面板寬度
+            const newLeftWidth = startLeftWidth + deltaX;
+
+            if (newLeftWidth >= 200 && newLeftWidth <= 800) {
+                leftPanel.style.width = newLeftWidth + 'px';
+            }
+        } else if (currentResizer === 2) {
+            // 調整中間面板寬度
+            const newMiddleWidth = startMiddleWidth + deltaX;
+
+            if (newMiddleWidth >= 150 && newMiddleWidth <= 600) {
+                middlePanel.style.width = newMiddleWidth + 'px';
+            }
+        }
+
+        e.preventDefault();
+    });
+
+    document.addEventListener('mouseup', function() {
+        if (isDragging) {
+            isDragging = false;
+            currentResizer = null;
+            widthResizer1.classList.remove('dragging');
+            widthResizer2.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+
+    // 頁面載入時載入儲存的面板尺寸
+    loadSavedPanelSize();
+})();
 
 // 工具列按鈕事件
 

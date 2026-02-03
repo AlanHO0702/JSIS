@@ -5,11 +5,11 @@ using PcbErpApi.Models;
 
 namespace PcbErpApi.Pages
 {
-    public class PendingApprovalsModel : PageModel
+    public class PendingNotificationsModel : PageModel
     {
         private readonly IConfiguration _configuration;
 
-        public PendingApprovalsModel(IConfiguration configuration)
+        public PendingNotificationsModel(IConfiguration configuration)
         {
             _configuration = configuration;
         }
@@ -79,10 +79,9 @@ namespace PcbErpApi.Pages
             string? status = null,
             string? sort1 = null,
             string? sort2 = null,
-            string? sort3 = null)
+            string? sort3 = null,
+            string? paperNum = null)
         {
-            // 從 HttpContext.Items 取得 UserId（由 Middleware 設定）
-            // 如果沒有，從參數取得，再沒有就使用預設值
             userId = HttpContext.Items["UserId"]?.ToString()
                      ?? userId
                      ?? User.Identity?.Name
@@ -95,94 +94,74 @@ namespace PcbErpApi.Pages
             {
                 await connection.OpenAsync();
 
-                // 查詢資料辭典取得完整欄位資訊
-                TableFields = await LoadTableFieldsAsync(connection, "XFLdeFlowInfo");
+                TableFields = await LoadTableFieldsAsync(connection, "XFLdWORKLIST");
                 FlowHistoryFields = await LoadTableFieldsAsync(connection, "CURdFlowAlongHis");
                 FlowCommentFields = await LoadTableFieldsAsync(connection, "CURdFlowAlongComt");
 
-                // 建立查詢條件
-                var whereConditions = new List<string> { "f.USERID = @UserId" };
-                var parameters = new List<SqlParameter> { new SqlParameter("@UserId", userId) };
-
+                var where = "";
                 if (!string.IsNullOrWhiteSpace(mailSeq))
                 {
-                    whereConditions.Add("f.MAILSEQ = @MailSeq");
-                    parameters.Add(new SqlParameter("@MailSeq", mailSeq));
+                    where += $" AND t1.SEQ = '{mailSeq}'";
                 }
-
                 if (!string.IsNullOrWhiteSpace(subject))
                 {
-                    whereConditions.Add("f.SUBJECT LIKE @Subject");
-                    parameters.Add(new SqlParameter("@Subject", $"%{subject}%"));
+                    where += $" AND t1.SUBJECT LIKE N'%{subject}%'";
                 }
-
                 if (!string.IsNullOrWhiteSpace(applicant))
                 {
-                    whereConditions.Add("f.APPLICANT = @Applicant");
-                    parameters.Add(new SqlParameter("@Applicant", applicant));
+                    where += $" AND t7.APPLICANT = '{applicant}'";
                 }
-
                 if (!string.IsNullOrWhiteSpace(sender))
                 {
-                    whereConditions.Add("f.SENDER = @Sender");
-                    parameters.Add(new SqlParameter("@Sender", sender));
+                    where += $" AND t1.SENDER = '{sender}'";
                 }
-
                 if (!string.IsNullOrWhiteSpace(startDate))
                 {
-                    whereConditions.Add("f.CDATE >= @StartDate");
-                    parameters.Add(new SqlParameter("@StartDate", startDate));
+                    where += $" AND t7.CDATE >= '{startDate}'";
                 }
-
                 if (!string.IsNullOrWhiteSpace(endDate))
                 {
-                    whereConditions.Add("f.CDATE < DATEADD(day, 1, @EndDate)");
-                    parameters.Add(new SqlParameter("@EndDate", endDate));
+                    where += $" AND t7.CDATE < dateadd(day,1,'{endDate}')";
                 }
-
                 if (!string.IsNullOrWhiteSpace(paperId))
                 {
-                    whereConditions.Add("f.PAPERID = @PaperId");
-                    parameters.Add(new SqlParameter("@PaperId", paperId));
+                    where += $" AND t7.PAPERID = '{paperId}'";
                 }
 
-                if (!string.IsNullOrWhiteSpace(status))
+                where = where.Replace("'", "''");
+
+                var hasFilter = !string.IsNullOrWhiteSpace(where) || !string.IsNullOrWhiteSpace(status);
+                var useWhere = hasFilter ? 1 : 0;
+                var statusValue = hasFilter ? (status ?? "") : "0";
+                var usePaperNum = !string.IsNullOrWhiteSpace(paperNum) ? 1 : 0;
+
+                var sql = @"
+                    EXEC XFLdWORKLIST
+                        @UserId,
+                        @Type,
+                        @Flag,
+                        @Sort1,
+                        @Sort2,
+                        @Sort3,
+                        @UseWhere,
+                        @Where,
+                        @Status,
+                        @UsePaperNum,
+                        @PaperNum";
+
+                using (var command = new SqlCommand(sql, connection))
                 {
-                    whereConditions.Add("f.STATUSNAME = @Status");
-                    parameters.Add(new SqlParameter("@Status", status));
-                }
-
-                // 建立排序條件
-                var orderByClause = "f.MAILSEQ DESC";
-                var sortFields = new List<string>();
-
-                if (!string.IsNullOrWhiteSpace(sort1)) sortFields.Add($"f.{sort1}");
-                if (!string.IsNullOrWhiteSpace(sort2)) sortFields.Add($"f.{sort2}");
-                if (!string.IsNullOrWhiteSpace(sort3)) sortFields.Add($"f.{sort3}");
-
-                if (sortFields.Count > 0)
-                {
-                    orderByClause = string.Join(", ", sortFields);
-                }
-
-                // 直接從 XFLdeFlowInfo 查詢簽核待審列表
-                // 加入 XFLdPRCINST 來取得 PRCSEQ (流程序號)
-                var query = $@"
-                    SELECT f.*,
-                           ISNULL(s.ItemId, f.PAPERID) as ItemId,
-                           p.SEQ as PRCSEQ
-                    FROM XFLdeFlowInfo f
-                    LEFT JOIN CURdOCXTableSetUp s ON f.PAPERID = s.TableName AND s.TableKind LIKE '%Master%'
-                    LEFT JOIN XFLdPRCINST p ON f.PAPERID = p.PAPERID
-                                            AND f.PAPERNUM = p.PAPERNUM
-                                            AND f.USEID = p.USEID
-                                            AND f.SYSTEMID = p.SYSTEMID
-                    WHERE {string.Join(" AND ", whereConditions)}
-                    ORDER BY {orderByClause}";
-
-                using (var command = new SqlCommand(query, connection))
-                {
-                    command.Parameters.AddRange(parameters.ToArray());
+                    command.Parameters.AddWithValue("@UserId", userId);
+                    command.Parameters.AddWithValue("@Type", 2);
+                    command.Parameters.AddWithValue("@Flag", 0);
+                    command.Parameters.AddWithValue("@Sort1", sort1 ?? "");
+                    command.Parameters.AddWithValue("@Sort2", sort2 ?? "");
+                    command.Parameters.AddWithValue("@Sort3", sort3 ?? "");
+                    command.Parameters.AddWithValue("@UseWhere", useWhere);
+                    command.Parameters.AddWithValue("@Where", where);
+                    command.Parameters.AddWithValue("@Status", statusValue);
+                    command.Parameters.AddWithValue("@UsePaperNum", usePaperNum);
+                    command.Parameters.AddWithValue("@PaperNum", paperNum ?? "");
 
                     using (var adapter = new SqlDataAdapter(command))
                     {
@@ -190,8 +169,21 @@ namespace PcbErpApi.Pages
                     }
                 }
 
-                // 取得待審總數
                 TotalCount = PendingList.Rows.Count;
+
+                if (TableFields.Count == 0 && PendingList.Columns.Count > 0)
+                {
+                    foreach (DataColumn col in PendingList.Columns)
+                    {
+                        TableFields.Add(new CURdTableField
+                        {
+                            TableName = "XFLdWORKLIST",
+                            FieldName = col.ColumnName,
+                            DisplayLabel = col.ColumnName,
+                            Visible = 1
+                        });
+                    }
+                }
             }
         }
     }

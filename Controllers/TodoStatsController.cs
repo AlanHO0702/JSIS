@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using System.Data;
 
 namespace PcbErpApi.Controllers
 {
@@ -110,18 +111,58 @@ namespace PcbErpApi.Controllers
         {
             try
             {
-                // 取得簽核通知數量 - 根據您的實際資料表結構調整
-                var query = @"
-                    SELECT COUNT(*)
-                    FROM XFLdMailNotify (NOLOCK)
-                    WHERE RecvId = @UserId
-                    AND ReadFlag = 0";
+                // 取得簽核通知數量 (Delphi: XFLdWORKLIST Type=2)
+                var sql = @"
+                    EXEC XFLdWORKLIST
+                        @UserId,
+                        @Type,
+                        @Flag,
+                        @Sort1,
+                        @Sort2,
+                        @Sort3,
+                        @UseWhere,
+                        @Where,
+                        @Status,
+                        @UsePaperNum,
+                        @PaperNum";
 
-                using (var command = new SqlCommand(query, connection))
+                using (var command = new SqlCommand(sql, connection))
                 {
+                    command.CommandType = CommandType.Text;
                     command.Parameters.AddWithValue("@UserId", userId);
-                    var result = await command.ExecuteScalarAsync();
-                    return result != null ? Convert.ToInt32(result) : 0;
+                    command.Parameters.AddWithValue("@Type", 2);
+                    command.Parameters.AddWithValue("@Flag", 0);
+                    command.Parameters.AddWithValue("@Sort1", "");
+                    command.Parameters.AddWithValue("@Sort2", "");
+                    command.Parameters.AddWithValue("@Sort3", "");
+                    command.Parameters.AddWithValue("@UseWhere", 0);
+                    command.Parameters.AddWithValue("@Where", "");
+                    command.Parameters.AddWithValue("@Status", "0");
+                    command.Parameters.AddWithValue("@UsePaperNum", 0);
+                    command.Parameters.AddWithValue("@PaperNum", "");
+
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        var count = 0;
+                        while (await reader.ReadAsync())
+                        {
+                            try
+                            {
+                                var ordinal = reader.GetOrdinal("Notify");
+                                var notifyVal = reader.IsDBNull(ordinal) ? null : reader.GetValue(ordinal)?.ToString();
+                                if (!string.Equals(notifyVal, "2", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    count++;
+                                }
+                            }
+                            catch
+                            {
+                                // 若欄位不存在就全部計入
+                                count++;
+                            }
+                        }
+                        return count;
+                    }
                 }
             }
             catch (Exception)

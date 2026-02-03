@@ -1,0 +1,948 @@
+@page
+@using System.Reflection
+@using System.Text.Json
+@using PcbErpApi.Helpers
+@using PcbErpApi.Models
+@model PcbErpApi.Pages.PendingNotificationsModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "簽核通知";
+
+    var visibleFields = Model.TableFields
+        .Where(f => ToBool(f.Visible, defaultValue: true))
+        .Where(f => Model.PendingList.Columns.Contains(f.FieldName))
+        .ToList();
+
+    var visibleHistoryFields = (Model.FlowHistoryFields ?? new List<CURdTableField>())
+        .Where(f => ToBool(f.Visible, defaultValue: true))
+        .ToList();
+
+    var visibleCommentFields = (Model.FlowCommentFields ?? new List<CURdTableField>())
+        .Where(f => ToBool(f.Visible, defaultValue: true))
+        .ToList();
+}
+
+@functions{
+    private static bool ToBool(object? raw, bool defaultValue)
+    {
+        if (raw == null) return defaultValue;
+
+        return raw switch
+        {
+            bool b => b,
+            byte b => b != 0,
+            sbyte b => b != 0,
+            short n => n != 0,
+            ushort n => n != 0,
+            int n => n != 0,
+            uint n => n != 0,
+            long n => n != 0,
+            ulong n => n != 0,
+            decimal n => n != 0m,
+            double n => Math.Abs(n) > double.Epsilon,
+            float n => Math.Abs(n) > float.Epsilon,
+            _ => ParseBool(raw.ToString(), defaultValue)
+        };
+
+        static bool ParseBool(string? text, bool fallback)
+        {
+            var s = text?.Trim();
+            if (string.IsNullOrWhiteSpace(s)) return fallback;
+
+            if (bool.TryParse(s, out var b)) return b;
+            if (int.TryParse(s, out var n)) return n != 0;
+            if (string.Equals(s, "Y", StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(s, "N", StringComparison.OrdinalIgnoreCase)) return false;
+
+            return fallback;
+        }
+    }
+
+    private static int ToColWidthPx(CURdTableField? f, int pxPerChar = 10)
+    {
+        try
+        {
+            var raw = f?.DisplaySize;
+            if (raw == null) return 0;
+
+            if (raw is int i && i > 0) return i * pxPerChar;
+
+            int n;
+            var s = raw.ToString();
+            if (int.TryParse(s, out n) && n > 0) return n * pxPerChar;
+
+            return 0;
+        }
+        catch { return 0; }
+    }
+
+    private static string GetFieldProp(CURdTableField? field, string propName)
+    {
+        if (field == null || string.IsNullOrWhiteSpace(propName)) return "";
+
+        var prop = field.GetType().GetProperty(propName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+        return prop?.GetValue(field)?.ToString() ?? "";
+    }
+
+    private static string FormatCell(object? value, CURdTableField? field)
+    {
+        var dataType = GetFieldProp(field, "DataType");
+        var formatStr = GetFieldProp(field, "FormatStr");
+
+        var formatted = FormatHelper.FormatValue(value, dataType, formatStr);
+        return formatted;
+    }
+
+    private static string GetRowValue(System.Data.DataRow row, string fieldName)
+    {
+        if (row.Table.Columns.Contains(fieldName))
+        {
+            return row[fieldName]?.ToString() ?? "";
+        }
+        return "";
+    }
+}
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+
+<style>
+body {
+    background: #f4f6fb;
+    font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+    overflow-y: auto;
+}
+.approval-container {
+    padding: 8px 12px;
+    max-width: 100%;
+    margin: 0;
+}
+.approval-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #f6f7f9;
+    border: 1px solid #d8dee8;
+    border-radius: 10px;
+    padding: 6px 8px;
+    margin-bottom: 8px;
+    box-shadow: 0 1px 2px rgba(20,40,80,0.06);
+}
+.toolbar-buttons {
+    display: flex;
+    gap: 4px;
+    flex: 1;
+}
+.toolbar-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: #fff;
+    color: #2a4a7a;
+    border: 1px solid #b9c7de;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 4px 10px;
+    height: 28px;
+    cursor: pointer;
+    transition: all 0.18s;
+}
+.toolbar-btn:hover {
+    background: #eef3fb;
+    border-color: #9fb2d2;
+    transform: translateY(-1px);
+}
+.toolbar-input {
+    padding: 4px 8px;
+    border: 1px solid #b9c7de;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    height: 28px;
+    width: 120px;
+    outline: none;
+}
+.toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.toolbar-label {
+    font-size: 0.85rem;
+    color: #555;
+    font-weight: 500;
+}
+.toolbar-count {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    background: #1e4db7;
+    color: #fff;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.approval-table-container {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    overflow: auto;
+    max-width: 100%;
+    height: calc(100vh - 400px);
+    max-height: calc(100vh - 400px);
+    min-height: 200px;
+}
+.approval-table {
+    width: 100%;
+    margin: 0;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: .85rem;
+}
+.approval-table thead {
+    background: #f8f9fa;
+}
+.approval-table thead th {
+    padding: 2px 6px;
+    font-weight: 600;
+    color: #555;
+    border: 1px solid #dee2e6;
+    white-space: nowrap;
+    position: relative;
+    vertical-align: middle;
+    height: 24px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #f8f9fa;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.approval-table tbody td {
+    padding: 2px 6px;
+    border: 1px solid #dee2e6;
+    vertical-align: middle;
+    background: #f3f3f3;
+    height: 20px;
+    font-size: .85rem;
+    line-height: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.approval-table tbody tr:hover td {
+    background: #f1f5ff;
+}
+.approval-table tbody tr.selected td {
+    background: #e3f2fd !important;
+    border-color: #90caf9;
+}
+.approval-table tbody tr.notify-unread td {
+    color: #c0392b;
+}
+.col-resizer {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    width: 6px;
+    cursor: col-resize;
+    user-select: none;
+    height: 100%;
+    z-index: 10;
+}
+.detail-panels-container { max-width: 100%; }
+.detail-panel {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    overflow: hidden;
+}
+.detail-panel-header {
+    background: #f6f7f9;
+    border-bottom: 1px solid #d8dee8;
+    padding: 6px 12px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #2a4a7a;
+}
+.detail-panel-body {
+    padding: 8px 12px;
+}
+.detail-panel-body textarea {
+    border: 1px solid #d8dee8;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    padding: 8px;
+}
+.detail-table {
+    margin-bottom: 0;
+    font-size: 0.85rem;
+    width: max-content;
+    min-width: 100%;
+}
+.detail-table thead th {
+    padding: 6px 8px;
+    font-weight: 600;
+    color: #555;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    white-space: nowrap;
+}
+.detail-table tbody td {
+    padding: 4px 8px;
+    border: 1px solid #dee2e6;
+    vertical-align: middle;
+}
+.nav-tabs {
+    border-bottom: 2px solid #d8dee8;
+    margin: 0;
+    padding: 0 12px;
+    background: #f6f7f9;
+}
+.nav-tabs .nav-link {
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #666;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 8px 16px;
+    margin-bottom: -2px;
+}
+.nav-tabs .nav-link.active {
+    color: #2a4a7a;
+    background: transparent;
+    border-bottom-color: #4a90e2;
+    font-weight: 600;
+}
+.width-resizer {
+    width: 8px;
+    background: linear-gradient(to right, #f0f2f5 0%, #e8eaed 50%, #f0f2f5 100%);
+    cursor: ew-resize;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+    border-left: 1px solid #ddd;
+    border-right: 1px solid #ddd;
+    flex-shrink: 0;
+}
+.width-resizer::before {
+    content: '';
+    width: 3px;
+    height: 40px;
+    background: #9ca3af;
+    border-radius: 2px;
+    opacity: 0.6;
+}
+.height-resizer {
+    height: 8px;
+    background: linear-gradient(to bottom, #f0f2f5 0%, #e8eaed 50%, #f0f2f5 100%);
+    cursor: ns-resize;
+    border-top: 1px solid #ddd;
+    border-bottom: 1px solid #ddd;
+}
+</style>
+
+<div class="approval-container" data-current-userid="@Model.CurrentUserId">
+    <div class="approval-toolbar">
+        <div class="toolbar-buttons">
+            <button type="button" class="toolbar-btn" id="btnQuery">查詢</button>
+            <button type="button" class="toolbar-btn" id="btnDetail">詳細內容</button>
+            <button type="button" class="toolbar-btn" id="btnDeleteNotify">刪除通知</button>
+            <button type="button" class="toolbar-btn" id="btnDeleteRead">刪除已讀</button>
+            <input type="text" class="toolbar-input" id="txtPaperNum" placeholder="單號" />
+            <button type="button" class="toolbar-btn" id="btnPaperSearch">篩選</button>
+        </div>
+        <div class="toolbar-right">
+            <span class="toolbar-label">單筆資訊</span>
+            <div class="toolbar-count">
+                通知 <span id="currentRow">0</span> / @Model.TotalCount
+            </div>
+        </div>
+    </div>
+
+    <div class="approval-table-container" data-dict-table="XFLdWORKLIST">
+        @if (Model.PendingList.Rows.Count > 0)
+        {
+            <table class="approval-table" id="pendingNotificationsTable" data-dict-table="XFLdWORKLIST">
+                <colgroup>
+                    @foreach (var f in visibleFields)
+                    {
+                        var w = ToColWidthPx(f, 10);
+                        if (w > 0)
+                        {
+                            <col data-field="@f.FieldName" style="width:@($"{w}px");min-width:@($"{w}px")" />
+                        }
+                        else
+                        {
+                            <col data-field="@f.FieldName" />
+                        }
+                    }
+                </colgroup>
+                <thead>
+                    <tr>
+                        @foreach (var f in visibleFields)
+                        {
+                            <th data-field="@f.FieldName">
+                                @(string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel)
+                                <span class="col-resizer" data-field="@f.FieldName"></span>
+                            </th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (System.Data.DataRow row in Model.PendingList.Rows)
+                    {
+                        <tr data-mailseq="@GetRowValue(row, "MAILSEQ")"
+                            data-prcseq="@GetRowValue(row, "PRCSEQ")"
+                            data-paperid="@GetRowValue(row, "PAPERID")"
+                            data-papernum="@GetRowValue(row, "PAPERNUM")"
+                            data-memo2="@GetRowValue(row, "MEMO2")"
+                            data-userid="@GetRowValue(row, "USERID")"
+                            data-notify="@GetRowValue(row, "Notify")"
+                            class="@(GetRowValue(row, "Notify") != "2" ? "notify-unread" : "")">
+                            @foreach (var f in visibleFields)
+                            {
+                                var fieldName = f.FieldName;
+                                var value = row[fieldName];
+                                <td>@FormatCell(value, f)</td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+        else
+        {
+            <div class="text-center text-muted p-5">目前沒有通知</div>
+        }
+    </div>
+
+    <div class="height-resizer" id="heightResizer"></div>
+
+    <div class="detail-panels-container mt-2">
+        <div class="mb-2" style="display: flex; gap: 8px;">
+            <button type="button" class="toolbar-btn" id="btnShowHistoryComments">顯示審核歷史及意見</button>
+            <button type="button" class="toolbar-btn" id="btnSaveHeight">儲存高度</button>
+        </div>
+
+        <div style="display: flex; gap: 0;">
+            <div id="leftPanel" style="flex: 0 0 auto; min-width: 200px;">
+                <div class="detail-panel">
+                    <ul class="nav nav-tabs" id="reviewTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="history-tab" data-bs-toggle="tab" data-bs-target="#history-panel" type="button" role="tab">審核歷史</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="comments-tab" data-bs-toggle="tab" data-bs-target="#comments-panel" type="button" role="tab">審核意見</button>
+                        </li>
+                    </ul>
+                    <div class="tab-content" id="reviewTabContent">
+                        <div class="tab-pane fade show active" id="history-panel" role="tabpanel">
+                            <div class="detail-panel-body" style="height: 180px; overflow: auto; padding: 0;">
+                                <table class="table table-sm table-bordered detail-table" id="historyTable" data-dict-table="CURdFlowAlongHis">
+                                    <thead class="table-light">
+                                        <tr>
+                                            @if (visibleHistoryFields.Count > 0)
+                                            {
+                                                foreach (var f in visibleHistoryFields)
+                                                {
+                                                    <th data-field="@f.FieldName">@(string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel)</th>
+                                                }
+                                            }
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="comments-panel" role="tabpanel">
+                            <div class="detail-panel-body" style="height: 180px; overflow: auto; padding: 0;">
+                                <table class="table table-sm table-bordered detail-table" id="commentsTable" data-dict-table="CURdFlowAlongComt">
+                                    <thead class="table-light">
+                                        <tr>
+                                            @if (visibleCommentFields.Count > 0)
+                                            {
+                                                foreach (var f in visibleCommentFields)
+                                                {
+                                                    <th data-field="@f.FieldName">@(string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel)</th>
+                                                }
+                                            }
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="width-resizer" id="widthResizer1"></div>
+
+            <div id="middlePanel" style="flex: 0 0 auto; min-width: 150px;">
+                <div class="detail-panel mb-2">
+                    <div class="detail-panel-header">
+                        <span class="detail-panel-title">意見</span>
+                    </div>
+                    <div class="detail-panel-body" style="height: 180px; overflow: auto;">
+                        <textarea id="txtCommentDetail" class="form-control" readonly style="resize: none; height: 100%; border: none; background: #f8f9fa;"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="width-resizer" id="widthResizer2"></div>
+
+            <div id="rightPanel" style="flex: 1 1 auto; min-width: 150px;">
+                <div class="detail-panel mb-2">
+                    <div class="detail-panel-header">
+                        <span class="detail-panel-title">備註</span>
+                    </div>
+                    <div class="detail-panel-body" style="height: 180px; overflow: auto;">
+                        <textarea id="txtNotes" class="form-control" readonly style="resize: none; height: 100%; border: none; background: #f8f9fa;"></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 查詢 Modal -->
+<div class="modal fade" id="queryModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">查詢條件</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="queryForm">
+                    <div class="mb-3 row">
+                        <label class="col-sm-3 col-form-label col-form-label-sm text-end">編號:</label>
+                        <div class="col-sm-9">
+                            <input type="text" class="form-control form-control-sm" id="qryMailSeq" name="mailSeq">
+                        </div>
+                    </div>
+                    <div class="mb-3 row">
+                        <label class="col-sm-3 col-form-label col-form-label-sm text-end">主旨:</label>
+                        <div class="col-sm-9">
+                            <input type="text" class="form-control form-control-sm" id="qrySubject" name="subject">
+                        </div>
+                    </div>
+                    <div class="mb-3 row">
+                        <label class="col-sm-3 col-form-label col-form-label-sm text-end">申請人:</label>
+                        <div class="col-sm-9">
+                            <input type="text" class="form-control form-control-sm" id="qryApplicant" name="applicant">
+                        </div>
+                    </div>
+                    <div class="mb-3 row">
+                        <label class="col-sm-3 col-form-label col-form-label-sm text-end">寄件人:</label>
+                        <div class="col-sm-9">
+                            <input type="text" class="form-control form-control-sm" id="qrySender" name="sender">
+                        </div>
+                    </div>
+                    <div class="mb-3 row">
+                        <label class="col-sm-3 col-form-label col-form-label-sm text-end">申請日期:</label>
+                        <div class="col-sm-4">
+                            <input type="date" class="form-control form-control-sm" id="qryStartDate" name="startDate">
+                        </div>
+                        <div class="col-sm-1 text-center">~</div>
+                        <div class="col-sm-4">
+                            <input type="date" class="form-control form-control-sm" id="qryEndDate" name="endDate">
+                        </div>
+                    </div>
+                    <div class="mb-3 row">
+                        <label class="col-sm-3 col-form-label col-form-label-sm text-end">單據類型:</label>
+                        <div class="col-sm-9">
+                            <input type="text" class="form-control form-control-sm" id="qryPaperId" name="paperId">
+                        </div>
+                    </div>
+                    <div class="mb-3 row">
+                        <label class="col-sm-3 col-form-label col-form-label-sm text-end">處理狀態:</label>
+                        <div class="col-sm-9">
+                            <input type="text" class="form-control form-control-sm" id="qryStatus" name="status">
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="mb-3 row">
+                        <label class="col-sm-3 col-form-label col-form-label-sm text-end">排序 1:</label>
+                        <div class="col-sm-9">
+                            <input type="text" class="form-control form-control-sm" id="qrySort1" name="sort1">
+                        </div>
+                    </div>
+                    <div class="mb-3 row">
+                        <label class="col-sm-3 col-form-label col-form-label-sm text-end">排序 2:</label>
+                        <div class="col-sm-9">
+                            <input type="text" class="form-control form-control-sm" id="qrySort2" name="sort2">
+                        </div>
+                    </div>
+                    <div class="mb-3 row">
+                        <label class="col-sm-3 col-form-label col-form-label-sm text-end">排序 3:</label>
+                        <div class="col-sm-9">
+                            <input type="text" class="form-control form-control-sm" id="qrySort3" name="sort3">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-sm btn-primary" id="btnExecuteQuery">確定</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 資料辭典 Modal -->
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", new List<PcbErpApi.Models.CURdTableField>())
+
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="~/js/fieldDictModal.js"></script>
+
+<script>
+const _flowHistoryFields = @Html.Raw(JsonSerializer.Serialize(
+    visibleHistoryFields.Select(f => new {
+        fieldName = f.FieldName,
+        displayLabel = f.DisplayLabel,
+        dataType = f.DataType,
+        formatStr = f.FormatStr
+    })
+));
+const _flowCommentFields = @Html.Raw(JsonSerializer.Serialize(
+    visibleCommentFields.Select(f => new {
+        fieldName = f.FieldName,
+        displayLabel = f.DisplayLabel,
+        dataType = f.DataType,
+        formatStr = f.FormatStr
+    })
+));
+
+function getCurrentUserId() {
+    const container = document.querySelector('.approval-container');
+    const serverUserId = container?.dataset?.currentUserid;
+    if (serverUserId) return serverUserId;
+    const urlUserId = new URLSearchParams(window.location.search).get('userId');
+    if (urlUserId) return urlUserId;
+    return localStorage.getItem('erpLoginUserId') || 'admin';
+}
+
+window._dictTableName = 'XFLdWORKLIST';
+
+// 點擊行選中
+document.querySelectorAll('.approval-table tbody tr').forEach((row, index) => {
+    row.addEventListener('click', function() {
+        document.querySelectorAll('.approval-table tbody tr').forEach(r => r.classList.remove('selected'));
+        this.classList.add('selected');
+        document.getElementById('currentRow').textContent = index + 1;
+
+        const memo2 = this.getAttribute('data-memo2') || '';
+        const txtNotes = document.getElementById('txtNotes');
+        if (txtNotes) txtNotes.value = memo2;
+        const txtCommentDetail = document.getElementById('txtCommentDetail');
+        if (txtCommentDetail) txtCommentDetail.value = '';
+
+        const notify = (this.getAttribute('data-notify') || '').trim();
+        const mailSeq = (this.getAttribute('data-mailseq') || '').trim();
+        if (notify !== '2' && mailSeq) {
+            markNotifyRead(this, mailSeq);
+        }
+    });
+});
+
+async function markNotifyRead(row, mailSeq) {
+    try {
+        const response = await fetch('/api/Flow/MarkNotifyRead', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mailSeq: mailSeq })
+        });
+        if (!response.ok) return;
+        row.setAttribute('data-notify', '2');
+        row.classList.remove('notify-unread');
+    } catch (err) {
+        console.warn('MarkNotifyRead failed', err);
+    }
+}
+
+async function loadReviewHistory(mailSeq, prcSeq) {
+    const response = await fetch(`/api/Flow/ReviewHistory?mailSeq=${encodeURIComponent(mailSeq)}&prcSeq=${encodeURIComponent(prcSeq || '')}`);
+    if (!response.ok) throw new Error('載入審核歷史失敗');
+    const data = await response.json();
+    const tbody = document.querySelector('#historyTable tbody');
+    renderFlowTable(tbody, data, _flowHistoryFields, '無審核歷史資料');
+}
+
+async function loadReviewComments(paperId, paperNum) {
+    const response = await fetch(`/api/Flow/ReviewComments?paperId=${encodeURIComponent(paperId || '')}&paperNum=${encodeURIComponent(paperNum || '')}`);
+    if (!response.ok) throw new Error('載入審核意見失敗');
+    const data = await response.json();
+    const tbody = document.querySelector('#commentsTable tbody');
+    renderFlowTable(tbody, data, _flowCommentFields, '無審核意見資料');
+
+    const txtCommentDetail = document.getElementById('txtCommentDetail');
+    if (txtCommentDetail) {
+        const first = Array.isArray(data) && data.length > 0 ? data[0] : null;
+        const comment2 = first ? (first.COMMENT2 ?? first.comment2 ?? first.Comment2 ?? '') : '';
+        txtCommentDetail.value = comment2 || '';
+    }
+}
+
+document.getElementById('btnShowHistoryComments')?.addEventListener('click', async function() {
+    const selectedRow = document.querySelector('.approval-table tbody tr.selected');
+    if (!selectedRow) {
+        await Swal.fire('提示', '請先選擇一筆資料', 'info');
+        return;
+    }
+
+    const mailSeq = (selectedRow.getAttribute('data-mailseq') || '').trim();
+    const prcSeq = (selectedRow.getAttribute('data-prcseq') || '').trim();
+    const paperId = (selectedRow.getAttribute('data-paperid') || '').trim();
+    const paperNum = (selectedRow.getAttribute('data-papernum') || '').trim();
+
+    if (!paperId || !paperNum) {
+        await Swal.fire('錯誤', '無法取得單據資訊', 'error');
+        return;
+    }
+
+    try {
+        await loadReviewHistory(mailSeq, prcSeq);
+        await loadReviewComments(paperId, paperNum);
+
+        const historyTab = document.getElementById('history-tab');
+        if (historyTab) historyTab.click();
+    } catch (error) {
+        console.error('載入審核歷史及意見失敗:', error);
+        await Swal.fire('錯誤', '載入審核歷史及意見失敗', 'error');
+    }
+});
+
+function escapeHtml(text) {
+    const s = String(text ?? '');
+    return s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getItemValue(item, fieldName) {
+    if (!item || !fieldName) return '';
+    if (Object.prototype.hasOwnProperty.call(item, fieldName)) {
+        return item[fieldName];
+    }
+    const key = Object.keys(item).find(k => k.toLowerCase() === fieldName.toLowerCase());
+    if (key) return item[key];
+    return '';
+}
+
+function isDateField(field) {
+    const name = (field?.fieldName || '').toString().toLowerCase();
+    const dt = (field?.dataType || '').toString().toLowerCase();
+    if (name === 'flowtimes') return false;
+    return name.includes('date') || name.includes('time') || dt.includes('date') || dt.includes('time');
+}
+
+function formatValue(value, field) {
+    if (value == null) return '';
+    if (isDateField(field)) {
+        const d = new Date(value);
+        if (!isNaN(d.getTime())) {
+            const hasTime = (field?.fieldName || '').toString().toLowerCase().includes('time');
+            return hasTime ? d.toLocaleString('zh-TW') : d.toLocaleDateString('zh-TW');
+        }
+    }
+    return String(value);
+}
+
+function renderFlowTable(tbody, data, fields, emptyText) {
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const cols = Array.isArray(fields) ? fields : [];
+    const colCount = cols.length || 1;
+
+    if (!Array.isArray(data) || data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="${colCount}" class="text-center text-muted">${escapeHtml(emptyText)}</td></tr>`;
+        return;
+    }
+
+    data.forEach(item => {
+        const tr = document.createElement('tr');
+        if (cols.length === 0) {
+            tr.innerHTML = '<td class="text-center text-muted">無可顯示欄位</td>';
+        } else {
+            tr.innerHTML = cols.map(f => {
+                const raw = getItemValue(item, f.fieldName);
+                const text = escapeHtml(formatValue(raw, f));
+                return `<td>${text}</td>`;
+            }).join('');
+        }
+        tbody.appendChild(tr);
+    });
+}
+
+// 查詢
+document.getElementById('btnQuery')?.addEventListener('click', function() {
+    const modal = new bootstrap.Modal(document.getElementById('queryModal'));
+    modal.show();
+});
+
+document.getElementById('btnExecuteQuery')?.addEventListener('click', async function() {
+    const form = document.getElementById('queryForm');
+    const data = new FormData(form);
+    const queryParams = new URLSearchParams();
+
+    for (const [key, value] of data.entries()) {
+        if (value) queryParams.set(key, value);
+    }
+    const userId = getCurrentUserId();
+    if (userId) queryParams.set('userId', userId);
+
+    window.location.href = `/PendingNotifications?${queryParams.toString()}`;
+});
+
+// 單號篩選
+document.getElementById('btnPaperSearch')?.addEventListener('click', function() {
+    const paperNum = document.getElementById('txtPaperNum')?.value?.trim();
+    if (!paperNum) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('paperNum', paperNum);
+    const userId = getCurrentUserId();
+    if (userId) url.searchParams.set('userId', userId);
+    window.location.href = url.toString();
+});
+
+// ===== 欄位寬度調整功能 =====
+(function() {
+    const table = document.getElementById('pendingNotificationsTable');
+    if (!table) return;
+
+    const colGroupCols = Array.from(table.querySelectorAll('colgroup col'));
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    const tableName = 'XFLdWORKLIST';
+
+    const colMap = {};
+    colGroupCols.forEach(col => {
+        const field = col.getAttribute('data-field');
+        if (field) colMap[field.toLowerCase()] = col;
+    });
+
+    let dragState = null;
+
+    ths.forEach(th => {
+        const field = th.getAttribute('data-field');
+        const resizer = th.querySelector('.col-resizer');
+        if (!field || !resizer) return;
+
+        resizer.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const col = colMap[field.toLowerCase()];
+            const startX = e.clientX;
+            const startWidth = (col?.getBoundingClientRect().width) || th.getBoundingClientRect().width;
+            dragState = { field, startX, startWidth };
+            document.body.style.cursor = 'col-resize';
+        });
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!dragState) return;
+        const delta = e.clientX - dragState.startX;
+        const newW = Math.max(40, dragState.startWidth + delta);
+        const col = colMap[dragState.field.toLowerCase()];
+        if (col) {
+            col.style.width = `${newW}px`;
+            col.style.minWidth = `${newW}px`;
+        }
+        const th = ths.find(t => (t.getAttribute('data-field') || '').toLowerCase() === dragState.field.toLowerCase());
+        if (th) th.style.width = `${newW}px`;
+    });
+
+    document.addEventListener('mouseup', async () => {
+        if (!dragState) return;
+
+        const col = colMap[dragState.field.toLowerCase()];
+        const th = ths.find(t => (t.getAttribute('data-field') || '').toLowerCase() === dragState.field.toLowerCase());
+        const width = col?.getBoundingClientRect().width || th?.getBoundingClientRect().width || dragState.startWidth;
+        const fieldName = dragState.field;
+
+        dragState = null;
+        document.body.style.cursor = '';
+
+        try {
+            await fetch('/api/DictSetupApi/FieldWidth/Save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tableName: tableName,
+                    fieldName: fieldName,
+                    widthPx: Math.round(width)
+                })
+            });
+        } catch (err) {
+            console.warn('儲存欄位寬度失敗', err);
+        }
+    });
+})();
+
+// 儲存高度按鈕
+document.getElementById('btnSaveHeight')?.addEventListener('click', async function() {
+    const userId = getCurrentUserId();
+    const leftPanel = document.getElementById('leftPanel');
+    const middlePanel = document.getElementById('middlePanel');
+    const detailPanelsContainer = document.querySelector('.detail-panels-container');
+
+    const flowHisCommtWidth = leftPanel?.offsetWidth || 0;
+    const flowCommtWidth = middlePanel?.offsetWidth || 0;
+    const flowDtlHeight = detailPanelsContainer?.offsetHeight || 0;
+
+    try {
+        const response = await fetch('/api/Flow/SavePanelSize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userId: userId,
+                flowHisCommtWidth: flowHisCommtWidth,
+                flowCommtWidth: flowCommtWidth,
+                flowDtlHeight: flowDtlHeight
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('儲存高度失敗');
+        }
+    } catch (error) {
+        console.error('儲存高度失敗:', error);
+        await Swal.fire('錯誤', '儲存高度失敗', 'error');
+    }
+});
+
+// 載入儲存的面板尺寸
+async function loadSavedPanelSize() {
+    const userId = getCurrentUserId();
+
+    try {
+        const response = await fetch(`/api/Flow/GetPanelSize?userId=${encodeURIComponent(userId)}`);
+        if (!response.ok) return;
+
+        const data = await response.json();
+        const leftPanel = document.getElementById('leftPanel');
+        const middlePanel = document.getElementById('middlePanel');
+
+        if (data.flowHisCommtWidth > 0 && leftPanel) {
+            leftPanel.style.width = data.flowHisCommtWidth + 'px';
+        }
+        if (data.flowCommtWidth > 0 && middlePanel) {
+            middlePanel.style.width = data.flowCommtWidth + 'px';
+        }
+    } catch (error) {
+        console.error('載入面板尺寸失敗:', error);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadSavedPanelSize();
+});
+</script>
