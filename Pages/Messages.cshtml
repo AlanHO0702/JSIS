@@ -272,7 +272,7 @@ body {
 }
 </style>
 
-<div class="message-container" data-current-userid="@Model.CurrentUserId">
+<div class="message-container" data-current-userid="@Model.CurrentUserId" data-current-useid="@Model.CurrentUseId">
     <div class="message-toolbar">
         <div class="toolbar-buttons">
             <button type="button" class="toolbar-btn" id="btnOpenPaper">開啟單據</button>
@@ -448,8 +448,21 @@ document.getElementById('btnOpenPaper')?.addEventListener('click', async functio
     }
 
     try {
-        // 先查詢對應的 ItemId
-        const response = await fetch(`/api/DictSetupApi/GetItemIdByTableName?tableName=${encodeURIComponent(toPaperId)}`);
+        const container = document.querySelector('.message-container');
+        const userId = (container?.dataset?.currentUserid || localStorage.getItem('erpLoginUserId') || '').toString().trim();
+        const useId = (container?.dataset?.currentUseid || localStorage.getItem('erpLoginBUId') || '').toString().trim();
+        if (!userId || !useId) throw new Error('缺少使用者/公司別');
+
+        const response = await fetch('/api/Flow/ResolveItemIdByFromType', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                paperId: toPaperId,
+                paperNum: toPaperNum,
+                userId,
+                useId
+            })
+        });
 
         if (!response.ok) {
             throw new Error('查詢 ItemId 失敗');
@@ -458,12 +471,10 @@ document.getElementById('btnOpenPaper')?.addEventListener('click', async functio
         const data = await response.json();
         const itemId = data.itemId || toPaperId;
 
-        // 開啟單據頁面（使用 ItemId）
         const url = `/DynamicTemplate/Paper/${itemId}/${toPaperNum}`;
         window.open(url, '_blank');
     } catch (error) {
         console.error('開啟單據失敗:', error);
-        // 如果查詢失敗，嘗試直接使用 PaperId
         const url = `/DynamicTemplate/Paper/${toPaperId}/${toPaperNum}`;
         window.open(url, '_blank');
     }

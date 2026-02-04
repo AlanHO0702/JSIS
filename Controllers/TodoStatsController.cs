@@ -34,12 +34,16 @@ namespace PcbErpApi.Controllers
 
                     var pendingCount = await GetPendingSignCount(connection, userId);
 
+                    var useId = Request.Query["useId"].ToString() ?? "";
+
                     var stats = new
                     {
                         pendingSign = pendingCount,
                         messages = await GetUnreadMessagesCount(connection, userId),
                         notifications = await GetNotificationsCount(connection, userId),
                         sent = await GetSentMessagesCount(connection, userId),
+                        pendingDocs = await GetPendingDocsCount(connection, userId, useId),
+                        announcements = await GetAnnouncementsCount(connection, userId),
                         // 除錯資訊
                         debug = new
                         {
@@ -182,6 +186,67 @@ namespace PcbErpApi.Controllers
                     FROM CURdMailMsg (NOLOCK)
                     WHERE SenderId = @UserId
                     AND SendTime >= DATEADD(day, -7, GETDATE())"; // 最近7天
+
+                using (var command = new SqlCommand(query, connection))
+                {
+                    command.Parameters.AddWithValue("@UserId", userId);
+                    var result = await command.ExecuteScalarAsync();
+                    return result != null ? Convert.ToInt32(result) : 0;
+                }
+            }
+            catch (Exception)
+            {
+                // 如果資料表不存在或查詢失敗，返回 0
+                return 0;
+            }
+        }
+
+        private async Task<int> GetPendingDocsCount(SqlConnection connection, string userId, string useId)
+        {
+            try
+            {
+                // 取得未完成單據數量 (執行 CURdOCXWorkingList stored procedure 並計算結果集筆數)
+                using (var command = new SqlCommand("CURdOCXWorkingList", connection))
+                {
+                    command.CommandType = CommandType.StoredProcedure;
+                    command.Parameters.AddWithValue("@UserId", userId);
+                    command.Parameters.AddWithValue("@UseId", useId ?? "");
+                    command.Parameters.AddWithValue("@forCount", 0);
+
+                    var count = 0;
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            count++;
+                        }
+                    }
+                    return count;
+                }
+            }
+            catch (Exception ex)
+            {
+                // 記錄錯誤並返回 0
+                Console.WriteLine($"GetPendingDocsCount Error: {ex.Message}");
+                return 0;
+            }
+        }
+
+        private async Task<int> GetAnnouncementsCount(SqlConnection connection, string userId)
+        {
+            try
+            {
+                // 取得佈告欄未讀數量
+                var query = @"
+                    SELECT COUNT(*)
+                    FROM CURdNoticeBoard WITH (NOLOCK)
+                    WHERE (ValidDate IS NULL OR ValidDate >= GETDATE())
+                    AND (ExpireDate IS NULL OR ExpireDate >= GETDATE())
+                    AND NoticeId NOT IN (
+                        SELECT NoticeId
+                        FROM CURdNoticeBoardRead WITH (NOLOCK)
+                        WHERE UserId = @UserId
+                    )";
 
                 using (var command = new SqlCommand(query, connection))
                 {
