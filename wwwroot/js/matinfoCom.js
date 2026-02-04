@@ -2010,6 +2010,40 @@
         if (cell) cell.style.width = width;
       });
     });
+    lockDetailTableWidths(table);
+    refreshDetailTableWidth(table);
+  }
+
+  function lockDetailTableWidths(table) {
+    if (!table || table.dataset.fixedLayout === '1') return;
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    if (!ths.length) return;
+    let total = 0;
+    ths.forEach((th, idx) => {
+      const width = Math.round(th.getBoundingClientRect().width || th.offsetWidth || 0);
+      if (width <= 0) return;
+      th.style.width = `${width}px`;
+      table.querySelectorAll('tbody tr').forEach((row) => {
+        const cell = row.children[idx];
+        if (cell) cell.style.width = `${width}px`;
+      });
+      total += width;
+    });
+    if (total <= 0) return;
+    table.style.width = `${total}px`;
+    table.style.tableLayout = 'fixed';
+    table.dataset.fixedLayout = '1';
+  }
+
+  function refreshDetailTableWidth(table) {
+    if (!table) return;
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    if (!ths.length) return;
+    const total = ths.reduce((sum, th) => {
+      const width = Math.round(th.getBoundingClientRect().width || th.offsetWidth || 0);
+      return width > 0 ? sum + width : sum;
+    }, 0);
+    if (total > 0) table.style.width = `${total}px`;
   }
 
   function updateDetailColumnWidth(table, index, width, persist) {
@@ -2024,6 +2058,7 @@
       const cell = row.children[index];
       if (cell) cell.style.width = widthValue;
     });
+    refreshDetailTableWidth(table);
     if (persist) {
       const map = loadDetailWidthMap(table);
       map[index] = next;
@@ -2034,6 +2069,7 @@
   function attachDetailTableResizers(table) {
     if (!enableColumnResize || !table) return;
     table.classList.add('matinfo-resizable');
+    lockDetailTableWidths(table);
     const ths = Array.from(table.querySelectorAll('thead th'));
     if (!ths.length) return;
     ths.forEach((th, idx) => {
