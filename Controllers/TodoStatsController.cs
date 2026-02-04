@@ -86,12 +86,12 @@ namespace PcbErpApi.Controllers
         {
             try
             {
-                // 取得未讀訊息數量 - 根據您的實際資料表結構調整
+                // 取得未讀訊息數量 (CURdMsg 表, iStatus=0 表示未讀)
                 var query = @"
                     SELECT COUNT(*)
-                    FROM CURdMailMsg (NOLOCK)
-                    WHERE RecvId = @UserId
-                    AND ReadFlag = 0";
+                    FROM CURdMsg WITH (NOLOCK)
+                    WHERE ToUserId = @UserId
+                    AND iStatus = 0";
 
                 using (var command = new SqlCommand(query, connection))
                 {

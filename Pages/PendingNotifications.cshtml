@@ -336,12 +336,42 @@ body {
     border-radius: 2px;
     opacity: 0.6;
 }
+.width-resizer:hover::before {
+    opacity: 1;
+    background: #6b7280;
+}
 .height-resizer {
     height: 8px;
     background: linear-gradient(to bottom, #f0f2f5 0%, #e8eaed 50%, #f0f2f5 100%);
     cursor: ns-resize;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
     border-top: 1px solid #ddd;
     border-bottom: 1px solid #ddd;
+}
+.height-resizer:hover {
+    background: linear-gradient(to bottom, #e8eaed 0%, #d0d4d9 50%, #e8eaed 100%);
+}
+.height-resizer::before {
+    content: '';
+    width: 40px;
+    height: 3px;
+    background: #9ca3af;
+    border-radius: 2px;
+    opacity: 0.6;
+}
+.height-resizer:hover::before {
+    opacity: 1;
+    background: #6b7280;
+}
+.height-resizer.dragging {
+    background: linear-gradient(to bottom, #d0d4d9 0%, #b0b8c0 50%, #d0d4d9 100%);
+}
+.height-resizer.dragging::before {
+    background: #4a5568;
 }
 </style>
 
@@ -395,9 +425,19 @@ body {
                 <tbody>
                     @foreach (System.Data.DataRow row in Model.PendingList.Rows)
                     {
+                        var itemId = GetRowValue(row, "ItemId");
+                        if (string.IsNullOrEmpty(itemId))
+                        {
+                            itemId = GetRowValue(row, "ITEMID");
+                        }
+                        if (string.IsNullOrEmpty(itemId))
+                        {
+                            itemId = GetRowValue(row, "PAPERID");
+                        }
                         <tr data-mailseq="@GetRowValue(row, "MAILSEQ")"
                             data-prcseq="@GetRowValue(row, "PRCSEQ")"
                             data-paperid="@GetRowValue(row, "PAPERID")"
+                            data-itemid="@itemId"
                             data-papernum="@GetRowValue(row, "PAPERNUM")"
                             data-memo2="@GetRowValue(row, "MEMO2")"
                             data-userid="@GetRowValue(row, "USERID")"
@@ -562,26 +602,48 @@ body {
                     <div class="mb-3 row">
                         <label class="col-sm-3 col-form-label col-form-label-sm text-end">處理狀態:</label>
                         <div class="col-sm-9">
-                            <input type="text" class="form-control form-control-sm" id="qryStatus" name="status">
+                            <select class="form-select form-select-sm" id="qryStatus" name="status">
+                                <option value="">全部</option>
+                                <option value="0">未處理</option>
+                                <option value="2" selected>已通知</option>
+                            </select>
                         </div>
                     </div>
                     <hr>
                     <div class="mb-3 row">
                         <label class="col-sm-3 col-form-label col-form-label-sm text-end">排序 1:</label>
                         <div class="col-sm-9">
-                            <input type="text" class="form-control form-control-sm" id="qrySort1" name="sort1">
+                            <select class="form-select form-select-sm" id="qrySort1" name="sort1">
+                                <option value="">請選擇</option>
+                                <option value="APPLICANT">申請者</option>
+                                <option value="SENDER">寄件者</option>
+                                <option value="PAPERID">單據類型</option>
+                                <option value="PAPERNUM">單號</option>
+                            </select>
                         </div>
                     </div>
                     <div class="mb-3 row">
                         <label class="col-sm-3 col-form-label col-form-label-sm text-end">排序 2:</label>
                         <div class="col-sm-9">
-                            <input type="text" class="form-control form-control-sm" id="qrySort2" name="sort2">
+                            <select class="form-select form-select-sm" id="qrySort2" name="sort2">
+                                <option value="">請選擇</option>
+                                <option value="APPLICANT">申請者</option>
+                                <option value="SENDER">寄件者</option>
+                                <option value="PAPERID">單據類型</option>
+                                <option value="PAPERNUM">單號</option>
+                            </select>
                         </div>
                     </div>
                     <div class="mb-3 row">
                         <label class="col-sm-3 col-form-label col-form-label-sm text-end">排序 3:</label>
                         <div class="col-sm-9">
-                            <input type="text" class="form-control form-control-sm" id="qrySort3" name="sort3">
+                            <select class="form-select form-select-sm" id="qrySort3" name="sort3">
+                                <option value="">請選擇</option>
+                                <option value="APPLICANT">申請者</option>
+                                <option value="SENDER">寄件者</option>
+                                <option value="PAPERID">單據類型</option>
+                                <option value="PAPERNUM">單號</option>
+                            </select>
                         </div>
                     </div>
                 </form>
@@ -665,29 +727,6 @@ async function markNotifyRead(row, mailSeq) {
     }
 }
 
-async function loadReviewHistory(mailSeq, prcSeq) {
-    const response = await fetch(`/api/Flow/ReviewHistory?mailSeq=${encodeURIComponent(mailSeq)}&prcSeq=${encodeURIComponent(prcSeq || '')}`);
-    if (!response.ok) throw new Error('載入審核歷史失敗');
-    const data = await response.json();
-    const tbody = document.querySelector('#historyTable tbody');
-    renderFlowTable(tbody, data, _flowHistoryFields, '無審核歷史資料');
-}
-
-async function loadReviewComments(paperId, paperNum) {
-    const response = await fetch(`/api/Flow/ReviewComments?paperId=${encodeURIComponent(paperId || '')}&paperNum=${encodeURIComponent(paperNum || '')}`);
-    if (!response.ok) throw new Error('載入審核意見失敗');
-    const data = await response.json();
-    const tbody = document.querySelector('#commentsTable tbody');
-    renderFlowTable(tbody, data, _flowCommentFields, '無審核意見資料');
-
-    const txtCommentDetail = document.getElementById('txtCommentDetail');
-    if (txtCommentDetail) {
-        const first = Array.isArray(data) && data.length > 0 ? data[0] : null;
-        const comment2 = first ? (first.COMMENT2 ?? first.comment2 ?? first.Comment2 ?? '') : '';
-        txtCommentDetail.value = comment2 || '';
-    }
-}
-
 document.getElementById('btnShowHistoryComments')?.addEventListener('click', async function() {
     const selectedRow = document.querySelector('.approval-table tbody tr.selected');
     if (!selectedRow) {
@@ -695,8 +734,6 @@ document.getElementById('btnShowHistoryComments')?.addEventListener('click', asy
         return;
     }
 
-    const mailSeq = (selectedRow.getAttribute('data-mailseq') || '').trim();
-    const prcSeq = (selectedRow.getAttribute('data-prcseq') || '').trim();
     const paperId = (selectedRow.getAttribute('data-paperid') || '').trim();
     const paperNum = (selectedRow.getAttribute('data-papernum') || '').trim();
 
@@ -706,11 +743,40 @@ document.getElementById('btnShowHistoryComments')?.addEventListener('click', asy
     }
 
     try {
-        await loadReviewHistory(mailSeq, prcSeq);
-        await loadReviewComments(paperId, paperNum);
+        // 載入完整審核歷史
+        const historyResponse = await fetch(`/api/Flow/PaperFlowHistory?paperId=${encodeURIComponent(paperId)}&paperNum=${encodeURIComponent(paperNum)}`);
+        if (historyResponse.ok) {
+            const historyData = await historyResponse.json();
+            const tbody = document.querySelector('#historyTable tbody');
+            if (tbody) {
+                renderFlowTable(tbody, historyData, _flowHistoryFields, '無審核歷史資料');
+            }
+        }
 
+        // 載入完整審核意見
+        const commentsResponse = await fetch(`/api/Flow/PaperFlowComments?paperId=${encodeURIComponent(paperId)}&paperNum=${encodeURIComponent(paperNum)}`);
+        if (commentsResponse.ok) {
+            const commentsData = await commentsResponse.json();
+            const tbody = document.querySelector('#commentsTable tbody');
+            if (tbody) {
+                renderFlowTable(tbody, commentsData, _flowCommentFields, '無審核意見資料');
+
+                // 顯示第一筆審核意見到 txtCommentDetail
+                const txtCommentDetail = document.getElementById('txtCommentDetail');
+                if (txtCommentDetail && Array.isArray(commentsData) && commentsData.length > 0) {
+                    const first = commentsData[0];
+                    const comment2 = first?.COMMENT2 ?? first?.comment2 ?? first?.Comment2 ?? '';
+                    txtCommentDetail.value = comment2 || '';
+                }
+            }
+        }
+
+        // 切換到審核歷史頁籤
         const historyTab = document.getElementById('history-tab');
-        if (historyTab) historyTab.click();
+        if (historyTab) {
+            historyTab.click();
+        }
+
     } catch (error) {
         console.error('載入審核歷史及意見失敗:', error);
         await Swal.fire('錯誤', '載入審核歷史及意見失敗', 'error');
@@ -783,23 +849,78 @@ function renderFlowTable(tbody, data, fields, emptyText) {
     });
 }
 
-// 查詢
-document.getElementById('btnQuery')?.addEventListener('click', function() {
+// 載入排序設定
+async function loadSortSettings() {
+    try {
+        const userId = getCurrentUserId();
+        const response = await fetch(`/api/Flow/GetSortSettings?userId=${encodeURIComponent(userId)}`);
+
+        if (response.ok) {
+            const data = await response.json();
+            if (data.sort1) document.getElementById('qrySort1').value = data.sort1;
+            if (data.sort2) document.getElementById('qrySort2').value = data.sort2;
+            if (data.sort3) document.getElementById('qrySort3').value = data.sort3;
+        }
+    } catch (error) {
+        console.error('載入排序設定失敗:', error);
+    }
+}
+
+// 儲存排序設定
+async function saveSortSettings(sort1, sort2, sort3) {
+    try {
+        const userId = getCurrentUserId();
+        const response = await fetch('/api/Flow/SaveSortSettings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userId: userId,
+                sort1: sort1 || '',
+                sort2: sort2 || '',
+                sort3: sort3 || ''
+            })
+        });
+
+        if (!response.ok) {
+            console.warn('儲存排序設定失敗');
+        }
+    } catch (error) {
+        console.error('儲存排序設定失敗:', error);
+    }
+}
+
+// 查詢按鈕 - 開啟 Modal 並載入排序設定
+document.getElementById('btnQuery')?.addEventListener('click', async function() {
+    // 載入排序設定
+    await loadSortSettings();
+
+    // 開啟 Modal
     const modal = new bootstrap.Modal(document.getElementById('queryModal'));
     modal.show();
 });
 
+// 執行查詢
 document.getElementById('btnExecuteQuery')?.addEventListener('click', async function() {
     const form = document.getElementById('queryForm');
     const data = new FormData(form);
     const queryParams = new URLSearchParams();
 
+    // 收集查詢條件
     for (const [key, value] of data.entries()) {
         if (value) queryParams.set(key, value);
     }
+
     const userId = getCurrentUserId();
     if (userId) queryParams.set('userId', userId);
 
+    // 儲存排序設定
+    const sort1 = document.getElementById('qrySort1')?.value || '';
+    const sort2 = document.getElementById('qrySort2')?.value || '';
+    const sort3 = document.getElementById('qrySort3')?.value || '';
+
+    await saveSortSettings(sort1, sort2, sort3);
+
+    // 重新載入頁面
     window.location.href = `/PendingNotifications?${queryParams.toString()}`;
 });
 
@@ -812,6 +933,99 @@ document.getElementById('btnPaperSearch')?.addEventListener('click', function() 
     const userId = getCurrentUserId();
     if (userId) url.searchParams.set('userId', userId);
     window.location.href = url.toString();
+});
+
+// 詳細內容按鈕
+document.getElementById('btnDetail')?.addEventListener('click', function() {
+    const table = document.querySelector('.approval-table tbody');
+    const selectedRow = table?.querySelector('tr.selected');
+
+    if (!selectedRow) {
+        Swal.fire('提示', '請先選擇一筆資料', 'info');
+        return;
+    }
+
+    // 從選中的行取得單據資訊
+    const itemId = selectedRow.getAttribute('data-itemid');
+    const paperNum = selectedRow.getAttribute('data-papernum');
+
+    if (!itemId || !paperNum) {
+        Swal.fire('錯誤', '無法取得單據資訊', 'error');
+        return;
+    }
+
+    // 開啟單據頁面
+    const url = `/DynamicTemplate/Paper/${itemId}/${paperNum}`;
+    window.open(url, '_blank');
+});
+
+// 刪除通知按鈕
+document.getElementById('btnDeleteNotify')?.addEventListener('click', async function() {
+    const selectedRow = document.querySelector('.approval-table tbody tr.selected');
+
+    if (!selectedRow) {
+        await Swal.fire('提示', '請先選擇一筆資料', 'info');
+        return;
+    }
+
+    const mailSeq = (selectedRow.getAttribute('data-mailseq') || '').trim();
+
+    if (!mailSeq) {
+        await Swal.fire('錯誤', '無法取得通知編號', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/Flow/DeleteNotify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mailSeq: mailSeq })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            await Swal.fire('成功', data.message, 'success');
+            // 重新載入頁面
+            window.location.reload();
+        } else {
+            await Swal.fire('警告', data.message || '刪除通知失敗', 'warning');
+        }
+    } catch (error) {
+        console.error('刪除通知失敗:', error);
+        await Swal.fire('錯誤', '刪除通知失敗', 'error');
+    }
+});
+
+// 刪除已讀按鈕
+document.getElementById('btnDeleteRead')?.addEventListener('click', async function() {
+    const userId = getCurrentUserId();
+
+    if (!userId) {
+        await Swal.fire('錯誤', '無法取得使用者資訊', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/Flow/DeleteReadNotifications', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: userId })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            await Swal.fire('成功', data.message, 'success');
+            // 重新載入頁面
+            window.location.reload();
+        } else {
+            await Swal.fire('警告', data.message || '刪除已讀通知失敗', 'warning');
+        }
+    } catch (error) {
+        console.error('刪除已讀通知失敗:', error);
+        await Swal.fire('錯誤', '刪除已讀通知失敗', 'error');
+    }
 });
 
 // ===== 欄位寬度調整功能 =====
@@ -913,6 +1127,8 @@ document.getElementById('btnSaveHeight')?.addEventListener('click', async functi
         if (!response.ok) {
             throw new Error('儲存高度失敗');
         }
+
+        await Swal.fire('成功', '儲存高度完成!', 'success');
     } catch (error) {
         console.error('儲存高度失敗:', error);
         await Swal.fire('錯誤', '儲存高度失敗', 'error');
@@ -930,19 +1146,173 @@ async function loadSavedPanelSize() {
         const data = await response.json();
         const leftPanel = document.getElementById('leftPanel');
         const middlePanel = document.getElementById('middlePanel');
+        const detailPanelsContainer = document.querySelector('.detail-panels-container');
+        const tableContainer = document.querySelector('.approval-table-container');
 
+        // 套用儲存的寬度
         if (data.flowHisCommtWidth > 0 && leftPanel) {
             leftPanel.style.width = data.flowHisCommtWidth + 'px';
         }
         if (data.flowCommtWidth > 0 && middlePanel) {
             middlePanel.style.width = data.flowCommtWidth + 'px';
         }
+
+        // 根據詳細資料區高度計算簽核待審表格高度
+        if (data.flowDtlHeight > 0 && detailPanelsContainer && tableContainer) {
+            // 設定詳細資料區的高度
+            detailPanelsContainer.style.height = data.flowDtlHeight + 'px';
+
+            // 計算簽核待審表格的高度 = 總高度 - 詳細資料區高度 - 其他元素高度
+            const containerHeight = window.innerHeight - 60; // 減去 header 等元素
+            const otherElementsHeight = 50; // toolbar + resizer + 其他間距
+            const tableHeight = containerHeight - data.flowDtlHeight - otherElementsHeight;
+
+            if (tableHeight > 200) { // 確保最小高度
+                tableContainer.style.height = tableHeight + 'px';
+                tableContainer.style.maxHeight = tableHeight + 'px';
+            }
+        }
+
+        console.log('已載入儲存的面板尺寸:', data);
     } catch (error) {
         console.error('載入面板尺寸失敗:', error);
     }
 }
 
-document.addEventListener('DOMContentLoaded', function() {
+// 高度調整拖曳功能
+(function initHeightResizer() {
+    const resizer = document.getElementById('heightResizer');
+    const tableContainer = document.querySelector('.approval-table-container');
+    const detailContainer = document.querySelector('.detail-panels-container');
+
+    if (!resizer || !tableContainer || !detailContainer) return;
+
+    let isDragging = false;
+    let startY = 0;
+    let startTableHeight = 0;
+
+    resizer.addEventListener('mousedown', function(e) {
+        isDragging = true;
+        startY = e.clientY;
+        startTableHeight = tableContainer.offsetHeight;
+
+        resizer.classList.add('dragging');
+        document.body.style.cursor = 'ns-resize';
+        document.body.style.userSelect = 'none';
+
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (!isDragging) return;
+
+        const deltaY = e.clientY - startY;
+        const newTableHeight = startTableHeight + deltaY;
+
+        // 設定最小高度限制
+        const minTableHeight = 200;
+        const minDetailHeight = 150;
+
+        // 計算可用的總高度
+        const containerHeight = window.innerHeight - 60;
+        const maxTableHeight = containerHeight - minDetailHeight - 50;
+
+        if (newTableHeight >= minTableHeight && newTableHeight <= maxTableHeight) {
+            tableContainer.style.height = newTableHeight + 'px';
+            tableContainer.style.maxHeight = newTableHeight + 'px';
+        }
+
+        e.preventDefault();
+    });
+
+    document.addEventListener('mouseup', function() {
+        if (isDragging) {
+            isDragging = false;
+            resizer.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+
+    // 頁面載入時載入儲存的面板尺寸
     loadSavedPanelSize();
-});
+})();
+
+// 寬度調整拖曳功能
+(function initWidthResizers() {
+    const widthResizer1 = document.getElementById('widthResizer1');
+    const widthResizer2 = document.getElementById('widthResizer2');
+    const leftPanel = document.getElementById('leftPanel');
+    const middlePanel = document.getElementById('middlePanel');
+    const rightPanel = document.getElementById('rightPanel');
+
+    if (!widthResizer1 || !widthResizer2 || !leftPanel || !middlePanel || !rightPanel) return;
+
+    let isDragging = false;
+    let currentResizer = null;
+    let startX = 0;
+    let startLeftWidth = 0;
+    let startMiddleWidth = 0;
+
+    // 第一條分隔線（調整左邊和中間的寬度）
+    widthResizer1.addEventListener('mousedown', function(e) {
+        isDragging = true;
+        currentResizer = 1;
+        startX = e.clientX;
+        startLeftWidth = leftPanel.offsetWidth;
+
+        widthResizer1.classList.add('dragging');
+        document.body.style.cursor = 'ew-resize';
+        document.body.style.userSelect = 'none';
+
+        e.preventDefault();
+    });
+
+    // 第二條分隔線（調整中間和右邊的寬度）
+    widthResizer2.addEventListener('mousedown', function(e) {
+        isDragging = true;
+        currentResizer = 2;
+        startX = e.clientX;
+        startMiddleWidth = middlePanel.offsetWidth;
+
+        widthResizer2.classList.add('dragging');
+        document.body.style.cursor = 'ew-resize';
+        document.body.style.userSelect = 'none';
+
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (!isDragging) return;
+
+        const deltaX = e.clientX - startX;
+        const minWidth = 150;
+
+        if (currentResizer === 1) {
+            const newLeftWidth = startLeftWidth + deltaX;
+            if (newLeftWidth >= minWidth) {
+                leftPanel.style.width = newLeftWidth + 'px';
+            }
+        } else if (currentResizer === 2) {
+            const newMiddleWidth = startMiddleWidth + deltaX;
+            if (newMiddleWidth >= minWidth) {
+                middlePanel.style.width = newMiddleWidth + 'px';
+            }
+        }
+
+        e.preventDefault();
+    });
+
+    document.addEventListener('mouseup', function() {
+        if (isDragging) {
+            isDragging = false;
+            currentResizer = null;
+
+            widthResizer1.classList.remove('dragging');
+            widthResizer2.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+})();
 </script>

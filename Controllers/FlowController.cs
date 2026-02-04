@@ -550,6 +550,44 @@ namespace PcbErpApi.Controllers
             }
         }
 
+        // 儲存排序設定
+        [HttpPost("SaveSortSettings")]
+        public async Task<IActionResult> SaveSortSettings([FromBody] SaveSortSettingsRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.UserId))
+            {
+                return BadRequest(new { error = "userId is required" });
+            }
+
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+
+            try
+            {
+                using (var connection = new SqlConnection(connectionString))
+                {
+                    await connection.OpenAsync();
+
+                    // 執行 XFLdSaveSort 預存程序
+                    using (var command = new SqlCommand("XFLdSaveSort", connection))
+                    {
+                        command.CommandType = CommandType.StoredProcedure;
+                        command.Parameters.AddWithValue("@USERID", request.UserId);
+                        command.Parameters.AddWithValue("@SORT1", request.Sort1 ?? "");
+                        command.Parameters.AddWithValue("@SORT2", request.Sort2 ?? "");
+                        command.Parameters.AddWithValue("@SORT3", request.Sort3 ?? "");
+
+                        await command.ExecuteNonQueryAsync();
+
+                        return Ok(new { success = true, message = "儲存排序設定成功" });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
         // 通知點擊後標記為已通知 (Notify=2)
         [HttpPost("MarkNotifyRead")]
         public async Task<IActionResult> MarkNotifyRead([FromBody] MarkNotifyReadRequest request)
@@ -577,6 +615,223 @@ namespace PcbErpApi.Controllers
                         var rows = await command.ExecuteNonQueryAsync();
                         return Ok(new { success = rows > 0 });
                     }
+                }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // 刪除通知
+        [HttpPost("DeleteNotify")]
+        public async Task<IActionResult> DeleteNotify([FromBody] DeleteNotifyRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.MailSeq))
+            {
+                return BadRequest(new { error = "mailSeq is required" });
+            }
+
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+
+            try
+            {
+                using (var connection = new SqlConnection(connectionString))
+                {
+                    await connection.OpenAsync();
+
+                    // 查詢當前 Notify 狀態
+                    var checkSql = "SELECT ISNULL(Notify, 0) AS Notify FROM XFLdMAIL WITH (NOLOCK) WHERE SEQ = @MailSeq";
+                    int notify = 0;
+
+                    using (var checkCommand = new SqlCommand(checkSql, connection))
+                    {
+                        checkCommand.Parameters.AddWithValue("@MailSeq", request.MailSeq);
+                        var result = await checkCommand.ExecuteScalarAsync();
+                        if (result != null && result != DBNull.Value)
+                        {
+                            notify = Convert.ToInt32(result);
+                        }
+                    }
+
+                    // 如果 Notify 是 1 或 2，則可以刪除
+                    if (notify == 1 || notify == 2)
+                    {
+                        var updateSql = "UPDATE XFLdMAIL SET Notify=0, IsDelNotify=1 WHERE SEQ=@MailSeq";
+                        using (var updateCommand = new SqlCommand(updateSql, connection))
+                        {
+                            updateCommand.Parameters.AddWithValue("@MailSeq", request.MailSeq);
+                            await updateCommand.ExecuteNonQueryAsync();
+                        }
+
+                        return Ok(new { success = true, message = "刪除通知成功" });
+                    }
+                    else
+                    {
+                        return BadRequest(new { success = false, message = "副本通知，請由詳細資料讀取後清除!" });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // 刪除已讀通知
+        [HttpPost("DeleteReadNotifications")]
+        public async Task<IActionResult> DeleteReadNotifications([FromBody] DeleteReadRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.UserId))
+            {
+                return BadRequest(new { error = "userId is required" });
+            }
+
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+
+            try
+            {
+                using (var connection = new SqlConnection(connectionString))
+                {
+                    await connection.OpenAsync();
+
+                    // 執行 XFLdUserMailChkRead 檢查是否有已讀通知
+                    int chkRead = 0;
+                    using (var checkCommand = new SqlCommand("XFLdUserMailChkRead", connection))
+                    {
+                        checkCommand.CommandType = CommandType.StoredProcedure;
+                        checkCommand.Parameters.AddWithValue("@Receiver", request.UserId);
+
+                        using (var reader = await checkCommand.ExecuteReaderAsync())
+                        {
+                            if (await reader.ReadAsync())
+                            {
+                                chkRead = reader["ChkRead"] != DBNull.Value ? Convert.ToInt32(reader["ChkRead"]) : 0;
+                            }
+                        }
+                    }
+
+                    // 如果有已讀通知，則執行刪除
+                    if (chkRead == 1)
+                    {
+                        using (var deleteCommand = new SqlCommand("XFLdUserMailDelRead", connection))
+                        {
+                            deleteCommand.CommandType = CommandType.StoredProcedure;
+                            deleteCommand.Parameters.AddWithValue("@Receiver", request.UserId);
+                            await deleteCommand.ExecuteNonQueryAsync();
+                        }
+
+                        return Ok(new { success = true, message = "刪除已讀通知成功" });
+                    }
+                    else
+                    {
+                        return BadRequest(new { success = false, message = "副本通知，目前沒有已讀通知!" });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // 標記訊息為已讀
+        [HttpPost("MarkMessageRead")]
+        public async Task<IActionResult> MarkMessageRead([FromBody] MarkMessageReadRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.ToUserId) || request.SerialNum == 0)
+            {
+                return BadRequest(new { error = "toUserId and serialNum are required" });
+            }
+
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+
+            try
+            {
+                using (var connection = new SqlConnection(connectionString))
+                {
+                    await connection.OpenAsync();
+
+                    var updateSql = @"UPDATE CURdMsg
+                                     SET iStatus = 1
+                                     WHERE ToUserId = @ToUserId
+                                     AND SerialNum = @SerialNum
+                                     AND Kind <> 4
+                                     AND iStatus = 0";
+
+                    using (var command = new SqlCommand(updateSql, connection))
+                    {
+                        command.Parameters.AddWithValue("@ToUserId", request.ToUserId);
+                        command.Parameters.AddWithValue("@SerialNum", request.SerialNum);
+                        var rows = await command.ExecuteNonQueryAsync();
+                        return Ok(new { success = rows > 0 });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // 刪除已讀訊息
+        [HttpPost("DeleteReadMessages")]
+        public async Task<IActionResult> DeleteReadMessages([FromBody] DeleteMessagesRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.UserId))
+            {
+                return BadRequest(new { error = "userId is required" });
+            }
+
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+
+            try
+            {
+                using (var connection = new SqlConnection(connectionString))
+                {
+                    await connection.OpenAsync();
+
+                    using (var command = new SqlCommand("CURdMsgTextedDelete", connection))
+                    {
+                        command.CommandType = CommandType.StoredProcedure;
+                        command.Parameters.AddWithValue("@UserId", request.UserId);
+                        await command.ExecuteNonQueryAsync();
+                    }
+
+                    return Ok(new { success = true, message = "刪除已讀訊息成功" });
+                }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // 刪除全部訊息
+        [HttpPost("DeleteAllMessages")]
+        public async Task<IActionResult> DeleteAllMessages([FromBody] DeleteMessagesRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.UserId))
+            {
+                return BadRequest(new { error = "userId is required" });
+            }
+
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+
+            try
+            {
+                using (var connection = new SqlConnection(connectionString))
+                {
+                    await connection.OpenAsync();
+
+                    using (var command = new SqlCommand("CURdMsgAllDelete", connection))
+                    {
+                        command.CommandType = CommandType.StoredProcedure;
+                        command.Parameters.AddWithValue("@UserId", request.UserId);
+                        await command.ExecuteNonQueryAsync();
+                    }
+
+                    return Ok(new { success = true, message = "刪除全部訊息成功" });
                 }
             }
             catch (Exception ex)
@@ -625,5 +880,34 @@ namespace PcbErpApi.Controllers
     public class MarkNotifyReadRequest
     {
         public string MailSeq { get; set; } = "";
+    }
+
+    public class DeleteNotifyRequest
+    {
+        public string MailSeq { get; set; } = "";
+    }
+
+    public class DeleteReadRequest
+    {
+        public string UserId { get; set; } = "";
+    }
+
+    public class MarkMessageReadRequest
+    {
+        public string ToUserId { get; set; } = "";
+        public int SerialNum { get; set; }
+    }
+
+    public class DeleteMessagesRequest
+    {
+        public string UserId { get; set; } = "";
+    }
+
+    public class SaveSortSettingsRequest
+    {
+        public string UserId { get; set; } = "";
+        public string? Sort1 { get; set; }
+        public string? Sort2 { get; set; }
+        public string? Sort3 { get; set; }
     }
 }

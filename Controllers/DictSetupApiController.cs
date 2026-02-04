@@ -910,4 +910,42 @@ SELECT TOP 1 CommandText
 
         return Ok(list);
     }
+
+    // GET /api/DictSetupApi/GetItemIdByTableName?tableName=xxx
+    [HttpGet("GetItemIdByTableName")]
+    public async Task<IActionResult> GetItemIdByTableName([FromQuery] string tableName)
+    {
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            return BadRequest(new { error = "tableName is required" });
+        }
+
+        try
+        {
+            await using var conn = new SqlConnection(_connStr);
+            await conn.OpenAsync();
+
+            var sql = @"
+                SELECT TOP 1 ItemId
+                FROM CURdOCXTableSetUp WITH (NOLOCK)
+                WHERE TableName = @TableName";
+
+            using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@TableName", tableName);
+
+            var result = await cmd.ExecuteScalarAsync();
+
+            if (result != null && result != DBNull.Value)
+            {
+                return Ok(new { itemId = result.ToString() });
+            }
+
+            // 如果找不到，返回原始的 tableName 作為 fallback
+            return Ok(new { itemId = tableName });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
 }
