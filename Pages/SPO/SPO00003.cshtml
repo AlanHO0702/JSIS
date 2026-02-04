@@ -1,0 +1,275 @@
+@page "/SPO/SPO00003"
+@using PcbErpApi.Models
+@model PcbErpApi.Pages.SPO.SPO00003Model
+@{
+    Layout = "_InquiryTemplate";
+    ViewData["Title"] = Model.PageTitle;
+    ViewData["ShowInqHeader"] = false;
+    ViewData["ShowInqRail"] = true;
+    ViewData["InqRailTitle"] = "查詢";
+    ViewData["InqRailWidth"] = "120px";
+}
+
+@section InqRail {
+    <button type="submit" form="inqForm" class="inq-rail-btn">
+        <i class="bi bi-search"></i>查詢
+    </button>
+    <button type="button" class="inq-rail-btn" id="btnClearInq">
+        <i class="bi bi-eraser"></i>清除
+    </button>
+    <div class="inq-rail-status">
+      <div>資料筆數：<span id="inqTotalCount">0</span></div>
+      <div>目前位置：<span id="inqCurrentPos">0</span></div>
+    </div>
+}
+
+@{
+  var qDict = Model.QueryDictFields ?? new List<CURdTableField>();
+  CURdTableField? QField(string name) =>
+      qDict.FirstOrDefault(f => string.Equals(f.FieldName, name, StringComparison.OrdinalIgnoreCase));
+  string QLabel(string field, string fallback) => QField(field)?.DisplayLabel ?? fallback;
+  bool QVisible(string field) => (QField(field)?.Visible ?? 1) != 0;
+}
+
+@section InqQuery {
+  <form id="inqForm" method="get" class="inq-form">
+    @if (QVisible("PaperDate"))
+    {
+      <div class="inq-row">
+        <label class="inq-label">@QLabel("PaperDate", "單據日期")</label>
+        <input type="date" name="PaperDateFrom" class="form-control form-control-sm inq-input"
+               value="@(Model.PaperDateFrom?.ToString("yyyy-MM-dd") ?? "")" />
+        <span class="inq-sep">至</span>
+        <input type="date" name="PaperDateTo" class="form-control form-control-sm inq-input"
+               value="@(Model.PaperDateTo?.ToString("yyyy-MM-dd") ?? "")" />
+      </div>
+    }
+    <div class="inq-row">
+      @if (QVisible("CustomerId"))
+      {
+        <label class="inq-label">@QLabel("CustomerId", "客戶代碼")</label>
+        <input type="text" name="CustomerId" class="form-control form-control-sm inq-input"
+               value="@Model.CustomerId" />
+      }
+      @if (QVisible("CustPONum"))
+      {
+        <label class="inq-label">@QLabel("CustPONum", "客戶訂單號")</label>
+        <input type="text" name="CustPONum" class="form-control form-control-sm inq-input"
+               value="@Model.CustPONum" />
+      }
+    </div>
+    <div class="inq-row">
+      @if (QVisible("PaperNum"))
+      {
+        <label class="inq-label">@QLabel("PaperNum", "單據編號")</label>
+        <input type="text" name="PaperNum" class="form-control form-control-sm inq-input"
+               value="@Model.PaperNum" />
+      }
+      @if (QVisible("PartNum"))
+      {
+        <label class="inq-label">@QLabel("PartNum", "料號")</label>
+        <input type="text" name="PartNum" class="form-control form-control-sm inq-input"
+               value="@Model.PartNum" />
+      }
+    </div>
+
+    <input type="hidden" name="page" value="1" />
+    <input type="hidden" name="pageSize" value="@Model.PageSize" />
+  </form>
+}
+
+@{
+  var gDict = Model.GridDictFields ?? new List<CURdTableField>();
+  var gFields = gDict
+      .Where(f => (f.Visible ?? 1) != 0)
+      .OrderBy(f => f.SerialNum ?? int.MaxValue)
+      .ToList();
+
+  string GLabel(CURdTableField f) => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel!;
+
+  object? GVal(object row, string? name)
+  {
+      if (row == null || string.IsNullOrWhiteSpace(name)) return null;
+      var prop = row.GetType().GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
+      return prop?.GetValue(row);
+  }
+
+  string GFormat(object? v, CURdTableField f)
+  {
+      if (v == null) return "";
+      if (v is DateTime dt) return dt.ToString("yyyy/MM/dd");
+      if (v is decimal dec) return dec.ToString("###,###,###.####");
+      if (v is double d) return d.ToString("###,###,###.####");
+      if (v is float fl) return fl.ToString("###,###,###.####");
+      return v.ToString() ?? "";
+  }
+}
+
+<div class="inq-table-wrap">
+  <table class="table table-sm table-hover align-middle inq-table">
+    <thead>
+      <tr>
+        @foreach (var f in gFields)
+        {
+          <th>@GLabel(f)</th>
+        }
+      </tr>
+    </thead>
+    <tbody>
+    @if (Model.Items.Count == 0)
+    {
+      <tr>
+        <td colspan="@(Math.Max(1, gFields.Count))" class="text-center text-muted py-3">（無資料）</td>
+      </tr>
+    }
+    else
+    {
+      foreach (var row in Model.Items)
+      {
+        <tr>
+          @foreach (var f in gFields)
+          {
+            var val = GVal(row, f.FieldName);
+            <td>@GFormat(val, f)</td>
+          }
+        </tr>
+      }
+    }
+    </tbody>
+  </table>
+</div>
+
+@if (Model.TotalPages > 1)
+{
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-2">
+      <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber <= 1 ? "disabled" : "")"
+         href="@(Model.PageNumber <= 1 ? "#" : Model.BuildPageUrl(Model.PageNumber - 1))">上一頁</a>
+      <span>Page: <strong>@Model.PageNumber</strong> / <span>@Model.TotalPages</span></span>
+      <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber >= Model.TotalPages ? "disabled" : "")"
+         href="@(Model.PageNumber >= Model.TotalPages ? "#" : Model.BuildPageUrl(Model.PageNumber + 1))">下一頁</a>
+    </div>
+    <div class="text-muted">Total: @Model.TotalCount</div>
+  </div>
+}
+
+<style>
+  .inq-rail-status {
+    margin-top: 6px;
+    padding: 8px 6px;
+    border: 1px solid #d8dee8;
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #1f3a8a;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  .inq-form {
+    display: grid;
+    gap: 8px;
+  }
+  .inq-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .inq-label {
+    min-width: 72px;
+    text-align: right;
+    color: #1d3b6b;
+    font-size: 0.9rem;
+  }
+  .inq-input {
+    width: 180px;
+  }
+  .inq-sep {
+    color: #64748b;
+  }
+  .inq-table-wrap {
+    border: 1px solid #d8dee8;
+    border-radius: 10px;
+    background: #fff;
+    padding: 8px;
+    overflow-x: auto;
+  }
+  .inq-table th {
+    white-space: nowrap;
+    background: #f3f7ff;
+    color: #2056ac;
+    font-weight: 600;
+  }
+  .inq-table td {
+    white-space: nowrap;
+  }
+</style>
+
+<script>
+  const totalCount = @Model.TotalCount;
+  const totalEl = document.getElementById("inqTotalCount");
+  const posEl = document.getElementById("inqCurrentPos");
+  if (totalEl) totalEl.textContent = String(totalCount);
+  const rows = Array.from(document.querySelectorAll(".inq-table tbody tr"));
+  const setPos = (idx) => {
+    if (!posEl) return;
+    posEl.textContent = totalCount === 0 ? "0" : String(idx);
+  };
+  if (rows.length > 0 && totalCount > 0) setPos(1);
+  rows.forEach((tr, i) => {
+    tr.addEventListener("click", () => {
+      rows.forEach(r => r.classList.remove("table-active"));
+      tr.classList.add("table-active");
+      setPos(i + 1);
+    });
+  });
+  document.getElementById("btnClearInq")?.addEventListener("click", () => {
+    window.location.href = "/SPO/SPO00003";
+  });
+</script>
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", new List<CURdTableField>(), ViewData)
+<script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+<script>
+  (function initDictForInq() {
+    const dictForQuery = "SPOdOrderInqParams";
+    const dictForGrid = "SPOdOrderInq";
+    let currentDict = dictForQuery;
+
+    const setDict = (name) => {
+      currentDict = name || currentDict;
+      window._dictTableName = currentDict;
+    };
+
+    // default target: query area
+    setDict(dictForQuery);
+
+    const queryArea = document.getElementById("inqForm");
+    const table = document.querySelector(".inq-table");
+
+    queryArea?.addEventListener("focusin", () => setDict(dictForQuery));
+    queryArea?.addEventListener("click", () => setDict(dictForQuery));
+    table?.addEventListener("click", () => setDict(dictForGrid));
+
+    const openFieldDict = () => {
+      if (typeof window.initFieldDictModal === "function") {
+        window.initFieldDictModal(currentDict, "fieldDictModal");
+        const el = document.getElementById("fieldDictModal");
+        if (el) {
+          const md = bootstrap.Modal.getOrCreateInstance(el);
+          md.show();
+        }
+      } else if (typeof window.loadFieldDict === "function") {
+        window.loadFieldDict(currentDict);
+      }
+    };
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "F3") return;
+      const target = e.target;
+      const inText = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+      if (inText) return;
+      e.preventDefault();
+      openFieldDict();
+    });
+  })();
+</script>

@@ -56,6 +56,7 @@ namespace PcbErpApi.Pages.CCS
         public List<CURdTableField> FieldDictList { get; private set; } = new();
         public List<CURdTableField> TableFields { get; private set; } = new();
         public List<string> KeyFields { get; private set; } = new();
+        public List<QueryFieldViewModel> QueryFields { get; private set; } = new();
 
         public async Task OnGetAsync([FromRoute(Name = "systemId")] int? systemIdRoute, [FromQuery(Name = "systemId")] int? systemIdQuery, [FromQuery(Name = "pageIndex")] int pageIndex = 1, int pageSize = 50)
         {
@@ -85,6 +86,22 @@ namespace PcbErpApi.Pages.CCS
                 if (hasCompanyId) KeyFields.Add("CompanyId");
             }
 
+            QueryFields = _ctx.CURdPaperSelected
+                .Where(x => x.TableName == TableName && x.IVisible == 1)
+                .OrderBy(x => x.SortOrder)
+                .Select(x => new QueryFieldViewModel
+                {
+                    ColumnName = x.ColumnName,
+                    ColumnCaption = x.ColumnCaption,
+                    DataType = x.DataType,
+                    ControlType = x.ControlType ?? 0,
+                    EditMask = x.EditMask,
+                    DefaultValue = x.DefaultValue,
+                    DefaultEqual = x.DefaultEqual,
+                    SortOrder = x.SortOrder
+                })
+                .ToList();
+
             var orderBy = await GetDefaultOrderByAsync(TableName);
             var filterParams = new List<SqlParameter>();
             var filterSql = BuildFilterFromQuery(FieldDictList, Request.Query, filterParams);
@@ -108,6 +125,7 @@ namespace PcbErpApi.Pages.CCS
             ViewData["Fields"] = TableFields;
             ViewData["KeyFields"] = KeyFields;
             ViewData["OrderBy"] = orderBy;
+            ViewData["QueryFields"] = QueryFields;
             ViewData["QueryStringRaw"] = Request.QueryString.Value ?? string.Empty;
             try
             {
