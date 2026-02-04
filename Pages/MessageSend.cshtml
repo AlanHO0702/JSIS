@@ -1,0 +1,311 @@
+@page
+@model PcbErpApi.Pages.MessageSendModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "訊息發送";
+}
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+<style>
+body {
+    background: #f4f6fb;
+    font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+}
+.msgsend-container {
+    padding: 10px 12px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+.msgsend-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #f6f7f9;
+    border: 1px solid #d8dee8;
+    border-radius: 10px;
+    padding: 6px 8px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 2px rgba(20,40,80,0.06);
+}
+.msgsend-toolbar .btn {
+    height: 32px;
+    font-size: 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+.msgsend-card {
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid #e6edf6;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    padding: 12px;
+}
+.msgsend-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+}
+@@media (min-width: 992px) {
+    .msgsend-grid {
+        grid-template-columns: 1fr 1.1fr;
+    }
+}
+.field-label {
+    font-size: 0.85rem;
+    color: #555;
+    margin-bottom: 4px;
+}
+.msgsend-input textarea {
+    min-height: 160px;
+    resize: vertical;
+}
+.recipient-panel {
+    border: 1px solid #e3e8f0;
+    border-radius: 10px;
+    overflow: hidden;
+}
+.recipient-header {
+    background: #f6f7f9;
+    padding: 6px 10px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #2a4a7a;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.recipient-body {
+    padding: 10px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+}
+@@media (min-width: 768px) {
+    .recipient-body {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+.user-list {
+    border: 1px solid #dbe4f1;
+    border-radius: 8px;
+    padding: 6px;
+    min-height: 220px;
+}
+.user-list select {
+    width: 100%;
+    min-height: 180px;
+    border: none;
+    outline: none;
+}
+.recipient-list {
+    border: 1px solid #dbe4f1;
+    border-radius: 8px;
+    padding: 6px;
+    min-height: 220px;
+}
+.recipient-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 6px;
+    border-bottom: 1px solid #eef2f7;
+    font-size: 0.9rem;
+}
+.recipient-item:last-child {
+    border-bottom: none;
+}
+.recipient-item .name {
+    color: #1f2937;
+}
+</style>
+
+<div class="msgsend-container" data-current-userid="@Model.CurrentUserId">
+    <div class="msgsend-toolbar">
+        <button type="button" class="btn btn-primary" id="btnSendMsg">訊息傳送</button>
+        <button type="button" class="btn btn-secondary" id="btnExit">關閉</button>
+        <div class="ms-auto text-secondary small">目前使用者：<span id="currentUserLabel">@Model.CurrentUserId</span></div>
+    </div>
+
+    <div class="msgsend-card">
+        <div class="msgsend-grid">
+            <div class="msgsend-input">
+                <div class="mb-2">
+                    <div class="field-label">主旨</div>
+                    <input id="txtSubject" type="text" class="form-control" />
+                </div>
+                <div>
+                    <div class="field-label">內容</div>
+                    <textarea id="txtMessage" class="form-control"></textarea>
+                </div>
+            </div>
+
+            <div class="recipient-panel">
+                <div class="recipient-header">
+                    <span>發送對象</span>
+                    <span class="text-secondary small">已選：<span id="recipientCount">0</span></span>
+                </div>
+                <div class="recipient-body">
+                    <div class="user-list">
+                        <div class="input-group mb-2">
+                            <input id="userSearch" type="text" class="form-control form-control-sm" placeholder="搜尋工號或姓名" />
+                            <button id="btnAddUser" class="btn btn-outline-primary btn-sm" type="button">加入</button>
+                        </div>
+                        <select id="userSelect" size="8"></select>
+                    </div>
+                    <div class="recipient-list" id="recipientList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(() => {
+    const container = document.querySelector('.msgsend-container');
+    const currentUserId = container?.dataset?.currentUserid
+        || localStorage.getItem('erpLoginUserId')
+        || 'admin';
+
+    const userSelect = document.getElementById('userSelect');
+    const userSearch = document.getElementById('userSearch');
+    const recipientList = document.getElementById('recipientList');
+    const recipientCount = document.getElementById('recipientCount');
+    const btnAddUser = document.getElementById('btnAddUser');
+    const btnSend = document.getElementById('btnSendMsg');
+    const btnExit = document.getElementById('btnExit');
+
+    let allUsers = [];
+    let recipients = [];
+    let serialNum = 0;
+
+    const renderUserList = (filter = '') => {
+        const f = filter.trim().toLowerCase();
+        userSelect.innerHTML = '';
+        allUsers
+            .filter(u => !f || u.userId.toLowerCase().includes(f) || (u.userName || '').toLowerCase().includes(f))
+            .forEach(u => {
+                const opt = document.createElement('option');
+                opt.value = u.userId;
+                opt.textContent = `${u.userId} ${u.userName || ''}`.trim();
+                userSelect.appendChild(opt);
+            });
+    };
+
+    const renderRecipients = () => {
+        recipientList.innerHTML = '';
+        recipients.forEach(u => {
+            const row = document.createElement('div');
+            row.className = 'recipient-item';
+            row.innerHTML = `
+                <span class="name">${u.userId} ${u.userName || ''}</span>
+                <button type="button" class="btn btn-sm btn-outline-danger">移除</button>
+            `;
+            row.querySelector('button').addEventListener('click', () => {
+                recipients = recipients.filter(x => x.userId !== u.userId);
+                renderRecipients();
+            });
+            recipientList.appendChild(row);
+        });
+        recipientCount.textContent = recipients.length;
+    };
+
+    const initDraft = async () => {
+        const fetcher = window.busyFetch || fetch.bind(window);
+        const resp = await fetcher('/api/Flow/MessageSendInit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUserId })
+        }, '初始化中…');
+        if (!resp.ok) throw new Error('init failed');
+        const data = await resp.json();
+        serialNum = data.serialNum || 0;
+    };
+
+    const loadUsers = async () => {
+        const resp = await fetch('/api/Login/UserList');
+        if (!resp.ok) throw new Error('user list failed');
+        allUsers = await resp.json();
+        renderUserList();
+    };
+
+    const addSelectedUser = () => {
+        const userId = userSelect.value;
+        if (!userId) return;
+        const user = allUsers.find(u => u.userId === userId);
+        if (!user) return;
+        if (recipients.some(r => r.userId === userId)) return;
+        recipients.push(user);
+        renderRecipients();
+    };
+
+    userSearch?.addEventListener('input', () => renderUserList(userSearch.value));
+    userSelect?.addEventListener('dblclick', addSelectedUser);
+    btnAddUser?.addEventListener('click', addSelectedUser);
+
+    btnSend?.addEventListener('click', async () => {
+        const subject = document.getElementById('txtSubject').value.trim();
+        const message = document.getElementById('txtMessage').value.trim();
+        if (recipients.length === 0) {
+            Swal.fire('提示', '請先選擇發送對象', 'info');
+            return;
+        }
+        if (!subject && !message) {
+            Swal.fire('提示', '主旨或內容至少填一項', 'info');
+            return;
+        }
+        const payload = {
+            userId: currentUserId,
+            serialNum,
+            subject,
+            message,
+            recipients: recipients.map(r => r.userId)
+        };
+        const fetcher = window.busyFetch || fetch.bind(window);
+        const resp = await fetcher('/api/Flow/MessageSend', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }, '傳送中…');
+        if (!resp.ok) {
+            Swal.fire('錯誤', '訊息傳送失敗', 'error');
+            return;
+        }
+        Swal.fire('完成', '已完成傳送', 'success');
+        document.getElementById('txtSubject').value = '';
+        document.getElementById('txtMessage').value = '';
+        recipients = [];
+        renderRecipients();
+        await initDraft();
+    });
+
+    const cancelDraft = async () => {
+        if (!serialNum) return;
+        await fetch('/api/Flow/MessageSendCancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUserId, serialNum })
+        }).catch(() => { /* ignore */ });
+    };
+
+    btnExit?.addEventListener('click', async () => {
+        await cancelDraft();
+        window.location.href = '/FontIndex';
+    });
+
+    (async () => {
+        try {
+            await initDraft();
+            await loadUsers();
+        } catch (err) {
+            console.warn(err);
+            Swal.fire('錯誤', '初始化失敗', 'error');
+        }
+    })();
+})();
+</script>

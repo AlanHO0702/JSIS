@@ -839,6 +839,254 @@ namespace PcbErpApi.Controllers
                 return StatusCode(500, new { error = ex.Message });
             }
         }
+
+        // 初始化訊息發送（建立草稿）
+        [HttpPost("MessageSendInit")]
+        public async Task<IActionResult> MessageSendInit([FromBody] MessageSendInitRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.UserId))
+            {
+                return BadRequest(new { error = "userId is required" });
+            }
+
+            var userId = request.UserId.Trim();
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+
+            try
+            {
+                using (var connection = new SqlConnection(connectionString))
+                {
+                    await connection.OpenAsync();
+
+                    string? useId = null;
+                    using (var cmdUse = new SqlCommand("SELECT UseId FROM CURdUsers WITH (NOLOCK) WHERE UserId = @UserId", connection))
+                    {
+                        cmdUse.Parameters.AddWithValue("@UserId", userId);
+                        var raw = await cmdUse.ExecuteScalarAsync();
+                        useId = raw?.ToString();
+                    }
+
+                    int serialNum = 0;
+                    using (var cmdSeq = new SqlCommand("SELECT ISNULL(MAX(ISNULL(SerialNum,0)),0)+1 FROM CURdMsg WITH (NOLOCK) WHERE ToUserId = @UserId", connection))
+                    {
+                        cmdSeq.Parameters.AddWithValue("@UserId", userId);
+                        var raw = await cmdSeq.ExecuteScalarAsync();
+                        serialNum = Convert.ToInt32(raw ?? 1);
+                    }
+
+                    DateTime buildDate;
+                    using (var cmdDate = new SqlCommand("SELECT GETDATE()", connection))
+                    {
+                        var raw = await cmdDate.ExecuteScalarAsync();
+                        buildDate = raw != null ? Convert.ToDateTime(raw) : DateTime.Now;
+                    }
+
+                    using (var cmdIns = new SqlCommand(@"
+                        INSERT INTO CURdMsg(ToUserId, SerialNum, FromUserId, Kind, BuildDate, UseId)
+                        VALUES (@ToUserId, @SerialNum, @FromUserId, 4, @BuildDate, @UseId)", connection))
+                    {
+                        cmdIns.Parameters.AddWithValue("@ToUserId", userId);
+                        cmdIns.Parameters.AddWithValue("@SerialNum", serialNum);
+                        cmdIns.Parameters.AddWithValue("@FromUserId", userId);
+                        cmdIns.Parameters.AddWithValue("@BuildDate", buildDate);
+                        cmdIns.Parameters.AddWithValue("@UseId", (object?)useId ?? DBNull.Value);
+                        await cmdIns.ExecuteNonQueryAsync();
+                    }
+
+                    return Ok(new { userId, serialNum });
+                }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // 取消訊息發送（清除草稿）
+        [HttpPost("MessageSendCancel")]
+        public async Task<IActionResult> MessageSendCancel([FromBody] MessageSendCancelRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.UserId) || request.SerialNum <= 0)
+            {
+                return BadRequest(new { error = "userId and serialNum are required" });
+            }
+
+            var userId = request.UserId.Trim();
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+
+            try
+            {
+                using (var connection = new SqlConnection(connectionString))
+                {
+                    await connection.OpenAsync();
+
+                    using (var cmdDelTo = new SqlCommand(@"
+                        DELETE FROM CURdMsgHandSendToUser
+                        WHERE ToUserId = @UserId AND SerialNum = @SerialNum", connection))
+                    {
+                        cmdDelTo.Parameters.AddWithValue("@UserId", userId);
+                        cmdDelTo.Parameters.AddWithValue("@SerialNum", request.SerialNum);
+                        await cmdDelTo.ExecuteNonQueryAsync();
+                    }
+
+                    using (var cmdDelMsg = new SqlCommand(@"
+                        DELETE FROM CURdMsg
+                        WHERE ToUserId = @UserId
+                          AND SerialNum = @SerialNum
+                          AND ISNULL(iStatus,-1) = -1", connection))
+                    {
+                        cmdDelMsg.Parameters.AddWithValue("@UserId", userId);
+                        cmdDelMsg.Parameters.AddWithValue("@SerialNum", request.SerialNum);
+                        await cmdDelMsg.ExecuteNonQueryAsync();
+                    }
+
+                    return Ok(new { success = true });
+                }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // 傳送訊息
+        [HttpPost("MessageSend")]
+        public async Task<IActionResult> MessageSend([FromBody] MessageSendRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.UserId) || request.SerialNum <= 0)
+            {
+                return BadRequest(new { error = "userId and serialNum are required" });
+            }
+
+            var userId = request.UserId.Trim();
+            var recipients = (request.Recipients ?? new List<string>())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (recipients.Count == 0)
+            {
+                return BadRequest(new { error = "recipients required" });
+            }
+
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+
+            try
+            {
+                using (var connection = new SqlConnection(connectionString))
+                {
+                    await connection.OpenAsync();
+                    using (var tx = connection.BeginTransaction())
+                    {
+                        try
+                        {
+                            using (var cmdUpd = new SqlCommand(@"
+                                UPDATE CURdMsg
+                                SET Subjects = @Subjects,
+                                    MsgText = @MsgText
+                                WHERE ToUserId = @UserId AND SerialNum = @SerialNum", connection, tx))
+                            {
+                                cmdUpd.Parameters.AddWithValue("@Subjects", request.Subject ?? "");
+                                cmdUpd.Parameters.AddWithValue("@MsgText", request.Message ?? "");
+                                cmdUpd.Parameters.AddWithValue("@UserId", userId);
+                                cmdUpd.Parameters.AddWithValue("@SerialNum", request.SerialNum);
+                                await cmdUpd.ExecuteNonQueryAsync();
+                            }
+
+                            using (var cmdDel = new SqlCommand(@"
+                                DELETE FROM CURdMsgHandSendToUser
+                                WHERE ToUserId = @UserId AND SerialNum = @SerialNum", connection, tx))
+                            {
+                                cmdDel.Parameters.AddWithValue("@UserId", userId);
+                                cmdDel.Parameters.AddWithValue("@SerialNum", request.SerialNum);
+                                await cmdDel.ExecuteNonQueryAsync();
+                            }
+
+                            foreach (var toUserId in recipients)
+                            {
+                                using (var cmdIns = new SqlCommand(@"
+                                    INSERT INTO CURdMsgHandSendToUser(ToUserId, SerialNum, SendToUserId)
+                                    VALUES (@UserId, @SerialNum, @SendToUserId)", connection, tx))
+                                {
+                                    cmdIns.Parameters.AddWithValue("@UserId", userId);
+                                    cmdIns.Parameters.AddWithValue("@SerialNum", request.SerialNum);
+                                    cmdIns.Parameters.AddWithValue("@SendToUserId", toUserId);
+                                    await cmdIns.ExecuteNonQueryAsync();
+                                }
+                            }
+
+                            using (var cmdProc = new SqlCommand("CURdMsgGeneralInsert", connection, tx))
+                            {
+                                cmdProc.CommandType = CommandType.StoredProcedure;
+                                cmdProc.Parameters.AddWithValue("@ToUserId", userId);
+                                cmdProc.Parameters.AddWithValue("@SerialNum", request.SerialNum);
+                                await cmdProc.ExecuteNonQueryAsync();
+                            }
+
+                            tx.Commit();
+                            return Ok(new { success = true });
+                        }
+                        catch
+                        {
+                            tx.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // 依 PaperId/PaperNum/UserId/UseId 解析對應作業代碼
+        [HttpPost("ResolveItemIdByFromType")]
+        public async Task<IActionResult> ResolveItemIdByFromType([FromBody] ResolveItemIdByFromTypeRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.PaperId) || string.IsNullOrWhiteSpace(request.PaperNum))
+            {
+                return BadRequest(new { error = "paperId and paperNum are required" });
+            }
+            if (string.IsNullOrWhiteSpace(request.UserId) || string.IsNullOrWhiteSpace(request.UseId))
+            {
+                return BadRequest(new { error = "userId and useId are required" });
+            }
+
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+
+            try
+            {
+                using (var connection = new SqlConnection(connectionString))
+                {
+                    await connection.OpenAsync();
+                    using (var command = new SqlCommand("CURdOCXItemIdByFromType", connection))
+                    {
+                        command.CommandType = CommandType.StoredProcedure;
+                        command.Parameters.AddWithValue("@PaperId", request.PaperId.Trim());
+                        command.Parameters.AddWithValue("@PaperNum", request.PaperNum.Trim());
+                        command.Parameters.AddWithValue("@UserId", request.UserId.Trim());
+                        command.Parameters.AddWithValue("@UseId", request.UseId.Trim());
+
+                        using (var reader = await command.ExecuteReaderAsync())
+                        {
+                            if (await reader.ReadAsync())
+                            {
+                                var itemId = reader["ItemId"]?.ToString() ?? "";
+                                return Ok(new { itemId });
+                            }
+                        }
+                    }
+                }
+
+                return NotFound(new { error = "itemId not found" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
     }
 
     // 審核歷史項目
@@ -901,6 +1149,34 @@ namespace PcbErpApi.Controllers
     public class DeleteMessagesRequest
     {
         public string UserId { get; set; } = "";
+    }
+
+    public class MessageSendInitRequest
+    {
+        public string UserId { get; set; } = "";
+    }
+
+    public class MessageSendCancelRequest
+    {
+        public string UserId { get; set; } = "";
+        public int SerialNum { get; set; }
+    }
+
+    public class MessageSendRequest
+    {
+        public string UserId { get; set; } = "";
+        public int SerialNum { get; set; }
+        public string? Subject { get; set; }
+        public string? Message { get; set; }
+        public List<string>? Recipients { get; set; }
+    }
+
+    public class ResolveItemIdByFromTypeRequest
+    {
+        public string PaperId { get; set; } = "";
+        public string PaperNum { get; set; } = "";
+        public string UserId { get; set; } = "";
+        public string UseId { get; set; } = "";
     }
 
     public class SaveSortSettingsRequest
