@@ -175,15 +175,38 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
                 lotInfo["AftLayerName"] = aftLayerName;
         }
 
-        // 5. 目前型狀名稱 (POP → POPName)
+        // 5. 目前型狀名稱和排版數量 (POP → POPName, XQnty, YQnty)
         var pop = GetIntValue(lotInfo, "POP");
         if (pop > 0)
         {
-            var popName = await LookupValue(conn,
-                "SELECT POPName FROM EMOdPOP WITH(NOLOCK) WHERE POP = @Code",
-                pop);
-            if (!string.IsNullOrEmpty(popName))
-                lotInfo["POPName"] = popName;
+            try
+            {
+                await using var cmd = new SqlCommand(
+                    "SELECT POPName, XQnty, YQnty FROM EMOdPOP WITH(NOLOCK) WHERE POP = @Code", conn);
+                cmd.Parameters.AddWithValue("@Code", pop);
+                await using var rd = await cmd.ExecuteReaderAsync();
+                if (await rd.ReadAsync())
+                {
+                    var popName = rd["POPName"]?.ToString();
+                    if (!string.IsNullOrEmpty(popName))
+                        lotInfo["POPName"] = popName;
+
+                    // 安全讀取 XQnty 和 YQnty
+                    for (int i = 0; i < rd.FieldCount; i++)
+                    {
+                        var fieldName = rd.GetName(i);
+                        if (fieldName.Equals("XQnty", StringComparison.OrdinalIgnoreCase) && rd[i] != DBNull.Value)
+                            lotInfo["XQnty"] = Convert.ToInt32(rd[i]);
+                        else if (fieldName.Equals("YQnty", StringComparison.OrdinalIgnoreCase) && rd[i] != DBNull.Value)
+                            lotInfo["YQnty"] = Convert.ToInt32(rd[i]);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "查詢 EMOdPOP 排版數量失敗: POP={POP}", pop);
+                // 繼續執行,不中斷流程
+            }
         }
 
         // 6. 過帳後型狀名稱 (AftPOP → AftPOPName)
@@ -236,8 +259,9 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
     }
 
     /// <summary>
-    /// 取得多報明細列表 (呼叫 FMEdPassSetXOut SP)
-    /// 根據料號的成型尺寸片數自動產生多報明細
+    /// 取得多報明細列表
+    /// 1. 呼叫 FMEdPassSetXOut SP (將資料寫入 FMEdLotXOutTmp)
+    /// 2. 從 FMEdLotXOutTmp 表讀取多報明細
     /// </summary>
     private async Task<List<Dictionary<string, object?>>> GetXOutDetailList(SqlConnection conn, string lotNum, string paperNum)
     {
@@ -245,18 +269,31 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
 
         try
         {
-            await using var cmd = new SqlCommand("exec FMEdPassSetXOut @LotNum, @PaperNum", conn);
-            cmd.Parameters.AddWithValue("@LotNum", lotNum);
-            cmd.Parameters.AddWithValue("@PaperNum", paperNum);
-
-            await using var rd = await cmd.ExecuteReaderAsync();
-            while (await rd.ReadAsync())
+            // 1. 執行 FMEdPassSetXOut SP (會將資料寫入 FMEdLotXOutTmp)
+            await using (var cmd = new SqlCommand("exec FMEdPassSetXOut @LotNum, @PaperNum", conn))
             {
-                var row = ReadRowToDictionary(rd);
-                list.Add(row);
+                cmd.Parameters.AddWithValue("@LotNum", lotNum);
+                cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+                await cmd.ExecuteNonQueryAsync();
+                _logger.LogInformation("已執行 FMEdPassSetXOut SP");
             }
 
-            _logger.LogInformation("FMEdPassSetXOut 回傳 {Count} 筆多報明細", list.Count);
+            // 2. 從 FMEdLotXOutTmp 表讀取多報明細
+            await using (var cmd = new SqlCommand(
+                "SELECT * FROM FMEdLotXOutTmp WHERE PaperNum = @PaperNum AND LotNum = @LotNum ORDER BY Item", conn))
+            {
+                cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+                cmd.Parameters.AddWithValue("@LotNum", lotNum);
+
+                await using var rd = await cmd.ExecuteReaderAsync();
+                while (await rd.ReadAsync())
+                {
+                    var row = ReadRowToDictionary(rd);
+                    list.Add(row);
+                }
+            }
+
+            _logger.LogInformation("從 FMEdLotXOutTmp 讀取 {Count} 筆多報明細", list.Count);
         }
         catch (Exception ex)
         {
