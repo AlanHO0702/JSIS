@@ -22,6 +22,36 @@
     var keyFieldsFromViewData = (IEnumerable<string>)(ViewData["KeyFields"] as IEnumerable<string> ?? Array.Empty<string>());
     var dictFields    = (IEnumerable<dynamic>)(ViewData["FieldDictList"] as IEnumerable<dynamic> ?? fields);
     var dictTableName = (string?)(ViewData["DictTableName"] as string) ?? tableName;
+
+    // 建立 fieldFormatMap 資料
+    var fieldFormatMapData = new List<object>();
+    if (dictFields != null)
+    {
+        foreach (var f in dictFields)
+        {
+            try
+            {
+                fieldFormatMapData.Add(new
+                {
+                    FieldName = f?.FieldName?.ToString() ?? "",
+                    DataType = f?.DataType?.ToString() ?? "",
+                    FormatStr = f?.FormatStr?.ToString() ?? "",
+                    ComboStyle = f?.ComboStyle != null ? Convert.ToInt32(f.ComboStyle) : (int?)null
+                });
+            }
+            catch (Exception ex)
+            {
+                // 如果轉換失敗，使用預設值
+                fieldFormatMapData.Add(new
+                {
+                    FieldName = f?.FieldName?.ToString() ?? "",
+                    DataType = "",
+                    FormatStr = "",
+                    ComboStyle = (int?)null
+                });
+            }
+        }
+    }
     var enableRowDelete = (ViewData["EnableRowDelete"] as bool?)
         ?? (string.Equals(ViewData["EnableRowDelete"]?.ToString(), "true", StringComparison.OrdinalIgnoreCase)
             || string.Equals(ViewData["EnableRowDelete"]?.ToString(), "1", StringComparison.OrdinalIgnoreCase));
@@ -617,6 +647,25 @@ table.table tbody td{background:#f3f3f3!important}
   #condRunSpModal .crs-field { display: flex; align-items: center; gap: 8px; }
   #condRunSpModal .crs-label { white-space: nowrap; margin: 0; flex: 0 0 90px; text-align: right; font-size: var(--field-label-size); }
   #condRunSpModal .crs-control { flex: 1 1 auto; min-width: 0; font-size: var(--field-value-size); }
+
+  /* Checkbox 樣式 - 參考 MultiGrid 模板 */
+  #mainGrid td input[type="checkbox"].cell-edit {
+    transform: scale(1.05);
+    cursor: pointer;
+    accent-color: #007bff;
+  }
+
+  /* 瀏覽模式（禁用狀態）不要模糊，保持清晰可見 */
+  #mainGrid td input[type="checkbox"].cell-edit:disabled {
+    cursor: not-allowed;
+    opacity: 1;
+  }
+
+  /* 包含 checkbox 的儲存格置中對齊 */
+  #mainGrid td:has(input[type="checkbox"].cell-edit) {
+    text-align: center;
+    vertical-align: middle;
+  }
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -639,16 +688,15 @@ table.table tbody td{background:#f3f3f3!important}
     const modeEl = document.getElementById("singleGridMode");
     const countEl = document.getElementById("singleGridCount");
     const countBox = document.getElementById("singleGridCountBox");
+  console.log('[DEBUG] 開始載入變數');
   const table   = document.getElementById("mainGrid");
+  console.log('[DEBUG] table loaded');
   const ocxLookupMaps = @Html.Raw(JsonSerializer.Serialize(ocxLookupPayload));
+  console.log('[DEBUG] ocxLookupMaps loaded');
   const customButtonsMeta = @Html.Raw(JsonSerializer.Serialize(customButtonMeta ?? new List<object>()));
-  const fieldFormatMap = @Html.Raw(JsonSerializer.Serialize(
-    dictFields.Select(f => new {
-      FieldName = f.FieldName,
-      DataType = f.DataType,
-      FormatStr = f.FormatStr
-    })
-  ));
+  console.log('[DEBUG] customButtonsMeta loaded');
+  const fieldFormatMap = @Html.Raw(JsonSerializer.Serialize(fieldFormatMapData));
+  console.log('[DEBUG] fieldFormatMap loaded:', fieldFormatMap);
     const customButtonBar = null;
     const customButtonBarBottom = document.getElementById("customButtonBarBottom");
     const dictTableName = "@dictTableName";
@@ -1292,6 +1340,93 @@ table.table tbody td{background:#f3f3f3!important}
     });
   };
 
+  // Checkbox 轉換相關函數
+  const getFieldMeta = (fieldName) => {
+    if (!fieldName || !Array.isArray(fieldFormatMap)) return null;
+    return fieldFormatMap.find(f =>
+      (f.FieldName || "").toLowerCase() === fieldName.toLowerCase()
+    );
+  };
+
+  const isCheckboxField = (fieldName) => {
+    const meta = getFieldMeta(fieldName);
+    const result = meta && Number(meta.ComboStyle ?? 0) === 1;
+    if (result) {
+      console.log(`[isCheckboxField] ${fieldName} 是 checkbox 欄位，ComboStyle =`, meta?.ComboStyle);
+    }
+    return result;
+  };
+
+  const applyCheckboxCells = () => {
+    console.log('[applyCheckboxCells] 開始執行，fieldFormatMap 長度:', fieldFormatMap?.length);
+    let convertCount = 0;
+    table.querySelectorAll("tbody tr").forEach(tr => {
+      tr.querySelectorAll("td").forEach(td => {
+        const fieldName = td.dataset.field;
+        if (!fieldName) return;
+
+        if (!isCheckboxField(fieldName)) return;
+
+        const inp = td.querySelector(".cell-edit");
+        if (!inp) {
+          console.log(`[applyCheckboxCells] ${fieldName}: 找不到 input`);
+          return;
+        }
+
+        // 如果已經是 checkbox，就跳過
+        if (inp.type === "checkbox") {
+          console.log(`[applyCheckboxCells] ${fieldName}: 已經是 checkbox`);
+          return;
+        }
+
+        console.log(`[applyCheckboxCells] ${fieldName}: 準備轉換，value =`, inp.value);
+        convertCount++;
+
+        // 以下是將 text input 轉換為 checkbox 的邏輯
+        const isReadOnly = inp.dataset.readonly === "1";
+        const rawValue = inp.value ?? "";
+        const checked = rawValue === "1" || rawValue === "true" || rawValue.toLowerCase() === "y";
+
+        // 建立 checkbox
+        const chk = document.createElement("input");
+        chk.type = "checkbox";
+        // 使用最基本的 class，不加任何 Bootstrap 樣式
+        chk.className = "cell-edit";
+        if (isReadOnly) chk.classList.add("readonly-cell");
+        chk.name = inp.name;
+        chk.checked = checked;
+        chk.value = checked ? "1" : "0";
+        chk.dataset.raw = inp.dataset.raw || (checked ? "1" : "0");
+        chk.dataset.readonly = inp.dataset.readonly || "0";
+        chk.dataset.lookupkey = inp.dataset.lookupkey || "";
+
+        // 初始狀態根據當前模式設定
+        if (isReadOnly || !isEdit) {
+          chk.disabled = true;
+        }
+
+        // 確保 checkbox 顯示（瀏覽模式時也要顯示）
+        chk.classList.remove('d-none');
+
+        // 監聽變更事件
+        chk.addEventListener("change", () => {
+          chk.value = chk.checked ? "1" : "0";
+          if (isEdit && !isReadOnly) setDirty(true);
+        });
+
+        // 替換原本的 input
+        inp.replaceWith(chk);
+
+        // 確保 span 隱藏（checkbox 欄位不使用 span）
+        const span = td.querySelector(".cell-view");
+        if (span) span.classList.add('d-none');
+
+        console.log(`[applyCheckboxCells] ${fieldName}: 轉換完成，checkbox 顯示狀態:`, !chk.classList.contains('d-none'));
+      });
+    });
+    console.log(`[applyCheckboxCells] 執行完成，共轉換 ${convertCount} 個欄位`);
+  };
+
   // 修改/檢視切換
     editBtn.addEventListener("click", () => {
       isEdit = !isEdit;
@@ -1306,7 +1441,13 @@ table.table tbody td{background:#f3f3f3!important}
 
       if (isEdit) {
         table.querySelectorAll(".cell-edit").forEach(inp => {
-          inp.defaultValue = inp.value;
+          if (inp.type === "checkbox") {
+            // checkbox: 將當前值儲存到 data-raw
+            inp.dataset.raw = inp.checked ? "1" : "0";
+          } else {
+            // 一般 input: 使用 defaultValue
+            inp.defaultValue = inp.value;
+          }
         });
         setDirty(false);
       }
@@ -1317,16 +1458,29 @@ table.table tbody td{background:#f3f3f3!important}
         const inp  = td.querySelector(".cell-edit");
         if (!span || !inp) return;
 
+        const isCheckbox = inp.type === "checkbox";
+        const isReadonly = inp.dataset.readonly === "1";
+
         if (isEdit) {
-          if (inp.dataset.readonly === "1") {
-            // readonly 欄位：維持顯示 span（lookup 值），隱藏 input
+          if (isCheckbox) {
+            // checkbox: 不切換顯示/隱藏，直接啟用/禁用
+            if (isReadonly) {
+              inp.disabled = true;
+            } else {
+              inp.disabled = false;
+            }
+            // checkbox 始終顯示 input，隱藏 span
+            span.classList.add("d-none");
+            inp.classList.remove("d-none");
+          } else if (isReadonly) {
+            // 一般欄位且 readonly：維持顯示 span，隱藏 input
             span.classList.remove("d-none");
             inp.classList.add("d-none");
             inp.classList.add("readonly-cell");
             inp.setAttribute("readonly", "readonly");
             inp.setAttribute("tabindex", "-1");
           } else {
-            // 可編輯欄位：顯示 input，隱藏 span
+            // 一般欄位且可編輯：顯示 input，隱藏 span
             span.classList.add("d-none");
             inp.classList.remove("d-none");
             inp.classList.remove("readonly-cell");
@@ -1334,18 +1488,43 @@ table.table tbody td{background:#f3f3f3!important}
             inp.removeAttribute("tabindex");
           }
         } else {
-          inp.dataset.raw = inp.value;
-          span.textContent = lookupDisplay(td.dataset.field, inp.value, span.textContent, inp.dataset.lookupkey);
-          span.classList.remove("d-none");
-          inp.classList.add("d-none");
+          // 切換到瀏覽模式
+          if (isCheckbox) {
+            // checkbox: 禁用並保持顯示
+            inp.disabled = true;
+            inp.dataset.raw = inp.checked ? "1" : "0";
+            // checkbox 在瀏覽模式也顯示 input（禁用狀態）
+            span.classList.add("d-none");
+            inp.classList.remove("d-none");
+          } else {
+            // 一般 input: 更新 textContent 並切換顯示
+            inp.dataset.raw = inp.value;
+            span.textContent = lookupDisplay(td.dataset.field, inp.value, span.textContent, inp.dataset.lookupkey);
+            span.classList.remove("d-none");
+            inp.classList.add("d-none");
+          }
         }
       });
     });
+
+    // 套用 checkbox 轉換（根據 ComboStyle）
+    applyCheckboxCells();
 
     table.addEventListener("input", (e) => {
       if (!isEdit) return;
       const inp = e.target;
       if (!(inp instanceof HTMLInputElement)) return;
+      if (!inp.classList.contains("cell-edit")) return;
+      if (inp.dataset.readonly === "1") return;
+      setDirty(true);
+    });
+
+    // checkbox 的 change 事件也要觸發 dirty
+    table.addEventListener("change", (e) => {
+      if (!isEdit) return;
+      const inp = e.target;
+      if (!(inp instanceof HTMLInputElement)) return;
+      if (inp.type !== "checkbox") return;
       if (!inp.classList.contains("cell-edit")) return;
       if (inp.dataset.readonly === "1") return;
       setDirty(true);
@@ -1379,7 +1558,15 @@ table.table tbody td{background:#f3f3f3!important}
           if (!cell) continue;
           const inp  = cell.querySelector(".cell-edit");
           const span = cell.querySelector(".cell-view");
-          if (inp)  inp.defaultValue = newVal;
+          if (inp) {
+            if (inp.type === "checkbox") {
+              // checkbox: 更新 data-raw
+              inp.dataset.raw = newVal;
+            } else {
+              // 一般 input: 更新 defaultValue
+              inp.defaultValue = newVal;
+            }
+          }
           if (span) span.textContent  = lookupDisplay(field, newVal, span.textContent, inp?.dataset.lookupkey ?? newVal);
         }
       });
@@ -1563,8 +1750,18 @@ table.table tbody td{background:#f3f3f3!important}
         const name = inp.name;
         if (!name) return;
 
-        const oldVal = inp.defaultValue ?? "";
-        const newVal = inp.value ?? "";
+        // 處理 checkbox 和一般 input 的值
+        let oldVal, newVal;
+        if (inp.type === "checkbox") {
+          // checkbox: 使用 data-raw 作為舊值，checked 狀態作為新值
+          oldVal = inp.dataset.raw ?? "";
+          newVal = inp.checked ? "1" : "0";
+        } else {
+          // 一般 input: 使用 defaultValue 和 value
+          oldVal = inp.defaultValue ?? "";
+          newVal = inp.value ?? "";
+        }
+
         const isReadonly = inp.dataset.readonly === "1";
         const isKey = KEY_FIELDS.includes(name.toLowerCase());
 
@@ -1605,6 +1802,7 @@ table.table tbody td{background:#f3f3f3!important}
     });
 
     applyLookupToTable();
+    applyCheckboxCells(); // 頁面載入時套用 checkbox 轉換
     setModePanel(isEdit);
     updateCountPanel(getSelectedRowIndex());
     buildCustomButtonsFromMeta();
@@ -1787,6 +1985,7 @@ table.table tbody td{background:#f3f3f3!important}
         || dt.startsWith('int') || dt.startsWith('smallint') || dt.startsWith('tinyint') || dt.startsWith('bigint');
       const cellClass = isNumber ? 'cell-number' : 'cell-text';
       const isReadOnly = f.ReadOnly != null && f.ReadOnly != 0;
+      const isCheckbox = isCheckboxField(fieldName);
 
       const td = document.createElement("td");
       td.className = `text-nowrap ${cellClass}`;
@@ -1797,16 +1996,45 @@ table.table tbody td{background:#f3f3f3!important}
       span.className = "cell-view d-none";
       span.dataset.raw = "";
       span.dataset.lookupkey = "";
-      span.textContent = "";
 
-      const inp = document.createElement("input");
-      inp.className = `form-control form-control-sm cell-edit ${isReadOnly ? "readonly-cell" : ""}`;
-      inp.name = fieldName;
-      inp.value = "";
-      inp.dataset.raw = "";
-      inp.dataset.lookupkey = "";
-      inp.dataset.readonly = isReadOnly ? "1" : "0";
-      if (isReadOnly) inp.readOnly = true;
+      let inp;
+      if (isCheckbox) {
+        // 建立 checkbox 輸入框
+        inp = document.createElement("input");
+        inp.type = "checkbox";
+        inp.className = `cell-edit ${isReadOnly ? "readonly-cell" : ""}`;
+        inp.name = fieldName;
+        inp.checked = false;
+        inp.value = "0";
+        inp.dataset.raw = "0";
+        inp.dataset.lookupkey = "";
+        inp.dataset.readonly = isReadOnly ? "1" : "0";
+
+        // 初始狀態根據當前模式設定
+        if (isReadOnly || !isEdit) {
+          inp.disabled = true;
+        }
+
+        // 監聽變更事件
+        inp.addEventListener("change", () => {
+          inp.value = inp.checked ? "1" : "0";
+          if (isEdit && !isReadOnly) setDirty(true);
+        });
+
+        // span 保持空的，不放任何內容
+        span.textContent = "";
+      } else {
+        // 建立一般文字輸入框
+        span.textContent = "";
+        inp = document.createElement("input");
+        inp.className = `form-control form-control-sm cell-edit ${isReadOnly ? "readonly-cell" : ""}`;
+        inp.name = fieldName;
+        inp.value = "";
+        inp.dataset.raw = "";
+        inp.dataset.lookupkey = "";
+        inp.dataset.readonly = isReadOnly ? "1" : "0";
+        if (isReadOnly) inp.readOnly = true;
+      }
 
       td.appendChild(span);
       td.appendChild(inp);
@@ -1842,10 +2070,24 @@ table.table tbody td{background:#f3f3f3!important}
     const inp = inputs.find(i => (i.name || '').toLowerCase() === fieldName.toLowerCase());
     if (!inp) return;
     const val = value == null ? "" : String(value);
-    inp.value = val;
-    if (!keepDefaultEmpty) inp.defaultValue = val;
-    const span = inp.closest("td")?.querySelector(".cell-view");
-    if (span) span.textContent = val;
+
+    if (inp.type === "checkbox") {
+      // checkbox: 設定 checked 狀態
+      inp.checked = val === "1" || val === "true" || val.toLowerCase() === "y";
+      inp.value = inp.checked ? "1" : "0";
+      if (!keepDefaultEmpty) inp.dataset.raw = inp.value;
+      const span = inp.closest("td")?.querySelector(".cell-view");
+      if (span) {
+        const viewChk = span.querySelector("input[type='checkbox']");
+        if (viewChk) viewChk.checked = inp.checked;
+      }
+    } else {
+      // 一般 input
+      inp.value = val;
+      if (!keepDefaultEmpty) inp.defaultValue = val;
+      const span = inp.closest("td")?.querySelector(".cell-view");
+      if (span) span.textContent = val;
+    }
   }
 
   function applyDefaultNewRowValues(tr) {
@@ -1869,11 +2111,24 @@ table.table tbody td{background:#f3f3f3!important}
         return;
       }
       tr.querySelectorAll(".cell-edit").forEach(inp => {
-        const val = inp.defaultValue ?? "";
-        inp.value = val;
-        inp.dataset.raw = val;
-        const span = inp.closest("td")?.querySelector(".cell-view");
-        if (span) span.textContent = val;
+        if (inp.type === "checkbox") {
+          // checkbox: 從 data-raw 復原
+          const val = inp.dataset.raw ?? "0";
+          inp.checked = val === "1" || val === "true";
+          inp.value = inp.checked ? "1" : "0";
+          const span = inp.closest("td")?.querySelector(".cell-view");
+          if (span) {
+            const viewChk = span.querySelector("input[type='checkbox']");
+            if (viewChk) viewChk.checked = inp.checked;
+          }
+        } else {
+          // 一般 input: 從 defaultValue 復原
+          const val = inp.defaultValue ?? "";
+          inp.value = val;
+          inp.dataset.raw = val;
+          const span = inp.closest("td")?.querySelector(".cell-view");
+          if (span) span.textContent = val;
+        }
       });
     });
     applyLookupToTable();
@@ -2258,6 +2513,9 @@ table.table tbody td{background:#f3f3f3!important}
           '</td>';
       }).join('') + '</tr>';
     }).join('');
+
+    // 套用 checkbox 轉換（根據 ComboStyle）
+    applyCheckboxCells();
 
     window.SELECTED_ROW = null;
     updateCountPanel(0);

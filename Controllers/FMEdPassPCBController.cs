@@ -98,6 +98,21 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
         // 補充 Lookup 欄位
         await EnrichWithLookupFields(conn, lotInfo);
 
+        // 檢查是否為壓合站,若是則查詢所有層別
+        var procCode = GetStringValue(lotInfo, "ProcCode");
+        if (procCode == "P1200")  // 壓合站
+        {
+            var allLayers = await GetAllLayersForLamination(conn, request.LotNum);
+            if (allLayers.Count > 0)
+            {
+                lotInfo["AllLayers"] = allLayers;
+
+                // 計算最小良品數
+                var minGoodQty = allLayers.Min(layer => GetIntValue(layer, "Qnty"));
+                lotInfo["MinGoodQty"] = minGoodQty;
+            }
+        }
+
         // 呼叫 FMEdPassSetXOut 取得多報明細 (根據料號的成型尺寸片數)
         var xOutDetailList = await GetXOutDetailList(conn, request.LotNum, request.PaperNum ?? "");
         if (xOutDetailList.Count > 0)
@@ -122,6 +137,7 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
     /// </summary>
     private async Task EnrichWithLookupFields(SqlConnection conn, Dictionary<string, object?> lotInfo)
     {
+        _logger.LogInformation("===== EnrichWithLookupFields 開始 =====");
         // 1. 目前製程名稱 (ProcCode → ProcName) 及製程規範參數
         var procCode = GetStringValue(lotInfo, "ProcCode");
         if (!string.IsNullOrEmpty(procCode))
@@ -175,38 +191,15 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
                 lotInfo["AftLayerName"] = aftLayerName;
         }
 
-        // 5. 目前型狀名稱和排版數量 (POP → POPName, XQnty, YQnty)
+        // 5. 目前型狀名稱 (POP → POPName)
         var pop = GetIntValue(lotInfo, "POP");
         if (pop > 0)
         {
-            try
-            {
-                await using var cmd = new SqlCommand(
-                    "SELECT POPName, XQnty, YQnty FROM EMOdPOP WITH(NOLOCK) WHERE POP = @Code", conn);
-                cmd.Parameters.AddWithValue("@Code", pop);
-                await using var rd = await cmd.ExecuteReaderAsync();
-                if (await rd.ReadAsync())
-                {
-                    var popName = rd["POPName"]?.ToString();
-                    if (!string.IsNullOrEmpty(popName))
-                        lotInfo["POPName"] = popName;
-
-                    // 安全讀取 XQnty 和 YQnty
-                    for (int i = 0; i < rd.FieldCount; i++)
-                    {
-                        var fieldName = rd.GetName(i);
-                        if (fieldName.Equals("XQnty", StringComparison.OrdinalIgnoreCase) && rd[i] != DBNull.Value)
-                            lotInfo["XQnty"] = Convert.ToInt32(rd[i]);
-                        else if (fieldName.Equals("YQnty", StringComparison.OrdinalIgnoreCase) && rd[i] != DBNull.Value)
-                            lotInfo["YQnty"] = Convert.ToInt32(rd[i]);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "查詢 EMOdPOP 排版數量失敗: POP={POP}", pop);
-                // 繼續執行,不中斷流程
-            }
+            var popName = await LookupValue(conn,
+                "SELECT POPName FROM EMOdPOP WITH(NOLOCK) WHERE POP = @Code",
+                pop);
+            if (!string.IsNullOrEmpty(popName))
+                lotInfo["POPName"] = popName;
         }
 
         // 6. 過帳後型狀名稱 (AftPOP → AftPOPName)
@@ -220,24 +213,114 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
                 lotInfo["AftPOPName"] = aftPOPName;
         }
 
-        // 7. 產品類別 & 允收X報數 (PartNum → ProdStyle, AllowXOutQnty from MINdMatInfo)
+        // 7. 產品類別 & 允收X報數 & 排版數量 (PartNum → ProdStyle, AllowXOutQnty, 排版數)
         var partNum = GetStringValue(lotInfo, "PartNum");
         if (!string.IsNullOrEmpty(partNum))
         {
-            await using var cmd = new SqlCommand(
-                "SELECT ProdStyle, AllowXOutQnty FROM MINdMatInfo WITH(NOLOCK) WHERE PartNum = @Code", conn);
-            cmd.Parameters.AddWithValue("@Code", partNum);
-            await using var rd = await cmd.ExecuteReaderAsync();
-            if (await rd.ReadAsync())
+            // 7.1 查詢產品類別和允收X報數
+            await using (var cmd = new SqlCommand(
+                "SELECT ProdStyle, AllowXOutQnty FROM MINdMatInfo WITH(NOLOCK) WHERE PartNum = @Code", conn))
             {
-                var prodStyle = rd["ProdStyle"]?.ToString()?.Trim();
-                if (!string.IsNullOrEmpty(prodStyle))
-                    lotInfo["ProdStyle"] = prodStyle;
+                cmd.Parameters.AddWithValue("@Code", partNum);
+                await using var rd = await cmd.ExecuteReaderAsync();
+                if (await rd.ReadAsync())
+                {
+                    var prodStyle = rd["ProdStyle"]?.ToString()?.Trim();
+                    if (!string.IsNullOrEmpty(prodStyle))
+                        lotInfo["ProdStyle"] = prodStyle;
 
-                if (!rd.IsDBNull(rd.GetOrdinal("AllowXOutQnty")))
-                    lotInfo["AllowXOutQnty"] = Convert.ToInt32(rd["AllowXOutQnty"]);
+                    if (!rd.IsDBNull(rd.GetOrdinal("AllowXOutQnty")))
+                        lotInfo["AllowXOutQnty"] = Convert.ToInt32(rd["AllowXOutQnty"]);
+                }
+            }
+
+            // 7.2 查詢排版數量 (從 EMOdProdPOP 表查詢 POP=3撈邊 和 POP=4成型)
+            var revision = GetStringValue(lotInfo, "Revision");
+            try
+            {
+                _logger.LogInformation("開始查詢排版數: PartNum={PartNum}, Revision={Revision}", partNum, revision);
+
+                await using var cmd = new SqlCommand(
+                    @"SELECT POP, AftPiece
+                      FROM EMOdProdPOP WITH(NOLOCK)
+                      WHERE PartNum = @PartNum AND Revision = @Revision AND POP IN (3, 4)
+                      ORDER BY POP", conn);
+                cmd.Parameters.AddWithValue("@PartNum", partNum);
+                cmd.Parameters.AddWithValue("@Revision", revision ?? "");
+                await using var rd = await cmd.ExecuteReaderAsync();
+
+                int? pop3AftPiece = null;
+                int? pop4AftPiece = null;
+                int rowCount = 0;
+
+                while (await rd.ReadAsync())
+                {
+                    rowCount++;
+                    var popValue = rd["POP"] != DBNull.Value ? Convert.ToInt32(rd["POP"]) : 0;
+                    var aftPiece = rd["AftPiece"] != DBNull.Value ? Convert.ToInt32(rd["AftPiece"]) : 0;
+
+                    _logger.LogInformation("找到排版資料: POP={POP}, AftPiece={AftPiece}", popValue, aftPiece);
+
+                    if (popValue == 3)
+                        pop3AftPiece = aftPiece;
+                    else if (popValue == 4)
+                        pop4AftPiece = aftPiece;
+                }
+
+                _logger.LogInformation("查詢完成: 共{Count}筆, POP3={POP3}, POP4={POP4}", rowCount, pop3AftPiece, pop4AftPiece);
+
+                // 如果找到兩個值,組合成排版數 (例如 3 x 5)
+                if (pop3AftPiece.HasValue && pop4AftPiece.HasValue)
+                {
+                    lotInfo["XQnty"] = pop3AftPiece.Value;
+                    lotInfo["YQnty"] = pop4AftPiece.Value;
+                    _logger.LogInformation("排版數設定成功: {X} x {Y}", pop3AftPiece.Value, pop4AftPiece.Value);
+                }
+                else
+                {
+                    _logger.LogWarning("排版數不完整: POP3={POP3}, POP4={POP4}", pop3AftPiece, pop4AftPiece);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "查詢排版數量失敗: PartNum={PartNum}, Revision={Revision}", partNum, revision);
             }
         }
+    }
+
+    /// <summary>
+    /// 查詢壓合站的所有層別資料
+    /// </summary>
+    private async Task<List<Dictionary<string, object?>>> GetAllLayersForLamination(SqlConnection conn, string lotNum)
+    {
+        var layers = new List<Dictionary<string, object?>>();
+
+        try
+        {
+            // 查詢同批號、在壓合站(P1200)的所有層別
+            await using var cmd = new SqlCommand(
+                @"SELECT LotNum, LayerId, LayerName, Qnty, ProcCode, ProcName
+                  FROM FMEdLotWip WITH(NOLOCK)
+                  WHERE LEFT(LotNum, CHARINDEX('-', LotNum) - 1) = LEFT(@LotNum, CHARINDEX('-', @LotNum) - 1)
+                    AND ProcCode = 'P1200'
+                  ORDER BY LayerId", conn);
+            cmd.Parameters.AddWithValue("@LotNum", lotNum);
+
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var layer = ReadRowToDictionary(rd);
+                layers.Add(layer);
+            }
+
+            _logger.LogInformation("壓合站查詢: 批號 {LotNum} 找到 {Count} 個層別", lotNum, layers.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "查詢壓合站層別失敗: LotNum={LotNum}", lotNum);
+        }
+
+        return layers;
     }
 
     /// <summary>

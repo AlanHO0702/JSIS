@@ -775,13 +775,13 @@
         $('#txtPartNum').val(getVal(info, 'PartNum'));
         $('#txtRevision').val(getVal(info, 'Revision'));
 
-        // 排版數
+        // 排版數 - 有數據才顯示
         var xQnty = getIntVal(info, 'XQnty');
         var yQnty = getIntVal(info, 'YQnty');
         if (xQnty > 0 && yQnty > 0) {
             $('#lblPanelLayout').text(xQnty + ' x ' + yQnty);
         } else {
-            $('#lblPanelLayout').text('-');
+            $('#lblPanelLayout').text('');
         }
 
         // 製程與階段 - 組合顯示代號和名稱
@@ -1018,31 +1018,45 @@
             return v === '' ? 0 : parseFloat(v) || 0;
         }
 
-        // 取得欄位值
-        var lotNum = getVal(info, 'LotNum');
-        var layerName = getVal(info, 'LayerName') || getVal(info, 'LayerId');
-        var qnty = getNumVal(info, 'Qnty');
-        var pQnty = getNumVal(info, 'PQnty');
-        var sQnty = getNumVal(info, 'SQnty');
-        var uQnty = getNumVal(info, 'UQnty');
-        var xOutQnty = getNumVal(info, 'XOutQnty');
-        var dateCode = getVal(info, 'DateCode');
-        var goodPCS = getNumVal(info, 'GoodPCS');
+        // 檢查是否為壓合站且有多層別資料
+        if (info.AllLayers && info.AllLayers.length > 0) {
+            // 壓合站：顯示所有層別
+            info.AllLayers.forEach(function(layer, index) {
+                var row = createSelectLotRow(layer, index + 1);
+                tbody.append(row);
+            });
+            return;
+        }
 
-        // 建立表格列
-        var row = $('<tr></tr>');
-        row.append('<td class="text-center">1</td>');  // 項次
-        row.append('<td>' + (lotNum || '') + '</td>');  // 批號(F5)
-        row.append('<td>' + (layerName || '') + '</td>');  // 階段
-        row.append('<td class="text-end">' + qnty.toFixed(0) + '</td>');  // 原始數量
-        row.append('<td class="text-end">' + pQnty.toFixed(0) + '</td>');  // 過帳數
-        row.append('<td class="text-end">' + sQnty.toFixed(0) + '</td>');  // 報廢數
-        row.append('<td class="text-end">' + uQnty.toFixed(0) + '</td>');  // 留存數
-        row.append('<td class="text-end">' + xOutQnty.toFixed(0) + '</td>');  // 本站新增單報數
-        row.append('<td>' + (dateCode || '') + '</td>');  // DateCode
-        row.append('<td class="text-end">' + goodPCS.toFixed(0) + '</td>');  // 完成良品PCS數
-
+        // 一般情況：顯示單一批號
+        var row = createSelectLotRow(info, 1);
         tbody.append(row);
+
+        // 建立表格列的輔助函數
+        function createSelectLotRow(data, serialNum) {
+            var lotNum = getVal(data, 'LotNum');
+            var layerName = getVal(data, 'LayerName') || getVal(data, 'LayerId');
+            var qnty = getNumVal(data, 'Qnty');
+            var pQnty = getNumVal(data, 'PQnty');
+            var sQnty = getNumVal(data, 'SQnty');
+            var uQnty = getNumVal(data, 'UQnty');
+            var xOutQnty = getNumVal(data, 'XOutQnty');
+            var dateCode = getVal(data, 'DateCode');
+            var goodPCS = getNumVal(data, 'GoodPCS');
+
+            var row = $('<tr></tr>');
+            row.append('<td class="text-center">' + serialNum + '</td>');  // 項次
+            row.append('<td>' + (lotNum || '') + '</td>');  // 批號(F5)
+            row.append('<td>' + (layerName || '') + '</td>');  // 階段
+            row.append('<td class="text-end">' + qnty.toFixed(0) + '</td>');  // 原始數量
+            row.append('<td class="text-end">' + pQnty.toFixed(0) + '</td>');  // 過帳數
+            row.append('<td class="text-end">' + sQnty.toFixed(0) + '</td>');  // 報廢數
+            row.append('<td class="text-end">' + uQnty.toFixed(0) + '</td>');  // 留存數
+            row.append('<td class="text-end">' + xOutQnty.toFixed(0) + '</td>');  // 本站新增單報數
+            row.append('<td>' + (dateCode || '') + '</td>');  // DateCode
+            row.append('<td class="text-end">' + goodPCS.toFixed(0) + '</td>');  // 完成良品PCS數
+            return row;
+        }
     }
 
     // 執行過帳 - 建立單號並呼叫 FMEdPassResult SP
@@ -1282,8 +1296,8 @@
         $('#txtLotNum').val('');
         $('#txtPartNum').val('');
         $('#txtRevision').val('');
-        $('#txtProcName').val('');
-        $('#txtAftProcName').val('');
+        $('#txtProcDisplay').val('');  // 目前製程
+        $('#txtAftProcDisplay').val('');  // 下站製程
         $('#txtLayerName').val('');
         $('#txtAftLayerName').val('');
         $('#txtPopName').val('');
@@ -1295,6 +1309,8 @@
         $('#txtScrapStrXOutQnty').val(0);
         $('#txtPoType').val('');
         $('#txtNotes').val('');
+        $('#lblPanelLayout').text('');  // 排版數
+        $('#lblGoodPCS').text('0');  // 良品PCS數
         $('#tblXOut tbody').empty();
         $('#tblXOutDefect tbody').empty();
         $('#tblSelectLot tbody').empty();
