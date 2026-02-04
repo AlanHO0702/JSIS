@@ -101,34 +101,39 @@ namespace PcbErpApi.Pages
                 var where = "";
                 if (!string.IsNullOrWhiteSpace(mailSeq))
                 {
-                    where += $" AND t1.SEQ = '{mailSeq}'";
+                    var escapedMailSeq = mailSeq.Replace("'", "''");
+                    where += $" AND t1.SEQ = '{escapedMailSeq}'";
                 }
                 if (!string.IsNullOrWhiteSpace(subject))
                 {
-                    where += $" AND t1.SUBJECT LIKE N'%{subject}%'";
+                    var escapedSubject = subject.Replace("'", "''");
+                    where += $" AND t1.SUBJECT LIKE N'%{escapedSubject}%'";
                 }
                 if (!string.IsNullOrWhiteSpace(applicant))
                 {
-                    where += $" AND t7.APPLICANT = '{applicant}'";
+                    var escapedApplicant = applicant.Replace("'", "''");
+                    where += $" AND t7.APPLICANT = '{escapedApplicant}'";
                 }
                 if (!string.IsNullOrWhiteSpace(sender))
                 {
-                    where += $" AND t1.SENDER = '{sender}'";
+                    var escapedSender = sender.Replace("'", "''");
+                    where += $" AND t1.SENDER = '{escapedSender}'";
                 }
                 if (!string.IsNullOrWhiteSpace(startDate))
                 {
-                    where += $" AND t7.CDATE >= '{startDate}'";
+                    var escapedStartDate = startDate.Replace("'", "''");
+                    where += $" AND t7.CDATE >= '{escapedStartDate}'";
                 }
                 if (!string.IsNullOrWhiteSpace(endDate))
                 {
-                    where += $" AND t7.CDATE < dateadd(day,1,'{endDate}')";
+                    var escapedEndDate = endDate.Replace("'", "''");
+                    where += $" AND t7.CDATE < dateadd(day,1,'{escapedEndDate}')";
                 }
                 if (!string.IsNullOrWhiteSpace(paperId))
                 {
-                    where += $" AND t7.PAPERID = '{paperId}'";
+                    var escapedPaperId = paperId.Replace("'", "''");
+                    where += $" AND t7.PAPERID = '{escapedPaperId}'";
                 }
-
-                where = where.Replace("'", "''");
 
                 var hasFilter = !string.IsNullOrWhiteSpace(where) || !string.IsNullOrWhiteSpace(status);
                 var useWhere = hasFilter ? 1 : 0;

@@ -1,0 +1,631 @@
+@page
+@using System.Reflection
+@using System.Text.Json
+@using PcbErpApi.Helpers
+@using PcbErpApi.Models
+@model PcbErpApi.Pages.MessagesModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "訊息清單";
+
+    var visibleFields = Model.TableFields
+        .Where(f => ToBool(f.Visible, defaultValue: true))
+        .Where(f => Model.MessageList.Columns.Contains(f.FieldName))
+        .Where(f => f.FieldName != "Kind") // 隱藏 Kind 欄位，因為已有 Lk_KindName
+        .ToList();
+}
+
+@functions{
+    private static bool ToBool(object? raw, bool defaultValue)
+    {
+        if (raw == null) return defaultValue;
+
+        return raw switch
+        {
+            bool b => b,
+            byte b => b != 0,
+            sbyte b => b != 0,
+            short n => n != 0,
+            ushort n => n != 0,
+            int n => n != 0,
+            uint n => n != 0,
+            long n => n != 0,
+            ulong n => n != 0,
+            decimal n => n != 0m,
+            double n => Math.Abs(n) > double.Epsilon,
+            float n => Math.Abs(n) > float.Epsilon,
+            _ => ParseBool(raw.ToString(), defaultValue)
+        };
+
+        static bool ParseBool(string? text, bool fallback)
+        {
+            var s = text?.Trim();
+            if (string.IsNullOrWhiteSpace(s)) return fallback;
+
+            if (bool.TryParse(s, out var b)) return b;
+            if (int.TryParse(s, out var n)) return n != 0;
+            if (string.Equals(s, "Y", StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(s, "N", StringComparison.OrdinalIgnoreCase)) return false;
+
+            return fallback;
+        }
+    }
+
+    private static int ToColWidthPx(CURdTableField? f, int pxPerChar = 10)
+    {
+        try
+        {
+            var raw = f?.DisplaySize;
+            if (raw == null) return 0;
+
+            if (raw is int i && i > 0) return i * pxPerChar;
+
+            int n;
+            var s = raw.ToString();
+            if (int.TryParse(s, out n) && n > 0) return n * pxPerChar;
+
+            return 0;
+        }
+        catch { return 0; }
+    }
+
+    private static string GetFieldProp(CURdTableField? field, string propName)
+    {
+        if (field == null || string.IsNullOrWhiteSpace(propName)) return "";
+
+        var prop = field.GetType().GetProperty(propName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+        return prop?.GetValue(field)?.ToString() ?? "";
+    }
+
+    private static string FormatCell(object? value, CURdTableField? field)
+    {
+        var dataType = GetFieldProp(field, "DataType");
+        var formatStr = GetFieldProp(field, "FormatStr");
+
+        var formatted = FormatHelper.FormatValue(value, dataType, formatStr);
+        return formatted;
+    }
+
+    private static string GetRowValue(System.Data.DataRow row, string fieldName)
+    {
+        if (row.Table.Columns.Contains(fieldName))
+        {
+            return row[fieldName]?.ToString() ?? "";
+        }
+        return "";
+    }
+}
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+<script src="~/js/fieldDictModal.js"></script>
+
+<style>
+body {
+    background: #f4f6fb;
+    font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+    overflow-y: auto;
+}
+.message-container {
+    padding: 6px 10px;
+    max-width: 100%;
+    margin: 0;
+    max-height: calc(100vh - 80px);
+    overflow: auto;
+}
+.message-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #f6f7f9;
+    border: 1px solid #d8dee8;
+    border-radius: 10px;
+    padding: 4px 6px;
+    margin-bottom: 6px;
+    box-shadow: 0 1px 2px rgba(20,40,80,0.06);
+}
+.toolbar-buttons {
+    display: flex;
+    gap: 4px;
+    flex: 1;
+}
+.toolbar-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: #fff;
+    color: #2a4a7a;
+    border: 1px solid #b9c7de;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 3px 8px;
+    height: 26px;
+    cursor: pointer;
+    transition: all 0.18s;
+}
+.toolbar-btn:hover {
+    background: #eef3fb;
+    border-color: #9fb2d2;
+    transform: translateY(-1px);
+}
+.toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.toolbar-label {
+    font-size: 0.85rem;
+    color: #555;
+    font-weight: 500;
+}
+.toolbar-count {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    background: #1e4db7;
+    color: #fff;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.message-table-container {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    overflow: auto;
+    max-width: 100%;
+    height: calc(100vh - 360px);
+    max-height: calc(100vh - 360px);
+    min-height: 260px;
+}
+.message-table {
+    width: 100%;
+    margin: 0;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: .85rem;
+}
+.message-table thead {
+    background: #f8f9fa;
+}
+.message-table thead th {
+    padding: 2px 6px;
+    font-weight: 600;
+    color: #555;
+    border: 1px solid #dee2e6;
+    white-space: nowrap;
+    position: relative;
+    vertical-align: middle;
+    height: 24px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #f8f9fa;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 5px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 10;
+}
+.col-resizer:hover {
+    background: rgba(0, 123, 255, 0.3);
+}
+.message-table tbody td {
+    padding: 2px 6px;
+    border: 1px solid #dee2e6;
+    vertical-align: middle;
+    background: #f3f3f3;
+    height: 20px;
+    font-size: .85rem;
+    line-height: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.message-table tbody tr:hover td {
+    background: #f1f5ff;
+}
+.message-table tbody tr.selected td {
+    background: #e3f2fd !important;
+    border-color: #90caf9;
+}
+.message-table tbody tr.msg-unread-system td {
+    color: #c0392b;
+}
+.message-table tbody tr.msg-unread-user td {
+    color: #2980b9;
+}
+.detail-panel {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    overflow: hidden;
+    margin-top: 8px;
+}
+.detail-panel-header {
+    background: #f6f7f9;
+    border-bottom: 1px solid #d8dee8;
+    padding: 6px 12px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #2a4a7a;
+}
+.detail-panel-body {
+    padding: 8px 12px;
+}
+.detail-panel-body textarea {
+    border: 1px solid #d8dee8;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    padding: 8px;
+    min-height: 100px;
+    max-height: 150px;
+}
+</style>
+
+<div class="message-container" data-current-userid="@Model.CurrentUserId">
+    <div class="message-toolbar">
+        <div class="toolbar-buttons">
+            <button type="button" class="toolbar-btn" id="btnOpenPaper">開啟單據</button>
+            <button type="button" class="toolbar-btn" id="btnDeleteRead">刪除已讀</button>
+            <button type="button" class="toolbar-btn" id="btnDeleteAll">刪除全部</button>
+        </div>
+        <div class="toolbar-right">
+            <span class="toolbar-label">訊息數量</span>
+            <div class="toolbar-count">
+                <span id="currentRow">0</span> / @Model.TotalCount
+            </div>
+        </div>
+    </div>
+
+    <div class="message-table-container">
+        @if (Model.MessageList.Rows.Count > 0)
+        {
+            <table class="message-table" id="messagesTable">
+                <colgroup>
+                    @foreach (var f in visibleFields)
+                    {
+                        var w = ToColWidthPx(f, 10);
+                        if (w > 0)
+                        {
+                            <col data-field="@f.FieldName" style="width:@($"{w}px");min-width:@($"{w}px")" />
+                        }
+                        else
+                        {
+                            <col data-field="@f.FieldName" />
+                        }
+                    }
+                </colgroup>
+                <thead>
+                    <tr>
+                        @foreach (var f in visibleFields)
+                        {
+                            <th data-field="@f.FieldName">
+                                @(string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel)
+                                <div class="col-resizer"></div>
+                            </th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (System.Data.DataRow row in Model.MessageList.Rows)
+                    {
+                        var toPaperId = GetRowValue(row, "ToPaperId");
+                        var toPaperNum = GetRowValue(row, "ToPaperNum");
+                        var serialNum = GetRowValue(row, "SerialNum");
+                        var kind = GetRowValue(row, "Kind");
+                        var iStatus = GetRowValue(row, "iStatus");
+
+                        var rowClass = "";
+                        if (iStatus == "0")
+                        {
+                            rowClass = kind == "4" ? "msg-unread-user" : "msg-unread-system";
+                        }
+
+                        <tr data-touserid="@GetRowValue(row, "ToUserId")"
+                            data-serialnum="@serialNum"
+                            data-topaperid="@toPaperId"
+                            data-topapernum="@toPaperNum"
+                            data-kind="@kind"
+                            data-istatus="@iStatus"
+                            class="@rowClass">
+                            @foreach (var f in visibleFields)
+                            {
+                                var fieldName = f.FieldName;
+                                var value = row[fieldName];
+                                <td>@FormatCell(value, f)</td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+        else
+        {
+            <div class="text-center text-muted p-5">目前沒有訊息</div>
+        }
+    </div>
+
+    <div class="detail-panel">
+        <div class="detail-panel-header">訊息內容</div>
+        <div class="detail-panel-body">
+            <textarea id="txtMsgText" class="form-control" readonly style="resize: none; height: 150px; border: none; background: #f8f9fa;"></textarea>
+        </div>
+    </div>
+</div>
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", new List<PcbErpApi.Models.CURdTableField>())
+
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+<script>
+function getCurrentUserId() {
+    const container = document.querySelector('.message-container');
+    const serverUserId = container?.dataset?.currentUserid;
+    if (serverUserId) return serverUserId;
+    const urlUserId = new URLSearchParams(window.location.search).get('userId');
+    if (urlUserId) return urlUserId;
+    return localStorage.getItem('erpLoginUserId') || 'admin';
+}
+
+// 點擊行選中並標記為已讀
+document.querySelectorAll('.message-table tbody tr').forEach((row, index) => {
+    row.addEventListener('click', async function() {
+        document.querySelectorAll('.message-table tbody tr').forEach(r => r.classList.remove('selected'));
+        this.classList.add('selected');
+        document.getElementById('currentRow').textContent = index + 1;
+
+        // 取得訊息內容
+        const table = document.querySelector('.message-table');
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const rowIndex = rows.indexOf(this);
+
+        if (rowIndex >= 0) {
+            const msgTextCell = this.querySelector('td:nth-child(' + (table.querySelectorAll('thead th').length) + ')');
+            const msgText = msgTextCell?.textContent || '';
+            document.getElementById('txtMsgText').value = msgText;
+        }
+
+        // 如果是未讀訊息且不是發信類型,則標記為已讀
+        const kind = this.getAttribute('data-kind');
+        const iStatus = this.getAttribute('data-istatus');
+        const toUserId = this.getAttribute('data-touserid');
+        const serialNum = this.getAttribute('data-serialnum');
+
+        if (kind !== '4' && iStatus === '0' && toUserId && serialNum) {
+            try {
+                const response = await fetch('/api/Flow/MarkMessageRead', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        toUserId: toUserId,
+                        serialNum: parseInt(serialNum)
+                    })
+                });
+
+                if (response.ok) {
+                    // 移除未讀樣式
+                    this.classList.remove('msg-unread-system', 'msg-unread-user');
+                    this.setAttribute('data-istatus', '1');
+                }
+            } catch (error) {
+                console.warn('標記已讀失敗:', error);
+            }
+        }
+    });
+});
+
+// 開啟單據按鈕
+document.getElementById('btnOpenPaper')?.addEventListener('click', async function() {
+    const selectedRow = document.querySelector('.message-table tbody tr.selected');
+
+    if (!selectedRow) {
+        await Swal.fire('提示', '請先選擇一筆資料', 'info');
+        return;
+    }
+
+    const toPaperId = (selectedRow.getAttribute('data-topaperid') || '').trim();
+    const toPaperNum = (selectedRow.getAttribute('data-topapernum') || '').trim();
+
+    if (!toPaperId) {
+        await Swal.fire('錯誤', '此筆訊息不是單據，不可開啟', 'error');
+        return;
+    }
+
+    if (!toPaperNum) {
+        await Swal.fire('錯誤', '沒有單據號碼', 'error');
+        return;
+    }
+
+    try {
+        // 先查詢對應的 ItemId
+        const response = await fetch(`/api/DictSetupApi/GetItemIdByTableName?tableName=${encodeURIComponent(toPaperId)}`);
+
+        if (!response.ok) {
+            throw new Error('查詢 ItemId 失敗');
+        }
+
+        const data = await response.json();
+        const itemId = data.itemId || toPaperId;
+
+        // 開啟單據頁面（使用 ItemId）
+        const url = `/DynamicTemplate/Paper/${itemId}/${toPaperNum}`;
+        window.open(url, '_blank');
+    } catch (error) {
+        console.error('開啟單據失敗:', error);
+        // 如果查詢失敗，嘗試直接使用 PaperId
+        const url = `/DynamicTemplate/Paper/${toPaperId}/${toPaperNum}`;
+        window.open(url, '_blank');
+    }
+});
+
+// 刪除已讀按鈕
+document.getElementById('btnDeleteRead')?.addEventListener('click', async function() {
+    const result = await Swal.fire({
+        title: '確認刪除',
+        text: '是否要刪除已讀訊息?',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: '確定',
+        cancelButtonText: '取消'
+    });
+
+    if (!result.isConfirmed) return;
+
+    const userId = getCurrentUserId();
+
+    try {
+        const response = await fetch('/api/Flow/DeleteReadMessages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: userId })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            await Swal.fire('成功', data.message, 'success');
+            window.location.reload();
+        } else {
+            await Swal.fire('錯誤', data.message || '刪除已讀訊息失敗', 'error');
+        }
+    } catch (error) {
+        console.error('刪除已讀訊息失敗:', error);
+        await Swal.fire('錯誤', '刪除已讀訊息失敗', 'error');
+    }
+});
+
+// 刪除全部按鈕
+document.getElementById('btnDeleteAll')?.addEventListener('click', async function() {
+    const result = await Swal.fire({
+        title: '確認刪除',
+        text: '是否要刪除全部訊息?',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: '確定',
+        cancelButtonText: '取消'
+    });
+
+    if (!result.isConfirmed) return;
+
+    const userId = getCurrentUserId();
+
+    try {
+        const response = await fetch('/api/Flow/DeleteAllMessages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: userId })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            await Swal.fire('成功', data.message, 'success');
+            window.location.reload();
+        } else {
+            await Swal.fire('錯誤', data.message || '刪除全部訊息失敗', 'error');
+        }
+    } catch (error) {
+        console.error('刪除全部訊息失敗:', error);
+        await Swal.fire('錯誤', '刪除全部訊息失敗', 'error');
+    }
+});
+
+// ===== F3 開啟辭典功能 =====
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'F3') {
+        e.preventDefault();
+        const tableName = 'CURdMsg';
+
+        if (window.showDictModal) {
+            window._dictTableName = tableName;
+            window.showDictModal('fieldDictModal', tableName);
+        } else {
+            console.warn('字典功能未載入');
+        }
+    }
+});
+
+// ===== 欄位寬度調整功能 =====
+(function() {
+    const table = document.getElementById('messagesTable');
+    if (!table) return;
+
+    const colGroupCols = Array.from(table.querySelectorAll('colgroup col'));
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    const tableName = 'CURdMsg';
+
+    const colMap = {};
+    colGroupCols.forEach(col => {
+        const field = col.getAttribute('data-field');
+        if (field) colMap[field.toLowerCase()] = col;
+    });
+
+    let dragState = null;
+
+    ths.forEach(th => {
+        const field = th.getAttribute('data-field');
+        const resizer = th.querySelector('.col-resizer');
+        if (!field || !resizer) return;
+
+        resizer.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const col = colMap[field.toLowerCase()];
+            const startX = e.clientX;
+            const startWidth = (col?.getBoundingClientRect().width) || th.getBoundingClientRect().width;
+            dragState = { field, startX, startWidth };
+            document.body.style.cursor = 'col-resize';
+        });
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!dragState) return;
+        const delta = e.clientX - dragState.startX;
+        const newW = Math.max(40, dragState.startWidth + delta);
+        const col = colMap[dragState.field.toLowerCase()];
+        if (col) {
+            col.style.width = `${newW}px`;
+            col.style.minWidth = `${newW}px`;
+        }
+        const th = ths.find(t => (t.getAttribute('data-field') || '').toLowerCase() === dragState.field.toLowerCase());
+        if (th) th.style.width = `${newW}px`;
+    });
+
+    document.addEventListener('mouseup', async () => {
+        if (!dragState) return;
+
+        const col = colMap[dragState.field.toLowerCase()];
+        const th = ths.find(t => (t.getAttribute('data-field') || '').toLowerCase() === dragState.field.toLowerCase());
+        const width = col?.getBoundingClientRect().width || th?.getBoundingClientRect().width || dragState.startWidth;
+        const fieldName = dragState.field;
+
+        dragState = null;
+        document.body.style.cursor = '';
+
+        try {
+            await fetch('/api/DictSetupApi/FieldWidth/Save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tableName: tableName,
+                    fieldName: fieldName,
+                    widthPx: Math.round(width)
+                })
+            });
+        } catch (err) {
+            console.warn('儲存欄位寬度失敗', err);
+        }
+    });
+})();
+</script>
