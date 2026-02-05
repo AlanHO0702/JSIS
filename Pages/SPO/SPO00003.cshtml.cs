@@ -1,5 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Data;
+using System.Data.Common;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
@@ -26,6 +28,12 @@ namespace PcbErpApi.Pages.SPO
         }
 
         public string PageTitle => "SPO00003 銷售訂單查詢";
+        public string? DictTableName { get; set; }
+        public string? ParamTableName { get; set; }
+        public int SpId { get; set; }
+        public Dictionary<string, object?> DefaultQueryValues { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, string> ParamNameByField { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, string> FieldNameByParam { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
         [BindProperty(SupportsGet = true)]
         public string? PaperNum { get; set; }
@@ -47,71 +55,70 @@ namespace PcbErpApi.Pages.SPO
 
         public int TotalCount { get; set; }
         public int TotalPages { get; set; }
-        public List<OrderInqRow> Items { get; set; } = new();
+        public List<Dictionary<string, object?>> Items { get; set; } = new();
 
         public List<CURdTableField> QueryDictFields { get; set; } = new();
         public List<CURdTableField> GridDictFields { get; set; } = new();
+        public string? DebugExecText { get; set; }
+        public List<(string Name, object? Value)> DebugParams { get; set; } = new();
 
         public async Task OnGetAsync()
         {
-            QueryDictFields = LoadDictSafe("SPOdOrderInqParams");
-            GridDictFields = LoadDictSafe("SPOdOrderInq");
-
-            var query =
-                from m in _context.SpodOrderMain.AsNoTracking()
-                join s in _context.SpodOrderSub.AsNoTracking()
-                    on m.PaperNum equals s.PaperNum
-                select new OrderInqRow
-                {
-                    PaperNum = m.PaperNum,
-                    PaperDate = m.PaperDate,
-                    CustomerId = m.CustomerId,
-                    CustPONum = m.CustPonum ?? "",
-                    Status = m.Status,
-                    MoneyCode = m.MoneyCode,
-                    RateToNt = m.RateToNt,
-                    Item = s.Item,
-                    PartNum = s.PartNum,
-                    CustomerPartNum = s.CustomerPartNum,
-                    Qnty = s.Qnty,
-                    UnitPrice = s.UnitPrice,
-                    SubTotal = s.SubTotal,
-                    DelDate = s.DelDate
-                };
-
-            if (!string.IsNullOrWhiteSpace(PaperNum))
-                query = query.Where(x => x.PaperNum.Contains(PaperNum));
-            if (!string.IsNullOrWhiteSpace(CustomerId))
-                query = query.Where(x => x.CustomerId.Contains(CustomerId));
-            if (!string.IsNullOrWhiteSpace(CustPONum))
-                query = query.Where(x => x.CustPONum.Contains(CustPONum));
-            if (!string.IsNullOrWhiteSpace(PartNum))
-                query = query.Where(x => x.PartNum.Contains(PartNum));
-
-            if (PaperDateFrom.HasValue)
-                query = query.Where(x => x.PaperDate >= PaperDateFrom.Value.Date);
-            if (PaperDateTo.HasValue)
+            var conn = _context.Database.GetDbConnection();
+            var opened = conn.State != ConnectionState.Open;
+            if (opened) await _context.Database.OpenConnectionAsync();
+            try
             {
-                var end = PaperDateTo.Value.Date.AddDays(1);
-                query = query.Where(x => x.PaperDate < end);
+                const string itemId = "SPO00003";
+
+                var (paramStr, spId, tableName) = await CallInqStartAsync(conn, itemId);
+                DictTableName = tableName;
+                SpId = spId;
+
+                var item = await _context.CurdSysItems.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.ItemId == itemId);
+
+                var className = (item?.ClassName ?? "").Replace(".dll", "", StringComparison.OrdinalIgnoreCase);
+                if (string.IsNullOrWhiteSpace(className))
+                    className = tableName;
+
+                ParamTableName = ResolveParamTableName(className);
+
+                QueryDictFields = LoadDictSafe(ParamTableName);
+                GridDictFields = LoadDictSafe(DictTableName);
+                (ParamNameByField, FieldNameByParam) = await LoadParamMapAsync(conn, ParamTableName);
+
+                PageNumber = PageNumber <= 0 ? 1 : PageNumber;
+                PageSize = PageSize <= 0 ? 50 : Math.Min(PageSize, 500);
+
+                DefaultQueryValues = await LoadDefaultParamRowAsync(conn, spId, item?.ItemId ?? itemId);
+                // Expand defaults with FieldName -> ParamName mapping for easier lookup
+                foreach (var kv in ParamNameByField)
+                {
+                    var field = kv.Key;
+                    var param = kv.Value;
+                    if (!DefaultQueryValues.ContainsKey(field) && DefaultQueryValues.TryGetValue(param, out var v))
+                        DefaultQueryValues[field] = v;
+                }
+                var rows = await ExecInqAsync(conn, paramStr, spId, item, DefaultQueryValues);
+
+                TotalCount = rows.Count;
+                TotalPages = Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize));
+
+                Items = rows
+                    .Skip((PageNumber - 1) * PageSize)
+                    .Take(PageSize)
+                    .ToList();
             }
-
-            query = query
-                .OrderByDescending(x => x.PaperDate)
-                .ThenByDescending(x => x.PaperNum)
-                .ThenBy(x => x.Item);
-
-            PageNumber = PageNumber <= 0 ? 1 : PageNumber;
-            PageSize = PageSize <= 0 ? 50 : Math.Min(PageSize, 500);
-
-            var result = await _pagedService.GetPagedAsync(query, PageNumber, PageSize);
-            TotalCount = result.TotalCount;
-            Items = result.Data;
-            TotalPages = Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize));
+            finally
+            {
+                if (opened) await _context.Database.CloseConnectionAsync();
+            }
         }
 
-        private List<CURdTableField> LoadDictSafe(string tableName)
+        private List<CURdTableField> LoadDictSafe(string? tableName)
         {
+            if (string.IsNullOrWhiteSpace(tableName)) return new List<CURdTableField>();
             try
             {
                 var list = _dictService.GetFieldDict(tableName, typeof(object));
@@ -123,50 +130,339 @@ namespace PcbErpApi.Pages.SPO
             }
         }
 
-        public string BuildPageUrl(int page)
+        private string ResolveParamTableName(string className)
         {
-            var query = new Dictionary<string, string?>
-            {
-                ["PaperNum"] = PaperNum,
-                ["CustomerId"] = CustomerId,
-                ["CustPONum"] = CustPONum,
-                ["PartNum"] = PartNum,
-                ["PaperDateFrom"] = PaperDateFrom?.ToString("yyyy-MM-dd"),
-                ["PaperDateTo"] = PaperDateTo?.ToString("yyyy-MM-dd"),
-                ["page"] = page.ToString(),
-                ["pageSize"] = PageSize.ToString()
-            };
-
-            var filtered = query
-                .Where(kv => !string.IsNullOrWhiteSpace(kv.Value))
-                .ToDictionary(k => k.Key, v => v.Value!);
-
-            return QueryString.Create(filtered).ToString();
+            if (string.Equals(className, "SPOdOutInq", StringComparison.OrdinalIgnoreCase))
+                return "SPOdMPSOutInqParams";
+            if (string.Equals(className, "SPOdOutInvInq", StringComparison.OrdinalIgnoreCase))
+                return "SPOdMPSOutInvInqParams";
+            return $"{className}Params";
         }
 
-        public class OrderInqRow
+        private async Task<(string ParamStr, int SpId, string TableName)> CallInqStartAsync(DbConnection conn, string itemId)
         {
-            public string PaperNum { get; set; } = "";
-            public DateTime PaperDate { get; set; }
-            public string CustomerId { get; set; } = "";
-            public string CustPONum { get; set; } = "";
-            public int Status { get; set; }
-            public string StatusText => Status switch
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "exec SPOdInqStart @ItemId";
+            var p = cmd.CreateParameter();
+            p.ParameterName = "@ItemId";
+            p.Value = itemId;
+            cmd.Parameters.Add(p);
+
+            await using var rd = await cmd.ExecuteReaderAsync();
+            if (!await rd.ReadAsync())
+                throw new InvalidOperationException("SPOdInqStart did not return data.");
+
+            var paramStr = rd["ParamStr"]?.ToString() ?? "";
+            var spId = rd["SPId"] == DBNull.Value ? 0 : Convert.ToInt32(rd["SPId"]);
+            var tableName = rd["TableName"]?.ToString() ?? "";
+
+            return (paramStr, spId, tableName);
+        }
+
+        private List<string> ParseParamNames(string paramStr, out string procName)
+        {
+            procName = "";
+            var text = (paramStr ?? "").Trim();
+            if (text.StartsWith("exec ", StringComparison.OrdinalIgnoreCase))
+                text = text.Substring(5).Trim();
+
+            var firstSpace = text.IndexOf(' ');
+            if (firstSpace < 0)
             {
-                0 => "未確認",
-                1 => "已確認",
-                2 => "已結案",
-                _ => Status.ToString()
-            };
-            public byte MoneyCode { get; set; }
-            public decimal RateToNt { get; set; }
-            public int Item { get; set; }
-            public string PartNum { get; set; } = "";
-            public string CustomerPartNum { get; set; } = "";
-            public decimal Qnty { get; set; }
-            public decimal UnitPrice { get; set; }
-            public decimal SubTotal { get; set; }
-            public DateTime? DelDate { get; set; }
+                procName = text.Trim();
+                return new List<string>();
+            }
+
+            procName = text.Substring(0, firstSpace).Trim();
+            var rawParams = text.Substring(firstSpace + 1).Trim();
+            if (string.IsNullOrWhiteSpace(rawParams))
+                return new List<string>();
+
+            return rawParams
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(p => p.Trim().TrimStart(':').TrimStart('@'))
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .ToList();
+        }
+
+        private async Task<Dictionary<string, object?>> LoadDefaultParamRowAsync(DbConnection conn, int spId, string itemId)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "select top 1 * from SPOdInqParams with (nolock) where SPId=@spid and ItemId=@itemId";
+            var p1 = cmd.CreateParameter();
+            p1.ParameterName = "@spid";
+            p1.Value = spId;
+            cmd.Parameters.Add(p1);
+            var p2 = cmd.CreateParameter();
+            p2.ParameterName = "@itemId";
+            p2.Value = itemId;
+            cmd.Parameters.Add(p2);
+
+            await using var rd = await cmd.ExecuteReaderAsync();
+            if (!await rd.ReadAsync()) return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+            var map = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < rd.FieldCount; i++)
+            {
+                var key = rd.GetName(i);
+                var val = rd.IsDBNull(i) ? null : rd.GetValue(i);
+                map[key] = val;
+            }
+            return map;
+        }
+
+        private object? CoerceValue(string? raw, CURdTableField? field)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            var dt = (field?.DataType ?? "").ToLowerInvariant();
+
+            if (dt.Contains("date"))
+            {
+                if (DateTime.TryParse(raw, out var d)) return d;
+            }
+            if (dt.Contains("int") || dt.Contains("smallint") || dt.Contains("tinyint") || dt.Contains("bigint"))
+            {
+                if (int.TryParse(raw, out var n)) return n;
+            }
+            if (dt.Contains("decimal") || dt.Contains("numeric") || dt.Contains("money") || dt.Contains("float") || dt.Contains("real"))
+            {
+                if (decimal.TryParse(raw, out var dec)) return dec;
+            }
+
+            return raw;
+        }
+
+        private async Task<List<Dictionary<string, object?>>> ExecInqAsync(DbConnection conn, string paramStr, int spId, CurdSysItem? item, Dictionary<string, object?> defaults)
+        {
+            var paramNames = ParseParamNames(paramStr, out var procName);
+            if (string.IsNullOrWhiteSpace(procName))
+                return new List<Dictionary<string, object?>>();
+
+            var useId = ResolveUseId();
+            var userId = ResolveUserId();
+            var powerType = item?.PowerType ?? 0;
+
+            var qFieldMap = (QueryDictFields ?? new List<CURdTableField>())
+                .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
+                .ToDictionary(f => f.FieldName.TrimStart('@'), f => f, StringComparer.OrdinalIgnoreCase);
+
+            var paramValues = new List<(string Name, object? Value)>();
+            foreach (var p in paramNames)
+            {
+                object? val = null;
+                var qsVal = Request.Query[p].ToString();
+                if (!string.IsNullOrWhiteSpace(qsVal) && qsVal.Contains(','))
+                {
+                    qsVal = qsVal.Split(',').LastOrDefault()?.Trim() ?? qsVal;
+                }
+                if (!string.IsNullOrWhiteSpace(qsVal))
+                {
+                    CURdTableField? f = null;
+                    if (!qFieldMap.TryGetValue(p, out f) && FieldNameByParam.TryGetValue(p, out var fn))
+                        qFieldMap.TryGetValue(fn, out f);
+                    val = CoerceValue(qsVal, f);
+                }
+                else if (string.Equals(p, "SpId", StringComparison.OrdinalIgnoreCase))
+                {
+                    val = spId;
+                }
+                else if (string.Equals(p, "sUseId", StringComparison.OrdinalIgnoreCase))
+                {
+                    val = useId;
+                }
+                else if (string.Equals(p, "sUserId", StringComparison.OrdinalIgnoreCase))
+                {
+                    val = userId;
+                }
+                else if (string.Equals(p, "PowerType", StringComparison.OrdinalIgnoreCase))
+                {
+                    val = powerType;
+                }
+                else if (defaults.TryGetValue(p, out var dv))
+                {
+                    val = dv;
+                }
+                else if (FieldNameByParam.TryGetValue(p, out var fieldName)
+                         && defaults.TryGetValue(fieldName, out var dv2))
+                {
+                    val = dv2;
+                }
+
+                if (val is string s && string.IsNullOrWhiteSpace(s))
+                    val = null;
+
+                // Delphi default behaviors (critical for getting rows)
+                if (val == null)
+                {
+                    if (string.Equals(p, "iPost", StringComparison.OrdinalIgnoreCase)) val = 1;
+                    else if (string.Equals(p, "Charge", StringComparison.OrdinalIgnoreCase)) val = 1;
+                    else if (string.Equals(p, "OutNotIn", StringComparison.OrdinalIgnoreCase)) val = 255;
+                    else if (string.Equals(p, "iNotFinish", StringComparison.OrdinalIgnoreCase)) val = 0;
+                    else if (string.Equals(p, "iWaitAudit", StringComparison.OrdinalIgnoreCase)) val = 0;
+                    else if (string.Equals(p, "iAct", StringComparison.OrdinalIgnoreCase)) val = 0;
+                    else if (string.Equals(p, "iStop", StringComparison.OrdinalIgnoreCase)) val = 0;
+                }
+
+                // Always pass all parameters (Delphi does), allow NULL if no value/default.
+                paramValues.Add((p, val));
+            }
+
+            var execText = $"exec {procName} {string.Join(", ", paramValues.Select(p => "@" + p.Name + "=@" + p.Name))}";
+            DebugExecText = execText;
+            DebugParams = paramValues.ToList();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = execText;
+            cmd.CommandType = CommandType.Text;
+
+            foreach (var p in paramValues)
+            {
+                var pp = cmd.CreateParameter();
+                pp.ParameterName = "@" + p.Name;
+                pp.Value = p.Value ?? DBNull.Value;
+                cmd.Parameters.Add(pp);
+            }
+
+            var rows = new List<Dictionary<string, object?>>();
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < rd.FieldCount; i++)
+                {
+                    var key = rd.GetName(i);
+                    row[key] = rd.IsDBNull(i) ? null : rd.GetValue(i);
+                }
+                rows.Add(row);
+            }
+            return rows;
+        }
+
+        public string BuildPageUrl(int page)
+        {
+            var map = Request.Query.ToDictionary(k => k.Key, v => v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+            map["page"] = page.ToString();
+            map["pageSize"] = PageSize.ToString();
+            return QueryString.Create(map).ToString();
+        }
+
+        private string ResolveUseId()
+        {
+            var claim = User?.Claims?.FirstOrDefault(c => string.Equals(c.Type, "UseId", StringComparison.OrdinalIgnoreCase))?.Value;
+            var item = HttpContext.Items["UseId"]?.ToString();
+            return string.IsNullOrWhiteSpace(claim)
+                ? (string.IsNullOrWhiteSpace(item) ? "A001" : item)
+                : claim;
+        }
+
+        private string ResolveUserId()
+        {
+            var claim = User?.Claims?.FirstOrDefault(c => string.Equals(c.Type, "UserId", StringComparison.OrdinalIgnoreCase))?.Value;
+            var item = HttpContext.Items["UserId"]?.ToString();
+            return string.IsNullOrWhiteSpace(claim)
+                ? (string.IsNullOrWhiteSpace(item) ? "admin" : item)
+                : claim;
+        }
+
+        private async Task<(Dictionary<string, string> ParamByField, Dictionary<string, string> FieldByParam)> LoadParamMapAsync(DbConnection conn, string? paramTableName)
+        {
+            var byField = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var byParam = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(paramTableName)) return (byField, byParam);
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "select ParamName, FieldName from SPOdInqParamsField with (nolock) where SPName=@sp";
+            var p = cmd.CreateParameter();
+            p.ParameterName = "@sp";
+            p.Value = paramTableName;
+            cmd.Parameters.Add(p);
+
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var param = rd["ParamName"]?.ToString()?.Trim();
+                var field = rd["FieldName"]?.ToString()?.Trim();
+                if (string.IsNullOrWhiteSpace(param) || string.IsNullOrWhiteSpace(field)) continue;
+                byField[field.TrimStart('@')] = param.TrimStart('@');
+                byParam[param.TrimStart('@')] = field.TrimStart('@');
+            }
+            return (byField, byParam);
+        }
+
+        public sealed class CustomerSelectRequest
+        {
+            public int SpId { get; set; }
+            public List<string> CustomerIds { get; set; } = new();
+        }
+
+        public async Task<IActionResult> OnPostSaveCustomersAsync([FromBody] CustomerSelectRequest req)
+        {
+            if (req == null || req.SpId <= 0)
+                return BadRequest("SpId is required.");
+
+            var conn = _context.Database.GetDbConnection();
+            var opened = conn.State != ConnectionState.Open;
+            if (opened) await _context.Database.OpenConnectionAsync();
+            try
+            {
+                await using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "delete SPOdInqTable where SpId=@spid and PaperId='SPOdOrderInq'";
+                    var p = cmd.CreateParameter();
+                    p.ParameterName = "@spid";
+                    p.Value = req.SpId;
+                    cmd.Parameters.Add(p);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                var item = 1;
+                foreach (var id in req.CustomerIds.Where(x => !string.IsNullOrWhiteSpace(x)))
+                {
+                    await using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "insert into SPOdInqTable(SPId,Item,PaperId,Selected) values (@spid,@item,'SPOdOrderInq',@sel)";
+                    var p1 = cmd.CreateParameter();
+                    p1.ParameterName = "@spid";
+                    p1.Value = req.SpId;
+                    cmd.Parameters.Add(p1);
+                    var p2 = cmd.CreateParameter();
+                    p2.ParameterName = "@item";
+                    p2.Value = item++;
+                    cmd.Parameters.Add(p2);
+                    var p3 = cmd.CreateParameter();
+                    p3.ParameterName = "@sel";
+                    p3.Value = id.Trim();
+                    cmd.Parameters.Add(p3);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+            finally
+            {
+                if (opened) await _context.Database.CloseConnectionAsync();
+            }
+
+            return new JsonResult(new { ok = true });
+        }
+
+        public async Task<IActionResult> OnPostResetParamsAsync()
+        {
+            const string itemId = "SPO00003";
+            var conn = _context.Database.GetDbConnection();
+            var opened = conn.State != ConnectionState.Open;
+            if (opened) await _context.Database.OpenConnectionAsync();
+            try
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = "exec SPOdImportInqParams @ItemId";
+                var p = cmd.CreateParameter();
+                p.ParameterName = "@ItemId";
+                p.Value = itemId;
+                cmd.Parameters.Add(p);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            finally
+            {
+                if (opened) await _context.Database.CloseConnectionAsync();
+            }
+            return new JsonResult(new { ok = true });
         }
     }
 }
