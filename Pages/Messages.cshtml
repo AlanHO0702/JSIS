@@ -128,6 +128,41 @@ body {
     display: flex;
     gap: 4px;
     flex: 1;
+    align-items: center;
+}
+.toolbar-filter-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 8px;
+    padding-right: 8px;
+    border-right: 1px solid #d0d7e0;
+}
+.filter-label {
+    font-size: 0.8rem;
+    color: #555;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.toolbar-date-input {
+    border: 1px solid #b9c7de;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    padding: 2px 6px;
+    height: 26px;
+    background: #fff;
+    color: #2a4a7a;
+    cursor: pointer;
+    transition: all 0.18s;
+}
+.toolbar-date-input:hover {
+    border-color: #9fb2d2;
+    background: #eef3fb;
+}
+.toolbar-date-input:focus {
+    outline: none;
+    border-color: #1e4db7;
+    box-shadow: 0 0 0 2px rgba(30, 77, 183, 0.1);
 }
 .toolbar-btn {
     display: flex;
@@ -270,19 +305,40 @@ body {
     min-height: 100px;
     max-height: 150px;
 }
+
+/* SweetAlert2 自訂樣式 */
+.swal-title-small {
+    font-size: 1.1rem !important;
+    padding: 10px 0 5px 0 !important;
+}
+.swal-html-small {
+    font-size: 0.85rem !important;
+    padding: 5px 10px !important;
+}
+.swal-btn-small {
+    font-size: 0.85rem !important;
+    padding: 6px 20px !important;
+}
 </style>
 
 <div class="message-container" data-current-userid="@Model.CurrentUserId" data-current-useid="@Model.CurrentUseId">
     <div class="message-toolbar">
         <div class="toolbar-buttons">
+            <div class="toolbar-filter-group">
+                <label class="filter-label">起始日期</label>
+                <input type="date" id="filterStartDate" class="toolbar-date-input">
+                <label class="filter-label">結束日期</label>
+                <input type="date" id="filterEndDate" class="toolbar-date-input">
+                <button type="button" class="toolbar-btn" id="btnFilter">篩選</button>
+            </div>
+            <button type="button" class="toolbar-btn" id="btnDeleteFiltered">批次刪除篩選</button>
             <button type="button" class="toolbar-btn" id="btnOpenPaper">開啟單據</button>
             <button type="button" class="toolbar-btn" id="btnDeleteRead">刪除已讀</button>
-            <button type="button" class="toolbar-btn" id="btnDeleteAll">刪除全部</button>
         </div>
         <div class="toolbar-right">
             <span class="toolbar-label">訊息數量</span>
             <div class="toolbar-count">
-                <span id="currentRow">0</span> / @Model.TotalCount
+                <span id="currentRow">0</span> / <span id="totalCount">@Model.TotalCount</span>
             </div>
         </div>
     </div>
@@ -516,11 +572,112 @@ document.getElementById('btnDeleteRead')?.addEventListener('click', async functi
     }
 });
 
-// 刪除全部按鈕
-document.getElementById('btnDeleteAll')?.addEventListener('click', async function() {
+// 初始化日期欄位（預設為一個月前到今天）
+(function initializeDateInputs() {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+
+    const lastMonth = new Date();
+    lastMonth.setMonth(lastMonth.getMonth() - 1);
+    const lastMonthStr = lastMonth.toISOString().split('T')[0];
+
+    document.getElementById('filterStartDate').value = lastMonthStr;
+    document.getElementById('filterEndDate').value = todayStr;
+})();
+
+// 篩選按鈕
+document.getElementById('btnFilter')?.addEventListener('click', function() {
+    const startDate = document.getElementById('filterStartDate').value;
+    const endDate = document.getElementById('filterEndDate').value;
+
+    if (!startDate || !endDate) {
+        Swal.fire('提示', '請選擇起始日期和結束日期', 'info');
+        return;
+    }
+
+    if (new Date(startDate) > new Date(endDate)) {
+        Swal.fire('錯誤', '起始日期不可大於結束日期', 'error');
+        return;
+    }
+
+    const startDateTime = new Date(startDate + 'T00:00:00');
+    const endDateTime = new Date(endDate + 'T23:59:59');
+
+    // 先在迴圈外查詢表格和標題
+    const table = document.querySelector('.message-table');
+    if (!table) {
+        console.error('找不到訊息表格');
+        return;
+    }
+
+    const headers = Array.from(table.querySelectorAll('thead th'));
+    const buildDateIndex = headers.findIndex(th =>
+        th.getAttribute('data-field') === 'BuildDate' ||
+        th.textContent.includes('建立時間') ||
+        th.textContent.includes('作業時間')
+    );
+
+    console.log('日期欄位索引:', buildDateIndex);
+    console.log('標題欄位:', headers.map(h => h.textContent));
+
+    if (buildDateIndex < 0) {
+        Swal.fire('錯誤', '找不到日期欄位，無法篩選', 'error');
+        return;
+    }
+
+    const rows = table.querySelectorAll('tbody tr');
+    let visibleCount = 0;
+
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        const dateCell = cells[buildDateIndex];
+        const dateText = dateCell?.textContent.trim();
+
+        if (dateText) {
+            try {
+                // 解析日期（格式可能是 YYYY/MM/DD HH:mm）
+                const rowDate = new Date(dateText.replace(/\//g, '-'));
+
+                if (!isNaN(rowDate.getTime()) && rowDate >= startDateTime && rowDate <= endDateTime) {
+                    row.style.display = '';
+                    visibleCount++;
+                } else {
+                    row.style.display = 'none';
+                }
+            } catch (e) {
+                console.warn('日期解析失敗:', dateText, e);
+                row.style.display = '';
+                visibleCount++;
+            }
+        } else {
+            row.style.display = '';
+            visibleCount++;
+        }
+    });
+
+    // 更新顯示的訊息數量
+    document.getElementById('currentRow').textContent = visibleCount > 0 ? '1' : '0';
+    document.getElementById('totalCount').textContent = visibleCount;
+});
+
+// 批次刪除篩選按鈕
+document.getElementById('btnDeleteFiltered')?.addEventListener('click', async function() {
+    const startDate = document.getElementById('filterStartDate').value;
+    const endDate = document.getElementById('filterEndDate').value;
+
+    if (!startDate || !endDate) {
+        await Swal.fire('提示', '請先選擇日期範圍', 'info');
+        return;
+    }
+
+    if (new Date(startDate) > new Date(endDate)) {
+        await Swal.fire('錯誤', '起始日期不可大於結束日期', 'error');
+        return;
+    }
+
     const result = await Swal.fire({
         title: '確認刪除',
-        text: '是否要刪除全部訊息?',
+        text: `是否要刪除 ${startDate} 至 ${endDate} 期間的訊息?`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonText: '確定',
@@ -535,20 +692,23 @@ document.getElementById('btnDeleteAll')?.addEventListener('click', async functio
         const response = await fetch('/api/Flow/DeleteAllMessages', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: userId })
+            body: JSON.stringify({
+                userId: userId,
+                bDate: startDate,
+                eDate: endDate
+            })
         });
 
         const data = await response.json();
 
         if (response.ok && data.success) {
-            await Swal.fire('成功', data.message, 'success');
             window.location.reload();
         } else {
-            await Swal.fire('錯誤', data.message || '刪除全部訊息失敗', 'error');
+            await Swal.fire('錯誤', data.error || data.message || '批次刪除訊息失敗', 'error');
         }
     } catch (error) {
-        console.error('刪除全部訊息失敗:', error);
-        await Swal.fire('錯誤', '刪除全部訊息失敗', 'error');
+        console.error('批次刪除訊息失敗:', error);
+        await Swal.fire('錯誤', '批次刪除訊息失敗', 'error');
     }
 });
 

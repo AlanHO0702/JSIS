@@ -807,13 +807,23 @@ namespace PcbErpApi.Controllers
             }
         }
 
-        // 刪除全部訊息
+        // 刪除全部訊息（批次刪除，依日期範圍）
         [HttpPost("DeleteAllMessages")]
         public async Task<IActionResult> DeleteAllMessages([FromBody] DeleteMessagesRequest request)
         {
             if (string.IsNullOrWhiteSpace(request.UserId))
             {
                 return BadRequest(new { error = "userId is required" });
+            }
+
+            if (!request.BDate.HasValue || !request.EDate.HasValue)
+            {
+                return BadRequest(new { error = "起始日期和結束日期為必填" });
+            }
+
+            if (request.BDate.Value > request.EDate.Value)
+            {
+                return BadRequest(new { error = "起始日期不可大於結束日期" });
             }
 
             var connectionString = _configuration.GetConnectionString("DefaultConnection");
@@ -824,14 +834,16 @@ namespace PcbErpApi.Controllers
                 {
                     await connection.OpenAsync();
 
-                    using (var command = new SqlCommand("CURdMsgAllDelete", connection))
+                    using (var command = new SqlCommand("CURdMsgAllDeleteDate", connection))
                     {
                         command.CommandType = CommandType.StoredProcedure;
                         command.Parameters.AddWithValue("@UserId", request.UserId);
+                        command.Parameters.AddWithValue("@BDate", request.BDate.Value);
+                        command.Parameters.AddWithValue("@EDate", request.EDate.Value);
                         await command.ExecuteNonQueryAsync();
                     }
 
-                    return Ok(new { success = true, message = "刪除全部訊息成功" });
+                    return Ok(new { success = true, message = "批次刪除訊息成功" });
                 }
             }
             catch (Exception ex)
@@ -1149,6 +1161,8 @@ namespace PcbErpApi.Controllers
     public class DeleteMessagesRequest
     {
         public string UserId { get; set; } = "";
+        public DateTime? BDate { get; set; }
+        public DateTime? EDate { get; set; }
     }
 
     public class MessageSendInitRequest

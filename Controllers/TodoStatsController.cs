@@ -236,28 +236,27 @@ namespace PcbErpApi.Controllers
         {
             try
             {
-                // 取得佈告欄未讀數量
-                var query = @"
-                    SELECT COUNT(*)
-                    FROM CURdNoticeBoard WITH (NOLOCK)
-                    WHERE (ValidDate IS NULL OR ValidDate >= GETDATE())
-                    AND (ExpireDate IS NULL OR ExpireDate >= GETDATE())
-                    AND NoticeId NOT IN (
-                        SELECT NoticeId
-                        FROM CURdNoticeBoardRead WITH (NOLOCK)
-                        WHERE UserId = @UserId
-                    )";
-
-                using (var command = new SqlCommand(query, connection))
+                // 取得佈告欄數量 (使用與 NoticeBoardList 相同的 stored procedure)
+                using (var command = new SqlCommand("CURdGetNoticeBoardInq", connection))
                 {
+                    command.CommandType = CommandType.StoredProcedure;
                     command.Parameters.AddWithValue("@UserId", userId);
-                    var result = await command.ExecuteScalarAsync();
-                    return result != null ? Convert.ToInt32(result) : 0;
+
+                    var count = 0;
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            count++;
+                        }
+                    }
+                    return count;
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // 如果資料表不存在或查詢失敗，返回 0
+                // 記錄錯誤並返回 0
+                Console.WriteLine($"GetAnnouncementsCount Error: {ex.Message}");
                 return 0;
             }
         }
