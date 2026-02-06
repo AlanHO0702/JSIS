@@ -15,20 +15,20 @@ using PcbErpApi.Services;
 
 namespace PcbErpApi.Pages.SPO
 {
-    public class SPO00003Model : PageModel
+    public class SPO00009Model : PageModel
     {
         private readonly PcbErpContext _context;
         private readonly PaginationService _pagedService;
         private readonly ITableDictionaryService _dictService;
 
-        public SPO00003Model(PcbErpContext context, PaginationService pagedService, ITableDictionaryService dictService)
+        public SPO00009Model(PcbErpContext context, PaginationService pagedService, ITableDictionaryService dictService)
         {
             _context = context;
             _pagedService = pagedService;
             _dictService = dictService;
         }
 
-        public string PageTitle => "SPO00003 銷售訂單查詢";
+        public string PageTitle => "SPO00009 銷貨單查詢";
         public string? DictTableName { get; set; }
         public string? ParamTableName { get; set; }
         [BindProperty(SupportsGet = true, Name = "spId")]
@@ -73,14 +73,14 @@ namespace PcbErpApi.Pages.SPO
             if (opened) await _context.Database.OpenConnectionAsync();
             try
             {
-                const string itemId = "SPO00003";
+                const string itemId = "SPO00009";
 
                 var item = await _context.CurdSysItems.AsNoTracking()
                     .FirstOrDefaultAsync(x => x.ItemId == itemId);
 
                 var className = (item?.ClassName ?? "").Replace(".dll", "", StringComparison.OrdinalIgnoreCase);
                 if (string.IsNullOrWhiteSpace(className))
-                    className = "SPOdOrderInq";
+                    className = "SPOdOutInq";
 
                 ParamTableName = ResolveParamTableName(className);
 
@@ -144,14 +144,14 @@ namespace PcbErpApi.Pages.SPO
             if (opened) await _context.Database.OpenConnectionAsync();
             try
             {
-                const string itemId = "SPO00003";
+                const string itemId = "SPO00009";
 
                 var item = await _context.CurdSysItems.AsNoTracking()
                     .FirstOrDefaultAsync(x => x.ItemId == itemId);
 
                 var className = (item?.ClassName ?? "").Replace(".dll", "", StringComparison.OrdinalIgnoreCase);
                 if (string.IsNullOrWhiteSpace(className))
-                    className = "SPOdOrderInq";
+                    className = "SPOdOutInq";
 
                 ParamTableName = ResolveParamTableName(className);
                 QueryDictFields = LoadDictSafe(ParamTableName);
@@ -192,7 +192,7 @@ namespace PcbErpApi.Pages.SPO
                     .ToList();
 
                 using var wb = new XLWorkbook();
-                var ws = wb.AddWorksheet("SPO00003");
+                var ws = wb.AddWorksheet("SPO00009");
                 for (var c = 0; c < fields.Count; c++)
                 {
                     ws.Cell(1, c + 1).Value = fields[c].DisplayLabel ?? fields[c].FieldName;
@@ -215,7 +215,7 @@ namespace PcbErpApi.Pages.SPO
 
                 // Avoid AdjustToContents to prevent font engine version conflicts.
 
-                var fileName = $"SPO00003_{DateTime.Now:yyyyMMdd}.xlsx";
+                var fileName = $"SPO00009_{DateTime.Now:yyyyMMdd}.xlsx";
                 using var stream = new MemoryStream();
                 wb.SaveAs(stream);
                 stream.Position = 0;
@@ -516,95 +516,9 @@ namespace PcbErpApi.Pages.SPO
             return (byField, byParam);
         }
 
-        public sealed class CustomerSelectRequest
-        {
-            public int SpId { get; set; }
-            public List<string> CustomerIds { get; set; } = new();
-        }
-
-        public async Task<IActionResult> OnGetCustomerSelectedAsync(int spId)
-        {
-            if (spId <= 0)
-                return new JsonResult(new { items = Array.Empty<string>() });
-
-            var conn = _context.Database.GetDbConnection();
-            var opened = conn.State != ConnectionState.Open;
-            if (opened) await _context.Database.OpenConnectionAsync();
-            try
-            {
-                var list = new List<string>();
-                await using var cmd = conn.CreateCommand();
-                cmd.CommandText = "select Selected from SPOdInqTable with (nolock) where SpId=@spid and PaperId='SPOdOrderInq' order by Item";
-                var p = cmd.CreateParameter();
-                p.ParameterName = "@spid";
-                p.Value = spId;
-                cmd.Parameters.Add(p);
-
-                await using var rd = await cmd.ExecuteReaderAsync();
-                while (await rd.ReadAsync())
-                {
-                    var v = rd["Selected"]?.ToString();
-                    if (!string.IsNullOrWhiteSpace(v)) list.Add(v.Trim());
-                }
-                return new JsonResult(new { items = list });
-            }
-            finally
-            {
-                if (opened) await _context.Database.CloseConnectionAsync();
-            }
-        }
-
-        public async Task<IActionResult> OnPostSaveCustomersAsync([FromBody] CustomerSelectRequest req)
-        {
-            if (req == null || req.SpId <= 0)
-                return BadRequest("SpId is required.");
-
-            var conn = _context.Database.GetDbConnection();
-            var opened = conn.State != ConnectionState.Open;
-            if (opened) await _context.Database.OpenConnectionAsync();
-            try
-            {
-                await using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = "delete SPOdInqTable where SpId=@spid and PaperId='SPOdOrderInq'";
-                    var p = cmd.CreateParameter();
-                    p.ParameterName = "@spid";
-                    p.Value = req.SpId;
-                    cmd.Parameters.Add(p);
-                    await cmd.ExecuteNonQueryAsync();
-                }
-
-                var item = 1;
-                foreach (var id in req.CustomerIds.Where(x => !string.IsNullOrWhiteSpace(x)))
-                {
-                    await using var cmd = conn.CreateCommand();
-                    cmd.CommandText = "insert into SPOdInqTable(SPId,Item,PaperId,Selected) values (@spid,@item,'SPOdOrderInq',@sel)";
-                    var p1 = cmd.CreateParameter();
-                    p1.ParameterName = "@spid";
-                    p1.Value = req.SpId;
-                    cmd.Parameters.Add(p1);
-                    var p2 = cmd.CreateParameter();
-                    p2.ParameterName = "@item";
-                    p2.Value = item++;
-                    cmd.Parameters.Add(p2);
-                    var p3 = cmd.CreateParameter();
-                    p3.ParameterName = "@sel";
-                    p3.Value = id.Trim();
-                    cmd.Parameters.Add(p3);
-                    await cmd.ExecuteNonQueryAsync();
-                }
-            }
-            finally
-            {
-                if (opened) await _context.Database.CloseConnectionAsync();
-            }
-
-            return new JsonResult(new { ok = true });
-        }
-
         public async Task<IActionResult> OnPostResetParamsAsync()
         {
-            const string itemId = "SPO00003";
+            const string itemId = "SPO00009";
             var conn = _context.Database.GetDbConnection();
             var opened = conn.State != ConnectionState.Open;
             if (opened) await _context.Database.OpenConnectionAsync();

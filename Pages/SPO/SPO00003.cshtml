@@ -54,6 +54,10 @@
   {
       var dt = (f.DataType ?? "").ToLowerInvariant();
       if (dt.Contains("date")) return "date";
+      var fname = (f.FieldName ?? "").ToLowerInvariant();
+      if (fname.Contains("date")) return "date";
+      var label = (f.DisplayLabel ?? "");
+      if (label.Contains("日期")) return "date";
       return "text";
   }
 
@@ -146,29 +150,21 @@
           }
           else if (IsSelect(f))
           {
-            <select class="form-select form-select-sm inq-input"
-                    name="@name"
-                    data-lookup-table="@f.LookupTable"
-                    data-lookup-key="@((f.LookupKeyField ?? "").Replace(" ", ""))"
-                    data-lookup-result="@((f.LookupResultField ?? "").Replace(" ", ""))"
-                    data-cond1-field="@f.LookupCond1Field"
-                    data-cond1-source="@f.LookupCond1ResultField"
-                    data-cond2-field="@f.LookupCond2Field"
-                    data-cond2-source="@f.LookupCond2ResultField"
-                    data-selected="@cur">
-              <option value=""></option>
-              @foreach (var opt in ParseItems(f.Items))
-              {
-                if (cur == opt.Value)
-                {
-                  <option value="@opt.Value" selected>@opt.Label</option>
-                }
-                else
-                {
-                  <option value="@opt.Value">@opt.Label</option>
-                }
-              }
-            </select>
+            <span class="inq-select">
+              <input type="@type" name="@name" class="form-control form-control-sm inq-input inq-select-input"
+                     value="@cur"
+                     autocomplete="off"
+                     data-items="@f.Items"
+                     data-lookup-table="@f.LookupTable"
+                     data-lookup-key="@((f.LookupKeyField ?? "").Replace(" ", ""))"
+                     data-lookup-result="@((f.LookupResultField ?? "").Replace(" ", ""))"
+                     data-cond1-field="@f.LookupCond1Field"
+                     data-cond1-source="@f.LookupCond1ResultField"
+                     data-cond2-field="@f.LookupCond2Field"
+                     data-cond2-source="@f.LookupCond2ResultField"
+                     data-selected="@cur" />
+              <button type="button" class="inq-select-btn" aria-label="開啟清單">▾</button>
+            </span>
           }
           else
           {
@@ -181,6 +177,7 @@
 
     <input type="hidden" name="page" value="1" />
     <input type="hidden" name="pageSize" value="@Model.PageSize" />
+    <input type="hidden" name="spId" value="@Model.SpId" />
   </form>
 }
 
@@ -268,19 +265,42 @@
 }
 
 <div class="modal fade" id="customerMultiModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
+  <div class="modal-dialog modal-lg" style="max-width:920px;">
+    <div class="modal-content customer-multi-modal" style="font-size:12px;">
+      <div class="modal-header" style="background:#f3f7ff;">
         <h5 class="modal-title">客戶多選</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <div class="text-muted mb-2">請輸入客戶代碼，一行一筆或逗號分隔。</div>
-        <textarea id="customerMultiInput" class="form-control" rows="10"></textarea>
+        <div class="text-muted mb-2">用左邊挑選、右邊已選；支援搜尋。</div>
+        <div class="row g-2 align-items-stretch customer-dual-row">
+          <div class="col-md-5 customer-dual-side customer-dual-side-left">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <div class="fw-semibold">可選客戶</div>
+              <div class="small text-muted">總數 <span id="cusAvailCount">0</span></div>
+            </div>
+            <input id="customerAvailFilter" class="form-control form-control-sm mb-2" placeholder="搜尋客戶代碼/名稱" style="font-size:12px;padding:3px 6px;">
+            <div class="border rounded p-2 customer-dual-list" id="customerAvailList" style="height:420px;font-size:12px;"></div>
+          </div>
+          <div class="col-md-2 d-flex flex-column gap-2 align-items-center justify-content-center customer-dual-actions">
+            <button type="button" class="btn cus-move-btn cus-move-primary" id="cusMoveRight" style="width:50px !important;height:22px !important;padding:0 !important;line-height:1 !important;border-radius:8px;font-size:12px;">▶</button>
+            <button type="button" class="btn cus-move-btn cus-move-primary" id="cusMoveAllRight" style="width:50px !important;height:22px !important;padding:0 !important;line-height:1 !important;border-radius:8px;font-size:12px;">▶▶</button>
+            <button type="button" class="btn cus-move-btn cus-move-secondary" id="cusMoveLeft" style="width:50px !important;height:22px !important;padding:0 !important;line-height:1 !important;border-radius:8px;font-size:12px;">◀</button>
+            <button type="button" class="btn cus-move-btn cus-move-secondary" id="cusMoveAllLeft" style="width:50px !important;height:22px !important;padding:0 !important;line-height:1 !important;border-radius:8px;font-size:12px;">◀◀</button>
+          </div>
+          <div class="col-md-5 customer-dual-side customer-dual-side-right">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <div class="fw-semibold">已選客戶</div>
+              <div class="small text-muted">總數 <span id="cusChosenCount">0</span></div>
+            </div>
+            <input id="customerChosenFilter" class="form-control form-control-sm mb-2" placeholder="搜尋客戶代碼/名稱" style="font-size:12px;padding:3px 6px;">
+            <div class="border rounded p-2 customer-dual-list" id="customerChosenList" style="height:420px;font-size:12px;"></div>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
-        <button type="button" class="btn btn-primary" id="btnCustomerMultiSave">套用</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary btn-sm" id="btnCustomerMultiSave">套用</button>
       </div>
     </div>
   </div>
@@ -324,6 +344,58 @@
     height: 26px;
     padding: 2px 6px;
   }
+  .inq-select {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+  .inq-select-input {
+    padding-right: 18px;
+  }
+  .inq-select-btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 0;
+    background: transparent;
+    font-size: 0.75rem;
+    color: #4b5563;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+  }
+  .inq-suggest {
+    position: absolute;
+    background: #fff;
+    border: 1px solid #c9d2e3;
+    border-radius: 6px;
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 2000;
+  }
+  .inq-suggest-item {
+    display: flex;
+    gap: 6px;
+    padding: 4px 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+  }
+  .inq-suggest-item:hover {
+    background: #eef3ff;
+  }
+  .inq-suggest-code {
+    min-width: 40px;
+    font-weight: 600;
+    color: #1d3b6b;
+  }
+  .inq-suggest-label {
+    color: #4b5563;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .compact-check .form-check-input {
     width: 14px;
     height: 14px;
@@ -345,6 +417,80 @@
     background: #f3f7ff;
     color: #2056ac;
     font-weight: 600;
+  }
+  .customer-multi-modal .customer-dual-list {
+    height: 420px !important;
+    overflow: auto;
+    background: #fff;
+  }
+  .customer-multi-modal .customer-dual-list table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem !important;
+  }
+  .customer-multi-modal .customer-dual-list th,
+  .customer-multi-modal .customer-dual-list td {
+    border-bottom: 1px solid #eef2f7;
+    padding: 3px 6px !important;
+    white-space: nowrap;
+  }
+  .customer-multi-modal .customer-dual-list th {
+    position: sticky;
+    top: 0;
+    background: #f7f9fc;
+    z-index: 1;
+    color: #1d3b6b;
+    font-weight: 600;
+  }
+  .customer-multi-modal .customer-dual-list tr:hover td {
+    background: #f1f5ff;
+  }
+  #customerMultiModal .modal-dialog {
+    max-width: 980px !important;
+  }
+  .customer-multi-modal .modal-title {
+    font-size: 0.88rem !important;
+    font-weight: 600;
+  }
+  .customer-multi-modal .modal-body {
+    font-size: 0.78rem !important;
+    padding: 10px 14px !important;
+  }
+  .customer-multi-modal .form-control,
+  .customer-multi-modal .form-control-sm {
+    font-size: 0.76rem !important;
+    padding: 3px 6px !important;
+  }
+  .customer-multi-modal .fw-semibold {
+    font-size: 0.78rem !important;
+  }
+  .customer-multi-modal .small {
+    font-size: 0.7rem !important;
+  }
+  .customer-multi-modal .cus-move-btn {
+    width: 30px !important;
+    height: 24px !important;
+    padding: 0;
+    border-radius: 6px !important;
+    font-size: 0.7rem !important;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .customer-multi-modal .cus-move-primary {
+    background: #e8f0ff;
+    border-color: #b9cdf5;
+    color: #1f4fbf;
+  }
+  .customer-multi-modal .cus-move-secondary {
+    background: #f2f4f8;
+    border-color: #c9d2e3;
+    color: #46526a;
+  }
+  .customer-multi-modal .cus-move-primary:hover {
+    background: #d9e6ff;
+  }
+  .customer-multi-modal .cus-move-secondary:hover {
+    background: #e6ebf3;
   }
 </style>
 
@@ -390,40 +536,45 @@
   });
 
   document.getElementById("btnExportExcel")?.addEventListener("click", () => {
-    const table = document.querySelector(".inq-table");
-    if (!table) return;
-    const rows = Array.from(table.querySelectorAll("tr")).map(tr =>
-      Array.from(tr.querySelectorAll("th,td")).map(td => `"${(td.textContent || "").replace(/"/g, '""')}"`).join(",")
-    );
-    const csv = rows.join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "SPO00003.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    const url = new URL(window.location.href);
+    url.searchParams.set("handler", "Export");
+    window.location.href = url.toString();
   });
 
-  document.getElementById("btnPaperTrace")?.addEventListener("click", () => {
+  const currentUserId = "@Model.CurrentUserId";
+  const currentUseId = "@Model.CurrentUseId";
+
+  document.getElementById("btnPaperTrace")?.addEventListener("click", async () => {
     if (!selectedRow) return alert("請先選擇一筆資料");
     const pid = selectedRow.getAttribute("data-paper-id");
     const pnum = selectedRow.getAttribute("data-paper-num");
     if (!pid || !pnum) return alert("找不到單據資訊");
+    try {
+      const res = await fetch("/api/Flow/ResolveItemIdByFromType", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paperId: pid, paperNum: pnum, userId: currentUserId, useId: currentUseId })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const itemId = data.itemId || pid;
+        window.open(`/DynamicTemplate/Paper/${encodeURIComponent(itemId)}/${encodeURIComponent(pnum)}`, "_blank");
+        return;
+      }
+    } catch {}
     window.open(`/DynamicTemplate/Paper/${encodeURIComponent(pid)}/${encodeURIComponent(pnum)}`, "_blank");
   });
 
   document.getElementById("btnCustomerMulti")?.addEventListener("click", () => {
     const el = document.getElementById("customerMultiModal");
     if (!el) return;
+    loadCustomerDual();
     const md = bootstrap.Modal.getOrCreateInstance(el);
     md.show();
   });
 
   document.getElementById("btnCustomerMultiSave")?.addEventListener("click", async () => {
-    const input = document.getElementById("customerMultiInput");
-    const raw = input?.value || "";
-    const ids = raw.split(/\r?\n|,|;/).map(x => x.trim()).filter(Boolean);
+    const ids = Array.from(customerChosen || []);
     const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
     const res = await fetch("?handler=SaveCustomers", {
       method: "POST",
@@ -435,8 +586,104 @@
     });
     if (!res.ok) return alert("儲存失敗");
     bootstrap.Modal.getOrCreateInstance(document.getElementById("customerMultiModal")).hide();
-    alert("已套用客戶多選");
+    const url = new URL(window.location.href);
+    url.searchParams.delete("sCompanyId");
+    url.searchParams.delete("sECompanyId");
+    url.searchParams.set("page", "1");
+    if (@Model.SpId > 0) url.searchParams.set("spId", "@Model.SpId");
+    window.location.href = url.toString();
   });
+
+  let customerCache = null;
+  let customerChosen = new Set();
+
+  const renderCustomerDual = () => {
+    const availRoot = document.getElementById("customerAvailList");
+    const chosenRoot = document.getElementById("customerChosenList");
+    if (!availRoot || !chosenRoot) return;
+    const fAvail = (document.getElementById("customerAvailFilter")?.value || "").toLowerCase();
+    const fChosen = (document.getElementById("customerChosenFilter")?.value || "").toLowerCase();
+
+    const avail = [];
+    const chosen = [];
+    (customerCache || []).forEach(c => {
+      if (customerChosen.has(c.value)) chosen.push(c);
+      else avail.push(c);
+    });
+
+    const filterList = (list, q) => list.filter(c => !q || c.value.toLowerCase().includes(q) || c.text.toLowerCase().includes(q));
+    const availFiltered = filterList(avail, fAvail);
+    const chosenFiltered = filterList(chosen, fChosen);
+
+    const renderTable = (list, root, name) => {
+      root.innerHTML = "";
+      const table = document.createElement("table");
+      table.innerHTML = `
+        <thead><tr><th style="width:26px"></th><th>客戶代碼</th><th>客戶名稱</th></tr></thead>
+        <tbody></tbody>`;
+      const tbody = table.querySelector("tbody");
+      list.forEach(c => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><input type="checkbox" data-name="${name}" value="${c.value}"></td>
+          <td>${c.value}</td>
+          <td>${c.text}</td>`;
+        tbody.appendChild(tr);
+      });
+      root.appendChild(table);
+    };
+
+    renderTable(availFiltered, availRoot, "avail");
+    renderTable(chosenFiltered, chosenRoot, "chosen");
+    document.getElementById("cusAvailCount").textContent = String(avail.length);
+    document.getElementById("cusChosenCount").textContent = String(chosen.length);
+  };
+
+  const loadCustomerDual = async () => {
+    if (!customerCache) {
+      const res = await fetch("/api/report/lookup/customer");
+      if (!res.ok) return;
+      const data = await res.json();
+      customerCache = (data || []).map(x => ({
+        value: (x.value ?? "").toString(),
+        text: (x.text ?? "").toString()
+      })).filter(x => x.value);
+    }
+    if (@Model.SpId > 0) {
+      const resSel = await fetch(`?handler=CustomerSelected&spId=@Model.SpId`);
+      if (resSel.ok) {
+        const dataSel = await resSel.json();
+        customerChosen = new Set((dataSel?.items || []).map(x => (x || "").toString()));
+      }
+    }
+    renderCustomerDual();
+  };
+
+  const moveChecked = (from, to) => {
+    const boxes = Array.from(document.querySelectorAll(`input[type="checkbox"][data-name="${from}"]:checked`));
+    boxes.forEach(b => {
+      const id = b.value;
+      if (to === "chosen") customerChosen.add(id);
+      else customerChosen.delete(id);
+    });
+    renderCustomerDual();
+  };
+
+  const moveAll = (to) => {
+    if (to === "chosen") {
+      (customerCache || []).forEach(c => customerChosen.add(c.value));
+    } else {
+      customerChosen = new Set();
+    }
+    renderCustomerDual();
+  };
+
+  document.getElementById("cusMoveRight")?.addEventListener("click", () => moveChecked("avail", "chosen"));
+  document.getElementById("cusMoveLeft")?.addEventListener("click", () => moveChecked("chosen", "avail"));
+  document.getElementById("cusMoveAllRight")?.addEventListener("click", () => moveAll("chosen"));
+  document.getElementById("cusMoveAllLeft")?.addEventListener("click", () => moveAll("avail"));
+  document.getElementById("customerAvailFilter")?.addEventListener("input", renderCustomerDual);
+  document.getElementById("customerChosenFilter")?.addEventListener("input", renderCustomerDual);
 
   document.getElementById("btnSaveHeight")?.addEventListener("click", async () => {
     const h = document.querySelector(".inq-body")?.clientHeight || 0;
@@ -469,50 +716,175 @@
     return el.value || "";
   };
 
-  const loadLookupSelect = async (sel) => {
-    const table = sel.dataset.lookupTable || "";
-    const key = sel.dataset.lookupKey || "";
-    const result = sel.dataset.lookupResult || "";
-    const selected = sel.dataset.selected || "";
-    if (!table || !key || !result) return;
+  const parseItems = (raw) => {
+    if (!raw) return [];
+    return raw.split(/[;,]/).map(p => p.trim()).filter(Boolean).map(p => {
+      const kv = p.split(/=|:/);
+      if (kv.length >= 2) return { value: kv[0].trim(), label: kv.slice(1).join(":").trim() };
+      return { value: p, label: p };
+    });
+  };
 
-    const cond1Field = (sel.dataset.cond1Field || "").trim();
-    const cond1Source = (sel.dataset.cond1Source || "").trim();
-    const cond2Field = (sel.dataset.cond2Field || "").trim();
-    const cond2Source = (sel.dataset.cond2Source || "").trim();
+  const buildCondKey = (el) => {
+    const table = el.dataset.lookupTable || "";
+    const key = el.dataset.lookupKey || "";
+    const result = el.dataset.lookupResult || "";
+    const cond1Field = (el.dataset.cond1Field || "").trim();
+    const cond1Source = (el.dataset.cond1Source || "").trim();
+    const cond2Field = (el.dataset.cond2Field || "").trim();
+    const cond2Source = (el.dataset.cond2Source || "").trim();
     const cond1ValueField = cond1Source || cond1Field;
     const cond2ValueField = cond2Source || cond2Field;
     const cond1Value = cond1ValueField ? resolveCondValue(cond1ValueField) : "";
     const cond2Value = cond2ValueField ? resolveCondValue(cond2ValueField) : "";
-
-    const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(table)}&key=${encodeURIComponent(key)}&result=${encodeURIComponent(result)}`
-      + (cond1Field && cond1Value ? `&cond1Field=${encodeURIComponent(cond1Field)}&cond1Value=${encodeURIComponent(cond1Value)}` : "")
-      + (cond2Field && cond2Value ? `&cond2Field=${encodeURIComponent(cond2Field)}&cond2Value=${encodeURIComponent(cond2Value)}` : "");
-    const res = await fetch(url);
-    if (!res.ok) return;
-    const data = await res.json();
-    if (!Array.isArray(data)) return;
-
-    sel.innerHTML = "";
-    const emptyOpt = document.createElement("option");
-    emptyOpt.value = "";
-    emptyOpt.textContent = "";
-    sel.appendChild(emptyOpt);
-
-    data.forEach(row => {
-      const val = row?.key ?? "";
-      const label = Object.keys(row || {}).filter(k => k.startsWith("result")).map(k => row[k]).join(" - ");
-      const opt = document.createElement("option");
-      opt.value = val;
-      opt.textContent = label || val;
-      if (String(val) === String(selected)) opt.selected = true;
-      sel.appendChild(opt);
-    });
+    const items = el.dataset.items || "";
+    return [table, key, result, cond1Field, cond1Value, cond2Field, cond2Value, items].join("|");
   };
 
-  document.querySelectorAll("select[data-lookup-table]").forEach(sel => {
-    if (!sel.dataset.lookupTable) return;
-    loadLookupSelect(sel);
+  const fetchLookupOptions = async (el) => {
+    const items = parseItems(el.dataset.items || "");
+    const table = el.dataset.lookupTable || "";
+    const key = el.dataset.lookupKey || "";
+    const result = el.dataset.lookupResult || "";
+    const selected = el.dataset.selected || "";
+
+    let options = [...items];
+
+    if (table && key && result) {
+      const cond1Field = (el.dataset.cond1Field || "").trim();
+      const cond1Source = (el.dataset.cond1Source || "").trim();
+      const cond2Field = (el.dataset.cond2Field || "").trim();
+      const cond2Source = (el.dataset.cond2Source || "").trim();
+      const cond1ValueField = cond1Source || cond1Field;
+      const cond2ValueField = cond2Source || cond2Field;
+      const cond1Value = cond1ValueField ? resolveCondValue(cond1ValueField) : "";
+      const cond2Value = cond2ValueField ? resolveCondValue(cond2ValueField) : "";
+
+      const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(table)}&key=${encodeURIComponent(key)}&result=${encodeURIComponent(result)}`
+        + (cond1Field && cond1Value ? `&cond1Field=${encodeURIComponent(cond1Field)}&cond1Value=${encodeURIComponent(cond1Value)}` : "")
+        + (cond2Field && cond2Value ? `&cond2Field=${encodeURIComponent(cond2Field)}&cond2Value=${encodeURIComponent(cond2Value)}` : "");
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          const lookups = data.map(row => {
+            const val = row?.key ?? "";
+            const label = Object.keys(row || {}).filter(k => k.startsWith("result")).map(k => row[k]).join(" - ");
+            return { value: String(val), label: label || String(val) };
+          });
+          options = options.concat(lookups);
+        }
+      }
+    }
+
+    const map = new Map();
+    options.forEach(o => {
+      if (!o.value) return;
+      if (!map.has(o.value)) map.set(o.value, o);
+    });
+
+    if (selected && !map.has(selected)) map.set(selected, { value: selected, label: selected });
+
+    return Array.from(map.values());
+  };
+
+  const suggest = document.createElement("div");
+  suggest.className = "inq-suggest";
+  suggest.style.display = "none";
+  document.body.appendChild(suggest);
+  let suggestTarget = null;
+  let suggestOptions = [];
+  let keepSuggestUntil = 0;
+
+  const positionSuggest = (el) => {
+    const rect = el.getBoundingClientRect();
+    suggest.style.left = `${rect.left + window.scrollX}px`;
+    suggest.style.top = `${rect.bottom + window.scrollY}px`;
+    suggest.style.width = `${rect.width}px`;
+  };
+
+  const hideSuggest = () => {
+    if (Date.now() < keepSuggestUntil) return;
+    suggest.style.display = "none";
+    suggest.innerHTML = "";
+    suggestTarget = null;
+    suggestOptions = [];
+  };
+
+  const renderSuggest = (el, list) => {
+    const q = (el.value || "").trim().toLowerCase();
+    const filtered = q
+      ? list.filter(o => (o.value || "").toLowerCase().includes(q) || (o.label || "").toLowerCase().includes(q))
+      : list;
+
+    suggest.innerHTML = "";
+    if (filtered.length === 0) {
+      hideSuggest();
+      return;
+    }
+
+    filtered.slice(0, 200).forEach(o => {
+      const item = document.createElement("div");
+      item.className = "inq-suggest-item";
+      item.innerHTML = `<div class="inq-suggest-code">${o.value}</div><div class="inq-suggest-label">${o.label}</div>`;
+      item.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        el.value = o.value;
+        hideSuggest();
+      });
+      suggest.appendChild(item);
+    });
+
+    positionSuggest(el);
+    suggest.style.display = "block";
+  };
+
+  const lookupCache = new Map();
+
+  const showSuggest = async (el) => {
+    const key = buildCondKey(el);
+    if (!lookupCache.has(key)) {
+      const opts = await fetchLookupOptions(el);
+      lookupCache.set(key, opts);
+    }
+    suggestTarget = el;
+    suggestOptions = lookupCache.get(key) || [];
+    renderSuggest(el, suggestOptions);
+  };
+
+  document.querySelectorAll(".inq-select-btn").forEach(btn => {
+    btn.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      keepSuggestUntil = Date.now() + 250;
+      const input = btn.previousElementSibling;
+      if (input) {
+        input.focus();
+        showSuggest(input);
+      }
+    });
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!suggestTarget) return;
+    if (e.target === suggestTarget || suggest.contains(e.target)) return;
+    hideSuggest();
+  });
+
+  document.querySelectorAll(".inq-input[data-lookup-table], .inq-input[data-items]").forEach(el => {
+    el.addEventListener("focus", () => showSuggest(el));
+    el.addEventListener("input", () => {
+      if (suggestTarget !== el) return showSuggest(el);
+      renderSuggest(el, suggestOptions);
+    });
+    el.addEventListener("blur", () => {
+      setTimeout(() => {
+        if (!suggest.matches(":hover")) hideSuggest();
+      }, 120);
+    });
+  });
+
+  suggest.addEventListener("mousedown", () => {
+    keepSuggestUntil = Date.now() + 250;
   });
 </script>
 
