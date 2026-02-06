@@ -2,7 +2,9 @@
   const tbody = document.getElementById('matinfo-browse-body');
   const theadRow = document.getElementById('matinfo-browse-head');
   const form = document.querySelector('.matinfo-form');
-    const countEl = document.getElementById('matinfo-count');
+  const modeEl = document.getElementById('singleGridMode');
+  const countEl = document.getElementById('singleGridCount');
+  const countBox = document.getElementById('singleGridCountBox');
   const browseScrollTop = document.getElementById('matinfo-browse-scroll-top');
   const browseScrollBody = document.getElementById('matinfo-browse-scroll-body');
   const formScrollTop = document.getElementById('matinfo-form-scroll-top');
@@ -17,8 +19,10 @@
   const btnToEmo = document.getElementById('btnMatInfoToEmo');
   const btnDelete = document.getElementById('btnMatInfoDelete');
   const btnSave = document.getElementById('btnMatInfoSave');
+  const btnTabFirst = document.getElementById('btnMatInfoTabFirst');
   const btnTabPrev = document.getElementById('btnMatInfoTabPrev');
   const btnTabNext = document.getElementById('btnMatInfoTabNext');
+  const btnTabLast = document.getElementById('btnMatInfoTabLast');
   const unitTable = document.getElementById('matinfo-unit-table');
   const unitWrap = document.getElementById('matinfo-unit-wrap');
   const custTable = document.getElementById('matinfo-cust-table');
@@ -126,32 +130,36 @@
   let kitGrid = null;
   const pageRoot = document.querySelector('.matinfo-page');
   const itemId = pageRoot?.dataset?.itemId || '';
+  const itemIdUpper = (itemId || '').toUpperCase();
+  const resizableItemIds = new Set(['MG000008', 'CPN00006', 'MG000002', 'CPN00007']);
+  const enableColumnResize = resizableItemIds.has(itemIdUpper);
+  const columnWidthStorageKey = enableColumnResize ? `matinfo:col-widths:${itemIdUpper}` : null;
     const dictTableName = (() => {
-      const id = (itemId || '').toUpperCase();
+      const id = itemIdUpper;
       if (id === 'MG000008' || id === 'CPN00006') return 'MGN_MINdMatInfo2';
       if (id === 'MG000002' || id === 'CPN00007') return 'MGN_MINdMatInfo40';
       return 'MINdMatInfo';
     })();
 
     const dictSearchTableName = (() => {
-      const id = (itemId || '').toUpperCase();
+      const id = itemIdUpper;
       if (id === 'MG000008' || id === 'CPN00006') return 'MGN_MINdMatInfo21';
       if (id === 'MG000002' || id === 'CPN00007') return 'MGN_MINdMatInfo41';
       return dictTableName;
     })();
 
   const dictPanelTableName = (() => {
-    const id = (itemId || '').toUpperCase();
+    const id = itemIdUpper;
     if (id === 'MG000008' || id === 'CPN00006') return 'MGN_MINdMatInfo2PNL';
     if (id === 'MG000002' || id === 'CPN00007') return 'MGN_MINdMatInfo40PNL';
     return dictTableName;
   })();
   const custTabLabel = (() => {
-    const id = (itemId || '').toUpperCase();
+    const id = itemIdUpper;
     return (id === 'MG000008' || id === 'CPN00006') ? '客戶料號' : '廠商料號';
   })();
   const defaultMbFilter = (() => {
-    const id = (itemId || '').toUpperCase();
+    const id = itemIdUpper;
     if (id === 'MG000008' || id === 'CPN00006') return 0;
     if (id === 'MG000002' || id === 'CPN00007') return 1;
     return null;
@@ -419,6 +427,8 @@
         const tr = document.createElement('tr');
         tr.innerHTML = `<td colspan="${cfg.columns.length}">沒有資料</td>`;
         tbodyEl.appendChild(tr);
+        applyDetailTableWidths(cfg.table);
+        attachDetailTableResizers(cfg.table);
         state.selectedIndex = -1;
         setToolbarEnabled();
         return;
@@ -454,6 +464,9 @@
         tr.addEventListener('click', () => selectRow(idx));
         tbodyEl.appendChild(tr);
       });
+
+      applyDetailTableWidths(cfg.table);
+      attachDetailTableResizers(cfg.table);
 
       if (state.selectedIndex < 0) {
         selectRow(0);
@@ -585,9 +598,9 @@
   const applyTopToolbarVisibility = () => {
     const id = (itemId || '').toUpperCase();
     if (id !== 'MG000002' && id !== 'CPN00007') return;
-    const keep = new Set([btnTabPrev, btnTabNext, btnQuery, btnAdd, btnDelete, btnEdit]);
+    const keep = new Set([btnTabFirst, btnTabPrev, btnTabNext, btnTabLast, btnQuery, btnAdd, btnDelete, btnEdit]);
     const all = [
-      btnTabPrev, btnTabNext, btnQuery, btnEdit, btnCancel, btnAdd,
+      btnTabFirst, btnTabPrev, btnTabNext, btnTabLast, btnQuery, btnEdit, btnCancel, btnAdd,
       btnToFormal, btnDetail, btnHistory, btnToEmo, btnDelete, btnSave
     ];
     all.forEach((btn) => {
@@ -627,6 +640,17 @@
     if (!resp.ok) return new Map();
     const data = await resp.json();
     const map = new Map();
+    const setKeyVariants = (raw, label) => {
+      const base = String(raw);
+      if (!base) return;
+      map.set(base, label);
+      const trimmed = base.trim();
+      if (trimmed && trimmed !== base) map.set(trimmed, label);
+      if (trimmed) {
+        map.set(trimmed.toLowerCase(), label);
+        map.set(trimmed.toUpperCase(), label);
+      }
+    };
     (data || []).forEach((row) => {
       const rawKey = row?.key;
       if (rawKey == null) return;
@@ -638,9 +662,7 @@
         .filter((v) => v != null && typeof v !== 'object' && String(v).trim() !== '')
         .map((v) => String(v));
       const label = labelParts.join(' - ');
-      map.set(keyStr, label || keyStr);
-      const trimmed = keyStr.trim();
-      if (trimmed && trimmed !== keyStr) map.set(trimmed, label || trimmed);
+      setKeyVariants(keyStr, label || keyStr);
     });
     return map;
   }
@@ -1202,6 +1224,11 @@
     isEditMode = !!enabled;
     setFormEditable(isEditMode);
     setButtonText(btnEdit, isEditMode ? '保留' : '修改');
+    if (modeEl) modeEl.textContent = isEditMode ? '編輯模式' : '瀏覽模式';
+    if (countBox) {
+      countBox.classList.toggle('mode-edit', isEditMode);
+      countBox.classList.toggle('mode-view', !isEditMode);
+    }
     if (isEditMode) {
       if (!preserveCancelSnapshot) {
         cancelSnapshot = getFormData();
@@ -1213,7 +1240,7 @@
     }
     if (btnSave) btnSave.hidden = isEditMode;
     if (btnCancel) btnCancel.hidden = !isEditMode;
-    const lockButtons = [btnQuery, btnAdd, btnToFormal, btnDetail, btnHistory, btnToEmo, btnDelete, btnSave, btnTabPrev, btnTabNext];
+    const lockButtons = [btnQuery, btnAdd, btnToFormal, btnDetail, btnHistory, btnToEmo, btnDelete, btnSave, btnTabFirst, btnTabPrev, btnTabNext, btnTabLast];
     lockButtons.forEach((btn) => { if (btn) btn.disabled = isEditMode; });
     document.querySelector('.matinfo-page')?.classList.toggle('is-edit-mode', isEditMode);
     detailGrids.forEach((grid) => grid.toggleEdit(isEditMode));
@@ -1562,9 +1589,11 @@
     el.classList.add('abs-item');
     if (extraClass) el.classList.add(extraClass);
     el.style.position = 'absolute';
+    const isField = el.matches && el.matches('input, select, textarea');
+    const fieldGap = isField ? 6 : 0;
     if (pos.top !== null) el.style.top = `${pos.top + topPad}px`;
-    if (pos.left !== null) el.style.left = `${pos.left}px`;
-    if (pos.width !== null) el.style.width = `${pos.width}px`;
+    if (pos.left !== null) el.style.left = `${pos.left + fieldGap}px`;
+    if (pos.width !== null) el.style.width = `${Math.max(0, pos.width - fieldGap)}px`;
     if (pos.height !== null) el.style.height = `${pos.height}px`;
     const estHeight = pos.height ?? (el.tagName === 'LABEL' ? 22 : 24);
     const estTop = (pos.top ?? 0) + topPad;
@@ -1865,6 +1894,253 @@
     }));
   }
 
+  function loadColumnWidthMap() {
+    if (!columnWidthStorageKey) return {};
+    try {
+      const raw = localStorage.getItem(columnWidthStorageKey);
+      if (!raw) return {};
+      const data = JSON.parse(raw);
+      return data && typeof data === 'object' ? data : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveColumnWidthMap(map) {
+    if (!columnWidthStorageKey) return;
+    try {
+      localStorage.setItem(columnWidthStorageKey, JSON.stringify(map));
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  function applyStoredColumnWidths() {
+    if (!enableColumnResize) return;
+    const widthMap = loadColumnWidthMap();
+    columns.forEach((col) => {
+      const key = col?.key;
+      const value = key ? Number(widthMap[key]) : null;
+      if (key && Number.isFinite(value) && value > 20) {
+        col.width = `${Math.round(value)}px`;
+      }
+    });
+  }
+
+  function updateColumnWidthAt(index, width, persist) {
+    if (!columns[index] || !theadRow) return;
+    const next = Math.max(40, Math.round(width));
+    columns[index].width = `${next}px`;
+    const th = theadRow.querySelectorAll('th')[index];
+    if (th) th.style.width = columns[index].width;
+    if (tbody) {
+      const rows = tbody.querySelectorAll('tr');
+      rows.forEach((row) => {
+        const cells = row.children;
+        if (!cells || !cells.length) return;
+        const cell = cells[index];
+        if (cell) cell.style.width = columns[index].width;
+      });
+    }
+    if (persist) {
+      const map = loadColumnWidthMap();
+      const key = columns[index].key;
+      if (key) {
+        map[key] = next;
+        saveColumnWidthMap(map);
+      }
+    }
+  }
+
+  function getDetailTableStorageKey(table) {
+    if (!enableColumnResize || !table) return null;
+    const key = table.dataset.resizeKey || table.id;
+    if (!key) return null;
+    return `matinfo:detail-col-widths:${itemIdUpper}:${key}`;
+  }
+
+  function ensureDetailResizeKey(table) {
+    if (!table || table.dataset.resizeKey) return;
+    if (table.id) {
+      table.dataset.resizeKey = table.id;
+      return;
+    }
+    const pane = table.closest('.tab-pane');
+    const paneId = pane?.id || 'pane';
+    const list = pane ? Array.from(pane.querySelectorAll('table')) : Array.from(document.querySelectorAll('.matinfo-form table'));
+    const idx = list.indexOf(table);
+    table.dataset.resizeKey = `${paneId}-${idx >= 0 ? idx : list.length}`;
+  }
+
+  function loadDetailWidthMap(table) {
+    const storageKey = getDetailTableStorageKey(table);
+    if (!storageKey) return {};
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return {};
+      const data = JSON.parse(raw);
+      return data && typeof data === 'object' ? data : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveDetailWidthMap(table, map) {
+    const storageKey = getDetailTableStorageKey(table);
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(map));
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  function applyDetailTableWidths(table) {
+    if (!enableColumnResize || !table) return;
+    const widthMap = loadDetailWidthMap(table);
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    if (!ths.length) return;
+    ths.forEach((th, idx) => {
+      const value = Number(widthMap[idx]);
+      if (!Number.isFinite(value) || value <= 20) return;
+      const width = `${Math.round(value)}px`;
+      th.style.width = width;
+      table.querySelectorAll('tbody tr').forEach((row) => {
+        const cell = row.children[idx];
+        if (cell) cell.style.width = width;
+      });
+    });
+    lockDetailTableWidths(table);
+    refreshDetailTableWidth(table);
+  }
+
+  function lockDetailTableWidths(table) {
+    if (!table || table.dataset.fixedLayout === '1') return;
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    if (!ths.length) return;
+    let total = 0;
+    ths.forEach((th, idx) => {
+      const width = Math.round(th.getBoundingClientRect().width || th.offsetWidth || 0);
+      if (width <= 0) return;
+      th.style.width = `${width}px`;
+      table.querySelectorAll('tbody tr').forEach((row) => {
+        const cell = row.children[idx];
+        if (cell) cell.style.width = `${width}px`;
+      });
+      total += width;
+    });
+    if (total <= 0) return;
+    table.style.width = `${total}px`;
+    table.style.tableLayout = 'fixed';
+    table.dataset.fixedLayout = '1';
+  }
+
+  function refreshDetailTableWidth(table) {
+    if (!table) return;
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    if (!ths.length) return;
+    const total = ths.reduce((sum, th) => {
+      const width = Math.round(th.getBoundingClientRect().width || th.offsetWidth || 0);
+      return width > 0 ? sum + width : sum;
+    }, 0);
+    if (total > 0) table.style.width = `${total}px`;
+  }
+
+  function updateDetailColumnWidth(table, index, width, persist) {
+    if (!enableColumnResize || !table) return;
+    const ths = table.querySelectorAll('thead th');
+    if (!ths || !ths[index]) return;
+    const next = Math.max(20, Math.round(width));
+    const th = ths[index];
+    const widthValue = `${next}px`;
+    th.style.width = widthValue;
+    table.querySelectorAll('tbody tr').forEach((row) => {
+      const cell = row.children[index];
+      if (cell) cell.style.width = widthValue;
+    });
+    refreshDetailTableWidth(table);
+    if (persist) {
+      const map = loadDetailWidthMap(table);
+      map[index] = next;
+      saveDetailWidthMap(table, map);
+    }
+  }
+
+  function attachDetailTableResizers(table) {
+    if (!enableColumnResize || !table) return;
+    table.classList.add('matinfo-resizable');
+    lockDetailTableWidths(table);
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    if (!ths.length) return;
+    ths.forEach((th, idx) => {
+      const existing = th.querySelector('.col-resizer');
+      if (existing) return;
+      const handle = document.createElement('span');
+      handle.className = 'col-resizer';
+      handle.addEventListener('click', (e) => e.stopPropagation());
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const startX = e.clientX;
+        const startWidth = th.getBoundingClientRect().width || th.offsetWidth || 0;
+        const onMove = (ev) => {
+          const delta = ev.clientX - startX;
+          updateDetailColumnWidth(table, idx, startWidth + delta, false);
+        };
+        const onUp = () => {
+          const finalWidth = th.getBoundingClientRect().width || th.offsetWidth || startWidth;
+          updateDetailColumnWidth(table, idx, finalWidth, true);
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+      th.appendChild(handle);
+    });
+  }
+
+  function initDetailTableResizers() {
+    if (!enableColumnResize) return;
+    const tables = Array.from(document.querySelectorAll('.matinfo-form table'));
+    tables.forEach((table, idx) => {
+      if (!table.querySelector('thead th')) return;
+      ensureDetailResizeKey(table);
+      applyDetailTableWidths(table);
+      attachDetailTableResizers(table);
+    });
+  }
+
+  function attachColumnResizers() {
+    if (!enableColumnResize || !theadRow) return;
+    const ths = Array.from(theadRow.querySelectorAll('th'));
+    ths.forEach((th, idx) => {
+      const existing = th.querySelector('.col-resizer');
+      if (existing) existing.remove();
+      const handle = document.createElement('span');
+      handle.className = 'col-resizer';
+      handle.addEventListener('click', (e) => e.stopPropagation());
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const startX = e.clientX;
+        const startWidth = th.getBoundingClientRect().width || th.offsetWidth || 0;
+        const onMove = (ev) => {
+          const delta = ev.clientX - startX;
+          updateColumnWidthAt(idx, startWidth + delta, false);
+        };
+        const onUp = () => {
+          updateColumnWidthAt(idx, th.getBoundingClientRect().width || th.offsetWidth || startWidth, true);
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+      th.appendChild(handle);
+    });
+  }
+
   async function buildColumns(rows) {
     const dict = await loadDict();
     const keySet = new Set();
@@ -1899,6 +2175,7 @@
     } else {
       columns = buildColumnsFromData(rows);
     }
+    applyStoredColumnWidths();
 
     theadRow.innerHTML = columns
       .map((col) => {
@@ -1912,6 +2189,7 @@
         return `<th${classAttr}${style}${keyAttr}>${col.label ?? col.key}</th>`;
       })
       .join('');
+    attachColumnResizers();
     applySortIndicators();
   }
 
@@ -2006,6 +2284,7 @@
     detailGrids.forEach((grid) => grid.loadRows());
     currentIndex = (index ?? 0) + 1;
     updateCount();
+    ensureBrowseVisible(index ?? 0);
     scheduleRender();
     if (useCommonTable) {
       refreshCommonRecord(currentKey.partnum, currentKey.revision);
@@ -2027,6 +2306,38 @@
       return;
     }
     pendingSelectIndex = clamped;
+  }
+
+  function ensureBrowseVisible(index) {
+    if (!browseScrollBody || !Number.isFinite(index)) return;
+    const clamped = Math.max(0, Math.min(index, Math.max(0, totalCount - 1)));
+    const margin = 4;
+
+    const adjustByRect = () => {
+      const row = tbody?.querySelector(`tr.matinfo-row[data-index="${clamped}"]`);
+      if (!row) return false;
+      const bodyRect = browseScrollBody.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const topEdge = bodyRect.top + margin;
+      const bottomEdge = bodyRect.bottom - margin;
+      if (rowRect.top < topEdge) {
+        browseScrollBody.scrollTop -= (topEdge - rowRect.top);
+      } else if (rowRect.bottom > bottomEdge) {
+        browseScrollBody.scrollTop += (rowRect.bottom - bottomEdge);
+      }
+      return true;
+    };
+
+    // rough scroll first (in case the row isn't rendered yet), then refine by actual rect
+    const rowTop = clamped * rowHeight;
+    const rowBottom = rowTop + rowHeight;
+    const viewTop = browseScrollBody.scrollTop;
+    const viewBottom = viewTop + browseScrollBody.clientHeight;
+    if (rowTop < viewTop || rowBottom > viewBottom) {
+      const target = Math.max(0, rowTop - Math.max(margin, (browseScrollBody.clientHeight - rowHeight) / 2));
+      browseScrollBody.scrollTop = target;
+    }
+    requestAnimationFrame(() => { adjustByRect(); });
   }
 
   function renderVirtual() {
@@ -2068,7 +2379,8 @@
             col.readOnly ? 'col-readonly' : ''
           ].filter(Boolean).join(' ');
           const classAttr = cls ? ` class="${cls}"` : '';
-          return `<td${classAttr}>${formatCellHtml(col, getValue(item, col.key))}</td>`;
+          const style = col.width ? ` style="width:${col.width}"` : '';
+          return `<td${classAttr}${style}>${formatCellHtml(col, getValue(item, col.key))}</td>`;
         }).join('') +
         `</tr>`;
     }
@@ -2184,6 +2496,24 @@
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="6">載入失敗：${err.message ?? err}</td></tr>`;
     }
+  }
+
+  async function searchByAddedPartnum(partnum) {
+    const pn = (partnum || '').toString().trim();
+    if (!pn) return false;
+    const payload = { PartNumB: pn, PartNumE: pn, Limit: 200 };
+    if (defaultMbFilter === 0 || defaultMbFilter === 1) payload.MB = defaultMbFilter;
+    const res = await fetch('/api/MatInfoSearch/Search', withJwtHeaders({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }));
+    if (!res.ok) return false;
+    const respJson = await res.json();
+    const rows = Array.isArray(respJson) ? respJson : (respJson?.data || respJson?.Data || []);
+    if (!Array.isArray(rows) || rows.length === 0) return false;
+    await renderRows(rows, rows.length);
+    return true;
   }
 
   tbody?.addEventListener('click', (e) => {
@@ -2461,12 +2791,18 @@
   const moveRow = (dir) => {
     if (totalCount <= 0) return;
     const activeIdx = Math.max(0, Math.min((currentIndex || 1) - 1, totalCount - 1));
-    const nextIdx = dir === 'prev' ? activeIdx - 1 : activeIdx + 1;
+    let nextIdx = activeIdx;
+    if (dir === 'prev') nextIdx = activeIdx - 1;
+    else if (dir === 'next') nextIdx = activeIdx + 1;
+    else if (dir === 'first') nextIdx = 0;
+    else if (dir === 'last') nextIdx = totalCount - 1;
     selectRowAt(nextIdx);
   };
 
+  btnTabFirst?.addEventListener('click', () => moveRow('first'));
   btnTabPrev?.addEventListener('click', () => moveRow('prev'));
   btnTabNext?.addEventListener('click', () => moveRow('next'));
+  btnTabLast?.addEventListener('click', () => moveRow('last'));
 
   btnHistory?.addEventListener('click', async () => {
     if (!currentKey || !currentKey.partnum) {
@@ -2729,6 +3065,7 @@
 
   syncScroll(browseScrollTop, browseScrollBody);
   syncScroll(formScrollTop, formScrollBody);
+  initDetailTableResizers();
 
   document.querySelectorAll('[data-bs-toggle="tab"]').forEach((btn) => {
     btn.addEventListener('shown.bs.tab', () => {
@@ -2736,6 +3073,16 @@
       setActiveTabContext(btn);
       if (btn.dataset.bsTarget === '#tab-glyph') {
         showGlyphPreview(getSelectedMapPath(), false);
+      }
+      const pane = btn.dataset.bsTarget ? document.querySelector(btn.dataset.bsTarget) : null;
+      if (pane) {
+        const tables = Array.from(pane.querySelectorAll('table'));
+        tables.forEach((table) => {
+          if (!table.querySelector('thead th')) return;
+          ensureDetailResizeKey(table);
+          applyDetailTableWidths(table);
+          attachDetailTableResizers(table);
+        });
       }
     });
   });
@@ -2815,7 +3162,9 @@
       }
     }
   }
-  document.addEventListener('matinfo:add:done', () => {
+  document.addEventListener('matinfo:add:done', async (e) => {
+    const partnum = e.detail?.partnum;
+    if (await searchByAddedPartnum(partnum)) return;
     loadData();
   });
   document.addEventListener('matinfo:search:done', (e) => {

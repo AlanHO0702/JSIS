@@ -12,7 +12,7 @@
   <style>
     html, body { height: 100%; }
     :root {
-      --app-toolbar-height: 56px;
+      --app-toolbar-height: 40px;
       --field-label-size: 14px;
       --field-value-size: 13px;
       --detail-max-width: 1400px;
@@ -21,7 +21,7 @@
       --tab-pad-x: 8px;
       --top-toolbar-font-size: 15px;
       --top-toolbar-icon-size: 20px;
-      --top-toolbar-btn-height: 36px;
+      --top-toolbar-btn-height: 30px;
       --top-toolbar-icon-font-size: 26px;
       --page-bg: #f4f6fb;
       --section-bg-toolbar: #f6f7f9;
@@ -142,6 +142,66 @@
     .toolbar-user .label {
       font-weight: 500;
       color: #64748b;
+    }
+    .toolbar-user-menu {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+    .toolbar-user-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border: 1px solid #cbd5f5;
+      border-radius: 6px;
+      background: #f8fafc;
+      color: #1f2937;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .toolbar-user-toggle:hover {
+      background: #eef2ff;
+    }
+    .toolbar-user-toggle .bi {
+      font-size: 12px;
+      color: #64748b;
+    }
+    .toolbar-user-dropdown {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 6px;
+      min-width: 110px;
+      background: #fff;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+      padding: 4px;
+      display: none;
+      z-index: 3000;
+    }
+    .toolbar-user-dropdown.show {
+      display: block;
+    }
+    .toolbar-user-dropdown button {
+      width: 100%;
+      border: none;
+      background: transparent;
+      text-align: left;
+      padding: 4px 8px;
+      border-radius: 6px;
+      color: #374151;
+      font-weight: 600;
+      font-size: 14px;
+      line-height: 1.1;
+      cursor: pointer;
+    }
+    .toolbar-user-dropdown button:hover {
+      background: #f3f4f6;
+    }
+    .toolbar-user-dropdown .logout {
+      color: #dc2626;
     }
     .toolbar-palette {
       position: relative;
@@ -317,6 +377,12 @@
     .modal .modal-dialog.modal-dialog-scrollable {
       max-height: 90vh;
     }
+    /* ✅ 全站 Modal 邊框加粗 */
+    .modal .modal-content {
+      border: 2px solid #5a7ba8 !important;
+      border-radius: 8px !important;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15) !important;
+    }
 
     /* SweetAlert2: avoid active/focus glow on buttons */
     .swal2-styled:focus,
@@ -488,7 +554,18 @@
           <span class="label">公司別</span>
           <span id="toolbarBuName" class="value-box">未指定</span>
           <span class="label">登入者</span>
-          <span id="toolbarUserName" class="value-box">未登入</span>
+          <span class="toolbar-user-menu">
+            <button type="button" id="toolbarUserToggle" class="toolbar-user-toggle" aria-haspopup="true" aria-expanded="false">
+              <span id="toolbarUserName">未登入</span>
+              <i class="bi bi-caret-down-fill" aria-hidden="true"></i>
+            </button>
+            <div id="toolbarUserDropdown" class="toolbar-user-dropdown" role="menu" aria-label="使用者選單">
+              <button type="button" id="toolbarLogoutBtn" class="logout" role="menuitem">
+                <i class="bi bi-power" aria-hidden="true"></i>
+                登出
+              </button>
+            </div>
+          </span>
         </div>
       </div>
     </div>
@@ -754,6 +831,46 @@
           if (window.Swal) Swal.fire({ icon: 'success', title: '儲存完成', timer: 1000, showConfirmButton: false });
         });
       }
+
+      const userToggle = document.getElementById('toolbarUserToggle');
+      const userDropdown = document.getElementById('toolbarUserDropdown');
+      if (userToggle && userDropdown) {
+        userToggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const isOpen = userDropdown.classList.toggle('show');
+          userToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        });
+        document.addEventListener('click', (e) => {
+          if (!userDropdown.contains(e.target) && e.target !== userToggle) {
+            userDropdown.classList.remove('show');
+            userToggle.setAttribute('aria-expanded', 'false');
+          }
+        });
+      }
+
+      const logoutBtn = document.getElementById('toolbarLogoutBtn');
+      if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+          const doLogout = () => {
+            localStorage.removeItem('jwtId');
+            localStorage.removeItem('erpLoginBUId');
+            localStorage.removeItem('erpLoginBUName');
+            localStorage.removeItem('erpLoginUserId');
+            window.location.href = '/Login';
+          };
+          if (window.Swal) {
+            Swal.fire({
+              icon: 'warning',
+              title: '確定要登出？',
+              showCancelButton: true,
+              confirmButtonText: '登出',
+              cancelButtonText: '取消'
+            }).then(r => { if (r.isConfirmed) doLogout(); });
+          } else {
+            if (confirm('確定要登出？')) doLogout();
+          }
+        });
+      }
     })();
   </script>
 
@@ -953,6 +1070,20 @@
 
             return resp;
         };
+    })();
+
+    // ===============================
+    // ✅ 全站未儲存變更提示（關閉網頁前警告）
+    // ===============================
+    (() => {
+      window.addEventListener('beforeunload', (e) => {
+        if (window.__unsavedChanges) {
+          // 標準寫法：設定 returnValue 和 return 訊息
+          e.preventDefault();
+          e.returnValue = '您有尚未儲存的變更，確定要離開此頁面嗎？';
+          return e.returnValue;
+        }
+      });
     })();
 
     (function initPalette() {

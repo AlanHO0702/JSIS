@@ -7,6 +7,8 @@
     var masterDictName = Model.MasterDict ?? Model.MasterTable;
     var detailDictName = Model.DetailDict ?? Model.DetailTable;
     var json = JsonSerializer.Serialize(Model, new JsonSerializerOptions { PropertyNamingPolicy = null });
+
+    var showBtnInq = ViewData["ShowBtnInq"] as bool? ?? true;
 }
 
 <div id="@domId" class="md-wrapper md-page container-fluid px-2 px-md-4">
@@ -29,7 +31,7 @@
           <div id="@domId-modeLabel" class="count-line">瀏覽模式</div>
           <div id="@domId-countLabel" class="count-line">0 / 0</div>
         </div>
-        <button id="@domId-btnQuery" type="button" class="btn toolbar-btn">
+        <button id="@domId-btnQuery" type="button" class="btn toolbar-btn @(showBtnInq ? "" : "d-none")" data-toolbar-btn="btnInq">
           <i class="bi bi-search"></i>查詢
         </button>
         <button id="@domId-btnEdit" type="button" class="btn toolbar-btn">
@@ -85,20 +87,27 @@
 <!-- Query Modal -->
 <div class="modal fade" id="@domId-queryModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
+    <form id="@domId-queryForm" method="post" class="modal-content query-modal-content">
       <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-search me-2"></i>查詢條件</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <h5 class="modal-title">查詢條件</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <form id="@domId-queryForm" class="row g-3"></form>
+        <div class="container-fluid">
+          <div class="row g-1 query-field-grid" id="@domId-queryFieldGrid"></div>
+        </div>
       </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary btn-sm" id="@domId-btnClearQuery">清除</button>
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-        <button type="button" class="btn btn-primary" id="@domId-btnQuerySubmit">確定</button>
+      <div class="modal-footer query-footer">
+        <div class="query-footer-left">
+          <button id="btnQueryFieldSelect" class="btn btn-outline-secondary btn-sm" type="button">進階</button>
+          <button id="btnQueryDefault" class="btn btn-outline-secondary btn-sm" type="button">預設</button>
+        </div>
+        <div class="query-footer-right">
+          <button type="submit" class="btn btn-primary">查詢</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        </div>
       </div>
-    </div>
+    </form>
   </div>
 </div>
 
@@ -116,6 +125,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const domId = '@domId';
   const cfg = window._mdConfigs[domId] || {};
 
+  // 確保 itemId 和 masterTable 有值
+  if (!cfg.ItemId) {
+    console.warn('[MasterDetail] cfg.ItemId is missing, using window._mdItemId:', window._mdItemId);
+  }
+  if (!cfg.MasterTable) {
+    console.warn('[MasterDetail] cfg.MasterTable is missing, using window._mdTableName:', window._mdTableName);
+  }
+
   // 按鈕元素
   const editBtn = document.getElementById(domId + '-btnEdit');
   const saveBtn = document.getElementById(domId + '-btnSave');
@@ -131,8 +148,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // 查詢相關
   const queryModalEl = document.getElementById(domId + '-queryModal');
   const queryForm = document.getElementById(domId + '-queryForm');
-  const btnClearQuery = document.getElementById(domId + '-btnClearQuery');
-  const btnQuerySubmit = document.getElementById(domId + '-btnQuerySubmit');
+  const queryFieldGrid = document.getElementById(domId + '-queryFieldGrid');
+  const btnQueryFieldSelect = document.getElementById('btnQueryFieldSelect');
+  const btnQueryDefault = document.getElementById('btnQueryDefault');
 
   // 狀態面板
   const modeLabel = document.getElementById(domId + '-modeLabel');
@@ -144,8 +162,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // 表格元素
   const mWrapper = document.getElementById(domId + '-masterWrapper');
   const mTable = document.getElementById(domId + '-masterGrid');
+  const masterBody = document.getElementById(domId + '-m-body');
   const dWrapper = document.getElementById(domId + '-detailWrapper');
   const dTable = document.getElementById(domId + '-detailGrid');
+  const detailBody = document.getElementById(domId + '-d-body');
   const wrapper = document.getElementById(domId);
 
   let isEdit = false;
@@ -160,7 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const masterEditor = window.makeEditableGrid({
     wrapper: mWrapper,
     table: mTable,
-    tableName: cfg.MasterTable || cfg.Master || '',
+    tableName: cfg.MasterTable || '',
     keyFields: masterKeyFields
   });
   window._masterEditor = masterEditor;
@@ -168,7 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const detailEditor = window.makeEditableGrid({
     wrapper: dWrapper,
     table: dTable,
-    tableName: cfg.DetailTable || cfg.Detail || '',
+    tableName: cfg.DetailTable || '',
     keyFields: detailKeyFields
   });
   window._detailEditor = detailEditor;
@@ -404,89 +424,220 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 查詢功能
-  let queryFieldsLoaded = false;
-  const masterTable = cfg.MasterTable || cfg.Master || '';
+  // 查詢功能 - 使用全域查詢面板
+  const masterTable = cfg.MasterTable || window._mdTableName || '';
   const itemId = cfg.ItemId || window._mdItemId || '';
 
+  console.log('[MasterDetail Query] itemId:', itemId, 'masterTable:', masterTable);
+  window._itemId = itemId;
+  window._dictTableName = masterTable;
+  window._tableName = masterTable;
+
+  let allQueryFields = [];
+  let selectedQueryFields = [];
+  let queryEqualsCache = null;
+
   async function loadQueryFields() {
-    if (queryFieldsLoaded) return;
-    if (!itemId || !masterTable) return;
+    if (!itemId || !masterTable) {
+      console.warn('[MasterDetail] Cannot load query fields: itemId or masterTable is empty', { itemId, masterTable });
+      return [];
+    }
     try {
-      const res = await fetch(`/api/DictSetupApi/QueryFields?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(masterTable)}&lang=TW`);
-      if (!res.ok) throw new Error(await res.text());
+      // 優先使用已選欄位清單（與「進階」一致）
+      const psUrl = `/api/DictSetupApi/PaperSelectedList?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(masterTable)}`;
+      const psRes = await fetch(psUrl);
+      if (psRes.ok) {
+        const psData = await psRes.json();
+        const selected = Array.isArray(psData?.selected) ? psData.selected : [];
+        const allFields = Array.isArray(psData?.allFields) ? psData.allFields : [];
+        if (selected.length) {
+          allQueryFields = allFields.length ? allFields : selected;
+          selectedQueryFields = selected;
+          console.log('[MasterDetail] Query fields loaded (PaperSelectedList):', selected);
+          return selected;
+        }
+      }
+
+      const url = `/api/DictSetupApi/QueryFields?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(masterTable)}&lang=TW`;
+      console.log('[MasterDetail] Loading query fields from:', url);
+      const res = await fetch(url);
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('[MasterDetail] Query fields API error:', errorText);
+        throw new Error(errorText);
+      }
       const data = await res.json();
-      const list = Array.isArray(data) && data.length ? data : [];
-      buildQueryForm(list);
-      queryFieldsLoaded = true;
+      console.log('[MasterDetail] Query fields loaded:', data);
+      allQueryFields = Array.isArray(data) && data.length ? data : [];
+      // API data may not include Visible; treat missing as visible
+      selectedQueryFields = allQueryFields.filter(f => (f.Visible ?? f.visible ?? f.IVisible ?? f.iVisible ?? 1) === 1);
+      console.log('[MasterDetail] Selected query fields:', selectedQueryFields);
+      return allQueryFields;
     } catch (err) {
-      console.warn("load query fields failed", err);
+      console.error('[MasterDetail] Load query fields failed:', err);
+      return [];
     }
   }
 
-  function buildQueryForm(fields) {
-    if (!queryForm) return;
-    queryForm.innerHTML = "";
+  async function loadQueryEquals() {
+    if (Array.isArray(queryEqualsCache) && queryEqualsCache.length) return queryEqualsCache;
+    try {
+      const fetcher = (input, init, msg) => {
+        if (typeof window.http === "function") return window.http(input, init);
+        if (typeof window.busyFetch === "function") return window.busyFetch(input, init, msg);
+        return fetch(input, init);
+      };
+      const res = await fetcher("/api/DictSetupApi/QueryEquals?all=1", null, "載入查詢條件…");
+      if (!res.ok) throw new Error(await res.text());
+      const list = await res.json();
+      queryEqualsCache = Array.isArray(list) ? list : [];
+    } catch (err) {
+      console.warn("[MasterDetail] Load QueryEquals failed, fallback to defaults", err);
+      queryEqualsCache = [
+        { value: "=", text: "=" },
+        { value: ">=", text: ">=" },
+        { value: "<=", text: "<=" },
+        { value: "like", text: "like" }
+      ];
+    }
+    return queryEqualsCache;
+  }
 
-    fields.forEach(f => {
+  async function buildQueryPanel(fields) {
+    if (!queryFieldGrid) return;
+    queryFieldGrid.innerHTML = "";
+
+    if (!fields || !fields.length) {
+      const empty = document.createElement("div");
+      empty.className = "col-12 text-muted text-center py-3";
+      empty.textContent = "目前沒有可用的查詢欄位";
+      queryFieldGrid.appendChild(empty);
+      return;
+    }
+
+    const equals = await loadQueryEquals();
+    const urlParams = new URLSearchParams(window.location.search);
+
+    for (const f of fields) {
       const colName = f.columnName || f.ColumnName || "";
-      if (!colName) return;
+      if (!colName) continue;
       const caption = f.columnCaption || f.ColumnCaption || colName;
       const defVal = f.defaultValue || f.DefaultValue || "";
-      const defEq = (f.defaultEqual || f.DefaultEqual || "").toString().toLowerCase();
       const dtRaw = f.dataType ?? f.DataType;
       const dt = Number(dtRaw);
 
       const wrap = document.createElement("div");
-      wrap.className = "col-md-4 col-sm-6";
+      wrap.className = "query-item";
+      wrap.dataset.fieldName = colName;
+
+      const row = document.createElement("div");
+      row.className = "query-row";
+
       const label = document.createElement("label");
-      label.className = "form-label text-muted";
+      label.className = "form-label query-label text-muted";
       label.textContent = caption;
+
+      const opSelect = document.createElement("select");
+      opSelect.className = "form-select query-op";
+      opSelect.name = `Cond_${colName}`;
+      opSelect.dataset.field = colName;
+      opSelect.style.fontWeight = "bold";
+      equals.forEach(eq => {
+        const opt = document.createElement("option");
+        opt.value = eq.value ?? eq.Value ?? eq;
+        opt.textContent = eq.text ?? eq.Text ?? eq;
+        opSelect.appendChild(opt);
+      });
+
+      const urlOp = urlParams.get(`Cond_${colName}`) || "";
+      const defEqRaw = (f.defaultEqual || f.DefaultEqual || "").toString();
+      const defEq = (urlOp || defEqRaw).toLowerCase();
+      if (defEq && !Array.from(opSelect.options).some(o => o.value.toLowerCase() === defEq)) {
+        const opt = document.createElement("option");
+        opt.value = urlOp || defEqRaw;
+        opt.textContent = urlOp || defEqRaw;
+        opSelect.appendChild(opt);
+      }
+      if (defEq) {
+        const hit = Array.from(opSelect.options).find(o => o.value.toLowerCase() === defEq);
+        if (hit) opSelect.value = hit.value;
+      }
+
       const input = document.createElement("input");
-      input.className = "form-control form-control-sm";
+      input.className = "form-control query-input";
       input.name = colName;
       if (dt === 1) input.type = "date";
       else if (dt === 2) input.type = "number";
       else input.type = "text";
-      if (defVal) input.value = defVal;
-      if (defEq === "like") input.placeholder = "模糊查詢";
 
-      wrap.appendChild(label);
-      wrap.appendChild(input);
-      queryForm.appendChild(wrap);
-    });
+      const urlValue = urlParams.get(colName);
+      input.value = urlValue || defVal || "";
+
+      row.appendChild(label);
+      row.appendChild(opSelect);
+      row.appendChild(input);
+      wrap.appendChild(row);
+      queryFieldGrid.appendChild(wrap);
+    }
   }
 
+  // 提供給 _QueryFieldModals 使用
+  window.QueryFieldsManager = {
+    refresh: async () => {
+      allQueryFields = [];
+      selectedQueryFields = [];
+      await loadQueryFields();
+      if (queryModalEl?.classList.contains("show")) {
+        await buildQueryPanel(selectedQueryFields);
+      }
+    },
+    load: async () => {
+      await loadQueryFields();
+    }
+  };
+
   queryBtn?.addEventListener('click', async () => {
-    await loadQueryFields();
+    if (allQueryFields.length === 0) {
+      await loadQueryFields();
+    }
+    await buildQueryPanel(selectedQueryFields);
+
     if (queryModalEl && window.bootstrap) {
       const modal = bootstrap.Modal.getOrCreateInstance(queryModalEl);
       modal.show();
     }
   });
 
-  btnClearQuery?.addEventListener('click', () => {
-    if (queryForm) {
-      Array.from(queryForm.elements).forEach(el => {
-        if (el.tagName === "INPUT") el.value = "";
-      });
-    }
-  });
+  // 進階 / 預設 按鈕由 _QueryFieldModals.cshtml 綁定
 
-  btnQuerySubmit?.addEventListener('click', () => {
-    if (!queryForm) return;
+  // 查詢表單提交
+  queryForm?.addEventListener('submit', (e) => {
+    e.preventDefault();
     const url = new URL(window.location.href);
+
     // 收集查詢欄位
-    Array.from(queryForm.elements).forEach(el => {
-      if (el.tagName === "INPUT" && el.name) {
-        const val = el.value?.trim() ?? "";
-        if (val) {
-          url.searchParams.set(el.name, val);
-        } else {
-          url.searchParams.delete(el.name);
-        }
+    queryFieldGrid?.querySelectorAll('.query-input').forEach(input => {
+      const val = input.value?.trim() ?? "";
+      if (val) {
+        url.searchParams.set(input.name, val);
+      } else {
+        url.searchParams.delete(input.name);
       }
     });
+
+    queryFieldGrid?.querySelectorAll('.query-op').forEach(select => {
+      const op = select.value?.trim() ?? "";
+      const field = select.dataset.field || "";
+      const paramName = `Cond_${field}`;
+      const input = field ? queryFieldGrid.querySelector(`.query-input[name="${CSS.escape(field)}"]`) : null;
+      const hasValue = !!(input && (input.value ?? "").toString().trim() !== "");
+      if (field && op && op !== "=" && hasValue) {
+        url.searchParams.set(paramName, op);
+      } else if (field) {
+        url.searchParams.delete(paramName);
+      }
+    });
+
     // 重設分頁
     url.searchParams.set('pageIndex', '1');
     window.location.href = url.toString();
@@ -960,4 +1111,37 @@ document.addEventListener('DOMContentLoaded', () => {
   outline: 2px solid #93c5fd;
   outline-offset: 1px;
 }
+
+/* 查詢模態框樣式 */
+.query-modal-content .modal-body { padding: 10px 12px; max-height: 50vh; overflow-y: auto; }
+.query-modal-content .modal-header { cursor: move; user-select: none; padding: 6px 12px; }
+.query-modal-content .modal-header :is(button, input, select, textarea, a) { cursor: default; }
+.query-modal-content .query-op { flex: 0 0 76px; min-width: 76px; max-width: 76px; }
+.query-modal-content .query-input { flex: 0 0 140px; min-width: 140px; max-width: 140px; }
+.query-modal-content .modal-header { display: flex; align-items: center; gap: 10px; }
+.query-modal-content .modal-title { margin: 0; }
+.query-footer { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; }
+.query-footer-left { display: flex; gap: 6px; }
+.query-footer-right { display: flex; gap: 8px; }
+.query-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; }
+.query-field-grid > .query-item { box-sizing: border-box; }
+.query-field-grid .query-item { display: flex; }
+.query-field-grid .query-row { display: flex; align-items: center; gap: 8px; }
+.query-field-grid .query-label {
+  flex: 0 0 110px;
+  text-align: right;
+  font-size: var(--field-label-size, 0.85rem);
+  line-height: 1.2;
+  margin: 0;
+  white-space: nowrap;
+}
+@@media (max-width: 991.98px) { .query-field-grid { grid-template-columns: 1fr; } }
+.query-field-grid .query-input,
+.query-field-grid .query-op {
+  height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  font-size: var(--field-value-size, 0.85rem);
+}
+#@domId-queryModal .query-field-grid { width: 100%; max-width: 720px; margin: 0 auto; }
 </style>

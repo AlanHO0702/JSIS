@@ -3,6 +3,9 @@
 @{
     Layout = "_Layout";
     ViewData["Title"] = $"{Model.ItemId} {Model.ItemName}";
+    var itemIdUpper = (Model.ItemId ?? string.Empty).ToUpperInvariant();
+    var isProductMat = itemIdUpper == "CPN00006" || itemIdUpper == "MG000008";
+    var isQueryMat = itemIdUpper == "CPN00006" || itemIdUpper == "CPN00007";
 }
 
 <style>
@@ -18,13 +21,34 @@
   }
   .matinfo-toolbar-actions {
     display: flex;
-    gap: 6px;
+    gap: 4px;
     align-items: center;
   }
-  .matinfo-count {
-    font-size: 0.9rem;
-    color: #1d3b6b;
-    font-weight: 600;
+  .toolbar-count-box {
+    display: inline-flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: var(--top-toolbar-btn-height, 36px);
+    min-width: 74px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-weight: 700;
+    line-height: 1.05;
+    color: #fff;
+    background: #1e4db7;
+    user-select: none;
+  }
+  .toolbar-count-box.mode-edit,
+  .toolbar-count-box.mode-view {
+    background: #1e4db7;
+  }
+  .toolbar-count-box.mode-edit {
+    background: #f00000;
+  }
+  .toolbar-count-box .count-line {
+    text-align: center;
+    font-size: 0.75rem;
   }
   .matinfo-page .toolbar-btn {
     display: flex;
@@ -34,12 +58,16 @@
     color: #1d2b4f;
     border: 1px solid #cfd7e6;
     border-radius: 10px;
-    font-size: var(--top-toolbar-font-size);
+    font-size: calc(var(--top-toolbar-font-size) - 2px);
     font-weight: 500;
-    padding: 5px 10px;
+    padding: 4px 8px;
     box-shadow: none;
     transition: background 0.18s, transform 0.11s, border-color 0.18s;
     cursor: pointer;
+  }
+  .matinfo-toolbar-actions .toolbar-btn:not(.toolbar-btn-icon) {
+    height: var(--top-toolbar-btn-height, 36px);
+    justify-content: center;
   }
   .matinfo-page .toolbar-btn.success {
     border-color: #9fd6b3;
@@ -75,17 +103,19 @@
   .matinfo-toolbar .toolbar-btn-icon .toolbar-icon {
     display: inline-block;
   }
-  .matinfo-toolbar #btnMatInfoTabPrev .toolbar-icon,
-  .matinfo-toolbar #btnMatInfoTabNext .toolbar-icon {
-    transform: translateY(-3px);
+  .matinfo-toolbar #btnMatInfoTabFirst i,
+  .matinfo-toolbar #btnMatInfoTabPrev i,
+  .matinfo-toolbar #btnMatInfoTabNext i,
+  .matinfo-toolbar #btnMatInfoTabLast i {
+    font-size: 16px;
   }
   .matinfo-browse {
     border: 1px solid #d8e0ee;
     border-radius: 8px;
     background: #fff;
     overflow: hidden;
-    --browse-row-height: 24px;
-    --browse-head-height: 30px;
+    --browse-row-height: 22px;
+    --browse-head-height: 26px;
   }
   .matinfo-browse.is-hidden {
     display: none;
@@ -95,6 +125,12 @@
     overflow-y: hidden;
     height: 14px;
     border-bottom: 1px solid #eef2f8;
+  }
+  .matinfo-page[data-item-id="MG000008"] .matinfo-scroll-top,
+  .matinfo-page[data-item-id="CPN00006"] .matinfo-scroll-top,
+  .matinfo-page[data-item-id="MG000002"] .matinfo-scroll-top,
+  .matinfo-page[data-item-id="CPN00007"] .matinfo-scroll-top {
+    display: none;
   }
   .matinfo-scroll-top > div {
     height: 1px;
@@ -107,21 +143,52 @@
   .matinfo-browse table {
     width: max-content;
     border-collapse: collapse;
-    font-size: 0.92rem;
+    font-size: 0.82rem;
     min-width: 1200px;
+  }
+  .matinfo-page[data-item-id="MG000002"] .matinfo-browse {
+    width: 100%;
+  }
+  .matinfo-page[data-item-id="MG000002"] .matinfo-browse table {
+    width: 100%;
+    min-width: 0;
   }
   .matinfo-browse thead th {
     background: #f2f6ff;
     color: #204a87;
     text-align: left;
-    padding: 4px 8px;
+    padding: 3px 6px;
     border-bottom: 1px solid #b7c2d4;
     border-right: 1px solid #b7c2d4;
     white-space: nowrap;
+    position: relative;
     position: sticky;
     top: 0;
     z-index: 2;
     height: var(--browse-head-height);
+  }
+  .matinfo-browse thead th .col-resizer {
+    position: absolute;
+    top: 0;
+    right: -2px;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+  }
+  .matinfo-browse thead th .col-resizer::after {
+    content: "";
+    position: absolute;
+    top: 20%;
+    right: 2px;
+    width: 1px;
+    height: 60%;
+    background: #c7d3e6;
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+  .matinfo-browse thead th:hover .col-resizer::after {
+    opacity: 1;
   }
   .matinfo-browse thead th.sortable {
     cursor: pointer;
@@ -135,7 +202,7 @@
     font-size: 0.75em;
   }
   .matinfo-browse tbody td {
-    padding: 2px 8px;
+    padding: 2px 6px;
     border-bottom: 1px solid #c4cede;
     border-right: 1px solid #c4cede;
     border-top: 1px solid #c4cede;
@@ -148,8 +215,8 @@
   }
   .matinfo-browse tbody td input[type="checkbox"] {
     pointer-events: none;
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
   }
   .matinfo-browse .col-checkbox {
     text-align: center;
@@ -182,28 +249,50 @@
     font-style: italic;
   }
   .matinfo-tabs {
-    margin-top: 8px;
+    margin-top: 6px;
+    gap: 2px;
     flex-wrap: nowrap;
     overflow-x: auto;
     overflow-y: hidden;
     white-space: nowrap;
+    border: 2px solid #9fb3d8;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    padding: 2px 4px;
+    background: #eef3ff;
+    box-shadow: 0 2px 6px rgba(35, 61, 120, 0.12);
   }
   .matinfo-tabs .nav-item {
     flex: 0 0 auto;
+    margin-right: 2px;
   }
   .matinfo-tabs .nav-link {
-    padding: 3px 8px;
-    font-size: 0.82rem;
+    padding: 1px 6px;
+    font-size: 0.78rem;
+    line-height: 1.15;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .matinfo-tabs .nav-link.tab-compact {
+    padding: 1px 6px;
+    font-size: 0.78rem;
+    line-height: 1.15;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
   }
   .matinfo-form {
-    border: 1px solid #d8e0ee;
+    border: 2px solid #9fb3d8;
     border-top: none;
-    padding: 8px 10px 12px 10px;
+    padding: 6px 8px 10px 8px;
     background: #fff;
     overflow-x: auto;
+    border-radius: 0 0 8px 8px;
+    box-shadow: 0 3px 8px rgba(35, 61, 120, 0.12);
   }
   .matinfo-form .tab-pane {
-    min-width: 1200px;
+    min-width: 1080px;
   }
   .matinfo-page.is-edit-mode .matinfo-form input[data-field]:not([readonly]):not([disabled]),
   .matinfo-page.is-edit-mode .matinfo-form textarea[data-field]:not([readonly]):not([disabled]),
@@ -212,35 +301,39 @@
     border-color: #f59e0b;
   }
   .matinfo-section {
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
   .matinfo-section-title {
     display: none;
   }
   .matinfo-grid {
     display: grid;
-    grid-template-columns: 90px 210px 90px 210px 90px 210px;
-    gap: 6px 16px;
+    grid-template-columns: 80px 180px 80px 180px 80px 180px;
+    gap: 4px 12px;
     align-items: center;
   }
+  #tab-basic .matinfo-grid,
+  #tab-basic2 .matinfo-grid {
+    column-gap: 16px;
+  }
   .matinfo-grid.compact {
-    grid-template-columns: 90px 260px 90px 260px;
+    grid-template-columns: 80px 220px 80px 220px;
   }
   .matinfo-grid label {
     text-align: right;
     color: #1d3b6b;
-    font-size: 0.86rem;
+    font-size: 0.82rem;
     align-self: center;
     white-space: nowrap;
   }
   .matinfo-grid input,
   .matinfo-grid select {
     width: 100%;
-    height: 24px;
-    padding: 1px 4px;
+    height: var(--browse-row-height);
+    padding: 2px 6px;
     border: 1px solid #cfd7e6;
     border-radius: 4px;
-    font-size: 0.86rem;
+    font-size: 0.82rem;
     box-sizing: border-box;
   }
   .matinfo-grid .field-wide {
@@ -260,18 +353,18 @@
   .matinfo-abs-layout label {
     text-align: right;
     color: #1d3b6b;
-    font-size: 0.86rem;
+    font-size: 0.8rem;
     white-space: nowrap;
   }
   .matinfo-abs-layout input,
   .matinfo-abs-layout select,
   .matinfo-abs-layout textarea {
     width: 100%;
-    height: 24px;
-    padding: 1px 4px;
+    height: var(--browse-row-height);
+    padding: 2px 6px;
     border: 1px solid #cfd7e6;
     border-radius: 4px;
-    font-size: 0.86rem;
+    font-size: 0.82rem;
     box-sizing: border-box;
   }
   .matinfo-abs-layout .abs-checkbox-label {
@@ -301,28 +394,28 @@
   .matinfo-split {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: 10px;
   }
   .matinfo-box {
     border: 1px solid #d8e0ee;
     border-radius: 8px;
     background: #fff;
-    padding: 8px;
+    padding: 6px;
     overflow-x: auto;
   }
   .matinfo-grid-toolbar {
     display: flex;
-    gap: 6px;
+    gap: 4px;
     align-items: center;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
   }
   .matinfo-grid-toolbar .btn {
-    padding: 2px 8px;
-    font-size: 0.78rem;
+    padding: 2px 6px;
+    font-size: 0.74rem;
   }
   .matinfo-grid-toolbar .btn-icon {
-    width: 28px;
-    height: 26px;
+    width: 26px;
+    height: 24px;
     padding: 0;
     display: inline-flex;
     align-items: center;
@@ -331,12 +424,12 @@
   .matinfo-grid-table table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.84rem;
+    font-size: 0.82rem;
   }
   .matinfo-grid-table th,
   .matinfo-grid-table td {
     border: 1px solid #e5e7eb;
-    padding: 4px 6px;
+    padding: 3px 5px;
     white-space: nowrap;
   }
   .matinfo-grid-table tbody tr.is-selected {
@@ -349,11 +442,11 @@
   .matinfo-grid-table input,
   .matinfo-grid-table select {
     width: 100%;
-    height: 24px;
-    padding: 1px 4px;
+    height: var(--browse-row-height);
+    padding: 2px 6px;
     border: 1px solid #cfd7e6;
     border-radius: 4px;
-    font-size: 0.84rem;
+    font-size: 0.82rem;
     box-sizing: border-box;
   }
   .matinfo-box table {
@@ -361,6 +454,41 @@
     border-collapse: collapse;
     font-size: 0.84rem;
     min-width: 1200px;
+  }
+  .matinfo-form .tab-pane:not(#tab-basic):not(#tab-basic2):not(#tab-prop):not(#tab-glyph) table {
+    font-size: 0.82rem;
+    border-collapse: collapse;
+  }
+  .matinfo-form .tab-pane:not(#tab-basic):not(#tab-basic2):not(#tab-prop):not(#tab-glyph) thead th {
+    background: #f2f6ff;
+    color: #204a87;
+    text-align: left;
+    padding: 3px 6px;
+    border-bottom: 1px solid #b7c2d4;
+    border-right: 1px solid #b7c2d4;
+    white-space: nowrap;
+    height: var(--browse-head-height);
+  }
+  .matinfo-form .tab-pane:not(#tab-basic):not(#tab-basic2):not(#tab-prop):not(#tab-glyph) thead th:last-child {
+    border-right: none;
+  }
+  .matinfo-form .tab-pane:not(#tab-basic):not(#tab-basic2):not(#tab-prop):not(#tab-glyph) tbody td {
+    padding: 2px 6px;
+    border-bottom: 1px solid #c4cede;
+    border-right: 1px solid #c4cede;
+    border-top: 1px solid #c4cede;
+    white-space: nowrap;
+    height: var(--browse-row-height);
+  }
+  .matinfo-form .tab-pane:not(#tab-basic):not(#tab-basic2):not(#tab-prop):not(#tab-glyph) tbody td:last-child {
+    border-right: none;
+  }
+  .matinfo-form .tab-pane:not(#tab-basic):not(#tab-basic2):not(#tab-prop):not(#tab-glyph) tbody tr:hover {
+    background: #f9fbff;
+  }
+  .matinfo-form table.matinfo-resizable {
+    width: max-content;
+    min-width: 0;
   }
   .matinfo-box th,
   .matinfo-box td {
@@ -373,6 +501,32 @@
     background: #f7f9ff;
     color: #1d3b6b;
     font-weight: 600;
+  }
+  .matinfo-form table thead th {
+    position: relative;
+  }
+  .matinfo-form table thead th .col-resizer {
+    position: absolute;
+    top: 0;
+    right: -2px;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+  }
+  .matinfo-form table thead th .col-resizer::after {
+    content: "";
+    position: absolute;
+    top: 20%;
+    right: 2px;
+    width: 1px;
+    height: 60%;
+    background: #c7d3e6;
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+  .matinfo-form table thead th:hover .col-resizer::after {
+    opacity: 1;
   }
   .matinfo-textarea {
     width: 100%;
@@ -444,20 +598,43 @@
 <div class="matinfo-page" data-item-id="@Model.ItemId">
   <div class="matinfo-toolbar">
     <div class="btn-toolbar matinfo-toolbar-actions" role="group" aria-label="料號主檔操作">
-      <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnMatInfoTabPrev" title="上一筆" aria-label="上一筆"><span class="toolbar-icon">&laquo;</span></button>
-      <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnMatInfoTabNext" title="下一筆" aria-label="下一筆"><span class="toolbar-icon">&raquo;</span></button>
+      <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnMatInfoTabFirst" title="第一筆" aria-label="第一筆"><i class="bi bi-chevron-bar-left"></i></button>
+      <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnMatInfoTabPrev" title="上一筆" aria-label="上一筆"><i class="bi bi-chevron-left"></i></button>
+      <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnMatInfoTabNext" title="下一筆" aria-label="下一筆"><i class="bi bi-chevron-right"></i></button>
+      <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnMatInfoTabLast" title="最後一筆" aria-label="最後一筆"><i class="bi bi-chevron-bar-right"></i></button>
+      <div id="singleGridCountBox" class="toolbar-count-box mode-view">
+        <div id="singleGridMode" class="count-line">瀏覽模式</div>
+        <div id="singleGridCount" class="count-line">0 / 0</div>
+      </div>
       <button type="button" class="btn toolbar-btn" id="btnMatInfoQuery"><i class="bi bi-search"></i>查詢</button>
-      <button type="button" class="btn toolbar-btn" id="btnMatInfoEdit"><i class="bi bi-pencil-square"></i>修改</button>
-      <button type="button" class="btn toolbar-btn warning" id="btnMatInfoCancel" hidden><i class="bi bi-x-circle"></i>取消</button>
-      <button type="button" class="btn toolbar-btn" id="btnMatInfoAdd"><i class="bi bi-plus-lg"></i>新增</button>
-      <button type="button" class="btn toolbar-btn warning" id="btnMatInfoToFormal"><i class="bi bi-arrow-right-circle"></i>轉正式</button>
-      <button type="button" class="btn toolbar-btn" id="btnMatInfoDetail"><i class="bi bi-list-ul"></i>明細</button>
+      @if (!isQueryMat)
+      {
+        <button type="button" class="btn toolbar-btn" id="btnMatInfoEdit"><i class="bi bi-pencil-square"></i>修改</button>
+        <button type="button" class="btn toolbar-btn warning" id="btnMatInfoCancel" hidden><i class="bi bi-x-circle"></i>取消</button>
+        <button type="button" class="btn toolbar-btn" id="btnMatInfoAdd"><i class="bi bi-plus-lg"></i>新增</button>
+        @if (!isProductMat)
+        {
+          <button type="button" class="btn toolbar-btn warning" id="btnMatInfoToFormal"><i class="bi bi-arrow-right-circle"></i>轉正式</button>
+          <button type="button" class="btn toolbar-btn" id="btnMatInfoDetail"><i class="bi bi-list-ul"></i>明細</button>
+        }
+      }
       <button type="button" class="btn toolbar-btn" id="btnMatInfoHistory"><i class="bi bi-clock-history"></i>歷史</button>
-      <button type="button" class="btn toolbar-btn warning" id="btnMatInfoToEmo"><i class="bi bi-arrow-repeat"></i>轉工程</button>
-      <button type="button" class="btn toolbar-btn danger" id="btnMatInfoDelete"><i class="bi bi-trash3"></i>刪除</button>
-      <button type="button" class="btn toolbar-btn success" id="btnMatInfoSave"><i class="bi bi-check2-circle"></i>儲存</button>
+      @if (!isQueryMat)
+      {
+        <button type="button" class="btn toolbar-btn warning" id="btnMatInfoToEmo"><i class="bi bi-arrow-repeat"></i>轉工程</button>
+        <button type="button" class="btn toolbar-btn danger" id="btnMatInfoDelete"><i class="bi bi-trash3"></i>刪除</button>
+        @if (!isProductMat)
+        {
+          <button type="button" class="btn toolbar-btn success" id="btnMatInfoSave"><i class="bi bi-check2-circle"></i>儲存</button>
+        }
+      }
+      <button type="button" class="btn toolbar-btn" id="btnMatInfoSaveHeight">儲存高度</button>
+      @if (!isQueryMat)
+      {
+        <button type="button" class="btn toolbar-btn" id="btnMatInfoCopyPN4YX">客戶版本複製</button>
+        <button type="button" class="btn toolbar-btn" id="btnMatInfoUpdateCustPn">修改客戶料號</button>
+      }
     </div>
-    <div class="matinfo-count" id="matinfo-count">0 / 0</div>
   </div>
 
   <div class="matinfo-browse" id="matinfo-browse">
@@ -481,28 +658,28 @@
       <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-basic2" type="button" role="tab" data-tab-name="基本資料2">基本資料2</button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-cust" type="button" role="tab" data-tab-name="廠商料號">廠商料號</button>
+      <button class="nav-link tab-compact" data-bs-toggle="tab" data-bs-target="#tab-cust" type="button" role="tab" data-tab-name="廠商料號">廠商料號</button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-prop" type="button" role="tab" data-tab-name="屬性及備註">屬性及備註</button>
+      <button class="nav-link tab-compact" data-bs-toggle="tab" data-bs-target="#tab-prop" type="button" role="tab" data-tab-name="屬性及備註">屬性及備註</button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-map" type="button" role="tab" data-tab-name="工程圖">工程圖</button>
+      <button class="nav-link tab-compact" data-bs-toggle="tab" data-bs-target="#tab-map" type="button" role="tab" data-tab-name="工程圖">工程圖</button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-glyph" type="button" role="tab" data-tab-name="圖檔">圖檔</button>
+      <button class="nav-link tab-compact" data-bs-toggle="tab" data-bs-target="#tab-glyph" type="button" role="tab" data-tab-name="圖檔">圖檔</button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-spec" type="button" role="tab" data-tab-name="規格表">規格表</button>
+      <button class="nav-link tab-compact" data-bs-toggle="tab" data-bs-target="#tab-spec" type="button" role="tab" data-tab-name="規格表">規格表</button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-unit" type="button" role="tab" data-tab-name="替代單位設定">替代單位設定</button>
+      <button class="nav-link tab-compact" data-bs-toggle="tab" data-bs-target="#tab-unit" type="button" role="tab" data-tab-name="替代單位設定">替代單位設定</button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-common" type="button" role="tab" data-tab-name="共用件">共用件</button>
+      <button class="nav-link tab-compact" data-bs-toggle="tab" data-bs-target="#tab-common" type="button" role="tab" data-tab-name="共用件">共用件</button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-kit" type="button" role="tab" data-tab-name="組合商品">組合商品</button>
+      <button class="nav-link tab-compact" data-bs-toggle="tab" data-bs-target="#tab-kit" type="button" role="tab" data-tab-name="組合商品">組合商品</button>
     </li>
   </ul>
 
@@ -1198,11 +1375,6 @@
     </div>
   </div>
 
-  <div class="matinfo-toolbar matinfo-bottom-toolbar" style="justify-content: flex-start; gap: 10px; margin-top: 10px;">
-    <button type="button" class="btn toolbar-btn" id="btnMatInfoSaveHeight">儲存高度</button>
-    <button type="button" class="btn toolbar-btn" id="btnMatInfoCopyPN4YX">客戶版本複製</button>
-    <button type="button" class="btn toolbar-btn" id="btnMatInfoUpdateCustPn">修改客戶料號</button>
-  </div>
 </div>
 
 <div class="modal fade" id="matinfo-log-modal" tabindex="-1" aria-hidden="true">
