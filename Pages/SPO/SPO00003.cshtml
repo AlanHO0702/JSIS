@@ -220,7 +220,7 @@
       <tr>
         @foreach (var f in gFields)
         {
-          <th>@GLabel(f)</th>
+          <th class="inq-sortable">@GLabel(f)</th>
         }
       </tr>
     </thead>
@@ -417,6 +417,18 @@
     background: #f3f7ff;
     color: #2056ac;
     font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+  }
+  .inq-table th.inq-sort-asc::after {
+    content: " ▲";
+    font-size: 0.7rem;
+    color: #1d3b6b;
+  }
+  .inq-table th.inq-sort-desc::after {
+    content: " ▼";
+    font-size: 0.7rem;
+    color: #1d3b6b;
   }
   .customer-multi-modal .customer-dual-list {
     height: 420px !important;
@@ -517,6 +529,48 @@
   document.getElementById("btnClearInq")?.addEventListener("click", () => {
     window.location.href = "/SPO/SPO00003";
   });
+
+  const parseSortValue = (text) => {
+    if (text == null) return "";
+    const t = String(text).trim();
+    if (!t) return "";
+    const d = t.match(/^(\d{4})[\/-](\d{2})[\/-](\d{2})$/);
+    if (d) return new Date(`${d[1]}-${d[2]}-${d[3]}`).getTime();
+    const n = t.replace(/,/g, "");
+    if (!isNaN(n) && n !== "") return parseFloat(n);
+    return t.toLowerCase();
+  };
+
+  const sortTableByColumn = (table, colIndex, asc) => {
+    const tbody = table.querySelector("tbody");
+    if (!tbody) return;
+    const rows = Array.from(tbody.querySelectorAll("tr"))
+      .filter(r => !r.querySelector("td[colspan]"));
+    const dir = asc ? 1 : -1;
+    rows.sort((a, b) => {
+      const aText = a.children[colIndex]?.textContent ?? "";
+      const bText = b.children[colIndex]?.textContent ?? "";
+      const av = parseSortValue(aText);
+      const bv = parseSortValue(bText);
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+    rows.forEach(r => tbody.appendChild(r));
+  };
+
+  const table = document.querySelector(".inq-table");
+  if (table) {
+    const headers = Array.from(table.querySelectorAll("thead th"));
+    headers.forEach((th, idx) => {
+      th.addEventListener("click", () => {
+        const isAsc = !th.classList.contains("inq-sort-asc");
+        headers.forEach(h => h.classList.remove("inq-sort-asc", "inq-sort-desc"));
+        th.classList.add(isAsc ? "inq-sort-asc" : "inq-sort-desc");
+        sortTableByColumn(table, idx, isAsc);
+      });
+    });
+  }
 
   const inqForm = document.getElementById("inqForm");
   inqForm?.addEventListener("submit", (e) => {

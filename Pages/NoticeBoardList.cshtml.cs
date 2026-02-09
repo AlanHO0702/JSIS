@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.Data.SqlClient;
 using System.Data;
 using PcbErpApi.Models;
+using System.Text.Json.Serialization;
+using System.Linq;
 
 namespace PcbErpApi.Pages
 {
@@ -18,6 +20,20 @@ namespace PcbErpApi.Pages
         public DataTable Rows { get; set; } = new DataTable();
         public List<CURdTableField> TableFields { get; set; } = new List<CURdTableField>();
         public string CurrentUserId { get; set; } = "";
+
+        private sealed class NoticeMiniItem
+        {
+            public int SerialNum { get; set; }
+            public string Subject { get; set; } = "";
+            public string Text { get; set; } = "";
+            public string ShortDate { get; set; } = "";
+            public string DateRange { get; set; } = "";
+            public string BuildDate { get; set; } = "";
+            public string UserName { get; set; } = "";
+
+            [JsonIgnore]
+            public DateTime? BuildDateValue { get; set; }
+        }
 
         private static CURdTableField ReadTableField(IDataRecord reader)
         {
@@ -56,6 +72,27 @@ namespace PcbErpApi.Pages
             }
 
             return list;
+        }
+
+        private static async Task<Dictionary<string, string>> LoadUserDictAsync(SqlConnection connection)
+        {
+            var usersDict = new Dictionary<string, string>();
+            var userQuery = "SELECT UserId, UserName FROM CURdUsers WITH (NOLOCK)";
+            using (var userCommand = new SqlCommand(userQuery, connection))
+            using (var reader = await userCommand.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    var uid = reader["UserId"]?.ToString() ?? "";
+                    var uname = reader["UserName"]?.ToString() ?? "";
+                    if (!string.IsNullOrEmpty(uid))
+                    {
+                        usersDict[uid] = uname;
+                    }
+                }
+            }
+
+            return usersDict;
         }
 
         public async Task OnGetAsync(string? userId = null)
@@ -142,6 +179,179 @@ namespace PcbErpApi.Pages
         }
 
         // 標記為已讀的 API
+        public async Task<IActionResult> OnGetMiniListAsync(string? userId = null, int take = 4)
+        {
+            userId = HttpContext.Items["UserId"]?.ToString()
+                     ?? userId
+                     ?? User.Identity?.Name
+                     ?? "admin";
+
+            take = Math.Clamp(take, 1, 8);
+
+            var items = new List<NoticeMiniItem>();
+
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+            using (var connection = new SqlConnection(connectionString))
+            {
+                await connection.OpenAsync();
+
+                var rows = new DataTable();
+                using (var command = new SqlCommand("CURdGetNoticeBoardInq", connection))
+                {
+                    command.CommandType = CommandType.StoredProcedure;
+                    command.Parameters.AddWithValue("@UserId", userId);
+
+                    using (var adapter = new SqlDataAdapter(command))
+                    {
+                        adapter.Fill(rows);
+                    }
+                }
+
+                Dictionary<string, string>? usersDict = null;
+                var hasUserName = rows.Columns.Contains("Lk_UserName") || rows.Columns.Contains("UserName");
+                if (!hasUserName)
+                {
+                    usersDict = await LoadUserDictAsync(connection);
+                }
+
+                foreach (DataRow row in rows.Rows)
+                {
+                    var serialNumStr = row["SerialNum"]?.ToString() ?? "";
+                    _ = int.TryParse(serialNumStr, out var serialNum);
+
+                    var postUserId = row["PostUserId"]?.ToString() ?? "";
+                    var userName = postUserId;
+                    if (rows.Columns.Contains("Lk_UserName"))
+                    {
+                        userName = row["Lk_UserName"]?.ToString() ?? postUserId;
+                    }
+                    else if (rows.Columns.Contains("UserName"))
+                    {
+                        userName = row["UserName"]?.ToString() ?? postUserId;
+                    }
+                    else if (usersDict != null && usersDict.TryGetValue(postUserId, out var lookupName))
+                    {
+                        userName = lookupName;
+                    }
+
+                    var buildDateValue = row["BuildDate"] != DBNull.Value
+                        ? Convert.ToDateTime(row["BuildDate"])
+                        : (DateTime?)null;
+
+                    var beginDate = row["BeginDate"] != DBNull.Value
+                        ? Convert.ToDateTime(row["BeginDate"])
+                        : (DateTime?)null;
+                    var endDate = row["EndDate"] != DBNull.Value
+                        ? Convert.ToDateTime(row["EndDate"])
+                        : (DateTime?)null;
+
+                    var subject = row["Subjects"]?.ToString() ?? "";
+                    var text = row["BoardText"]?.ToString() ?? "";
+
+                    var shortDate = buildDateValue?.ToString("MM/dd")
+                                    ?? beginDate?.ToString("MM/dd")
+                                    ?? "";
+                    var buildDate = buildDateValue?.ToString("yyyy/MM/dd") ?? "";
+                    var dateRange = beginDate.HasValue || endDate.HasValue
+                        ? $"{beginDate:yyyy/MM/dd} ~ {endDate:yyyy/MM/dd}"
+                        : "";
+
+                    items.Add(new NoticeMiniItem
+                    {
+                        SerialNum = serialNum,
+                        Subject = subject,
+                        Text = text,
+                        ShortDate = shortDate,
+                        DateRange = dateRange,
+                        BuildDate = buildDate,
+                        UserName = userName,
+                        BuildDateValue = buildDateValue
+                    });
+                }
+            }
+
+            var resultItems = items
+                .OrderByDescending(i => i.BuildDateValue ?? DateTime.MinValue)
+                .Take(take)
+                .ToList();
+
+            return new JsonResult(new { success = true, items = resultItems });
+        }
+
+        public async Task<IActionResult> OnGetMiniListAllAsync(int take = 6)
+        {
+            take = Math.Clamp(take, 1, 12);
+
+            var items = new List<NoticeMiniItem>();
+
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+            using (var connection = new SqlConnection(connectionString))
+            {
+                await connection.OpenAsync();
+
+                var usersDict = await LoadUserDictAsync(connection);
+
+                var query = @"
+                    SELECT TOP (@Take)
+                        SerialNum, PostUserId, Subjects, BoardText, BeginDate, EndDate, BuildDate
+                    FROM CURdNoticeBoard WITH (NOLOCK)
+                    ORDER BY ISNULL(BuildDate, BeginDate) DESC, SerialNum DESC";
+
+                using (var command = new SqlCommand(query, connection))
+                {
+                    command.Parameters.AddWithValue("@Take", take);
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            var serialNumStr = reader["SerialNum"]?.ToString() ?? "";
+                            _ = int.TryParse(serialNumStr, out var serialNum);
+
+                            var postUserId = reader["PostUserId"]?.ToString() ?? "";
+                            var userName = usersDict.TryGetValue(postUserId, out var lookupName)
+                                ? lookupName
+                                : postUserId;
+
+                            var buildDateValue = reader["BuildDate"] != DBNull.Value
+                                ? Convert.ToDateTime(reader["BuildDate"])
+                                : (DateTime?)null;
+                            var beginDate = reader["BeginDate"] != DBNull.Value
+                                ? Convert.ToDateTime(reader["BeginDate"])
+                                : (DateTime?)null;
+                            var endDate = reader["EndDate"] != DBNull.Value
+                                ? Convert.ToDateTime(reader["EndDate"])
+                                : (DateTime?)null;
+
+                            var subject = reader["Subjects"]?.ToString() ?? "";
+                            var text = reader["BoardText"]?.ToString() ?? "";
+
+                            var shortDate = buildDateValue?.ToString("MM/dd")
+                                            ?? beginDate?.ToString("MM/dd")
+                                            ?? "";
+                            var buildDate = buildDateValue?.ToString("yyyy/MM/dd") ?? "";
+                            var dateRange = beginDate.HasValue || endDate.HasValue
+                                ? $"{beginDate:yyyy/MM/dd} ~ {endDate:yyyy/MM/dd}"
+                                : "";
+
+                            items.Add(new NoticeMiniItem
+                            {
+                                SerialNum = serialNum,
+                                Subject = subject,
+                                Text = text,
+                                ShortDate = shortDate,
+                                DateRange = dateRange,
+                                BuildDate = buildDate,
+                                UserName = userName,
+                                BuildDateValue = buildDateValue
+                            });
+                        }
+                    }
+                }
+            }
+
+            return new JsonResult(new { success = true, items });
+        }
+
         public async Task<IActionResult> OnPostMarkAsReadAsync(int serialNum, string userId)
         {
             var connectionString = _configuration.GetConnectionString("DefaultConnection");
