@@ -45,6 +45,11 @@ namespace PcbErpApi.Data
         public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
         public virtual DbSet<CurdOcxtableSetUp> CurdOcxtableSetUp { get; set; }
         public virtual DbSet<CurdPaperPaper> CurdPaperPaper { get; set; }
+        public virtual DbSet<CurdPaperInfo> CurdPaperInfos { get; set; }
+        public virtual DbSet<CurdPaperType> CurdPaperTypes { get; set; }
+        public virtual DbSet<CurdPaperList> CurdPaperLists { get; set; }
+        public virtual DbSet<CurdModule> CurdModules { get; set; }
+        public virtual DbSet<CurdVSystems> CurdVSystems { get; set; }
         public virtual DbSet<CurdBu> CurdBus { get; set; }
         public virtual DbSet<FmedVProcNisToStd> FmedVProcNisToStd { get; set; }
         public virtual DbSet<FmedIssueMain> FmedIssueMain { get; set; }
@@ -101,7 +106,7 @@ namespace PcbErpApi.Data
                     .IsUnicode(false);
             });
 
-            // FMEdIssuePO 複�?主鍵?�置
+            // FMEdIssuePO 複�?主鍵?�置
             modelBuilder.Entity<FmedIssuePo>(entity =>
             {
                 entity.HasKey(e => new { e.PaperNum, e.Item });
@@ -292,13 +297,13 @@ namespace PcbErpApi.Data
             });
 
 
-            // FMEdIssueMat 複�?主鍵?�置
+            // FMEdIssueMat 複�?主鍵?�置
             modelBuilder.Entity<FmedIssueMat>(entity =>
             {
                 entity.HasKey(e => new { e.PaperNum, e.Item });
             });
 
-            // FMEdIssueLayer 複�?主鍵?�置
+            // FMEdIssueLayer 複�?主鍵?�置
             modelBuilder.Entity<FmedIssueLayer>(entity =>
             {
                 entity.HasKey(e => new { e.PaperNum, e.Item });
@@ -718,7 +723,7 @@ namespace PcbErpApi.Data
             entity.Property(e => e.LotNotes)
                 .HasMaxLength(12)
                 .IsUnicode(false)
-                .HasDefaultValue("�@");
+                .HasDefaultValue("�@");
             entity.Property(e => e.McutNum)
                 .HasMaxLength(16)
                 .IsUnicode(false);
@@ -1238,10 +1243,10 @@ namespace PcbErpApi.Data
             mindMatInfo.ToTable(tb => tb.UseSqlOutputClause(false));
 
             modelBuilder.Entity<CURdTableField>()
-            .HasKey(e => new { e.TableName, e.FieldName }); // ?�裡?��?你�?�??複�?主鍵欄�?
+            .HasKey(e => new { e.TableName, e.FieldName }); // ?�裡?��?你�?�??複�?主鍵欄�?
 
             modelBuilder.Entity<CURdOCXTableFieldLK>()
-            .HasKey(e => new { e.TableName, e.FieldName, e.KeyFieldName, e.KeySelfName }); // ?�裡?��?你�?�??複�?主鍵欄�?
+            .HasKey(e => new { e.TableName, e.FieldName, e.KeyFieldName, e.KeySelfName }); // ?�裡?��?你�?�??複�?主鍵欄�?
 
             modelBuilder.Entity<CURdTableField>().ToTable("CURdTableField");
 
@@ -1263,13 +1268,13 @@ namespace PcbErpApi.Data
 
             modelBuilder.Entity<CURdSysParams>(e =>
             {
-                e.HasKey(x => new { x.SystemId, x.ParamId });   // ??複�?主鍵
+                e.HasKey(x => new { x.SystemId, x.ParamId });   // ??複�?主鍵
 
-                // （可?��??��?保險?��?定長�?
+                // （可?��??��?保險?��?定長�?
                 e.Property(x => x.SystemId).HasMaxLength(8).IsRequired();
                 e.Property(x => x.ParamId).HasMaxLength(24).IsRequired();
 
-                e.ToTable(tb => tb.HasTrigger("CURdSysParams_tIU")); // ??EF ?�改?�普??UPDATE
+                e.ToTable(tb => tb.HasTrigger("CURdSysParams_tIU")); // ??EF ?�改?�普??UPDATE
 
             });
 
@@ -1355,22 +1360,22 @@ namespace PcbErpApi.Data
             });
                 modelBuilder.Entity<SpodPoKind>(entity =>
             {
-                // 資�?庫�?實�?表�?：SPODPoKind  （照�?SQL ?��?字�?
+                // 資�?庫�?實�?表�?：SPODPoKind  （照�?SQL ?��?字�?
                 entity.ToTable("SPODPoKind");
 
                 // PK_SPOdPoKind clustered, unique, primary key located on PRIMARY PoKind, UseId
                 entity.HasKey(e => new { e.PoKind, e.UseId });
 
-                // PoKind int not null（�?設就?�以，�?一定�??�設定�?
+                // PoKind int not null（�?設就?�以，�?一定�??�設定�?
 
                 entity.Property(e => e.PoKindName)
                     .HasMaxLength(100);          // nvarchar(100)
 
                 entity.Property(e => e.UseId)
                     .HasMaxLength(8)
-                    .IsUnicode(false)            // char(8)，�???nvarchar
+                    .IsUnicode(false)            // char(8)，�???nvarchar
                     .IsFixedLength()
-                    .HasDefaultValue("A001");    // 如�?資�?庫�??�設?�就一起寫
+                    .HasDefaultValue("A001");    // 如�?資�?庫�??�設?�就一起寫
 
                 entity.Property(e => e.LotNotes)
                     .HasMaxLength(12)
@@ -1683,7 +1688,7 @@ namespace PcbErpApi.Data
                     .IsUnicode(false);
                 entity.Property(e => e.BProcNameEng).HasMaxLength(200);
 
-                // Ignore ?�於 lookup ?��?位�?不在資�?表中�?
+                // Ignore ?�於 lookup ?��?位�?不在資�?表中�?
                 entity.Ignore(e => e.BPTypeNameM);
             });
 
@@ -2302,7 +2307,7 @@ namespace PcbErpApi.Data
             modelBuilder.Entity<UpdateDictFieldInput>().HasNoKey();
             modelBuilder.Entity<AddItemRequest>().HasNoKey();
 
-            // ?��?每�?entity ??decimal 欄�??��??��?設�? HasPrecision
+            // ?��?每�?entity ??decimal 欄�??��??��?設�? HasPrecision
 
             modelBuilder.Entity<AddItemRequest>(entity =>
             {
@@ -2584,6 +2589,161 @@ namespace PcbErpApi.Data
 
                 entity.Property(e => e.Thickness)
                     .HasPrecision(18, 6);
+            });
+
+            // 配置 CurdPaperInfo
+            modelBuilder.Entity<CurdPaperInfo>(entity =>
+            {
+                entity.HasKey(e => e.PaperId);
+                entity.ToTable("CURdPaperInfo", tb => tb.HasTrigger("CURdPaperInfo_tD"));
+
+                entity.Property(e => e.PaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false)
+                    .IsRequired();
+
+                entity.Property(e => e.PaperName)
+                    .HasMaxLength(24)
+                    .IsRequired();
+
+                entity.Property(e => e.SystemId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .IsFixedLength()
+                    .IsRequired();
+
+                entity.Property(e => e.HeadFirst)
+                    .HasMaxLength(4)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.HeadDateFormat)
+                    .HasMaxLength(8)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.TableName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.PKName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+            });
+
+            // 配置 CurdPaperType
+            modelBuilder.Entity<CurdPaperType>(entity =>
+            {
+                entity.HasKey(e => new { e.PaperId, e.PaperType });
+                entity.ToTable("CURdPaperType");
+
+                entity.Property(e => e.PaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false)
+                    .IsRequired();
+
+                entity.Property(e => e.PaperTypeName)
+                    .HasMaxLength(24);
+
+                entity.Property(e => e.HeadFirst)
+                    .HasMaxLength(4)
+                    .IsUnicode(false);
+            });
+
+            // 配置 CurdPaperList
+            modelBuilder.Entity<CurdPaperList>(entity =>
+            {
+                entity.HasKey(e => new { e.PaperId, e.SerialNum });
+                entity.ToTable("CURdPaperList");
+
+                entity.Property(e => e.PaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false)
+                    .IsRequired();
+
+                entity.Property(e => e.ItemName)
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.Notes)
+                    .HasMaxLength(255);
+
+                entity.Property(e => e.ClassName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.ObjectName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.TableIndex)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+            });
+
+            // 配置 CurdPaperPaper
+            modelBuilder.Entity<CurdPaperPaper>(entity =>
+            {
+                entity.HasKey(e => new { e.PaperId, e.SerialNum });
+                entity.ToTable("CURdPaperPaper", tb => tb.HasTrigger("CURdPaperPaper_tD"));
+
+                entity.Property(e => e.PaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false)
+                    .IsRequired();
+
+                entity.Property(e => e.ItemName)
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.Notes)
+                    .HasMaxLength(255);
+
+                entity.Property(e => e.ClassName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.ObjectName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.TableIndex)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.PrintItemId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false);
+            });
+
+            // 配置 CurdModule
+            modelBuilder.Entity<CurdModule>(entity =>
+            {
+                entity.HasKey(e => e.ModuleId);
+                entity.ToTable("CURdModule");
+
+                entity.Property(e => e.ModuleId)
+                    .HasMaxLength(1)
+                    .IsUnicode(false)
+                    .IsFixedLength()
+                    .IsRequired();
+
+                entity.Property(e => e.ModuleName)
+                    .HasMaxLength(50)
+                    .IsRequired();
+            });
+
+            // 配置 CurdVSystems (View)
+            modelBuilder.Entity<CurdVSystems>(entity =>
+            {
+                entity.HasNoKey();
+                entity.ToView("CURdVSystems");
+
+                entity.Property(e => e.SystemId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .IsFixedLength()
+                    .IsRequired();
+
+                entity.Property(e => e.SystemName)
+                    .HasMaxLength(50)
+                    .IsRequired();
             });
 
             OnModelCreatingPartial(modelBuilder);

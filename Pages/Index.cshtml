@@ -4,16 +4,21 @@
     var level0 = Model.Level0Items;
     var level1Map = Model.Level1Map;
     var level2List = Model.GetCurrentLevel2();
+    var requestPath = ViewContext.HttpContext.Request.Path;
+    var isPaperInfo = requestPath.StartsWithSegments("/PaperInfo");
+    var isSysParams = requestPath.StartsWithSegments("/SysParams");
+    var isIndexPage = requestPath == "/" || requestPath.StartsWithSegments("/Index");
+    var sysCode = (Model.SelectedLevel1Id ?? "").Length >= 3 ? Model.SelectedLevel1Id.Substring(0, 3) : "";
     Layout = "_Layout";
 }
 
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
 
-<div style="display:flex; gap:20px;">
+<div style="display:flex; gap:20px;" class="index-page">
   <!-- 左側模組 -->
-  <div style="width:240px;">
+  <div style="width:240px;" class="index-side">
     <h4>系統模組</h4>
-    <ul style="list-style:none; padding-left:0;">
+    <ul class="index-tree" style="list-style:none; padding-left:0;">
       @foreach (var mod0 in level0)
       {
           var level1Id = $"level1-{mod0.ItemId}";
@@ -25,7 +30,10 @@
               <ul id="@level1Id" style="display:@(shouldExpand ? "block" : "none"); margin-left:15px;">
                 @foreach (var mod1 in level1Map[mod0.ItemId])
                 {
-                    <li class="mb-1"><a asp-page="/Index" asp-route-level1Id="@mod1.ItemId">@mod1.ItemName</a></li>
+                    var isActive = mod1.ItemId == Model.SelectedLevel1Id;
+                    <li class="mb-1">
+                      <a asp-page="/Index" asp-route-level1Id="@mod1.ItemId" class="@(isActive ? "active" : "")">@mod1.ItemName</a>
+                    </li>
                 }
               </ul>
             }
@@ -35,20 +43,35 @@
   </div>
 
   <!-- 右側功能列表 -->
-  <div style="width:700px;">
+  <div style="width:700px;" class="index-main">
+  <div class="index-headerbar">
+    <ul class="nav nav-pills index-nav">
+      <li class="nav-item">
+        <button class="nav-link @(isIndexPage ? "active" : "")" type="button">
+          功能項目維護
+        </button>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link @(isSysParams ? "active" : "") @(string.IsNullOrEmpty(sysCode) ? "disabled" : "")"
+           href="@(string.IsNullOrEmpty(sysCode) ? "#" : $"/SysParams?SelectedSystem={sysCode}")"
+           aria-disabled="@(string.IsNullOrEmpty(sysCode) ? "true" : "false")">
+          系統參數設定
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link @(isPaperInfo ? "active" : "")" href="/PaperInfo">單據設定</a>
+      </li>
+    </ul>
+    <div class="index-header-actions">
+      <button id="btnDict" class="btn btn-outline-secondary" onclick="openDictModal()" disabled>辭典設定</button>
+      <button id="btnCustomBtns" class="btn btn-outline-secondary" onclick="openCustomBtnModal()" disabled>自訂按鈕</button>
+      <button class="btn btn-primary" onclick="openAddModal()">新增功能</button>
+    </div>
+  </div>
   @if (level2List.Any())
   {
-    <div class="d-flex align-items-center mb-2">
-      <h4 class="mb-0 me-2">功能列表</h4>
-      <div class="ms-auto d-flex gap-2">
-        <button id="btnSysParams" class="btn btn-outline-primary" onclick="openSysParams()">系統參數設定</button>
-        <button id="btnDict" class="btn btn-secondary" onclick="openDictModal()" disabled>辭典設定</button>
-        <button id="btnCustomBtns" class="btn btn-outline-secondary" onclick="openCustomBtnModal()" disabled>自訂按鈕</button>
-        <button class="btn btn-primary" onclick="openAddModal()">新增功能</button>
-      </div>
-    </div>
 
-    <ul id="level2-list" class="list-group">
+    <ul id="level2-list" class="list-group index-list">
       @foreach (var item in level2List)
       {
         if (item.ItemType == 4)
@@ -63,23 +86,42 @@
               onclick="selectItem('@item.ItemId')"
               ondblclick="openEditModal('@item.ItemId', '@item.ItemName', '@item.SuperId', '@item.SystemId', '@item.SerialNum', @((item.Enabled)), '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Notes ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Ocxtemplete ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.SWebMenuId ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.SWebSuperMenuId ?? ""))', '@(item.IWebMenuOrderSeq?.ToString() ?? "")', '@(item.IWebMenuLevel?.ToString() ?? "")', '@(item.IWebEnable?.ToString() ?? "")')"
               style="cursor:pointer;">
-              @if (item.IWebMenuOrderSeq.HasValue)
-              {
-                  <span class="text-muted me-2">[@item.IWebMenuOrderSeq]</span>
-              }
-              <span>@item.ItemId - @item.ItemName</span>
-              @if (!string.IsNullOrWhiteSpace(item.SWebMenuId))
-              {
-                  <span class="text-muted ms-2">(@item.SWebMenuId)</span>
-              }
-              @if (item.Enabled == 1)
-              {
-                  <span class="badge bg-success ms-2">已啟用</span>
-              }
-              @if (item.IWebEnable == 1)
-              {
-                  <span class="badge bg-primary ms-2">前台啟用</span>
-              }
+              <div class="item-row">
+                <div class="item-main">
+                  <div class="item-line">
+                    @if (item.IWebMenuOrderSeq.HasValue)
+                    {
+                      <span class="item-seq">[@item.IWebMenuOrderSeq]</span>
+                    }
+                    <span class="item-code">@item.ItemId</span>
+                    <span class="item-dot">·</span>
+                    <span class="item-name">@item.ItemName</span>
+                    @if (!string.IsNullOrWhiteSpace(item.SWebMenuId))
+                    {
+                      <span class="item-dot">·</span>
+                      <span class="item-code">@item.SWebMenuId</span>
+                    }
+                  </div>
+                </div>
+                <div class="item-status">
+                  @if (item.Enabled == 1)
+                  {
+                    <span class="badge bg-success">已啟用</span>
+                  }
+                  else
+                  {
+                    <span class="badge badge-empty"></span>
+                  }
+                  @if (item.IWebEnable == 1)
+                  {
+                    <span class="badge bg-primary">前台啟用</span>
+                  }
+                  else
+                  {
+                    <span class="badge badge-empty"></span>
+                  }
+                </div>
+              </div>
           </li>
         }
       }
@@ -848,6 +890,11 @@ window.openSysParams = function () {
   location.href = `/SysParams?SelectedSystem=${encodeURIComponent(sys)}`;
 };
 
+// 開啟單據設定頁面
+window.openPaperInfo = function () {
+  location.href = '/PaperInfo';
+};
+
 window.saveReportRows = saveReportRows;
 
 /* ========= 自訂按鈕（CURdOCXItemCustButton） ========= */
@@ -1065,11 +1112,237 @@ window.toggleBtnDetail = toggleBtnDetail;
 </script>
 
 <style>
-  #level2-list .selectable.active{
-    background-color:#cce5ff!important;
-    border-left:4px solid #004085;
-    color:#004085; font-weight:700;
+  .index-page {
+    background: #f6f7fb;
+    padding: 0 12px 12px;
+    border-radius: 12px;
   }
+
+  .index-side,
+  .index-main {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+  }
+
+  .index-side {
+    padding: 12px 10px;
+  }
+
+  .index-side h4 {
+    font-size: 15px;
+    color: #0f172a;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+
+  .index-tree > li {
+    margin-bottom: 6px;
+  }
+
+  .index-tree a {
+    color: #475569;
+    text-decoration: none;
+    padding: 6px 8px;
+    border-radius: 6px;
+    display: block;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+
+  .index-tree a:hover {
+    background: #f1f5f9;
+    color: #1d4ed8;
+  }
+
+  .index-tree a.active {
+    background: #e8f0ff;
+    color: #1e3a8a;
+    box-shadow: inset 3px 0 0 #2563eb;
+    font-weight: 600;
+  }
+
+  .index-tree ul {
+    margin-top: 4px;
+    margin-left: 10px;
+    padding-left: 8px;
+    border-left: 1px dashed #e5e7eb;
+  }
+
+  .index-tree ul a {
+    font-size: 12px;
+    color: #6b7280;
+  }
+
+  .index-tree ul li {
+    list-style: none;
+  }
+
+  .index-main {
+    padding: 12px;
+  }
+
+  .index-headerbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 56px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #eef2f7;
+    margin: -12px -12px 8px;
+  }
+
+  .index-nav {
+    gap: 6px;
+  }
+
+  .index-nav .nav-link {
+    padding: 6px 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    color: #475569;
+    border: 1px solid transparent;
+    background: transparent;
+  }
+
+  .index-nav .nav-link:hover {
+    color: #1d4ed8;
+    background: #f1f5f9;
+  }
+
+  .index-nav .nav-link.active {
+    color: #1e3a8a;
+    background: #e8f0ff;
+    border-color: #cfe0ff;
+    font-weight: 600;
+  }
+
+  .index-nav .nav-link.disabled {
+    color: #94a3b8;
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    pointer-events: none;
+  }
+
+  .index-header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .index-header h4 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #0f172a;
+  }
+
+  .index-header {
+    padding: 4px 4px 8px;
+    border-bottom: 1px solid #f1f5f9;
+    margin-bottom: 6px;
+  }
+
+  .index-list .list-group-item {
+    border-color: #eef2f7;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: #334155;
+  }
+
+  .index-list .list-group-item.selectable:hover {
+    background: #f8fafc;
+  }
+
+  #level2-list .selectable.active{
+    background-color:#eaf2ff!important;
+    border-left:4px solid #2563eb;
+    color:#1e3a8a; font-weight:700;
+  }
+
+  .item-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .item-main {
+    min-width: 0;
+  }
+
+  .item-line {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    color: #334155;
+  }
+
+  .item-seq {
+    min-width: 36px;
+    text-align: right;
+    color: #94a3b8;
+  }
+
+  .item-name,
+  .item-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  }
+
+  .item-dot {
+    color: #94a3b8;
+  }
+
+  .item-status {
+    width: 160px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .badge-empty {
+    border: 1px dashed #e2e8f0;
+    color: transparent;
+    background: transparent;
+    min-width: 54px;
+    height: 22px;
+  }
+
+  .index-list .badge {
+    font-weight: 600;
+    letter-spacing: 0.2px;
+  }
+
+  .index-list .badge.bg-success {
+    background: #eef9f2 !important;
+    color: #1b5e3a !important;
+    border: 1px solid #d8f0e3;
+  }
+
+  .index-list .badge.bg-primary {
+    background: #edf3ff !important;
+    color: #1e3a8a !important;
+    border: 1px solid #d8e6ff;
+  }
+
+  .index-main .btn-secondary {
+    background: #f8fafc;
+    border-color: #dbe3ef;
+    color: #334155;
+  }
+
+  .index-main .btn-outline-secondary {
+    border-color: #dbe3ef;
+    color: #334155;
+  }
+
+  .index-main .btn-primary {
+    background: #2563eb;
+    border-color: #2563eb;
+  }
+
   #dictTable th, #reportTable th { white-space: nowrap; }
   #dictTable tbody tr.active { outline:2px solid #0d6efd; background:#e7f1ff; }
 
