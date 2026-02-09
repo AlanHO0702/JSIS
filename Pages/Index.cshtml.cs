@@ -40,16 +40,17 @@ namespace PcbErpApi.Pages
                 i.SuperId  = i.SuperId?.Trim();
             }
 
-            // 讀取 CURdSystemSelect 的排序，做成 Dictionary
+            // 讀取 CURdSystemSelect 的排序，只取 Selected != 0 的
             var orderPairs = await _context.CurdSystemSelects
+                .Where(s => s.Selected != 0)
                 .Select(s => new { SystemId = s.SystemId.Trim(), s.OrderNum })
                 .ToListAsync();
 
             var orderMap = orderPairs.ToDictionary(x => x.SystemId, x => x.OrderNum);
 
-            // Level 0 用 CURdSystemSelect.OrderNum 排序（找不到的排在最後）
+            // Level 0 用 CURdSystemSelect.OrderNum 排序，且只顯示 Selected != 0 的模組
             Level0Items = items
-                .Where(i => i.LevelNo == 0)
+                .Where(i => i.LevelNo == 0 && orderMap.ContainsKey(i.SystemId))
                 .OrderBy(i => orderMap.TryGetValue(i.SystemId, out var n) ? n : int.MaxValue)
                 .ThenBy(i => i.SerialNum)  // 次要排序保留原本序號
                 .ToList();
