@@ -1,17 +1,17 @@
-@if (ViewData["QueryFieldModalsRendered"] == null)
+﻿@if (ViewData["QueryFieldModalsRendered"] == null)
 {
     ViewData["QueryFieldModalsRendered"] = true;
     <div class="modal fade" id="queryFieldSelectModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg">
             <div class="modal-content query-field-select-modal">
                 <div class="modal-header">
-                    <h5 class="modal-title">設定查詢項目</h5>
+                    <h5 class="modal-title">查詢欄位設定</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div class="qf-top-row">
                         <div class="qf-config">
-                            <label class="qf-config-label">比對條件</label>
+                            <label class="qf-config-label">運算子</label>
                             <select id="qfEqual" class="form-select form-select-sm qf-config-select"></select>
                         </div>
                         <div class="qf-order">
@@ -21,7 +21,7 @@
                     </div>
                     <div class="qf-main-row">
                         <div class="qf-panel">
-                            <div class="qf-title">可用欄位</div>
+                            <div class="qf-title">全部欄位</div>
                             <div class="qf-table-wrap">
                                 <table class="qf-table">
                                     <thead>
@@ -51,7 +51,7 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button id="qfSave" class="btn btn-success">確定</button>
+                    <button id="qfSave" class="btn btn-success">儲存</button>
                     <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
                 </div>
             </div>
@@ -62,7 +62,7 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content query-default-modal">
                 <div class="modal-header">
-                    <h5 class="modal-title">預設設定</h5>
+                    <h5 class="modal-title">預設查詢</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
@@ -77,7 +77,7 @@
                                             <th style="width:55px">別名</th>
                                             <th style="width:130px">欄位名稱</th>
                                             <th class="qf-col-caption">欄位顯示名稱</th>
-                                            <th class="qf-col-cond">條件</th>
+                                            <th class="qf-col-cond">運算子</th>
                                         </tr>
                                     </thead>
                                     <tbody id="qfDefaultBody"></tbody>
@@ -88,10 +88,10 @@
                             <div class="qf-default-editor">
                                 <div class="qf-default-group">
                                     <div class="qf-default-title">
-                                        <span>下拉選單 .SQL</span>
+                                        <span>欄位選項 SQL</span>
                                         <label class="form-check qf-default-inline">
                                             <input id="qfDefaultControlType" class="form-check-input" type="checkbox">
-                                            <span class="form-check-label">啟用</span>
+                                            <span class="form-check-label">下拉</span>
                                         </label>
                                     </div>
                                     <textarea id="qfDefaultCommandText" class="form-control form-control-sm qf-default-textarea" rows="5"></textarea>
@@ -101,11 +101,11 @@
                                     <select id="qfDefaultType" class="form-select form-select-sm"></select>
                                 </div>
                                 <div class="qf-default-group">
-                                    <div class="qf-default-title">預設值 .SQL</div>
+                                    <div class="qf-default-title">預設值 SQL</div>
                                     <textarea id="qfDefaultValue" class="form-control form-control-sm qf-default-textarea" rows="5"></textarea>
                                 </div>
                                 <div class="qf-default-group">
-                                    <div class="qf-default-title">上層參數</div>
+                                    <div class="qf-default-title">上層欄位</div>
                                     <input id="qfDefaultSuperId" class="form-control form-control-sm" type="text">
                                 </div>
                             </div>
@@ -113,7 +113,7 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button id="qfDefaultSave" class="btn btn-success">確定</button>
+                    <button id="qfDefaultSave" class="btn btn-success">儲存</button>
                     <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
                 </div>
             </div>
@@ -155,10 +155,10 @@ const initQueryFieldModals = () => {
         let dragItem = null;
 
         const defaultTypeOptions = [
-            { value: 0, text: "固定常數" },
+            { value: 0, text: "不設定" },
             { value: 1, text: "SQL指令" },
-            { value: 2, text: "登入帳號" },
-            { value: 3, text: "公司代號" }
+            { value: 2, text: "登入者" },
+            { value: 3, text: "公司別" }
         ];
 
         const ensureDefaultTypeOptions = () => {
@@ -197,7 +197,10 @@ const initQueryFieldModals = () => {
             if (qfDefaultControlEl) currentDefaultRow.dataset.controlType = qfDefaultControlEl.checked ? "1" : "0";
         };
 
-        const searchModalEl = document.getElementById("searchModal") || document.getElementById("singleGridQueryModal") || document.getElementById("multiGridQueryModal");
+        const searchModalEl = document.getElementById("searchModal")
+            || document.getElementById("queryModal")
+            || document.getElementById("singleGridQueryModal")
+            || document.getElementById("multiGridQueryModal");
         if (qfModalEl && qfModalEl.parentElement !== document.body) document.body.appendChild(qfModalEl);
         if (qfDefaultModalEl && qfDefaultModalEl.parentElement !== document.body) document.body.appendChild(qfDefaultModalEl);
 
@@ -207,7 +210,7 @@ const initQueryFieldModals = () => {
         const fetchEquals = async () => {
             if (qfEquals) return qfEquals;
             try {
-                const res = await fetcher("/api/DictSetupApi/QueryEquals?all=1", null, "載入比對條件…");
+                const res = await fetcher("/api/DictSetupApi/QueryEquals?all=1", null, "載入運算子…");
                 if (!res.ok) throw new Error(await res.text());
                 const list = await res.json();
                 qfEquals = Array.isArray(list) ? list : [];
@@ -228,7 +231,7 @@ const initQueryFieldModals = () => {
             const table = getDictTable();
             if (!itemId || !table) return null;
             const eq = equalValue != null ? `&equal=${encodeURIComponent(equalValue)}` : "";
-            const res = await fetcher(`/api/DictSetupApi/PaperSelectedList?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(table)}${eq}`, null, "載入查詢項目…");
+            const res = await fetcher(`/api/DictSetupApi/PaperSelectedList?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(table)}${eq}`, null, "載入查詢欄位…");
             if (!res.ok) return null;
             const data = await res.json();
             if (equalValue == null) qfCache = data || null;
@@ -290,7 +293,7 @@ const initQueryFieldModals = () => {
             const selected = Array.isArray(data.selected) ? data.selected : [];
             const allFields = Array.isArray(data.allFields) ? data.allFields : [];
 
-            // 改用「欄位名稱+條件」作為唯一識別 key
+            // ?寧??雿?蝔?運算子???箏銝霅 key
             const selectedKey = new Set(selected.map(x => {
                 const col = (x.columnName || x.ColumnName || "").toLowerCase();
                 const eq = (x.defaultEqual || x.DefaultEqual || "").toLowerCase();
@@ -305,7 +308,7 @@ const initQueryFieldModals = () => {
             };
             const getTableName = (item) => (item.tableName || item.TableName || "").toString();
 
-            // 在欄位名稱後面加上條件
+            // ?冽?雿?蝔勗??Ｗ?銝?隞?
             const getFieldNameWithCondition = (item) => {
                 const baseName = getFieldName(item);
                 const condition = (item.defaultEqual || item.DefaultEqual || "").toString();
@@ -430,26 +433,26 @@ const initQueryFieldModals = () => {
         const saveSelected = async (items) => {
             const itemId = getItemId();
             const table = getDictTable();
-            console.log('[QueryFieldModals] 保存預設設定, itemId:', itemId, 'table:', table, 'items:', items.length);
+            console.log('[QueryFieldModals] 儲存查詢欄位, itemId:', itemId, 'table:', table, 'items:', items.length);
             if (!itemId || !table) {
-                console.error('[QueryFieldModals] 缺少 itemId 或 table，無法保存');
+                console.error('[QueryFieldModals] 缺少 itemId 或 table');
                 return false;
             }
             const res = await fetcher("/api/DictSetupApi/PaperSelected", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ itemId, table, items })
-            }, "儲存查詢設定…");
+            }, "儲存查詢欄位…");
             if (!res.ok) {
-                console.error('[QueryFieldModals] 保存失敗, status:', res.status);
+                console.error('[QueryFieldModals] 靽?憭望?, status:', res.status);
                 return false;
             }
-            console.log('[QueryFieldModals] 保存成功，清除快取');
+            console.log('[QueryFieldModals] 儲存完成');
             qfCache = null;
             if (window.QueryFieldsManager && typeof window.QueryFieldsManager.refresh === "function") {
-                console.log('[QueryFieldModals] 呼叫 QueryFieldsManager.refresh()');
+                console.log('[QueryFieldModals] ?澆 QueryFieldsManager.refresh()');
                 window.QueryFieldsManager.refresh().catch((err) => {
-                    console.error('[QueryFieldModals] refresh 失敗:', err);
+                    console.error('[QueryFieldModals] refresh 憭望?:', err);
                 });
             } else {
                 console.warn('[QueryFieldModals] QueryFieldsManager.refresh 不存在');
@@ -671,7 +674,7 @@ const initQueryFieldModals = () => {
                     const hit = map.get(key);
                     if (!hit) return;
                     updateCount++;
-                    console.log(`[QueryFieldModals] 更新欄位 ${key}: defType ${item.defaultType ?? item.DefaultType} -> ${hit.defType}`);
+                    console.log(`[QueryFieldModals] ?湔甈? ${key}: defType ${item.defaultType ?? item.DefaultType} -> ${hit.defType}`);
                     item.defaultEqual = hit.eq;
                     item.DefaultEqual = hit.eq;
                     item.defaultValue = hit.val;
@@ -879,7 +882,7 @@ if (document.readyState === "loading") {
     z-index: 10960;
     }
 
-    /* 預設設定視窗：放大、分隔清楚、字體/高度縮小 */
+    /* 預設查詢閬?嚗憭扼???璆?擃?擃漲蝮桀? */
     #queryDefaultModal .modal-dialog {
     --bs-modal-width: 980px;
     }
@@ -1031,3 +1034,4 @@ if (document.readyState === "loading") {
     font-size: 11px;
     }
 </style>
+
