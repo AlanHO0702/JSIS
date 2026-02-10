@@ -80,7 +80,9 @@ namespace PcbErpApi.Pages.SPO
 
                 var className = (item?.ClassName ?? "").Replace(".dll", "", StringComparison.OrdinalIgnoreCase);
                 if (string.IsNullOrWhiteSpace(className))
-                    className = "SPOdOutInq";
+                    className = "SPOdMPSOutInq";
+                if (string.Equals(className, "SPOdOutInq", StringComparison.OrdinalIgnoreCase))
+                    className = "SPOdMPSOutInq";
 
                 ParamTableName = ResolveParamTableName(className);
 
@@ -96,7 +98,9 @@ namespace PcbErpApi.Pages.SPO
                 if (SpId <= 0)
                 {
                     var start = await CallInqStartAsync(conn, itemId);
-                    paramStr = start.ParamStr;
+                    paramStr = string.Equals(className, "SPOdMPSOutInq", StringComparison.OrdinalIgnoreCase)
+                        ? BuildParamStrFromDict(className, ParamTableName)
+                        : start.ParamStr;
                     SpId = start.SpId;
                     if (!string.IsNullOrWhiteSpace(start.TableName))
                     {
@@ -151,7 +155,9 @@ namespace PcbErpApi.Pages.SPO
 
                 var className = (item?.ClassName ?? "").Replace(".dll", "", StringComparison.OrdinalIgnoreCase);
                 if (string.IsNullOrWhiteSpace(className))
-                    className = "SPOdOutInq";
+                    className = "SPOdMPSOutInq";
+                if (string.Equals(className, "SPOdOutInq", StringComparison.OrdinalIgnoreCase))
+                    className = "SPOdMPSOutInq";
 
                 ParamTableName = ResolveParamTableName(className);
                 QueryDictFields = LoadDictSafe(ParamTableName);
@@ -163,7 +169,9 @@ namespace PcbErpApi.Pages.SPO
                 if (SpId <= 0)
                 {
                     var start = await CallInqStartAsync(conn, itemId);
-                    paramStr = start.ParamStr;
+                    paramStr = string.Equals(className, "SPOdMPSOutInq", StringComparison.OrdinalIgnoreCase)
+                        ? BuildParamStrFromDict(className, ParamTableName)
+                        : start.ParamStr;
                     SpId = start.SpId;
                     if (!string.IsNullOrWhiteSpace(start.TableName))
                     {
