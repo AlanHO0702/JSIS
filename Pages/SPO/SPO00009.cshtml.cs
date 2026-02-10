@@ -475,7 +475,7 @@ namespace PcbErpApi.Pages.SPO
 
         public string BuildPageUrl(int page)
         {
-            var map = Request.Query.ToDictionary(k => k.Key, v => v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+            var map = Request.Query.ToDictionary(k => k.Key, v => (string?)v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
             map["page"] = page.ToString();
             map["pageSize"] = PageSize.ToString();
             return QueryString.Create(map).ToString();
