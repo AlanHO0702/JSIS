@@ -64,6 +64,12 @@ namespace PcbErpApi.Data
         public virtual DbSet<EmodLayerPress> EmodLayerPresses { get; set; }
         public IEnumerable<object> TabConfigs { get; internal set; }
 
+        // Flow Designer 相關資料表
+        public virtual DbSet<XFLdPRC> XFLdPRCs { get; set; }
+        public virtual DbSet<XFLdAct> XFLdActs { get; set; }
+        public virtual DbSet<XFLdTRA> XFLdTRAs { get; set; }
+        public virtual DbSet<XFLdEVT> XFLdEVTs { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
 
@@ -2745,6 +2751,22 @@ namespace PcbErpApi.Data
                     .HasMaxLength(50)
                     .IsRequired();
             });
+
+            // 配置 XFLdEVT 複合主鍵
+            modelBuilder.Entity<XFLdEVT>(entity =>
+            {
+                entity.HasKey(e => new { e.PRCID, e.RELATEID, e.EVTNAME });
+            });
+
+            // 配置 XFLdTRA 複合主鍵
+            modelBuilder.Entity<XFLdTRA>(entity =>
+            {
+                entity.HasKey(e => new { e.PRCID, e.TRAID });
+            });
+
+            // XFLdAct 表有觸發器，需關閉 OUTPUT 子句
+            modelBuilder.Entity<XFLdAct>()
+                .ToTable(tb => tb.UseSqlOutputClause(false));
 
             OnModelCreatingPartial(modelBuilder);
         }
