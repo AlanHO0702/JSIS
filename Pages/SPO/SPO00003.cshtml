@@ -97,6 +97,7 @@
 
   bool IsCheckbox(CURdTableField f)
   {
+      if ((f.ComboStyle ?? 0) == 1) return true;
       var dt = (f.DataType ?? "").ToLowerInvariant();
       if (dt.Contains("bit")) return true;
       if (dt.Contains("tinyint") || dt.Contains("int"))
@@ -111,6 +112,13 @@
   bool IsSelect(CURdTableField f)
   {
       return !string.IsNullOrWhiteSpace(f.Items) || !string.IsNullOrWhiteSpace(f.LookupTable);
+  }
+
+  bool DisableLookup(CURdTableField f)
+  {
+      var n = (f.FieldName ?? "").TrimStart('@');
+      return n.Equals("sPartNum", StringComparison.OrdinalIgnoreCase)
+          || n.Equals("sEPartNum", StringComparison.OrdinalIgnoreCase);
   }
 
   IEnumerable<(string Value, string Label)> ParseItems(string? items)
@@ -141,6 +149,7 @@
           var name = QInputName(f);
           var type = QInputType(f);
           var cur = QValue(name, type);
+          var codeId = $"inq_{name}";
           <label class="inq-label">@QLabel(f)</label>
           if (IsCheckbox(f))
           {
@@ -148,12 +157,14 @@
               <input class="form-check-input" type="checkbox" name="@name" value="1" @(QChecked(name) ? "checked" : "") />
             </div>
           }
-          else if (IsSelect(f))
+          else if (IsSelect(f) && !DisableLookup(f))
           {
             <span class="inq-select">
-              <input type="@type" name="@name" class="form-control form-control-sm inq-input inq-select-input"
-                     value="@cur"
+              <input type="hidden" id="@codeId" name="@name" class="inq-select-code-hidden" value="@cur" />
+              <input type="text" class="form-control form-control-sm inq-input inq-lookup-display"
+                     value=""
                      autocomplete="off"
+                     data-code-target="@codeId"
                      data-items="@f.Items"
                      data-lookup-table="@f.LookupTable"
                      data-lookup-key="@((f.LookupKeyField ?? "").Replace(" ", ""))"
@@ -322,6 +333,9 @@
     font-size: 0.82rem;
     border-radius: 8px;
   }
+  #btnEditDict {
+    display: none;
+  }
   .inq-form {
     display: grid;
     gap: 6px;
@@ -349,9 +363,6 @@
     display: inline-flex;
     align-items: center;
   }
-  .inq-select-input {
-    padding-right: 18px;
-  }
   .inq-select-btn {
     position: absolute;
     right: 4px;
@@ -364,6 +375,11 @@
     line-height: 1;
     padding: 0;
     cursor: pointer;
+  }
+  .inq-lookup-display {
+    padding-right: 18px;
+    background: #fff;
+    color: #374151;
   }
   .inq-suggest {
     position: absolute;
@@ -397,8 +413,24 @@
     text-overflow: ellipsis;
   }
   .compact-check .form-check-input {
-    width: 14px;
-    height: 14px;
+    width: 18px;
+    height: 18px;
+    margin: 0;
+  }
+  .inq-query .compact-check .form-check-input {
+    width: 18px;
+    height: 18px;
+  }
+  .compact-check {
+    width: 160px;
+    min-width: 160px;
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+    padding: 0;
+  }
+  .compact-check.form-check-inline {
+    margin: 0;
   }
   .inq-table-wrap {
     border: 1px solid #d8dee8;
@@ -842,6 +874,24 @@
     return Array.from(map.values());
   };
 
+  const getCodeInput = (el) => {
+    const id = el?.dataset?.codeTarget;
+    if (id) return document.getElementById(id);
+    return el?.closest(".inq-select")?.querySelector(".inq-select-code-hidden");
+  };
+
+  const syncDisplayValue = (displayEl, options) => {
+    if (!displayEl) return;
+    const codeInput = getCodeInput(displayEl);
+    const codeVal = (codeInput?.value || "").toString().trim();
+    if (!codeVal) {
+      displayEl.value = "";
+      return;
+    }
+    const hit = (options || []).find(o => String(o.value).trim() === codeVal);
+    displayEl.value = hit ? (hit.label || hit.value) : codeVal;
+  };
+
   const suggest = document.createElement("div");
   suggest.className = "inq-suggest";
   suggest.style.display = "none";
@@ -854,7 +904,8 @@
     const rect = el.getBoundingClientRect();
     suggest.style.left = `${rect.left + window.scrollX}px`;
     suggest.style.top = `${rect.bottom + window.scrollY}px`;
-    suggest.style.width = `${rect.width}px`;
+    const width = Math.max(rect.width, 280);
+    suggest.style.width = `${width}px`;
   };
 
   const hideSuggest = () => {
@@ -883,7 +934,9 @@
       item.innerHTML = `<div class="inq-suggest-code">${o.value}</div><div class="inq-suggest-label">${o.label}</div>`;
       item.addEventListener("mousedown", (e) => {
         e.preventDefault();
-        el.value = o.value;
+        const codeInput = getCodeInput(el);
+        if (codeInput) codeInput.value = o.value;
+        el.value = o.label || o.value;
         hideSuggest();
       });
       suggest.appendChild(item);
@@ -903,6 +956,7 @@
     }
     suggestTarget = el;
     suggestOptions = lookupCache.get(key) || [];
+    syncDisplayValue(el, suggestOptions);
     renderSuggest(el, suggestOptions);
   };
 
@@ -924,7 +978,7 @@
     hideSuggest();
   });
 
-  document.querySelectorAll(".inq-input[data-lookup-table], .inq-input[data-items]").forEach(el => {
+  document.querySelectorAll(".inq-lookup-display[data-lookup-table], .inq-lookup-display[data-items]").forEach(el => {
     el.addEventListener("focus", () => showSuggest(el));
     el.addEventListener("input", () => {
       if (suggestTarget !== el) return showSuggest(el);
@@ -934,8 +988,42 @@
       setTimeout(() => {
         if (!suggest.matches(":hover")) hideSuggest();
       }, 120);
+      const codeInput = getCodeInput(el);
+      if (!codeInput) return;
+      const text = (el.value || "").trim();
+      const key = buildCondKey(el);
+      const opts = lookupCache.get(key) || [];
+      if (!text) {
+        codeInput.value = "";
+        return;
+      }
+      const hit = opts.find(o => {
+        const v = String(o.value ?? "").trim();
+        const l = String(o.label ?? "").trim();
+        return v === text || l === text;
+      });
+      if (hit) {
+        codeInput.value = hit.value;
+        el.value = hit.label || hit.value;
+      } else {
+        syncDisplayValue(el, opts);
+      }
     });
   });
+
+  (async () => {
+    const inputs = Array.from(document.querySelectorAll(".inq-lookup-display"));
+    for (const el of inputs) {
+      if (!(el instanceof HTMLInputElement)) continue;
+      const key = buildCondKey(el);
+      if (!lookupCache.has(key)) {
+        const opts = await fetchLookupOptions(el);
+        lookupCache.set(key, opts);
+      }
+      const opts = lookupCache.get(key) || [];
+      syncDisplayValue(el, opts);
+    }
+  })();
 
   suggest.addEventListener("mousedown", () => {
     keepSuggestUntil = Date.now() + 250;
@@ -989,6 +1077,7 @@
     });
   })();
 </script>
+
 
 @if (Request.Query.ContainsKey("debug"))
 {
