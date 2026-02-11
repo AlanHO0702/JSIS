@@ -69,6 +69,8 @@ namespace PcbErpApi.Data
         public virtual DbSet<XFLdAct> XFLdActs { get; set; }
         public virtual DbSet<XFLdTRA> XFLdTRAs { get; set; }
         public virtual DbSet<XFLdEVT> XFLdEVTs { get; set; }
+        public virtual DbSet<XFLdSYSPARAMS> XFLdSYSPARAMS { get; set; }
+        public virtual DbSet<XFLdFUNC> XFLdFUNCs { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

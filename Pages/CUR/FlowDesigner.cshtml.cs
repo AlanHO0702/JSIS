@@ -77,37 +77,90 @@ namespace PcbErpApi.Pages.CUR
                     return RedirectToPage();
                 }
 
-                var newFlow = new XFLdPRC
-                {
-                    PRCID = prcId,
-                    PRCNAME = prcName,
-                    DESCRIP = descrip,
-                    CREATOR = CurrentUserId,
-                    CDATE = DateTime.Now,
-                    Finished = 0
-                };
+                // 使用原生 SQL 插入流程主檔（避免 Trigger 干擾 EF Core OUTPUT 子句）
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"INSERT INTO XFLdPRC(PRCID, PRCNAME, CREATOR, CDATE, DESCRIP, Finished)
+                      VALUES({0}, {1}, {2}, GETDATE(), {3}, 0)",
+                    prcId, prcName, CurrentUserId, descrip ?? "");
 
-                _context.XFLdPRCs.Add(newFlow);
+                // 使用原生 SQL 插入預設事件（完全模仿 DELPHI 行為）
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"INSERT INTO XFLdEVT(PRCID, RELATEID, EVTNAME, EVTTYPE, ONEXEC)
+                      VALUES({0}, {1}, {2}, 0, {3})",
+                    prcId, "", "流程初始行為", "");
 
-                // 新增預設事件
-                var defaultEvents = new[]
-                {
-                    new XFLdEVT { PRCID = prcId, RELATEID = "", EVTNAME = "流程初始行為", EVTTYPE = 0, ONEXEC = "" },
-                    new XFLdEVT { PRCID = prcId, RELATEID = "", EVTNAME = "流程結束行為", EVTTYPE = 0, ONEXEC = "" },
-                    new XFLdEVT { PRCID = prcId, RELATEID = "", EVTNAME = "流程取消行為", EVTTYPE = 0,
-                        ONEXEC = "EXEC CURdOCXFlowBackToPaper @單據類型,@單據編號,33,@申請人,@申請人,@流程編號,@代理人" }
-                };
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"INSERT INTO XFLdEVT(PRCID, RELATEID, EVTNAME, EVTTYPE, ONEXEC)
+                      VALUES({0}, {1}, {2}, 0, {3})",
+                    prcId, "", "流程結束行為", "");
 
-                _context.XFLdEVTs.AddRange(defaultEvents);
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"INSERT INTO XFLdEVT(PRCID, RELATEID, EVTNAME, EVTTYPE, ONEXEC)
+                      VALUES({0}, {1}, {2}, 0, {3})",
+                    prcId, "", "流程取消行為",
+                    "EXEC CURdOCXFlowBackToPaper @單據類型,@單據編號,33,@申請人,@申請人,@流程編號,@代理人");
 
-                await _context.SaveChangesAsync();
+                // 自動建立流程開始和流程結束節點（模仿 DELPHI 的 FileNew 行為）
+                // FlowStart: 位置 (200, 250)
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"INSERT INTO XFLdAct(ACTID, PRCID, ACTNAME, X, Y, ACTTYPE)
+                      VALUES({0}, {1}, {2}, {3}, {4}, {5})",
+                    "flowstart", prcId, "流程開始", 200, 250, 0);
+
+                // 為 FlowStart 建立 3 個活動事件
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"INSERT INTO XFLdEVT(PRCID, RELATEID, EVTNAME, EVTTYPE, ONEXEC)
+                      VALUES({0}, {1}, {2}, 1, {3})",
+                    prcId, "flowstart", "收件前行為", "SET @收件人 = @申請人");
+
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"INSERT INTO XFLdEVT(PRCID, RELATEID, EVTNAME, EVTTYPE, ONEXEC)
+                      VALUES({0}, {1}, {2}, 1, {3})",
+                    prcId, "flowstart", "收件後行為", "");
+
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"INSERT INTO XFLdEVT(PRCID, RELATEID, EVTNAME, EVTTYPE, ONEXEC)
+                      VALUES({0}, {1}, {2}, 1, {3})",
+                    prcId, "flowstart", "寄件行為", "");
+
+                // FlowEnd: 位置 (500, 250)
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"INSERT INTO XFLdAct(ACTID, PRCID, ACTNAME, X, Y, ACTTYPE)
+                      VALUES({0}, {1}, {2}, {3}, {4}, {5})",
+                    "flowend", prcId, "流程結束", 500, 250, 0);
+
+                // 為 FlowEnd 建立 3 個活動事件
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"INSERT INTO XFLdEVT(PRCID, RELATEID, EVTNAME, EVTTYPE, ONEXEC)
+                      VALUES({0}, {1}, {2}, 1, {3})",
+                    prcId, "flowend", "收件前行為", "SET @收件人 = @申請人");
+
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"INSERT INTO XFLdEVT(PRCID, RELATEID, EVTNAME, EVTTYPE, ONEXEC)
+                      VALUES({0}, {1}, {2}, 1, {3})",
+                    prcId, "flowend", "收件後行為", "");
+
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"INSERT INTO XFLdEVT(PRCID, RELATEID, EVTNAME, EVTTYPE, ONEXEC)
+                      VALUES({0}, {1}, {2}, 1, {3})",
+                    prcId, "flowend", "寄件行為", "");
 
                 TempData["Success"] = "新增流程成功";
                 return RedirectToPage(new { prcId = prcId });
             }
             catch (Exception ex)
             {
-                TempData["Error"] = $"新增流程失敗：{ex.Message}";
+                // 取得完整的錯誤訊息，包含內部異常
+                var errorMessage = ex.Message;
+                if (ex.InnerException != null)
+                {
+                    errorMessage += $" | Inner: {ex.InnerException.Message}";
+                    if (ex.InnerException.InnerException != null)
+                    {
+                        errorMessage += $" | Inner2: {ex.InnerException.InnerException.Message}";
+                    }
+                }
+                TempData["Error"] = $"新增流程失敗：{errorMessage}";
                 return RedirectToPage();
             }
         }
@@ -221,17 +274,19 @@ namespace PcbErpApi.Pages.CUR
                     return RedirectToPage();
                 }
 
-                // 刪除相關的活動、轉換、事件
-                var activities = await _context.XFLdActs.Where(a => a.PRCID == prcId).ToListAsync();
-                var transitions = await _context.XFLdTRAs.Where(t => t.PRCID == prcId).ToListAsync();
-                var events = await _context.XFLdEVTs.Where(e => e.PRCID == prcId).ToListAsync();
+                // 使用原生 SQL 刪除（避免 Trigger 干擾 EF Core OUTPUT 子句）
+                // 按照順序刪除：先刪除轉換、事件、活動，最後刪除流程
+                await _context.Database.ExecuteSqlRawAsync(
+                    "DELETE FROM XFLdTRA WHERE PRCID = {0}", prcId);
 
-                _context.XFLdActs.RemoveRange(activities);
-                _context.XFLdTRAs.RemoveRange(transitions);
-                _context.XFLdEVTs.RemoveRange(events);
-                _context.XFLdPRCs.Remove(flow);
+                await _context.Database.ExecuteSqlRawAsync(
+                    "DELETE FROM XFLdEVT WHERE PRCID = {0}", prcId);
 
-                await _context.SaveChangesAsync();
+                await _context.Database.ExecuteSqlRawAsync(
+                    "DELETE FROM XFLdAct WHERE PRCID = {0}", prcId);
+
+                await _context.Database.ExecuteSqlRawAsync(
+                    "DELETE FROM XFLdPRC WHERE PRCID = {0}", prcId);
 
                 TempData["Success"] = "刪除成功";
                 return RedirectToPage();

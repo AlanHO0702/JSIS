@@ -200,8 +200,18 @@
 
     .drawflow .connection {
         stroke: #4ea9ff;
-        stroke-width: 0.8px;
+        stroke-width: 1.1px;
         fill: none;
+    }
+
+    .drawflow .connection .main-path {
+        cursor: pointer;
+        stroke-width: 1.1px;
+    }
+
+    .drawflow .connection.selected .main-path {
+        stroke: #ff8c00 !important;
+        stroke-width: 2.2px !important;
     }
 
     .drawflow .drawflow-node.selected {
@@ -427,7 +437,7 @@
         <button type="button" class="secondary" onclick="showFlowContentDialog()" @(string.IsNullOrEmpty(currentPrcId) ? "disabled" : "")>
             <span>🔄</span> 讀取流程
         </button>
-        <button type="button" class="danger" onclick="deleteFlow()" @(string.IsNullOrEmpty(currentPrcId) || isEnabled ? "disabled" : "")>
+        <button type="button" class="danger" onclick="handleDeleteSelectedNodes()" @(string.IsNullOrEmpty(currentPrcId) || isEnabled ? "disabled" : "")>
             <span>🗑️</span> 刪除
         </button>
         <button type="button" class="secondary" onclick="autoArrangeFlow()" @(string.IsNullOrEmpty(currentPrcId) || isEnabled ? "disabled" : "")>
@@ -551,39 +561,156 @@
 </div>
 
 <!-- 流程內容對話框 -->
-<div id="flowContentDialog" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:20px; border:2px solid #ddd; border-radius:8px; z-index:1000; box-shadow: 0 4px 16px rgba(0,0,0,0.2); width:860px; max-width:92vw; max-height:86vh; overflow:auto;">
-    <h3 style="margin-top:0; margin-bottom:15px;">流程內容</h3>
+<div id="flowContentDialog" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:20px; border:2px solid #ddd; border-radius:8px; z-index:1000; box-shadow: 0 4px 16px rgba(0,0,0,0.2); width:620px;">
+    <h3 style="margin-top:0; margin-bottom:12px;">流程內容</h3>
 
-    <div style="display:grid; grid-template-columns: 110px 1fr 110px 1fr; gap:10px; align-items:center; margin-bottom:15px;">
-        <label style="font-weight:bold;">流程代碼:</label>
-        <input id="flowContentPrcId" type="text" readonly style="padding:6px; border:1px solid #ddd; border-radius:4px;" />
-        <label style="font-weight:bold;">流程名稱:</label>
-        <input id="flowContentPrcName" type="text" style="padding:6px; border:1px solid #ddd; border-radius:4px;" />
-        <label style="font-weight:bold;">流程描述:</label>
-        <input id="flowContentDescrip" type="text" style="grid-column: span 3; padding:6px; border:1px solid #ddd; border-radius:4px;" />
+    <!-- 流程基本資訊 -->
+    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+        <!-- 第一行：流程代碼 + 刪除流程按鈕（靠右） -->
+        <div style="display:flex; gap:8px; align-items:center;">
+            <label style="font-weight:bold; width:80px;">流程代碼:</label>
+            <input id="flowContentPrcId" type="text" readonly style="width:250px; padding:5px; border:1px solid #ddd; border-radius:4px; font-size:13px;" />
+            <div style="flex:1;"></div>
+            <button id="flowContentBtnDelete" type="button" onclick="deleteFlow()" style="padding:6px 12px; background-color:#dc3545; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px;">刪除流程</button>
+        </div>
+
+        <!-- 第二行：流程名稱 -->
+        <div style="display:flex; gap:8px; align-items:center;">
+            <label style="font-weight:bold; width:80px;">流程名稱:</label>
+            <input id="flowContentPrcName" type="text" style="width:250px; padding:5px; border:1px solid #ddd; border-radius:4px; font-size:13px;" />
+        </div>
+
+        <!-- 第三行：流程描述 + 插入參數 + 插入函式（靠右） -->
+        <div style="display:flex; gap:8px; align-items:center;">
+            <label style="font-weight:bold; width:80px;">流程描述:</label>
+            <input id="flowContentDescrip" type="text" style="flex:1; padding:5px; border:1px solid #ddd; border-radius:4px; font-size:13px;" />
+            <button id="flowContentBtnInsertVar" type="button" onclick="showInsertParamDialog()" style="padding:6px 12px; background-color:#6c757d; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px;">插入參數</button>
+            <button id="flowContentBtnInsertFunc" type="button" onclick="showInsertFuncDialog()" style="padding:6px 12px; background-color:#6c757d; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px;">插入函式</button>
+        </div>
     </div>
 
-    <div style="display:flex; gap:12px; height:360px;">
-        <div style="width:220px; display:flex; flex-direction:column; gap:8px;">
-            <label style="font-weight:bold;">流程事件:</label>
-            <select id="flowContentEvtList" size="14" style="flex:1; border:1px solid #ddd; border-radius:4px; padding:6px;" onchange="onFlowContentEventChanged()"></select>
+    <!-- 中間區域：流程事件 + ONEXEC -->
+    <div style="display:flex; gap:0;">
+        <!-- 左側：流程事件列表 -->
+        <div style="width:160px;">
+            <select id="flowContentEvtList" size="10" style="height:268px; border:1px solid #ddd; border-radius:4px 0 0 4px; border-right:none; padding:4px; font-size:13px;" onchange="onFlowContentEventChanged()"></select>
         </div>
-        <div style="flex:1; display:flex; flex-direction:column; gap:8px;">
-            <label style="font-weight:bold;">ONEXEC:</label>
-            <textarea id="flowContentOnExec" style="flex:1; border:1px solid #ddd; border-radius:4px; padding:8px; font-family:Consolas, monospace;"></textarea>
+
+        <!-- 右側：ONEXEC -->
+        <div style="flex:1;">
+            <textarea id="flowContentOnExec" style="width:100%; height:268px; border:1px solid #ddd; border-radius:0 4px 4px 0; padding:6px; font-family:Consolas, monospace; font-size:13px; resize:none; box-sizing:border-box;"></textarea>
         </div>
     </div>
 
-    <div style="display:flex; justify-content:space-between; margin-top:14px;">
-        <div style="display:flex; gap:8px;">
-            <button id="flowContentBtnInsertVar" type="button" style="padding:8px 14px; background-color:#6c757d; color:white; border:none; border-radius:4px; cursor:pointer;">插入參數</button>
-            <button id="flowContentBtnInsertFunc" type="button" style="padding:8px 14px; background-color:#6c757d; color:white; border:none; border-radius:4px; cursor:pointer;">插入函式</button>
-            <button id="flowContentBtnDelete" type="button" style="padding:8px 14px; background-color:#dc3545; color:white; border:none; border-radius:4px; cursor:pointer;">刪除流程</button>
+    <!-- 底部：確定、取消按鈕 -->
+    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
+        <button id="flowContentBtnOk" type="button" style="padding:6px 16px; background-color:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px;" onclick="closeFlowContentDialog()">確定</button>
+        <button type="button" style="padding:6px 16px; background-color:#6c757d; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px;" onclick="closeFlowContentDialog()">取消</button>
+    </div>
+</div>
+
+<!-- 活動內容對話框（先完成開啟與顯示，按鈕功能後續實作） -->
+<div id="activityContentDialog" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:14px; border:2px solid #ddd; border-radius:8px; z-index:1000; box-shadow: 0 4px 16px rgba(0,0,0,0.2); width:640px; max-width:88vw; font-size:12px;">
+    <h3 style="margin-top:0; margin-bottom:8px; font-size:22px; white-space:nowrap;">活動內容</h3>
+
+    <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:10px;">
+        <div style="display:flex; align-items:center; gap:6px;">
+            <label style="font-weight:bold; width:56px; flex-shrink:0; white-space:nowrap;">活動代碼:</label>
+            <input id="activityContentActId" type="text" readonly style="width:136px; padding:3px 4px; border:1px solid #ddd; border-radius:0; font-size:12px;" />
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+            <label style="font-weight:bold; width:56px; flex-shrink:0; white-space:nowrap;">活動名稱:</label>
+            <input id="activityContentActName" type="text" readonly style="width:136px; padding:3px 4px; border:1px solid #ddd; border-radius:0; font-size:12px;" />
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+            <label style="font-weight:bold; width:56px; flex-shrink:0; white-space:nowrap;">活動描述:</label>
+            <input id="activityContentDescrip" type="text" readonly style="width:210px; padding:3px 4px; border:1px solid #ddd; border-radius:0; font-size:12px;" />
+        </div>
+        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <label style="font-weight:bold; width:56px; flex-shrink:0; white-space:nowrap;">收件類型:</label>
+            <input id="activityContentActType" type="text" readonly style="width:118px; padding:3px 4px; border:1px solid #ddd; border-radius:0; font-size:12px;" />
+            <label style="font-weight:bold; width:56px; flex-shrink:0; white-space:nowrap;">收件指定:</label>
+            <input id="activityContentRecType" type="text" readonly style="width:132px; padding:3px 4px; border:1px solid #ddd; border-radius:0; font-size:12px;" />
+            <input id="activityContentParamText" type="text" readonly style="width:80px; padding:3px 4px; border:1px solid #ddd; border-radius:0; font-size:12px;" />
+            <label style="display:flex; align-items:center; gap:4px; white-space:nowrap;"><input id="activityContentIsEmail" type="checkbox" disabled /> Email通知下一關</label>
+        </div>
+    </div>
+
+    <div style="display:flex; gap:12px; align-items:center; margin-bottom:10px;">
+        <label style="display:flex; align-items:center; gap:4px; white-space:nowrap;"><input id="activityContentAllowAdd" type="checkbox" disabled /> 可加簽</label>
+        <label style="display:flex; align-items:center; gap:4px; white-space:nowrap;"><input id="activityContentAllowReject" type="checkbox" disabled /> 可退回</label>
+        <label style="display:flex; align-items:center; gap:4px; font-weight:bold; white-space:nowrap;"><input id="activityContentIsMultiSign" type="checkbox" disabled /> 是會簽</label>
+    </div>
+
+    <div style="display:flex; gap:0; margin-bottom:10px;">
+        <div style="flex:0 0 20%; min-width:0;">
+            <select id="activityContentEvtList" size="11" style="width:100%; height:224px; border:1px solid #ddd; border-radius:4px 0 0 4px; border-right:none; padding:4px; font-size:12px;" onchange="onActivityContentEventChanged()"></select>
+        </div>
+        <div style="flex:1; min-width:0;">
+            <textarea id="activityContentOnExec" readonly style="width:100%; height:224px; border:1px solid #ddd; border-radius:0 4px 4px 0; padding:5px; font-family:Consolas, monospace; font-size:12px; resize:none; box-sizing:border-box;"></textarea>
+        </div>
+    </div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+        <div style="display:flex; gap:6px; flex-wrap:nowrap;">
+            <button id="activityContentBtnMultiSign" type="button" disabled style="width:82px; padding:5px 0; background-color:#e9ecef; color:#333; border:1px solid #adb5bd; border-radius:4px; font-size:12px; cursor:not-allowed; white-space:nowrap;">設定會簽</button>
+            <button id="activityContentBtnMultiSignView" type="button" disabled style="width:82px; padding:5px 0; background-color:#e9ecef; color:#666; border:1px solid #adb5bd; border-radius:4px; font-size:12px; cursor:not-allowed; white-space:nowrap;">檢視會簽</button>
+            <button id="activityContentBtnMultiSignCancel" type="button" disabled style="width:82px; padding:5px 0; background-color:#e9ecef; color:#333; border:1px solid #adb5bd; border-radius:4px; font-size:12px; cursor:not-allowed; white-space:nowrap;">取消會簽</button>
+            <button id="activityContentBtnInsertVar" type="button" disabled style="width:82px; padding:5px 0; background-color:#e9ecef; color:#333; border:1px solid #adb5bd; border-radius:4px; font-size:12px; cursor:not-allowed; white-space:nowrap;">插入參數</button>
+            <button id="activityContentBtnInsertFunc" type="button" disabled style="width:82px; padding:5px 0; background-color:#e9ecef; color:#333; border:1px solid #adb5bd; border-radius:4px; font-size:12px; cursor:not-allowed; white-space:nowrap;">插入函式</button>
         </div>
         <div style="display:flex; gap:8px;">
-            <button id="flowContentBtnOk" type="button" style="padding:8px 20px; background-color:#007bff; color:white; border:none; border-radius:4px; cursor:pointer;" onclick="closeFlowContentDialog()">確定</button>
-            <button type="button" style="padding:8px 20px; background-color:#6c757d; color:white; border:none; border-radius:4px; cursor:pointer;" onclick="closeFlowContentDialog()">取消</button>
+            <button id="activityContentBtnOk" type="button" onclick="closeActivityContentDialog()" style="width:68px; padding:5px 0; background-color:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; white-space:nowrap;">關閉</button>
         </div>
+    </div>
+</div>
+
+<!-- 插入參數對話框 -->
+<div id="insertParamDialog" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:20px; border:2px solid #ddd; border-radius:8px; z-index:1001; box-shadow: 0 4px 16px rgba(0,0,0,0.2); width:400px; max-width:90vw; max-height:70vh; flex-direction:column;">
+    <h3 style="margin-top:0; margin-bottom:15px; flex-shrink:0;">插入參數</h3>
+
+    <!-- 參數列表 -->
+    <div style="flex:1; overflow-y:auto; margin-bottom:15px; min-height:0;">
+        <table id="paramListTable" style="width:100%; border-collapse:collapse;">
+            <thead style="position:sticky; top:0; background-color:#f5f5f5; z-index:1;">
+                <tr style="border-bottom:2px solid #ddd;">
+                    <th style="padding:10px; text-align:left;">參數名稱</th>
+                </tr>
+            </thead>
+            <tbody id="paramListBody">
+                <!-- 參數列表將通過 JavaScript 動態載入 -->
+            </tbody>
+        </table>
+    </div>
+
+    <div style="display:flex; gap:10px; justify-content:flex-end; flex-shrink:0;">
+        <button id="insertParamBtnOk" type="button" onclick="insertSelectedParam()" style="padding:8px 20px; background-color:#007bff; color:white; border:none; border-radius:4px; cursor:pointer;">確定</button>
+        <button type="button" onclick="closeInsertParamDialog()" style="padding:8px 20px; background-color:#6c757d; color:white; border:none; border-radius:4px; cursor:pointer;">取消</button>
+    </div>
+</div>
+
+<!-- 插入函式對話框 -->
+<div id="insertFuncDialog" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:20px; border:2px solid #ddd; border-radius:8px; z-index:1001; box-shadow: 0 4px 16px rgba(0,0,0,0.2); width:600px; max-width:90vw; max-height:70vh; flex-direction:column;">
+    <h3 style="margin-top:0; margin-bottom:15px; flex-shrink:0;">插入函式</h3>
+
+    <!-- 函式列表 -->
+    <div style="flex:1; overflow-y:auto; margin-bottom:15px; min-height:0;">
+        <table id="funcListTable" style="width:100%; border-collapse:collapse;">
+            <thead style="position:sticky; top:0; background-color:#f5f5f5; z-index:1;">
+                <tr style="border-bottom:2px solid #ddd;">
+                    <th style="padding:10px; text-align:left; width:45%; border-right:2px solid #ccc;">函式</th>
+                    <th style="padding:10px; text-align:left; width:55%;">說明</th>
+                </tr>
+            </thead>
+            <tbody id="funcListBody">
+                <!-- 函式列表將通過 JavaScript 動態載入 -->
+            </tbody>
+        </table>
+    </div>
+
+    <div style="display:flex; gap:10px; justify-content:flex-end; flex-shrink:0;">
+        <button id="insertFuncBtnOk" type="button" onclick="insertSelectedFunc()" style="padding:8px 20px; background-color:#007bff; color:white; border:none; border-radius:4px; cursor:pointer;">確定</button>
+        <button type="button" onclick="closeInsertFuncDialog()" style="padding:8px 20px; background-color:#6c757d; color:white; border:none; border-radius:4px; cursor:pointer;">取消</button>
     </div>
 </div>
 
@@ -596,6 +723,18 @@
 
     <!-- 四方向連接點定位 (覆寫 Drawflow 預設的左右配置) -->
     <style>
+        /* 覆寫 Drawflow 預設連線粗細（Drawflow CSS 較晚載入，需在這裡強制覆蓋） */
+        .drawflow .connection .main-path {
+            stroke: #4ea9ff !important;
+            stroke-width: 1.1px !important;
+            fill: none;
+        }
+
+        .drawflow .connection.selected .main-path {
+            stroke: #ff8c00 !important;
+            stroke-width: 2.2px !important;
+        }
+
         /* 讓 inputs/outputs 容器覆蓋整個節點，以便四方向定位 */
         .drawflow .drawflow-node .inputs,
         .drawflow .drawflow-node .outputs {
@@ -619,47 +758,44 @@
             height: 10px;
         }
 
-        /* 滑鼠移到節點時才顯示連接點 */
-        .drawflow .drawflow-node:hover .input,
-        .drawflow .drawflow-node:hover .output {
+        /* 只在節點被選取時顯示連接點，未點選流程時不顯示 */
+        .drawflow .drawflow-node.selected .input,
+        .drawflow .drawflow-node.selected .output,
+        .drawflow .drawflow-node.multi-selected .input,
+        .drawflow .drawflow-node.multi-selected .output {
             opacity: 1;
         }
 
-        /* 有連線的連接點永遠顯示 */
-        .drawflow .drawflow-node .input.connected,
-        .drawflow .drawflow-node .output.connected {
-            opacity: 1;
-        }
-
-        /* input_1 = 左側中央 */
-        .drawflow .drawflow-node .inputs .input_1 {
-            left: -5px;
-            top: 50%;
-            transform: translateY(-50%);
-        }
-
-        /* input_2 = 頂部中央 */
-        .drawflow .drawflow-node .inputs .input_2 {
+        /* 連接點編號: 1=上, 2=右, 3=下, 4=左 */
+        .drawflow .drawflow-node .inputs .input_1,
+        .drawflow .drawflow-node .outputs .output_1 {
             left: 50%;
             top: -5px;
             transform: translateX(-50%);
         }
 
-        /* output_1 = 右側中央 */
-        .drawflow .drawflow-node .outputs .output_1 {
+        .drawflow .drawflow-node .inputs .input_2,
+        .drawflow .drawflow-node .outputs .output_2 {
             right: -5px;
             left: auto;
             top: 50%;
             transform: translateY(-50%);
         }
 
-        /* output_2 = 底部中央 */
-        .drawflow .drawflow-node .outputs .output_2 {
+        .drawflow .drawflow-node .inputs .input_3,
+        .drawflow .drawflow-node .outputs .output_3 {
             left: 50%;
             bottom: -5px;
             top: auto;
             right: auto;
             transform: translateX(-50%);
+        }
+
+        .drawflow .drawflow-node .inputs .input_4,
+        .drawflow .drawflow-node .outputs .output_4 {
+            left: -5px;
+            top: 50%;
+            transform: translateY(-50%);
         }
     </style>
 
@@ -673,6 +809,7 @@
         let currentTransitions = [];
         let currentActIdToNodeIdMap = {};
         const multiSelectedNodeIds = new Set();
+        let selectedConnection = null;
         let lastMovedNodePositions = {};
         let isSyncingGroupMove = false;
         const isReadOnly = @isReadOnly;
@@ -708,6 +845,148 @@
             };
         }
 
+        function getNodePortContext(nodeId, fallbackPos) {
+            const nodeData = nodeId ? editor?.getNodeFromId(Number(nodeId)) : null;
+            const nodeEl = nodeId ? document.getElementById('node-' + nodeId) : null;
+
+            return {
+                x: Number(nodeData?.pos_x ?? fallbackPos?.x) || 0,
+                y: Number(nodeData?.pos_y ?? fallbackPos?.y) || 0,
+                width: Number(nodeEl?.offsetWidth ?? fallbackPos?.width) || 150,
+                height: Number(nodeEl?.offsetHeight ?? fallbackPos?.height) || 80
+            };
+        }
+
+        function extractNodeIdFromConnectionToken(token) {
+            if (!token) return null;
+            const nodeMatch = token.match(/node-(\d+)/i);
+            if (nodeMatch) return Number(nodeMatch[1]);
+            const suffixMatch = token.match(/(\d+)$/);
+            if (suffixMatch) return Number(suffixMatch[1]);
+            return null;
+        }
+
+        function getConnectionInfoFromElement(connectionEl) {
+            if (!connectionEl) return null;
+            const classes = Array.from(connectionEl.classList || []);
+            const outputClass = classes.find(c => /^output_\d+$/.test(c));
+            const inputClass = classes.find(c => /^input_\d+$/.test(c));
+            const outputToken = classes.find(c => c.startsWith('node_out_'));
+            const inputToken = classes.find(c => c.startsWith('node_in_'));
+            const outputId = extractNodeIdFromConnectionToken(outputToken);
+            const inputId = extractNodeIdFromConnectionToken(inputToken);
+
+            if (!outputClass || !inputClass || !Number.isFinite(outputId) || !Number.isFinite(inputId)) {
+                return null;
+            }
+
+            return {
+                element: connectionEl,
+                output_id: outputId,
+                input_id: inputId,
+                output_class: outputClass,
+                input_class: inputClass
+            };
+        }
+
+        function ensureConnectionArrows() {
+            const svgNs = 'http://www.w3.org/2000/svg';
+            const connectionEls = document.querySelectorAll('#drawflow .connection');
+
+            connectionEls.forEach((connectionEl, index) => {
+                const mainPath = connectionEl.querySelector('path.main-path');
+                if (!mainPath) return;
+
+                let markerId = connectionEl.dataset.arrowMarkerId;
+                if (!markerId) {
+                    markerId = `flow-arrowhead-${Date.now()}-${index}`;
+                    connectionEl.dataset.arrowMarkerId = markerId;
+                }
+
+                let defsEl = connectionEl.querySelector('defs');
+                if (!defsEl) {
+                    defsEl = document.createElementNS(svgNs, 'defs');
+                    connectionEl.insertBefore(defsEl, connectionEl.firstChild);
+                }
+
+                let markerEl = defsEl.querySelector(`#${markerId}`);
+                if (!markerEl) {
+                    markerEl = document.createElementNS(svgNs, 'marker');
+                    markerEl.setAttribute('id', markerId);
+                    markerEl.setAttribute('viewBox', '0 0 18 18');
+                    markerEl.setAttribute('refX', '17');
+                    markerEl.setAttribute('refY', '9');
+                    markerEl.setAttribute('markerWidth', '14');
+                    markerEl.setAttribute('markerHeight', '14');
+                    markerEl.setAttribute('markerUnits', 'userSpaceOnUse');
+                    markerEl.setAttribute('orient', 'auto');
+
+                    const arrowPath = document.createElementNS(svgNs, 'path');
+                    arrowPath.setAttribute('d', 'M 0 0 L 18 9 L 0 18 z');
+                    arrowPath.setAttribute('fill', '#2f7fbe');
+                    arrowPath.setAttribute('stroke', '#2f7fbe');
+                    arrowPath.setAttribute('stroke-width', '1');
+                    markerEl.appendChild(arrowPath);
+                    defsEl.appendChild(markerEl);
+                }
+
+                const arrowPath = markerEl.querySelector('path');
+                if (arrowPath) {
+                    const strokeColor = window.getComputedStyle(mainPath).stroke || '#2f7fbe';
+                    arrowPath.setAttribute('fill', strokeColor);
+                    arrowPath.setAttribute('stroke', strokeColor);
+                }
+
+                mainPath.setAttribute('marker-end', `url(#${markerId})`);
+            });
+        }
+
+        function clearSelectedConnection() {
+            if (selectedConnection?.element) {
+                selectedConnection.element.classList.remove('selected');
+            }
+            selectedConnection = null;
+            ensureConnectionArrows();
+        }
+
+        function selectConnectionElement(connectionEl) {
+            const info = getConnectionInfoFromElement(connectionEl);
+            if (!info) {
+                clearSelectedConnection();
+                return;
+            }
+
+            if (selectedConnection?.element === info.element) return;
+
+            clearSelectedConnection();
+            info.element.classList.add('selected');
+            selectedConnection = info;
+            ensureConnectionArrows();
+        }
+
+        async function handleDeleteSelectedConnection() {
+            if (!selectedConnection) return false;
+
+            if (!confirm('是否確定要刪除選中的連線？')) {
+                return true;
+            }
+
+            const info = selectedConnection;
+            clearSelectedConnection();
+
+            try {
+                editor.removeSingleConnection(info.output_id, info.input_id, info.output_class, info.input_class);
+                markConnectedPorts();
+                renderTransitionLabels();
+                ensureConnectionArrows();
+            } catch (error) {
+                console.error('刪除連線失敗:', error, info);
+                alert('刪除連線失敗: ' + error.message);
+            }
+
+            return true;
+        }
+
         function seedSelectedNodePositions() {
             lastMovedNodePositions = {};
             multiSelectedNodeIds.forEach(nodeId => {
@@ -716,13 +995,192 @@
             });
         }
 
+        function getSelectedNodeIds() {
+            const flowData = editor.export();
+            const moduleData = flowData.drawflow?.Home?.data || {};
+
+            // 以我們自己的多選集合為主，避免被 Drawflow 單選樣式覆蓋
+            const idsFromSet = Array.from(multiSelectedNodeIds)
+                .map(id => String(id))
+                .filter(id => !!moduleData[id]);
+            if (idsFromSet.length > 0) {
+                return idsFromSet;
+            }
+
+            // 後備：若集合為空，仍可讀取畫面上 selected 類別
+            const idsFromDom = [];
+            for (const nodeId in moduleData) {
+                const nodeEl = document.getElementById('node-' + nodeId);
+                if (nodeEl && nodeEl.classList.contains('selected')) {
+                    idsFromDom.push(String(nodeId));
+                }
+            }
+            return idsFromDom;
+        }
+
+        // 處理刪除選中的物件（優先刪除連線，其次刪除節點）
+        async function handleDeleteSelectedNodes() {
+            if (isReadOnly) {
+                alert('已啟用的流程無法修改');
+                return;
+            }
+
+            if (!currentPrcId) {
+                return;
+            }
+
+            if (await handleDeleteSelectedConnection()) {
+                return;
+            }
+
+            // 取得所有選中的節點
+            const flowData = editor.export();
+            const moduleData = flowData.drawflow?.Home?.data || {};
+            const selectedNodeIds = getSelectedNodeIds();
+
+            if (selectedNodeIds.length === 0) {
+                return;
+            }
+
+            // 檢查是否包含不可刪除的節點（FlowStart, FlowEnd）
+            for (const nodeId of selectedNodeIds) {
+                const nodeData = moduleData[nodeId];
+                const actId = nodeData?.data?.actid;
+                const actIdLower = (actId || '').toLowerCase();
+
+                if (actIdLower === 'flowstart') {
+                    alert('[流程開始] 這個物件不可刪除！');
+                    return;
+                }
+                if (actIdLower === 'flowend') {
+                    alert('[流程結束] 這個物件不可刪除！');
+                    return;
+                }
+            }
+
+            // 顯示確認對話框
+            if (!confirm('是否確定要刪除選中的物件？')) {
+                return;
+            }
+
+            // 執行刪除
+            for (const nodeId of selectedNodeIds) {
+                const nodeData = moduleData[nodeId];
+                const actId = nodeData?.data?.actid;
+
+                if (!actId) continue;
+
+                try {
+                    // 1. 刪除資料庫中的活動記錄（API 會自動刪除相關的轉換）
+                    const response = await fetch(`/api/FlowDesigner/${encodeURIComponent(currentPrcId)}/activities/${encodeURIComponent(actId)}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (!response.ok) {
+                        const error = await response.json();
+                        console.error('刪除活動失敗:', actId, error);
+                        alert(`刪除活動失敗: ${error.error || error.message}`);
+                        continue;
+                    }
+
+                    // 2. 從前端刪除節點（會自動刪除相關連線）
+                    editor.removeNodeId('node-' + nodeId);
+
+                    // 3. 從映射中移除
+                    delete currentActIdToNodeIdMap[actId];
+
+                    console.log('已刪除活動:', actId);
+                } catch (error) {
+                    console.error('刪除活動時發生錯誤:', actId, error);
+                    alert(`刪除活動時發生錯誤: ${error.message}`);
+                }
+            }
+
+            // 清除多選狀態
+            multiSelectedNodeIds.clear();
+            applyMultiSelectionClasses();
+        }
+
+        // 處理連線刪除（同步刪除資料庫的 XFLdTRA）
+        async function handleConnectionRemoved(info) {
+            if (!currentPrcId) return;
+
+            if (selectedConnection &&
+                Number(selectedConnection.output_id) === Number(info.output_id) &&
+                Number(selectedConnection.input_id) === Number(info.input_id) &&
+                selectedConnection.output_class === info.output_class &&
+                selectedConnection.input_class === info.input_class) {
+                clearSelectedConnection();
+            }
+
+            try {
+                // 從連線資訊中找出對應的 TRAID
+                // info 包含: output_id (source node id), input_id (target node id),
+                //            output_class (e.g. "output_1"), input_class (e.g. "input_1")
+
+                const srcNodeId = info.output_id;
+                const dstNodeId = info.input_id;
+
+                // 從 currentTransitions 中找出對應的轉換
+                const srcNodeData = editor.getNodeFromId(srcNodeId);
+                const dstNodeData = editor.getNodeFromId(dstNodeId);
+
+                const srcActId = srcNodeData?.data?.actid;
+                const dstActId = dstNodeData?.data?.actid;
+
+                if (!srcActId || !dstActId) return;
+
+                // 找出對應的 TRAID
+                const transition = currentTransitions.find(t =>
+                    (t.srcact || t.SRCACT) === srcActId &&
+                    (t.dstact || t.DSTACT) === dstActId
+                );
+
+                if (!transition) {
+                    console.warn('找不到對應的轉換記錄:', srcActId, '->', dstActId);
+                    return;
+                }
+
+                const traId = transition.traid || transition.TRAID;
+                if (!traId) return;
+
+                // 呼叫 API 刪除資料庫記錄
+                const response = await fetch(`/api/FlowDesigner/${encodeURIComponent(currentPrcId)}/transitions/${encodeURIComponent(traId)}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    console.error('刪除轉換失敗:', traId, error);
+                } else {
+                    console.log('已刪除轉換:', traId);
+                    // 從 currentTransitions 中移除
+                    const index = currentTransitions.indexOf(transition);
+                    if (index > -1) {
+                        currentTransitions.splice(index, 1);
+                    }
+                }
+            } catch (error) {
+                console.error('刪除轉換時發生錯誤:', error);
+            }
+        }
+
         function applyMultiSelectionClasses() {
+            // 移除所有節點的多選樣式
             document.querySelectorAll('.drawflow-node.multi-selected')
                 .forEach(el => el.classList.remove('multi-selected'));
 
+            // 移除所有節點的 selected 類別
+            document.querySelectorAll('.drawflow-node.selected')
+                .forEach(el => el.classList.remove('selected'));
+
+            // 為所有在多選集合中的節點加上樣式
             multiSelectedNodeIds.forEach(nodeId => {
                 const nodeEl = document.getElementById('node-' + nodeId);
-                if (nodeEl) nodeEl.classList.add('multi-selected');
+                if (nodeEl) {
+                    nodeEl.classList.add('multi-selected');
+                    nodeEl.classList.add('selected');  // 同時加上 selected 類別
+                }
             });
         }
 
@@ -770,31 +1228,46 @@
 
         function handleShiftMultiSelect(event) {
             const nodeEl = event.target.closest('.drawflow-node');
+            if (nodeEl) {
+                clearSelectedConnection();
+                const nodeId = getNodeIdFromElement(nodeEl);
+                if (!nodeId) return;
 
-            if (!nodeEl) {
-                if (!event.shiftKey && multiSelectedNodeIds.size > 0) {
+                if (event.shiftKey) {
+                    // 按住 Shift 點擊：切換節點的選中狀態（加入或移除多選）
+                    if (multiSelectedNodeIds.has(nodeId)) {
+                        multiSelectedNodeIds.delete(nodeId);
+                    } else {
+                        multiSelectedNodeIds.add(nodeId);
+                    }
+                    seedSelectedNodePositions();
+                    applyMultiSelectionClasses();
+                } else {
+                    // 不按 Shift 點擊：清除之前的多選，只選中當前節點
                     multiSelectedNodeIds.clear();
+                    multiSelectedNodeIds.add(nodeId);
+                    seedSelectedNodePositions();
                     applyMultiSelectionClasses();
                 }
                 return;
             }
 
-            const nodeId = getNodeIdFromElement(nodeEl);
-            if (!nodeId) return;
-
-            if (event.shiftKey) {
-                if (multiSelectedNodeIds.has(nodeId)) {
-                    multiSelectedNodeIds.delete(nodeId);
-                } else {
-                    multiSelectedNodeIds.add(nodeId);
-                }
-                seedSelectedNodePositions();
-                applyMultiSelectionClasses();
-            } else if (multiSelectedNodeIds.has(nodeId)) {
-                seedSelectedNodePositions();
-            } else if (multiSelectedNodeIds.size > 0) {
+            const connectionEl = event.target.closest('.connection');
+            if (connectionEl) {
                 multiSelectedNodeIds.clear();
                 applyMultiSelectionClasses();
+                selectConnectionElement(connectionEl);
+                return;
+            }
+
+            // 點擊空白處：清除所有選擇
+            if (!nodeEl) {
+                if (multiSelectedNodeIds.size > 0) {
+                    multiSelectedNodeIds.clear();
+                    applyMultiSelectionClasses();
+                }
+                clearSelectedConnection();
+                return;
             }
         }
 
@@ -802,9 +1275,23 @@
         document.addEventListener('DOMContentLoaded', function() {
             const container = document.getElementById('drawflow');
             editor = new Drawflow(container);
+            // Drawflow 預設是曲線連線，將曲率降為 0 讓線條盡量直連
+            editor.curvature = 0;
+            editor.reroute_curvature = 0;
+            editor.reroute_curvature_start_end = 0;
+            editor.reroute_fix_curvature = true;
 
             editor.start();
             container.addEventListener('mousedown', handleShiftMultiSelect, true);
+
+            // 覆寫 Drawflow 的刪除鍵行為（完全模仿 DELPHI 邏輯）
+            container.addEventListener('keydown', async function(e) {
+                if (e.key === 'Delete') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    await handleDeleteSelectedNodes();
+                }
+            }, true);
 
             // 如果有流程資料，載入流程圖
             if (currentPrcId) {
@@ -820,12 +1307,23 @@
                         editor.removeSingleConnection(info.output_id, info.input_id, info.output_class, info.input_class);
                     }
                 });
-                editor.on('nodeRemoved', function() {
-                    if (!isLoadingFlow) {
-                        alert('已啟用的流程無法修改');
-                    }
-                });
             }
+
+            // 連線刪除事件（同步刪除資料庫的 XFLdTRA）
+            editor.on('connectionRemoved', async function(info) {
+                if (isLoadingFlow || isReadOnly) return;
+                await handleConnectionRemoved(info);
+                markConnectedPorts();
+                renderTransitionLabels();
+            });
+
+            editor.on('connectionCreated', function() {
+                setTimeout(() => {
+                    markConnectedPorts();
+                    renderTransitionLabels();
+                    ensureConnectionArrows();
+                }, 0);
+            });
 
             editor.on('nodeMoved', function(nodeId) {
                 const movedNodeId = String(nodeId);
@@ -849,21 +1347,66 @@
             window.addEventListener('resize', renderTransitionLabels);
         });
 
-        // 根據節點相對位置選擇最佳連接埠
-        // output_1=右, output_2=下, input_1=左, input_2=上
+        // 根據節點實際位置與尺寸，選擇最接近的一組連接埠
+        // 連接點編號: 1=上, 2=右, 3=下, 4=左
         function getBestPorts(srcPos, dstPos) {
             if (!srcPos || !dstPos) {
                 return { output: 'output_1', input: 'input_1' };
             }
-            const dx = dstPos.x - srcPos.x;
-            const dy = dstPos.y - srcPos.y;
 
-            // 目標在下方且垂直距離大於水平距離 → 使用 下→上 連接
-            if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
-                return { output: 'output_2', input: 'input_2' }; // 下 → 上
+            const source = {
+                x: Number(srcPos.x) || 0,
+                y: Number(srcPos.y) || 0,
+                width: Number(srcPos.width) || 150,
+                height: Number(srcPos.height) || 80
+            };
+            const target = {
+                x: Number(dstPos.x) || 0,
+                y: Number(dstPos.y) || 0,
+                width: Number(dstPos.width) || 150,
+                height: Number(dstPos.height) || 80
+            };
+
+            const oppositeInputIndex = { 1: 3, 2: 4, 3: 1, 4: 2 };
+
+            function getPortPoint(node, index) {
+                const halfW = node.width / 2;
+                const halfH = node.height / 2;
+                switch (index) {
+                    case 1: return { x: node.x + halfW, y: node.y };                 // 上
+                    case 2: return { x: node.x + node.width, y: node.y + halfH };   // 右
+                    case 3: return { x: node.x + halfW, y: node.y + node.height };  // 下
+                    case 4: return { x: node.x, y: node.y + halfH };                 // 左
+                    default: return { x: node.x + halfW, y: node.y + halfH };
+                }
             }
-            // 其餘情況使用 右→左 水平連接
-            return { output: 'output_1', input: 'input_1' };
+
+            let best = null;
+
+            for (let outputIndex = 1; outputIndex <= 4; outputIndex++) {
+                for (let inputIndex = 1; inputIndex <= 4; inputIndex++) {
+                    const outPoint = getPortPoint(source, outputIndex);
+                    const inPoint = getPortPoint(target, inputIndex);
+
+                    const dx = inPoint.x - outPoint.x;
+                    const dy = inPoint.y - outPoint.y;
+                    const distance = Math.hypot(dx, dy);
+
+                    // 優先選擇面對面的方向，避免斜向繞線
+                    const facingPenalty = inputIndex === oppositeInputIndex[outputIndex] ? 0 : 24;
+                    const score = distance + facingPenalty;
+
+                    if (!best || score < best.score) {
+                        best = {
+                            score,
+                            output: `output_${outputIndex}`,
+                            input: `input_${inputIndex}`
+                        };
+                    }
+                }
+            }
+
+            return best || { output: 'output_1', input: 'input_1' };
         }
 
         // 標記有連線的連接點，讓它們永遠顯示
@@ -1020,6 +1563,7 @@
 
                 // 清空現有的編輯器內容
                 editor.clear();
+                clearSelectedConnection();
                 multiSelectedNodeIds.clear();
                 lastMovedNodePositions = {};
                 applyMultiSelectionClasses();
@@ -1041,12 +1585,12 @@
 
                         const visual = getNodeVisualConfig(actId, actName, actType);
 
-                        // 新增節點到編輯器 (2 inputs: 左/上, 2 outputs: 右/下)
+                        // 新增節點到編輯器 (4 inputs: 上/右/下/左, 4 outputs: 上/右/下/左)
                         try {
                             const nodeId = editor.addNode(
                                 actName,
-                                2,  // 輸入數量 (input_1=左, input_2=上)
-                                2,  // 輸出數量 (output_1=右, output_2=下)
+                                4,  // 輸入數量 (input_1=上, input_2=右, input_3=下, input_4=左)
+                                4,  // 輸出數量 (output_1=上, output_2=右, output_3=下, output_4=左)
                                 x,
                                 y,
                                 visual.nodeClass,
@@ -1088,8 +1632,10 @@
                                     const dstNodeId = actIdToNodeIdMap[dstAct];
 
                                     if (srcNodeId && dstNodeId) {
-                                        // 根據節點相對位置選擇最佳連接埠
-                                        const ports = getBestPorts(actPositions[srcAct], actPositions[dstAct]);
+                                        // 根據節點實際位置與尺寸，選擇最接近的連接埠
+                                        const srcContext = getNodePortContext(srcNodeId, actPositions[srcAct]);
+                                        const dstContext = getNodePortContext(dstNodeId, actPositions[dstAct]);
+                                        const ports = getBestPorts(srcContext, dstContext);
                                         editor.addConnection(
                                             srcNodeId,
                                             dstNodeId,
@@ -1110,6 +1656,7 @@
                     console.log('流程圖載入完成');
                     markConnectedPorts();
                     renderTransitionLabels();
+                    ensureConnectionArrows();
                     isLoadingFlow = false;
                 }, 100);
 
@@ -1147,7 +1694,13 @@
 
                 const evtList = document.getElementById('flowContentEvtList');
                 evtList.innerHTML = '';
-                events.forEach(evt => {
+                // 只顯示流程事件（EVTTYPE=0 或 RELATEID=""），不顯示活動事件（EVTTYPE=1）
+                const flowEvents = events.filter(evt => {
+                    const evtType = evt.evttype ?? evt.EVTTYPE ?? 0;
+                    const relateId = (evt.relateid ?? evt.RELATEID ?? '').trim();
+                    return evtType === 0 || relateId === '';
+                });
+                flowEvents.forEach(evt => {
                     const evtName = evt.evtname || evt.EVTNAME || '';
                     const option = document.createElement('option');
                     option.value = evtName;
@@ -1197,6 +1750,197 @@
         function closeFlowContentDialog() {
             document.getElementById('flowContentDialog').style.display = 'none';
             document.getElementById('dialogOverlay').style.display = 'none';
+        }
+
+        // 插入參數相關函數
+        async function showInsertParamDialog() {
+            const evtList = document.getElementById('flowContentEvtList');
+            const selectedOption = evtList.options[evtList.selectedIndex];
+            if (!selectedOption) {
+                alert('請先選擇流程事件');
+                return;
+            }
+
+            const evtName = selectedOption.value;
+
+            try {
+                // 呼叫 API 取得參數列表
+                const response = await fetch(`/api/FlowDesigner/params/${encodeURIComponent(evtName)}`);
+                if (!response.ok) {
+                    throw new Error('取得參數列表失敗');
+                }
+
+                const params = await response.json();
+
+                // 填充參數列表
+                const tbody = document.getElementById('paramListBody');
+                tbody.innerHTML = '';
+
+                if (params.length === 0) {
+                    const row = document.createElement('tr');
+                    row.innerHTML = '<td style="padding:10px; text-align:center; color:#999;">無可用參數</td>';
+                    tbody.appendChild(row);
+                } else {
+                    params.forEach((param, index) => {
+                        const paramName = param.paramname || param.PARAMNAME || '';
+                        const row = document.createElement('tr');
+                        row.style.cursor = 'pointer';
+                        row.style.borderBottom = '1px solid #eee';
+                        row.dataset.paramName = paramName;
+                        row.innerHTML = `<td style="padding:10px;">${paramName}</td>`;
+
+                        // 點擊選中
+                        row.addEventListener('click', function() {
+                            // 移除其他行的選中狀態
+                            tbody.querySelectorAll('tr').forEach(r => r.style.backgroundColor = '');
+                            // 選中當前行
+                            this.style.backgroundColor = '#e3f2fd';
+                        });
+
+                        // 雙擊直接插入
+                        row.addEventListener('dblclick', function() {
+                            insertParamByName(paramName);
+                            closeInsertParamDialog();
+                        });
+
+                        tbody.appendChild(row);
+                    });
+                }
+
+                // 顯示對話框
+                document.getElementById('insertParamDialog').style.display = 'flex';
+                document.getElementById('dialogOverlay').style.display = 'block';
+            } catch (error) {
+                console.error('載入參數列表失敗:', error);
+                alert('載入參數列表失敗: ' + error.message);
+            }
+        }
+
+        function closeInsertParamDialog() {
+            document.getElementById('insertParamDialog').style.display = 'none';
+            document.getElementById('dialogOverlay').style.display = 'none';
+        }
+
+        function insertSelectedParam() {
+            const tbody = document.getElementById('paramListBody');
+            const selectedRow = tbody.querySelector('tr[style*="background-color: rgb(227, 242, 253)"]');
+
+            if (!selectedRow) {
+                alert('請選擇一個參數');
+                return;
+            }
+
+            const paramName = selectedRow.dataset.paramName;
+            insertParamByName(paramName);
+            closeInsertParamDialog();
+        }
+
+        function insertParamByName(paramName) {
+            const textarea = document.getElementById('flowContentOnExec');
+            const startPos = textarea.selectionStart;
+            const endPos = textarea.selectionEnd;
+            const text = textarea.value;
+
+            // 在游標位置插入參數名稱
+            const newText = text.substring(0, startPos) + paramName + text.substring(endPos);
+            textarea.value = newText;
+
+            // 設定游標位置（在插入的文字之後，並選中插入的文字）
+            textarea.focus();
+            textarea.setSelectionRange(startPos, startPos + paramName.length);
+        }
+
+        // 插入函式相關函數
+        async function showInsertFuncDialog() {
+            try {
+                // 呼叫 API 取得函式列表
+                const response = await fetch('/api/FlowDesigner/functions');
+                if (!response.ok) {
+                    throw new Error('取得函式列表失敗');
+                }
+
+                const functions = await response.json();
+
+                // 填充函式列表
+                const tbody = document.getElementById('funcListBody');
+                tbody.innerHTML = '';
+
+                if (functions.length === 0) {
+                    const row = document.createElement('tr');
+                    row.innerHTML = '<td colspan="2" style="padding:10px; text-align:center; color:#999;">無可用函式</td>';
+                    tbody.appendChild(row);
+                } else {
+                    functions.forEach((func, index) => {
+                        const funcName = func.funcname || func.FUNCNAME || '';
+                        const funcDesc = func.funcdesc || func.FUNCDESC || '';
+                        const row = document.createElement('tr');
+                        row.style.cursor = 'pointer';
+                        row.style.borderBottom = '1px solid #eee';
+                        row.dataset.funcName = funcName;
+                        row.innerHTML = `
+                            <td style="padding:10px; border-right:1px solid #ddd;">${funcName}</td>
+                            <td style="padding:10px;">${funcDesc}</td>
+                        `;
+
+                        // 點擊選中
+                        row.addEventListener('click', function() {
+                            // 移除其他行的選中狀態
+                            tbody.querySelectorAll('tr').forEach(r => r.style.backgroundColor = '');
+                            // 選中當前行
+                            this.style.backgroundColor = '#e3f2fd';
+                        });
+
+                        // 雙擊直接插入
+                        row.addEventListener('dblclick', function() {
+                            insertFuncByName(funcName);
+                            closeInsertFuncDialog();
+                        });
+
+                        tbody.appendChild(row);
+                    });
+                }
+
+                // 顯示對話框
+                document.getElementById('insertFuncDialog').style.display = 'flex';
+                document.getElementById('dialogOverlay').style.display = 'block';
+            } catch (error) {
+                console.error('載入函式列表失敗:', error);
+                alert('載入函式列表失敗: ' + error.message);
+            }
+        }
+
+        function closeInsertFuncDialog() {
+            document.getElementById('insertFuncDialog').style.display = 'none';
+            document.getElementById('dialogOverlay').style.display = 'none';
+        }
+
+        function insertSelectedFunc() {
+            const tbody = document.getElementById('funcListBody');
+            const selectedRow = tbody.querySelector('tr[style*="background-color: rgb(227, 242, 253)"]');
+
+            if (!selectedRow) {
+                alert('請選擇一個函式');
+                return;
+            }
+
+            const funcName = selectedRow.dataset.funcName;
+            insertFuncByName(funcName);
+            closeInsertFuncDialog();
+        }
+
+        function insertFuncByName(funcName) {
+            const textarea = document.getElementById('flowContentOnExec');
+            const startPos = textarea.selectionStart;
+            const endPos = textarea.selectionEnd;
+            const text = textarea.value;
+
+            // 在游標位置插入函式名稱
+            const newText = text.substring(0, startPos) + funcName + text.substring(endPos);
+            textarea.value = newText;
+
+            // 設定游標位置（在插入的文字之後，並選中插入的文字）
+            textarea.focus();
+            textarea.setSelectionRange(startPos, startPos + funcName.length);
         }
 
         // 從 Drawflow 匯出資料中提取節點位置
@@ -1329,30 +2073,282 @@
         }
 
         // 自動排列流程佈局
-        function autoArrangeFlow() {
-            if (!currentPrcId || isReadOnly) return;
-
-            alert('自動排列佈局功能開發中...\n\n此功能將自動調整節點位置，讓流程圖更整齊美觀。');
-
-            // TODO: 實作自動排列演算法
-            // 可以使用分層佈局或力導向佈局
+        // 取得節點類型（1=FlowStart, 2=FlowEnd, 3=Normal）
+        function getNodeKind(nodeData) {
+            const actId = (nodeData?.data?.actid || '').toLowerCase();
+            if (actId === 'flowstart') return 1;
+            if (actId === 'flowend') return 2;
+            return 3; // Normal or others
         }
 
-        // 顯示活動屬性編輯對話框
-        function showActivityProperties() {
-            if (!currentPrcId) return;
+        // 取得預設連線標題（模仿 DELPHI funGetDefCaption）
+        function getDefCaption(iKind1, iKind2) {
+            let iType = 0;
 
-            // 取得目前選中的節點
-            const selectedNodes = editor.getNodesFromName('selected');
+            if (iKind1 === 3 && iKind2 === 3) iType = 1;
+            else if (iKind1 === 3 && iKind2 === 2) iType = 2;
 
-            if (!selectedNodes || selectedNodes.length === 0) {
-                alert('請先選擇一個活動節點');
+            switch (iType) {
+                case 0: return '同意';
+                case 1: return 'ERP決策(中間)';
+                case 2: return 'ERP決策(最後)';
+                default: return '同意';
+            }
+        }
+
+        // 取得預設 SQL（模仿 DELPHI funGetDefSQL）
+        function getDefSQL(iKind1, iKind2) {
+            let iType = 0;
+
+            if (iKind1 === 3 && iKind2 === 3) iType = 1;
+            else if (iKind1 === 3 && iKind2 === 2) iType = 2;
+
+            switch (iType) {
+                case 0:
+                    return "IF @@審核結果='同意' SET @@流程結果='經過'";
+                case 1:
+                    return "IF @@審核結果='同意' SET @@流程結果='經過' ELSE EXEC CURdOCXFlowBackToPaper @@單據類型,@@單據編號,32,@@申請人,@@寄件人,@@流程編號,@@代理人";
+                case 2:
+                    return "IF @@審核結果='同意' EXEC CURdOCXFlowBackToPaper @@單據類型,@@單據編號,1,@@申請人,@@寄件人,@@流程編號,@@代理人 ELSE EXEC CURdOCXFlowBackToPaper @@單據類型,@@單據編號,32,@@申請人,@@寄件人,@@流程編號,@@代理人 SET @@流程結果='經過'";
+                default:
+                    return "IF @@審核結果='同意' SET @@流程結果='經過'";
+            }
+        }
+
+        // 流程方向：在兩個選中的節點之間創建連線（模仿 DELPHI btnTraClick + DoLink）
+        async function autoArrangeFlow() {
+            if (!currentPrcId) {
+                alert('請先開啟或建立流程');
                 return;
             }
 
-            alert('活動內容編輯功能開發中...\n\n此功能將允許您編輯選中節點的詳細屬性：\n- 活動名稱\n- 活動類型\n- 處理人員\n- 相關參數');
+            if (isReadOnly) {
+                alert('已啟用的流程無法修改');
+                return;
+            }
 
-            // TODO: 實作活動屬性編輯對話框
+            // 取得所有選中的節點
+            const flowData = editor.export();
+            const moduleData = flowData.drawflow?.Home?.data || {};
+            const selectedNodeIds = getSelectedNodeIds();
+
+            console.log('選中的節點數量:', selectedNodeIds.length, '節點ID:', selectedNodeIds);
+
+            // 必須恰好選中 2 個節點
+            if (selectedNodeIds.length !== 2) {
+                alert('請使用 Shift 選擇恰好 2 個節點');
+                return;
+            }
+
+            const node1Data = moduleData[selectedNodeIds[0]];
+            const node2Data = moduleData[selectedNodeIds[1]];
+
+            const srcActId = node1Data?.data?.actid;
+            const dstActId = node2Data?.data?.actid;
+            const srcActName = node1Data?.name || srcActId;
+            const dstActName = node2Data?.name || dstActId;
+
+            console.log('連線方向:', srcActName, '→', dstActName);
+
+            if (!srcActId || !dstActId) {
+                alert('節點資料不完整');
+                return;
+            }
+
+            // 判斷節點類型
+            const iKind1 = getNodeKind(node1Data);
+            const iKind2 = getNodeKind(node2Data);
+
+            // 取得預設 Caption 和 SQL
+            const caption = getDefCaption(iKind1, iKind2);
+            const onexec = getDefSQL(iKind1, iKind2);
+            const traType = 0; // 固定為 0（同意）
+
+            console.log('連線標題:', caption, '節點類型:', iKind1, '→', iKind2);
+
+            // 根據節點實際位置與尺寸計算最佳連接點
+            const pos1 = getNodePortContext(selectedNodeIds[0], { x: node1Data.pos_x, y: node1Data.pos_y });
+            const pos2 = getNodePortContext(selectedNodeIds[1], { x: node2Data.pos_x, y: node2Data.pos_y });
+            const ports = getBestPorts(pos1, pos2);
+            const outputClass = ports.output;
+            const inputClass = ports.input;
+
+            console.log('連接點:', outputClass, '→', inputClass, '節點位置:', { source: pos1, target: pos2 });
+
+            // 生成唯一的 TRAID
+            const traId = 'TRA' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+
+            try {
+                // 呼叫 API 新增轉換和事件
+                const response = await fetch(`/api/FlowDesigner/${encodeURIComponent(currentPrcId)}/transitions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        TRAID: traId,
+                        SRCACT: srcActId,
+                        DSTACT: dstActId,
+                        CAPTION: caption,
+                        TRATYPE: traType,
+                        ONEXEC: onexec
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || '新增轉換失敗');
+                }
+
+                // 在前端創建連線，使用計算出的最佳連接點
+                editor.addConnection(selectedNodeIds[0], selectedNodeIds[1], outputClass, inputClass);
+
+                // 將轉換資料加入 currentTransitions
+                currentTransitions.push({
+                    traid: traId,
+                    srcact: srcActId,
+                    dstact: dstActId,
+                    caption: caption,
+                    tratype: traType
+                });
+                markConnectedPorts();
+                ensureConnectionArrows();
+
+                console.log('成功創建轉換:', traId, caption);
+
+                // 清除選擇狀態
+                multiSelectedNodeIds.clear();
+                applyMultiSelectionClasses();
+            } catch (error) {
+                console.error('創建轉換失敗:', error);
+                alert('創建轉換失敗: ' + error.message);
+            }
+        }
+
+        function getActivityTypeText(actType) {
+            const type = Number(actType ?? 0);
+            if (type === 1) return '程序活動';
+            if (type === 2) return '副本通知';
+            return '一般活動';
+        }
+
+        function onActivityContentEventChanged() {
+            const evtList = document.getElementById('activityContentEvtList');
+            const selected = evtList.options[evtList.selectedIndex];
+            document.getElementById('activityContentOnExec').value = selected ? (selected.dataset.onexec || '') : '';
+        }
+
+        function closeActivityContentDialog() {
+            document.getElementById('activityContentDialog').style.display = 'none';
+            document.getElementById('dialogOverlay').style.display = 'none';
+        }
+
+        // 顯示活動內容（先完成開啟與資料顯示；編輯按鈕後續實作）
+        async function showActivityProperties() {
+            if (!currentPrcId) return;
+
+            if (selectedConnection) {
+                alert('目前僅支援活動內容，請先選擇一個活動節點');
+                return;
+            }
+
+            const selectedNodeIds = getSelectedNodeIds();
+            if (selectedNodeIds.length !== 1) {
+                alert('請先選擇恰好 1 個活動節點');
+                return;
+            }
+
+            const selectedNodeId = selectedNodeIds[0];
+            const selectedNode = editor.getNodeFromId(Number(selectedNodeId));
+            const selectedActId = (selectedNode?.data?.actid || '').trim();
+            if (!selectedActId) {
+                alert('找不到選中活動資料');
+                return;
+            }
+
+            try {
+                let detail = currentFlowDetail;
+                if (!detail || !detail.flow) {
+                    const response = await fetch(`/api/FlowDesigner/${encodeURIComponent(currentPrcId)}`);
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || errorData.message || '載入活動內容失敗');
+                    }
+                    detail = await response.json();
+                    currentFlowDetail = detail;
+                }
+
+                const activities = detail.activities || [];
+                const events = detail.events || [];
+                const activity = activities.find(a => {
+                    const actId = (a.actid || a.ACTID || '').trim();
+                    return actId.toLowerCase() === selectedActId.toLowerCase();
+                }) || {};
+
+                const actName = activity.actname || activity.ACTNAME || selectedNode?.name || selectedActId;
+                const actType = activity.acttype ?? activity.ACTTYPE ?? selectedNode?.data?.acttype ?? 0;
+                const descrip = activity.descrip || activity.DESCRIP || '';
+                const recType = activity.rectype || activity.RECTYPE || '';
+                const paramText = activity.paramtext || activity.PARAMTEXT || '';
+                const allowAdd = Number(activity.allowadd ?? activity.ALLOWADD ?? 0) === 1;
+                const allowReject = Number(activity.allowreturn ?? activity.ALLOWRETURN ?? 0) === 1;
+                const isMultiSign = Number(activity.imultisign ?? activity.IMULTISIGN ?? 0) === 1;
+                const isEmail = Number(activity.checkisemail ?? activity.CHECKISEMAIL ?? 0) === 1;
+
+                document.getElementById('activityContentActId').value = selectedActId;
+                document.getElementById('activityContentActName').value = actName;
+                document.getElementById('activityContentActType').value = getActivityTypeText(actType);
+                document.getElementById('activityContentDescrip').value = descrip;
+                document.getElementById('activityContentRecType').value = recType;
+                document.getElementById('activityContentParamText').value = paramText;
+                document.getElementById('activityContentAllowAdd').checked = allowAdd;
+                document.getElementById('activityContentAllowReject').checked = allowReject;
+                document.getElementById('activityContentIsMultiSign').checked = isMultiSign;
+                document.getElementById('activityContentIsEmail').checked = isEmail;
+
+                const evtList = document.getElementById('activityContentEvtList');
+                evtList.innerHTML = '';
+                const actEvents = events.filter(evt => {
+                    const relateId = (evt.relateid ?? evt.RELATEID ?? '').trim();
+                    return relateId.toLowerCase() === selectedActId.toLowerCase();
+                });
+
+                actEvents.forEach(evt => {
+                    const evtName = evt.evtname || evt.EVTNAME || '';
+                    const option = document.createElement('option');
+                    option.value = evtName;
+                    option.textContent = evtName;
+                    option.dataset.onexec = evt.onexec || evt.ONEXEC || '';
+                    evtList.appendChild(option);
+                });
+
+                if (evtList.options.length > 0) {
+                    evtList.selectedIndex = 0;
+                    onActivityContentEventChanged();
+                } else {
+                    document.getElementById('activityContentOnExec').value = '';
+                }
+
+                // 先開啟視窗，內容按鈕後續實作；已啟用流程維持唯讀
+                document.getElementById('activityContentActName').readOnly = true;
+                document.getElementById('activityContentDescrip').readOnly = true;
+                document.getElementById('activityContentOnExec').readOnly = true;
+                document.getElementById('activityContentAllowAdd').disabled = true;
+                document.getElementById('activityContentAllowReject').disabled = true;
+                document.getElementById('activityContentIsMultiSign').disabled = true;
+                document.getElementById('activityContentIsEmail').disabled = true;
+
+                // 先不做按鈕功能，僅顯示（即便未啟用流程也暫不開放）
+                document.getElementById('activityContentBtnInsertVar').disabled = true;
+                document.getElementById('activityContentBtnInsertFunc').disabled = true;
+                document.getElementById('activityContentBtnMultiSign').disabled = true;
+                document.getElementById('activityContentBtnMultiSignView').disabled = true;
+                document.getElementById('activityContentBtnMultiSignCancel').disabled = true;
+
+                document.getElementById('activityContentDialog').style.display = 'block';
+                document.getElementById('dialogOverlay').style.display = 'block';
+            } catch (error) {
+                console.error('開啟活動內容失敗:', error);
+                alert('開啟活動內容失敗: ' + error.message);
+            }
         }
 
         // 拖放功能
@@ -1364,48 +2360,107 @@
             event.preventDefault();
         }
 
-        function dropNode(event) {
+        async function dropNode(event) {
             event.preventDefault();
             if (isReadOnly) {
                 alert('已啟用的流程無法修改');
                 return;
             }
 
+            if (!currentPrcId) {
+                alert('請先開啟或建立流程');
+                return;
+            }
+
             const nodeType = event.dataTransfer.getData('nodeType');
             const container = document.getElementById('drawflow');
             const rect = container.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
 
-            let nodeName = '';
+            // 計算相對於畫布的座標（考慮縮放和平移）
+            const zoom = editor.zoom || 1;
+            const canvasX = editor.canvas_x || 0;
+            const canvasY = editor.canvas_y || 0;
+            const x = Math.round((event.clientX - rect.left - canvasX) / zoom);
+            const y = Math.round((event.clientY - rect.top - canvasY) / zoom);
+
+            // 根據節點類型產生預設名稱和類型
+            let nodeBaseName = '';
             let actType = 0;
             switch (nodeType) {
                 case 'activity':
-                    nodeName = '簽核主管';
+                    nodeBaseName = '一般活動';
                     actType = 0;
                     break;
                 case 'notify':
-                    nodeName = '副本通知';
+                    nodeBaseName = '副本通知';
                     actType = 2;
                     break;
                 case 'proc':
-                    nodeName = '簽核主管';
+                    nodeBaseName = '程序活動';
                     actType = 1;
                     break;
             }
 
-            const actId = 'node_' + Date.now();
-            const visual = getNodeVisualConfig(actId, nodeName, actType);
-            editor.addNode(
-                nodeName,
-                2,
-                2,
-                x,
-                y,
-                visual.nodeClass,
-                { type: nodeType, actid: actId, acttype: actType },
-                visual.html
-            );
+            // 計算自動序號（從現有節點中找出最大序號）
+            let maxNum = 0;
+            const flowData = editor.export();
+            const moduleData = flowData.drawflow?.Home?.data || {};
+            for (const nodeId in moduleData) {
+                const node = moduleData[nodeId];
+                const name = node.name || '';
+                // 檢查是否符合「節點名稱+數字」格式
+                const match = name.match(new RegExp(`^${nodeBaseName}(\\d+)$`));
+                if (match) {
+                    const num = parseInt(match[1]);
+                    if (num > maxNum) maxNum = num;
+                }
+            }
+            const nodeName = `${nodeBaseName}${maxNum + 1}`;
+
+            // 生成唯一的 ACTID（使用時間戳 + 隨機數）
+            const actId = 'ACT' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+
+            try {
+                // 先在資料庫中建立活動記錄
+                const response = await fetch(`/api/FlowDesigner/${encodeURIComponent(currentPrcId)}/activities`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ACTID: actId,
+                        PRCID: currentPrcId,
+                        ACTNAME: nodeName,
+                        X: x,
+                        Y: y,
+                        ACTTYPE: actType
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || '新增活動失敗');
+                }
+
+                // 資料庫儲存成功後，在前端新增節點
+                const visual = getNodeVisualConfig(actId, nodeName, actType);
+                const nodeId = editor.addNode(
+                    nodeName,
+                    4,  // 輸入數量 (input_1=上, input_2=右, input_3=下, input_4=左)
+                    4,  // 輸出數量 (output_1=上, output_2=右, output_3=下, output_4=左)
+                    x,
+                    y,
+                    visual.nodeClass,
+                    { type: nodeType, actid: actId, acttype: actType },
+                    visual.html
+                );
+
+                // 更新映射
+                currentActIdToNodeIdMap[actId] = nodeId;
+
+                console.log('成功新增活動:', actId, nodeName);
+            } catch (error) {
+                console.error('新增活動失敗:', error);
+                alert('新增活動失敗: ' + error.message);
+            }
         }
 
         // 對話框控制
@@ -1559,6 +2614,9 @@
             document.getElementById('newFlowDialog').style.display = 'none';
             document.getElementById('openFlowDialog').style.display = 'none';
             document.getElementById('flowContentDialog').style.display = 'none';
+            document.getElementById('activityContentDialog').style.display = 'none';
+            document.getElementById('insertParamDialog').style.display = 'none';
+            document.getElementById('insertFuncDialog').style.display = 'none';
             document.getElementById('dialogOverlay').style.display = 'none';
         }
     </script>
