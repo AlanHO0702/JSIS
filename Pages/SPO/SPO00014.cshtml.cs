@@ -10,6 +10,7 @@ using ClosedXML.Excel;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using PcbErpApi.Models;
 using PcbErpApi.Data;
 
 namespace PcbErpApi.Pages.SPO
@@ -33,6 +34,7 @@ namespace PcbErpApi.Pages.SPO
         public int TotalCount { get; set; }
         public int TotalPages { get; set; }
         public List<Dictionary<string, object?>> Items { get; set; } = new();
+        public List<CURdTableField> FieldDictList { get; set; } = new();
         public string CurrentUserId { get; set; } = "";
         public string CurrentUseId { get; set; } = "";
 
@@ -75,6 +77,7 @@ namespace PcbErpApi.Pages.SPO
                 TotalPages = Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize));
 
                 Items = await LoadRowsAsync(conn, whereSql, orderBy, PageNumber, PageSize, parameters);
+                FieldDictList = await LoadFieldDictAsync(conn, "SPOdV_MPSRejectInq");
 
                 CurrentUserId = ResolveUserId();
                 CurrentUseId = ResolveUseId();
@@ -137,6 +140,32 @@ namespace PcbErpApi.Pages.SPO
                     }
                 }
 
+                try
+                {
+                    ws.Columns().AdjustToContents();
+                }
+                catch
+                {
+                    // Fallback: estimate widths from header/data text length.
+                    for (var c = 0; c < columns.Length; c++)
+                    {
+                        var header = columns[c].Header ?? string.Empty;
+                        var maxLen = header.Length;
+                        var field = columns[c].Field ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(field))
+                        {
+                            for (var r = 0; r < rows.Count; r++)
+                            {
+                                rows[r].TryGetValue(field, out var v);
+                                var s = v?.ToString() ?? string.Empty;
+                                if (s.Length > maxLen) maxLen = s.Length;
+                            }
+                        }
+                        var width = Math.Min(60, Math.Max(10, maxLen + 2));
+                        ws.Column(c + 1).Width = width;
+                    }
+                }
+
                 var fileName = $"SPO00014_{DateTime.Now:yyyyMMdd}.xlsx";
                 using var stream = new MemoryStream();
                 wb.SaveAs(stream);
@@ -148,6 +177,22 @@ namespace PcbErpApi.Pages.SPO
             finally
             {
                 if (opened) await _context.Database.CloseConnectionAsync();
+            }
+        }
+
+        private async Task<List<CURdTableField>> LoadFieldDictAsync(DbConnection conn, string tableName)
+        {
+            if (string.IsNullOrWhiteSpace(tableName)) return new List<CURdTableField>();
+            try
+            {
+                return await _context.CURdTableFields
+                    .AsNoTracking()
+                    .Where(x => x.TableName == tableName)
+                    .ToListAsync();
+            }
+            catch
+            {
+                return new List<CURdTableField>();
             }
         }
 

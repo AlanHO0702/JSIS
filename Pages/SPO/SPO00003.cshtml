@@ -116,21 +116,6 @@
           || n.Equals("sEPartNum", StringComparison.OrdinalIgnoreCase);
   }
 
-  IEnumerable<(string Value, string Label)> ParseItems(string? items)
-  {
-      if (string.IsNullOrWhiteSpace(items)) yield break;
-      var parts = items.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-      foreach (var part in parts)
-      {
-          var p = part.Trim();
-          if (string.IsNullOrWhiteSpace(p)) continue;
-          var kv = p.Split(new[] { '=', ':' }, 2, StringSplitOptions.TrimEntries);
-          if (kv.Length == 2)
-              yield return (kv[0], kv[1]);
-          else
-              yield return (p, p);
-      }
-  }
 }
 
 @section InqQuery {
@@ -211,12 +196,7 @@
 
   string GFormat(object? v, CURdTableField f)
   {
-      if (v == null) return "";
-      if (v is DateTime dt) return dt.ToString("yyyy/MM/dd");
-      if (v is decimal dec) return dec.ToString("###,###,###.####");
-      if (v is double d) return d.ToString("###,###,###.####");
-      if (v is float fl) return fl.ToString("###,###,###.####");
-      return v.ToString() ?? "";
+      return FormatHelper.FormatValue(v, f.DataType, f.FormatStr);
   }
 }
 
@@ -226,7 +206,10 @@
       <tr>
         @foreach (var f in gFields)
         {
-          <th class="inq-sortable">@GLabel(f)</th>
+          <th class="inq-sortable" data-field="@f.FieldName">
+            <span class="th-text">@GLabel(f)</span>
+            <span class="col-resizer" draggable="false"></span>
+          </th>
         }
       </tr>
     </thead>
@@ -431,14 +414,25 @@
     border: 1px solid #d8dee8;
     border-radius: 8px;
     background: #fff;
-    padding: 6px;
+    padding: 0;
     overflow-x: auto;
+  }
+  .inq-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+    width: max-content;
+    min-width: 100%;
   }
   .inq-table th,
   .inq-table td {
     white-space: nowrap;
     font-size: 0.82rem;
     padding: 4px 6px;
+    border: 1px solid #e1e7f0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 300px;
   }
   .inq-table th {
     background: #f3f7ff;
@@ -446,6 +440,21 @@
     font-weight: 600;
     cursor: pointer;
     user-select: none;
+    position: relative;
+  }
+  .inq-table th .th-text {
+    display: inline-block;
+    padding-right: 8px;
+  }
+  .inq-table th .col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 2;
   }
   .inq-table th.inq-sort-asc::after {
     content: " ▲";
@@ -590,7 +599,9 @@
   if (table) {
     const headers = Array.from(table.querySelectorAll("thead th"));
     headers.forEach((th, idx) => {
-      th.addEventListener("click", () => {
+      th.addEventListener("click", (e) => {
+        if (e.target && e.target.classList?.contains("col-resizer")) return;
+        if (th.dataset.resizing === "1") return;
         const isAsc = !th.classList.contains("inq-sort-asc");
         headers.forEach(h => h.classList.remove("inq-sort-asc", "inq-sort-desc"));
         th.classList.add(isAsc ? "inq-sort-asc" : "inq-sort-desc");
@@ -598,6 +609,87 @@
       });
     });
   }
+
+  const dictTableName = "@(Model.DictTableName ?? "")";
+  const fieldNames = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(gFields.Select(f => f.FieldName ?? "")));
+
+  function applyColumnWidth(table, ths, index, width) {
+    const w = Math.max(20, Math.round(width));
+    const th = ths[index];
+    if (!th) return;
+    th.style.width = `${w}px`;
+    th.style.minWidth = `${w}px`;
+    Array.from(table.querySelectorAll(`tbody tr td:nth-child(${index + 1})`))
+      .forEach(td => {
+        td.style.width = `${w}px`;
+        td.style.minWidth = `${w}px`;
+      });
+  }
+
+  function applySavedWidths(table, dictTable, fields) {
+    const tn = (dictTable || "").trim();
+    if (!tn) return;
+    try {
+      const raw = localStorage.getItem(`colwidth:${tn}`);
+      if (!raw) return;
+      const cols = JSON.parse(raw) || [];
+      const ths = Array.from(table.querySelectorAll('thead th'));
+      cols.forEach(c => {
+        const f = (c.fieldName || '').toString();
+        const w = Number(c.width);
+        if (!f || !Number.isFinite(w)) return;
+        const idx = fields.findIndex(x => x.toLowerCase() === f.toLowerCase());
+        if (idx >= 0) applyColumnWidth(table, ths, idx, w);
+      });
+    } catch { }
+  }
+
+  function initColumnResize(tableEl, dictTable, fields) {
+    if (!tableEl) return;
+    const ths = Array.from(tableEl.querySelectorAll('thead th'));
+    applySavedWidths(tableEl, dictTable, fields);
+
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+    let thIndex = -1;
+
+    ths.forEach((th, idx) => {
+      const handle = th.querySelector('.col-resizer');
+      if (!handle) return;
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        isResizing = true;
+        startX = e.pageX;
+        startWidth = th.getBoundingClientRect().width;
+        thIndex = idx;
+        document.body.classList.add('resizing');
+      });
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing || thIndex < 0) return;
+      const dx = e.pageX - startX;
+      const newW = Math.max(20, startWidth + dx);
+      applyColumnWidth(tableEl, ths, thIndex, newW);
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!isResizing) return;
+      isResizing = false;
+      document.body.classList.remove('resizing');
+      const tn = (dictTable || "").trim();
+      if (tn) {
+        const payload = ths.map(th => ({ fieldName: th.dataset.field, width: Math.round(th.getBoundingClientRect().width) }));
+        try {
+          localStorage.setItem(`colwidth:${tn}`, JSON.stringify(payload));
+        } catch { }
+      }
+      thIndex = -1;
+    });
+  }
+
+  initColumnResize(table, dictTableName, fieldNames);
 
   const inqForm = document.getElementById("inqForm");
   inqForm?.addEventListener("submit", (e) => {

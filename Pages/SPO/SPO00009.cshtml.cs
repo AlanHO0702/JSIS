@@ -221,7 +221,31 @@ namespace PcbErpApi.Pages.SPO
                     }
                 }
 
-                // Avoid AdjustToContents to prevent font engine version conflicts.
+                try
+                {
+                    ws.Columns().AdjustToContents();
+                }
+                catch
+                {
+                    // Fallback: estimate widths from header/data text length.
+                    for (var c = 0; c < fields.Count; c++)
+                    {
+                        var header = fields[c].DisplayLabel ?? fields[c].FieldName ?? string.Empty;
+                        var maxLen = header.Length;
+                        var field = fields[c].FieldName ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(field))
+                        {
+                            for (var r = 0; r < rows.Count; r++)
+                            {
+                                rows[r].TryGetValue(field, out var v);
+                                var s = v?.ToString() ?? string.Empty;
+                                if (s.Length > maxLen) maxLen = s.Length;
+                            }
+                        }
+                        var width = Math.Min(60, Math.Max(10, maxLen + 2));
+                        ws.Column(c + 1).Width = width;
+                    }
+                }
 
                 var fileName = $"SPO00009_{DateTime.Now:yyyyMMdd}.xlsx";
                 using var stream = new MemoryStream();
