@@ -45,6 +45,11 @@ namespace PcbErpApi.Data
         public virtual DbSet<CurdTableFieldLang> CurdTableFieldLangs { get; set; }
         public virtual DbSet<CurdOcxtableSetUp> CurdOcxtableSetUp { get; set; }
         public virtual DbSet<CurdPaperPaper> CurdPaperPaper { get; set; }
+        public virtual DbSet<CurdPaperInfo> CurdPaperInfos { get; set; }
+        public virtual DbSet<CurdPaperType> CurdPaperTypes { get; set; }
+        public virtual DbSet<CurdPaperList> CurdPaperLists { get; set; }
+        public virtual DbSet<CurdModule> CurdModules { get; set; }
+        public virtual DbSet<CurdVSystems> CurdVSystems { get; set; }
         public virtual DbSet<CurdBu> CurdBus { get; set; }
         public virtual DbSet<FmedVProcNisToStd> FmedVProcNisToStd { get; set; }
         public virtual DbSet<FmedIssueMain> FmedIssueMain { get; set; }
@@ -59,6 +64,15 @@ namespace PcbErpApi.Data
         public virtual DbSet<EmodLayerPress> EmodLayerPresses { get; set; }
 
         public IEnumerable<object> TabConfigs { get; internal set; }
+
+        // Flow Designer 相關資料表
+        public virtual DbSet<XFLdPRC> XFLdPRCs { get; set; }
+        public virtual DbSet<XFLdAct> XFLdActs { get; set; }
+        public virtual DbSet<XFLdTRA> XFLdTRAs { get; set; }
+        public virtual DbSet<XFLdEVT> XFLdEVTs { get; set; }
+        public virtual DbSet<XFLdSYSPARAMS> XFLdSYSPARAMS { get; set; }
+        public virtual DbSet<XFLdFUNC> XFLdFUNCs { get; set; }
+        public virtual DbSet<CURdFlowMultiSignUser> CURdFlowMultiSignUsers { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -2585,6 +2599,183 @@ namespace PcbErpApi.Data
 
                 entity.Property(e => e.Thickness)
                     .HasPrecision(18, 6);
+            });
+
+            // 配置 CurdPaperInfo
+            modelBuilder.Entity<CurdPaperInfo>(entity =>
+            {
+                entity.HasKey(e => e.PaperId);
+                entity.ToTable("CURdPaperInfo", tb => tb.HasTrigger("CURdPaperInfo_tD"));
+
+                entity.Property(e => e.PaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false)
+                    .IsRequired();
+
+                entity.Property(e => e.PaperName)
+                    .HasMaxLength(24)
+                    .IsRequired();
+
+                entity.Property(e => e.SystemId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .IsFixedLength()
+                    .IsRequired();
+
+                entity.Property(e => e.HeadFirst)
+                    .HasMaxLength(4)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.HeadDateFormat)
+                    .HasMaxLength(8)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.TableName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.PKName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+            });
+
+            // 配置 CurdPaperType
+            modelBuilder.Entity<CurdPaperType>(entity =>
+            {
+                entity.HasKey(e => new { e.PaperId, e.PaperType });
+                entity.ToTable("CURdPaperType");
+
+                entity.Property(e => e.PaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false)
+                    .IsRequired();
+
+                entity.Property(e => e.PaperTypeName)
+                    .HasMaxLength(24);
+
+                entity.Property(e => e.HeadFirst)
+                    .HasMaxLength(4)
+                    .IsUnicode(false);
+            });
+
+            // 配置 CurdPaperList
+            modelBuilder.Entity<CurdPaperList>(entity =>
+            {
+                entity.HasKey(e => new { e.PaperId, e.SerialNum });
+                entity.ToTable("CURdPaperList");
+
+                entity.Property(e => e.PaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false)
+                    .IsRequired();
+
+                entity.Property(e => e.ItemName)
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.Notes)
+                    .HasMaxLength(255);
+
+                entity.Property(e => e.ClassName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.ObjectName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.TableIndex)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+            });
+
+            // 配置 CurdPaperPaper
+            modelBuilder.Entity<CurdPaperPaper>(entity =>
+            {
+                entity.HasKey(e => new { e.PaperId, e.SerialNum });
+                entity.ToTable("CURdPaperPaper", tb => tb.HasTrigger("CURdPaperPaper_tD"));
+
+                entity.Property(e => e.PaperId)
+                    .HasMaxLength(32)
+                    .IsUnicode(false)
+                    .IsRequired();
+
+                entity.Property(e => e.ItemName)
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.Notes)
+                    .HasMaxLength(255);
+
+                entity.Property(e => e.ClassName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.ObjectName)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.TableIndex)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+
+                entity.Property(e => e.PrintItemId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false);
+            });
+
+            // 配置 CurdModule
+            modelBuilder.Entity<CurdModule>(entity =>
+            {
+                entity.HasKey(e => e.ModuleId);
+                entity.ToTable("CURdModule");
+
+                entity.Property(e => e.ModuleId)
+                    .HasMaxLength(1)
+                    .IsUnicode(false)
+                    .IsFixedLength()
+                    .IsRequired();
+
+                entity.Property(e => e.ModuleName)
+                    .HasMaxLength(50)
+                    .IsRequired();
+            });
+
+            // 配置 CurdVSystems (View)
+            modelBuilder.Entity<CurdVSystems>(entity =>
+            {
+                entity.HasNoKey();
+                entity.ToView("CURdVSystems");
+
+                entity.Property(e => e.SystemId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .IsFixedLength()
+                    .IsRequired();
+
+                entity.Property(e => e.SystemName)
+                    .HasMaxLength(50)
+                    .IsRequired();
+            });
+
+            // 配置 XFLdEVT 複合主鍵
+            modelBuilder.Entity<XFLdEVT>(entity =>
+            {
+                entity.HasKey(e => new { e.PRCID, e.RELATEID, e.EVTNAME });
+            });
+
+            // 配置 XFLdTRA 複合主鍵
+            modelBuilder.Entity<XFLdTRA>(entity =>
+            {
+                entity.HasKey(e => new { e.PRCID, e.TRAID });
+            });
+
+            // XFLdAct 表有觸發器，需關閉 OUTPUT 子句
+            modelBuilder.Entity<XFLdAct>()
+                .ToTable(tb => tb.UseSqlOutputClause(false));
+
+            // 配置 CURdFlowMultiSignUser 複合主鍵
+            modelBuilder.Entity<CURdFlowMultiSignUser>(entity =>
+            {
+                entity.HasKey(e => new { e.PRCID, e.ACTID, e.UserId });
             });
 
             OnModelCreatingPartial(modelBuilder);
