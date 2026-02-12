@@ -357,20 +357,51 @@ namespace PcbErpApi.Controllers
 
                 activity.PRCID = prcId;
 
+                // 使用原生 SQL 新增或更新（避免 Trigger 干擾 EF Core OUTPUT 子句）
                 var existingActivity = await _context.XFLdActs.FindAsync(activity.ACTID);
                 if (existingActivity != null)
                 {
-                    existingActivity.ACTNAME = activity.ACTNAME;
-                    existingActivity.X = activity.X;
-                    existingActivity.Y = activity.Y;
-                    existingActivity.ACTTYPE = activity.ACTTYPE;
+                    // 更新現有活動
+                    await _context.Database.ExecuteSqlRawAsync(
+                        @"UPDATE XFLdAct
+                          SET ACTNAME = {0}, X = {1}, Y = {2}, ACTTYPE = {3}
+                          WHERE ACTID = {4}",
+                        activity.ACTNAME ?? "",
+                        activity.X ?? 0,
+                        activity.Y ?? 0,
+                        activity.ACTTYPE ?? (byte)0,
+                        activity.ACTID);
                 }
                 else
                 {
-                    _context.XFLdActs.Add(activity);
+                    // 新增活動
+                    await _context.Database.ExecuteSqlRawAsync(
+                        @"INSERT INTO XFLdAct(ACTID, PRCID, ACTNAME, X, Y, ACTTYPE)
+                          VALUES({0}, {1}, {2}, {3}, {4}, {5})",
+                        activity.ACTID,
+                        prcId,
+                        activity.ACTNAME ?? "",
+                        activity.X ?? 0,
+                        activity.Y ?? 0,
+                        activity.ACTTYPE ?? (byte)0);
+
+                    // 為新活動建立 3 個事件（模仿 DELPHI CreateControl 行為）
+                    await _context.Database.ExecuteSqlRawAsync(
+                        @"INSERT INTO XFLdEVT(PRCID, RELATEID, EVTNAME, EVTTYPE, ONEXEC)
+                          VALUES({0}, {1}, {2}, 1, {3})",
+                        prcId, activity.ACTID, "收件前行為", "SET @收件人 = @申請人");
+
+                    await _context.Database.ExecuteSqlRawAsync(
+                        @"INSERT INTO XFLdEVT(PRCID, RELATEID, EVTNAME, EVTTYPE, ONEXEC)
+                          VALUES({0}, {1}, {2}, 1, {3})",
+                        prcId, activity.ACTID, "收件後行為", "");
+
+                    await _context.Database.ExecuteSqlRawAsync(
+                        @"INSERT INTO XFLdEVT(PRCID, RELATEID, EVTNAME, EVTTYPE, ONEXEC)
+                          VALUES({0}, {1}, {2}, 1, {3})",
+                        prcId, activity.ACTID, "寄件行為", "");
                 }
 
-                await _context.SaveChangesAsync();
                 return Ok(new { message = "儲存成功", activity = activity });
             }
             catch (Exception ex)
@@ -393,18 +424,16 @@ namespace PcbErpApi.Controllers
                     return BadRequest(new { error = "無法刪除活動" });
                 }
 
-                var activity = await _context.XFLdActs.FindAsync(actId);
-                if (activity != null)
-                {
-                    // 刪除相關的轉換
-                    var relatedTransitions = await _context.XFLdTRAs
-                        .Where(t => t.SRCACT == actId || t.DSTACT == actId)
-                        .ToListAsync();
-                    _context.XFLdTRAs.RemoveRange(relatedTransitions);
+                // 使用原生 SQL 刪除（避免 Trigger 干擾 EF Core OUTPUT 子句）
+                // 先刪除相關的轉換
+                await _context.Database.ExecuteSqlRawAsync(
+                    "DELETE FROM XFLdTRA WHERE PRCID = {0} AND (SRCACT = {1} OR DSTACT = {1})",
+                    prcId, actId);
 
-                    _context.XFLdActs.Remove(activity);
-                    await _context.SaveChangesAsync();
-                }
+                // 再刪除活動
+                await _context.Database.ExecuteSqlRawAsync(
+                    "DELETE FROM XFLdAct WHERE PRCID = {0} AND ACTID = {1}",
+                    prcId, actId);
 
                 return Ok(new { message = "刪除成功" });
             }
@@ -454,7 +483,7 @@ namespace PcbErpApi.Controllers
         /// 新增或更新轉換
         /// </summary>
         [HttpPost("{prcId}/transitions")]
-        public async Task<IActionResult> SaveTransition(string prcId, [FromBody] XFLdTRA transition)
+        public async Task<IActionResult> SaveTransition(string prcId, [FromBody] CreateTransitionRequest request)
         {
             try
             {
@@ -464,23 +493,54 @@ namespace PcbErpApi.Controllers
                     return BadRequest(new { error = "無法修改轉換" });
                 }
 
-                transition.PRCID = prcId;
+                var traId = (request.TRAID ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(traId))
+                {
+                    return BadRequest(new { error = "TRAID 不可空白" });
+                }
 
-                var existingTransition = await _context.XFLdTRAs.FindAsync(prcId, transition.TRAID);
+                // 使用原生 SQL 新增或更新（避免 Trigger 干擾 EF Core OUTPUT 子句）
+                var existingTransition = await _context.XFLdTRAs
+                    .FirstOrDefaultAsync(t => t.PRCID == prcId && t.TRAID == traId);
+
                 if (existingTransition != null)
                 {
-                    existingTransition.SRCACT = transition.SRCACT;
-                    existingTransition.DSTACT = transition.DSTACT;
-                    existingTransition.CAPTION = transition.CAPTION;
-                    existingTransition.TRATYPE = transition.TRATYPE;
+                    // 更新現有轉換
+                    await _context.Database.ExecuteSqlRawAsync(
+                        @"UPDATE XFLdTRA
+                          SET SRCACT = {0}, DSTACT = {1}, CAPTION = {2}, TRATYPE = {3}
+                          WHERE PRCID = {4} AND TRAID = {5}",
+                        request.SRCACT ?? "",
+                        request.DSTACT ?? "",
+                        request.CAPTION ?? "",
+                        request.TRATYPE ?? 0,
+                        prcId,
+                        traId);
                 }
                 else
                 {
-                    _context.XFLdTRAs.Add(transition);
+                    // 新增轉換
+                    await _context.Database.ExecuteSqlRawAsync(
+                        @"INSERT INTO XFLdTRA(PRCID, TRAID, SRCACT, DSTACT, CAPTION, CDATE, TRATYPE)
+                          VALUES({0}, {1}, {2}, {3}, {4}, GETDATE(), {5})",
+                        prcId,
+                        traId,
+                        request.SRCACT ?? "",
+                        request.DSTACT ?? "",
+                        request.CAPTION ?? "",
+                        request.TRATYPE ?? 0);
+
+                    // 建立「流程決策行為」事件（EVTTYPE=2）
+                    await _context.Database.ExecuteSqlRawAsync(
+                        @"INSERT INTO XFLdEVT(PRCID, RELATEID, EVTNAME, EVTTYPE, ONEXEC)
+                          VALUES({0}, {1}, {2}, 2, {3})",
+                        prcId,
+                        traId,
+                        "流程決策行為",
+                        request.ONEXEC ?? "");
                 }
 
-                await _context.SaveChangesAsync();
-                return Ok(new { message = "儲存成功", transition = transition });
+                return Ok(new { message = "儲存成功" });
             }
             catch (Exception ex)
             {
@@ -502,12 +562,10 @@ namespace PcbErpApi.Controllers
                     return BadRequest(new { error = "無法刪除轉換" });
                 }
 
-                var transition = await _context.XFLdTRAs.FindAsync(traId);
-                if (transition != null)
-                {
-                    _context.XFLdTRAs.Remove(transition);
-                    await _context.SaveChangesAsync();
-                }
+                // 使用原生 SQL 刪除（避免 Trigger 干擾 EF Core OUTPUT 子句）
+                await _context.Database.ExecuteSqlRawAsync(
+                    "DELETE FROM XFLdTRA WHERE PRCID = {0} AND TRAID = {1}",
+                    prcId, traId);
 
                 return Ok(new { message = "刪除成功" });
             }
@@ -555,6 +613,51 @@ namespace PcbErpApi.Controllers
         }
 
         #endregion
+
+        #region 系統參數管理
+
+        /// <summary>
+        /// 取得指定事件的系統參數列表
+        /// </summary>
+        [HttpGet("params/{evtName}")]
+        public async Task<ActionResult<IEnumerable<XFLdSYSPARAMS>>> GetSystemParams(string evtName)
+        {
+            try
+            {
+                var params_ = await _context.XFLdSYSPARAMS
+                    .Where(p => p.EVTNAME == evtName)
+                    .OrderBy(p => p.PARAMNAME)
+                    .ToListAsync();
+
+                return Ok(params_);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = "取得系統參數失敗", message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// 取得所有函式列表
+        /// </summary>
+        [HttpGet("functions")]
+        public async Task<ActionResult<IEnumerable<XFLdFUNC>>> GetFunctions()
+        {
+            try
+            {
+                var functions = await _context.XFLdFUNCs
+                    .OrderBy(f => f.FUNCNAME)
+                    .ToListAsync();
+
+                return Ok(functions);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = "取得函式列表失敗", message = ex.Message });
+            }
+        }
+
+        #endregion
     }
 
     #region Request Models
@@ -578,6 +681,16 @@ namespace PcbErpApi.Controllers
     public class UpdateStatusRequest
     {
         public string? UserId { get; set; }
+    }
+
+    public class CreateTransitionRequest
+    {
+        public string? TRAID { get; set; }
+        public string? SRCACT { get; set; }
+        public string? DSTACT { get; set; }
+        public string? CAPTION { get; set; }
+        public int? TRATYPE { get; set; }
+        public string? ONEXEC { get; set; }
     }
 
     public class CopyFlowRequest

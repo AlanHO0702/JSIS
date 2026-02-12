@@ -411,20 +411,169 @@
   };
 
   // ==============================================================================
+  //  表格排序狀態管理
+  // ==============================================================================
+  const SORT_STATE = {}; // { tableId: { fieldName: 'asc' | 'desc' | null } }
+
+  const getSortIndicator = (direction) => {
+    if (direction === 'desc') return ' ▼';
+    if (direction === 'asc') return ' ▲';
+    return '';
+  };
+
+  const sortTableByField = (tbody, dict, fieldName, direction) => {
+    if (!tbody || !fieldName || !direction) return;
+
+    const getRowValue = (row, field) => {
+      if (!row) return "";
+      const want = String(field).toLowerCase();
+      const hit = Object.keys(row).find(k => String(k).toLowerCase() === want);
+      return hit ? row[hit] : "";
+    };
+
+    const getFieldDef = (dict, fieldName) => {
+      return dict.find(f => f.FieldName === fieldName);
+    };
+
+    const parseValue = (value, dataType) => {
+      if (value == null || value === "") return null;
+
+      // 日期類型
+      if (dataType && String(dataType).toLowerCase().includes("date")) {
+        const d = new Date(value);
+        return isNaN(d) ? null : d.getTime();
+      }
+
+      // 數字類型
+      if (typeof value === "number") return value;
+      const strValue = String(value).replace(/,/g, "").trim();
+      const num = Number(strValue);
+      if (!isNaN(num) && strValue.match(/^-?\d+(\.\d+)?$/)) return num;
+
+      // 字串類型
+      return String(value).toLowerCase();
+    };
+
+    // 從 tbody 中取得所有資料列及其原始資料
+    const rows = Array.from(tbody.querySelectorAll('tr')).map(tr => {
+      // 排除佔位列和已刪除的列
+      const isPlaceholder = tr.dataset.placeholder === "1";
+      const isDeleted = tr.dataset.state === "deleted";
+      if (isPlaceholder || isDeleted) {
+        return { tr, data: {}, skip: true };
+      }
+
+      const rowData = {};
+      const inputs = tr.querySelectorAll('input.cell-edit[name]');
+      inputs.forEach(inp => {
+        if (inp.name) {
+          // 優先使用 dataset.raw (原始值)，如果不存在則使用 value
+          rowData[inp.name] = inp.dataset.raw !== undefined ? inp.dataset.raw : inp.value;
+        }
+      });
+      return { tr, data: rowData, skip: false };
+    });
+
+    const fieldDef = getFieldDef(dict, fieldName);
+    const dataType = fieldDef?.DataType;
+
+    // 分離需要排序的列和不需要排序的列
+    const sortableRows = rows.filter(r => !r.skip);
+    const skipRows = rows.filter(r => r.skip);
+
+    // 排序
+    sortableRows.sort((a, b) => {
+      const aVal = parseValue(getRowValue(a.data, fieldName), dataType);
+      const bVal = parseValue(getRowValue(b.data, fieldName), dataType);
+
+      // 處理 null 值 (null 排在最後)
+      if (aVal === null && bVal === null) return 0;
+      if (aVal === null) return 1;
+      if (bVal === null) return -1;
+
+      // 比較值
+      let result = 0;
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        result = aVal.localeCompare(bVal, 'zh-TW');
+      } else {
+        result = aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+      }
+
+      // 套用排序方向
+      return direction === 'desc' ? -result : result;
+    });
+
+    // 重新排列 DOM：先放置已排序的列，再放置佔位列/已刪除的列
+    sortableRows.forEach(({ tr }) => tbody.appendChild(tr));
+    skipRows.forEach(({ tr }) => tbody.appendChild(tr));
+  };
+
+  // ==============================================================================
   //  建表頭
   // ==============================================================================
   const buildHead = (tr, dict) => {
     tr.innerHTML = "";
+    const tableId = tr.closest('table')?.id || '';
+
+    if (!SORT_STATE[tableId]) {
+      SORT_STATE[tableId] = {};
+    }
+
     dict
       .filter(DICT.visible)
       .sort((a, b) => DICT.order(a) - DICT.order(b))
       .forEach(f => {
         const th = document.createElement("th");
-        th.textContent = DICT.header(f);
+        const textSpan = document.createElement("span");
+        textSpan.className = "th-text";
+        textSpan.textContent = DICT.header(f);
+
+        th.appendChild(textSpan);
         th.dataset.field = f.FieldName;
         const w = DICT.width(f);
         if (w) th.style.width = w + "px";
         th.style.whiteSpace = "nowrap";
+        th.style.cursor = "pointer";
+        th.style.userSelect = "none";
+        th.title = "雙擊可排序";
+
+        // 雙擊事件：排序
+        th.addEventListener('dblclick', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          const table = th.closest('table');
+          const tbody = table?.querySelector('tbody');
+          if (!tbody) return;
+
+          const currentSort = SORT_STATE[tableId][f.FieldName];
+          let newSort = null;
+
+          // 切換排序狀態：null → desc → asc → desc → ...
+          if (!currentSort || currentSort === 'asc') {
+            newSort = 'desc';
+          } else {
+            newSort = 'asc';
+          }
+
+          // 清除其他欄位的排序狀態
+          SORT_STATE[tableId] = { [f.FieldName]: newSort };
+
+          // 更新所有表頭的視覺指示器
+          table.querySelectorAll('thead th').forEach(header => {
+            const field = header.dataset.field;
+            const span = header.querySelector('.th-text');
+            if (span) {
+              const baseText = DICT.header(dict.find(d => d.FieldName === field));
+              const indicator = field === f.FieldName ? getSortIndicator(newSort) : '';
+              span.textContent = baseText + indicator;
+            }
+          });
+
+          // 執行排序
+          sortTableByField(tbody, dict, f.FieldName, newSort);
+        });
+
         const handle = document.createElement("span");
         handle.className = "col-resizer";
         th.appendChild(handle);
@@ -550,7 +699,7 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
         inp.dataset.raw = raw == null ? "" : raw;
       }
 
-      // ★★★ 修正：如果該欄位是 PK (IsKey)，或者是唯讀，或者是關聯鍵，都必須鎖定不可編輯 ★★★
+      // ★★★ 修正：如果該欄位是 PK (IsKey)，或者是唯讀，或者是關聯鍵,都必須鎖定不可編輯 ★★★
       if (DICT.readonly(f) || f.KeySelfName || (DICT.isKey(f) && tr.dataset.state !== "added")) {
         inp.readOnly = true;
         td.classList.add("mmd-readonly-cell");
@@ -569,6 +718,32 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
     }
     tbody.appendChild(tr);
   });
+
+  // ★ 套用已儲存的排序狀態
+  const table = tbody.closest('table');
+  const tableId = table?.id || '';
+  if (SORT_STATE[tableId]) {
+    const sortedField = Object.keys(SORT_STATE[tableId]).find(f => SORT_STATE[tableId][f]);
+    if (sortedField) {
+      const direction = SORT_STATE[tableId][sortedField];
+      sortTableByField(tbody, dict, sortedField, direction);
+
+      // 更新表頭的視覺指示器
+      const thead = table?.querySelector('thead');
+      if (thead) {
+        thead.querySelectorAll('th').forEach(th => {
+          const field = th.dataset.field;
+          const span = th.querySelector('.th-text');
+          if (span && field) {
+            const fieldDef = dict.find(d => d.FieldName === field);
+            const baseText = DICT.header(fieldDef);
+            const indicator = field === sortedField ? getSortIndicator(direction) : '';
+            span.textContent = baseText + indicator;
+          }
+        });
+      }
+    }
+  }
 };
 
   // ==============================================================================
