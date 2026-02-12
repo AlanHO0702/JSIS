@@ -100,9 +100,14 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
 
         // 檢查是否為壓合站,若是則查詢所有層別
         var procCode = GetStringValue(lotInfo, "ProcCode");
-        if (procCode == "P1200")  // 壓合站
+        _logger.LogInformation("批號 {LotNum} 的製程代碼: [{ProcCode}] (長度={Length})", request.LotNum, procCode, procCode.Length);
+
+        if (procCode.Trim() == "P1200")  // 壓合站 (使用 Trim() 去除空白)
         {
+            _logger.LogInformation("判斷為壓合站，開始查詢所有層別");
             var allLayers = await GetAllLayersForLamination(conn, request.LotNum);
+            _logger.LogInformation("查詢到 {Count} 個層別", allLayers.Count);
+
             if (allLayers.Count > 0)
             {
                 lotInfo["AllLayers"] = allLayers;
@@ -110,7 +115,16 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
                 // 計算最小良品數
                 var minGoodQty = allLayers.Min(layer => GetIntValue(layer, "Qnty"));
                 lotInfo["MinGoodQty"] = minGoodQty;
+                _logger.LogInformation("壓合站最小良品數: {MinQty}", minGoodQty);
             }
+            else
+            {
+                _logger.LogWarning("壓合站但查詢不到任何層別資料");
+            }
+        }
+        else
+        {
+            _logger.LogInformation("非壓合站，製程代碼為: {ProcCode}", procCode);
         }
 
         // 呼叫 FMEdPassSetXOut 取得多報明細 (根據料號的成型尺寸片數)
@@ -290,6 +304,7 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
 
     /// <summary>
     /// 查詢壓合站的所有層別資料
+    /// 批號格式: P25050067-06-67 (前綴-批次-層別)
     /// </summary>
     private async Task<List<Dictionary<string, object?>>> GetAllLayersForLamination(SqlConnection conn, string lotNum)
     {
@@ -297,23 +312,87 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
 
         try
         {
-            // 查詢同批號、在壓合站(P1200)的所有層別
-            await using var cmd = new SqlCommand(
-                @"SELECT LotNum, LayerId, LayerName, Qnty, ProcCode, ProcName
-                  FROM FMEdLotWip WITH(NOLOCK)
-                  WHERE LEFT(LotNum, CHARINDEX('-', LotNum) - 1) = LEFT(@LotNum, CHARINDEX('-', @LotNum) - 1)
-                    AND ProcCode = 'P1200'
-                  ORDER BY LayerId", conn);
-            cmd.Parameters.AddWithValue("@LotNum", lotNum);
+            _logger.LogInformation("開始查詢壓合站所有層別: {LotNum}", lotNum);
 
-            await using var rd = await cmd.ExecuteReaderAsync();
-            while (await rd.ReadAsync())
+            // 步驟1: 從批號提取 "前綴-批次" (例如 P25050067-06-67 → P25050067-06)
+            var lotNumPrefix = "";
+            var parts = lotNum.Split('-');
+
+            if (parts.Length >= 2)
             {
-                var layer = ReadRowToDictionary(rd);
-                layers.Add(layer);
+                // 取前兩段: P25050067-06
+                lotNumPrefix = parts[0] + "-" + parts[1];
+            }
+            else
+            {
+                _logger.LogWarning("批號格式不正確，無法提取前綴: {LotNum}", lotNum);
+                return layers;
             }
 
-            _logger.LogInformation("壓合站查詢: 批號 {LotNum} 找到 {Count} 個層別", lotNum, layers.Count);
+            _logger.LogInformation("批號前綴(含批次): {Prefix}", lotNumPrefix);
+
+            var allLayerLotNums = new List<string>();
+            await using (var cmd = new SqlCommand(
+                @"SELECT LotNum
+                  FROM FMEdV_ProcNIS_ToStd WITH(NOLOCK)
+                  WHERE LotNum LIKE @Prefix + '%'
+                    AND ProcCode = 'P1200'
+                  ORDER BY LotNum", conn))
+            {
+                cmd.Parameters.AddWithValue("@Prefix", lotNumPrefix);
+                await using var rd = await cmd.ExecuteReaderAsync();
+                while (await rd.ReadAsync())
+                {
+                    var layerLotNum = rd["LotNum"]?.ToString()?.Trim();
+                    if (!string.IsNullOrEmpty(layerLotNum))
+                    {
+                        allLayerLotNums.Add(layerLotNum);
+                    }
+                }
+            }
+
+            _logger.LogInformation("找到 {Count} 個壓合站批號: {LotNums}",
+                allLayerLotNums.Count, string.Join(", ", allLayerLotNums));
+
+            // 步驟2: 對每個批號呼叫 FMEdPassChoiceLotPCB SP 取得完整資訊
+            foreach (var layerLotNum in allLayerLotNums)
+            {
+                try
+                {
+                    Dictionary<string, object?>? layer = null;
+
+                    // 先執行 SP 並讀取資料，然後關閉 DataReader
+                    await using (var cmd = new SqlCommand("exec FMEdPassChoiceLotPCB @LotNum, @InStock, @PaperNum", conn))
+                    {
+                        cmd.Parameters.AddWithValue("@LotNum", layerLotNum);
+                        cmd.Parameters.AddWithValue("@InStock", 0);
+                        cmd.Parameters.AddWithValue("@PaperNum", "");
+
+                        await using var rd = await cmd.ExecuteReaderAsync();
+                        if (await rd.ReadAsync())
+                        {
+                            layer = ReadRowToDictionary(rd);
+                        }
+                    } // DataReader 在這裡關閉
+
+                    // 確保有資料才繼續處理
+                    if (layer != null)
+                    {
+                        // 補充 Lookup 欄位 (LayerName, ProcName)
+                        await EnrichLayerLookupFields(conn, layer);
+
+                        layers.Add(layer);
+                        _logger.LogInformation("  層別批號 {LotNum}: Qnty={Qnty}, LayerId={LayerId}",
+                            layerLotNum, GetIntValue(layer, "Qnty"), GetStringValue(layer, "LayerId"));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "查詢層別批號失敗: {LotNum}", layerLotNum);
+                }
+            }
+
+            _logger.LogInformation("壓合站查詢完成: 批號 {LotNum} 找到 {Count} 個層別", lotNum, layers.Count);
         }
         catch (Exception ex)
         {
@@ -321,6 +400,34 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
         }
 
         return layers;
+    }
+
+    /// <summary>
+    /// 補充層別的 Lookup 欄位 (LayerName, ProcName)
+    /// </summary>
+    private async Task EnrichLayerLookupFields(SqlConnection conn, Dictionary<string, object?> layer)
+    {
+        // LayerName
+        var layerId = GetStringValue(layer, "LayerId");
+        if (!string.IsNullOrEmpty(layerId))
+        {
+            var layerName = await LookupValue(conn,
+                "SELECT LayerName FROM EMOdProdLayer WITH(NOLOCK) WHERE LayerId = @Code",
+                layerId);
+            if (!string.IsNullOrEmpty(layerName))
+                layer["LayerName"] = layerName;
+        }
+
+        // ProcName
+        var procCode = GetStringValue(layer, "ProcCode");
+        if (!string.IsNullOrEmpty(procCode))
+        {
+            var procName = await LookupValue(conn,
+                "SELECT ProcName FROM EMOdProcInfo WITH(NOLOCK) WHERE ProcCode = @Code",
+                procCode);
+            if (!string.IsNullOrEmpty(procName))
+                layer["ProcName"] = procName;
+        }
     }
 
     /// <summary>
