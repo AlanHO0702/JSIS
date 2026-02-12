@@ -71,6 +71,7 @@ namespace PcbErpApi.Data
         public virtual DbSet<XFLdEVT> XFLdEVTs { get; set; }
         public virtual DbSet<XFLdSYSPARAMS> XFLdSYSPARAMS { get; set; }
         public virtual DbSet<XFLdFUNC> XFLdFUNCs { get; set; }
+        public virtual DbSet<CURdFlowMultiSignUser> CURdFlowMultiSignUsers { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -2769,6 +2770,12 @@ namespace PcbErpApi.Data
             // XFLdAct 表有觸發器，需關閉 OUTPUT 子句
             modelBuilder.Entity<XFLdAct>()
                 .ToTable(tb => tb.UseSqlOutputClause(false));
+
+            // 配置 CURdFlowMultiSignUser 複合主鍵
+            modelBuilder.Entity<CURdFlowMultiSignUser>(entity =>
+            {
+                entity.HasKey(e => new { e.PRCID, e.ACTID, e.UserId });
+            });
 
             OnModelCreatingPartial(modelBuilder);
         }
