@@ -42,7 +42,7 @@ namespace PcbErpApi.Controllers
                 await conn.OpenAsync();
 
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "select OCXTemplete, OCXTempleteName from CURdOCXTemplete";
+            cmd.CommandText = "select * from CURdOCXTemplete(nolock) order by OCXTemplete";
 
             var list = new List<OcxTempleteOption>();
             await using var reader = await cmd.ExecuteReaderAsync();
@@ -56,6 +56,27 @@ namespace PcbErpApi.Controllers
             }
 
             return Ok(list);
+        }
+
+        public class UpdateOcxTemplateDto
+        {
+            public string ItemId { get; set; } = "";
+            public string OcxTemplete { get; set; } = "";
+        }
+
+        [HttpPost("UpdateOcxTemplete")]
+        public async Task<IActionResult> UpdateOcxTemplete([FromBody] UpdateOcxTemplateDto dto)
+        {
+            if (string.IsNullOrWhiteSpace(dto.ItemId))
+                return BadRequest(new { success = false, message = "ItemId 不可空白" });
+
+            var item = await _context.CurdSysItems.FirstOrDefaultAsync(x => x.ItemId == dto.ItemId.Trim());
+            if (item == null)
+                return NotFound(new { success = false, message = "找不到項目" });
+
+            item.Ocxtemplete = dto.OcxTemplete?.Trim() ?? string.Empty;
+            await _context.SaveChangesAsync();
+            return Ok(new { success = true });
         }
 
         [HttpPost]

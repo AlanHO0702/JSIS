@@ -52,7 +52,15 @@ public class DictSetupApiController : ControllerBase
             SELECT TableName, TableKind, MDKey, LocateKeys, OrderByField, FilterSQL, RunSQLAfterAdd
               FROM CURdOCXTableSetUp WITH (NOLOCK)
              WHERE ItemId = @itemId
-             ORDER BY TableKind, TableName;", conn);
+             ORDER BY
+                CASE
+                    WHEN TableKind LIKE 'Master%' THEN 1
+                    WHEN TableKind LIKE 'Detail%' THEN 2
+                    WHEN TableKind LIKE 'SubDetail%' THEN 3
+                    ELSE 4
+                END,
+                TableKind,
+                TableName;", conn);
 
         cmd.Parameters.AddWithValue("@itemId", (object?)itemId ?? string.Empty);
 
@@ -127,6 +135,120 @@ UPDATE CURdOCXTableSetUp
         }
 
         return Ok(new { success = true, count = list.Count });
+    }
+
+    // ===== A-2. TableName 詳細資訊（CURdTableName）=====
+    public class TableNameRow
+    {
+        public string TableName { get; set; }
+        public string DisplayLabel { get; set; }
+        public string TableNote { get; set; }
+        public int? SerialNum { get; set; }
+        public int? TableType { get; set; }
+        public int? LevelNo { get; set; }
+        public string SystemId { get; set; }
+        public string SuperId { get; set; }
+        public string RealTableName { get; set; }
+        public string OrderByField { get; set; }
+        public string DisplayLabelCn { get; set; }
+        public string DisplayLabelEn { get; set; }
+        public string DisplayLabelJp { get; set; }
+        public string DisplayLabelTh { get; set; }
+        public string LogKeildFieldName { get; set; }
+    }
+
+    // GET /api/DictSetupApi/TableName/{tableName}
+    [HttpGet("TableName/{tableName}")]
+    public async Task<IActionResult> GetTableName(string tableName)
+    {
+        if (string.IsNullOrWhiteSpace(tableName))
+            return BadRequest(new { success = false, message = "tableName is required" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        var cmd = new SqlCommand(@"
+            SELECT TableName, DisplayLabel, TableNote, SerialNum, TableType, LevelNo,
+                   SystemId, SuperId, RealTableName, OrderByField,
+                   DisplayLabelCn, DisplayLabelEn, DisplayLabelJp, DisplayLabelTh, LogKeildFieldName
+              FROM CURdTableName WITH (NOLOCK)
+             WHERE TableName = @tableName;", conn);
+
+        cmd.Parameters.AddWithValue("@tableName", tableName);
+
+        using var rd = await cmd.ExecuteReaderAsync();
+        if (await rd.ReadAsync())
+        {
+            return Ok(new TableNameRow
+            {
+                TableName = rd["TableName"]?.ToString() ?? string.Empty,
+                DisplayLabel = rd["DisplayLabel"]?.ToString() ?? string.Empty,
+                TableNote = rd["TableNote"]?.ToString() ?? string.Empty,
+                SerialNum = TryToInt(rd["SerialNum"]),
+                TableType = TryToInt(rd["TableType"]),
+                LevelNo = TryToInt(rd["LevelNo"]),
+                SystemId = rd["SystemId"]?.ToString() ?? string.Empty,
+                SuperId = rd["SuperId"]?.ToString() ?? string.Empty,
+                RealTableName = rd["RealTableName"]?.ToString() ?? string.Empty,
+                OrderByField = rd["OrderByField"]?.ToString() ?? string.Empty,
+                DisplayLabelCn = rd["DisplayLabelCn"]?.ToString() ?? string.Empty,
+                DisplayLabelEn = rd["DisplayLabelEn"]?.ToString() ?? string.Empty,
+                DisplayLabelJp = rd["DisplayLabelJp"]?.ToString() ?? string.Empty,
+                DisplayLabelTh = rd["DisplayLabelTh"]?.ToString() ?? string.Empty,
+                LogKeildFieldName = rd["LogKeildFieldName"]?.ToString() ?? string.Empty
+            });
+        }
+
+        return NotFound(new { success = false, message = "TableName not found" });
+    }
+
+    // POST /api/DictSetupApi/TableName/Update
+    [HttpPost("TableName/Update")]
+    public async Task<IActionResult> UpdateTableName([FromBody] TableNameRow input)
+    {
+        if (input == null || string.IsNullOrWhiteSpace(input.TableName))
+            return BadRequest(new { success = false, message = "Invalid input" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        var cmd = new SqlCommand(@"
+UPDATE CURdTableName
+   SET DisplayLabel = @DisplayLabel,
+       TableNote = @TableNote,
+       SerialNum = @SerialNum,
+       TableType = @TableType,
+       LevelNo = @LevelNo,
+       SystemId = @SystemId,
+       SuperId = @SuperId,
+       RealTableName = @RealTableName,
+       OrderByField = @OrderByField,
+       DisplayLabelCn = @DisplayLabelCn,
+       DisplayLabelEn = @DisplayLabelEn,
+       DisplayLabelJp = @DisplayLabelJp,
+       DisplayLabelTh = @DisplayLabelTh,
+       LogKeildFieldName = @LogKeildFieldName
+ WHERE TableName = @TableName;", conn);
+
+        cmd.Parameters.AddWithValue("@TableName", input.TableName);
+        cmd.Parameters.AddWithValue("@DisplayLabel", (object?)input.DisplayLabel ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@TableNote", (object?)input.TableNote ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@SerialNum", (object?)input.SerialNum ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@TableType", (object?)input.TableType ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@LevelNo", (object?)input.LevelNo ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@SystemId", (object?)input.SystemId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@SuperId", (object?)input.SuperId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@RealTableName", (object?)input.RealTableName ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@OrderByField", (object?)input.OrderByField ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@DisplayLabelCn", (object?)input.DisplayLabelCn ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@DisplayLabelEn", (object?)input.DisplayLabelEn ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@DisplayLabelJp", (object?)input.DisplayLabelJp ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@DisplayLabelTh", (object?)input.DisplayLabelTh ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@LogKeildFieldName", (object?)input.LogKeildFieldName ?? DBNull.Value);
+
+        var affected = await cmd.ExecuteNonQueryAsync();
+
+        return Ok(new { success = affected > 0, affected });
     }
 
     // ===== B. 自訂按鈕（CURdOCXItemCustButton）=====
@@ -946,6 +1068,362 @@ SELECT TOP 1 CommandText
         catch (Exception ex)
         {
             return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    // ===== C. 欄位設定（用於 F3 對辭典和唯讀控制）=====
+    public class FieldSettingRow
+    {
+        public string FieldName { get; set; }
+        public string DisplayLabel { get; set; }
+        public int? ReadOnly { get; set; }
+        public string OCXLKTableName { get; set; }
+        public string OCXLKResultName { get; set; }
+        public string DataType { get; set; }
+    }
+
+    // GET /api/DictSetupApi/FieldSettings/{tableName}
+    [HttpGet("FieldSettings/{tableName}")]
+    public async Task<IActionResult> GetFieldSettings(string tableName)
+    {
+        if (string.IsNullOrWhiteSpace(tableName))
+            return BadRequest(new { success = false, message = "tableName is required" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        var cmd = new SqlCommand(@"
+            SELECT FieldName, DisplayLabel, ReadOnly, OCXLKTableName, OCXLKResultName, DataType
+              FROM CURdTableField WITH (NOLOCK)
+             WHERE LOWER(REPLACE(TableName, 'dbo.', '')) = LOWER(REPLACE(@tableName, 'dbo.', ''))
+             ORDER BY SerialNum;", conn);
+
+        cmd.Parameters.AddWithValue("@tableName", tableName);
+
+        var list = new List<FieldSettingRow>();
+        using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            list.Add(new FieldSettingRow
+            {
+                FieldName = rd["FieldName"]?.ToString() ?? string.Empty,
+                DisplayLabel = rd["DisplayLabel"]?.ToString() ?? string.Empty,
+                ReadOnly = TryToInt(rd["ReadOnly"]),
+                OCXLKTableName = rd["OCXLKTableName"]?.ToString() ?? string.Empty,
+                OCXLKResultName = rd["OCXLKResultName"]?.ToString() ?? string.Empty,
+                DataType = rd["DataType"]?.ToString() ?? string.Empty
+            });
+        }
+
+        return Ok(list);
+    }
+
+    // GET /api/DictSetupApi/LookupData/{tableName}/{resultField}
+    [HttpGet("LookupData/{tableName}/{resultField}")]
+    public async Task<IActionResult> GetLookupData(string tableName, string resultField)
+    {
+        if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(resultField))
+            return BadRequest(new { success = false, message = "tableName and resultField are required" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        // 動態查詢對辭典資料表
+        var cmd = new SqlCommand($@"
+            SELECT TOP 1000 [{resultField}]
+              FROM [{tableName}] WITH (NOLOCK)
+             WHERE [{resultField}] IS NOT NULL
+             ORDER BY [{resultField}];", conn);
+
+        var list = new List<Dictionary<string, object>>();
+        using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            var row = new Dictionary<string, object>();
+            for (int i = 0; i < rd.FieldCount; i++)
+            {
+                row[rd.GetName(i)] = rd.GetValue(i) ?? DBNull.Value;
+            }
+            list.Add(row);
+        }
+
+        return Ok(list);
+    }
+
+    // ===== F. 系統按鈕設定（CURdOCXItemSysButton）=====
+    public class SysButtonRow
+    {
+        public string ItemId { get; set; }
+        public string ButtonName { get; set; }
+        public int? bVisiable { get; set; }
+        public string CustCaption { get; set; }
+        public string CustHint { get; set; }
+        public int? bShowMsg { get; set; }
+        public string sCustMsg { get; set; }
+        public int? bShowMsgAft { get; set; }
+        public string sCustMsgAft { get; set; }
+        public string CustCaptionCN { get; set; }
+        public string CustCaptionEN { get; set; }
+        public string CustCaptionJP { get; set; }
+        public string CustCaptionTH { get; set; }
+        public string CustHintCN { get; set; }
+        public string CustHintEN { get; set; }
+        public string CustHintJP { get; set; }
+        public string CustHintTH { get; set; }
+        public int? SerialNum { get; set; }
+    }
+
+    // GET /api/DictSetupApi/SysButton/ByItem/{itemId}
+    [HttpGet("SysButton/ByItem/{itemId}")]
+    public async Task<IActionResult> GetSysButtonsByItem(string itemId)
+    {
+        var list = new List<SysButtonRow>();
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        var cmd = new SqlCommand(@"
+            SELECT ItemId, ButtonName, bVisiable, CustCaption, CustHint,
+                   bShowMsg, sCustMsg, bShowMsgAft, sCustMsgAft,
+                   CustCaptionCN, CustCaptionEN, CustCaptionJP, CustCaptionTH,
+                   CustHintCN, CustHintEN, CustHintJP, CustHintTH, SerialNum
+              FROM CURdOCXItemSysButton WITH (NOLOCK)
+             WHERE ItemId = @itemId
+             ORDER BY SerialNum, ButtonName;", conn);
+
+        cmd.Parameters.AddWithValue("@itemId", (object?)itemId ?? string.Empty);
+
+        using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            list.Add(new SysButtonRow
+            {
+                ItemId = rd["ItemId"]?.ToString() ?? string.Empty,
+                ButtonName = rd["ButtonName"]?.ToString() ?? string.Empty,
+                bVisiable = TryToInt(rd["bVisiable"]),
+                CustCaption = rd["CustCaption"]?.ToString() ?? string.Empty,
+                CustHint = rd["CustHint"]?.ToString() ?? string.Empty,
+                bShowMsg = TryToInt(rd["bShowMsg"]),
+                sCustMsg = rd["sCustMsg"]?.ToString() ?? string.Empty,
+                bShowMsgAft = TryToInt(rd["bShowMsgAft"]),
+                sCustMsgAft = rd["sCustMsgAft"]?.ToString() ?? string.Empty,
+                CustCaptionCN = rd["CustCaptionCN"]?.ToString() ?? string.Empty,
+                CustCaptionEN = rd["CustCaptionEN"]?.ToString() ?? string.Empty,
+                CustCaptionJP = rd["CustCaptionJP"]?.ToString() ?? string.Empty,
+                CustCaptionTH = rd["CustCaptionTH"]?.ToString() ?? string.Empty,
+                CustHintCN = rd["CustHintCN"]?.ToString() ?? string.Empty,
+                CustHintEN = rd["CustHintEN"]?.ToString() ?? string.Empty,
+                CustHintJP = rd["CustHintJP"]?.ToString() ?? string.Empty,
+                CustHintTH = rd["CustHintTH"]?.ToString() ?? string.Empty,
+                SerialNum = TryToInt(rd["SerialNum"])
+            });
+        }
+
+        return Ok(list);
+    }
+
+    // POST /api/DictSetupApi/SysButton/Save
+    [HttpPost("SysButton/Save")]
+    public async Task<IActionResult> SaveSysButtons([FromBody] List<SysButtonRow> list)
+    {
+        if (list == null || list.Count == 0)
+            return BadRequest(new { success = false, message = "no payload" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        foreach (var x in list)
+        {
+            var cmd = new SqlCommand(@"
+UPDATE CURdOCXItemSysButton
+   SET bVisiable = @bVisiable,
+       CustCaption = @CustCaption,
+       CustHint = @CustHint,
+       bShowMsg = @bShowMsg,
+       sCustMsg = @sCustMsg,
+       bShowMsgAft = @bShowMsgAft,
+       sCustMsgAft = @sCustMsgAft,
+       CustCaptionCN = @CustCaptionCN,
+       CustCaptionEN = @CustCaptionEN,
+       CustCaptionJP = @CustCaptionJP,
+       CustCaptionTH = @CustCaptionTH,
+       CustHintCN = @CustHintCN,
+       CustHintEN = @CustHintEN,
+       CustHintJP = @CustHintJP,
+       CustHintTH = @CustHintTH,
+       SerialNum = @SerialNum
+ WHERE ItemId = @ItemId AND ButtonName = @ButtonName;", conn);
+
+            cmd.Parameters.AddWithValue("@ItemId", x.ItemId ?? "");
+            cmd.Parameters.AddWithValue("@ButtonName", x.ButtonName ?? "");
+            cmd.Parameters.AddWithValue("@bVisiable", (object?)x.bVisiable ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustCaption", (object?)x.CustCaption ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustHint", (object?)x.CustHint ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@bShowMsg", (object?)x.bShowMsg ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@sCustMsg", (object?)x.sCustMsg ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@bShowMsgAft", (object?)x.bShowMsgAft ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@sCustMsgAft", (object?)x.sCustMsgAft ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustCaptionCN", (object?)x.CustCaptionCN ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustCaptionEN", (object?)x.CustCaptionEN ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustCaptionJP", (object?)x.CustCaptionJP ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustCaptionTH", (object?)x.CustCaptionTH ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustHintCN", (object?)x.CustHintCN ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustHintEN", (object?)x.CustHintEN ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustHintJP", (object?)x.CustHintJP ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustHintTH", (object?)x.CustHintTH ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SerialNum", (object?)x.SerialNum ?? DBNull.Value);
+
+            var affected = await cmd.ExecuteNonQueryAsync();
+            if (affected == 0)
+            {
+                var ins = new SqlCommand(@"
+INSERT INTO CURdOCXItemSysButton
+(
+    ItemId, ButtonName, bVisiable, CustCaption, CustHint, bShowMsg, sCustMsg, bShowMsgAft, sCustMsgAft,
+    CustCaptionCN, CustCaptionEN, CustCaptionJP, CustCaptionTH,
+    CustHintCN, CustHintEN, CustHintJP, CustHintTH, SerialNum
+)
+VALUES
+(
+    @ItemId, @ButtonName, @bVisiable, @CustCaption, @CustHint, @bShowMsg, @sCustMsg, @bShowMsgAft, @sCustMsgAft,
+    @CustCaptionCN, @CustCaptionEN, @CustCaptionJP, @CustCaptionTH,
+    @CustHintCN, @CustHintEN, @CustHintJP, @CustHintTH, @SerialNum
+);", conn);
+
+                ins.Parameters.AddWithValue("@ItemId", x.ItemId ?? "");
+                ins.Parameters.AddWithValue("@ButtonName", x.ButtonName ?? "");
+                ins.Parameters.AddWithValue("@bVisiable", (object?)x.bVisiable ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@CustCaption", (object?)x.CustCaption ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@CustHint", (object?)x.CustHint ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@bShowMsg", (object?)x.bShowMsg ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@sCustMsg", (object?)x.sCustMsg ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@bShowMsgAft", (object?)x.bShowMsgAft ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@sCustMsgAft", (object?)x.sCustMsgAft ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@CustCaptionCN", (object?)x.CustCaptionCN ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@CustCaptionEN", (object?)x.CustCaptionEN ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@CustCaptionJP", (object?)x.CustCaptionJP ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@CustCaptionTH", (object?)x.CustCaptionTH ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@CustHintCN", (object?)x.CustHintCN ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@CustHintEN", (object?)x.CustHintEN ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@CustHintJP", (object?)x.CustHintJP ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@CustHintTH", (object?)x.CustHintTH ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@SerialNum", (object?)x.SerialNum ?? DBNull.Value);
+                await ins.ExecuteNonQueryAsync();
+            }
+        }
+
+        return Ok(new { success = true, count = list.Count });
+    }
+
+    // ===== G. 其他規則設定（CURdOCXItemOtherRule）=====
+    public class ItemOtherRuleRow
+    {
+        public string ItemId { get; set; } = string.Empty;
+        public string RuleId { get; set; } = string.Empty;
+        public string Lk_RuleName { get; set; } = string.Empty;
+        public string DLLValue { get; set; } = string.Empty;
+    }
+
+    public class OtherRuleOptionRow
+    {
+        public string RuleId { get; set; } = string.Empty;
+        public string RuleName { get; set; } = string.Empty;
+    }
+
+    // GET /api/DictSetupApi/OtherRule/ByItem/{itemId}
+    [HttpGet("OtherRule/ByItem/{itemId}")]
+    public async Task<IActionResult> GetOtherRuleByItem(string itemId)
+    {
+        var list = new List<ItemOtherRuleRow>();
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        var cmd = new SqlCommand(@"
+SELECT a.ItemId, a.RuleId, ISNULL(b.RuleName,'') AS Lk_RuleName, a.DLLValue
+  FROM CURdOCXItemOtherRule a WITH (NOLOCK)
+  LEFT JOIN CURdOCXOtherRule b WITH (NOLOCK) ON a.RuleId = b.RuleId
+ WHERE a.ItemId = @itemId
+ ORDER BY a.RuleId;", conn);
+        cmd.Parameters.AddWithValue("@itemId", itemId ?? string.Empty);
+
+        using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            list.Add(new ItemOtherRuleRow
+            {
+                ItemId = rd["ItemId"]?.ToString() ?? string.Empty,
+                RuleId = rd["RuleId"]?.ToString() ?? string.Empty,
+                Lk_RuleName = rd["Lk_RuleName"]?.ToString() ?? string.Empty,
+                DLLValue = rd["DLLValue"]?.ToString() ?? string.Empty
+            });
+        }
+        return Ok(list);
+    }
+
+    // GET /api/DictSetupApi/OtherRule/Options
+    [HttpGet("OtherRule/Options")]
+    public async Task<IActionResult> GetOtherRuleOptions()
+    {
+        var list = new List<OtherRuleOptionRow>();
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        var cmd = new SqlCommand(@"
+SELECT RuleId, RuleName
+  FROM CURdOCXOtherRule WITH (NOLOCK)
+ ORDER BY RuleId;", conn);
+        using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            list.Add(new OtherRuleOptionRow
+            {
+                RuleId = rd["RuleId"]?.ToString() ?? string.Empty,
+                RuleName = rd["RuleName"]?.ToString() ?? string.Empty
+            });
+        }
+        return Ok(list);
+    }
+
+    // POST /api/DictSetupApi/OtherRule/Save
+    [HttpPost("OtherRule/Save")]
+    public async Task<IActionResult> SaveOtherRules([FromBody] List<ItemOtherRuleRow> rows, [FromQuery] string? itemId = null)
+    {
+        if (rows == null) rows = new List<ItemOtherRuleRow>();
+        var targetItemId = (itemId ?? rows.Select(x => x.ItemId?.Trim()).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(targetItemId))
+            return BadRequest(new { success = false, message = "ItemId required" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        try
+        {
+            var del = new SqlCommand("DELETE FROM CURdOCXItemOtherRule WHERE ItemId = @itemId;", conn, (SqlTransaction)tx);
+            del.Parameters.AddWithValue("@itemId", targetItemId);
+            await del.ExecuteNonQueryAsync();
+
+            var validRows = rows
+                .Where(x => !string.IsNullOrWhiteSpace(x.RuleId))
+                .GroupBy(x => x.RuleId.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.Last())
+                .ToList();
+
+            foreach (var x in validRows)
+            {
+                var ins = new SqlCommand(@"
+INSERT INTO CURdOCXItemOtherRule (ItemId, RuleId, DLLValue)
+VALUES (@itemId, @ruleId, @dllValue);", conn, (SqlTransaction)tx);
+                ins.Parameters.AddWithValue("@itemId", targetItemId);
+                ins.Parameters.AddWithValue("@ruleId", x.RuleId?.Trim() ?? string.Empty);
+                ins.Parameters.AddWithValue("@dllValue", (object?)x.DLLValue ?? DBNull.Value);
+                await ins.ExecuteNonQueryAsync();
+            }
+
+            await tx.CommitAsync();
+            return Ok(new { success = true, count = validRows.Count });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return StatusCode(500, new { success = false, message = ex.Message });
         }
     }
 }
