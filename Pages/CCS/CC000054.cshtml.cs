@@ -1,12 +1,12 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Html;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -22,19 +22,8 @@ namespace PcbErpApi.Pages.CCS
         private readonly ITableDictionaryService _dictService;
         private readonly ILogger<CC000054Model> _logger;
 
-        private const string DictTable = "AJNdCompany_1";
+        private const string DefaultDictTable = "AJNdCompany_1";
         private const string DataTable = "AJNdCompany";
-        private static readonly Dictionary<int, string> SystemNameMap = new()
-        {
-            { 1, "銷售客戶" },
-            { 2, "原物料廠商" },
-            { 3, "製程委外廠商" },
-            { 4, "製令委外廠商" },
-            { 5, "進出口廠商" },
-            { 6, "其它廠商" },
-            { 7, "經銷商" },
-            { 9, "臨時客戶" }
-        };
 
         public CC000054Model(PcbErpContext ctx, ITableDictionaryService dictService, ILogger<CC000054Model> logger)
         {
@@ -43,12 +32,25 @@ namespace PcbErpApi.Pages.CCS
             _logger = logger;
         }
 
-        public string ItemId => "CC000054";
-        public string PageTitle => $"客戶主檔 - {SystemName}";
-        public string TableName { get; private set; } = DataTable;
-        public string DictTableName { get; private set; } = DictTable;
+        public string ItemId { get; private set; } = "CC000054";
+        public string ItemName { get; private set; } = string.Empty;
+        public int? PowerType { get; private set; }
+        public int? PaperType { get; private set; }
+        public int TableId { get; private set; } = 1;
         public int SystemId { get; private set; } = 1;
-        public string SystemName => SystemNameMap.TryGetValue(SystemId, out var name) ? name : $"System {SystemId}";
+        public int SubSystemId { get; private set; }
+        public bool ApplySystemFilter { get; private set; } = true;
+        public bool ApplySubSystemFilter { get; private set; }
+        public bool CanAdd { get; private set; }
+        public bool CanDelete { get; private set; }
+        public bool CanReview { get; private set; }
+        public bool CanBackReview { get; private set; }
+        public bool CanTurnFormal { get; private set; }
+        public bool CanDrop { get; private set; }
+
+        public string PageTitle => string.IsNullOrWhiteSpace(ItemName) ? ItemId : $"{ItemId} {ItemName}";
+        public string TableName { get; private set; } = DataTable;
+        public string DictTableName { get; private set; } = DefaultDictTable;
         public int PageNumber { get; private set; } = 1;
         public int PageSize { get; private set; } = 50;
         public int TotalCount { get; private set; }
@@ -58,16 +60,75 @@ namespace PcbErpApi.Pages.CCS
         public List<string> KeyFields { get; private set; } = new();
         public List<QueryFieldViewModel> QueryFields { get; private set; } = new();
 
-        public async Task OnGetAsync([FromRoute(Name = "systemId")] int? systemIdRoute, [FromQuery(Name = "systemId")] int? systemIdQuery, [FromQuery(Name = "pageIndex")] int pageIndex = 1, int pageSize = 50)
+        public async Task<IActionResult> OnGetAsync(
+            [FromRoute] string? itemId,
+            [FromRoute(Name = "systemId")] int? systemIdRoute,
+            [FromQuery(Name = "systemId")] int? systemIdQuery,
+            [FromQuery(Name = "pageIndex")] int pageIndex = 1,
+            int pageSize = 50,
+            string? sortBy = null,
+            string? sortDir = null)
         {
-            SystemId = NormalizeSystemId(systemIdQuery ?? systemIdRoute);
+            ItemId = string.IsNullOrWhiteSpace(itemId) ? ItemId : itemId.Trim();
+
+            var item = await _ctx.CurdSysItems.AsNoTracking()
+                .Where(x => x.ItemId == ItemId)
+                .Select(x => new
+                {
+                    x.ItemName,
+                    x.PowerType,
+                    x.PaperType,
+                    x.BtnInq,
+                    x.BtnToExcel,
+                    x.BtnUpdate,
+                    x.BtnAdd,
+                    x.BtnDelete,
+                    x.BtnVoid,
+                    x.BtnExam,
+                    x.BtnRejExam
+                })
+                .FirstOrDefaultAsync();
+
+            if (item == null)
+                return NotFound($"Item {ItemId} not found.");
+
+            ItemName = item.ItemName ?? string.Empty;
+            PowerType = item.PowerType;
+            PaperType = item.PaperType;
+
+            var requestedSystem = NormalizeSystemId(systemIdQuery ?? systemIdRoute);
+            SystemId = ResolveSystemId(PowerType, requestedSystem);
+            TableId = ResolveTableId(SystemId);
+            SubSystemId = ResolveSubSystemId(PaperType);
+            ApplySystemFilter = ShouldApplySystemFilter(PowerType);
+            ApplySubSystemFilter = ShouldApplySubSystemFilter(PowerType, PaperType);
+
+            DictTableName = ResolveDictTableName(TableId);
+            TableName = DataTable;
             PageNumber = pageIndex <= 0 ? 1 : pageIndex;
             PageSize = pageSize <= 0 ? 50 : pageSize;
+
+            CanAdd = CanAddOrDelete(PowerType) && GetFlag(item.BtnAdd, true);
+            var canDeleteByFlag = GetFlag(item.BtnDelete, true) || GetFlag(item.BtnVoid, true);
+            CanDelete = CanAddOrDelete(PowerType) && canDeleteByFlag;
+            CanReview = GetFlag(item.BtnExam, false);
+            CanBackReview = GetFlag(item.BtnRejExam, false);
+            CanTurnFormal = PowerType == 9;
+            CanDrop = PowerType == 101;
+
             ViewData["Title"] = PageTitle;
             ViewData["SystemId"] = SystemId;
-            ViewData["SystemName"] = SystemName;
+            ViewData["SubSystemId"] = SubSystemId;
+            ViewData["PowerType"] = PowerType;
+            ViewData["PaperType"] = PaperType;
 
             FieldDictList = await LoadFieldDictAsync(DictTableName);
+            if (FieldDictList.Count == 0 && !string.Equals(DictTableName, DefaultDictTable, StringComparison.OrdinalIgnoreCase))
+            {
+                DictTableName = DefaultDictTable;
+                FieldDictList = await LoadFieldDictAsync(DictTableName);
+            }
+
             await ApplyLangDisplaySizeAsync(DictTableName, FieldDictList);
             TableFields = FieldDictList
                 .Where(f => f.Visible == 1)
@@ -81,9 +142,8 @@ namespace PcbErpApi.Pages.CCS
                 .ToList();
             if (KeyFields.Count == 0)
             {
-                // fallback：若辭典未標記 PK，預設用 CompanyId
-                var hasCompanyId = FieldDictList.Any(f => string.Equals(f.FieldName, "CompanyId", StringComparison.OrdinalIgnoreCase));
-                if (hasCompanyId) KeyFields.Add("CompanyId");
+                if (FieldDictList.Any(f => string.Equals(f.FieldName, "CompanyId", StringComparison.OrdinalIgnoreCase)))
+                    KeyFields.Add("CompanyId");
             }
 
             QueryFields = _ctx.CURdPaperSelected
@@ -102,10 +162,12 @@ namespace PcbErpApi.Pages.CCS
                 })
                 .ToList();
 
-            var orderBy = await GetDefaultOrderByAsync(TableName);
+            var orderBy = BuildOrderByClause(sortBy, sortDir, FieldDictList)
+                ?? await GetDefaultOrderByAsync(TableName);
             var filterParams = new List<SqlParameter>();
             var filterSql = BuildFilterFromQuery(FieldDictList, Request.Query, filterParams);
-            AppendSystemFilter(filterParams, SystemId, ref filterSql);
+            if (ApplySystemFilter)
+                AppendSystemFilter(filterParams, SystemId, SubSystemId, ApplySubSystemFilter, ref filterSql);
 
             try
             {
@@ -114,10 +176,31 @@ namespace PcbErpApi.Pages.CCS
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Load AJNdCompany data failed");
-                Items = new();
-                TotalCount = 0;
-                ViewData["LoadError"] = ex.Message;
+                if (!string.IsNullOrWhiteSpace(sortBy))
+                {
+                    try
+                    {
+                        orderBy = await GetDefaultOrderByAsync(TableName);
+                        TotalCount = await CountRowsAsync(TableName, filterSql, filterParams);
+                        Items = await LoadRowsAsync(TableName, filterSql, orderBy, PageNumber, PageSize, filterParams);
+                        sortBy = null;
+                        sortDir = null;
+                    }
+                    catch (Exception ex2)
+                    {
+                        _logger.LogError(ex2, "Load AJNdCompany data failed (fallback) for {ItemId}", ItemId);
+                        Items = new();
+                        TotalCount = 0;
+                        ViewData["LoadError"] = ex2.Message;
+                    }
+                }
+                else
+                {
+                    _logger.LogError(ex, "Load AJNdCompany data failed for {ItemId}", ItemId);
+                    Items = new();
+                    TotalCount = 0;
+                    ViewData["LoadError"] = ex.Message;
+                }
             }
 
             ViewData["DictTableName"] = DictTableName;
@@ -125,8 +208,19 @@ namespace PcbErpApi.Pages.CCS
             ViewData["Fields"] = TableFields;
             ViewData["KeyFields"] = KeyFields;
             ViewData["OrderBy"] = orderBy;
+            ViewData["SortBy"] = sortBy ?? string.Empty;
+            ViewData["SortDir"] = sortDir ?? string.Empty;
             ViewData["QueryFields"] = QueryFields;
             ViewData["QueryStringRaw"] = Request.QueryString.Value ?? string.Empty;
+            ViewData["CustomButtons"] = BuildCustomButtonsHtml();
+            ViewData["ToolbarButtonVisibility"] = BuildToolbarButtonVisibility(item);
+            ViewData["CCSCanAdd"] = CanAdd;
+            ViewData["CCSCanDelete"] = CanDelete;
+            ViewData["CCSCanReview"] = CanReview;
+            ViewData["CCSCanBackReview"] = CanBackReview;
+            ViewData["CCSCanTurnFormal"] = CanTurnFormal;
+            ViewData["CCSCanDrop"] = CanDrop;
+
             try
             {
                 ViewData["OCXLookups"] = _dictService.GetOCXLookups(DictTableName);
@@ -136,13 +230,131 @@ namespace PcbErpApi.Pages.CCS
                 _logger.LogError(ex, "GetOCXLookups failed for {Table}", DictTableName);
             }
 
-            ViewData["CustomButtons"] = BuildCustomButtonsHtml();
+            return Page();
+        }
+
+        public async Task<IActionResult> OnGetDataAsync(
+            [FromRoute] string? itemId,
+            [FromRoute(Name = "systemId")] int? systemIdRoute,
+            [FromQuery(Name = "systemId")] int? systemIdQuery,
+            [FromQuery(Name = "pageIndex")] int pageIndex = 1,
+            int pageSize = 50,
+            string? sortBy = null,
+            string? sortDir = null)
+        {
+            ItemId = string.IsNullOrWhiteSpace(itemId) ? ItemId : itemId.Trim();
+            PageNumber = pageIndex <= 0 ? 1 : pageIndex;
+            PageSize = pageSize <= 0 ? 50 : pageSize;
+
+            var item = await _ctx.CurdSysItems.AsNoTracking()
+                .Where(x => x.ItemId == ItemId)
+                .Select(x => new { x.PowerType, x.PaperType })
+                .FirstOrDefaultAsync();
+            if (item == null)
+            {
+                return new JsonResult(new { success = false, error = $"Item {ItemId} not found." });
+            }
+
+            PowerType = item.PowerType;
+            PaperType = item.PaperType;
+
+            var requestedSystem = NormalizeSystemId(systemIdQuery ?? systemIdRoute);
+            SystemId = ResolveSystemId(PowerType, requestedSystem);
+            TableId = ResolveTableId(SystemId);
+            SubSystemId = ResolveSubSystemId(PaperType);
+            ApplySystemFilter = ShouldApplySystemFilter(PowerType);
+            ApplySubSystemFilter = ShouldApplySubSystemFilter(PowerType, PaperType);
+
+            DictTableName = ResolveDictTableName(TableId);
+            TableName = DataTable;
+            FieldDictList = await LoadFieldDictAsync(DictTableName);
+            if (FieldDictList.Count == 0 && !string.Equals(DictTableName, DefaultDictTable, StringComparison.OrdinalIgnoreCase))
+            {
+                DictTableName = DefaultDictTable;
+                FieldDictList = await LoadFieldDictAsync(DictTableName);
+            }
+            await ApplyLangDisplaySizeAsync(DictTableName, FieldDictList);
+
+            var orderBy = BuildOrderByClause(sortBy, sortDir, FieldDictList)
+                ?? await GetDefaultOrderByAsync(TableName);
+            var filterParams = new List<SqlParameter>();
+            var filterSql = BuildFilterFromQuery(FieldDictList, Request.Query, filterParams);
+            if (ApplySystemFilter)
+                AppendSystemFilter(filterParams, SystemId, SubSystemId, ApplySubSystemFilter, ref filterSql);
+
+            try
+            {
+                var totalCount = await CountRowsAsync(TableName, filterSql, filterParams);
+                var itemsData = await LoadRowsAsync(TableName, filterSql, orderBy, PageNumber, PageSize, filterParams);
+                var hasQueryParams = HasQueryParams(Request.Query, FieldDictList);
+                return new JsonResult(new
+                {
+                    success = true,
+                    items = itemsData,
+                    totalCount,
+                    pageNumber = PageNumber,
+                    pageSize = PageSize,
+                    sortBy,
+                    sortDir,
+                    openNoRecord = false,
+                    hasQueryParams
+                });
+            }
+            catch (Exception ex)
+            {
+                if (!string.IsNullOrWhiteSpace(sortBy))
+                {
+                    try
+                    {
+                        var fallbackOrder = await GetDefaultOrderByAsync(TableName);
+                        var totalCount = await CountRowsAsync(TableName, filterSql, filterParams);
+                        var itemsData = await LoadRowsAsync(TableName, filterSql, fallbackOrder, PageNumber, PageSize, filterParams);
+                        var hasQueryParams = HasQueryParams(Request.Query, FieldDictList);
+                        return new JsonResult(new
+                        {
+                            success = true,
+                            items = itemsData,
+                            totalCount,
+                            pageNumber = PageNumber,
+                            pageSize = PageSize,
+                            sortBy = "",
+                            sortDir = "",
+                            openNoRecord = false,
+                            hasQueryParams
+                        });
+                    }
+                    catch (Exception ex2)
+                    {
+                        _logger.LogError(ex2, "Load AJNdCompany data failed (AJAX fallback) for {ItemId}", ItemId);
+                    }
+                }
+
+                _logger.LogError(ex, "Load AJNdCompany data failed (AJAX) for {ItemId}", ItemId);
+                return new JsonResult(new { success = false, error = ex.Message });
+            }
         }
 
         private HtmlString BuildCustomButtonsHtml()
         {
             const string btn = "<button type='button' class='btn btn-outline-secondary btn-sm' data-custom-btn='1' data-button-name='openDetail'>明細</button>";
             return new HtmlString(btn);
+        }
+
+        private static Dictionary<string, bool> BuildToolbarButtonVisibility(dynamic item)
+        {
+            var map = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["btnInq"] = GetFlag(item?.BtnInq, true),
+                ["btnToExcel"] = GetFlag(item?.BtnToExcel, true),
+                ["btnUpdate"] = GetFlag(item?.BtnUpdate, true)
+            };
+            return map;
+        }
+
+        private static bool GetFlag(int? flag, bool defaultValue)
+        {
+            if (!flag.HasValue) return defaultValue;
+            return flag.Value != 0;
         }
 
         private async Task<List<Dictionary<string, object?>>> LoadRowsAsync(string tableName, string? filter, string? orderBy, int page, int pageSize, List<SqlParameter>? filterParams)
@@ -211,6 +423,17 @@ namespace PcbErpApi.Pages.CCS
             sb.Append(" OFFSET ").Append((page - 1) * pageSize).Append(" ROWS FETCH NEXT ").Append(pageSize).Append(" ROWS ONLY");
 
             return sb.ToString();
+        }
+
+        private static string? BuildOrderByClause(string? sortBy, string? sortDir, IEnumerable<CURdTableField> fields)
+        {
+            if (string.IsNullOrWhiteSpace(sortBy)) return null;
+            var target = fields?.FirstOrDefault(f =>
+                !string.IsNullOrWhiteSpace(f.FieldName)
+                && string.Equals(f.FieldName, sortBy, StringComparison.OrdinalIgnoreCase));
+            if (target == null || string.IsNullOrWhiteSpace(target.FieldName)) return null;
+            var dir = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC";
+            return $"[{target.FieldName}] {dir}";
         }
 
         private async Task<string> GetDefaultOrderByAsync(string tableName)
@@ -322,7 +545,9 @@ SELECT FieldName, DisplaySize
         {
             var dict = fields?
                 .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
-                .ToDictionary(f => f.FieldName!, StringComparer.OrdinalIgnoreCase) ?? new Dictionary<string, CURdTableField>(StringComparer.OrdinalIgnoreCase);
+                .ToDictionary(f => f.FieldName!, StringComparer.OrdinalIgnoreCase)
+                ?? new Dictionary<string, CURdTableField>(StringComparer.OrdinalIgnoreCase);
+
             var parts = new List<string>();
             foreach (var kv in query)
             {
@@ -331,26 +556,66 @@ SELECT FieldName, DisplaySize
                 if (key.Equals("pageIndex", StringComparison.OrdinalIgnoreCase)) continue;
                 if (key.Equals("page", StringComparison.OrdinalIgnoreCase)) continue;
                 if (key.Equals("pageSize", StringComparison.OrdinalIgnoreCase)) continue;
-                if (!dict.TryGetValue(key, out var f))
-                {
-                    // 若辭典沒有這個欄位仍允許直接帶 ColumnName
-                    f = new CURdTableField { FieldName = key, DataType = string.Empty };
-                }
+                if (key.Equals("systemId", StringComparison.OrdinalIgnoreCase)) continue;
+                if (key.Equals("sortBy", StringComparison.OrdinalIgnoreCase)) continue;
+                if (key.Equals("sortDir", StringComparison.OrdinalIgnoreCase)) continue;
+                if (key.Equals("handler", StringComparison.OrdinalIgnoreCase)) continue;
+                if (key.Equals("_sgall", StringComparison.OrdinalIgnoreCase)) continue;
+                if (key.StartsWith("_", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!dict.TryGetValue(key, out var f)) continue;
 
                 var val = kv.Value.ToString();
                 if (string.IsNullOrWhiteSpace(val)) continue;
 
                 var paramName = $"@p{parameters.Count}";
                 var dataType = f.DataType?.ToLowerInvariant() ?? string.Empty;
-                var isText = string.IsNullOrEmpty(dataType) || dataType.Contains("char") || dataType.Contains("text") || dataType.Contains("nchar") || dataType.Contains("varchar");
+                var isText = string.IsNullOrEmpty(dataType)
+                    || dataType.Contains("char")
+                    || dataType.Contains("text")
+                    || dataType.Contains("nchar")
+                    || dataType.Contains("varchar");
                 var op = isText ? "LIKE" : "=";
                 var pVal = isText ? $"%{val}%" : val;
 
                 parts.Add($"t0.[{f.FieldName}] {op} {paramName}");
                 parameters.Add(new SqlParameter(paramName, pVal));
             }
+
             if (parts.Count == 0) return string.Empty;
             return "WHERE " + string.Join(" AND ", parts);
+        }
+
+        private static bool HasQueryParams(IQueryCollection query, IEnumerable<CURdTableField> fields)
+        {
+            var validFields = fields?
+                .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
+                .Select(f => f.FieldName!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+                ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var kv in query)
+            {
+                var key = kv.Key ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(key)) continue;
+                if (IsControlQueryKey(key)) continue;
+                if (!validFields.Contains(key)) continue;
+                if (!string.IsNullOrWhiteSpace(kv.Value.ToString())) return true;
+            }
+            return false;
+        }
+
+        private static bool IsControlQueryKey(string key)
+        {
+            if (key.Equals("pageIndex", StringComparison.OrdinalIgnoreCase)) return true;
+            if (key.Equals("page", StringComparison.OrdinalIgnoreCase)) return true;
+            if (key.Equals("pageSize", StringComparison.OrdinalIgnoreCase)) return true;
+            if (key.Equals("systemId", StringComparison.OrdinalIgnoreCase)) return true;
+            if (key.Equals("sortBy", StringComparison.OrdinalIgnoreCase)) return true;
+            if (key.Equals("sortDir", StringComparison.OrdinalIgnoreCase)) return true;
+            if (key.Equals("handler", StringComparison.OrdinalIgnoreCase)) return true;
+            if (key.Equals("_sgall", StringComparison.OrdinalIgnoreCase)) return true;
+            if (key.StartsWith("_", StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
         }
 
         private string GetConnStr()
@@ -365,9 +630,11 @@ SELECT FieldName, DisplaySize
         {
             foreach (var p in source)
             {
-                var clone = new SqlParameter(p.ParameterName, p.Value);
-                clone.DbType = p.DbType;
-                clone.Direction = p.Direction;
+                var clone = new SqlParameter(p.ParameterName, p.Value)
+                {
+                    DbType = p.DbType,
+                    Direction = p.Direction
+                };
                 yield return clone;
             }
         }
@@ -375,27 +642,96 @@ SELECT FieldName, DisplaySize
         private static int NormalizeSystemId(int? id)
         {
             if (id.HasValue && id.Value > 0) return id.Value;
+            return 0;
+        }
+
+        private static int ResolveSystemId(int? powerType, int requestedSystem)
+        {
+            if (requestedSystem > 0) return requestedSystem;
+            if (!powerType.HasValue) return 1;
+
+            var pt = powerType.Value;
+            if (pt <= 100)
+            {
+                if (pt <= 50) return Math.Max(1, pt);
+                return Math.Max(1, pt - 50);
+            }
+            if (pt == 101) return 1;
+            if (pt == 103 || pt == 104) return 1;
             return 1;
         }
 
-        private static void AppendSystemFilter(List<SqlParameter> parameters, int systemId, ref string filterSql)
+        private static int ResolveTableId(int systemId)
         {
-            const string clause = "EXISTS (SELECT 1 FROM AJNdCompanySystem s WHERE s.CompanyId = t0.CompanyId AND s.SystemId = @sysId)";
+            if (systemId > 0 && systemId < 10) return systemId;
+            return 1;
+        }
+
+        private static int ResolveSubSystemId(int? paperType)
+        {
+            if (!paperType.HasValue) return 0;
+            if (paperType.Value == 255) return 0;
+            return Math.Max(0, paperType.Value);
+        }
+
+        private static string ResolveDictTableName(int tableId)
+        {
+            if (tableId <= 0) return DefaultDictTable;
+            return $"AJNdCompany_{tableId}";
+        }
+
+        private static bool ShouldApplySystemFilter(int? powerType)
+        {
+            if (!powerType.HasValue) return true;
+            return powerType.Value != 101;
+        }
+
+        private static bool ShouldApplySubSystemFilter(int? powerType, int? paperType)
+        {
+            if (!paperType.HasValue || paperType.Value == 255) return false;
+            if (!powerType.HasValue) return false;
+
+            var pt = powerType.Value;
+            return (pt <= 100 || pt == 103 || pt == 104) && pt != 101;
+        }
+
+        private static bool CanAddOrDelete(int? powerType)
+        {
+            if (!powerType.HasValue) return true;
+            var pt = powerType.Value;
+            if (pt == 101 || pt == 103 || pt == 104) return false;
+            return true;
+        }
+
+        private static void AppendSystemFilter(List<SqlParameter> parameters, int systemId, int subSystemId, bool withSubSystem, ref string filterSql)
+        {
+            const string head = "EXISTS (SELECT 1 FROM AJNdCompanySystem s WHERE s.CompanyId = t0.CompanyId";
+            var clause = new StringBuilder(head)
+                .Append(" AND s.SystemId = @sysId");
             parameters ??= new List<SqlParameter>();
             parameters.Add(new SqlParameter("@sysId", systemId));
+
+            if (withSubSystem)
+            {
+                clause.Append(" AND s.SubSystemId = @subSystemId");
+                parameters.Add(new SqlParameter("@subSystemId", subSystemId));
+            }
+
+            clause.Append(')');
+            var finalClause = clause.ToString();
 
             var where = (filterSql ?? string.Empty).Trim();
             if (where.Length == 0)
             {
-                filterSql = "WHERE " + clause;
+                filterSql = "WHERE " + finalClause;
             }
             else if (where.StartsWith("WHERE", StringComparison.OrdinalIgnoreCase))
             {
-                filterSql = where + " AND " + clause;
+                filterSql = where + " AND " + finalClause;
             }
             else
             {
-                filterSql = "WHERE " + where + " AND " + clause;
+                filterSql = "WHERE " + where + " AND " + finalClause;
             }
         }
     }

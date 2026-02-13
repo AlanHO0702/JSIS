@@ -1,9 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
@@ -17,9 +18,9 @@ namespace PcbErpApi.Pages.CCS
         private readonly ITableDictionaryService _dictService;
         private readonly ILogger<CC000054DetailModel> _logger;
 
-        private const string MasterDict = "AJNdCompany_1";
+        private const string DefaultMasterDict = "AJNdCompany_1";
         private const string MasterTable = "AJNdCompany";
-        private const string DetailDict = "AJNdCompanySystemView_1";
+        private const string DefaultSystemDict = "AJNdCompanySystemView_1";
         private const string DetailTable = "AJNdCompanySystem";
 
         public CC000054DetailModel(PcbErpContext ctx, ITableDictionaryService dictService, ILogger<CC000054DetailModel> logger)
@@ -29,20 +30,70 @@ namespace PcbErpApi.Pages.CCS
             _logger = logger;
         }
 
+        public string ItemId { get; private set; } = "CC000054";
+        public string ItemName { get; private set; } = string.Empty;
+        public int? PowerType { get; private set; }
+        public int? PaperType { get; private set; }
+        public int TableId { get; private set; } = 1;
+        public int SystemId { get; private set; } = 1;
+        public int SubSystemId { get; private set; }
+        public string PageTitle => string.IsNullOrWhiteSpace(ItemName) ? ItemId : $"{ItemId} {ItemName}";
+        public string MasterDictName { get; private set; } = DefaultMasterDict;
+        public string SystemDictName { get; private set; } = DefaultSystemDict;
+
         public MasterDetailConfig? Config { get; private set; }
         public List<KeyValuePair<string, string>> MasterKeyValues { get; private set; } = new();
         public List<DetailTab> ExtraTabs { get; private set; } = new();
-        public int SystemId { get; private set; } = 1;
 
-        public async Task<IActionResult> OnGetAsync()
+        public async Task<IActionResult> OnGetAsync([FromRoute] string? itemId)
         {
-            ViewData["Title"] = "客戶主檔_業務 - 明細";
-            SystemId = ParseSystemId(Request.Query["systemId"]);
+            ItemId = string.IsNullOrWhiteSpace(itemId) ? ItemId : itemId.Trim();
+
+            var item = await _ctx.CurdSysItems.AsNoTracking()
+                .Where(x => x.ItemId == ItemId)
+                .Select(x => new
+                {
+                    x.ItemName,
+                    x.PowerType,
+                    x.PaperType
+                })
+                .FirstOrDefaultAsync();
+
+            if (item == null)
+                return NotFound($"Item {ItemId} not found.");
+
+            ItemName = item.ItemName ?? string.Empty;
+            PowerType = item.PowerType;
+            PaperType = item.PaperType;
+
+            var systemIdQuery = ParseSystemId(Request.Query["systemId"]);
+            SystemId = ResolveSystemId(PowerType, systemIdQuery);
+            TableId = ResolveTableId(SystemId);
+            SubSystemId = ResolveSubSystemId(PaperType);
+
+            var masterDictName = ResolveMasterDictName(TableId);
+            var systemDictName = ResolveSystemDictName(TableId);
+
+            ViewData["Title"] = PageTitle;
 
             try
             {
-                var masterDict = await LoadFieldDictAsync(MasterDict);
-                var detailDict = await LoadFieldDictAsync(DetailDict);
+                var masterDict = await LoadFieldDictAsync(masterDictName);
+                if (masterDict.Count == 0 && !string.Equals(masterDictName, DefaultMasterDict, StringComparison.OrdinalIgnoreCase))
+                {
+                    masterDictName = DefaultMasterDict;
+                    masterDict = await LoadFieldDictAsync(masterDictName);
+                }
+
+                var detailDict = await LoadFieldDictAsync(systemDictName);
+                if (detailDict.Count == 0 && !string.Equals(systemDictName, DefaultSystemDict, StringComparison.OrdinalIgnoreCase))
+                {
+                    systemDictName = DefaultSystemDict;
+                    detailDict = await LoadFieldDictAsync(systemDictName);
+                }
+
+                MasterDictName = masterDictName;
+                SystemDictName = systemDictName;
 
                 var masterKeys = ExtractKeys(masterDict);
                 if (masterKeys.Count == 0) masterKeys.Add("CompanyId");
@@ -55,10 +106,10 @@ namespace PcbErpApi.Pages.CCS
                 {
                     DomId = "md_cc000054",
                     MasterTable = MasterTable,
-                    MasterDict = MasterDict,
+                    MasterDict = masterDictName,
                     DetailTable = DetailTable,
-                    DetailDict = DetailDict,
-                    MasterTitle = "客戶主檔",
+                    DetailDict = systemDictName,
+                    MasterTitle = string.IsNullOrWhiteSpace(ItemName) ? "客戶主檔" : ItemName,
                     DetailTitle = "系統資料",
                     KeyMap = keyMap.ToArray(),
                     DetailKeyFields = detailKeys.ToArray(),
@@ -78,6 +129,11 @@ namespace PcbErpApi.Pages.CCS
                         detailKeyValues.RemoveAll(kv => kv.Key.Equals("SystemId", StringComparison.OrdinalIgnoreCase));
                         detailKeyValues.Add(new KeyValuePair<string, string>("SystemId", SystemId.ToString()));
                     }
+                    if (SubSystemId > 0 && detailKeys.Any(k => string.Equals(k, "SubSystemId", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        detailKeyValues.RemoveAll(kv => kv.Key.Equals("SubSystemId", StringComparison.OrdinalIgnoreCase));
+                        detailKeyValues.Add(new KeyValuePair<string, string>("SubSystemId", SubSystemId.ToString()));
+                    }
 
                     if (detailKeyValues.Count > 0)
                         Config.DetailApi = BuildByKeysApi(DetailTable, detailKeyValues);
@@ -87,8 +143,8 @@ namespace PcbErpApi.Pages.CCS
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Build CC000054 detail config failed");
-                return BadRequest($"初始化失敗: {ex.Message}");
+                _logger.LogError(ex, "Build CC000054 detail config failed for {ItemId}", ItemId);
+                return BadRequest($"初始化畫面失敗: {ex.Message}");
             }
 
             return Page();
@@ -146,7 +202,7 @@ namespace PcbErpApi.Pages.CCS
                     list.Add(new KeyValuePair<string, string>(k, v.ToString()));
                 }
             }
-            // fallback: 即便辭典沒標 PK，也優先取 CompanyId
+
             if (!list.Any(kv => kv.Key.Equals("CompanyId", StringComparison.OrdinalIgnoreCase)))
             {
                 if (Request.Query.TryGetValue("CompanyId", out var cid) && !string.IsNullOrWhiteSpace(cid))
@@ -198,26 +254,110 @@ namespace PcbErpApi.Pages.CCS
 
         private List<DetailTab> BuildExtraTabs()
         {
-            return new List<DetailTab>
+            var tabs = new List<DetailTab>();
+            var pt = PowerType ?? 0;
+            var showSystemTab = pt != 101 && pt != 104;
+            var showCreditTabs = pt == 103 || pt == 104;
+            var showCustomerTabs = ShouldShowCustomerTabs(pt, SystemId);
+
+            if (showSystemTab)
             {
-                new DetailTab(
+                var extraKeys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["SystemId"] = SystemId.ToString()
+                };
+                if (SubSystemId > 0)
+                    extraKeys["SubSystemId"] = SubSystemId.ToString();
+
+                tabs.Add(new DetailTab(
                     "systemview",
                     "系統資料",
                     "AJNdCompanySystem",
-                    "AJNdCompanySystemView_1",
-                    new [] { "CompanyId" },
+                    SystemDictName,
+                    new[] { "CompanyId", "SystemId", "SubSystemId" },
                     true,
-                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["SystemId"] = SystemId.ToString(),
-                        ["SubSystemId"] = "0"
-                    }),
-                new DetailTab("assistant", "聯絡人", "AJNdCompanyAssistant", "AJNdCompanyAssistant", new [] { "CompanyId", "SerialNum" }),
-                new DetailTab("outaddr", "出貨地址", "AJNdCompanyOutAddr", "AJNdCompanyOutAddr", new [] { "CompanyId", "SerialNum" }),
-                new DetailTab("bank", "銀行資料", "AJNdCompanyBank", "AJNdCompanyBank", new [] { "CompanyId", "SerialNum" }),
-                new DetailTab("bankcredit", "銀行授信", "AJNdCompanyBankCredit", "AJNdCompanyBankCredit", new [] { "CompanyId", "CreditSerial" }),
-                new DetailTab("xout", "XOut 設定", "AJNdCompanyXOut", "AJNdCompanyXOut", new [] { "CompanyId", "SerialNum" })
-            };
+                    extraKeys));
+            }
+
+            tabs.Add(new DetailTab("assistant", "聯絡人", "AJNdCompanyAssistant", "AJNdCompanyAssistant", new[] { "CompanyId", "SerialNum" }));
+            tabs.Add(new DetailTab("outaddr", "出貨地址", "AJNdCompanyOutAddr", "AJNdCompanyOutAddr", new[] { "CompanyId", "SerialNum" }));
+
+            if (showCustomerTabs)
+            {
+                tabs.Add(new DetailTab("bank", "銀行資料", "AJNdCompanyBank", "AJNdCompanyBank", new[] { "CompanyId", "SerialNum" }));
+                tabs.Add(new DetailTab("bankcredit", "銀行授信", "AJNdCompanyBankCredit", "AJNdCompanyBankCredit", new[] { "CompanyId", "SerialNum", "CreditSerial" }));
+            }
+
+            if (showCreditTabs)
+            {
+                tabs.Add(new DetailTab("creditline", "授信額度", "AJNdCompanyCreditLine", "AJNdCompanyCreditLine", new[] { "CompanyId", "SerialNum" }));
+                tabs.Add(new DetailTab("bankassure", "銀行保證函", "AJNdCompanyBankAssure", "AJNdCompanyBankAssure", new[] { "CompanyId", "RecYear", "RecMonth" }));
+            }
+
+            if (showCustomerTabs)
+            {
+                tabs.Add(new DetailTab("ship", "銷貨資料", "AJNdCompanyShip", "AJNdCompanyShip", new[] { "CompanyId" }, true));
+                tabs.Add(new DetailTab("forwarder", "Forwarder", "AJNdCompanyForwarder", "AJNdCompanyForwarder", new[] { "CompanyId", "SerialNum" }));
+            }
+
+            if (TryGetAvlTable(pt, SystemId, showCustomerTabs, out var avlTable, out var avlTitle))
+                tabs.Add(new DetailTab("avl", avlTitle, avlTable, avlTable, new[] { "CompanyId" }));
+
+            if (SystemId == 1 && showCustomerTabs)
+                tabs.Add(new DetailTab("quota", "客戶要求", "AJNdCompanyQuota", "AJNdCompanyQuota", new[] { "CompanyId", "NumId" }));
+
+            if (SystemId == 8)
+                tabs.Add(new DetailTab("car", "車輛明細檔", "AJNdCompanyRecycleCar", "AJNdCompanyRecycleCar", new[] { "CompanyId", "SerialNum" }));
+
+            if (SystemId > 1 && SystemId < 9 && SystemId != 7)
+                tabs.Add(new DetailTab("attach", "附檔", "AJNdCompanyAttach", "AJNdCompanyAttach", new[] { "CompanyId", "SerialNum" }));
+
+            if (showCustomerTabs)
+                tabs.Add(new DetailTab("xout", "XOut 設定", "AJNdCompanyXOut", "AJNdCompanyXOut", new[] { "CompanyId", "SerialNum" }));
+
+            return tabs;
+        }
+
+        private static bool ShouldShowCustomerTabs(int powerType, int systemId)
+        {
+            if (powerType <= 100)
+                return systemId == 1;
+            if (powerType == 101)
+                return false;
+            if (powerType == 103 || powerType == 104)
+                return true;
+            return true;
+        }
+
+        private static bool TryGetAvlTable(int powerType, int systemId, bool showCustomerTabs, out string tableName, out string title)
+        {
+            tableName = string.Empty;
+            title = string.Empty;
+
+            if (powerType == 103)
+                return false;
+
+            if (systemId == 1)
+            {
+                if (!showCustomerTabs) return false;
+                tableName = "SPOdPriceTable_CCS";
+                title = "客戶品號";
+                return true;
+            }
+            if (systemId == 2)
+            {
+                tableName = "MPHdPriceTable_CCS";
+                title = "物料AVL";
+                return true;
+            }
+            if (systemId == 8)
+            {
+                tableName = "MPHdPriceRecycleTable_CCS";
+                title = "廢棄物料號";
+                return true;
+            }
+
+            return false;
         }
 
         public record DetailTab(string Key, string Title, string TableName, string DictName, IEnumerable<string> KeyFields, bool IsForm = false, Dictionary<string, string>? ExtraKeys = null);
@@ -228,7 +368,48 @@ namespace PcbErpApi.Pages.CCS
             {
                 if (int.TryParse(v, out var n) && n > 0) return n;
             }
+            return 0;
+        }
+
+        private static int ResolveSystemId(int? powerType, int requestedSystem)
+        {
+            if (requestedSystem > 0) return requestedSystem;
+            if (!powerType.HasValue) return 1;
+
+            var pt = powerType.Value;
+            if (pt <= 100)
+            {
+                if (pt <= 50) return Math.Max(1, pt);
+                return Math.Max(1, pt - 50);
+            }
+            if (pt == 101) return 1;
+            if (pt == 103 || pt == 104) return 1;
             return 1;
+        }
+
+        private static int ResolveTableId(int systemId)
+        {
+            if (systemId > 0 && systemId < 10) return systemId;
+            return 1;
+        }
+
+        private static int ResolveSubSystemId(int? paperType)
+        {
+            if (!paperType.HasValue) return 0;
+            if (paperType.Value == 255) return 0;
+            return Math.Max(0, paperType.Value);
+        }
+
+        private static string ResolveMasterDictName(int tableId)
+        {
+            if (tableId <= 0) return DefaultMasterDict;
+            return $"AJNdCompany_{tableId}";
+        }
+
+        private static string ResolveSystemDictName(int tableId)
+        {
+            if (tableId <= 0) return DefaultSystemDict;
+            return $"AJNdCompanySystemView_{tableId}";
         }
     }
 }
