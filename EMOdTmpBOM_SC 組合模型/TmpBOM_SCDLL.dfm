@@ -1,0 +1,376 @@
+inherited frmEMOdTmpBOM_SCDLL: TfrmEMOdTmpBOM_SCDLL
+  Caption = 'frmTmpBOMDLL'
+  ClientHeight = 551
+  ClientWidth = 1346
+  ExplicitWidth = 1354
+  ExplicitHeight = 578
+  PixelsPerInch = 96
+  TextHeight = 13
+  inherited pnlInfo: TPanel
+    Top = 531
+    Width = 1346
+    ExplicitTop = 531
+    ExplicitWidth = 1346
+    inherited btnGetParams: TSpeedButton
+      ExplicitLeft = 0
+      ExplicitTop = 6
+    end
+  end
+  inherited pageMain: TPageControl
+    Width = 1346
+    ExplicitWidth = 1346
+    inherited tbshtMaster1: TTabSheet
+      ExplicitLeft = 4
+      ExplicitTop = 28
+      ExplicitWidth = 1338
+      ExplicitHeight = 418
+      inherited Splitter1_1: TSplitter
+        Left = 120
+        Top = 0
+        Width = 4
+        Height = 390
+        Cursor = crHSplit
+        Align = alLeft
+        ExplicitLeft = 130
+        ExplicitTop = 3
+        ExplicitWidth = 4
+        ExplicitHeight = 390
+      end
+      inherited Page1_1: TPageControl
+        Left = 124
+        Top = 0
+        Width = 1214
+        Height = 390
+        ExplicitLeft = 124
+        ExplicitTop = 0
+        ExplicitWidth = 1214
+        ExplicitHeight = 390
+        inherited tbshtDetail1: TTabSheet
+          ExplicitLeft = 4
+          ExplicitTop = 28
+          ExplicitWidth = 1206
+          ExplicitHeight = 358
+          object Splitter1: TSplitter [0]
+            Left = 0
+            Top = 188
+            Width = 1206
+            Height = 4
+            Cursor = crVSplit
+            Align = alBottom
+            Color = clMedGray
+            ParentColor = False
+            ExplicitTop = 0
+            ExplicitWidth = 192
+          end
+          inherited gridDetail1: TJSdDBGrid
+            Top = 192
+            Width = 1206
+            Height = 166
+            Align = alBottom
+            ExplicitTop = 192
+            ExplicitWidth = 1206
+            ExplicitHeight = 166
+          end
+          object trvBOM: TJSdTreeView
+            Left = 0
+            Top = 0
+            Width = 1206
+            Height = 188
+            Align = alClient
+            Indent = 19
+            TabOrder = 1
+            DataFieldId = 'LayerId'
+            DataFieldLevelNo = 'Degree'
+            DataFieldSuperId = 'AftLayerId'
+            DataFieldCaption = 'LayerName'
+            DataFieldSort = 'FL'
+            DataSource = dsDetail1
+            SetupExpand = False
+            SortFieldInt = False
+          end
+        end
+      end
+      inherited gridMaster1: TJSdDBGrid
+        Width = 120
+        Height = 390
+        Align = alLeft
+        ExplicitWidth = 120
+        ExplicitHeight = 390
+      end
+      inherited trvMaster: TJSdTreeView
+        Left = 235
+        Top = 220
+        ExplicitLeft = 235
+        ExplicitTop = 220
+      end
+      inherited pnlTempBasDLLBottom: TPanel
+        Width = 1338
+        ExplicitWidth = 1338
+        inherited btnC1: TSpeedButton
+          ExplicitLeft = 90
+        end
+        inherited btnC2: TSpeedButton
+          ExplicitLeft = 175
+        end
+        inherited btnC3: TSpeedButton
+          ExplicitLeft = 260
+        end
+        inherited btnC4: TSpeedButton
+          ExplicitLeft = 345
+        end
+        inherited btnC5: TSpeedButton
+          ExplicitLeft = 430
+        end
+        inherited btnC6: TSpeedButton
+          ExplicitLeft = 515
+        end
+        inherited btnC7: TSpeedButton
+          ExplicitLeft = 600
+        end
+        inherited btnC8: TSpeedButton
+          ExplicitLeft = 685
+        end
+      end
+    end
+  end
+  inherited Panel1: TPanel
+    Width = 1346
+    ExplicitWidth = 1346
+    inherited btnToExcel: TSpeedButton
+      Left = 338
+      ExplicitLeft = 338
+    end
+    inherited btnChangeNav: TSpeedButton
+      Left = 224
+      Visible = False
+    end
+    inherited btnInq: TSpeedButton
+      Left = 292
+      ExplicitLeft = 292
+    end
+    inherited btnLink: TSpeedButton
+      Left = 594
+      ExplicitLeft = 522
+    end
+    inherited btnUpdate: TSpeedButton
+      Left = 384
+      ExplicitLeft = 384
+    end
+    inherited btnBrowse: TSpeedButton
+      Left = 502
+      ExplicitLeft = 430
+    end
+    inherited btnLog: TSpeedButton
+      Left = 548
+      ExplicitLeft = 476
+    end
+    inherited btnToExcelQuick: TSpeedButton
+      Left = 430
+      ExplicitLeft = 430
+    end
+    inherited btnChangeHeight: TSpeedButton
+      Left = 1044
+      ExplicitLeft = 1044
+    end
+    inherited pnl_NowMode: TPanel
+      Left = 964
+      ExplicitLeft = 964
+    end
+    inherited Panel3: TPanel
+      Left = 1209
+      ExplicitLeft = 1209
+    end
+    object pnlBtnGroup: TPanel
+      Left = 646
+      Top = 1
+      Width = 318
+      Height = 38
+      Align = alLeft
+      BevelOuter = bvNone
+      TabOrder = 3
+      object btChange: TSpeedButton
+        Left = 0
+        Top = 0
+        Width = 40
+        Height = 38
+        Align = alLeft
+        Caption = '&C'#30064#21205
+        Glyph.Data = {
+          36030000424D3603000000000000360000002800000010000000100000000100
+          1800000000000003000000000000000000000000000000000000FBFBFBFBFBFB
+          FBFBFBFBFBFBF7F7F7FFFFFF9290902E3B3B3D41413A3D3D3A4D4D3D50503C4F
+          4F3F54543134345F5E5EFBFBFBFBFBFBFBFBFBF9F9F9FDFCFCB4B4B4484A4AB4
+          95957B7272776F6FAA82829E7373A278789E6F6FA39C9C606363FBFBFBFBFBFB
+          F8F8F8F8F8F8EFEEEE5857575E6262F6B9B9A99898A69898E09494D08080D280
+          80DB9A9AF6F0F06F7171FBFBFBFBFBFBFFFFFFFFFFFFEDEDEC7171716E7272DF
+          A4A49D8C8C998B8BCF8686BF7474C17474C88888E6DFDF6B6D6DF6F6F5FCFCFC
+          CDCDCC83838DDEDDE0747473686B6BE5AFAF9F908F9A8E8ED59291C6807FC781
+          80CE9392E8E1E06C6D6DFFFFFFFFFFFF8888616161006F6F7060605F717676EB
+          A9ABA69396A39395DA878ACA7476CB7376D48E90F2ECF06F7171A5A5A4B0B0B2
+          DEDEF493933B55551751515E656663B69B9A7E7675787270B08D8BA3807DA784
+          81A37B78ADA5A760626264641B76764183837C93932450501C85859A4B4A2968
+          6D00757700747500727900737B00737A00777F045F61004C4C349C9CAA919157
+          676700848406C3C30870703B6E6E725B591F3F3F0A44430E43410C43410C4443
+          0E42400831301CC6C6C9FBFBFEC0C0C6A4A4AA8F8F6DE2E23BCECE006B6B367A
+          7A8BB2B2B3AAAAADA9AAACACACAEADAEB0A9A9ABC2C2C4FFFFFFFAFAF9FFFFFF
+          FFFFFFE1E1F189898FE8E845D0D004676732B0B0C0FFFFFFFFFFFFFFFFFFFFFF
+          FFFFFFFFFFFFFFF9F9F8FBFBFBF8F8F8F5F5F5FFFFFBE0E0E582828CDFDF41D2
+          D20265652676768486868FDDDDE0FBFBFAF6F6F5F8F8F8FBFBFBFBFBFBFBFBFB
+          FBFBFBF8F8F8FFFFFEE3E3E991918FD5D5258585086C6C00646400696966E9E9
+          EAFCFCFCFAFAFAFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBF7F7F8FFFFFDDFDFEC67
+          67317D7D06AEAEA09C9C49545429E5E5F0FDFDFBF9F9F9FBFBFBFBFBFBFBFBFB
+          FBFBFBFBFBFBFAFAFAFBFBF8E7E7F683835576761EA8A8B9DFDFE7DADADFFFFF
+          FFF9F9F9FBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFAFAFAF9F9FBF8F8F5BA
+          BAC28C8C4C676744EEEEF5FFFFFFF8F8F9FBFBFBFBFBFBFBFBFB}
+        Layout = blGlyphTop
+        OnClick = btChangeClick
+        ExplicitLeft = 662
+        ExplicitTop = 15
+        ExplicitHeight = 36
+      end
+      object btnForm: TSpeedButton
+        Left = 40
+        Top = 0
+        Width = 40
+        Height = 38
+        Align = alLeft
+        Caption = '&V'#27298#35222
+        Glyph.Data = {
+          36030000424D3603000000000000360000002800000010000000100000000100
+          1800000000000003000000000000000000000000000000000000FBFBFBFBFBFB
+          FBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBF8F8F8FEFE
+          FEFFFFFFFFFFFFFAFAFAFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFB
+          FBFBFBFBFBFBFBFBF8F8F8FFFFFFECECEC9C9C9CEAEAEAFCFCFCFBFBFBFBFBFB
+          FBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBFBF7F7F7FEFEFEE9E9E97F7F
+          7F3C3C3CACACACFEFEFEFBFBFBFBFBFBFBFBFBFBFBFBF9F9F9F7F7F7F8F8F8FB
+          FBFBF8F8F8FEFEFEE6E6E66F6F6F8484848B8B8BE1E1E1FBFBFBFBFBFBFBFBFB
+          FAFAFAF9F9F9FEFEFEFFFFFFFFFFFFF9F9F9FEFEFEEBEBEB7373738686868686
+          86E5E5E5FFFFFFF9F9F9FBFBFBF9F9F9FCFCFCFFFFFFDDDDDDABABABBBBBBBFC
+          FCFCE8E8E86F6F6F868686828282E2E2E2FFFFFFF8F8F8FBFBFBF9F9F9FFFFFF
+          E6E6E67D7D7D6A6A6A3030304949497575754B4B4B8C8C8C848484E5E5E5FFFF
+          FFF8F8F8FBFBFBFBFBFBFBFBFBE0E0E0747474585858717171B3B3B3A3A3A35E
+          5E5E646464323232CBCBCBFFFFFFF6F6F6FBFBFBFBFBFBFBFBFBFDFDFDAFAFAF
+          4545459F9F9FFAFAFAFFFFFFFFFFFFE1E1E16D6D6D4B4B4BC5C5C5FDFDFDF8F8
+          F8FBFBFBFBFBFBFBFBFBEAEAEA7878785F5F5FCFCFCFE4E4E4FBFBFBF3F3F3FF
+          FFFFAEAEAE5A5A5AB5B5B5FEFEFEF8F8F8FBFBFBFBFBFBFBFBFBE4E4E4545454
+          5A5A5A909090909090E9E9E9FBFBFBFCFCFCC6C6C63D3D3DC1C1C1FEFEFEF9F9
+          F9FBFBFBFBFBFBFBFBFBEAEAEA7979795D5D5DA7A7A79E9E9E7E7E7EE8E8E8FF
+          FFFFA9A9A9585858B6B6B6FEFEFEF9F9F9FBFBFBFBFBFBFBFBFBFDFDFDADADAD
+          515151A6A6A6B4B4B4B3B3B3FFFFFFD7D7D77C7C7C787878DADADAFEFEFEF9F9
+          F9FBFBFBFBFBFBFBFBFBFBFBFBDDDDDD8787877D7D7D838383B7B7B7A7A7A786
+          86866C6C6C646464FAFAFAF9F9F9FAFAFAFBFBFBFBFBFBFBFBFBF9F9F9FFFFFF
+          E2E2E2878787878787484848666666686868575757E9E9E9FBFBFBF9F9F9FBFB
+          FBFBFBFBFBFBFBFBFBFBFBFBFBF9F9F9FDFDFDFDFDFDDCDCDCB5B5B5C1C1C1CD
+          CDCDFCFCFCFFFFFFFAFAFAFBFBFBFBFBFBFBFBFBFBFBFBFBFBFB}
+        Layout = blGlyphTop
+        OnClick = btnFormClick
+        ExplicitLeft = 20
+        ExplicitTop = -4
+        ExplicitHeight = 36
+      end
+      object btSaveAs: TSpeedButton
+        Left = 80
+        Top = 0
+        Width = 40
+        Height = 38
+        Align = alLeft
+        Caption = '&S'#35079#35069
+        Glyph.Data = {
+          36030000424D3603000000000000360000002800000010000000100000000100
+          1800000000000003000000000000000000000000000000000000FD00FDFA00FA
+          FC00FFFF00FFFF00FFFF00FFFF00FFFF00FFFF00FFFF00FFFF00FFFF00FFFF00
+          FFFF00FFFF00FEFC00FCFC00FCFF00FFFC05F6BD41B4C140BBBE45BEB73EB7BC
+          43BCBD43BCBA41BBBF45BEC03FB8C13EB8BD46BAF608F7FD00FDF901F9E800E6
+          411F5709432B204D3841563F2C432C193019182E1821361F45614A0B402A0A41
+          2C2F5F3CA35EA0FD00FDFE02FE73006A00A18104D0DB008F94382B30D7D3D85A
+          555A575459908388122D3200BCC100CED5005A547A4569FE06FEFE02FE790071
+          019B8607CFD4019191383131CECFCF5959595658588C848415343401BBBB04CC
+          CE015E547F436EFE05FEFE02FE780070009C8507D0D50091913B3636DADFDF5D
+          61615A6060938F8F0C2F2F00BCBC03CDCF005E537E436DFE05FEFE02FE780070
+          009C8506D0D5008F8F3218188775753321214D3B3B745C5C30414100BDBD02CC
+          CE005E537E436DFE05FEFE02FE780070009D8604C8CD00ACAC02696900636301
+          686801686800666644B2B200BDBD01CDCF005E537E436DFE05FEFE02FE780070
+          009D8705C6CB00C0C0009898009A9A00969600979700989800C1C100BABA01CD
+          CF005E537E436DFE05FEFE02FE780070009D8602C8CD146F6F7F73737D717181
+          7D7D807D7D80787817707000BCBC02CDCF005E537E436DFE05FEFE02FE780070
+          009E8700BEC3314E4EFFC0C0E47373E04949D74242FFADAD31545400B0B004CD
+          D0005E537E436DFE05FEFE02FE780070009E8700C2C8254242FBFFFFD67979B3
+          0000AE0000E179792E616100B5B500D2D5005E537E436DFE05FEFE02FE790071
+          029C8701BFC4356464E68081B30000C31416B40000E46F71316466029FA113BE
+          C3025F577F426EFE05FEFE03FE73006A00A37E00D6DB8B4C4DC10000BB190EF1
+          D6CCE09D93F1BEB4246C61004C4155756D006F59794465FE06FEFD01FD8C0088
+          2C2F4F904F54BB0000C5030B9A436E55325B583B65573761300C36573C664E29
+          54291139CC0BC9FD00FDFC00F8FF00FFE00077C10000C10018EF00C6FC00FFF6
+          00F3F700F3F700F5FF00FFFF00FFFF00FEFF00FEFF00FFFD00FD}
+        Layout = blGlyphTop
+        OnClick = btSaveAsClick
+        ExplicitLeft = 76
+        ExplicitTop = -4
+        ExplicitHeight = 36
+      end
+      object Bevel3: TBevel
+        Left = 120
+        Top = 0
+        Width = 8
+        Height = 38
+        Align = alLeft
+        Shape = bsSpacer
+        ExplicitLeft = 116
+        ExplicitTop = -4
+        ExplicitHeight = 36
+      end
+      object pnlSave: TPanel
+        Left = 128
+        Top = 0
+        Width = 172
+        Height = 38
+        Align = alLeft
+        BevelOuter = bvNone
+        TabOrder = 0
+        object Label1: TJSdLabel
+          Left = 6
+          Top = 13
+          Width = 48
+          Height = 12
+          Caption = #21478#23384#20195#30908
+          Font.Charset = ANSI_CHARSET
+          Font.Color = clWindowText
+          Font.Height = -12
+          Font.Name = #32048#26126#39636
+          Font.Style = []
+          ParentFont = False
+        end
+        object edtTmpIdNew: TEdit
+          Left = 63
+          Top = 10
+          Width = 103
+          Height = 21
+          TabOrder = 0
+        end
+      end
+    end
+  end
+  inherited pnlTempBasDLLbm: TPanel
+    Width = 1346
+    ExplicitWidth = 1346
+  end
+  inherited pwgSaveToExcel: TJSdGrid2Excel
+    Left = 448
+    Top = 115
+  end
+  object qryChkTmp: TADOQuery
+    CursorType = ctStatic
+    Parameters = <
+      item
+        Name = 'TmpId'
+        DataType = ftString
+        Size = 12
+        Value = Null
+      end>
+    SQL.Strings = (
+      'exec EMOdTmpBOMUpdateChk :TmpId'
+      ' ')
+    Left = 134
+    Top = 310
+  end
+end

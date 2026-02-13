@@ -62,6 +62,7 @@ namespace PcbErpApi.Data
         public virtual DbSet<CurdNoticeBoardUser> CurdNoticeBoardUsers { get; set; }
         public virtual DbSet<EmodProdMap> EmodProdMaps { get; set; }
         public virtual DbSet<EmodLayerPress> EmodLayerPresses { get; set; }
+        public virtual DbSet<EMOdTmpBOMMas> EMOdTmpBOMMas { get; set; }
 
         public IEnumerable<object> TabConfigs { get; internal set; }
 
