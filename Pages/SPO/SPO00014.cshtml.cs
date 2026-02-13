@@ -71,12 +71,20 @@ namespace PcbErpApi.Pages.SPO
             {
                 var allowed = await GetAllowedColumnsAsync(conn);
                 var orderBy = BuildOrderBy(sortBy, sortDir, allowed);
-                var (whereSql, parameters) = BuildWhere(Request.Query, allowed);
-
-                TotalCount = await CountRowsAsync(conn, whereSql, parameters);
-                TotalPages = Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize));
-
-                Items = await LoadRowsAsync(conn, whereSql, orderBy, PageNumber, PageSize, parameters);
+                var hasQuery = HasEffectiveQuery(Request.Query);
+                if (hasQuery)
+                {
+                    var (whereSql, parameters) = BuildWhere(Request.Query, allowed);
+                    TotalCount = await CountRowsAsync(conn, whereSql, parameters);
+                    TotalPages = Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize));
+                    Items = await LoadRowsAsync(conn, whereSql, orderBy, PageNumber, PageSize, parameters);
+                }
+                else
+                {
+                    TotalCount = 0;
+                    TotalPages = 1;
+                    Items = new List<Dictionary<string, object?>>();
+                }
                 FieldDictList = await LoadFieldDictAsync(conn, "SPOdV_MPSRejectInq");
 
                 CurrentUserId = ResolveUserId();
@@ -234,6 +242,17 @@ namespace PcbErpApi.Pages.SPO
             }
 
             return (where, list);
+        }
+
+        private static bool HasEffectiveQuery(Microsoft.AspNetCore.Http.IQueryCollection query)
+        {
+            foreach (var key in query.Keys)
+            {
+                if (string.IsNullOrWhiteSpace(key)) continue;
+                if (ReservedQueryKeys.Contains(key) || key.StartsWith("Cond_", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.IsNullOrWhiteSpace(query[key].ToString())) return true;
+            }
+            return false;
         }
 
         private static bool TryResolveField(string key, HashSet<string> allowed, out string field)
