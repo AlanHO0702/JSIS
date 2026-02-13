@@ -1,0 +1,1188 @@
+﻿@page "/SPO/SPO00003"
+@using PcbErpApi.Models
+@model PcbErpApi.Pages.SPO.SPO00003Model
+@{
+    Layout = "_InquiryTemplate";
+    ViewData["Title"] = Model.PageTitle;
+    ViewData["ShowInqHeader"] = false;
+    ViewData["ShowInqRail"] = true;
+    ViewData["InqRailTitle"] = "查詢";
+    ViewData["InqRailWidth"] = "120px";
+}
+
+@section InqRail {
+    <button type="submit" form="inqForm" class="inq-rail-btn">查詢</button>
+    <button type="button" class="inq-rail-btn" id="btnExportExcel">匯出Excel</button>
+    <button type="button" class="inq-rail-btn" id="btnPaperTrace">單據追蹤</button>
+    <button type="button" class="inq-rail-btn" id="btnCustomerMulti">客戶多選</button>
+    <button type="button" class="inq-rail-btn" id="btnSaveHeight">儲存高度設定</button>
+    <button type="button" class="inq-rail-btn" id="btnEditDict">編輯辭典</button>
+    <button type="button" class="inq-rail-btn" id="btnResetParams">重設參數</button>
+    <button type="button" class="inq-rail-btn" id="btnClearInq">清除</button>
+    <div class="inq-rail-status">
+      <div>資料筆數：<span id="inqTotalCount">0</span></div>
+      <div>目前位置：<span id="inqCurrentPos">0</span></div>
+    </div>
+}
+
+@{
+  var qDict = Model.QueryDictFields ?? new List<CURdTableField>();
+  var qFields = qDict
+      .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
+      .Where(f => f.FieldName!.StartsWith("@"))
+      .Where(f => (f.Visible ?? 1) != 0)
+      .OrderBy(f => f.iLayRow ?? int.MaxValue)
+      .ThenBy(f => f.iLayColumn ?? int.MaxValue)
+      .ThenBy(f => f.SerialNum ?? int.MaxValue)
+      .ToList();
+
+  string QLabel(CURdTableField f)
+      => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName!.TrimStart('@') : f.DisplayLabel!;
+
+  string QInputName(CURdTableField f)
+  {
+      return f.FieldName?.TrimStart('@') ?? "";
+  }
+
+
+  string QInputType(CURdTableField f)
+  {
+      var dt = (f.DataType ?? "").ToLowerInvariant();
+      if (dt.Contains("date")) return "date";
+      var fname = (f.FieldName ?? "").ToLowerInvariant();
+      if (fname.Contains("date")) return "date";
+      var label = (f.DisplayLabel ?? "");
+      if (label.Contains("日期")) return "date";
+      return "text";
+  }
+
+  object? QDefault(string fieldName)
+  {
+      if (Model.DefaultQueryValues.TryGetValue(fieldName, out var v)) return v;
+      if (Model.ParamNameByField.TryGetValue(fieldName, out var p)
+          && Model.DefaultQueryValues.TryGetValue(p, out var v2)) return v2;
+      return null;
+  }
+
+  string QValue(string name, string type)
+  {
+      var qs = Request.Query[name].ToString();
+      if (!string.IsNullOrWhiteSpace(qs)) return qs;
+      var dv = QDefault(name);
+      if (dv == null) return "";
+      if (dv is DateTime dt) return type == "date" ? dt.ToString("yyyy-MM-dd") : dt.ToString("yyyy/MM/dd");
+      return dv.ToString() ?? "";
+  }
+
+  bool QChecked(string name)
+  {
+      var qs = Request.Query[name].ToString();
+      if (!string.IsNullOrWhiteSpace(qs))
+      {
+          return qs == "1" || qs.Equals("true", StringComparison.OrdinalIgnoreCase) || qs.Equals("y", StringComparison.OrdinalIgnoreCase);
+      }
+      var dv = QDefault(name);
+      if (dv is bool b) return b;
+      if (dv is int i) return i == 1;
+      if (dv is short s) return s == 1;
+      if (dv is byte by) return by == 1;
+      var str = dv?.ToString();
+      return str == "1" || string.Equals(str, "true", StringComparison.OrdinalIgnoreCase) || string.Equals(str, "y", StringComparison.OrdinalIgnoreCase);
+  }
+
+  bool IsCheckbox(CURdTableField f)
+  {
+      if ((f.ComboStyle ?? 0) == 1) return true;
+      var dt = (f.DataType ?? "").ToLowerInvariant();
+      if (dt.Contains("bit")) return true;
+      if (dt.Contains("tinyint") || dt.Contains("int"))
+      {
+          var n = f.FieldName?.TrimStart('@') ?? "";
+          if (n.StartsWith("i", StringComparison.OrdinalIgnoreCase) || n.StartsWith("b", StringComparison.OrdinalIgnoreCase))
+              return true;
+      }
+      return false;
+  }
+
+  bool IsSelect(CURdTableField f)
+  {
+      return !string.IsNullOrWhiteSpace(f.Items) || !string.IsNullOrWhiteSpace(f.LookupTable);
+  }
+
+  bool DisableLookup(CURdTableField f)
+  {
+      var n = (f.FieldName ?? "").TrimStart('@');
+      return n.Equals("sPartNum", StringComparison.OrdinalIgnoreCase)
+          || n.Equals("sEPartNum", StringComparison.OrdinalIgnoreCase);
+  }
+
+}
+
+@section InqQuery {
+  <form id="inqForm" method="get" class="inq-form">
+    @Html.AntiForgeryToken()
+    @foreach (var row in qFields.GroupBy(f => f.iLayRow ?? int.MaxValue).OrderBy(g => g.Key))
+    {
+      <div class="inq-row">
+        @foreach (var f in row)
+        {
+          var name = QInputName(f);
+          var type = QInputType(f);
+          var cur = QValue(name, type);
+          var codeId = $"inq_{name}";
+          <label class="inq-label">@QLabel(f)</label>
+          if (IsCheckbox(f))
+          {
+            <div class="form-check form-check-inline compact-check">
+              <input class="form-check-input" type="checkbox" name="@name" value="1" @(QChecked(name) ? "checked" : "") />
+            </div>
+          }
+          else if (IsSelect(f) && !DisableLookup(f))
+          {
+            <span class="inq-select">
+              <input type="hidden" id="@codeId" name="@name" class="inq-select-code-hidden" value="@cur" />
+              <input type="text" class="form-control form-control-sm inq-input inq-lookup-display"
+                     value=""
+                     autocomplete="off"
+                     data-code-target="@codeId"
+                     data-items="@f.Items"
+                     data-lookup-table="@f.LookupTable"
+                     data-lookup-key="@((f.LookupKeyField ?? "").Replace(" ", ""))"
+                     data-lookup-result="@((f.LookupResultField ?? "").Replace(" ", ""))"
+                     data-cond1-field="@f.LookupCond1Field"
+                     data-cond1-source="@f.LookupCond1ResultField"
+                     data-cond2-field="@f.LookupCond2Field"
+                     data-cond2-source="@f.LookupCond2ResultField"
+                     data-selected="@cur" />
+              <button type="button" class="inq-select-btn" aria-label="開啟清單">▾</button>
+            </span>
+          }
+          else
+          {
+            <input type="@type" name="@name" class="form-control form-control-sm inq-input"
+                   value="@cur" />
+          }
+        }
+      </div>
+    }
+
+    <input type="hidden" name="page" value="1" />
+    <input type="hidden" name="pageSize" value="@Model.PageSize" />
+    <input type="hidden" name="spId" value="@Model.SpId" />
+  </form>
+}
+
+@{
+  var gDict = Model.GridDictFields ?? new List<CURdTableField>();
+  var gFields = gDict
+      .Where(f => (f.Visible ?? 1) != 0)
+      .OrderBy(f => f.SerialNum ?? int.MaxValue)
+      .ToList();
+
+  string GLabel(CURdTableField f) => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel!;
+
+  object? GVal(object? row, string? name)
+  {
+      if (row == null || string.IsNullOrWhiteSpace(name)) return null;
+      if (row is IDictionary<string, object?> dict)
+      {
+          if (dict.TryGetValue(name, out var v)) return v;
+          var key = dict.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
+          return key != null ? dict[key] : null;
+      }
+      var prop = row.GetType().GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
+      return prop?.GetValue(row);
+  }
+
+  string GFormat(object? v, CURdTableField f)
+  {
+      return FormatHelper.FormatValue(v, f.DataType, f.FormatStr);
+  }
+}
+
+<div class="inq-table-wrap">
+  <table class="table table-sm table-hover align-middle inq-table">
+    <thead>
+      <tr>
+        @foreach (var f in gFields)
+        {
+          <th class="inq-sortable" data-field="@f.FieldName">
+            <span class="th-text">@GLabel(f)</span>
+            <span class="col-resizer" draggable="false"></span>
+          </th>
+        }
+      </tr>
+    </thead>
+    <tbody>
+    @if (Model.Items.Count == 0)
+    {
+      <tr>
+        <td colspan="@(Math.Max(1, gFields.Count))" class="text-center text-muted py-2">沒有資料</td>
+      </tr>
+    }
+    else
+    {
+      foreach (var row in Model.Items)
+      {
+        var paperId = GVal(row, "PaperId")?.ToString() ?? "";
+        var paperNum = GVal(row, "PaperNum")?.ToString() ?? "";
+        <tr data-paper-id="@paperId" data-paper-num="@paperNum">
+          @foreach (var f in gFields)
+          {
+            var val = GVal(row, f.FieldName);
+            <td>@GFormat(val, f)</td>
+          }
+        </tr>
+      }
+    }
+    </tbody>
+  </table>
+</div>
+
+@if (Model.TotalPages > 1)
+{
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-1">
+    <div class="d-flex align-items-center gap-1">
+      <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber <= 1 ? "disabled" : "")"
+         href="@(Model.PageNumber <= 1 ? "#" : Model.BuildPageUrl(Model.PageNumber - 1))">上一頁</a>
+      <span>Page: <strong>@Model.PageNumber</strong> / <span>@Model.TotalPages</span></span>
+      <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber >= Model.TotalPages ? "disabled" : "")"
+         href="@(Model.PageNumber >= Model.TotalPages ? "#" : Model.BuildPageUrl(Model.PageNumber + 1))">下一頁</a>
+    </div>
+    <div class="text-muted">Total: @Model.TotalCount</div>
+  </div>
+}
+
+<div class="modal fade" id="customerMultiModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg" style="max-width:920px;">
+    <div class="modal-content customer-multi-modal" style="font-size:12px;">
+      <div class="modal-header" style="background:#f3f7ff;">
+        <h5 class="modal-title">客戶多選</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="text-muted mb-2">用左邊挑選、右邊已選；支援搜尋。</div>
+        <div class="row g-2 align-items-stretch customer-dual-row">
+          <div class="col-md-5 customer-dual-side customer-dual-side-left">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <div class="fw-semibold">可選客戶</div>
+              <div class="small text-muted">總數 <span id="cusAvailCount">0</span></div>
+            </div>
+            <input id="customerAvailFilter" class="form-control form-control-sm mb-2" placeholder="搜尋客戶代碼/名稱" style="font-size:12px;padding:3px 6px;">
+            <div class="border rounded p-2 customer-dual-list" id="customerAvailList" style="height:420px;font-size:12px;"></div>
+          </div>
+          <div class="col-md-2 d-flex flex-column gap-2 align-items-center justify-content-center customer-dual-actions">
+            <button type="button" class="btn cus-move-btn cus-move-primary" id="cusMoveRight" style="width:50px !important;height:22px !important;padding:0 !important;line-height:1 !important;border-radius:8px;font-size:12px;">▶</button>
+            <button type="button" class="btn cus-move-btn cus-move-primary" id="cusMoveAllRight" style="width:50px !important;height:22px !important;padding:0 !important;line-height:1 !important;border-radius:8px;font-size:12px;">▶▶</button>
+            <button type="button" class="btn cus-move-btn cus-move-secondary" id="cusMoveLeft" style="width:50px !important;height:22px !important;padding:0 !important;line-height:1 !important;border-radius:8px;font-size:12px;">◀</button>
+            <button type="button" class="btn cus-move-btn cus-move-secondary" id="cusMoveAllLeft" style="width:50px !important;height:22px !important;padding:0 !important;line-height:1 !important;border-radius:8px;font-size:12px;">◀◀</button>
+          </div>
+          <div class="col-md-5 customer-dual-side customer-dual-side-right">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <div class="fw-semibold">已選客戶</div>
+              <div class="small text-muted">總數 <span id="cusChosenCount">0</span></div>
+            </div>
+            <input id="customerChosenFilter" class="form-control form-control-sm mb-2" placeholder="搜尋客戶代碼/名稱" style="font-size:12px;padding:3px 6px;">
+            <div class="border rounded p-2 customer-dual-list" id="customerChosenList" style="height:420px;font-size:12px;"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary btn-sm" id="btnCustomerMultiSave">套用</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .inq-rail-status {
+    margin-top: 4px;
+    padding: 6px 6px;
+    border: 1px solid #d8dee8;
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #1f3a8a;
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+  .inq-rail-btn {
+    padding: 4px 6px;
+    font-size: 0.82rem;
+    border-radius: 8px;
+  }
+  #btnEditDict {
+    display: none;
+  }
+  .inq-form {
+    display: grid;
+    gap: 6px;
+  }
+  .inq-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .inq-label {
+    min-width: 68px;
+    text-align: right;
+    color: #1d3b6b;
+    font-size: 0.82rem;
+  }
+  .inq-input {
+    width: 160px;
+    font-size: 0.82rem;
+    height: 26px;
+    padding: 2px 6px;
+  }
+  .inq-select {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+  .inq-select-btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 0;
+    background: transparent;
+    font-size: 0.75rem;
+    color: #4b5563;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+  }
+  .inq-lookup-display {
+    padding-right: 18px;
+    background: #fff;
+    color: #374151;
+  }
+  .inq-suggest {
+    position: absolute;
+    background: #fff;
+    border: 1px solid #c9d2e3;
+    border-radius: 6px;
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 2000;
+  }
+  .inq-suggest-item {
+    display: flex;
+    gap: 6px;
+    padding: 4px 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+  }
+  .inq-suggest-item:hover {
+    background: #eef3ff;
+  }
+  .inq-suggest-code {
+    min-width: 40px;
+    font-weight: 600;
+    color: #1d3b6b;
+  }
+  .inq-suggest-label {
+    color: #4b5563;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .compact-check .form-check-input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+  }
+  .inq-query .compact-check .form-check-input {
+    width: 18px;
+    height: 18px;
+  }
+  .compact-check {
+    width: 160px;
+    min-width: 160px;
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+    padding: 0;
+  }
+  .compact-check.form-check-inline {
+    margin: 0;
+  }
+  .inq-table-wrap {
+    border: 1px solid #d8dee8;
+    border-radius: 8px;
+    background: #fff;
+    padding: 0;
+    overflow-x: auto;
+  }
+  .inq-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+    width: max-content;
+    min-width: 100%;
+  }
+  .inq-table th,
+  .inq-table td {
+    white-space: nowrap;
+    font-size: 0.82rem;
+    padding: 4px 6px;
+    border: 1px solid #e1e7f0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 300px;
+  }
+  .inq-table th {
+    background: #f3f7ff;
+    color: #2056ac;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+  }
+  .inq-table th .th-text {
+    display: inline-block;
+    padding-right: 8px;
+  }
+  .inq-table th .col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 2;
+  }
+  .inq-table th.inq-sort-asc::after {
+    content: " ▲";
+    font-size: 0.7rem;
+    color: #1d3b6b;
+  }
+  .inq-table th.inq-sort-desc::after {
+    content: " ▼";
+    font-size: 0.7rem;
+    color: #1d3b6b;
+  }
+  .customer-multi-modal .customer-dual-list {
+    height: 420px !important;
+    overflow: auto;
+    background: #fff;
+  }
+  .customer-multi-modal .customer-dual-list table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem !important;
+  }
+  .customer-multi-modal .customer-dual-list th,
+  .customer-multi-modal .customer-dual-list td {
+    border-bottom: 1px solid #eef2f7;
+    padding: 3px 6px !important;
+    white-space: nowrap;
+  }
+  .customer-multi-modal .customer-dual-list th {
+    position: sticky;
+    top: 0;
+    background: #f7f9fc;
+    z-index: 1;
+    color: #1d3b6b;
+    font-weight: 600;
+  }
+  .customer-multi-modal .customer-dual-list tr:hover td {
+    background: #f1f5ff;
+  }
+  #customerMultiModal .modal-dialog {
+    max-width: 980px !important;
+  }
+  .customer-multi-modal .modal-title {
+    font-size: 0.88rem !important;
+    font-weight: 600;
+  }
+  .customer-multi-modal .modal-body {
+    font-size: 0.78rem !important;
+    padding: 10px 14px !important;
+  }
+  .customer-multi-modal .form-control,
+  .customer-multi-modal .form-control-sm {
+    font-size: 0.76rem !important;
+    padding: 3px 6px !important;
+  }
+  .customer-multi-modal .fw-semibold {
+    font-size: 0.78rem !important;
+  }
+  .customer-multi-modal .small {
+    font-size: 0.7rem !important;
+  }
+  .customer-multi-modal .cus-move-btn {
+    width: 30px !important;
+    height: 24px !important;
+    padding: 0;
+    border-radius: 6px !important;
+    font-size: 0.7rem !important;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .customer-multi-modal .cus-move-primary {
+    background: #e8f0ff;
+    border-color: #b9cdf5;
+    color: #1f4fbf;
+  }
+  .customer-multi-modal .cus-move-secondary {
+    background: #f2f4f8;
+    border-color: #c9d2e3;
+    color: #46526a;
+  }
+  .customer-multi-modal .cus-move-primary:hover {
+    background: #d9e6ff;
+  }
+  .customer-multi-modal .cus-move-secondary:hover {
+    background: #e6ebf3;
+  }
+</style>
+
+<script>
+  const totalCount = @Model.TotalCount;
+  const totalEl = document.getElementById("inqTotalCount");
+  const posEl = document.getElementById("inqCurrentPos");
+  if (totalEl) totalEl.textContent = String(totalCount);
+  const rows = Array.from(document.querySelectorAll(".inq-table tbody tr"));
+  let selectedRow = null;
+  const setPos = (idx) => {
+    if (!posEl) return;
+    posEl.textContent = totalCount === 0 ? "0" : String(idx);
+  };
+  if (rows.length > 0 && totalCount > 0) setPos(1);
+  rows.forEach((tr, i) => {
+    tr.addEventListener("click", () => {
+      rows.forEach(r => r.classList.remove("table-active"));
+      tr.classList.add("table-active");
+      selectedRow = tr;
+      setPos(i + 1);
+    });
+  });
+  document.getElementById("btnClearInq")?.addEventListener("click", () => {
+    window.location.href = "/SPO/SPO00003";
+  });
+
+  const parseSortValue = (text) => {
+    if (text == null) return "";
+    const t = String(text).trim();
+    if (!t) return "";
+    const d = t.match(/^(\d{4})[\/-](\d{2})[\/-](\d{2})$/);
+    if (d) return new Date(`${d[1]}-${d[2]}-${d[3]}`).getTime();
+    const n = t.replace(/,/g, "");
+    if (!isNaN(n) && n !== "") return parseFloat(n);
+    return t.toLowerCase();
+  };
+
+  const sortTableByColumn = (table, colIndex, asc) => {
+    const tbody = table.querySelector("tbody");
+    if (!tbody) return;
+    const rows = Array.from(tbody.querySelectorAll("tr"))
+      .filter(r => !r.querySelector("td[colspan]"));
+    const dir = asc ? 1 : -1;
+    rows.sort((a, b) => {
+      const aText = a.children[colIndex]?.textContent ?? "";
+      const bText = b.children[colIndex]?.textContent ?? "";
+      const av = parseSortValue(aText);
+      const bv = parseSortValue(bText);
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+    rows.forEach(r => tbody.appendChild(r));
+  };
+
+  const table = document.querySelector(".inq-table");
+  if (table) {
+    const headers = Array.from(table.querySelectorAll("thead th"));
+    headers.forEach((th, idx) => {
+      th.addEventListener("click", (e) => {
+        if (e.target && e.target.classList?.contains("col-resizer")) return;
+        if (th.dataset.resizing === "1") return;
+        const isAsc = !th.classList.contains("inq-sort-asc");
+        headers.forEach(h => h.classList.remove("inq-sort-asc", "inq-sort-desc"));
+        th.classList.add(isAsc ? "inq-sort-asc" : "inq-sort-desc");
+        sortTableByColumn(table, idx, isAsc);
+      });
+    });
+  }
+
+  const dictTableName = "@(Model.DictTableName ?? "")";
+  const fieldNames = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(gFields.Select(f => f.FieldName ?? "")));
+
+  function applyColumnWidth(table, ths, index, width) {
+    const w = Math.max(20, Math.round(width));
+    const th = ths[index];
+    if (!th) return;
+    th.style.width = `${w}px`;
+    th.style.minWidth = `${w}px`;
+    Array.from(table.querySelectorAll(`tbody tr td:nth-child(${index + 1})`))
+      .forEach(td => {
+        td.style.width = `${w}px`;
+        td.style.minWidth = `${w}px`;
+      });
+  }
+
+  function applySavedWidths(table, dictTable, fields) {
+    const tn = (dictTable || "").trim();
+    if (!tn) return;
+    try {
+      const raw = localStorage.getItem(`colwidth:${tn}`);
+      if (!raw) return;
+      const cols = JSON.parse(raw) || [];
+      const ths = Array.from(table.querySelectorAll('thead th'));
+      cols.forEach(c => {
+        const f = (c.fieldName || '').toString();
+        const w = Number(c.width);
+        if (!f || !Number.isFinite(w)) return;
+        const idx = fields.findIndex(x => x.toLowerCase() === f.toLowerCase());
+        if (idx >= 0) applyColumnWidth(table, ths, idx, w);
+      });
+    } catch { }
+  }
+
+  function initColumnResize(tableEl, dictTable, fields) {
+    if (!tableEl) return;
+    const ths = Array.from(tableEl.querySelectorAll('thead th'));
+    applySavedWidths(tableEl, dictTable, fields);
+
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+    let thIndex = -1;
+
+    ths.forEach((th, idx) => {
+      const handle = th.querySelector('.col-resizer');
+      if (!handle) return;
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        isResizing = true;
+        startX = e.pageX;
+        startWidth = th.getBoundingClientRect().width;
+        thIndex = idx;
+        document.body.classList.add('resizing');
+      });
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing || thIndex < 0) return;
+      const dx = e.pageX - startX;
+      const newW = Math.max(20, startWidth + dx);
+      applyColumnWidth(tableEl, ths, thIndex, newW);
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!isResizing) return;
+      isResizing = false;
+      document.body.classList.remove('resizing');
+      const tn = (dictTable || "").trim();
+      if (tn) {
+        const payload = ths.map(th => ({ fieldName: th.dataset.field, width: Math.round(th.getBoundingClientRect().width) }));
+        try {
+          localStorage.setItem(`colwidth:${tn}`, JSON.stringify(payload));
+        } catch { }
+      }
+      thIndex = -1;
+    });
+  }
+
+  initColumnResize(table, dictTableName, fieldNames);
+
+  const inqForm = document.getElementById("inqForm");
+  inqForm?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const fd = new FormData(inqForm);
+    const params = new URLSearchParams();
+    for (const [k, v] of fd.entries()) {
+      const val = (v ?? "").toString().trim();
+      if (!val) continue;
+      params.append(k, val);
+    }
+    if (new URLSearchParams(window.location.search).has("debug")) {
+      params.set("debug", "1");
+    }
+    const qs = params.toString();
+    window.location.href = qs ? (`/SPO/SPO00003?${qs}`) : "/SPO/SPO00003";
+  });
+
+  document.getElementById("btnExportExcel")?.addEventListener("click", () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("handler", "Export");
+    window.location.href = url.toString();
+  });
+
+  const currentUserId = "@Model.CurrentUserId";
+  const currentUseId = "@Model.CurrentUseId";
+
+  document.getElementById("btnPaperTrace")?.addEventListener("click", async () => {
+    if (!selectedRow) return alert("請先選擇一筆資料");
+    const pid = selectedRow.getAttribute("data-paper-id");
+    const pnum = selectedRow.getAttribute("data-paper-num");
+    if (!pid || !pnum) return alert("找不到單據資訊");
+    try {
+      const res = await fetch("/api/Flow/ResolveItemIdByFromType", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paperId: pid, paperNum: pnum, userId: currentUserId, useId: currentUseId })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const itemId = data.itemId || pid;
+        window.open(`/DynamicTemplate/Paper/${encodeURIComponent(itemId)}/${encodeURIComponent(pnum)}`, "_blank");
+        return;
+      }
+    } catch {}
+    window.open(`/DynamicTemplate/Paper/${encodeURIComponent(pid)}/${encodeURIComponent(pnum)}`, "_blank");
+  });
+
+  document.getElementById("btnCustomerMulti")?.addEventListener("click", () => {
+    const el = document.getElementById("customerMultiModal");
+    if (!el) return;
+    loadCustomerDual();
+    const md = bootstrap.Modal.getOrCreateInstance(el);
+    md.show();
+  });
+
+  document.getElementById("btnCustomerMultiSave")?.addEventListener("click", async () => {
+    const ids = Array.from(customerChosen || []);
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
+    const res = await fetch("?handler=SaveCustomers", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "RequestVerificationToken": token
+      },
+      body: JSON.stringify({ spId: @Model.SpId, customerIds: ids })
+    });
+    if (!res.ok) return alert("儲存失敗");
+    bootstrap.Modal.getOrCreateInstance(document.getElementById("customerMultiModal")).hide();
+    const url = new URL(window.location.href);
+    url.searchParams.delete("sCompanyId");
+    url.searchParams.delete("sECompanyId");
+    url.searchParams.set("page", "1");
+    if (@Model.SpId > 0) url.searchParams.set("spId", "@Model.SpId");
+    window.location.href = url.toString();
+  });
+
+  let customerCache = null;
+  let customerChosen = new Set();
+
+  const renderCustomerDual = () => {
+    const availRoot = document.getElementById("customerAvailList");
+    const chosenRoot = document.getElementById("customerChosenList");
+    if (!availRoot || !chosenRoot) return;
+    const fAvail = (document.getElementById("customerAvailFilter")?.value || "").toLowerCase();
+    const fChosen = (document.getElementById("customerChosenFilter")?.value || "").toLowerCase();
+
+    const avail = [];
+    const chosen = [];
+    (customerCache || []).forEach(c => {
+      if (customerChosen.has(c.value)) chosen.push(c);
+      else avail.push(c);
+    });
+
+    const filterList = (list, q) => list.filter(c => !q || c.value.toLowerCase().includes(q) || c.text.toLowerCase().includes(q));
+    const availFiltered = filterList(avail, fAvail);
+    const chosenFiltered = filterList(chosen, fChosen);
+
+    const renderTable = (list, root, name) => {
+      root.innerHTML = "";
+      const table = document.createElement("table");
+      table.innerHTML = `
+        <thead><tr><th style="width:26px"></th><th>客戶代碼</th><th>客戶名稱</th></tr></thead>
+        <tbody></tbody>`;
+      const tbody = table.querySelector("tbody");
+      list.forEach(c => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><input type="checkbox" data-name="${name}" value="${c.value}"></td>
+          <td>${c.value}</td>
+          <td>${c.text}</td>`;
+        tbody.appendChild(tr);
+      });
+      root.appendChild(table);
+    };
+
+    renderTable(availFiltered, availRoot, "avail");
+    renderTable(chosenFiltered, chosenRoot, "chosen");
+    document.getElementById("cusAvailCount").textContent = String(avail.length);
+    document.getElementById("cusChosenCount").textContent = String(chosen.length);
+  };
+
+  const loadCustomerDual = async () => {
+    if (!customerCache) {
+      const res = await fetch("/api/report/lookup/customer");
+      if (!res.ok) return;
+      const data = await res.json();
+      customerCache = (data || []).map(x => ({
+        value: (x.value ?? "").toString(),
+        text: (x.text ?? "").toString()
+      })).filter(x => x.value);
+    }
+    if (@Model.SpId > 0) {
+      const resSel = await fetch(`?handler=CustomerSelected&spId=@Model.SpId`);
+      if (resSel.ok) {
+        const dataSel = await resSel.json();
+        customerChosen = new Set((dataSel?.items || []).map(x => (x || "").toString()));
+      }
+    }
+    renderCustomerDual();
+  };
+
+  const moveChecked = (from, to) => {
+    const boxes = Array.from(document.querySelectorAll(`input[type="checkbox"][data-name="${from}"]:checked`));
+    boxes.forEach(b => {
+      const id = b.value;
+      if (to === "chosen") customerChosen.add(id);
+      else customerChosen.delete(id);
+    });
+    renderCustomerDual();
+  };
+
+  const moveAll = (to) => {
+    if (to === "chosen") {
+      (customerCache || []).forEach(c => customerChosen.add(c.value));
+    } else {
+      customerChosen = new Set();
+    }
+    renderCustomerDual();
+  };
+
+  document.getElementById("cusMoveRight")?.addEventListener("click", () => moveChecked("avail", "chosen"));
+  document.getElementById("cusMoveLeft")?.addEventListener("click", () => moveChecked("chosen", "avail"));
+  document.getElementById("cusMoveAllRight")?.addEventListener("click", () => moveAll("chosen"));
+  document.getElementById("cusMoveAllLeft")?.addEventListener("click", () => moveAll("avail"));
+  document.getElementById("customerAvailFilter")?.addEventListener("input", renderCustomerDual);
+  document.getElementById("customerChosenFilter")?.addEventListener("input", renderCustomerDual);
+
+  document.getElementById("btnSaveHeight")?.addEventListener("click", async () => {
+    const h = document.querySelector(".inq-body")?.clientHeight || 0;
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
+    const res = await fetch("/api/MatInfoUtility/SaveBrowseHeight", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "RequestVerificationToken": token },
+      body: JSON.stringify({ itemId: "SPO00003", height: h })
+    });
+    if (!res.ok) return alert("儲存失敗");
+    alert("已儲存高度設定");
+  });
+
+  document.getElementById("btnResetParams")?.addEventListener("click", async () => {
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
+    const res = await fetch("?handler=ResetParams", {
+      method: "POST",
+      headers: { "RequestVerificationToken": token }
+    });
+    if (!res.ok) return alert("重設失敗");
+    alert("已重設參數");
+    window.location.reload();
+  });
+
+  const resolveCondValue = (name) => {
+    if (!name) return "";
+    const el = document.querySelector(`[name="${name}"]`);
+    if (!el) return "";
+    if (el.type === "checkbox") return el.checked ? "1" : "0";
+    return el.value || "";
+  };
+
+  const parseItems = (raw) => {
+    if (!raw) return [];
+    return raw.split(/[;,]/).map(p => p.trim()).filter(Boolean).map(p => {
+      const kv = p.split(/=|:/);
+      if (kv.length >= 2) return { value: kv[0].trim(), label: kv.slice(1).join(":").trim() };
+      return { value: p, label: p };
+    });
+  };
+
+  const buildCondKey = (el) => {
+    const table = el.dataset.lookupTable || "";
+    const key = el.dataset.lookupKey || "";
+    const result = el.dataset.lookupResult || "";
+    const cond1Field = (el.dataset.cond1Field || "").trim();
+    const cond1Source = (el.dataset.cond1Source || "").trim();
+    const cond2Field = (el.dataset.cond2Field || "").trim();
+    const cond2Source = (el.dataset.cond2Source || "").trim();
+    const cond1ValueField = cond1Source || cond1Field;
+    const cond2ValueField = cond2Source || cond2Field;
+    const cond1Value = cond1ValueField ? resolveCondValue(cond1ValueField) : "";
+    const cond2Value = cond2ValueField ? resolveCondValue(cond2ValueField) : "";
+    const items = el.dataset.items || "";
+    return [table, key, result, cond1Field, cond1Value, cond2Field, cond2Value, items].join("|");
+  };
+
+  const fetchLookupOptions = async (el) => {
+    const items = parseItems(el.dataset.items || "");
+    const table = el.dataset.lookupTable || "";
+    const key = el.dataset.lookupKey || "";
+    const result = el.dataset.lookupResult || "";
+    const selected = el.dataset.selected || "";
+
+    let options = [...items];
+
+    if (table && key && result) {
+      const cond1Field = (el.dataset.cond1Field || "").trim();
+      const cond1Source = (el.dataset.cond1Source || "").trim();
+      const cond2Field = (el.dataset.cond2Field || "").trim();
+      const cond2Source = (el.dataset.cond2Source || "").trim();
+      const cond1ValueField = cond1Source || cond1Field;
+      const cond2ValueField = cond2Source || cond2Field;
+      const cond1Value = cond1ValueField ? resolveCondValue(cond1ValueField) : "";
+      const cond2Value = cond2ValueField ? resolveCondValue(cond2ValueField) : "";
+
+      const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(table)}&key=${encodeURIComponent(key)}&result=${encodeURIComponent(result)}`
+        + (cond1Field && cond1Value ? `&cond1Field=${encodeURIComponent(cond1Field)}&cond1Value=${encodeURIComponent(cond1Value)}` : "")
+        + (cond2Field && cond2Value ? `&cond2Field=${encodeURIComponent(cond2Field)}&cond2Value=${encodeURIComponent(cond2Value)}` : "");
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          const lookups = data.map(row => {
+            const val = row?.key ?? "";
+            const label = Object.keys(row || {}).filter(k => k.startsWith("result")).map(k => row[k]).join(" - ");
+            return { value: String(val), label: label || String(val) };
+          });
+          options = options.concat(lookups);
+        }
+      }
+    }
+
+    const map = new Map();
+    options.forEach(o => {
+      if (!o.value) return;
+      if (!map.has(o.value)) map.set(o.value, o);
+    });
+
+    if (selected && !map.has(selected)) map.set(selected, { value: selected, label: selected });
+
+    return Array.from(map.values());
+  };
+
+  const getCodeInput = (el) => {
+    const id = el?.dataset?.codeTarget;
+    if (id) return document.getElementById(id);
+    return el?.closest(".inq-select")?.querySelector(".inq-select-code-hidden");
+  };
+
+  const syncDisplayValue = (displayEl, options) => {
+    if (!displayEl) return;
+    const codeInput = getCodeInput(displayEl);
+    const codeVal = (codeInput?.value || "").toString().trim();
+    if (!codeVal) {
+      displayEl.value = "";
+      return;
+    }
+    const hit = (options || []).find(o => String(o.value).trim() === codeVal);
+    displayEl.value = hit ? (hit.label || hit.value) : codeVal;
+  };
+
+  const suggest = document.createElement("div");
+  suggest.className = "inq-suggest";
+  suggest.style.display = "none";
+  document.body.appendChild(suggest);
+  let suggestTarget = null;
+  let suggestOptions = [];
+  let keepSuggestUntil = 0;
+
+  const positionSuggest = (el) => {
+    const rect = el.getBoundingClientRect();
+    suggest.style.left = `${rect.left + window.scrollX}px`;
+    suggest.style.top = `${rect.bottom + window.scrollY}px`;
+    const width = Math.max(rect.width, 280);
+    suggest.style.width = `${width}px`;
+  };
+
+  const hideSuggest = () => {
+    if (Date.now() < keepSuggestUntil) return;
+    suggest.style.display = "none";
+    suggest.innerHTML = "";
+    suggestTarget = null;
+    suggestOptions = [];
+  };
+
+  const renderSuggest = (el, list) => {
+    const q = (el.value || "").trim().toLowerCase();
+    const filtered = q
+      ? list.filter(o => (o.value || "").toLowerCase().includes(q) || (o.label || "").toLowerCase().includes(q))
+      : list;
+
+    suggest.innerHTML = "";
+    if (filtered.length === 0) {
+      hideSuggest();
+      return;
+    }
+
+    filtered.slice(0, 200).forEach(o => {
+      const item = document.createElement("div");
+      item.className = "inq-suggest-item";
+      item.innerHTML = `<div class="inq-suggest-code">${o.value}</div><div class="inq-suggest-label">${o.label}</div>`;
+      item.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        const codeInput = getCodeInput(el);
+        if (codeInput) codeInput.value = o.value;
+        el.value = o.label || o.value;
+        hideSuggest();
+      });
+      suggest.appendChild(item);
+    });
+
+    positionSuggest(el);
+    suggest.style.display = "block";
+  };
+
+  const lookupCache = new Map();
+
+  const showSuggest = async (el) => {
+    const key = buildCondKey(el);
+    if (!lookupCache.has(key)) {
+      const opts = await fetchLookupOptions(el);
+      lookupCache.set(key, opts);
+    }
+    suggestTarget = el;
+    suggestOptions = lookupCache.get(key) || [];
+    syncDisplayValue(el, suggestOptions);
+    renderSuggest(el, suggestOptions);
+  };
+
+  document.querySelectorAll(".inq-select-btn").forEach(btn => {
+    btn.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      keepSuggestUntil = Date.now() + 250;
+      const input = btn.previousElementSibling;
+      if (input) {
+        input.focus();
+        showSuggest(input);
+      }
+    });
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!suggestTarget) return;
+    if (e.target === suggestTarget || suggest.contains(e.target)) return;
+    hideSuggest();
+  });
+
+  document.querySelectorAll(".inq-lookup-display[data-lookup-table], .inq-lookup-display[data-items]").forEach(el => {
+    el.addEventListener("focus", () => showSuggest(el));
+    el.addEventListener("input", () => {
+      if (suggestTarget !== el) return showSuggest(el);
+      renderSuggest(el, suggestOptions);
+    });
+    el.addEventListener("blur", () => {
+      setTimeout(() => {
+        if (!suggest.matches(":hover")) hideSuggest();
+      }, 120);
+      const codeInput = getCodeInput(el);
+      if (!codeInput) return;
+      const text = (el.value || "").trim();
+      const key = buildCondKey(el);
+      const opts = lookupCache.get(key) || [];
+      if (!text) {
+        codeInput.value = "";
+        return;
+      }
+      const hit = opts.find(o => {
+        const v = String(o.value ?? "").trim();
+        const l = String(o.label ?? "").trim();
+        return v === text || l === text;
+      });
+      if (hit) {
+        codeInput.value = hit.value;
+        el.value = hit.label || hit.value;
+      } else {
+        syncDisplayValue(el, opts);
+      }
+    });
+  });
+
+  (async () => {
+    const inputs = Array.from(document.querySelectorAll(".inq-lookup-display"));
+    for (const el of inputs) {
+      if (!(el instanceof HTMLInputElement)) continue;
+      const key = buildCondKey(el);
+      if (!lookupCache.has(key)) {
+        const opts = await fetchLookupOptions(el);
+        lookupCache.set(key, opts);
+      }
+      const opts = lookupCache.get(key) || [];
+      syncDisplayValue(el, opts);
+    }
+  })();
+
+  suggest.addEventListener("mousedown", () => {
+    keepSuggestUntil = Date.now() + 250;
+  });
+</script>
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", new List<CURdTableField>(), ViewData)
+<script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+<script>
+  (function initDictForInq() {
+    const dictForQuery = "@Model.ParamTableName";
+    const dictForGrid = "@Model.DictTableName";
+    let currentDict = dictForQuery;
+
+    const setDict = (name) => {
+      currentDict = name || currentDict;
+      window._dictTableName = currentDict;
+    };
+
+    setDict(dictForQuery);
+
+    const queryArea = document.getElementById("inqForm");
+    const table = document.querySelector(".inq-table");
+
+    queryArea?.addEventListener("focusin", () => setDict(dictForQuery));
+    queryArea?.addEventListener("click", () => setDict(dictForQuery));
+    table?.addEventListener("click", () => setDict(dictForGrid));
+
+    const openFieldDict = () => {
+      if (typeof window.initFieldDictModal === "function") {
+        window.initFieldDictModal(currentDict, "fieldDictModal");
+        const el = document.getElementById("fieldDictModal");
+        if (el) {
+          const md = bootstrap.Modal.getOrCreateInstance(el);
+          md.show();
+        }
+      } else if (typeof window.loadFieldDict === "function") {
+        window.loadFieldDict(currentDict);
+      }
+    };
+
+    document.getElementById("btnEditDict")?.addEventListener("click", openFieldDict);
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "F3") return;
+      const target = e.target;
+      const inText = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+      if (inText) return;
+      e.preventDefault();
+      openFieldDict();
+    });
+  })();
+</script>
+
+
+@if (Request.Query.ContainsKey("debug"))
+{
+  <div class="mt-3 p-2 border rounded bg-light">
+    <div class="fw-bold mb-1">Debug Exec</div>
+    <div class="small text-muted">@Model.DebugExecText</div>
+    <ul class="small mb-0">
+      @foreach (var p in Model.DebugParams)
+      {
+        <li>@p.Name = @(p.Value ?? "NULL")</li>
+      }
+    </ul>
+    <div class="fw-bold mt-2 mb-1">Debug Query</div>
+    <ul class="small mb-0">
+      @foreach (var kv in Request.Query)
+      {
+        <li>@kv.Key = @kv.Value.ToString()</li>
+      }
+    </ul>
+  </div>
+}

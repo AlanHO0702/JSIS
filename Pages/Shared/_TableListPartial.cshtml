@@ -33,7 +33,15 @@
     .table-list-page .title-row { display: flex; justify-content: space-between; align-items: flex-end; }
     .table-list-page .order-count { font-size: var(--field-value-size); color: #666; margin-bottom: 6px; }
     .table-list-page .table { box-shadow: 0 2px 12px 0 #c3d4e6; border-radius: 16px; overflow: hidden; background: #fff; }
-    .table-list-page .table th, .table-list-page .table td { vertical-align: middle !important; white-space: nowrap; border: none; border-right: 1px solid #e3ebf6; }
+    .table-list-page .table th, .table-list-page .table td {
+        vertical-align: middle !important;
+        white-space: nowrap;
+        border: none;
+        border-right: 1px solid #e3ebf6;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 300px;
+    }
     .table-list-page .table th:first-child, .table-list-page .table td:first-child { border-left: 1px solid #e3ebf6; }
     .table-list-page .table th {
         background: linear-gradient(90deg, #e8f2fe 0%, #f3f8ff 100%);
@@ -459,6 +467,14 @@ function renderTable(data) {
       }
       const td = document.createElement('td');
       td.innerHTML = valStr ?? "";
+
+      // 根據辭典的 FieldLen 設定欄位寬度
+      if (field.FieldLen && field.FieldLen > 0) {
+        const width = Math.min(field.FieldLen * 10, 300); // 每個字元約 10px，最大 300px
+        td.style.maxWidth = `${width}px`;
+        td.style.minWidth = `${Math.min(width, 60)}px`; // 最小寬度 60px
+      }
+
       tr.appendChild(td);
     });
 
@@ -606,9 +622,22 @@ function doQuery(page = 1) {
   history.replaceState(null, '', url.toString());
 
   // 檢查 sessionStorage 是否已有 lookup 快取（關閉分頁才會消失）
+  // 但如果查詢條件改變，需要清除快取以重新載入 lookup 資料
   const lookupCacheKey = `lookupCache:${tableName}`;
-  const cachedLookup = sessionStorage.getItem(lookupCacheKey);
-  const skipLookup = !!cachedLookup && !!window._lookupMapData;
+  const lookupFiltersKey = `lookupFilters:${tableName}`;
+  const currentFiltersHash = JSON.stringify(filters.filter(f => f.Field !== 'page' && f.Field !== 'pageSize').sort((a, b) => a.Field.localeCompare(b.Field)));
+  const cachedFiltersHash = sessionStorage.getItem(lookupFiltersKey);
+
+  let skipLookup = false;
+  if (cachedFiltersHash === currentFiltersHash) {
+    // 查詢條件相同，可以使用快取
+    const cachedLookup = sessionStorage.getItem(lookupCacheKey);
+    skipLookup = !!cachedLookup && !!window._lookupMapData;
+  } else {
+    // 查詢條件改變，清除舊快取
+    sessionStorage.removeItem(lookupCacheKey);
+    sessionStorage.removeItem(lookupFiltersKey);
+  }
 
   http('/api/DynamicTable/PagedQuery', {
     method: 'POST',
@@ -621,10 +650,12 @@ function doQuery(page = 1) {
       if (result.lookupMapData && Object.keys(result.lookupMapData).length > 0) {
         window._lookupMapData = result.lookupMapData;
         sessionStorage.setItem(lookupCacheKey, '1');
+        sessionStorage.setItem(lookupFiltersKey, currentFiltersHash);
       }
       // 如果跳過 lookup 但記憶體中沒有資料，清除快取標記讓下次重新取得
       if (skipLookup && (!window._lookupMapData || Object.keys(window._lookupMapData).length === 0)) {
         sessionStorage.removeItem(lookupCacheKey);
+        sessionStorage.removeItem(lookupFiltersKey);
       }
 
       renderTable(result.data);
@@ -804,6 +835,9 @@ document.addEventListener("DOMContentLoaded", function () {
     try {
       localStorage.setItem(filterKey, JSON.stringify(filtersWithPaging));
       localStorage.setItem('orderListQueryFilters', JSON.stringify(filtersWithPaging));
+      // 清除 lookup 快取，因為查詢條件改變了
+      sessionStorage.removeItem(`lookupCache:${tn}`);
+      sessionStorage.removeItem(`lookupFilters:${tn}`);
     } catch {}
   } else {
     // 沒有 URL 參數，使用 localStorage 的查詢條件

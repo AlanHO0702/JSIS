@@ -1,0 +1,481 @@
+@page "/SPO/SPO00014"
+@using PcbErpApi.Models
+@model PcbErpApi.Pages.SPO.SPO00014Model
+@{
+    Layout = "_InquiryTemplate";
+    ViewData["Title"] = Model.PageTitle;
+    ViewData["ShowInqRail"] = false;
+}
+
+@section InqHeader {
+  <div class="spo14-toolbar">
+    <div class="btn-toolbar spo14-toolbar-actions" role="group" aria-label="客戶退貨單查詢操作">
+      <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnSPO14First" title="第一筆" aria-label="第一筆"><i class="bi bi-chevron-bar-left"></i></button>
+      <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnSPO14Prev" title="上一筆" aria-label="上一筆"><i class="bi bi-chevron-left"></i></button>
+      <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnSPO14Next" title="下一筆" aria-label="下一筆"><i class="bi bi-chevron-right"></i></button>
+      <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnSPO14Last" title="最後一筆" aria-label="最後一筆"><i class="bi bi-chevron-bar-right"></i></button>
+      <div id="spo14CountBox" class="toolbar-count-box mode-view">
+        <div id="spo14Mode" class="count-line">瀏覽模式</div>
+        <div id="spo14Count" class="count-line">@(Model.Items.Count > 0 ? 1 : 0) / @Model.TotalCount</div>
+      </div>
+      <button type="button" class="btn toolbar-btn" id="btnSPO14Query"><i class="bi bi-search"></i>查詢</button>
+      <button type="button" class="btn toolbar-btn" id="btnSPO14Switch"><i class="bi bi-arrow-left-right"></i>切換</button>
+      <button type="button" class="btn toolbar-btn" id="btnSPO14Excel"><i class="bi bi-file-earmark-excel"></i>Excel</button>
+    </div>
+  </div>
+}
+
+<script>
+  window._itemId = "SPO00014";
+  window._dictTableName = "SPOdV_MPSRejectInq";
+</script>
+
+<!-- Query Modal (same template as 銷售訂單) -->
+<div class="modal fade" id="queryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    @await Html.PartialAsync("~/Pages/Shared/_QueryPanelPartial.cshtml", (object)(new List<object>()))
+  </div>
+</div>
+@await Html.PartialAsync("~/Pages/Shared/_QueryFieldModals.cshtml")
+
+<div class="inq-table-wrap">
+  <table class="table table-sm table-hover align-middle inq-table">
+    <thead>
+      <tr>
+        @{
+          var gFields = (Model.FieldDictList ?? new List<CURdTableField>())
+            .Where(f => (f.Visible ?? 1) != 0)
+            .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
+            .OrderBy(f => f.SerialNum ?? int.MaxValue)
+            .ToList();
+
+          if (gFields.Count == 0)
+          {
+            var fallback = new[]
+            {
+              "PaperNum","PaperDate","CustomerId","ShortName","FinishedName","Item","PartNum","UOMQnty",
+              "SourNum","SourItem","Treatment","Defects","ChangedName","ActionName","Qnty","PaperId"
+            };
+            gFields = fallback.Select(f => new CURdTableField { FieldName = f, DisplayLabel = f }).ToList();
+          }
+
+          string GLabel(CURdTableField f) => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel!;
+        }
+        @foreach (var f in gFields)
+        {
+          <th data-field="@f.FieldName">
+            <span class="th-text">@GLabel(f)</span>
+            <span class="col-resizer" draggable="false"></span>
+          </th>
+        }
+      </tr>
+    </thead>
+    <tbody>
+    @{
+      var dict = (Model.FieldDictList ?? new List<CURdTableField>())
+        .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
+        .ToDictionary(f => f.FieldName!, StringComparer.OrdinalIgnoreCase);
+
+      string FormatVal(Dictionary<string, object?> row, string fieldName)
+      {
+          if (!row.TryGetValue(fieldName, out var v)) return "";
+          if (dict.TryGetValue(fieldName, out var f))
+              return FormatHelper.FormatValue(v, f.DataType, f.FormatStr);
+          return v?.ToString() ?? "";
+      }
+    }
+    @if (Model.Items.Count == 0)
+    {
+      <tr>
+        <td colspan="@(Math.Max(1, gFields.Count))" class="text-center text-muted py-2">沒有資料</td>
+      </tr>
+    }
+    else
+    {
+      foreach (var row in Model.Items)
+      {
+        string Get(string name) => FormatVal(row, name);
+        <tr data-paper-id="@Get("PaperId")" data-paper-num="@Get("PaperNum")">
+          @foreach (var f in gFields)
+          {
+            <td>@Get(f.FieldName)</td>
+          }
+        </tr>
+      }
+    }
+    </tbody>
+  </table>
+</div>
+
+@if (Model.TotalPages > 1)
+{
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-1 mt-2">
+    <div class="d-flex align-items-center gap-1">
+      <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber <= 1 ? "disabled" : "")"
+         href="@(Model.PageNumber <= 1 ? "#" : BuildPageUrl(Model.PageNumber - 1))">上一頁</a>
+      <span>Page: <strong>@Model.PageNumber</strong> / <span>@Model.TotalPages</span></span>
+      <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber >= Model.TotalPages ? "disabled" : "")"
+         href="@(Model.PageNumber >= Model.TotalPages ? "#" : BuildPageUrl(Model.PageNumber + 1))">下一頁</a>
+    </div>
+    <div class="text-muted">Total: @Model.TotalCount</div>
+  </div>
+}
+
+@functions{
+    string BuildPageUrl(int page)
+    {
+        var map = ViewContext.HttpContext.Request.Query.ToDictionary(k => k.Key, v => (string?)v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+        map["page"] = page.ToString();
+        map["pageSize"] = Model.PageSize.ToString();
+        var qs = Microsoft.AspNetCore.Http.QueryString.Create(map).ToString();
+        return qs;
+    }
+}
+
+<style>
+  .inq-table-wrap {
+    border: 1px solid #d8dee8;
+    border-radius: 8px;
+    background: #fff;
+    padding: 0;
+    overflow-x: auto;
+  }
+  .inq-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+    width: max-content;
+    min-width: 100%;
+    margin: 0;
+  }
+  .inq-table th,
+  .inq-table td {
+    white-space: nowrap;
+    font-size: 0.82rem;
+    padding: 4px 6px;
+    border: 1px solid #e1e7f0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .inq-table th {
+    background: #f3f7ff;
+    color: #2056ac;
+    font-weight: 600;
+    position: relative;
+  }
+  .inq-table th .th-text {
+    display: inline-block;
+    padding-right: 8px;
+  }
+  .inq-table th .col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 2;
+  }
+  .inq-table th.inq-sort-asc::after {
+    content: " ▲";
+    font-size: 0.7em;
+    color: #1f3a8a;
+  }
+  .inq-table th.inq-sort-desc::after {
+    content: " ▼";
+    font-size: 0.7em;
+    color: #1f3a8a;
+  }
+  .inq-table tbody tr {
+    cursor: pointer;
+  }
+  .inq-table tbody tr.table-active td {
+    background: var(--bs-table-active-bg);
+  }
+
+  .spo14-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid #d8dee8;
+    border-radius: 10px;
+    background: var(--section-bg-toolbar, #f6f7f9);
+  }
+  .spo14-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .toolbar-count-box {
+    display: inline-flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 30px;
+    min-width: 74px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-weight: 700;
+    line-height: 1.05;
+    color: #fff;
+    background: #1e4db7;
+    user-select: none;
+    font-size: 0.85rem;
+  }
+  .toolbar-btn {
+    height: 32px;
+    padding: 0 8px;
+    font-size: 0.82rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid #cfd7e6;
+    border-radius: 8px;
+    background: #fff;
+    color: #1f3a8a;
+  }
+  .toolbar-btn:hover {
+    background: #e9f1ff;
+    border-color: #9fbaf0;
+  }
+  .toolbar-btn-icon {
+    width: 28px;
+    min-width: 28px;
+    padding: 0;
+    justify-content: center;
+  }
+</style>
+
+<script>
+  const queryModalEl = document.getElementById("queryModal");
+  const queryForm = document.getElementById("searchForm");
+  const queryFieldGrid = queryForm?.querySelector(".query-field-grid");
+
+  document.getElementById("btnSPO14Excel")?.addEventListener("click", () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("handler", "Export");
+    window.location.href = url.toString();
+  });
+
+  document.getElementById("btnSPO14Query")?.addEventListener("click", () => {
+    if (queryModalEl && window.bootstrap) {
+      const modal = bootstrap.Modal.getOrCreateInstance(queryModalEl);
+      modal.show();
+    }
+  });
+
+  queryForm?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const url = new URL(window.location.origin + window.location.pathname);
+
+    const currentPageSize = new URLSearchParams(window.location.search).get("pageSize");
+    if (currentPageSize) url.searchParams.set("pageSize", currentPageSize);
+    url.searchParams.set("page", "1");
+
+    queryFieldGrid?.querySelectorAll('.query-input').forEach(input => {
+      const val = input.value?.trim() ?? "";
+      const key = input.name || input.dataset.key || "";
+      if (!key) return;
+      if (val) url.searchParams.set(key, val);
+      else url.searchParams.delete(key);
+    });
+
+    queryFieldGrid?.querySelectorAll('.query-op').forEach(select => {
+      const op = select.value?.trim() ?? "";
+      const key = select.name?.replace(/^Cond_/, "") ?? "";
+      const input = key ? queryFieldGrid.querySelector(`.query-input[name="${CSS.escape(key)}"]`) : null;
+      const hasValue = !!(input && (input.value ?? "").toString().trim() !== "");
+      if (key && op && op !== "=" && hasValue) {
+        url.searchParams.set(`Cond_${key}`, op);
+      } else if (key) {
+        url.searchParams.delete(`Cond_${key}`);
+      }
+    });
+
+    window.location.href = url.toString();
+  });
+
+  const table = document.querySelector(".inq-table");
+  const dictTableName = window._dictTableName || "";
+  const fieldNames = Array.from(document.querySelectorAll(".inq-table thead th"))
+    .map(th => (th.dataset.field || "").toString());
+
+  function applyColumnWidth(tableEl, ths, index, width) {
+    const w = Math.max(20, Math.round(width));
+    const th = ths[index];
+    if (!th) return;
+    th.style.width = `${w}px`;
+    th.style.minWidth = `${w}px`;
+    Array.from(tableEl.querySelectorAll(`tbody tr td:nth-child(${index + 1})`))
+      .forEach(td => {
+        td.style.width = `${w}px`;
+        td.style.minWidth = `${w}px`;
+      });
+  }
+
+  function applySavedWidths(tableEl, dictTable, fields) {
+    const tn = (dictTable || "").trim();
+    if (!tn) return;
+    try {
+      const raw = localStorage.getItem(`colwidth:${tn}`);
+      if (!raw) return;
+      const cols = JSON.parse(raw) || [];
+      const ths = Array.from(tableEl.querySelectorAll('thead th'));
+      cols.forEach(c => {
+        const f = (c.fieldName || '').toString();
+        const w = Number(c.width);
+        if (!f || !Number.isFinite(w)) return;
+        const idx = fields.findIndex(x => x.toLowerCase() === f.toLowerCase());
+        if (idx >= 0) applyColumnWidth(tableEl, ths, idx, w);
+      });
+    } catch { }
+  }
+
+  function initColumnResize(tableEl, dictTable, fields) {
+    if (!tableEl) return;
+    const ths = Array.from(tableEl.querySelectorAll('thead th'));
+    applySavedWidths(tableEl, dictTable, fields);
+
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+    let thIndex = -1;
+
+    ths.forEach((th, idx) => {
+      const handle = th.querySelector('.col-resizer');
+      if (!handle) return;
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        isResizing = true;
+        th.dataset.resizing = "1";
+        startX = e.pageX;
+        startWidth = th.getBoundingClientRect().width;
+        thIndex = idx;
+        document.body.classList.add('resizing');
+      });
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing || thIndex < 0) return;
+      const dx = e.pageX - startX;
+      const newW = Math.max(20, startWidth + dx);
+      applyColumnWidth(tableEl, ths, thIndex, newW);
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!isResizing) return;
+      isResizing = false;
+      document.body.classList.remove('resizing');
+      if (thIndex >= 0 && ths[thIndex]) {
+        setTimeout(() => { delete ths[thIndex].dataset.resizing; }, 0);
+      }
+      const tn = (dictTable || "").trim();
+      if (tn) {
+        const payload = ths.map(th => ({ fieldName: th.dataset.field, width: Math.round(th.getBoundingClientRect().width) }));
+        try {
+          localStorage.setItem(`colwidth:${tn}`, JSON.stringify(payload));
+        } catch { }
+      }
+      thIndex = -1;
+    });
+  }
+
+  initColumnResize(table, dictTableName, fieldNames);
+
+  const rows = Array.from(document.querySelectorAll(".inq-table tbody tr"))
+    .filter(r => !r.querySelector("td[colspan]"));
+  let selectedIndex = rows.length > 0 ? 0 : -1;
+
+  const applyHeaderSort = () => {
+    const url = new URL(window.location.href);
+    const sortBy = (url.searchParams.get("sortBy") || "").toString();
+    const sortDir = (url.searchParams.get("sortDir") || "asc").toLowerCase();
+    const headers = Array.from(document.querySelectorAll(".inq-table thead th[data-field]"));
+    headers.forEach(th => {
+      th.classList.remove("inq-sort-asc", "inq-sort-desc");
+      const field = th.getAttribute("data-field") || "";
+      if (field && field.toLowerCase() === sortBy.toLowerCase()) {
+        th.classList.add(sortDir === "desc" ? "inq-sort-desc" : "inq-sort-asc");
+      }
+      th.style.cursor = field ? "pointer" : "";
+    });
+  };
+
+  const bindHeaderSort = () => {
+    const headers = Array.from(document.querySelectorAll(".inq-table thead th[data-field]"));
+    headers.forEach(th => {
+      th.addEventListener("click", (e) => {
+        if (e.target && e.target.classList?.contains("col-resizer")) return;
+        if (th.dataset.resizing === "1") return;
+        const field = th.getAttribute("data-field");
+        if (!field) return;
+        const url = new URL(window.location.href);
+        const curBy = (url.searchParams.get("sortBy") || "").toString();
+        const curDir = (url.searchParams.get("sortDir") || "asc").toLowerCase();
+        const nextDir = (curBy.toLowerCase() === field.toLowerCase() && curDir === "asc") ? "desc" : "asc";
+        url.searchParams.set("sortBy", field);
+        url.searchParams.set("sortDir", nextDir);
+        url.searchParams.set("page", "1");
+        window.location.href = url.toString();
+      });
+    });
+  };
+
+  const updateCount = () => {
+    const countEl = document.getElementById("spo14Count");
+    if (!countEl) return;
+    const cur = selectedIndex >= 0 ? (selectedIndex + 1) : 0;
+    countEl.textContent = `${cur} / @Model.TotalCount`;
+  };
+
+  const selectRow = (idx) => {
+    if (rows.length === 0) return;
+    const safe = Math.max(0, Math.min(rows.length - 1, idx));
+    rows.forEach(r => r.classList.remove("table-active"));
+    rows[safe].classList.add("table-active");
+    selectedIndex = safe;
+    updateCount();
+    rows[safe].scrollIntoView({ block: "nearest" });
+  };
+
+  rows.forEach((tr, i) => {
+    tr.addEventListener("click", () => selectRow(i));
+  });
+
+  document.getElementById("btnSPO14First")?.addEventListener("click", () => selectRow(0));
+  document.getElementById("btnSPO14Prev")?.addEventListener("click", () => selectRow(selectedIndex - 1));
+  document.getElementById("btnSPO14Next")?.addEventListener("click", () => selectRow(selectedIndex + 1));
+  document.getElementById("btnSPO14Last")?.addEventListener("click", () => selectRow(rows.length - 1));
+
+  bindHeaderSort();
+  applyHeaderSort();
+
+  const currentUserId = "@Model.CurrentUserId";
+  const currentUseId = "@Model.CurrentUseId";
+  document.getElementById("btnSPO14Switch")?.addEventListener("click", async () => {
+    if (selectedIndex < 0 || !rows[selectedIndex]) return alert("請先選擇一筆資料");
+    const tr = rows[selectedIndex];
+    const pid = tr.getAttribute("data-paper-id");
+    const pnum = tr.getAttribute("data-paper-num");
+    if (!pid || !pnum) return alert("找不到單據資訊");
+    try {
+      const res = await fetch("/api/Flow/ResolveItemIdByFromType", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paperId: pid, paperNum: pnum, userId: currentUserId, useId: currentUseId })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const itemId = data.itemId || pid;
+        window.open(`/DynamicTemplate/Paper/${encodeURIComponent(itemId)}/${encodeURIComponent(pnum)}`, "_blank");
+        return;
+      }
+    } catch {}
+    window.open(`/DynamicTemplate/Paper/${encodeURIComponent(pid)}/${encodeURIComponent(pnum)}`, "_blank");
+  });
+
+  if (rows.length > 0) selectRow(0);
+</script>

@@ -9,11 +9,12 @@
 
     var pageMap = new Dictionary<string, string> {
         {"SPO00013","/SPO/SPO00013" },  // 銷售價格表
+        {"SPO00015", "/SPO/SPO00015"},
+        {"SPO00014", "/SPO/SPO00014"},
         {"SPO00040", "/SPO/SPO00040"},// 銷售價格表(單一grid)
         {"MPH00052", "/MPH/MPH00052"},// 採購價格表(單一grid)
         {"FME00020","/FME/FmedIssueMain"},
         {"CUR00012", "/CUR/CURdSysParams"},
-        {"CURH0002", "/CUR/CURdReportOrderBasPage"},
         {"CUR00007", "/CUR/CURdGroups"},
         {"CURH0003", "/CUR/CURdV_SysProcess"},
         {"CUR00004", "/CUR/NoticeBoard"},
@@ -66,9 +67,11 @@
             var cls = (item?.ClassName ?? string.Empty).ToString().Trim();
             if (!cls.Equals("CCSdCompanyDLL.dll", StringComparison.OrdinalIgnoreCase))
                 return null;
+            var itemId = (item?.ItemId ?? string.Empty).ToString().Trim();
+            if (string.IsNullOrWhiteSpace(itemId)) return null;
             var sysId = ResolveCompanySystem(item?.PowerType);
             if (!sysId.HasValue) return null;
-            return $"/CCS/CC000054/{sysId.Value}";
+            return $"/CCS/{itemId}/{sysId.Value}";
         }
         catch { return null; }
     }
@@ -108,6 +111,27 @@
 body {
     background: #f4f6fb;
     font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+}
+.menu-notify-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: #fff0f0;
+    color: #b33939;
+    border: 1px solid #f0b7b7;
+    border-radius: 999px;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+.menu-notify-badge .count {
+    background: #e74c3c;
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    min-width: 24px;
+    text-align: center;
 }
 .erp-sidebar {
     background: #fff;
@@ -212,6 +236,12 @@ body {
 </style>
 
 <div class="container py-4">
+    <div class="d-flex justify-content-end mb-2">
+        <div class="menu-notify-badge">
+            簽核通知
+            <span id="menu-notify-count" class="count">0</span>
+        </div>
+    </div>
     <div class="row gx-4">
         <!-- 左側模組 -->
         <div class="col-12 col-md-3 mb-4">
@@ -386,11 +416,12 @@ body {
 <script>
     const pageMap = {
     "SPO00013": "/SPO/SPO00013",
+    "SPO00015": "/SPO/SPO00015",
+    "SPO00014": "/SPO/SPO00014",
     "SPO00040": "/SPO/SPO00040",
     "MPH00052": "/MPH/MPH00052",
     "FME00020": "/FME/FmedIssueMain",
     "CUR00012": "/CUR/CURdSysParams",
-    "CURH0002": "/CUR/CURdReportOrderBasPage",
     "CUR00007": "/CUR/CURdGroups",
     "CURH0003": "/CUR/CURdV_SysProcess",
     "CUR00004": "/CUR/NoticeBoard",
@@ -431,14 +462,16 @@ body {
         return map[num] ?? null;
     }
 
-    function resolveCompanyLinkFromMeta(meta) {
+    function resolveCompanyLinkFromMeta(meta, itemId) {
         if (!meta) return null;
         const cls = String(meta.className ?? meta.ClassName ?? "").trim().toLowerCase();
         if (cls !== "ccsdcompanydll.dll") return null;
+        const resolvedId = String(itemId ?? meta.itemId ?? meta.ItemId ?? "").trim();
+        if (!resolvedId) return null;
         const pt = meta.powerType ?? meta.PowerType;
         const sysId = getSystemIdFromPowerType(pt);
         if (!sysId) return null;
-        return `/CCS/CC000054/${sysId}`;
+        return `/CCS/${resolvedId}/${sysId}`;
     }
 
     const itemHintCache = new Map();
@@ -447,7 +480,7 @@ body {
         const hard = pageMap[itemId];
         if (hard) return hard;
 
-        const companyLink = resolveCompanyLinkFromMeta(meta);
+        const companyLink = resolveCompanyLinkFromMeta(meta, itemId);
         if (companyLink) return companyLink;
 
         const itemType = Number(meta?.itemType ?? meta?.ItemType);
@@ -485,7 +518,7 @@ body {
         const hard = pageMap[itemId];
         if (hard) return hard;
         const localMeta = { ClassName: className, PowerType: powerType };
-        const companyLink = resolveCompanyLinkFromMeta(localMeta);
+        const companyLink = resolveCompanyLinkFromMeta(localMeta, itemId);
         return companyLink || null;
     }
 
@@ -527,7 +560,7 @@ body {
 
         // 先嘗試本地 className/powerType 映射（我的最愛可帶進來）
         const localMeta = { ClassName: className, PowerType: powerType };
-        const localLink = resolveCompanyLinkFromMeta(localMeta);
+        const localLink = resolveCompanyLinkFromMeta(localMeta, itemId);
         if (localLink) { location.href = localLink; return; }
 
         try {
@@ -552,7 +585,7 @@ body {
                 }
             } catch (err) { console.warn('favorite meta backfill failed', err); }
 
-            const companyLink = resolveCompanyLinkFromMeta(meta);
+            const companyLink = resolveCompanyLinkFromMeta(meta, itemId);
             if (companyLink) { location.href = companyLink; return; }
 
             const itemType = Number(meta.itemType ?? meta.ItemType);
@@ -650,6 +683,21 @@ body {
     });
 
     document.addEventListener('DOMContentLoaded', () => {
+        (async function loadMenuNotifyCount() {
+            try {
+                const userId = localStorage.getItem('erpLoginUserId') || 'admin';
+                const res = await fetch(`/api/TodoStats?userId=${encodeURIComponent(userId)}`);
+                if (!res.ok) throw new Error('todo stats failed');
+                const data = await res.json();
+                const el = document.getElementById('menu-notify-count');
+                if (el) el.textContent = data.notifications || 0;
+            } catch (err) {
+                const el = document.getElementById('menu-notify-count');
+                if (el) el.textContent = '0';
+                console.warn('load menu notify count failed', err);
+            }
+        })();
+
         const addItemEl = document.getElementById('addItemModal');
         const editItemEl = document.getElementById('editItemModal');
         let addItemModal = addItemEl ? new bootstrap.Modal(addItemEl) : null;
