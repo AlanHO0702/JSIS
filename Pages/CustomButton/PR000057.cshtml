@@ -1,0 +1,127 @@
+@*
+    PR000057 - 應付沖帳單 (調用 PR000004 功能)
+    自訂按鈕功能:
+      - btnC6: 可沖帳之憑證選擇
+      - btnC7: 沖帳明細維護
+*@
+@model dynamic
+
+<script>
+(() => {
+    window._PR000004_Loading = window._PR000004_Loading || false;
+
+    /**
+     * 動態載入 PR000004.cshtml 的功能
+     * returns {Promise<boolean>} 載入成功返回 true
+     */
+    const ensurePR000004Loaded = async () => {
+        if (typeof window.StrikeSelectHandler?.open === 'function' &&
+            typeof window.StrikeDetailHandler?.open === 'function') {
+            return true;
+        }
+
+        if (window._PR000004_Loading) {
+            for (let i = 0; i < 100; i++) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                if (typeof window.StrikeSelectHandler?.open === 'function' &&
+                    typeof window.StrikeDetailHandler?.open === 'function') {
+                    return true;
+                }
+            }
+            console.error('等待 PR000004 載入超時');
+            return false;
+        }
+
+        window._PR000004_Loading = true;
+
+        try {
+            const response = await fetch('/api/StrikeSelect/GetViewContent');
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const html = await response.text();
+
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+
+            // 1. 注入 style 標籤
+            const styles = tempDiv.querySelectorAll('style');
+            styles.forEach(style => {
+                document.head.appendChild(style.cloneNode(true));
+            });
+
+            // 2. 注入所有 modal HTML
+            const modals = tempDiv.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                document.body.appendChild(modal.cloneNode(true));
+            });
+
+            // 3. 手動執行 script 內容
+            const scripts = tempDiv.querySelectorAll('script');
+            for (const script of scripts) {
+                const scriptContent = script.textContent || script.innerText;
+                if (scriptContent) {
+                    try {
+                        (new Function(scriptContent))();
+                    } catch (err) {
+                        console.error('執行 script 失敗:', err);
+                        throw err;
+                    }
+                }
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            if (typeof window.StrikeSelectHandler?.open === 'function' &&
+                typeof window.StrikeDetailHandler?.open === 'function') {
+                return true;
+            } else {
+                console.error('PR000004.cshtml 載入後功能仍不可用');
+                return false;
+            }
+        } catch (error) {
+            console.error('載入 PR000004.cshtml 失敗:', error);
+            return false;
+        } finally {
+            window._PR000004_Loading = false;
+        }
+    };
+
+    const showLoadError = async () => {
+        console.error('PR000004 功能載入失敗');
+        if (window.Swal) {
+            await window.Swal.fire({
+                icon: 'error',
+                title: '功能載入失敗',
+                text: '無法載入沖帳功能，請重新整理頁面或聯繫系統管理員'
+            });
+        } else {
+            alert('功能載入失敗，請重新整理頁面或聯繫系統管理員');
+        }
+    };
+
+    // 註冊按鈕處理函式
+    window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+    window.ActionRailCustomHandlers['PR000057'] = {
+        // 可沖帳之憑證選擇
+        btnC6: async (ctx) => {
+            const loaded = await ensurePR000004Loaded();
+            if (loaded) {
+                await window.StrikeSelectHandler.open(ctx);
+            } else {
+                await showLoadError();
+            }
+        },
+        // 沖帳明細維護
+        btnC7: async (ctx) => {
+            const loaded = await ensurePR000004Loaded();
+            if (loaded) {
+                await window.StrikeDetailHandler.open(ctx);
+            } else {
+                await showLoadError();
+            }
+        }
+    };
+})();
+</script>
