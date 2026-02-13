@@ -75,9 +75,55 @@
 
     function getVisibleFields(dict, fallbackKeys) {
         if (dict && dict.length > 0) {
-            return dict.map(d => ({ field: d.FieldName, label: d.DisplayLabel || d.FieldName }));
+            return dict.map(d => ({
+                field: d.FieldName,
+                label: d.DisplayLabel || d.FieldName,
+                isCheckbox: Number(d.ComboStyle ?? 0) === 1,
+                width: d.FieldWidth || d.DisplaySize || null
+            }));
         }
-        return fallbackKeys.map(k => ({ field: k, label: k }));
+        return fallbackKeys.map(k => ({ field: k, label: k, isCheckbox: false, width: null }));
+    }
+
+    /** 計算欄位寬度 (px)：DisplaySize 是字元數，乘以 8 再加 padding */
+    function calcColWidth(col) {
+        if (col.isCheckbox) return 60;
+        if (col.width) return Math.max(col.width * 8 + 20, 50);
+        return 120; // default
+    }
+
+    /** 為表頭加上拖曳調整欄寬功能 */
+    function enableThResize(table) {
+        const ths = table.querySelectorAll('thead th');
+        ths.forEach(th => {
+            const handle = th.querySelector('.th-resize');
+            if (!handle) return;
+            handle.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const startX = e.clientX;
+                const startW = th.offsetWidth;
+                const startTableW = table.offsetWidth;
+                function onMove(ev) {
+                    const delta = ev.clientX - startX;
+                    const newW = Math.max(30, startW + delta);
+                    th.style.width = newW + 'px';
+                    table.style.width = (startTableW + (newW - startW)) + 'px';
+                }
+                function onUp() {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                }
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        });
+    }
+
+    function isCheckedValue(v) {
+        if (v === true || v === 1) return true;
+        const s = String(v ?? '').trim().toLowerCase();
+        return s === '1' || s === 'true' || s === 'yes';
     }
 
     function formatCellValue(value, dict) {
@@ -89,6 +135,21 @@
             } catch (_) { }
         }
         return String(value);
+    }
+
+    function renderCell(td, value, col, dictEntry) {
+        if (col.isCheckbox) {
+            const chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.checked = isCheckedValue(value);
+            chk.disabled = true;
+            chk.className = 'form-check-input';
+            chk.style.cssText = 'margin:0; pointer-events:none;';
+            td.style.textAlign = 'center';
+            td.appendChild(chk);
+        } else {
+            td.textContent = formatCellValue(value, dictEntry);
+        }
     }
 
     // ==================== Master Grid ====================
@@ -110,13 +171,22 @@
         const cols = getVisibleFields(masterDict,
             masterRows.length > 0 ? Object.keys(masterRows[0]) : ['TmpId']);
 
-        // Build header
+        // Build header with fixed widths + resize handles
         thead.innerHTML = '';
+        const masterTable = document.getElementById('masterGrid');
+        let totalW = 0;
         cols.forEach(c => {
             const th = document.createElement('th');
+            const w = calcColWidth(c);
+            th.style.width = w + 'px';
+            totalW += w;
             th.textContent = c.label;
+            const handle = document.createElement('div');
+            handle.className = 'th-resize';
+            th.appendChild(handle);
             thead.appendChild(th);
         });
+        masterTable.style.width = totalW + 'px';
 
         // Build body
         tbody.innerHTML = '';
@@ -125,7 +195,7 @@
             cols.forEach(c => {
                 const td = document.createElement('td');
                 const dictEntry = masterDict.find(d => d.FieldName === c.field);
-                td.textContent = formatCellValue(row[c.field], dictEntry);
+                renderCell(td, row[c.field], c, dictEntry);
                 tr.appendChild(td);
             });
             tr.addEventListener('click', () => selectMasterRow(row, tr));
@@ -134,6 +204,7 @@
             }
             tbody.appendChild(tr);
         });
+        enableThResize(masterTable);
     }
 
     function selectMasterRow(row, tr) {
@@ -284,13 +355,22 @@
         const cols = getVisibleFields(detailDict,
             ['LayerId', 'LayerName', 'DefRoute', 'DefRouteNotes']);
 
-        // Rebuild header from dictionary
+        // Rebuild header from dictionary with fixed widths + resize handles
         thead.innerHTML = '';
+        const detailTable = document.getElementById('detailGrid');
+        let dtlTotalW = 0;
         cols.forEach(c => {
             const th = document.createElement('th');
+            const w = calcColWidth(c);
+            th.style.width = w + 'px';
+            dtlTotalW += w;
             th.textContent = c.label;
+            const handle = document.createElement('div');
+            handle.className = 'th-resize';
+            th.appendChild(handle);
             thead.appendChild(th);
         });
+        detailTable.style.width = dtlTotalW + 'px';
 
         // Build body
         tbody.innerHTML = '';
@@ -302,7 +382,7 @@
             cols.forEach(c => {
                 const td = document.createElement('td');
                 const dictEntry = detailDict.find(d => d.FieldName === c.field);
-                td.textContent = formatCellValue(r[c.field], dictEntry);
+                renderCell(td, r[c.field], c, dictEntry);
                 tr.appendChild(td);
             });
             tr.addEventListener('click', () => {
@@ -311,6 +391,7 @@
             });
             tbody.appendChild(tr);
         });
+        enableThResize(detailTable);
     }
 
     // ==================== Mode Toggle ====================
@@ -853,6 +934,30 @@
 
     // ==================== Splitter ====================
     function initSplitters() {
+        // Vertical splitter (between master panel and detail panel)
+        const vSplitter = document.getElementById('vSplitter');
+        const masterPanel = document.getElementById('masterPanel');
+
+        let vStartX, vStartWidth;
+        vSplitter.addEventListener('mousedown', (e) => {
+            vStartX = e.clientX;
+            vStartWidth = masterPanel.offsetWidth;
+            document.addEventListener('mousemove', onVSplitterMove);
+            document.addEventListener('mouseup', onVSplitterUp);
+            e.preventDefault();
+        });
+
+        function onVSplitterMove(e) {
+            const newWidth = vStartWidth + (e.clientX - vStartX);
+            if (newWidth >= 300 && newWidth <= 900) {
+                masterPanel.style.flex = `0 0 ${newWidth}px`;
+            }
+        }
+        function onVSplitterUp() {
+            document.removeEventListener('mousemove', onVSplitterMove);
+            document.removeEventListener('mouseup', onVSplitterUp);
+        }
+
         // Horizontal splitter (between tree and detail grid)
         const hSplitter = document.getElementById('hSplitter1');
         const detailGridContainer = document.getElementById('detailGridContainer');
