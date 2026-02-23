@@ -10,7 +10,6 @@
 *@
 @model dynamic
 
-
 <!-- 可沖帳之憑證選擇 -->
 <style>
   /* 隱藏 number input 的上下箭頭按鈕 */
@@ -759,6 +758,16 @@
         els['total-amount-og'].textContent = formatNumber(totalOg);
         if (els['source-count']) els['source-count'].textContent = state.sourceRows.length;
         if (els['target-count']) els['target-count'].textContent = state.targetRows.length;
+        // 根據右側是否有資料來控制確定按鈕的啟用狀態
+        if (els['btn-ok']) {
+            if (state.targetRows.length > 0) {
+                els['btn-ok'].disabled = false;
+                els['btn-ok'].classList.remove('disabled');
+            } else {
+                els['btn-ok'].disabled = true;
+                els['btn-ok'].classList.add('disabled');
+            }
+        }
     };
 
     // 加入選定
@@ -846,6 +855,9 @@
             return;
         }
 
+        // 確認後立刻顯示載入提示，涵蓋整段過程（API → 關閉 modal → refresh → 開啟沖帳明細）
+        if (window.Swal) Swal.fire({ title: '沖帳明細維護開啟中...', allowOutsideClick: false, allowEscapeKey: false, showConfirmButton: false, didOpen: () => Swal.showLoading() });
+
         try {
             const resp = await fetch('/api/StrikeSelect/Confirm', withJwtHeaders({
                 method: 'POST',
@@ -861,6 +873,7 @@
             try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
 
             if (!resp.ok || !data.ok) {
+                if (window.Swal) Swal.close();
                 await Swal.fire({ icon: 'error', title: '匯入失敗', text: data.error || `HTTP ${resp.status}` });
                 return;
             }
@@ -881,7 +894,9 @@
             if (typeof openDtl === 'function') {
                 try { await openDtl({ paperNum: state.paperNum }); } catch (e) { console.error('Auto open strike detail error:', e); }
             }
+            if (window.Swal) Swal.close();
         } catch (err) {
+            if (window.Swal) Swal.close();
             console.error('Confirm error:', err);
             await Swal.fire({ icon: 'error', title: '執行錯誤', text: err.message });
         }
@@ -1127,7 +1142,7 @@
     <div class="modal-content" style="display: flex; flex-direction: column; height: 100%;">
       <div class="modal-header" style="cursor: move; user-select: none; padding: 2px 8px;">
         <h5 class="modal-title" style="font-size: 16px;">沖帳明細維護</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <button type="button" class="btn-close" id="strike-dtl-btn-close-x" aria-label="Close"></button>
       </div>
 
       <div class="modal-body" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 4px 12px;">
@@ -1526,14 +1541,39 @@
   }
   #strike-dtl-modal .text-end { text-align: right; }
 
-  /* 統一頁籤樣式 */
+  /* 統一頁籤樣式 - 依照模板風格 */
   #strike-dtl-modal .nav-tabs {
-    border-bottom: 1px solid #dee2e6;
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-left: 2px;
     flex-shrink: 0;
   }
   #strike-dtl-modal .nav-tabs .nav-link {
-    font-size: 14px;
-    padding: 1px 12px;
+    color: #4a6fa8;
+    border: 1px solid #bccdea;
+    border-radius: 8px 8px 0 0;
+    padding: var(--tab-pad-y) var(--tab-pad-x);
+    background: #e8eff9;
+    transition: color 0.2s ease-in-out, background 0.2s ease-in-out, border-color 0.2s ease-in-out;
+    font-size: var(--field-label-size);
+    font-weight: 500;
+  }
+  #strike-dtl-modal .nav-tabs .nav-item:not(:first-child) .nav-link {
+    margin-left: -1px;
+  }
+  #strike-dtl-modal .nav-tabs .nav-link:hover {
+    background-color: #d0dcf2;
+    border-color: #adbfdf;
+    color: #3b5d92;
+  }
+  #strike-dtl-modal .nav-tabs .nav-link.active {
+    color: #1b3f8a;
+    background-color: #ffffff;
+    border-color: #7da3df;
+    box-shadow: 0 -2px 8px 0 rgba(14, 53, 95, 0.12);
+    font-weight: 700;
+    position: relative;
+    z-index: 1;
   }
 
   /* 修復 tab-content 和 tab-pane 的高度問題 */
@@ -3954,22 +3994,31 @@
             els['btn-save'].addEventListener('click', saveStrikeData);
         }
 
-        if (els['btn-cancel']) {
-            els['btn-cancel'].addEventListener('click', async () => {
-                if (confirm('確定要取消嗎？未儲存的資料將會遺失。')) {
-                    // 清除暫存資料 (APRdStrikeOtherClear)
-                    try {
-                        await fetch('/api/StrikeSelect/ClearOtherTemp', withJwtHeaders({
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ paperNum: paperNum })
-                        }));
-                    } catch (clearErr) {
-                        console.error('ClearOtherTemp error:', clearErr);
-                    }
-                    hideModal();
+        // 取消/關閉共用邏輯
+        const handleCancel = async () => {
+            if (confirm('確定要取消嗎？未儲存的資料將會遺失。')) {
+                // 清除暫存資料 (APRdStrikeOtherClear)
+                try {
+                    await fetch('/api/StrikeSelect/ClearOtherTemp', withJwtHeaders({
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ paperNum: paperNum })
+                    }));
+                } catch (clearErr) {
+                    console.error('ClearOtherTemp error:', clearErr);
                 }
-            });
+                hideModal();
+            }
+        };
+
+        if (els['btn-cancel']) {
+            els['btn-cancel'].addEventListener('click', handleCancel);
+        }
+
+        // 右上角 X 按鈕也執行取消邏輯
+        const btnCloseX = document.getElementById('strike-dtl-btn-close-x');
+        if (btnCloseX) {
+            btnCloseX.addEventListener('click', handleCancel);
         }
 
         // 現金金額變更：不再自動儲存，改由 ✓ 按鈕 (post) 手動儲存
@@ -4765,6 +4814,15 @@
     // 全域函式
     window.StrikeDetailHandler = {
         open: openStrikeDetail
+    };
+
+    // paperSearch 確認後自動開啟沖帳明細維護
+    window.__paperSearchAfterConfirm = async ({ paperNum }) => {
+        const openDtl = window.ActionRailCustomHandlers?.['PR000004']?.btnC2;
+        if (typeof openDtl === 'function') {
+            try { await openDtl({ paperNum }); } catch (e) { console.error('Auto open strike detail after paperSearch error:', e); }
+            if (window.Swal) Swal.close();
+        }
     };
 })();
 </script>
@@ -5930,6 +5988,16 @@
         });
         els['total-og'].textContent = formatNumber(totalOg);
         els['total'].textContent = formatNumber(total);
+        // 根據右側是否有資料來控制確定按鈕的啟用狀態
+        if (els['btn-ok']) {
+            if (state.targetRows.length > 0) {
+                els['btn-ok'].disabled = false;
+                els['btn-ok'].classList.remove('disabled');
+            } else {
+                els['btn-ok'].disabled = true;
+                els['btn-ok'].classList.add('disabled');
+            }
+        }
     };
 
     // 加入選定
