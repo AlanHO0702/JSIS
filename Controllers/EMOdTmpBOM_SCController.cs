@@ -406,30 +406,41 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         if (req == null || string.IsNullOrWhiteSpace(req.SourceTmpId) || string.IsNullOrWhiteSpace(req.NewTmpId))
             return BadRequest(new { ok = false, error = "SourceTmpId and NewTmpId required." });
 
-        await using var conn = new SqlConnection(_connStr);
-        await conn.OpenAsync();
-
-        await using var cmd = new SqlCommand("EMOdTmpBOMCopy", conn);
-        cmd.CommandType = CommandType.StoredProcedure;
-        cmd.CommandTimeout = 60;
-        AddParam(cmd, "@TmpId", req.SourceTmpId.Trim());
-        AddParam(cmd, "@NewTmpId", req.NewTmpId.Trim());
-
-        await using var reader = await cmd.ExecuteReaderAsync();
-        var resultStr = "";
-        if (await reader.ReadAsync())
+        try
         {
-            for (int i = 0; i < reader.FieldCount; i++)
+            await using var conn = new SqlConnection(_connStr);
+            await conn.OpenAsync();
+
+            await using var cmd = new SqlCommand("EMOdTmpBOMCopy", conn);
+            cmd.CommandType = CommandType.StoredProcedure;
+            cmd.CommandTimeout = 60;
+            AddParam(cmd, "@TmpId", req.SourceTmpId.Trim());
+            AddParam(cmd, "@NewTmpId", req.NewTmpId.Trim());
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            var resultStr = "";
+            if (await reader.ReadAsync())
             {
-                if (reader.GetName(i) == "ResultStr")
-                    resultStr = reader.IsDBNull(i) ? "" : reader.GetValue(i).ToString() ?? "";
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    if (reader.GetName(i) == "ResultStr")
+                        resultStr = reader.IsDBNull(i) ? "" : reader.GetValue(i).ToString() ?? "";
+                }
             }
+
+            if (!string.IsNullOrEmpty(resultStr))
+                return Ok(new { ok = false, error = resultStr });
+
+            return Ok(new { ok = true });
         }
-
-        if (!string.IsNullOrEmpty(resultStr))
-            return Ok(new { ok = false, error = resultStr });
-
-        return Ok(new { ok = true });
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "CopyBOM failed: {Src} -> {New}", req.SourceTmpId, req.NewTmpId);
+            var msg = ex.Number == 2627 || ex.Number == 2601
+                ? $"代碼 [{req.NewTmpId.Trim()}] 已存在，無法複製"
+                : ex.Message;
+            return Ok(new { ok = false, error = msg });
+        }
     }
 
     /// <summary>
@@ -460,5 +471,166 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
     public class UpdateUserIdRequest
     {
         public string TmpId { get; set; } = "";
+    }
+
+    // ==================== Insert / Delete Master ====================
+
+    public class InsertMasterRequest
+    {
+        public string TmpId { get; set; } = "";
+        public string Notes { get; set; } = "";
+    }
+
+    /// <summary>
+    /// 新增主檔
+    /// </summary>
+    [HttpPost("InsertMaster")]
+    public async Task<IActionResult> InsertMaster([FromBody] InsertMasterRequest req)
+    {
+        if (req == null || string.IsNullOrWhiteSpace(req.TmpId))
+            return BadRequest(new { ok = false, error = "TmpId required." });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        // 檢查是否已存在
+        await using (var chk = new SqlCommand(
+            "SELECT COUNT(*) FROM EMOdTmpBOMMas WITH (NOLOCK) WHERE TmpId = @TmpId", conn))
+        {
+            AddParam(chk, "@TmpId", req.TmpId.Trim());
+            var cnt = (int)(await chk.ExecuteScalarAsync() ?? 0);
+            if (cnt > 0)
+                return Ok(new { ok = false, error = "此代碼已存在" });
+        }
+
+        var userId = await LoadUserIdAsync(conn);
+
+        await using var cmd = new SqlCommand(
+            @"INSERT INTO EMOdTmpBOMMas (TmpId, Notes, BuildDate, UserId)
+              VALUES (@TmpId, @Notes, GETDATE(), @UserId)", conn);
+        AddParam(cmd, "@TmpId", req.TmpId.Trim());
+        AddParam(cmd, "@Notes", req.Notes?.Trim() ?? "");
+        AddParam(cmd, "@UserId", userId);
+
+        try
+        {
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (SqlException ex)
+        {
+            var msg = ex.Number == 2627 || ex.Number == 2601
+                ? $"代碼 [{req.TmpId.Trim()}] 已存在"
+                : ex.Message;
+            return Ok(new { ok = false, error = msg });
+        }
+
+        return Ok(new { ok = true });
+    }
+
+    public class DeleteMasterRequest
+    {
+        public string TmpId { get; set; } = "";
+    }
+
+    /// <summary>
+    /// 刪除主檔及其明細
+    /// </summary>
+    [HttpPost("DeleteMaster")]
+    public async Task<IActionResult> DeleteMaster([FromBody] DeleteMasterRequest req)
+    {
+        if (req == null || string.IsNullOrWhiteSpace(req.TmpId))
+            return BadRequest(new { ok = false, error = "TmpId required." });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var tran = conn.BeginTransaction();
+
+        try
+        {
+            // 先刪明細
+            await using (var delDtl = new SqlCommand(
+                "DELETE FROM EMOdTmpBOMDtl WHERE TmpId = @TmpId", conn, tran))
+            {
+                AddParam(delDtl, "@TmpId", req.TmpId.Trim());
+                await delDtl.ExecuteNonQueryAsync();
+            }
+
+            // 再刪主檔
+            await using (var delMas = new SqlCommand(
+                "DELETE FROM EMOdTmpBOMMas WHERE TmpId = @TmpId", conn, tran))
+            {
+                AddParam(delMas, "@TmpId", req.TmpId.Trim());
+                await delMas.ExecuteNonQueryAsync();
+            }
+
+            await tran.CommitAsync();
+            return Ok(new { ok = true });
+        }
+        catch (Exception ex)
+        {
+            await tran.RollbackAsync();
+            _logger.LogError(ex, "DeleteMaster failed for TmpId={TmpId}", req.TmpId);
+            return StatusCode(500, new { ok = false, error = ex.Message });
+        }
+    }
+
+    // ==================== 送審 / 退審 ====================
+
+    public class ApprovalPostRequest
+    {
+        public string TmpId { get; set; } = "";
+        public int IsPost { get; set; } // 1=送審, 0=退審
+    }
+
+    /// <summary>
+    /// 送審/退審 (透過 EMOdTmpRoutePost)
+    /// </summary>
+    [HttpPost("ApprovalPost")]
+    public async Task<IActionResult> ApprovalPost([FromBody] ApprovalPostRequest req)
+    {
+        if (req == null || string.IsNullOrWhiteSpace(req.TmpId))
+            return BadRequest(new { ok = false, error = "TmpId required." });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        var userId = await LoadUserIdAsync(conn);
+
+        try
+        {
+            await using var cmd = new SqlCommand("EMOdTmpRoutePost", conn);
+            cmd.CommandType = CommandType.StoredProcedure;
+            cmd.CommandTimeout = 30;
+            AddParam(cmd, "@TmpId", req.TmpId.Trim());
+            AddParam(cmd, "@IsPost", req.IsPost);
+            AddParam(cmd, "@Source", "EMOdTmpBOMMas");
+            AddParam(cmd, "@UserId", userId);
+
+            // SP 可能回傳結果集 (錯誤訊息等)
+            var rows = new List<Dictionary<string, object?>>();
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var row = new Dictionary<string, object?>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                rows.Add(row);
+            }
+
+            // 檢查是否有 ResultStr 欄位 (錯誤訊息)
+            if (rows.Count > 0 && rows[0].ContainsKey("ResultStr"))
+            {
+                var resultStr = rows[0]["ResultStr"]?.ToString() ?? "";
+                if (!string.IsNullOrEmpty(resultStr))
+                    return Ok(new { ok = false, error = resultStr });
+            }
+
+            return Ok(new { ok = true });
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "ApprovalPost failed for TmpId={TmpId}, IsPost={IsPost}", req.TmpId, req.IsPost);
+            return Ok(new { ok = false, error = ex.Message });
+        }
     }
 }

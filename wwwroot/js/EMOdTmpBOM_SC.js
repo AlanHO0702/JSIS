@@ -34,7 +34,14 @@
         const headers = { 'Content-Type': 'application/json' };
         if (jwtId) headers['X-JWTID'] = jwtId;
         const resp = await fetch(url, { ...options, headers: { ...headers, ...(options?.headers || {}) } });
-        if (!resp.ok) throw new Error(`API Error: ${resp.status}`);
+        if (!resp.ok) {
+            let msg = `API Error: ${resp.status}`;
+            try {
+                const body = await resp.json();
+                msg = body.error || body.title || body.message || msg;
+            } catch (_) { /* body not JSON */ }
+            throw new Error(msg);
+        }
         return resp.json();
     }
 
@@ -148,7 +155,9 @@
             td.style.textAlign = 'center';
             td.appendChild(chk);
         } else {
-            td.textContent = formatCellValue(value, dictEntry);
+            const text = formatCellValue(value, dictEntry);
+            td.textContent = text;
+            if (text) td.title = text;
         }
     }
 
@@ -397,29 +406,90 @@
     // ==================== Mode Toggle ====================
     function setMode(edit) {
         isEditMode = edit;
-        const badge = document.getElementById('modeIndicator');
+        const btn = document.getElementById('btnModeToggle');
+        const btnAdd = document.getElementById('btnAddRow');
+        const btnDel = document.getElementById('btnDelRow');
+        const sepAD = document.getElementById('sepAddDel');
         if (edit) {
-            badge.textContent = '編輯模式';
-            badge.className = 'bom-mode-badge edit';
+            btn.innerHTML = '<i class="bi bi-pencil-square"></i> 編輯模式';
+            btn.classList.add('active');
+            btnAdd.style.display = '';
+            btnDel.style.display = '';
+            sepAD.style.display = '';
         } else {
-            badge.textContent = '瀏覽模式';
-            badge.className = 'bom-mode-badge browse';
+            btn.innerHTML = '<i class="bi bi-eye"></i> 瀏覽模式';
+            btn.classList.remove('active');
+            btnAdd.style.display = 'none';
+            btnDel.style.display = 'none';
+            sepAD.style.display = 'none';
         }
     }
 
     // ==================== Toolbar Button Handlers ====================
     function initToolbar() {
-        document.getElementById('btnBrowse').addEventListener('click', () => {
-            setMode(false);
+        document.getElementById('btnModeToggle').addEventListener('click', () => {
+            setMode(!isEditMode);
         });
 
-        document.getElementById('btnUpdate').addEventListener('click', () => {
-            setMode(true);
-        });
-
+        document.getElementById('btnAddRow').addEventListener('click', handleAddRow);
+        document.getElementById('btnDelRow').addEventListener('click', handleDelRow);
         document.getElementById('btnChange').addEventListener('click', handleChange);
         document.getElementById('btnFormView').addEventListener('click', handleFormView);
         document.getElementById('btnSaveAs').addEventListener('click', handleSaveAs);
+        document.getElementById('btnApprove').addEventListener('click', () => handleApproval(1));
+        document.getElementById('btnReject').addEventListener('click', () => handleApproval(0));
+    }
+
+    // ==================== Add / Delete Master Row ====================
+    async function handleAddRow() {
+        if (!isEditMode) return;
+
+        const tmpId = prompt('請輸入新的組合模型代碼 (最多12碼):');
+        if (!tmpId || !tmpId.trim()) return;
+        const id = tmpId.trim();
+        if (id.length > 12) { alert('長度不可超過12碼'); return; }
+
+        // 檢查是否已存在
+        if (masterRows.some(r => r.TmpId === id)) {
+            alert('此代碼已存在');
+            return;
+        }
+
+        const notes = prompt('請輸入備註:') || '';
+
+        try {
+            const result = await apiPost('/api/EMOdTmpBOM_SC/InsertMaster', { tmpId: id, notes: notes.trim() });
+            if (!result.ok) {
+                alert('新增失敗: ' + (result.error || '未知錯誤'));
+                return;
+            }
+            alert('新增成功');
+            await loadMasterGrid();
+            const newRow = masterRows.find(r => r.TmpId === id);
+            if (newRow) {
+                const trs = document.querySelectorAll('#masterBody tr');
+                const idx = masterRows.indexOf(newRow);
+                if (trs[idx]) selectMasterRow(newRow, trs[idx]);
+            }
+        } catch (e) {
+            alert('新增失敗: ' + e.message);
+        }
+    }
+
+    async function handleDelRow() {
+        if (!isEditMode) return;
+        if (!selectedMasterRow) { alert('請先選擇一筆資料'); return; }
+
+        const tmpId = selectedMasterRow.TmpId;
+        if (!confirm(`確定要刪除 [${tmpId}] 嗎？`)) return;
+
+        try {
+            await apiPost('/api/EMOdTmpBOM_SC/DeleteMaster', { tmpId });
+            selectedMasterRow = null;
+            await loadMasterGrid();
+        } catch (e) {
+            alert('刪除失敗: ' + e.message);
+        }
     }
 
     async function handleChange() {
@@ -428,7 +498,7 @@
             return;
         }
         if (!selectedMasterRow) {
-            alert('請先選擇一筆範本');
+            alert('請先選擇一筆資料');
             return;
         }
 
@@ -438,7 +508,7 @@
         try {
             const chk = await apiGet(`/api/EMOdTmpBOM_SC/CheckUpdate?tmpId=${encodeURIComponent(tmpId)}`);
             if (!chk.canEdit) {
-                const msg = sysParams.activeType === '1' ? '此範本已發佈，無法異動！' : '此範本已使用，無法異動！';
+                const msg = sysParams.activeType === '1' ? '該組合模型已送審，無法異動！' : '該組合模型已使用，無法異動！';
                 alert(msg);
                 return;
             }
@@ -453,7 +523,7 @@
 
     function handleFormView() {
         if (!selectedMasterRow) {
-            alert('請先選擇一筆範本');
+            alert('請先選擇一筆資料');
             return;
         }
         bomSetReadOnly = true;
@@ -466,7 +536,7 @@
             return;
         }
         if (!selectedMasterRow) {
-            alert('請先選擇一筆範本');
+            alert('請先選擇一筆資料');
             return;
         }
 
@@ -498,6 +568,44 @@
             }
         } catch (e) {
             alert('複製失敗: ' + e.message);
+        }
+    }
+
+    // ==================== 送審 / 退審 ====================
+    async function handleApproval(isPost) {
+        if (!selectedMasterRow) {
+            alert('請先選擇一筆資料');
+            return;
+        }
+
+        const tmpId = selectedMasterRow.TmpId;
+        const action = isPost === 1 ? '送審' : '退審';
+
+        if (!confirm(`確定要將 [${tmpId}] ${action} 嗎？`)) return;
+
+        try {
+            const result = await apiPost('/api/EMOdTmpBOM_SC/ApprovalPost', {
+                tmpId: tmpId,
+                isPost: isPost
+            });
+
+            if (!result.ok) {
+                alert(`${action}失敗: ${result.error || '未知錯誤'}`);
+                return;
+            }
+
+            alert(`${action}成功`);
+            // Refresh master grid to update status
+            await loadMasterGrid();
+            // Re-select the same row
+            const row = masterRows.find(r => r.TmpId === tmpId);
+            if (row) {
+                const trs = document.querySelectorAll('#masterBody tr');
+                const idx = masterRows.indexOf(row);
+                if (trs[idx]) selectMasterRow(row, trs[idx]);
+            }
+        } catch (e) {
+            alert(`${action}失敗: ${e.message}`);
         }
     }
 
@@ -572,21 +680,21 @@
         const container = document.getElementById('pressButtonsRow');
         container.innerHTML = '';
 
-        // Column headers matching the visual grid columns
-        for (let p = 0; p < pressCount; p++) {
+        // Use same left formula as createLayerButton: left = MARGIN_LEFT + col * (COL_WIDTH + GAP)
+        for (let col = 1; col <= pressCount; col++) {
             const btn = document.createElement('button');
             btn.className = 'press-btn';
             btn.style.width = COL_WIDTH + 'px';
-            btn.style.marginLeft = p === 0 ? MARGIN_LEFT + 'px' : GAP + 'px';
+            btn.style.left = (MARGIN_LEFT + col * (COL_WIDTH + GAP)) + 'px';
 
-            if (p === 0) {
+            if (col === 1) {
                 btn.textContent = '發料';
             } else {
-                btn.textContent = `壓合${p}`;
+                btn.textContent = `壓合${col - 1}`;
             }
 
-            btn.setAttribute('data-press-index', p);
-            btn.addEventListener('click', () => handlePressClick(p));
+            btn.setAttribute('data-press-index', col);
+            btn.addEventListener('click', () => handlePressClick(col));
             container.appendChild(btn);
         }
     }
@@ -660,7 +768,9 @@
     function updateLayerEditorHeight() {
         const area = document.getElementById('layerEditorArea');
         const totalHeight = MARGIN_TOP + layerCount * (ROW_HEIGHT + GAP) + 20;
+        const totalWidth = MARGIN_LEFT + (pressCount + 1) * (COL_WIDTH + GAP) + 20;
         area.style.minHeight = Math.max(totalHeight, 400) + 'px';
+        area.style.minWidth = Math.max(totalWidth, 300) + 'px';
     }
 
     function toggleLayerSelection(layerData) {
@@ -679,7 +789,7 @@
 
     function handlePressClick(pressIndex) {
         if (bomSetReadOnly) return;
-        if (pressIndex === 0) return; // cannot combine into "issue materials" column
+        if (pressIndex === 0) return; // col 0 is base layers, not clickable
 
         // Find all selected buttons from previous columns (col < pressIndex)
         const selected = layerButtons.filter(b =>
@@ -853,6 +963,7 @@
             if (bomSetReadOnly) return;
             pressCount = parseInt(e.target.value) || 6;
             buildPressButtons();
+            updateLayerEditorHeight();
         });
     }
 
@@ -862,6 +973,7 @@
         area.innerHTML = '';
         layerButtons = [];
         selectedLayerBtn = null;
+        buildPressButtons();
         buildLayerGrid();
     }
 
