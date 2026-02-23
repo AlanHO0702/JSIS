@@ -228,6 +228,70 @@ order by SubSystemId;", conn))
         }
     }
 
+    [HttpGet("show-system")]
+    public async Task<IActionResult> ShowSystem([FromQuery] string companyId)
+    {
+        companyId = (companyId ?? string.Empty).Trim();
+        if (companyId.Length == 0)
+            return BadRequest(new { success = false, message = "companyId is required." });
+
+        try
+        {
+            await using var conn = new SqlConnection(GetConnStr());
+            await conn.OpenAsync();
+
+            var result = new ShowSystemDto { CompanyId = companyId };
+
+            await using (var cmd = new SqlCommand(@"
+select top 1 CompanyId, CompanyName, ShortName
+from AJNdCompany with(nolock)
+where CompanyId = @CompanyId;", conn))
+            {
+                cmd.Parameters.Add(new SqlParameter("@CompanyId", SqlDbType.VarChar, 16) { Value = companyId });
+                await using var rd = await cmd.ExecuteReaderAsync();
+                if (await rd.ReadAsync())
+                {
+                    result.CompanyId = rd["CompanyId"]?.ToString() ?? companyId;
+                    result.CompanyName = rd["CompanyName"]?.ToString() ?? string.Empty;
+                    result.ShortName = rd["ShortName"]?.ToString() ?? string.Empty;
+                }
+            }
+
+            await using (var cmd = new SqlCommand("exec CCSdShowSystem @CompanyId", conn))
+            {
+                cmd.Parameters.Add(new SqlParameter("@CompanyId", SqlDbType.VarChar, 16) { Value = companyId });
+                await using var rd = await cmd.ExecuteReaderAsync();
+                if (await rd.ReadAsync())
+                {
+                    result.Sys_1 = GetInt(rd, "Sys_1");
+                    result.Sys_2 = GetInt(rd, "Sys_2");
+                    result.Sys_3 = GetInt(rd, "Sys_3");
+                    result.Sys_4 = GetInt(rd, "Sys_4");
+                    result.Sys_5 = GetInt(rd, "Sys_5");
+                    result.Sys_6 = GetInt(rd, "Sys_6");
+                    result.Sys_7 = GetInt(rd, "Sys_7");
+                    result.Sys_8 = GetInt(rd, "Sys_8");
+                    result.Sys_9 = GetInt(rd, "Sys_9");
+                }
+            }
+
+            await using (var cmd = new SqlCommand(@"
+select top 1 1
+from AJNdCompanySystem with(nolock)
+where SystemId = 9;", conn))
+            {
+                result.HasSystem9 = (await cmd.ExecuteScalarAsync()) != null;
+            }
+
+            return Ok(new { success = true, data = result });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "CCSCompanyAdd show-system failed for {CompanyId}", companyId);
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
     [HttpPost("add")]
     public async Task<IActionResult> Add([FromBody] AddCompanyRequest req)
     {
@@ -413,6 +477,20 @@ where CompanyId = @CompanyId
         return cs;
     }
 
+    private static int GetInt(SqlDataReader rd, string fieldName)
+    {
+        try
+        {
+            var v = rd[fieldName];
+            if (v == null || v == DBNull.Value) return 0;
+            return Convert.ToInt32(v);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     private sealed class ItemContext
     {
         public string ItemId { get; set; } = string.Empty;
@@ -438,6 +516,23 @@ where CompanyId = @CompanyId
     {
         public string UserId { get; set; } = string.Empty;
         public string UserName { get; set; } = string.Empty;
+    }
+
+    private sealed class ShowSystemDto
+    {
+        public string CompanyId { get; set; } = string.Empty;
+        public string CompanyName { get; set; } = string.Empty;
+        public string ShortName { get; set; } = string.Empty;
+        public int Sys_1 { get; set; }
+        public int Sys_2 { get; set; }
+        public int Sys_3 { get; set; }
+        public int Sys_4 { get; set; }
+        public int Sys_5 { get; set; }
+        public int Sys_6 { get; set; }
+        public int Sys_7 { get; set; }
+        public int Sys_8 { get; set; }
+        public int Sys_9 { get; set; }
+        public bool HasSystem9 { get; set; }
     }
 
     public sealed class AddCompanyRequest
