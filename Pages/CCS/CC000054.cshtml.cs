@@ -108,7 +108,9 @@ namespace PcbErpApi.Pages.CCS
             PageNumber = pageIndex <= 0 ? 1 : pageIndex;
             PageSize = pageSize <= 0 ? 50 : pageSize;
 
-            CanAdd = CanAddOrDelete(PowerType) && GetFlag(item.BtnAdd, true);
+            var canUpdateByFlag = GetFlag(item.BtnUpdate, true);
+            var canAddByFlag = GetFlag(item.BtnAdd, true) || canUpdateByFlag;
+            CanAdd = CanAddOrDelete(PowerType) && canAddByFlag;
             var canDeleteByFlag = GetFlag(item.BtnDelete, true) || GetFlag(item.BtnVoid, true);
             CanDelete = CanAddOrDelete(PowerType) && canDeleteByFlag;
             CanReview = GetFlag(item.BtnExam, false);
@@ -336,8 +338,13 @@ namespace PcbErpApi.Pages.CCS
 
         private HtmlString BuildCustomButtonsHtml()
         {
-            const string btn = "<button type='button' class='btn btn-outline-secondary btn-sm' data-custom-btn='1' data-button-name='openDetail'>明細</button>";
-            return new HtmlString(btn);
+            var parts = new List<string>();
+            if (CanAdd)
+            {
+                parts.Add("<button type='button' class='btn toolbar-btn' id='btnAddCustomer'><i class='bi bi-plus-lg'></i>新增</button>");
+            }
+            parts.Add("<button type='button' class='btn btn-outline-secondary btn-sm' data-custom-btn='1' data-button-name='openDetail'>明細</button>");
+            return new HtmlString(string.Join("", parts));
         }
 
         private static Dictionary<string, bool> BuildToolbarButtonVisibility(dynamic item)
@@ -549,6 +556,7 @@ SELECT FieldName, DisplaySize
                 ?? new Dictionary<string, CURdTableField>(StringComparer.OrdinalIgnoreCase);
 
             var parts = new List<string>();
+            AppendCompanySelectFilter(parts, query, parameters, SystemId);
             foreach (var kv in query)
             {
                 var key = kv.Key ?? string.Empty;
@@ -561,6 +569,7 @@ SELECT FieldName, DisplaySize
                 if (key.Equals("sortDir", StringComparison.OrdinalIgnoreCase)) continue;
                 if (key.Equals("handler", StringComparison.OrdinalIgnoreCase)) continue;
                 if (key.Equals("_sgall", StringComparison.OrdinalIgnoreCase)) continue;
+                if (key.StartsWith("cs_", StringComparison.OrdinalIgnoreCase)) continue;
                 if (key.StartsWith("_", StringComparison.OrdinalIgnoreCase)) continue;
                 if (!dict.TryGetValue(key, out var f)) continue;
 
@@ -585,6 +594,89 @@ SELECT FieldName, DisplaySize
             return "WHERE " + string.Join(" AND ", parts);
         }
 
+        private static void AppendCompanySelectFilter(List<string> parts, IQueryCollection query, List<SqlParameter> parameters, int systemId)
+        {
+            static string Get(IQueryCollection q, string key) => (q[key].ToString() ?? string.Empty).Trim();
+            static void AddLike(List<string> p, List<SqlParameter> ps, string field, string value)
+            {
+                if (string.IsNullOrWhiteSpace(value)) return;
+                var pn = $"@p{ps.Count}";
+                p.Add($"t0.[{field}] LIKE {pn}");
+                ps.Add(new SqlParameter(pn, $"%{value}%"));
+            }
+
+            var companyLike = Get(query, "cs_companyLike");
+            if (!string.IsNullOrWhiteSpace(companyLike))
+            {
+                var pn = $"@p{parameters.Count}";
+                parts.Add($"t0.[CompanyId] LIKE {pn}");
+                parameters.Add(new SqlParameter(pn, $"%{companyLike}%"));
+            }
+
+            var companyStart = Get(query, "cs_companyStart");
+            if (!string.IsNullOrWhiteSpace(companyStart))
+            {
+                var pn = $"@p{parameters.Count}";
+                parts.Add($"t0.[CompanyId] >= {pn}");
+                parameters.Add(new SqlParameter(pn, companyStart));
+            }
+
+            var companyEnd = Get(query, "cs_companyEnd");
+            if (!string.IsNullOrWhiteSpace(companyEnd))
+            {
+                var pn = $"@p{parameters.Count}";
+                parts.Add($"t0.[CompanyId] <= {pn}");
+                parameters.Add(new SqlParameter(pn, companyEnd));
+            }
+
+            AddLike(parts, parameters, "ShortName", Get(query, "cs_shortName"));
+            AddLike(parts, parameters, "UniFormId", Get(query, "cs_uniFormId"));
+            AddLike(parts, parameters, "CompanyName", Get(query, "cs_companyName"));
+            AddLike(parts, parameters, "CompanyAddr", Get(query, "cs_companyAddr"));
+            AddLike(parts, parameters, "BnsItem", Get(query, "cs_bnsItem"));
+
+            var phone = Get(query, "cs_phone");
+            if (!string.IsNullOrWhiteSpace(phone))
+            {
+                var cond = Get(query, "cs_phoneCond");
+                var pn = $"@p{parameters.Count}";
+                var keyword = string.Equals(cond, "1", StringComparison.OrdinalIgnoreCase)
+                    ? $"%{phone}%"
+                    : $"{phone}%";
+                parts.Add($"(t0.[Phone1] LIKE {pn} OR t0.[Phone2] LIKE {pn})");
+                parameters.Add(new SqlParameter(pn, keyword));
+            }
+
+            var fax = Get(query, "cs_fax");
+            if (!string.IsNullOrWhiteSpace(fax))
+            {
+                var cond = Get(query, "cs_faxCond");
+                var pn = $"@p{parameters.Count}";
+                var keyword = string.Equals(cond, "1", StringComparison.OrdinalIgnoreCase)
+                    ? $"%{fax}%"
+                    : $"{fax}%";
+                parts.Add($"(t0.[Fax1] LIKE {pn} OR t0.[Fax2] LIKE {pn})");
+                parameters.Add(new SqlParameter(pn, keyword));
+            }
+
+            var subClass = Get(query, "cs_subClass");
+            if (!string.IsNullOrWhiteSpace(subClass) && systemId >= 1 && systemId <= 9)
+            {
+                var field = $"CustomerSubClass{systemId}";
+                var pn = $"@p{parameters.Count}";
+                parts.Add($"t0.[{field}] = {pn}");
+                parameters.Add(new SqlParameter(pn, subClass));
+            }
+
+            var salesId = Get(query, "cs_salesId");
+            if (!string.IsNullOrWhiteSpace(salesId))
+            {
+                var pn = $"@p{parameters.Count}";
+                parts.Add($"t0.[SalesId] = {pn}");
+                parameters.Add(new SqlParameter(pn, salesId));
+            }
+        }
+
         private static bool HasQueryParams(IQueryCollection query, IEnumerable<CURdTableField> fields)
         {
             var validFields = fields?
@@ -598,6 +690,11 @@ SELECT FieldName, DisplaySize
                 var key = kv.Key ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(key)) continue;
                 if (IsControlQueryKey(key)) continue;
+                if (key.StartsWith("cs_", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!string.IsNullOrWhiteSpace(kv.Value.ToString())) return true;
+                    continue;
+                }
                 if (!validFields.Contains(key)) continue;
                 if (!string.IsNullOrWhiteSpace(kv.Value.ToString())) return true;
             }
@@ -736,3 +833,4 @@ SELECT FieldName, DisplaySize
         }
     }
 }
+
