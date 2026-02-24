@@ -214,8 +214,12 @@ namespace PcbErpApi.Pages.CCS
             ViewData["SortDir"] = sortDir ?? string.Empty;
             ViewData["QueryFields"] = QueryFields;
             ViewData["QueryStringRaw"] = Request.QueryString.Value ?? string.Empty;
-            ViewData["CustomButtons"] = BuildCustomButtonsHtml();
+            var customButtons = await LoadCustomButtonsAsync(ItemId);
+            ViewData["CustomButtonMeta"] = customButtons;
+            ViewData["CustomButtons"] = BuildCustomButtonsHtml(customButtons);
             ViewData["ToolbarButtonVisibility"] = BuildToolbarButtonVisibility(item);
+            ViewData["EnableRowDelete"] = false;
+            ViewData["AllowDeleteInView"] = false;
             ViewData["CCSCanAdd"] = CanAdd;
             ViewData["CCSCanDelete"] = CanDelete;
             ViewData["CCSCanReview"] = CanReview;
@@ -336,14 +340,35 @@ namespace PcbErpApi.Pages.CCS
             }
         }
 
-        private HtmlString BuildCustomButtonsHtml()
+        private HtmlString BuildCustomButtonsHtml(IEnumerable<CustomButtonRow> rows)
         {
             var parts = new List<string>();
             if (CanAdd)
             {
                 parts.Add("<button type='button' class='btn toolbar-btn' id='btnAddCustomer'><i class='bi bi-plus-lg'></i>新增</button>");
             }
-            parts.Add("<button type='button' class='btn btn-outline-secondary btn-sm' data-custom-btn='1' data-button-name='openDetail'>明細</button>");
+            parts.Add("<button type='button' class='btn toolbar-btn' data-custom-btn='1' data-button-name='deletePaper'><i class='bi bi-trash3'></i>刪除</button>");
+            parts.Add("<button type='button' class='btn toolbar-btn' data-custom-btn='1' data-button-name='rejectPaper'><i class='bi bi-arrow-counterclockwise'></i>撤除</button>");
+            parts.Add("<button type='button' class='btn toolbar-btn' data-custom-btn='1' data-button-name='showLog'><i class='bi bi-clock-history'></i>記錄</button>");
+            parts.Add("<button type='button' class='btn toolbar-btn' data-custom-btn='1' data-button-name='showSystem'><i class='bi bi-person-badge'></i>檢視身分</button>");
+            parts.Add("<button type='button' class='btn toolbar-btn' data-custom-btn='1' data-button-name='openDetail'><i class='bi bi-list-ul'></i>明細</button>");
+            foreach (var b in rows ?? Enumerable.Empty<CustomButtonRow>())
+            {
+                if ((b.bVisible ?? 1) == 0) continue;
+                var btnName = b.ButtonName ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(btnName)) continue;
+                if (string.Equals(btnName, "btnC1", StringComparison.OrdinalIgnoreCase)) continue;
+                if (string.Equals(btnName, "showSystem", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(btnName, "openDetail", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(btnName, "deletePaper", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(btnName, "rejectPaper", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(btnName, "showLog", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var caption = string.IsNullOrWhiteSpace(b.CustCaption) ? btnName : b.CustCaption;
+                if (caption.Contains("檢查統編", StringComparison.OrdinalIgnoreCase)) continue;
+                var hint = b.CustHint ?? string.Empty;
+                parts.Add($"<button type='button' class='btn toolbar-btn' data-custom-btn='1' data-button-name='{System.Net.WebUtility.HtmlEncode(btnName)}' title='{System.Net.WebUtility.HtmlEncode(hint)}'>{System.Net.WebUtility.HtmlEncode(caption)}</button>");
+            }
             return new HtmlString(string.Join("", parts));
         }
 
@@ -353,9 +378,97 @@ namespace PcbErpApi.Pages.CCS
             {
                 ["btnInq"] = GetFlag(item?.BtnInq, true),
                 ["btnToExcel"] = GetFlag(item?.BtnToExcel, true),
-                ["btnUpdate"] = GetFlag(item?.BtnUpdate, true)
+                ["btnUpdate"] = true
             };
             return map;
+        }
+
+        private async Task<List<CustomButtonRow>> LoadCustomButtonsAsync(string itemId)
+        {
+            var list = new List<CustomButtonRow>();
+            if (string.IsNullOrWhiteSpace(itemId)) return list;
+
+            var cs = GetConnStr();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+            const string sql = @"
+SELECT *
+  FROM CURdOCXItemCustButton WITH (NOLOCK)
+ WHERE ItemId = @itemId
+ ORDER BY SerialNum, ButtonName;";
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@itemId", itemId);
+            await using var rd = await cmd.ExecuteReaderAsync();
+
+            var cols = Enumerable.Range(0, rd.FieldCount)
+                .ToDictionary(i => rd.GetName(i), i => i, StringComparer.OrdinalIgnoreCase);
+            string S(string name) => cols.TryGetValue(name, out var i) && !rd.IsDBNull(i) ? rd.GetValue(i)?.ToString() ?? string.Empty : string.Empty;
+            int? I(string name)
+            {
+                if (!cols.TryGetValue(name, out var i) || rd.IsDBNull(i)) return null;
+                return int.TryParse(rd.GetValue(i)?.ToString(), out var n) ? n : null;
+            }
+
+            while (await rd.ReadAsync())
+            {
+                list.Add(new CustomButtonRow
+                {
+                    ItemId = S("ItemId"),
+                    SerialNum = I("SerialNum"),
+                    ButtonName = S("ButtonName"),
+                    CustCaption = S("CustCaption"),
+                    CustHint = S("CustHint"),
+                    OCXName = S("OCXName"),
+                    CoClassName = S("CoClassName"),
+                    SpName = S("SpName"),
+                    ExecSpName = S("ExecSpName"),
+                    SearchTemplate = S("SearchTemplate"),
+                    MultiSelectDD = S("MultiSelectDD"),
+                    ReplaceExists = I("ReplaceExists"),
+                    DialogCaption = S("DialogCaption"),
+                    AllowSelCount = I("AllowSelCount"),
+                    bVisible = I("bVisible"),
+                    ChkCanUpdate = I("ChkCanUpdate"),
+                    bNeedNum = I("bNeedNum"),
+                    bNeedInEdit = I("bNeedInEdit"),
+                    ChkStatus = I("ChkStatus"),
+                    bSpHasResult = I("bSpHasResult"),
+                    IsUpdateMoney = I("IsUpdateMoney"),
+                    iNeedConfirmBefExec = I("iNeedConfirmBefExec"),
+                    sConfirmBefExec = S("sConfirmBefExec"),
+                    DesignType = I("DesignType")
+                });
+            }
+
+            return list;
+        }
+
+        private sealed class CustomButtonRow
+        {
+            public string ItemId { get; set; } = string.Empty;
+            public int? SerialNum { get; set; }
+            public string ButtonName { get; set; } = string.Empty;
+            public string CustCaption { get; set; } = string.Empty;
+            public string CustHint { get; set; } = string.Empty;
+            public string OCXName { get; set; } = string.Empty;
+            public string CoClassName { get; set; } = string.Empty;
+            public string SpName { get; set; } = string.Empty;
+            public string ExecSpName { get; set; } = string.Empty;
+            public string SearchTemplate { get; set; } = string.Empty;
+            public string MultiSelectDD { get; set; } = string.Empty;
+            public int? ReplaceExists { get; set; }
+            public string DialogCaption { get; set; } = string.Empty;
+            public int? AllowSelCount { get; set; }
+            public int? bVisible { get; set; }
+            public int? ChkCanUpdate { get; set; }
+            public int? bNeedNum { get; set; }
+            public int? bNeedInEdit { get; set; }
+            public int? ChkStatus { get; set; }
+            public int? bSpHasResult { get; set; }
+            public int? IsUpdateMoney { get; set; }
+            public int? iNeedConfirmBefExec { get; set; }
+            public string sConfirmBefExec { get; set; } = string.Empty;
+            public int? DesignType { get; set; }
         }
 
         private static bool GetFlag(int? flag, bool defaultValue)

@@ -26,6 +26,9 @@
     var enableRowDelete = (ViewData["EnableRowDelete"] as bool?)
         ?? (string.Equals(ViewData["EnableRowDelete"]?.ToString(), "true", StringComparison.OrdinalIgnoreCase)
             || string.Equals(ViewData["EnableRowDelete"]?.ToString(), "1", StringComparison.OrdinalIgnoreCase));
+    var allowDeleteInView = (ViewData["AllowDeleteInView"] as bool?)
+        ?? (string.Equals(ViewData["AllowDeleteInView"]?.ToString(), "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(ViewData["AllowDeleteInView"]?.ToString(), "1", StringComparison.OrdinalIgnoreCase));
     var ocxLookupsRaw = ViewData["OCXLookups"] as IEnumerable<dynamic>;
     var ocxLookupPayload = ocxLookupsRaw?.ToDictionary(
         k => ((string)k.FieldName).ToLowerInvariant(),
@@ -318,6 +321,47 @@
   .count-line {
     text-align: center;
   }
+  .singlegrid-toolbar .toolbar-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #fff;
+    color: #1d2b4f;
+    border: 1px solid #cfd7e6;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    height: 36px;
+    min-height: 36px;
+    padding: 0 10px;
+    box-shadow: none;
+    text-decoration: none;
+    transition: background .18s, transform .11s, border-color .18s;
+  }
+  .singlegrid-toolbar .toolbar-btn:hover,
+  .singlegrid-toolbar .toolbar-btn:focus {
+    transform: translateY(-1px) scale(1.02);
+    color: #1d2b4f;
+    background: #f8fbff;
+    border-color: #b9c8de;
+  }
+  .singlegrid-toolbar .toolbar-btn:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .singlegrid-toolbar .toolbar-btn-icon {
+    justify-content: center;
+    width: 30px;
+    padding: 0;
+    border-radius: 8px;
+    font-size: 16px;
+    line-height: 1;
+  }
+  .singlegrid-toolbar .toolbar-btn-add { color: #118a3f; border-color: #9fd6b3; }
+  .singlegrid-toolbar .toolbar-btn-del { color: #cc3a3a; border-color: #efb3b3; }
+  .singlegrid-toolbar .toolbar-btn-check { color: #1d62d8; border-color: #abc4f8; }
+  .singlegrid-toolbar .toolbar-btn-cancel { color: #6b7280; border-color: #d1d5db; }
 </style>
 
 <div class="table-wrapper">
@@ -547,7 +591,7 @@
   .top-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%;margin-bottom:0;border-radius:10px;background:#f6f7f9;border:1px solid #d8dee8;padding:4px 8px;box-shadow:0 1px 2px rgba(20,40,80,0.06)}
   .singlegrid-toolbar{--top-toolbar-icon-font-size: 20px;}
   .top-toolbar .toolbar-icon-row{display:flex;gap:4px;align-items:center}
-  .top-toolbar .toolbar-main{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;flex:0 1 auto;min-width:0}
+  .top-toolbar .toolbar-main{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;flex:1 1 auto;min-width:0}
   .toolbar-custom-right{display:flex;align-items:center;justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-left:0}
   .toolbar-btn{display:flex;align-items:center;gap:4px;background:#fff;color:#2a4a7a;border:1px solid #b9c7de;border-radius:11px;font-size:var(--top-toolbar-font-size);font-weight:500;padding:5px 10px;box-shadow:none;transition:background .18s, transform .11s, border-color .18s, color .18s;cursor:pointer}
   .toolbar-btn:hover,.toolbar-btn:focus{background:#eef3fb;border-color:#9fb2d2;transform:translateY(-1px) scale(1.02)}
@@ -672,7 +716,7 @@
       if (sgCancel) sgCancel.disabled = !editing || !isDirty;
       if (sgDelete) {
         const locked = sgDelete.dataset.lock === "1";
-        sgDelete.disabled = !editing || locked;
+        sgDelete.disabled = (!editing && !@((allowDeleteInView ? "true" : "false"))) || locked;
       }
       if (sgFirst) sgFirst.disabled = false;
       if (sgPrev) sgPrev.disabled = false;
@@ -1632,6 +1676,57 @@
       const tr = ev.target.closest("tbody tr");
       if (!tr) return;
       selectRow(tr);
+    });
+    table.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Delete") return;
+      const el = ev.target;
+      if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) return;
+      if (!el.classList.contains("cell-edit")) return;
+      if (el.readOnly || el.disabled) return;
+      ev.preventDefault();
+      if (el instanceof HTMLSelectElement) {
+        if (![...el.options].some(o => o.value === "")) {
+          const empty = document.createElement("option");
+          empty.value = "";
+          empty.textContent = "";
+          el.insertBefore(empty, el.firstChild);
+        }
+        el.value = "";
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return;
+      }
+      if (el instanceof HTMLInputElement && el.type === "checkbox") {
+        el.checked = false;
+        return;
+      }
+      el.value = "";
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    table.addEventListener("dblclick", (ev) => {
+      if (isEdit) return;
+      const tr = ev.target.closest("tbody tr");
+      if (!tr) return;
+      const target = ev.target;
+      if (target && target.closest && target.closest("input,textarea,select,button,a,label")) return;
+      selectRow(tr);
+      const handler = resolveCustomHandler("openDetail");
+      if (typeof handler !== "function") return;
+      ev.preventDefault();
+      const ctx = {
+        buttonName: "openDetail",
+        itemId: window._singleItemId || "",
+        tableName: window._singleRealTable || window._dictTableName || table?.dataset?.dictTable || "",
+        meta: findButtonMeta("openDetail"),
+        selectedRow: readRowData(window.SELECTED_ROW)
+      };
+      try {
+        handler(ctx);
+      } catch (err) {
+        console.error("double-click openDetail failed", err);
+        alert(`執行失敗: ${err?.message || err}`);
+      }
     });
 
     applyLookupToTable();
