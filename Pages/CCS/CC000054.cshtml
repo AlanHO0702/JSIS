@@ -104,6 +104,46 @@
     </div>
   </div>
 </div>
+<div class="modal fade" id="showSystemModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">檢視身分</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-2 mb-2">
+          <div class="col-12">
+            <label class="form-label mb-1">公司代碼</label>
+            <input id="ssCompanyId" class="form-control form-control-sm" readonly />
+          </div>
+          <div class="col-12">
+            <label class="form-label mb-1">簡稱</label>
+            <input id="ssShortName" class="form-control form-control-sm" readonly />
+          </div>
+          <div class="col-12">
+            <label class="form-label mb-1">公司名稱</label>
+            <input id="ssCompanyName" class="form-control form-control-sm" readonly />
+          </div>
+        </div>
+        <div class="ss-check-grid">
+          <label><input type="checkbox" id="ssSys1" disabled /> 銷售客戶</label>
+          <label><input type="checkbox" id="ssSys2" disabled /> 供應商</label>
+          <label><input type="checkbox" id="ssSys3" disabled /> 製程委外廠商</label>
+          <label><input type="checkbox" id="ssSys4" disabled /> 製令委外廠商</label>
+          <label><input type="checkbox" id="ssSys5" disabled /> 進出口廠商</label>
+          <label><input type="checkbox" id="ssSys6" disabled /> 其他廠商</label>
+          <label><input type="checkbox" id="ssSys7" disabled /> 經銷商</label>
+          <label id="ssSys8Row" class="d-none"><input type="checkbox" id="ssSys8" disabled /> 廢棄物廠商</label>
+          <label id="ssSys9Row"><input type="checkbox" id="ssSys9" disabled /> 未成交客戶</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" data-bs-dismiss="modal">確定</button>
+      </div>
+    </div>
+  </div>
+</div>
 @if (!string.IsNullOrWhiteSpace(Model.DictTableName))
 {
     <script>window._dictTableName = '@Model.DictTableName';</script>
@@ -381,6 +421,45 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   };
 
+  const initOuterToolbarButtons = () => {
+    const toolbarMainGroup = document.querySelector('.toolbar-main .d-flex.gap-2');
+    if (!toolbarMainGroup) return;
+    const bars = Array.from(document.querySelectorAll('#customButtonBarBottom'));
+    const allBtns = [];
+    bars.forEach(bar => {
+      bar.querySelectorAll('button[data-custom-btn]').forEach(btn => allBtns.push(btn));
+    });
+    const byName = (name) => allBtns.find(b => ((b.dataset.buttonName || '').toLowerCase() === name.toLowerCase())) || null;
+    const btnDetail = byName('openDetail');
+    const btnQuery = document.getElementById('btnOpenQuery');
+    const btnShowSystem = byName('showSystem');
+    const btnAdd = document.getElementById('btnAddCustomer');
+    const btnDelete = byName('deletePaper');
+    const btnEdit = document.getElementById('btnEditToggle');
+    const btnLog = byName('showLog');
+    const btnReject = byName('rejectPaper');
+    const ordered = [btnDetail, btnQuery, btnShowSystem, btnAdd, btnDelete, btnEdit, btnLog, btnReject].filter(Boolean);
+
+    ordered.forEach(btn => {
+      btn.classList.add('toolbar-btn');
+      btn.classList.remove('btn-sm', 'singlegrid-custom-btn');
+      if (btn.parentElement !== toolbarMainGroup) toolbarMainGroup.appendChild(btn);
+      else toolbarMainGroup.appendChild(btn);
+    });
+    bars.forEach(bar => bar.classList.add('d-none'));
+    const excelBtn = document.getElementById('btnExportExcel');
+    if (excelBtn) excelBtn.classList.add('d-none');
+    if (btnEdit) {
+      btnEdit.classList.remove('d-none');
+      btnEdit.innerHTML = '<i class="bi bi-pencil-square"></i>修改';
+      btnEdit.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+        alert('外頁不可直接修改，請先進入明細頁再按修改。');
+      }, true);
+    }
+  };
+
   const initCompanySelectQuery = () => {
     const queryModalEl = document.getElementById('cc000054QueryModal');
     const queryModal = queryModalEl && window.bootstrap ? bootstrap.Modal.getOrCreateInstance(queryModalEl) : null;
@@ -530,7 +609,7 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       e.stopImmediatePropagation();
       try {
-        if (!loaded) await loadQueryInit();
+        if (!loaded || (qSubClass && qSubClass.options.length <= 1)) await loadQueryInit();
         applyQueryToModal();
         queryModal?.show();
       } catch (err) {
@@ -567,11 +646,175 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   initAddButton();
+  initOuterToolbarButtons();
   initCompanySelectQuery();
 });
 </script>
 <script>
   window.SingleGridCustomHandlers = window.SingleGridCustomHandlers || {};
+  const withJwtHeaders = (init = {}) => {
+    const jwt = localStorage.getItem("jwtId");
+    const headers = Object.assign({}, init.headers || {});
+    if (jwt) headers["X-JWTID"] = jwt;
+    return { ...init, headers };
+  };
+  const fetchJsonWithTimeout = async (url, timeoutMs = 6000) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const resp = await fetch(url, withJwtHeaders({ signal: ctrl.signal }));
+      const json = await resp.json().catch(() => ({}));
+      return { ok: resp.ok && json?.ok !== false, json, status: resp.status };
+    } catch (err) {
+      return { ok: false, json: { error: String(err) }, status: 0 };
+    } finally {
+      clearTimeout(t);
+    }
+  };
+  window.SingleGridCustomHandlers.rejectPaper = async function(ctx) {
+    const row = (ctx && ctx.selectedRow) || {};
+    const keys = Object.keys(row || {});
+    const idKey = keys.find(k => String(k).toLowerCase() === 'companyid');
+    const paperNum = idKey ? String(row[idKey] || '').trim() : '';
+    if (!paperNum) {
+      alert('請先選取一筆資料');
+      return;
+    }
+    if (!confirm(`確定要撤除：${paperNum} ?`)) return;
+
+    const payload = {
+      paperId: (window._singleRealTable || 'AJNdCompany').toString(),
+      paperNum,
+      itemId: (window._singleItemId || 'CC000054').toString(),
+      userId: (window._userId || localStorage.getItem('erpLoginUserId') || 'admin').toString(),
+      useId: (window._useId || 'A001').toString(),
+      rejectNotes: ''
+    };
+    try {
+      const resp = await fetch('/api/PaperAction/RejectForEdit', withJwtHeaders({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }));
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(json?.message || resp.statusText || '撤除失敗');
+      alert(json?.message || '撤除完成');
+    } catch (err) {
+      alert('撤除失敗：' + err);
+    }
+  };
+  window.SingleGridCustomHandlers.deletePaper = async function(ctx) {
+    const row = (ctx && ctx.selectedRow) || {};
+    const keys = Object.keys(row || {});
+    const idKey = keys.find(k => String(k).toLowerCase() === 'companyid');
+    const paperNum = idKey ? String(row[idKey] || '').trim() : '';
+    if (!paperNum) {
+      alert('請先選取一筆資料');
+      return;
+    }
+    if (!confirm(`確定要刪除：${paperNum} ?`)) return;
+
+    const payload = {
+      paperId: (window._singleRealTable || 'AJNdCompany').toString(),
+      paperNum,
+      itemId: (window._singleItemId || 'CC000054').toString(),
+      userId: (window._userId || localStorage.getItem('erpLoginUserId') || 'admin').toString(),
+      useId: (window._useId || 'A001').toString(),
+      eoc: 0,
+      aftFinished: 2
+    };
+    try {
+      const resp = await fetch('/api/PaperAction/DoAction', withJwtHeaders({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }));
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(json?.message || resp.statusText || '刪除失敗');
+      alert(json?.message || '刪除完成');
+      location.reload();
+    } catch (err) {
+      alert('刪除失敗：' + err);
+    }
+  };
+  window.SingleGridCustomHandlers.showLog = async function(ctx) {
+    const row = (ctx && ctx.selectedRow) || {};
+    const keys = Object.keys(row || {});
+    const idKey = keys.find(k => String(k).toLowerCase() === 'companyid');
+    const paperNum = idKey ? String(row[idKey] || '').trim() : '';
+    if (!paperNum) {
+      alert('請先選取一筆資料');
+      return;
+    }
+    if (typeof window.openCcsUpdateLog === 'function') {
+      await window.openCcsUpdateLog({
+        paperId: (window._singleRealTable || 'AJNdCompany').toString(),
+        paperNum,
+        itemId: (window._singleItemId || 'CC000054').toString()
+      });
+      return;
+    }
+    alert('記錄視窗尚未載入');
+  };
+  window.SingleGridCustomHandlers.showSystem = async function(ctx) {
+    const row = (ctx && ctx.selectedRow) || {};
+    const keys = Object.keys(row || {});
+    const idKey = keys.find(k => String(k).toLowerCase() === 'companyid');
+    const cid = idKey ? String(row[idKey] || '').trim() : '';
+    if (!cid) {
+      alert('請先選取一筆資料');
+      return;
+    }
+
+    const modalEl = document.getElementById('showSystemModal');
+    const modal = modalEl && window.bootstrap ? bootstrap.Modal.getOrCreateInstance(modalEl) : null;
+    if (!modalEl || !modal) return;
+
+    const setChecked = (id, value) => {
+      const el = document.getElementById(id);
+      if (el) el.checked = Number(value || 0) === 1;
+    };
+    const setVal = (id, value) => {
+      const el = document.getElementById(id);
+      if (el) el.value = value || '';
+    };
+
+    setVal('ssCompanyId', cid);
+    setVal('ssShortName', '');
+    setVal('ssCompanyName', '');
+    ['ssSys1','ssSys2','ssSys3','ssSys4','ssSys5','ssSys6','ssSys7','ssSys8','ssSys9'].forEach(id => setChecked(id, 0));
+
+    try {
+      const resp = await fetch(`/api/CCSCompanyAdd/show-system?companyId=${encodeURIComponent(cid)}`);
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || !json?.success) throw new Error(json?.message || resp.statusText || 'load failed');
+      const d = json.data || {};
+      setVal('ssCompanyId', d.companyId || d.CompanyId || cid);
+      setVal('ssShortName', d.shortName || d.ShortName || '');
+      setVal('ssCompanyName', d.companyName || d.CompanyName || '');
+      setChecked('ssSys1', d.sys_1 ?? d.Sys_1);
+      setChecked('ssSys2', d.sys_2 ?? d.Sys_2);
+      setChecked('ssSys3', d.sys_3 ?? d.Sys_3);
+      setChecked('ssSys4', d.sys_4 ?? d.Sys_4);
+      setChecked('ssSys5', d.sys_5 ?? d.Sys_5);
+      setChecked('ssSys6', d.sys_6 ?? d.Sys_6);
+      setChecked('ssSys7', d.sys_7 ?? d.Sys_7);
+      setChecked('ssSys8', d.sys_8 ?? d.Sys_8);
+      setChecked('ssSys9', d.sys_9 ?? d.Sys_9);
+
+      const sys8Row = document.getElementById('ssSys8Row');
+      const sys9Row = document.getElementById('ssSys9Row');
+      const currentSystemId = Number(window._cc000054SystemId || 0);
+      const showSys8 = Number(d.sys_8 ?? d.Sys_8 ?? 0) === 1 || currentSystemId === 8;
+      const showSys9 = !!(d.hasSystem9 ?? d.HasSystem9 ?? true);
+      sys8Row?.classList.toggle('d-none', !showSys8);
+      sys9Row?.classList.toggle('d-none', !showSys9);
+    } catch (err) {
+      alert('讀取檢視身分失敗：' + err);
+    }
+
+    modal.show();
+  };
   window.SingleGridCustomHandlers.openDetail = function(ctx) {
     const keys = Array.isArray(window._cc000054KeyFields) ? window._cc000054KeyFields : [];
     const row = ctx && ctx.selectedRow;
@@ -697,7 +940,18 @@ document.addEventListener('DOMContentLoaded', () => {
 #cc000054QueryModal .modal-footer .btn {
   min-width: 72px;
 }
+
+#customButtonBarBottom {
+  display: none !important;
+}
+
+#showSystemModal .ss-check-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+}
 </style>
+<script src="~/js/ccsUpdateLog.js" asp-append-version="true"></script>
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
 
 

@@ -19,9 +19,19 @@ namespace PcbErpApi.Pages.CCS
         private readonly ILogger<CC000054DetailModel> _logger;
 
         private const string DefaultMasterDict = "AJNdCompany_1";
+        private const string LegacyMasterDict = "AJNdCompany";
         private const string MasterTable = "AJNdCompany";
         private const string DefaultSystemDict = "AJNdCompanySystemView_1";
         private const string DetailTable = "AJNdCompanySystem";
+        private static readonly IReadOnlyDictionary<string, int> ItemDefaultSystemMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["CC000054"] = 1, // 摰Ｘ銝餅?_璆剖?
+            ["CC000020"] = 7, // 摰Ｘ銝餅?_?嗡?
+            ["CC000014"] = 1, // 摰Ｘ?縑憿漲閮剖?
+            ["CC000055"] = 2, // 撱?銝餅?_?∟頃
+            ["CC000053"] = 3, // 撱?銝餅?_鋆賜?憪?
+            ["CC000016"] = 6  // 撱?銝餅?_?嗡?
+        };
 
         public CC000054DetailModel(PcbErpContext ctx, ITableDictionaryService dictService, ILogger<CC000054DetailModel> logger)
         {
@@ -67,7 +77,7 @@ namespace PcbErpApi.Pages.CCS
             PaperType = item.PaperType;
 
             var systemIdQuery = ParseSystemId(Request.Query["systemId"]);
-            SystemId = ResolveSystemId(PowerType, systemIdQuery);
+            SystemId = ResolveSystemId(ItemId, PowerType, systemIdQuery);
             TableId = ResolveTableId(SystemId);
             SubSystemId = ResolveSubSystemId(PaperType);
 
@@ -79,6 +89,11 @@ namespace PcbErpApi.Pages.CCS
             try
             {
                 var masterDict = await LoadFieldDictAsync(masterDictName);
+                if (!HasLayoutCoordinates(masterDict) && string.Equals(masterDictName, DefaultMasterDict, StringComparison.OrdinalIgnoreCase))
+                {
+                    masterDictName = LegacyMasterDict;
+                    masterDict = await LoadFieldDictAsync(masterDictName);
+                }
                 if (masterDict.Count == 0 && !string.Equals(masterDictName, DefaultMasterDict, StringComparison.OrdinalIgnoreCase))
                 {
                     masterDictName = DefaultMasterDict;
@@ -109,8 +124,8 @@ namespace PcbErpApi.Pages.CCS
                     MasterDict = masterDictName,
                     DetailTable = DetailTable,
                     DetailDict = systemDictName,
-                    MasterTitle = string.IsNullOrWhiteSpace(ItemName) ? "客戶主檔" : ItemName,
-                    DetailTitle = "系統資料",
+                    MasterTitle = string.IsNullOrWhiteSpace(ItemName) ? "摰Ｘ銝餅?" : ItemName,
+                    DetailTitle = "蝟餌絞鞈?",
                     KeyMap = keyMap.ToArray(),
                     DetailKeyFields = detailKeys.ToArray(),
                     MasterTop = 300
@@ -144,7 +159,7 @@ namespace PcbErpApi.Pages.CCS
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Build CC000054 detail config failed for {ItemId}", ItemId);
-                return BadRequest($"初始化畫面失敗: {ex.Message}");
+                return BadRequest($"????Ｗ仃?? {ex.Message}");
             }
 
             return Page();
@@ -252,7 +267,7 @@ namespace PcbErpApi.Pages.CCS
             return $"/api/CommonTable/ByKeys?table={Uri.EscapeDataString(table)}{qs}";
         }
 
-        private List<DetailTab> BuildExtraTabs()
+                private List<DetailTab> BuildExtraTabs()
         {
             var tabs = new List<DetailTab>();
             var pt = PowerType ?? 0;
@@ -290,8 +305,8 @@ namespace PcbErpApi.Pages.CCS
 
             if (showCreditTabs)
             {
-                tabs.Add(new DetailTab("creditline", "授信額度", "AJNdCompanyCreditLine", "AJNdCompanyCreditLine", new[] { "CompanyId", "SerialNum" }));
-                tabs.Add(new DetailTab("bankassure", "銀行保證函", "AJNdCompanyBankAssure", "AJNdCompanyBankAssure", new[] { "CompanyId", "RecYear", "RecMonth" }));
+                tabs.Add(new DetailTab("creditline", "銀行資料", "AJNdCompanyCreditLine", "AJNdCompanyCreditLine", new[] { "CompanyId", "SerialNum" }));
+                tabs.Add(new DetailTab("bankassure", "銀行保證", "AJNdCompanyBankAssure", "AJNdCompanyBankAssure", new[] { "CompanyId", "RecYear", "RecMonth" }));
             }
 
             if (showCustomerTabs)
@@ -300,7 +315,8 @@ namespace PcbErpApi.Pages.CCS
                 tabs.Add(new DetailTab("forwarder", "Forwarder", "AJNdCompanyForwarder", "AJNdCompanyForwarder", new[] { "CompanyId", "SerialNum" }));
             }
 
-            if (TryGetAvlTable(pt, SystemId, showCustomerTabs, out var avlTable, out var avlTitle))
+            if (!string.Equals(ItemId, "CC000054", StringComparison.OrdinalIgnoreCase)
+                && TryGetAvlTable(pt, SystemId, showCustomerTabs, out var avlTable, out var avlTitle))
                 tabs.Add(new DetailTab("avl", avlTitle, avlTable, avlTable, new[] { "CompanyId" }));
 
             if (SystemId == 1 && showCustomerTabs)
@@ -310,7 +326,7 @@ namespace PcbErpApi.Pages.CCS
                 tabs.Add(new DetailTab("car", "車輛明細檔", "AJNdCompanyRecycleCar", "AJNdCompanyRecycleCar", new[] { "CompanyId", "SerialNum" }));
 
             if (SystemId > 1 && SystemId < 9 && SystemId != 7)
-                tabs.Add(new DetailTab("attach", "附檔", "AJNdCompanyAttach", "AJNdCompanyAttach", new[] { "CompanyId", "SerialNum" }));
+                tabs.Add(new DetailTab("attach", "附件", "AJNdCompanyAttach", "AJNdCompanyAttach", new[] { "CompanyId", "SerialNum" }));
 
             if (showCustomerTabs)
                 tabs.Add(new DetailTab("xout", "XOut 設定", "AJNdCompanyXOut", "AJNdCompanyXOut", new[] { "CompanyId", "SerialNum" }));
@@ -329,7 +345,7 @@ namespace PcbErpApi.Pages.CCS
             return true;
         }
 
-        private static bool TryGetAvlTable(int powerType, int systemId, bool showCustomerTabs, out string tableName, out string title)
+                private static bool TryGetAvlTable(int powerType, int systemId, bool showCustomerTabs, out string tableName, out string title)
         {
             tableName = string.Empty;
             title = string.Empty;
@@ -347,13 +363,13 @@ namespace PcbErpApi.Pages.CCS
             if (systemId == 2)
             {
                 tableName = "MPHdPriceTable_CCS";
-                title = "物料AVL";
+                title = "客戶品號";
                 return true;
             }
             if (systemId == 8)
             {
                 tableName = "MPHdPriceRecycleTable_CCS";
-                title = "廢棄物料號";
+                title = "客戶品號";
                 return true;
             }
 
@@ -371,9 +387,29 @@ namespace PcbErpApi.Pages.CCS
             return 0;
         }
 
-        private static int ResolveSystemId(int? powerType, int requestedSystem)
+        private static int ResolveSystemId(string itemId, int? powerType, int requestedSystem)
         {
             if (requestedSystem > 0) return requestedSystem;
+            if (!string.IsNullOrWhiteSpace(itemId) && ItemDefaultSystemMap.TryGetValue(itemId, out var mappedSystemId) && mappedSystemId > 0)
+                return mappedSystemId;
+            return ResolveSystemIdByPowerType(powerType);
+        }
+
+        private static bool HasLayoutCoordinates(IEnumerable<CURdTableField>? fields)
+        {
+            if (fields == null) return false;
+            foreach (var f in fields)
+            {
+                // Width alone is not enough; some dictionaries keep width but all positions at 0.
+                // We only treat it as valid layout when any positioned coordinate exists.
+                if ((f?.iFieldTop ?? 0) > 0 || (f?.iFieldLeft ?? 0) > 0 || (f?.iLabTop ?? 0) > 0 || (f?.iLabLeft ?? 0) > 0)
+                    return true;
+            }
+            return false;
+        }
+
+        private static int ResolveSystemIdByPowerType(int? powerType)
+        {
             if (!powerType.HasValue) return 1;
 
             var pt = powerType.Value;
@@ -413,3 +449,5 @@ namespace PcbErpApi.Pages.CCS
         }
     }
 }
+
+
