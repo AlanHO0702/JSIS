@@ -511,14 +511,91 @@ public class StrikeSelectController : ControllerBase
                 }
             }
 
-            // 4. 更新狀態為 1 (表示已選擇憑證)
+            // 4. 檢查是否需要外幣匯率確認 (對應 Delphi APRdStrikeUseOtherOg ReWrite=-1)
+            var needOtherOg = false;
+            string otherOgMoneyName = "";
+            string otherOgUseMoneyName = "";
+            int otherOgMoneyCode = 0;
+            double otherOgCurrentRate = 0;
+
+            try
+            {
+                await using var otherOgCmd = new SqlCommand("APRdStrikeUseOtherOg", conn, tx)
+                {
+                    CommandType = CommandType.StoredProcedure,
+                    CommandTimeout = 120
+                };
+                otherOgCmd.Parameters.AddWithValue("@PaperNum", req.PaperNum);
+                otherOgCmd.Parameters.AddWithValue("@ReWrite", -1);
+
+                await using var ogReader = await otherOgCmd.ExecuteReaderAsync();
+                if (await ogReader.ReadAsync())
+                {
+                    var ogResult = ogReader["Result"] == DBNull.Value ? 0 : Convert.ToInt32(ogReader["Result"]);
+                    if (ogResult == 1)
+                    {
+                        needOtherOg = true;
+                        otherOgMoneyName = ogReader["MoneyName"]?.ToString() ?? "";
+                        otherOgUseMoneyName = ogReader["UseMoneyName"]?.ToString() ?? "";
+                    }
+                }
+                await ogReader.CloseAsync();
+            }
+            catch
+            {
+                // 如果檢查失敗，不影響主流程，繼續不顯示外幣匯率確認
+            }
+
+            if (needOtherOg)
+            {
+                // 取得幣別代碼 (對應 Delphi qryMoneyCode)
+                try
+                {
+                    await using var mcCmd = new SqlCommand(
+                        @"SELECT TOP 1 t1.MoneyCode FROM APRdPayRecvMain t1 WITH (NOLOCK)
+                          INNER JOIN APRdStrikeSource t2 WITH (NOLOCK) ON t2.SourNum = t1.PaperNum
+                          WHERE t2.PaperNum = @PaperNum", conn, tx);
+                    mcCmd.Parameters.AddWithValue("@PaperNum", req.PaperNum);
+                    var mcResult = await mcCmd.ExecuteScalarAsync();
+                    if (mcResult != null && mcResult != DBNull.Value)
+                        otherOgMoneyCode = Convert.ToInt32(mcResult);
+                }
+                catch { }
+
+                // 取得目前匯率 (對應 Delphi qryRateToNT)
+                try
+                {
+                    await using var rtCmd = new SqlCommand(
+                        "SELECT RateToNT FROM APRdStrikeMain WITH (NOLOCK) WHERE PaperNum = @PaperNum", conn, tx);
+                    rtCmd.Parameters.AddWithValue("@PaperNum", req.PaperNum);
+                    var rtResult = await rtCmd.ExecuteScalarAsync();
+                    if (rtResult != null && rtResult != DBNull.Value)
+                        otherOgCurrentRate = Convert.ToDouble(rtResult);
+                }
+                catch { }
+
+                // 不更新 Status，等待使用者確認匯率後再更新
+                await tx.CommitAsync();
+                return Ok(new
+                {
+                    ok = true,
+                    count = req.Rows.Count,
+                    needOtherOg = true,
+                    moneyCode = otherOgMoneyCode,
+                    moneyName = otherOgMoneyName,
+                    useMoneyName = otherOgUseMoneyName,
+                    currentRate = otherOgCurrentRate
+                });
+            }
+
+            // 5. 不需要外幣匯率確認，直接更新狀態為 1
             await using var updateCmd = new SqlCommand(
                 "UPDATE APRdStrikeMain SET Status = 1 WHERE PaperNum = @PaperNum", conn, tx);
             updateCmd.Parameters.AddWithValue("@PaperNum", req.PaperNum);
             await updateCmd.ExecuteNonQueryAsync();
 
             await tx.CommitAsync();
-            return Ok(new { ok = true, count = req.Rows.Count });
+            return Ok(new { ok = true, count = req.Rows.Count, needOtherOg = false });
         }
         catch (Exception ex)
         {
@@ -527,6 +604,92 @@ public class StrikeSelectController : ControllerBase
                 try { await tx.RollbackAsync(); }
                 catch { }
             }
+            return Ok(new { ok = false, error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 確認外幣匯率並完成沖帳 (對應 Delphi StrikeOtherAmountSelect 確認後的流程)
+    /// POST /api/StrikeSelect/ConfirmOtherOgRate
+    /// </summary>
+    [HttpPost("ConfirmOtherOgRate")]
+    public async Task<IActionResult> ConfirmOtherOgRate([FromBody] OtherOgRateRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req?.PaperNum))
+            return Ok(new { ok = false, error = "沒有單號" });
+
+        await using var conn = new SqlConnection(_cs);
+        try
+        {
+            await conn.OpenAsync();
+
+            // 1. 更新 APRdStrikeMain.RateToNT (對應 Delphi: update APRdStrikeMain set RateToNT=...)
+            await using var updateRateCmd = new SqlCommand(
+                "UPDATE APRdStrikeMain SET RateToNT = @RateToNT WHERE PaperNum = @PaperNum", conn);
+            updateRateCmd.Parameters.AddWithValue("@RateToNT", req.NewRate);
+            updateRateCmd.Parameters.AddWithValue("@PaperNum", req.PaperNum);
+            await updateRateCmd.ExecuteNonQueryAsync();
+
+            // 2. 呼叫 APRdStrikeUseOtherOg ReWrite=1 重新計算 (對應 Delphi qryOtherOg ReWrite=1)
+            await using var otherOgCmd = new SqlCommand("APRdStrikeUseOtherOg", conn)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = 120
+            };
+            otherOgCmd.Parameters.AddWithValue("@PaperNum", req.PaperNum);
+            otherOgCmd.Parameters.AddWithValue("@ReWrite", 1);
+            await using var reader = await otherOgCmd.ExecuteReaderAsync();
+            await reader.CloseAsync();
+
+            // 3. 更新狀態為 1
+            await using var statusCmd = new SqlCommand(
+                "UPDATE APRdStrikeMain SET Status = 1 WHERE PaperNum = @PaperNum", conn);
+            statusCmd.Parameters.AddWithValue("@PaperNum", req.PaperNum);
+            await statusCmd.ExecuteNonQueryAsync();
+
+            return Ok(new { ok = true });
+        }
+        catch (Exception ex)
+        {
+            return Ok(new { ok = false, error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 取得歷史匯率 (對應 Delphi SpeedButton1Click - APRdHisRateToNTGet)
+    /// GET /api/StrikeSelect/GetHistoricalRate?moneyCode=xxx
+    /// </summary>
+    [HttpGet("GetHistoricalRate")]
+    public async Task<IActionResult> GetHistoricalRate([FromQuery] int moneyCode)
+    {
+        await using var conn = new SqlConnection(_cs);
+        try
+        {
+            await conn.OpenAsync();
+
+            await using var cmd = new SqlCommand("APRdHisRateToNTGet", conn)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = 60
+            };
+            cmd.Parameters.AddWithValue("@MoneyCode", moneyCode);
+            cmd.Parameters.AddWithValue("@PaperDate", DateTime.Today);
+
+            var outputParam = cmd.Parameters.Add("@Output", SqlDbType.Int);
+            outputParam.Direction = ParameterDirection.Output;
+
+            var rateParam = cmd.Parameters.Add("@RateToNTStrike", SqlDbType.Decimal);
+            rateParam.Precision = 24;
+            rateParam.Scale = 8;
+            rateParam.Direction = ParameterDirection.Output;
+
+            await cmd.ExecuteNonQueryAsync();
+
+            var rate = rateParam.Value == DBNull.Value ? 0.0 : Convert.ToDouble(rateParam.Value);
+            return Ok(new { ok = true, rate });
+        }
+        catch (Exception ex)
+        {
             return Ok(new { ok = false, error = ex.Message });
         }
     }
@@ -544,6 +707,12 @@ public class StrikeSelectController : ControllerBase
         public string? DepartId { get; set; }
         public string? MainPaperNum { get; set; }
         public List<string>? ExcludePaperNums { get; set; }
+    }
+
+    public class OtherOgRateRequest
+    {
+        public string? PaperNum { get; set; }
+        public double NewRate { get; set; }
     }
 
     public class StrikeConfirmRequest
