@@ -17,6 +17,33 @@
 
 @await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", null, ViewData)
 <script src="~/js/editableGrid.js"></script>
+<div class="modal fade" id="cc000054DetailAddModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title">新增</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body ccs-add-modal-body">
+        <div class="ccs-add-row">
+          <label class="ccs-add-label" id="detailAddCodeLabel">客戶編號</label>
+          <div class="ccs-add-inline">
+            <input type="text" class="form-control form-control-sm ccs-add-code-select" id="detailAddCompanyId" autocomplete="off">
+            <input type="text" class="form-control form-control-sm ccs-add-short" id="detailAddShortName" readonly>
+          </div>
+        </div>
+        <div class="ccs-add-row">
+          <label class="ccs-add-label">簡稱</label>
+          <input type="text" class="form-control form-control-sm" id="detailAddCompanyName">
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-light btn-sm border" id="btnDetailAddConfirm">確定</button>
+        <button type="button" class="btn btn-light btn-sm border" data-bs-dismiss="modal">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 @if (cfg == null)
 {
@@ -119,6 +146,11 @@ else
                                     <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-save" data-tab-tool="save" data-tab="@tab.Key" title="儲存" aria-label="儲存"><i class="bi bi-check-lg"></i></button>
                                     <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-cancel" data-tab-tool="cancel" data-tab="@tab.Key" title="取消" aria-label="取消"><i class="bi bi-x-lg"></i></button>
                                     <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-refresh" data-tab-tool="edit" data-tab="@tab.Key" title="重新整理" aria-label="重新整理"><i class="bi bi-arrow-clockwise"></i></button>
+                                    @if (string.Equals(tab.Key, "attach", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        <button type="button" class="btn btn-outline-secondary btn-sm ccs-tool-text" data-tab-tool="setpath" data-tab="@tab.Key">指定路徑及檔名</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm ccs-tool-text" data-tab-tool="preview" data-tab="@tab.Key">檢視檔案</button>
+                                    }
                                 </div>
                                 <div class="table-responsive ccs-subgrid-wrap" data-tab-key="@tab.Key">
                                     <table class="table table-sm table-hover align-middle mb-0 ccs-subgrid-table"
@@ -567,13 +599,138 @@ function enableFormLayoutEditing(container, dictName) {
   }
   const tabState = {};
   const tabMeta = {}; // grid metadata
-  const iconToolbarTabs = new Set(['assistant', 'outaddr', 'bank', 'bankcredit', 'creditline', 'bankassure', 'forwarder', 'quota', 'xout']);
+  const iconToolbarTabs = new Set(['assistant', 'outaddr', 'bank', 'bankcredit', 'creditline', 'bankassure', 'forwarder', 'quota', 'xout', 'attach']);
   let hasGridPendingAdd = false;
+  const detailBaseUrl = '@Url.Page("CC000054Detail", new { itemId = Model.ItemId, systemId = Model.SystemId })';
+  const detailSystemId = Number('@Model.SystemId');
+
+  const initDetailAddDialog = () => {
+    const modalEl = document.getElementById('cc000054DetailAddModal');
+    const modal = modalEl && window.bootstrap ? bootstrap.Modal.getOrCreateInstance(modalEl) : null;
+    const addCodeLabel = document.getElementById('detailAddCodeLabel');
+    const addCompanyId = document.getElementById('detailAddCompanyId');
+    const addCompanyName = document.getElementById('detailAddCompanyName');
+    const addShortName = document.getElementById('detailAddShortName');
+    const btnConfirm = document.getElementById('btnDetailAddConfirm');
+    if (!modal || !addCompanyId || !addCompanyName || !addShortName || !btnConfirm) return;
+
+    let emptyShortName = '0';
+    let initLoaded = false;
+
+    const renderCodeLabel = () => {
+      if (addCodeLabel) addCodeLabel.textContent = detailSystemId === 1 ? '客戶編號' : '廠商編號';
+    };
+    const reset = () => {
+      addCompanyId.value = '';
+      addCompanyName.value = '';
+      addShortName.value = '';
+    };
+    const loadInit = async () => {
+      const q = new URLSearchParams();
+      q.set('itemId', ('@Model.ItemId' || 'CC000054').toString());
+      q.set('systemId', String(detailSystemId || 1));
+      const resp = await fetch(`/api/CCSCompanyAdd/init?${q.toString()}`);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.success) throw new Error(data?.message || resp.statusText || 'init failed');
+      emptyShortName = String(data.emptyShortName ?? '0');
+      initLoaded = true;
+    };
+    const syncShortName = async () => {
+      const cid = (addCompanyId.value || '').trim();
+      if (!cid) { addShortName.value = ''; return; }
+      const resp = await fetch(`/api/CCSCompanyAdd/company?companyId=${encodeURIComponent(cid)}`);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.success) {
+        addShortName.value = '';
+        throw new Error(data?.message || resp.statusText || 'load company failed');
+      }
+      addShortName.value = String(data.shortName || '');
+      if (emptyShortName !== '1' && !addCompanyName.value.trim()) addCompanyName.value = addShortName.value.trim();
+    };
+    const addCompany = async (companyId, companyName, overwrite, allowOtherSubSystem) => {
+      const body = {
+        itemId: ('@Model.ItemId' || 'CC000054').toString(),
+        systemId: detailSystemId || 1,
+        companyId,
+        companyName,
+        overwrite,
+        allowOtherSubSystem
+      };
+      const resp = await fetch('/api/CCSCompanyAdd/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data?.message || resp.statusText || 'add failed');
+      return data;
+    };
+
+    window.openCcsDetailAddDialog = async () => {
+      try {
+        renderCodeLabel();
+        if (!initLoaded) await loadInit();
+        reset();
+        modal.show();
+        addCompanyId.focus();
+      } catch (err) {
+        alert('讀取新增清單失敗：' + err);
+      }
+    };
+
+    addCompanyId.addEventListener('change', () => syncShortName().catch(err => alert('讀取客廠簡稱失敗：' + err)));
+    addCompanyId.addEventListener('blur', () => syncShortName().catch(() => { }));
+
+    btnConfirm.addEventListener('click', async () => {
+      const cid = (addCompanyId.value || '').trim();
+      const cname = (addCompanyName.value || '').trim();
+      if (!cid || !cname) { alert('客戶/廠商編號與簡稱不可空白'); return; }
+      try {
+        const warnResp = await fetch(`/api/CCSCompanyAdd/check-shortname?shortName=${encodeURIComponent(cname)}`);
+        const warnData = await warnResp.json().catch(() => ({}));
+        if (warnResp.ok && warnData?.success && !!warnData.exists) {
+          alert('提示：系統內已有此簡稱的客廠資料。');
+        }
+      } catch { }
+      let overwrite = false;
+      let allowOther = false;
+      try {
+        while (true) {
+          const result = await addCompany(cid, cname, overwrite, allowOther);
+          if (result?.success) {
+            modal.hide();
+            const sysId = result.systemId || detailSystemId || 1;
+            const u = new URL(detailBaseUrl, window.location.origin);
+            u.searchParams.set('CompanyId', cid);
+            u.searchParams.set('systemId', String(sysId));
+            window.location.href = u.toString();
+            return;
+          }
+          if (result?.needOverwriteConfirm && !overwrite) {
+            if (!confirm('查詢到有舊資料,是否覆蓋客戶舊資料?')) return;
+            overwrite = true;
+            continue;
+          }
+          if (result?.needOtherSubSystemConfirm && !allowOther) {
+            if (!confirm('此代碼已存在其他分類中，確定要新增?')) return;
+            allowOther = true;
+            continue;
+          }
+          if ((result?.code || '') === 'DUPLICATE_CODE') { alert('代碼重複!!'); return; }
+          alert((result?.message || '新增失敗').toString());
+          return;
+        }
+      } catch (err) {
+        alert('新增失敗：' + err);
+      }
+    });
+  };
 
   function getDict(dictName) {
     return fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictName)}`)
       .then(r => r.json());
   }
+  initDetailAddDialog();
 
   function buildGridViewText(field, rawVal) {
     const span = document.createElement('span');
@@ -922,6 +1079,7 @@ function enableFormLayoutEditing(container, dictName) {
       || tabTitle.toUpperCase().includes('FORWARDER')
       || tabTitle.includes('客戶要求')
       || tabTitle.includes('允收規範')
+      || tabTitle.includes('附件')
       || tabTitle.toUpperCase().includes('XOUT');
     bar.classList.toggle('d-none', !canShow);
     if (!canShow) return;
@@ -968,15 +1126,29 @@ function enableFormLayoutEditing(container, dictName) {
 
     const extrasMap = {};
     (meta.extras || []).forEach(kv => extrasMap[(kv.key || '').toLowerCase()] = kv.value);
-    const serialField = meta.serialField;
-    let nextSerial = '';
-    if (serialField) {
+    const autoIncFieldName = (() => {
+      const pick = (arr, rx) => (arr || []).find(f => rx.test(String(f?.FieldName || '')));
+      const serial = meta.serialField?.FieldName;
+      if (serial) return serial;
+      const pkCandidates = (meta.pkFields || []);
+      return (
+        pick(pkCandidates, /^SerialNum$/i)?.FieldName
+        || pick(pkCandidates, /Serial/i)?.FieldName
+        || pick(pkCandidates, /^NumId$/i)?.FieldName
+        || pick(pkCandidates, /Num/i)?.FieldName
+        || ''
+      );
+    })();
+    const autoIncFieldLower = String(autoIncFieldName || '').toLowerCase();
+    let nextAutoInc = '';
+    if (autoIncFieldName) {
       const existing = Array.from(tbody.querySelectorAll('tr')).map(r => {
-        const cell = r.querySelector(`input[name="${serialField.FieldName}"]`) || r.querySelector(`td[data-field="${serialField.FieldName}"] .cell-edit`);
-        const val = cell?.value || cell?.textContent || '';
-        return Number.parseInt(val, 10) || 0;
+        const fromVisible = r.querySelector(`input[name="${autoIncFieldName}"]`) || r.querySelector(`td[data-field="${autoIncFieldName}"] .cell-edit`);
+        const fromHidden = r.querySelector(`input.mmd-pk-hidden[name="${autoIncFieldName}"]`);
+        const val = fromVisible?.value ?? fromHidden?.value ?? fromVisible?.textContent ?? '';
+        return Number.parseInt(String(val || '').trim(), 10) || 0;
       });
-      nextSerial = (Math.max(0, ...existing) + 1).toString();
+      nextAutoInc = String(Math.max(0, ...existing) + 1);
     }
 
     const tr = document.createElement('tr');
@@ -993,8 +1165,8 @@ function enableFormLayoutEditing(container, dictName) {
       const lower = (f.FieldName || '').toLowerCase();
       if (lower === 'companyid') {
         val = currentCompany || '';
-      } else if (lower === 'serialnum') {
-        val = nextSerial || '';
+      } else if (autoIncFieldLower && lower === autoIncFieldLower) {
+        val = nextAutoInc || '';
       } else if (lower === 'useid') {
         val = 'A001';
       } else if (extrasMap[lower] !== undefined) {
@@ -1023,11 +1195,11 @@ function enableFormLayoutEditing(container, dictName) {
       if (lower === 'companyid') {
         hidden.value = currentCompany || '';
       } else {
-        let serialVal = '';
-        if (lower === 'serialnum') {
-          serialVal = nextSerial || '';
+        let autoIncVal = '';
+        if (autoIncFieldLower && lower === autoIncFieldLower) {
+          autoIncVal = nextAutoInc || '';
         }
-        let val = serialVal || '';
+        let val = autoIncVal || '';
         if (!val && lower === 'useid') val = 'A001';
         if (!val && lower === 'asstype') val = '0';
         if (!val && lower === 'language') val = '0';
@@ -1437,6 +1609,89 @@ function enableFormLayoutEditing(container, dictName) {
       const tabKey = b.dataset.tab;
       const action = b.dataset.tabTool;
       if (!tabKey || !action) return;
+      const attachFieldCandidates = ['PathAndName', 'FilePath', 'FullPath', 'CrossName', 'AttachName', 'FileName', 'PathName', 'AttachPath', 'Path'];
+      const table = document.getElementById(`grid-${tabKey}`);
+      const getAttachPathColumn = () => {
+        const ths = Array.from(table?.querySelectorAll('thead th') || []);
+        const byHeaderIdx = ths.findIndex(h => {
+          const t = String(h?.textContent || '').trim().toLowerCase();
+          return t.includes('路徑') || t.includes('檔名') || t.includes('path') || t.includes('file');
+        });
+        if (byHeaderIdx >= 0) {
+          const th = ths[byHeaderIdx];
+          return { idx: byHeaderIdx, field: String(th?.dataset?.field || '') };
+        }
+        const row = table?.querySelector('tbody tr');
+        for (const n of attachFieldCandidates) {
+          if (row?.querySelector(`.cell-edit[name="${n}"]`)) {
+            const idx = ths.findIndex(h => String(h?.dataset?.field || '').toLowerCase() === String(n).toLowerCase());
+            return { idx, field: n };
+          }
+        }
+        // Fallback: first non-key / non-note column.
+        const fallbackIdx = ths.findIndex(h => {
+          const f = String(h?.dataset?.field || '').toLowerCase();
+          if (!f) return false;
+          return f !== 'serialnum' && f !== 'useid' && f !== 'notes' && f !== 'memo' && f !== 'remark';
+        });
+        if (fallbackIdx >= 0) {
+          const th = ths[fallbackIdx];
+          return { idx: fallbackIdx, field: String(th?.dataset?.field || '') };
+        }
+        return { idx: -1, field: '' };
+      };
+      const getSelectedAttachRow = () => {
+        const bodyRows = Array.from(table?.querySelectorAll('tbody tr') || [])
+          .filter(r => r.querySelector('td[data-field]'));
+        const selected = table?.querySelector('tbody tr.selected, tbody tr.table-active');
+        return selected || bodyRows[0] || null;
+      };
+      const getAttachCell = (row) => {
+        if (!row) return null;
+        const col = getAttachPathColumn();
+        if (Number.isInteger(col.idx) && col.idx >= 0) {
+          const byIdx = row.children?.[col.idx];
+          if (byIdx) return byIdx;
+        }
+        if (col.field) {
+          const byField = row.querySelector(`td[data-field="${col.field}"]`);
+          if (byField) return byField;
+        }
+        return null;
+      };
+      const getAttachInput = (row) => {
+        const cell = getAttachCell(row);
+        return cell?.querySelector('.cell-edit') || null;
+      };
+      const getAttachPath = (row) => {
+        const inp = getAttachInput(row);
+        const fromInput = String(inp?.value || '').trim();
+        if (fromInput) return fromInput;
+        const cell = getAttachCell(row);
+        const fromSpan = String(cell?.querySelector('.cell-view')?.textContent || '').trim();
+        if (fromSpan) return fromSpan;
+        const fromCell = String(cell?.textContent || '').trim();
+        if (fromCell) return fromCell;
+        return '';
+      };
+      const normalizeAttachPath = (raw) => {
+        let s = String(raw || '').trim();
+        if (!s) return '';
+        s = s.replace(/^["']+|["']+$/g, '').trim();
+        s = s.replace(/[;；]+$/g, '').trim();
+        return s;
+      };
+      const toPreviewUrl = (raw) => {
+        const s = normalizeAttachPath(raw);
+        if (!s) return '';
+        if (/^https?:\/\//i.test(s)) return s;
+        if (/^\/api\//i.test(s)) return s;
+        if (/^file:\/\//i.test(s)) {
+          const local = decodeURIComponent(s.replace(/^file:\/\/\/?/i, '').replace(/\//g, '\\'));
+          return `/api/MapPreview/file?path=${encodeURIComponent(local)}`;
+        }
+        return `/api/MapPreview/file?path=${encodeURIComponent(s)}`;
+      };
       if (action === 'edit') {
         toggleGridEdit(tabKey, !(tabState[tabKey]?.isEdit?.()));
         return;
@@ -1456,6 +1711,32 @@ function enableFormLayoutEditing(container, dictName) {
       }
       if (action === 'delete') {
         alert('此按鈕暫不開放');
+        return;
+      }
+      if (action === 'setpath') {
+        if (!tabState[tabKey]?.isEdit?.()) toggleGridEdit(tabKey, true);
+        const row = getSelectedAttachRow();
+        if (!row) { alert('請先選取一筆附件資料'); return; }
+        selectGridRow(table, row);
+        const input = getAttachInput(row);
+        if (!input) { alert('找不到夾檔路徑欄位'); return; }
+        if (input.readOnly || input.disabled) { alert('夾檔路徑欄位目前為唯讀，請先確認資料辭典設定。'); return; }
+        input.focus();
+        try {
+          const len = String(input.value || '').length;
+          input.setSelectionRange(len, len);
+        } catch { }
+        return;
+      }
+      if (action === 'preview') {
+        const row = getSelectedAttachRow();
+        if (!row) { alert('請先選取一筆附件資料'); return; }
+        const rawPath = getAttachPath(row);
+        if (!rawPath) { alert('目前附件路徑為空白'); return; }
+        const openUrl = toPreviewUrl(rawPath);
+        if (!openUrl) { alert('目前附件路徑為空白'); return; }
+        const win = window.open(openUrl, '_blank', 'noopener');
+        if (!win) alert('檢視失敗，請確認瀏覽器是否封鎖彈出視窗');
       }
     });
   });
@@ -1652,7 +1933,11 @@ function enableFormLayoutEditing(container, dictName) {
           if (currentCompany && activeFormKey && activeFormKey !== 'master') loadTabData(activeFormKey, currentCompany);
         })();
       } else if (action === 'add') {
-        document.getElementById('btnBackList')?.click();
+        if (typeof window.openCcsDetailAddDialog === 'function') {
+          await window.openCcsDetailAddDialog();
+        } else {
+          alert('新增視窗尚未初始化');
+        }
       } else if (action === 'cancel') {
         applyFormEditMode(false);
       }
@@ -2274,6 +2559,20 @@ function enableFormLayoutEditing(container, dictName) {
 .ccs-detail-page .tab-icon-toolbar .btn-icon:disabled {
   opacity: .45;
   cursor: not-allowed;
+}
+.ccs-detail-page .tab-icon-toolbar .ccs-tool-text {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1;
+  color: #2a4a7a;
+  border-color: #b9c7de;
+  background: #fff;
+}
+.ccs-detail-page .tab-icon-toolbar .ccs-tool-text:hover {
+  background: #f8fbff;
 }
 .ccs-detail-page .table-responsive {
   border: 1px solid #cfd7e6;
