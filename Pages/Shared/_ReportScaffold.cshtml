@@ -1,178 +1,655 @@
 @using System.Text.Json
 @{
-    // PageModel 端先把 ViewData["ReportConfig"], ["Fields"], ["FieldDictList"] 都準備好了
     var cfg = ViewData["ReportConfig"] as ReportConfig;
-    var json = JsonSerializer.Serialize(cfg ?? new ReportConfig(), new JsonSerializerOptions { PropertyNamingPolicy = null });
-        // 🔧 把辭典表名也丟給 partial
+    var json = JsonSerializer.Serialize(cfg ?? new ReportConfig(), new JsonSerializerOptions { PropertyNamingPolicy = null })
+               .Replace("</", @"<\/");   // 防止 </script> 截斷 script 區塊
+    var fieldsJson = System.Text.Json.JsonSerializer.Serialize(
+                         ViewData["Fields"] ?? (object)new System.Collections.Generic.List<object>(),
+                         new JsonSerializerOptions { PropertyNamingPolicy = null })
+                     .Replace("</", @"<\/");
     ViewData["DictTableName"] = cfg?.DictTableName ?? "";
 }
 
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
-
 <style>
+  /* ── 全高佈局 ── */
+  #reportWrapper {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - var(--app-toolbar-height, 40px));
+    overflow: hidden;
+    background: #fff;
+  }
+
+  /* ── Toolbar ── */
+  #reportToolbar {
+    display: flex;
+    align-items: center;
+    padding: 2px 6px;
+    background: #dce6f5;
+    border-bottom: 2px solid #b0c4de;
+    gap: 1px;
+    flex-shrink: 0;
+    min-height: 46px;
+  }
+  .tb-btn {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 46px;
+    padding: 2px 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    gap: 1px;
+    color: #1a3060;
+    transition: background .15s, border-color .15s;
+  }
+  .tb-btn:hover { background: #b8cde8; border-color: #7a9cc0; }
+  .tb-btn:active { background: #a0b8d8; }
+  .tb-btn .tb-icon { font-size: 1.35rem; line-height: 1; }
+  .tb-btn .tb-label { font-size: 0.67rem; line-height: 1; white-space: nowrap; }
+  .tb-sep { width: 1px; height: 32px; background: #9ab0cc; margin: 0 3px; flex-shrink: 0; }
+  #rowCountBadge {
+    margin-left: auto;
+    font-size: 0.8rem;
+    color: #444;
+    padding: 1px 10px;
+    border: 1px solid #b0c4de;
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  /* ── Tab 內容區 ── */
+  #tabContentArea {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .view-pane {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .view-pane.is-active { display: flex; }
+
+  /* ── 原始資料表格 ── */
+  #rawScrollArea { flex: 1; overflow: auto; min-height: 0; }
+  #resultTable {
+    table-layout: fixed;
+    width: max-content;
+    text-align: left;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 0;
+  }
   #resultTable th, #resultTable td {
-    writing-mode: horizontal-tb !important;
-    text-orientation: mixed !important;
-    transform: none !important;
     white-space: nowrap;
     vertical-align: middle;
+    padding: 0 0.45rem;
+    line-height: 1.35;
+    font-size: 0.82rem;
+    border-right: 1px solid #e8eaed;
+    border-bottom: 1px solid #e8eaed;
   }
+  #resultTable th:first-child, #resultTable td:first-child { border-left: 1px solid #e8eaed; }
   #resultTable thead th {
-    background: #f5f8ff;
-    font-weight: 700;
-    letter-spacing: 1px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #f0f4fa;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    color: #2a3f6a;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-top: 1px solid #e8eaed;
+    border-bottom: 2px solid #c0cfe8 !important;
+    padding: 0.2rem 0.45rem;
   }
-  /* 收合箭頭：展開時朝下、收合時旋轉 */
-  #btnToggleQuery.collapsed .chev { transform: rotate(-90deg); }
+  #resultTable tbody tr:hover td { background: #eef3fb; }
+  #resultTable td { overflow: hidden; text-overflow: ellipsis; max-width: 0; }
+  /* 欄寬拖曳把手 */
+  .col-resizer {
+    position: absolute;
+    right: 0; top: 0; bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 3;
+  }
+  .col-resizer:hover { background: rgba(100,140,255,0.35); }
+
+  /* ── 分析（Pivot Builder）── */
+  /* Builder Panel */
+  #pvbPanel {
+    flex-shrink: 0;
+    background: #f4f7fb;
+    border-bottom: 2px solid #c0cfe8;
+    padding: 4px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .pvb-avail-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .pvb-avail-label {
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: #3a5a8a;
+    white-space: nowrap;
+    min-width: 52px;
+  }
+  #pvbAvailFields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    flex: 1;
+    padding: 2px 5px;
+    background: #fff;
+    border: 1px dashed #b0c4de;
+    border-radius: 4px;
+    min-height: 24px;
+  }
+  #pvbAvailFields:empty::after {
+    content: '（所有欄位已分配至區塊）';
+    color: #aaa;
+    font-size: 0.75rem;
+    align-self: center;
+  }
+  /* Three Zones */
+  .pvb-zones {
+    display: flex;
+    gap: 4px;
+  }
+  .pvb-zone {
+    flex: 1;
+    min-width: 0;
+    background: #fff;
+    border: 1px solid #c0cfe8;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    min-height: 50px;
+    transition: border-color .15s, background .15s;
+  }
+  .pvb-zone.drag-over {
+    border-color: #4a72c0;
+    background: #eef3ff;
+  }
+  .pvb-zone-title {
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: #fff;
+    background: #4a72c0;
+    padding: 2px 6px;
+    border-radius: 4px 4px 0 0;
+    user-select: none;
+  }
+  .pvb-zone-body {
+    flex: 1;
+    padding: 2px 5px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    align-content: flex-start;
+    min-height: 26px;
+  }
+  .pvb-zone-body:empty::after {
+    content: 'Drop Here';
+    color: #bbb;
+    font-size: 0.73rem;
+    font-style: italic;
+    align-self: center;
+    width: 100%;
+    text-align: center;
+    padding: 2px 0;
+  }
+  /* Chips */
+  .pvb-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px 1px 8px;
+    background: #dce8ff;
+    border: 1px solid #a0b8e0;
+    border-radius: 12px;
+    font-size: 0.76rem;
+    cursor: grab;
+    user-select: none;
+    white-space: nowrap;
+    transition: background .1s;
+  }
+  .pvb-chip:hover { background: #c8d8ff; }
+  .pvb-chip.dragging { opacity: 0.35; cursor: grabbing; }
+  .pvb-chip-del {
+    cursor: pointer;
+    color: #7090c0;
+    font-size: 0.82rem;
+    line-height: 1;
+    padding: 0 1px;
+  }
+  .pvb-chip-del:hover { color: #b30000; }
+  /* Options Row */
+  .pvb-options-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.79rem;
+    flex-wrap: wrap;
+  }
+  .pvb-options-row label { color: #555; margin: 0; }
+  .pvb-options-row .form-select-sm { padding-top: 0.08rem; padding-bottom: 0.08rem; font-size: 0.79rem; }
+  .pvb-options-row .btn-sm { padding: 0.1rem 0.5rem; font-size: 0.79rem; }
+
+  /* Result Area */
+  #pivotContainer { flex: 1; overflow: auto; padding: 0; }
+
+  /* ── 底部頁籤 ── */
+  #bottomTabs {
+    flex-shrink: 0;
+    background: #e4ecf7;
+    border-top: 1px solid #c0cfe8;
+    padding: 4px 6px 0;
+  }
+  #bottomTabs .nav-tabs { border-bottom: none; gap: 2px; flex-wrap: nowrap; }
+  #bottomTabs .nav-link {
+    padding: 4px 22px;
+    font-size: 0.8rem;
+    color: #5a7aaa;
+    border-radius: 4px 4px 0 0;
+    border: 1px solid transparent;
+    background: transparent;
+    transition: background .12s, color .12s;
+  }
+  #bottomTabs .nav-link:hover { background: #d0dff5; color: #2a4a8a; }
+  #bottomTabs .nav-link.active {
+    background: #fff;
+    color: #1a3a7c;
+    font-weight: 600;
+    border-color: #c0cfe8 #c0cfe8 #fff;
+    border-top: 2px solid #4a72c0;
+  }
+
+  /* ── 列導覽 ── */
+  #rowNavArea {
+    display: none;
+    align-items: center;
+    gap: 1px;
+    background: #1a3a7c;
+    border-radius: 3px;
+    padding: 2px 4px;
+    margin-left: 4px;
+  }
+  .nav-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: 1px solid #4a72b8;
+    background: #2a52a0;
+    border-radius: 2px;
+    cursor: pointer;
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: bold;
+    line-height: 1;
+    padding: 0;
+    transition: background .1s;
+  }
+  .nav-btn:hover:not(:disabled) { background: #3a62b8; }
+  .nav-btn:disabled { opacity: 0.35; cursor: default; }
+  #rowNavBadge {
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: bold;
+    padding: 0 6px;
+    letter-spacing: 1px;
+    white-space: nowrap;
+    min-width: 56px;
+    text-align: center;
+  }
+  /* 選中行 */
+  #resultTable tbody tr.row-selected td {
+    background: #1a4a9a !important;
+    color: #fff !important;
+  }
+
+  /* ── 查詢 Modal 橫向佈局 ── */
+  .param-row { display: flex; align-items: center; margin-bottom: 4px; }
+  .param-label {
+    width: 110px; min-width: 110px;
+    font-size: 0.83rem; font-weight: 500;
+    text-align: right; padding-right: 10px;
+    color: #333; white-space: nowrap;
+  }
+  .param-ctrl { flex: 1; }
+  .param-ctrl .form-control,
+  .param-ctrl .form-select {
+    font-size: 0.83rem;
+    padding: 0.12rem 0.45rem;
+    height: auto;
+  }
+  /* ── Combo 下拉 ── */
+  .combo-wrap { position: relative; }
+  .combo-input-row { display: flex; align-items: stretch; gap: 4px; }
+  .combo-code-input {
+    width: 88px; border: 1px solid #ced4da; border-radius: 4px;
+    padding: 0.12rem 0.4rem; font-size: 0.83rem;
+    font-family: "Consolas","Courier New",monospace;
+  }
+  /* 代碼框 + 內嵌 ▾ */
+  .combo-left {
+    display: flex; align-items: stretch;
+    border: 1px solid #ced4da; border-radius: 4px;
+    overflow: hidden; width: 110px; flex-shrink: 0;
+  }
+  .combo-code-input {
+    border: none !important; box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+  .combo-code-input:focus { outline: none; background: #f0f6ff; }
+  .combo-code-btn {
+    width: 20px; border: none; border-left: 1px solid #ced4da;
+    background: #e9ecef; cursor: pointer; font-size: 0.68rem;
+    color: #555; padding: 0; flex-shrink: 0;
+  }
+  .combo-code-btn:hover { background: #d0d8e8; }
+  /* 說明欄按鈕 (顯示中文名稱 + ▾) */
+  .combo-desc-btn {
+    flex: 1; min-width: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    border: 1px solid #e0e0e0; border-radius: 4px;
+    background: #f5f5f5; padding: 0.12rem 0.3rem 0.12rem 0.5rem;
+    cursor: pointer; font-size: 0.83rem; color: #555;
+    gap: 4px; text-align: left;
+  }
+  .combo-desc-btn:hover { background: #e8efff; border-color: #b8c8e8; }
+  .combo-desc-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .combo-desc-arrow { font-size: 0.68rem; flex-shrink: 0; color: #888; }
+  /* ── Picker Modal ── */
+  #pickerTable { table-layout: fixed; width: 100%; border-collapse: separate; border-spacing: 0; }
+  #pickerTable thead th {
+    position: sticky; top: 0; background: #f0f4ff;
+    font-size: 0.83rem; padding: 4px 8px; border-bottom: 2px solid #b0c4de;
+  }
+  #pickerTable tbody td {
+    font-size: 0.82rem; padding: 3px 8px !important;
+    cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    border-bottom: 1px solid #eee;
+  }
+  #pickerTable tbody tr:hover td { background: #e8f0ff; }
+  #pickerTable tbody tr.picker-selected td { background: #1a4a9a !important; color: #fff !important; }
 </style>
 
-<div class="container my-4">
-  <h3 class="text-primary fw-bold mb-3">@((cfg?.Title) ?? "")</h3>
+<!-- ── Report Wrapper ── -->
+<div id="reportWrapper">
 
-  <!-- 查詢條件（可收合） -->
-  <div class="card shadow-sm mb-4" id="queryPanel">
-    <div class="card-header d-flex justify-content-between align-items-center">
-      <div class="fw-bold">查詢條件</div>
-
-      <!-- 收合按鈕 -->
-      <button id="btnToggleQuery"
-              class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
-              type="button"
-              data-bs-toggle="collapse"
-              data-bs-target="#queryCollapse"
-              aria-expanded="true"
-              aria-controls="queryCollapse">
-        <span class="chev" style="display:inline-block; transition: transform .2s ease;">▾</span>
-        <span class="lbl">收合</span>
-      </button>
-    </div>
-
-    <div id="queryCollapse" class="collapse show">
-      <div class="card-body">
-        <div class="row g-3 align-items-end" id="paramRows">
-          @foreach (var def in cfg?.ParamDefs ?? Enumerable.Empty<ParamDef>())
-          {
-            <div class="col-md-3">
-              <label class="form-label">@def.Label</label>
-
-              @if (def.Ui == ParamUiType.Date)
-              {
-                <input type="date" class="form-control"
-                      id="@def.Name" name="@def.Name"
-                      value="" data-default="@def.DefaultValue" />
-              }
-              else if (def.Ui == ParamUiType.Select)
-              {
-                var lookupAttr = string.IsNullOrWhiteSpace(def.LookupKey)
-                    ? ""
-                    : $"data-lookup=\"{def.LookupKey}\"";
-
-                <select class="form-select"
-                        id="@def.Name" name="@def.Name"
-                        @Html.Raw(lookupAttr)
-                        data-default="@def.DefaultValue">
-                  <option value=""></option>
-                  @if (def.Options != null)
-                  {
-                    foreach (var (value, text) in def.Options)
-                    {
-                      <option value="@value">@text</option>
-                    }
-                  }
-                </select>
-              }
-              else if (def.Ui == ParamUiType.Number)
-              {
-                <input type="number" class="form-control"
-                      id="@def.Name" name="@def.Name"
-                      value="" data-default="@def.DefaultValue" />
-              }
-              else
-              {
-                <input type="text" class="form-control"
-                      id="@def.Name" name="@def.Name"
-                      value="" data-default="@def.DefaultValue" />
-              }
-            </div>
-          }
-
-          <div class="col-12 text-end d-flex justify-content-end gap-2">
-            <button id="btnPrintReport" class="btn btn-success px-4">列印報表</button>
-            <button id="btnSearch" class="btn btn-primary px-4">查詢</button>
-          </div>
-        </div>
-      </div>
+  <!-- Toolbar -->
+  <div id="reportToolbar">
+    <button class="tb-btn" id="btnOpenQuery" title="開啟查詢條件"
+            data-bs-toggle="modal" data-bs-target="#queryModal">
+      <i class="bi bi-search tb-icon"></i>
+      <span class="tb-label">查詢</span>
+    </button>
+    <div class="tb-sep"></div>
+    <button class="tb-btn" id="btnExportExcel" title="匯出 CSV/Excel">
+      <i class="bi bi-file-earmark-excel tb-icon"></i>
+      <span class="tb-label">匯出Excel</span>
+    </button>
+    <button class="tb-btn" id="btnPrintReport" title="列印報表">
+      <i class="bi bi-printer tb-icon"></i>
+      <span class="tb-label">列印</span>
+    </button>
+    <div class="tb-sep"></div>
+    <!-- 列導覽 -->
+    <div id="rowNavArea">
+      <button class="nav-btn" id="btnNavFirst"  title="第一筆">&#x23EE;</button>
+      <button class="nav-btn" id="btnNavPrev"   title="上一筆">&#x25C4;</button>
+      <span id="rowNavBadge">- / -</span>
+      <button class="nav-btn" id="btnNavNext"   title="下一筆">&#x25BA;</button>
+      <button class="nav-btn" id="btnNavLast"   title="最後一筆">&#x23ED;</button>
     </div>
   </div>
 
+  <!-- Tab 內容區 -->
+  <div id="tabContentArea">
 
-    <!-- ✅ 結果區塊：新增分頁 -->
-    <div id="resultTabs" class="card shadow-sm p-3" style="display:none;">
-      <ul class="nav nav-tabs" id="reportTabs" role="tablist">
-        <li class="nav-item" role="presentation">
-          <button class="nav-link active" id="tab-raw" data-bs-toggle="tab" data-bs-target="#tabRawPane" type="button" role="tab">原始資料</button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="tab-pivot" data-bs-toggle="tab" data-bs-target="#tabPivotPane" type="button" role="tab">樞紐分析</button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="tab-chart" data-bs-toggle="tab" data-bs-target="#tabChartPane" type="button" role="tab">
-            圖表分析
-          </button>
-        </li>
-      </ul>
-
-      <div class="tab-content mt-3">
-        <!-- 原始資料分頁 -->
-        <div class="tab-pane fade show active" id="tabRawPane" role="tabpanel">
-          <div class="table-responsive">
-            <table class="table table-bordered table-hover align-middle text-center mb-0" id="resultTable">
-              <thead class="table-light" id="tableHead"></thead>
-              <tbody id="tableBody"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- 樞紐分析分頁 -->
-        <div class="tab-pane fade" id="tabPivotPane" role="tabpanel">
-          <div id="pivotContainer" style="height:70vh; overflow:auto;">
-            <div class="text-secondary text-center mt-5">尚未載入資料</div>
-          </div>
-        </div>
-
-        <!-- 📊 圖表分析分頁 -->
-        <div class="tab-pane fade" id="tabChartPane" role="tabpanel">
-          <div class="mt-3">
-            <div class="d-flex align-items-center gap-3 mb-3">
-              <label class="form-label mb-0">圖表類型：</label>
-              <select id="chartType" class="form-select" style="width:180px;">
-                <option value="bar">長條圖</option>
-                <option value="line">折線圖</option>
-                <option value="pie">圓餅圖</option>
-              </select>
-              <button id="btnDrawChart" class="btn btn-success">重新產生圖表</button>
-            </div>
-            <div id="chartContainer">
-              <canvas id="pivotChart" style="width:100%; height:70vh;"></canvas>
-            </div>
-          </div>
-        </div>
-
+    <!-- 原始資料 -->
+    <div class="view-pane is-active" id="viewRaw">
+      <div id="rawScrollArea">
+        <table class="mb-0" id="resultTable">
+          <thead id="tableHead"></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
       </div>
     </div>
+
+    <!-- 分析（Pivot Builder） -->
+    <div class="view-pane" id="viewPivot">
+
+      <!-- ── Builder Panel ── -->
+      <div id="pvbPanel">
+        <!-- Available Fields Row -->
+        <div class="pvb-avail-row">
+          <span class="pvb-avail-label">可用欄位</span>
+          <div id="pvbAvailFields"></div>
+        </div>
+
+        <!-- Three Drop Zones -->
+        <div class="pvb-zones">
+          <div class="pvb-zone" id="pvbRowZone" data-zone="rows">
+            <div class="pvb-zone-title">&#9654; 列 (Rows)</div>
+            <div class="pvb-zone-body" id="pvbRowBody"></div>
+          </div>
+          <div class="pvb-zone" id="pvbColZone" data-zone="cols">
+            <div class="pvb-zone-title">&#9660; 欄 (Columns)</div>
+            <div class="pvb-zone-body" id="pvbColBody"></div>
+          </div>
+          <div class="pvb-zone" id="pvbValZone" data-zone="vals">
+            <div class="pvb-zone-title">&#9632; 數值 (Values)</div>
+            <div class="pvb-zone-body" id="pvbValBody"></div>
+          </div>
+        </div>
+
+        <!-- Options Row -->
+        <div class="pvb-options-row">
+          <label>聚合方式：</label>
+          <select id="pvbAgg" class="form-select form-select-sm" style="width:100px;">
+            <option value="Count">筆數</option>
+            <option value="Sum">加總</option>
+            <option value="Average">平均</option>
+            <option value="Maximum">最大值</option>
+            <option value="Minimum">最小值</option>
+          </select>
+          <label>呈現方式：</label>
+          <select id="pvbRender" class="form-select form-select-sm" style="width:140px;">
+            <option value="Table">表格</option>
+            <option value="Table Barchart">表格+長條圖</option>
+            <option value="Heatmap">熱圖</option>
+            <option value="Row Heatmap">列熱圖</option>
+            <option value="Col Heatmap">欄熱圖</option>
+          </select>
+          <button id="pvbApply" class="btn btn-primary btn-sm px-3">產生分析</button>
+          <button id="pvbClear" class="btn btn-outline-secondary btn-sm">重置</button>
+          <button id="pvbSave" class="btn btn-outline-success btn-sm">儲存配置</button>
+          <span id="pvbMsg" class="text-muted" style="font-size:0.78rem;"></span>
+        </div>
+      </div>
+
+      <!-- Pivot Result -->
+      <div id="pivotContainer">
+        <div class="text-secondary text-center mt-5" style="opacity:.6;">
+          請將欄位拖曳至各區塊，再按「產生分析」
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 圖形 -->
+    <div class="view-pane" id="viewChart">
+      <div style="padding:4px 8px; border-bottom:1px solid #dee2e6; flex-shrink:0; display:flex; align-items:center; gap:12px; background:#fafbff;">
+        <label class="mb-0" style="font-size:0.85rem;">圖表類型：</label>
+        <select id="chartType" class="form-select form-select-sm" style="width:150px;">
+          <option value="bar">長條圖</option>
+          <option value="line">折線圖</option>
+          <option value="pie">圓餅圖</option>
+        </select>
+        <button id="btnDrawChart" class="btn btn-sm btn-success">重新產生</button>
+      </div>
+      <div id="chartScrollArea" style="flex:1; overflow:auto; padding:8px;">
+        <canvas id="pivotChart" style="max-width:100%;"></canvas>
+      </div>
+    </div>
+
+  </div><!-- /tabContentArea -->
+
+  <!-- 底部頁籤 -->
+  <div id="bottomTabs">
+    <ul class="nav nav-tabs" role="tablist">
+      <li class="nav-item">
+        <button class="nav-link active" data-target="viewRaw">資料</button>
+      </li>
+      <li class="nav-item">
+        <button class="nav-link" data-target="viewPivot">分析</button>
+      </li>
+      <li class="nav-item">
+        <button class="nav-link" data-target="viewChart">圖形</button>
+      </li>
+    </ul>
+  </div>
+
+</div><!-- /reportWrapper -->
+
+<!-- ── 查詢條件 Modal ── -->
+<div class="modal fade" id="queryModal" tabindex="-1" aria-labelledby="queryModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:620px;">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-bold" id="queryModalLabel">
+          <i class="bi bi-funnel me-1"></i>查詢條件
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body py-2" style="max-height:75vh;overflow-y:auto;">
+        <div id="paramRows">
+          @foreach (var def in cfg?.ParamDefs ?? Enumerable.Empty<ParamDef>())
+          {
+            <div class="param-row">
+              <label class="param-label">@def.Label</label>
+              <div class="param-ctrl">
+                @if (def.Ui == ParamUiType.Date)
+                {
+                  <input type="date" class="form-control"
+                         id="@def.Name" name="@def.Name"
+                         value="" data-default="@def.DefaultValue" />
+                }
+                else if (def.Ui == ParamUiType.Select)
+                {
+                  var lookupAttr = string.IsNullOrWhiteSpace(def.LookupKey)
+                      ? ""
+                      : $"data-lookup=\"{def.LookupKey}\"";
+                  <div class="combo-wrap">
+                    <div class="combo-input-row">
+                      <!-- 代碼欄 + 內嵌 ▾ -->
+                      <div class="combo-left">
+                        <input type="text" class="combo-code-input" autocomplete="off" spellcheck="false" />
+                        <button type="button" class="combo-code-btn" tabindex="-1">▾</button>
+                      </div>
+                      <!-- 說明按鈕（顯示中文名稱 + ▾） -->
+                      <button type="button" class="combo-desc-btn" tabindex="-1">
+                        <span class="combo-desc-text"></span>
+                        <span class="combo-desc-arrow">▾</span>
+                      </button>
+                    </div>
+                    <select id="@def.Name" name="@def.Name"
+                            @Html.Raw(lookupAttr)
+                            data-default="@def.DefaultValue"
+                            style="display:none;">
+                    </select>
+                  </div>
+                }
+                else if (def.Ui == ParamUiType.Number)
+                {
+                  <input type="number" class="form-control"
+                         id="@def.Name" name="@def.Name"
+                         value="" data-default="@def.DefaultValue" />
+                }
+                else
+                {
+                  <input type="text" class="form-control"
+                         id="@def.Name" name="@def.Name"
+                         value="" data-default="@def.DefaultValue" />
+                }
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+      <div class="modal-footer py-2 gap-2">
+        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">關閉</button>
+        <button type="button" id="btnSearch" class="btn btn-sm btn-primary px-4">
+          <i class="bi bi-search me-1"></i>查詢
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
+
+<!-- ── Combo Picker Modal ── -->
+<div class="modal fade" id="comboPickerModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:520px;">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-bold" id="comboPickerTitle">名稱查詢</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div class="d-flex gap-2 p-2 border-bottom bg-light">
+          <input type="text" id="pickerFilterCode" class="form-control form-control-sm" placeholder="即時篩選" />
+          <input type="text" id="pickerFilterDesc" class="form-control form-control-sm" placeholder="即時篩選" />
+        </div>
+        <div style="height:340px; overflow-y:auto;" id="pickerScrollArea">
+          <table id="pickerTable">
+            <colgroup>
+              <col style="width:140px;" />
+              <col />
+            </colgroup>
+            <thead>
+              <tr>
+                <th id="pickerColCode">代碼</th>
+                <th id="pickerColDesc">名稱</th>
+              </tr>
+            </thead>
+            <tbody id="pickerBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer py-2 gap-2">
+        <button type="button" id="pickerConfirm" class="btn btn-primary btn-sm px-4">確定</button>
+        <button type="button" class="btn btn-danger btn-sm px-4" data-bs-dismiss="modal">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 @* F3 共用辭典 Modal *@
 @await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", Model.FieldDictList, ViewData)
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
 
-<!-- ✅ jQuery 本體 -->
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-
-<!-- ✅ jQuery UI（pivot 需要 sortable / draggable）-->
 <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
 <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
-
-<!-- ✅ 其他套件 -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/pivottable@2.23.0/dist/pivot.min.js"></script>
 <link href="https://cdn.jsdelivr.net/npm/pivottable@2.23.0/dist/pivot.min.css" rel="stylesheet"/>
@@ -180,123 +657,223 @@
 
 <script>
 (function () {
-  // --- 後端傳來的報表設定 ---
   const cfg = @Html.Raw(json);
 
-  // === 查詢條件收合狀態：依報表名稱或 DictTableName 記憶 ===
-  const QUERY_KEY = `report:queryCollapsed:${(cfg.DictTableName || cfg.Title || 'default')}`;
-
-  function applyQueryCollapseRemember() {
-    const btn = document.getElementById('btnToggleQuery');
-    const pane = document.getElementById('queryCollapse');
-    if (!btn || !pane) return;
-
-    // 讀取記憶（'1' = 收合, '0'/null = 展開）
-    const collapsed = localStorage.getItem(QUERY_KEY) === '1';
-
-    // 直接修改 class 以符合記憶狀態
-    if (collapsed) {
-      pane.classList.remove('show');
-      btn.classList.add('collapsed');
-      btn.setAttribute('aria-expanded', 'false');
-      btn.querySelector('.lbl').textContent = '展開';
-    } else {
-      pane.classList.add('show');
-      btn.classList.remove('collapsed');
-      btn.setAttribute('aria-expanded', 'true');
-      btn.querySelector('.lbl').textContent = '收合';
-    }
-
-    // 綁定事件：每次切換時更新記憶
-    pane.addEventListener('shown.bs.collapse', () => {
-      btn.classList.remove('collapsed');
-      btn.setAttribute('aria-expanded', 'true');
-      btn.querySelector('.lbl').textContent = '收合';
-      localStorage.setItem(QUERY_KEY, '0');
-    });
-    pane.addEventListener('hidden.bs.collapse', () => {
-      btn.classList.add('collapsed');
-      btn.setAttribute('aria-expanded', 'false');
-      btn.querySelector('.lbl').textContent = '展開';
-      localStorage.setItem(QUERY_KEY, '1');
-    });
-  }
-
-  // 在 DOMContentLoaded 時套用
-  document.addEventListener('DOMContentLoaded', () => {
-    applyQueryCollapseRemember();
-  });
-
-  // ⚙️ 確保 ParamDefs 一定是陣列，不會是物件 {0:{},1:{}}
   cfg.ParamDefs = Array.isArray(cfg.ParamDefs)
     ? cfg.ParamDefs
     : Object.values(cfg.ParamDefs || []);
 
-  // --- 供 renderTable 使用的辭典欄位（只含 Visible=1，已排序） ---
-  window._tableFields = @Html.Raw(Json.Serialize(ViewData["Fields"] ?? new object()));
+  window._tableFields = @Html.Raw(fieldsJson);
+  window._dictTableName = cfg.DictTableName || (cfg.TableName || "");
 
-  // ====== 通用工具 ======
-  function pad2(n){ return String(n).padStart(2,'0'); }
-  function todayOffset(expr){
+  // ====== 工具 ======
+  function pad2(n) { return String(n).padStart(2, '0'); }
+  function todayOffset(expr) {
     if (!expr || !/^today([+-]\d+d)?$/i.test(expr)) return '';
     const m = expr.match(/^today([+-]\d+)?d?$/i);
     const d = new Date();
-    if (m && m[1]) d.setDate(d.getDate() + parseInt(m[1],10));
+    if (m && m[1]) d.setDate(d.getDate() + parseInt(m[1], 10));
     return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
   }
 
-  async function loadLookup(key, el){
-    try{
+  async function loadLookup(key, el) {
+    try {
       const res = await fetch(`/api/Report/lookup/${key}`);
       if (!res.ok) throw 0;
-      const data = await res.json(); // [{value,text}]
-      data.forEach(o=>{
-        const opt = document.createElement('option');
-        opt.value = String(o.value ?? '').trim();   // ⬅ 轉字串 + 去空白
-        opt.textContent = o.text ?? '';
-        el.appendChild(opt);
-      });
-    }catch{
-      if (!el.querySelector('option')) {
-        const opt = document.createElement('option');
-        opt.value = ''; opt.textContent = '(不限)';
-        el.appendChild(opt);
-      }
+      const data = await res.json();
+      el._allOpts = [{ value: '', code: '', desc: '(不限)' }].concat(
+        data.map(o => {
+          const code = String(o.value ?? '').trim();
+          return { value: code, code, desc: o.text ?? '' };
+        })
+      );
+      // 同步到隱藏 select（供 collectParams 讀值）
+      el.innerHTML = '';
+      el._allOpts.forEach(o => el.appendChild(new Option(o.code ? `${o.code}　${o.desc}` : o.desc, o.value)));
+    } catch {
+      el._allOpts = [{ value: '', code: '', desc: '(不限)' }];
+      if (!el.querySelector('option')) el.appendChild(new Option('(不限)', ''));
     }
   }
 
-  // ====== 初始化條件（載入下拉 + 套預設值） ======
+  // ── Combo UI 初始化 ──
+  function setupCombo(select) {
+    const wrap      = select.closest('.combo-wrap');
+    if (!wrap) return;
+    const codeInput = wrap.querySelector('.combo-code-input');
+    const codeBtn   = wrap.querySelector('.combo-code-btn');
+    const descBtn   = wrap.querySelector('.combo-desc-btn');
+    const descText  = wrap.querySelector('.combo-desc-text');
+    if (!codeInput) return;
+    select._comboWrap = wrap;
+
+    // 右側說明按鈕 ▾ → 開啟 Picker Modal
+    descBtn?.addEventListener('click', e => { e.stopPropagation(); openPicker(select); });
+
+    // 左側 ▾ → 內嵌下拉清單（不開 Modal）
+    let _codeList = null;
+
+    function openCodeList() {
+      closeCodeList();
+      const opts = select._allOpts || [];
+      const q    = codeInput.value.trim().toLowerCase();
+      const div  = document.createElement('div');
+
+      // 用 fixed 定位掛到 body，避免被 modal overflow:auto 裁切
+      const rect       = codeInput.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom - 4;
+      const spaceAbove = rect.top - 4;
+      const maxH       = Math.min(200, Math.max(spaceBelow, spaceAbove));
+      const showBelow  = spaceBelow >= spaceAbove || spaceBelow >= 80;
+
+      div.style.cssText =
+        `position:fixed;left:${rect.left}px;` +
+        (showBelow ? `top:${rect.bottom + 2}px;` : `bottom:${window.innerHeight - rect.top + 2}px;`) +
+        `z-index:10050;background:#fff;` +
+        `border:1px solid #b0c4de;border-radius:4px;box-shadow:0 4px 10px rgba(0,0,0,.18);` +
+        `max-height:${maxH}px;overflow-y:auto;min-width:${Math.max(rect.width, 220)}px;`;
+
+      opts.forEach(o => {
+        const item = document.createElement('div');
+        item.style.cssText = 'display:flex;gap:8px;padding:3px 8px;cursor:pointer;font-size:0.82rem;white-space:nowrap;';
+        item.innerHTML =
+          `<span style="color:#222;font-weight:600;font-family:monospace;min-width:58px;">${o.code}</span>` +
+          `<span style="color:#222;">${o.desc}</span>`;
+        if (o.code.toLowerCase() === q) item.style.background = '#ddeeff';
+        item.addEventListener('mouseenter', () => { item.style.background = '#e8f0ff'; });
+        item.addEventListener('mouseleave', () => { item.style.background = o.code.toLowerCase() === codeInput.value.trim().toLowerCase() ? '#ddeeff' : ''; });
+        item.addEventListener('mousedown', e => {
+          e.preventDefault();
+          codeInput.value = o.code;
+          if (descText) descText.textContent = o.desc;
+          select.value = o.value;
+          closeCodeList();
+        });
+        div.appendChild(item);
+        // 捲動到已選取項
+        if (o.code.toLowerCase() === q) setTimeout(() => item.scrollIntoView({ block: 'nearest' }), 0);
+      });
+      document.body.appendChild(div);
+      _codeList = div;
+    }
+
+    function closeCodeList() {
+      _codeList?.remove();
+      _codeList = null;
+    }
+
+    codeBtn?.addEventListener('click', e => {
+      e.stopPropagation();
+      _codeList ? closeCodeList() : openCodeList();
+    });
+
+    // 點外部關閉
+    document.addEventListener('click', e => { if (!wrap.contains(e.target)) closeCodeList(); });
+
+    // 直接在代碼框輸入時即時比對說明
+    codeInput.addEventListener('input', () => {
+      const q     = codeInput.value.trim();
+      const exact = (select._allOpts || []).find(o => o.code.toLowerCase() === q.toLowerCase());
+      if (descText) descText.textContent = exact ? exact.desc : '';
+      select.value = exact ? exact.value : '';
+    });
+  }
+
+  // ── Combo Picker Modal ──
+  let _pickerSelect = null;
+  let _pickerSelectedOpt = null;
+
+  function openPicker(select) {
+    _pickerSelect = select;
+    _pickerSelectedOpt = null;
+    document.getElementById('pickerFilterCode').value = '';
+    document.getElementById('pickerFilterDesc').value = '';
+    renderPickerRows('', '');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('comboPickerModal')).show();
+    // modal 顯示後 focus 代碼篩選框
+    document.getElementById('comboPickerModal').addEventListener('shown.bs.modal', () => {
+      document.getElementById('pickerFilterCode').focus();
+    }, { once: true });
+  }
+
+  function renderPickerRows(codeQ, descQ) {
+    const opts = _pickerSelect?._allOpts || [];
+    const cql  = codeQ.trim().toLowerCase();
+    const dql  = descQ.trim().toLowerCase();
+    const filtered = opts.filter(o =>
+      (!cql || o.code.toLowerCase().includes(cql)) &&
+      (!dql || o.desc.toLowerCase().includes(dql))
+    );
+    const tbody = document.getElementById('pickerBody');
+    tbody.innerHTML = '';
+    filtered.forEach(o => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td style="font-weight:600;font-family:monospace;">${o.code}</td><td>${o.desc}</td>`;
+      tr.addEventListener('click', () => {
+        tbody.querySelectorAll('tr.picker-selected').forEach(r => r.classList.remove('picker-selected'));
+        tr.classList.add('picker-selected');
+        _pickerSelectedOpt = o;
+      });
+      tr.addEventListener('dblclick', () => {
+        _pickerSelectedOpt = o;
+        confirmPicker();
+      });
+      tbody.appendChild(tr);
+    });
+  }
+
+  function confirmPicker() {
+    if (!_pickerSelectedOpt || !_pickerSelect) return;
+    const wrap = _pickerSelect._comboWrap || _pickerSelect.closest?.('.combo-wrap');
+    if (wrap) {
+      const ci = wrap.querySelector('.combo-code-input');
+      const dt = wrap.querySelector('.combo-desc-text');
+      if (ci) ci.value = _pickerSelectedOpt.code;
+      if (dt) dt.textContent = _pickerSelectedOpt.desc;
+    }
+    _pickerSelect.value = _pickerSelectedOpt.value;
+    bootstrap.Modal.getInstance(document.getElementById('comboPickerModal'))?.hide();
+  }
+
+  // 從 select.value 同步回 combo 顯示
+  function syncComboFromSelect(select) {
+    const wrap = select._comboWrap || select.closest?.('.combo-wrap');
+    if (!wrap) return;
+    const codeInput = wrap.querySelector('.combo-code-input');
+    const descText  = wrap.querySelector('.combo-desc-text');
+    if (!codeInput) return;
+    const opt = (select._allOpts || []).find(o => o.value === select.value);
+    codeInput.value = opt ? opt.code : (select.value || '');
+    if (descText) descText.textContent = opt ? opt.desc : '';
+  }
+
+  // ====== 初始化條件 ======
   async function initParams() {
     cfg.ParamDefs = Array.isArray(cfg.ParamDefs) ? cfg.ParamDefs : Object.values(cfg.ParamDefs || {});
     for (const def of cfg.ParamDefs) {
       const el = document.getElementById(def.Name);
       if (!el) continue;
-
       const key = el.dataset.lookup;
-      // ⬇ 預設值一律轉字串並去空白
       const defValRaw = el.dataset.default || def.DefaultValue || "";
       const defVal = String(defValRaw).trim();
-
-      if (key) await loadLookup(key, el);
-
+      if (key) { await loadLookup(key, el); setupCombo(el); }
       if (def.Ui === 1 && typeof defVal === "string" && defVal.startsWith("today")) {
         el.value = todayOffset(defVal);
       } else {
         el.value = defVal;
-        // 若仍沒選到（例如後端真的有多餘空白），再做一次比對修正
         if (!el.value && el.options?.length > 0) {
           for (const opt of el.options) {
             if (String(opt.value).trim() === defVal) { el.value = opt.value; break; }
           }
         }
-        if (!el.value && el.options?.length > 0) el.selectedIndex = 0; // 最後保底
+        if (!el.value && el.options?.length > 0) el.selectedIndex = 0;
       }
+      // Combo 視覺同步
+      if (el.closest?.('.combo-wrap')) syncComboFromSelect(el);
     }
   }
 
-
-
-  // ====== 呼叫 SP ======
+  // ====== 收集查詢參數 ======
   function collectParams() {
     const p = {};
     (cfg.ParamDefs || []).forEach(def => {
@@ -308,17 +885,12 @@
     return p;
   }
 
+  // ====== 查詢 ======
   async function doSearch() {
     const payload = { spName: cfg.SpName, params: collectParams() };
-
     const btn = document.getElementById('btnSearch');
-    const originalText = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 查詢中...';
-
-    // ✅ 改這裡
-    const resultTabs = document.getElementById('resultTabs');
-    if (resultTabs) resultTabs.style.display = 'none';
+    const orig = btn?.innerHTML;
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>查詢中...'; }
 
     try {
       const res = await fetch('/api/Report/exec', {
@@ -327,456 +899,616 @@
         body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error(await res.text());
-
       const data = await res.json();
 
       if (!data.Rows || !Array.isArray(data.Rows) || data.Rows.length === 0) {
-        Swal.fire({
-          icon: 'info',
-          title: '查無資料',
-          text: '找不到符合條件的資料。',
-          confirmButtonText: '確定'
-        });
+        Swal.fire({ icon: 'info', title: '查無資料', text: '找不到符合條件的資料。', confirmButtonText: '確定' });
         return;
       }
-
       window.renderTable?.(data.Columns, data.Rows);
     } catch (err) {
       console.error('查詢發生錯誤:', err);
-      Swal.fire({
-        icon: 'error',
-        title: '查詢失敗',
-        text: err.message || '系統錯誤，請稍後再試。',
-        confirmButtonText: '確定'
-      });
+      Swal.fire({ icon: 'error', title: '查詢失敗', text: err.message || '系統錯誤，請稍後再試。', confirmButtonText: '確定' });
     } finally {
-      btn.disabled = false;
-      btn.innerHTML = originalText;
+      if (btn) { btn.disabled = false; btn.innerHTML = orig; }
     }
   }
 
-  // ====== 繪表 ======
-  // ====== 列印報表 ======
+  // ====== 列印 ======
   async function printReport() {
     const payload = {
       spName: cfg.SpName,
       reportName: cfg.ReportName || cfg.DictTableName || cfg.SpName || cfg.Title || "report",
       params: collectParams()
     };
-
     const btn = document.getElementById('btnPrintReport');
-    const originalText = btn?.innerHTML;
-    if (btn) {
-      btn.disabled = true;
-      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 列印中...';
-    }
-
+    const orig = btn?.innerHTML;
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split tb-icon"></i><span class="tb-label">列印中...</span>'; }
     try {
       const res = await fetch('/api/report/generate-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error(await res.text());
-
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      const blobUrl = URL.createObjectURL(blob);
+      const reportTitle = cfg.ReportName || cfg.DictTableName || cfg.SpName || cfg.Title || '報表';
+      const win = window.open('about:blank', '_blank');
+      if (win) {
+        const safeTitle = reportTitle.replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+        win.document.write(
+          '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + safeTitle + '<\/title><\/head>'
+          + '<body style="margin:0;overflow:hidden;">'
+          + '<embed src="' + blobUrl + '" type="application\/pdf" style="position:fixed;top:0;left:0;width:100%;height:100%;" \/>'
+          + '<\/body><\/html>'
+        );
+        win.document.close();
+      } else {
+        // popup 被封鎖時直接用 blob URL 開啟
+        const a = document.createElement('a');
+        a.href = blobUrl; a.target = '_blank';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      }
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
     } catch (err) {
       Swal.fire({ icon: 'error', title: '列印失敗', text: err.message || '請稍後再試' });
     } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
-      }
+      if (btn) { btn.disabled = false; btn.innerHTML = orig; }
     }
   }
 
-window.renderTable = function(apiColumns, rows) {
-  const thead = document.getElementById('tableHead');
-  const tbody = document.getElementById('tableBody');
-
-  const dictFields = (window._tableFields || [])
-    .filter(f => f.Visible)
-    .sort((a,b) => (a.SerialNum ?? 0) - (b.SerialNum ?? 0));
-
-  // 後端欄位（忽略大小寫）；若沒給 Columns，就用第一列 rows 的 keys
-  let apiColsLower = [];
-  if (Array.isArray(apiColumns) && apiColumns.length) {
-    apiColsLower = apiColumns.map(c => String(c).toLowerCase());
-  } else if (Array.isArray(rows) && rows.length) {
-    apiColsLower = Object.keys(rows[0]).map(k => k.toLowerCase());
-  }
-
-  // 用忽略大小寫方式配對辭典欄位
-  let cols = dictFields.filter(f => apiColsLower.includes(String(f.FieldName).toLowerCase()));
-
-  // 若配不到就 fallback：把第一列的所有 key 全部顯示
-  if (!cols.length && Array.isArray(rows) && rows.length) {
-    const keys = Object.keys(rows[0]);
-    cols = keys.map(k => ({ FieldName: k, DisplayLabel: k, FormatStr: "" }));
-  }
-
-  // 表頭
-  thead.innerHTML = `<tr>${
-    cols.map(c => `<th>${(c.DisplayLabel || c.FieldName)}</th>`).join('')
-  }</tr>`;
-
-  // 格式化
-  function fmt(v, format) {
-    if (v == null || format === "") return v ?? "";
-    if (/^(yyyy\/MM\/dd|yyyy-MM-dd)$/.test(format)) {
-      const d = (typeof v === 'string') ? new Date(v) : v;
-      if (isNaN(d)) return v ?? "";
-      const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
-      return format.includes('/') ? `${y}/${m}/${dd}` : `${y}-${m}-${dd}`;
-    }
-    if (typeof v === 'number' && /^#,#*0(\.[0#]+)?$/.test((format||'').replace(/ /g,''))) {
-      const m = format.match(/\.(0+|#+)?$/);
-      const max = m?.[0]?.length ? m[0].length-1 : 0;
-      return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: Math.max(0,max) });
-    }
-    return v;
-  }
-
-  // 表身
-  tbody.innerHTML = (rows || []).map(r => `<tr>${
-    cols.map(c => {
-      const raw = r[c.FieldName];
-      const text = fmt(raw, c.FormatStr || "");
-      return `<td>${text ?? ''}</td>`;
-    }).join('')
-  }</tr>`).join('');
-
-  // ✅ 改這裡，不要再用 resultArea
-  const resultTabs = document.getElementById('resultTabs');
-  if (resultTabs) resultTabs.style.display = '';
-};
-
-   // ====== F3 辭典（欄位可視/中文/順序） ======
-  // 提供給 fieldDictModal.js 用
-  window._dictTableName = cfg.DictTableName || (cfg.TableName || "");
-  function openFieldDict() {
-    const el = document.getElementById("fieldDictModal");
-    if (!el) return;
-
-    // 先載入 modal 內容（你的 fieldDictModal.js 會定義這個）
-    if (typeof window.initFieldDictModal === "function") {
-      // 帶 modalId，避免抓錯 tbody
-      window.initFieldDictModal(window._dictTableName, "fieldDictModal");
-    } else if (typeof window.loadFieldDict === "function") {
-      window.loadFieldDict(window._dictTableName);
-    }
-
-    // 顯示 Bootstrap Modal
-    const modal = new bootstrap.Modal(el);
-    modal.show();
-  }
-
-  // F3 熱鍵（避免在文字輸入中誤觸）
-  document.addEventListener("keydown", (e) => {
-    const tag = (e.target.tagName || "").toLowerCase();
-    const inText = tag === "input" || tag === "textarea" || e.target.isContentEditable;
-    if (e.key === "F3" && !inText) {
-      e.preventDefault();
-      openFieldDict();
-    }
-  });
-
-  // 儲存成功後，讓報表立刻套用最新中文/可視/順序
-  window.addEventListener("field-dict-saved", () => location.reload());
-
-
-  // 綁事件
-  document.addEventListener('DOMContentLoaded', () => {
-    initParams();
-    document.getElementById('btnSearch')?.addEventListener('click', e=>{
-      e.preventDefault();
-      doSearch();
-    });
-    document.getElementById('btnPrintReport')?.addEventListener('click', e=>{
-      e.preventDefault();
-      printReport();
-    });
-  });
-
-  const resultTabs = document.getElementById('resultTabs');
-  const pivotContainer = document.getElementById('pivotContainer');
-
-  // ====== 標準 renderTable ======
-  const origRender = window.renderTable;
-  window.renderTable = function(cols, rows) {
-    origRender?.(cols, rows);
-
-    if (rows && rows.length > 0) {
-      if (resultTabs) resultTabs.style.display = '';
-      pivotContainer.innerHTML = '<div class="text-secondary text-center mt-5">載入中...</div>';
-      window._lastReportData = { cols, rows };  // ✅ 暫存給樞紐分析使用
-    } else {
-      if (resultTabs) resultTabs.style.display = 'none';
-      Swal.fire({ icon: 'info', title: '查無資料', text: '找不到符合條件的資料。' });
-    }
-  };
-
-  // ====== 點擊「樞紐分析」分頁時載入 PivotTable ======
-  document.getElementById('tab-pivot')?.addEventListener('shown.bs.tab', () => {
-    const data = window._lastReportData?.rows;
-    if (!data || !data.length) {
-      pivotContainer.innerHTML = '<div class="text-secondary text-center mt-5">尚未載入資料</div>';
+  // ====== 匯出 CSV ======
+  function exportToExcel() {
+    const data = window._lastReportData;
+    if (!data || !data.rows || !data.rows.length) {
+      Swal.fire({ icon: 'info', title: '請先查詢資料' });
       return;
     }
-
-    // 只建立一次預設切換器
-    if (!document.getElementById('pivotPresets')) {
-      const bar = document.createElement('div');
-      bar.className = 'd-flex gap-2 align-items-center mb-2';
-      bar.innerHTML = `
-        <label class="form-label mb-0">預設：</label>
-        <select id="pivotPresets" class="form-select" style="width:240px;"></select>
-        <button id="pivotSavePreset" class="btn btn-outline-secondary">儲存目前配置</button>
-      `;
-      pivotContainer.before(bar);
+    const dictFields = (window._tableFields || [])
+      .filter(f => f.Visible)
+      .sort((a, b) => (a.SerialNum ?? 0) - (b.SerialNum ?? 0));
+    const keyMap = {};
+    Object.keys(data.rows[0]).forEach(k => { keyMap[k.toLowerCase()] = k; });
+    function getV(row, field) {
+      if (row[field] !== undefined && row[field] !== null) return row[field];
+      const rk = keyMap[String(field).toLowerCase()];
+      return rk !== undefined ? row[rk] : '';
     }
-
-    buildPivotUI();     // ← 用新函數產生 pivotUI（見下）
-
-    pivotContainer.innerHTML = '';
-
-    try {
-      // ✅ 取出辭典欄位（僅顯示可視欄位）
-      const dictFields = (window._tableFields || [])
-        .filter(f => f.Visible)
-        .sort((a,b) => (a.SerialNum ?? 0) - (b.SerialNum ?? 0));
-
-      // ✅ 建立中英文對照 map
-      const nameMap = {};
-      dictFields.forEach(f => {
-        const en = f.FieldName?.trim();
-        const zh = f.DisplayLabel?.trim() || en;
-        nameMap[en] = zh;
+    const headers = dictFields.map(f => f.DisplayLabel || f.FieldName);
+    const csvRows = [headers.join(',')];
+    data.rows.forEach(row => {
+      const vals = dictFields.map(f => {
+        const v = getV(row, f.FieldName);
+        if (v == null) return '';
+        const s = String(v);
+        return (s.includes(',') || s.includes('"') || s.includes('\n'))
+          ? `"${s.replace(/"/g, '""')}"` : s;
       });
-
-      // ✅ 轉換資料：把每列的 key 從英文換成中文
-      const localizedData = data.map(row => {
-        const newRow = {};
-        Object.keys(row).forEach(k => {
-          if (nameMap[k]) newRow[nameMap[k]] = row[k];
-        });
-        return newRow;
-      });
-
-      // ✅ 取得欄位清單
-      const visibleCols = dictFields.map(f => f.DisplayLabel?.trim() || f.FieldName);
-
-      // ✅ 載入 pivotUI（改用中文欄位名）
-      $("#pivotContainer").pivotUI(localizedData, {
-        rows: [visibleCols[0] || ""],
-        cols: [visibleCols[1] || ""],
-        rendererName: "Table"
-      });
-
-    } catch (err) {
-      console.error(err);
-      pivotContainer.innerHTML = `<div class="alert alert-danger">載入樞紐分析發生錯誤：${err.message}</div>`;
-    }
-  });
-
-   // ===== 📊 圖表分頁 =====
-    let chartInstance = null;
-
-    document.getElementById('tab-chart')?.addEventListener('shown.bs.tab', () => {
-      refreshChartFromPivot();
+      csvRows.push(vals.join(','));
     });
-
-    // ✅ 自動從 PivotTable 讀取目前顯示的資料產生圖表（含智能縮放）
-    function refreshChartFromPivot() {
-      const pivotTable = document.querySelector('#pivotContainer .pvtTable');
-      const ctx = document.getElementById('pivotChart');
-      const chartType = document.getElementById('chartType').value || 'bar';
-      const chartContainer = document.getElementById('chartContainer');
-
-      if (!pivotTable) {
-        ctx.replaceWith(ctx.cloneNode(true)); // 清空
-        Swal.fire({ icon: 'info', title: '請先建立樞紐分析表格' });
-        return;
-      }
-
-      // 取出資料（欄位名稱與列資料）
-      const headers = [...pivotTable.querySelectorAll('thead tr:last-child th')]
-        .map(th => th.textContent.trim())
-        .filter(t => t !== 'Totals');
-      const rows = [...pivotTable.querySelectorAll('tbody tr')];
-
-      const labels = [];
-      const values = [];
-
-      rows.forEach(tr => {
-        const cells = tr.querySelectorAll('th,td');
-        if (cells.length < 2) return;
-        const label = cells[0].textContent.trim();
-        const valCell = cells[cells.length - 1].textContent.trim().replace(/,/g, '');
-        const val = parseFloat(valCell) || 0;
-        if (label && !isNaN(val)) {
-          labels.push(label);
-          values.push(val);
-        }
-      });
-
-      if (labels.length === 0) {
-        ctx.replaceWith(ctx.cloneNode(true));
-        Swal.fire({ icon: 'info', title: '無法從樞紐分析中擷取有效資料' });
-        return;
-      }
-
-      // ✅ 智能高度調整（最小 300，最大 600）
-      const dynamicHeight = Math.min(800, Math.max(400, labels.length * 25));
-      chartContainer.style.height = dynamicHeight + 'px';
-      chartContainer.style.overflowY = labels.length > 20 ? 'auto' : 'visible';
-
-      // 清除舊圖
-      if (chartInstance) chartInstance.destroy();
-
-      chartInstance = new Chart(ctx, {
-        type: chartType,
-        data: {
-          labels,
-          datasets: [{
-            label: headers[0] || '數值',
-            data: values,
-            backgroundColor: 'rgba(54,162,235,0.6)',
-            borderColor: 'rgba(54,162,235,1)',
-            borderWidth: 1
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false, // ✅ 關閉固定比例，允許高度自動撐開
-          plugins: {
-            legend: { position: 'top' },
-            title: { display: true, text: headers[0] || '樞紐分析圖表' }
-          },
-          scales: {
-            x: { title: { display: true, text: headers[0] || '分類' } },
-            y: { title: { display: true, text: '數值' } }
-          }
-        }
-      });
-    }
-
-    // ✅ 手動重新產生圖表
-    document.getElementById('btnDrawChart')?.addEventListener('click', () => {
-      refreshChartFromPivot();
-    });
-
-
-    // === 定義可切換的預設（依你的中文欄位名填）===
-  const PIVOT_PRESETS = {
-    '客戶 × 客戶簡稱（筆數）': {
-      rows: ['客戶代碼'],
-      cols: ['客戶簡稱'],
-      aggregatorName: 'Count',
-      rendererName: 'Table'
-    },
-    '交期(月) × 客戶（加總數量）': {
-      rows: ['交期(月)'],         // 你若沒有這欄，可在 localizedData 事先派生一欄
-      cols: ['客戶簡稱'],
-      aggregatorName: 'Sum',
-      vals: ['數量'],
-      rendererName: 'Heatmap'     // 也可用 Table Heatmap
-    },
-    '品名 × 客戶（加總金額）': {
-      rows: ['品名(客戶料號)'],
-      cols: ['客戶簡稱'],
-      aggregatorName: 'Sum',
-      vals: ['金額'],              // 你的欄位名自行對應
-      rendererName: 'Table'
-    }
-  };
-
-  // 依報表（或 DictTableName）做 localStorage Key
-  function pivotStorageKey() {
-    const name = window._dictTableName || 'default-report';
-    return `pivotCfg:${name}`;
+    const blob = new Blob(['\uFEFF' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${cfg.Title || 'report'}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
-  // 產生/重建 pivotUI，支援套用預設或還原使用者上次設定
-  function buildPivotUI(presetKey) {
+  // ====== 底部頁籤切換 ======
+  function switchView(targetId) {
+    document.querySelectorAll('.view-pane').forEach(p => p.classList.remove('is-active'));
+    const pane = document.getElementById(targetId);
+    if (pane) pane.classList.add('is-active');
+    document.querySelectorAll('#bottomTabs .nav-link').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.target === targetId);
+    });
+    if (targetId === 'viewPivot') onShowPivot();
+    if (targetId === 'viewChart') refreshChartFromPivot();
+  }
+
+  // ====== 繪表 ======
+  window.renderTable = function (apiColumns, rows) {
+    const thead = document.getElementById('tableHead');
+    const tbody = document.getElementById('tableBody');
+
+    const dictFields = (window._tableFields || [])
+      .filter(f => f.Visible)
+      .sort((a, b) => (a.SerialNum ?? 0) - (b.SerialNum ?? 0));
+
+    let apiColsLower = [];
+    if (Array.isArray(apiColumns) && apiColumns.length) {
+      apiColsLower = apiColumns.map(c => String(c).toLowerCase());
+    } else if (Array.isArray(rows) && rows.length) {
+      apiColsLower = Object.keys(rows[0]).map(k => k.toLowerCase());
+    }
+
+    let cols = dictFields.filter(f => apiColsLower.includes(String(f.FieldName).toLowerCase()));
+    if (!cols.length && Array.isArray(rows) && rows.length) {
+      cols = Object.keys(rows[0]).map(k => ({ FieldName: k, DisplayLabel: k, FormatStr: "" }));
+    }
+
+    const keyMap = {};
+    if (rows && rows.length > 0) {
+      Object.keys(rows[0]).forEach(k => { keyMap[k.toLowerCase()] = k; });
+    }
+    function getVal(row, fieldName) {
+      if (row[fieldName] !== undefined && row[fieldName] !== null) return row[fieldName];
+      const realKey = keyMap[String(fieldName).toLowerCase()];
+      return realKey !== undefined ? row[realKey] : undefined;
+    }
+
+    const RESIZE_KEY = `report:colWidths:${cfg.DictTableName || cfg.SpName || 'default'}`;
+    const savedWidths = (() => {
+      try { return JSON.parse(localStorage.getItem(RESIZE_KEY) || '{}'); } catch { return {}; }
+    })();
+
+    thead.innerHTML = `<tr>${
+      cols.map(c => {
+        const saved = savedWidths[c.FieldName];
+        const dictW = Number(c.DisplaySize || 0) * 10;
+        const w = saved || dictW || 100;
+        return `<th data-field="${c.FieldName}" style="width:${w}px;min-width:${w}px;">${c.DisplayLabel || c.FieldName}<span class="col-resizer"></span></th>`;
+      }).join('')
+    }</tr>`;
+
+    function fmt(v, format) {
+      if (v == null || format === "") return v ?? "";
+      if (/^(yyyy\/MM\/dd|yyyy-MM-dd)$/.test(format)) {
+        const d = (typeof v === 'string') ? new Date(v) : v;
+        if (isNaN(d)) return v ?? "";
+        const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
+        return format.includes('/') ? `${y}/${m}/${dd}` : `${y}-${m}-${dd}`;
+      }
+      if (typeof v === 'number' && /^#,#*0(\.[0#]+)?$/.test((format||'').replace(/ /g,''))) {
+        const m = format.match(/\.(0+|#+)?$/);
+        const max = m?.[0]?.length ? m[0].length-1 : 0;
+        return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: Math.max(0,max) });
+      }
+      return v;
+    }
+
+    const alignMap = { 1: 'left', 2: 'center', 3: 'right' };
+
+    tbody.innerHTML = (rows || []).map(r => `<tr>${
+      cols.map(c => {
+        const raw = getVal(r, c.FieldName);
+        const text = fmt(raw, c.FormatStr || "");
+        const align = alignMap[c.Align] || 'left';
+        return `<td style="text-align:${align}">${text ?? ''}</td>`;
+      }).join('')
+    }</tr>`).join('');
+
+    // 暫存資料
+    window._lastReportData = { cols: apiColumns, rows };
+
+    // 切換到資料頁
+    switchView('viewRaw');
+
+    // 啟用欄寬拖曳
+    makeColsResizable(document.getElementById('resultTable'), RESIZE_KEY);
+
+    // 初始化列導覽（預設選第一列）
+    _navTotal = (rows || []).length;
+    _navCurrentIdx = -1;
+    bindRowClick();
+    if (_navTotal > 0) navGoTo(0);
+    else navUpdateUI();
+  };
+
+  // ====== Pivot Builder ======
+  const _pvb = { rows: [], cols: [], vals: [], available: [], data: [], allFields: [] };
+
+  function pvbStorageKey() {
+    return 'pvbCfg:' + (window._dictTableName || 'default');
+  }
+
+  function pvbBuildData() {
     const raw = window._lastReportData?.rows || [];
     const dictFields = (window._tableFields || []).filter(f => f.Visible)
-                                                  .sort((a,b) => (a.SerialNum ?? 0) - (b.SerialNum ?? 0));
+      .sort((a,b) => (a.SerialNum??0)-(b.SerialNum??0));
     const nameMap = {};
-    dictFields.forEach(f => {
-      const en = f.FieldName?.trim();
-      const zh = f.DisplayLabel?.trim() || en;
-      nameMap[en] = zh;
-    });
-
-    // 將資料英文鍵換中文鍵（維持你原本的作法）
-    const localizedData = raw.map(row => {
+    dictFields.forEach(f => { nameMap[(f.FieldName||'').trim()] = (f.DisplayLabel||'').trim() || f.FieldName; });
+    _pvb.data = raw.map(row => {
       const o = {};
       Object.keys(row).forEach(k => { if (nameMap[k]) o[nameMap[k]] = row[k]; });
       return o;
     });
-
-    // 先清空容器
-    const container = document.getElementById('pivotContainer');
-    container.innerHTML = '';
-
-    // 準備 options：先看是否有上次使用者配置（localStorage），否則套 preset，最後才退回預設 rows/cols
-    let opts = { rendererName: 'Table' };
-    const saved = localStorage.getItem(pivotStorageKey());
-    if (saved && !presetKey) {
-      // 還原使用者上次配置
-      try { opts = JSON.parse(saved); } catch {}
-    } else if (presetKey && PIVOT_PRESETS[presetKey]) {
-      opts = { ...PIVOT_PRESETS[presetKey] };
-    } else {
-      // 你原本的初始值
-      const visibleCols = dictFields.map(f => f.DisplayLabel?.trim() || f.FieldName);
-      opts.rows = [visibleCols[0] || ""];
-      opts.cols = [visibleCols[1] || ""];
-      opts.rendererName = 'Table';
-    }
-
-    // 建立 pivotUI
-    $("#pivotContainer").pivotUI(localizedData, opts, true);
-
-    // 監聽 onRefresh：每次使用者改動就存起來
-    const $pvt = $("#pivotContainer");
-    const onRefresh = $pvt.data("pivotUIOptions")?.onRefresh;
-    // 替換 onRefresh 以存儲（保留舊的行為）
-    const saveOnRefresh = function(cfg) {
-      // cfg 會帶很多函式/DOM，留乾淨的就好
-      const safe = (({ rows, cols, vals, aggregatorName, rendererName, sorters, derivedAttributes, inclusions, exclusions, unusedAttrsVertical }) =>
-        ({ rows, cols, vals, aggregatorName, rendererName, sorters, derivedAttributes, inclusions, exclusions, unusedAttrsVertical }))(cfg);
-      localStorage.setItem(pivotStorageKey(), JSON.stringify(safe));
-      if (typeof onRefresh === 'function') onRefresh(cfg);
-    };
-    // 寫回 options
-    const options = $pvt.data("pivotUIOptions");
-    options.onRefresh = saveOnRefresh;
-    $pvt.data("pivotUIOptions", options);
-
-    // 建立/更新「預設選單」內容與事件
-    const sel = document.getElementById('pivotPresets');
-    if (sel && sel.options.length === 0) {
-      Object.keys(PIVOT_PRESETS).forEach(name => sel.add(new Option(name, name)));
-      sel.addEventListener('change', () => buildPivotUI(sel.value));
-      document.getElementById('pivotSavePreset')?.addEventListener('click', () => {
-        const cfg = $("#pivotContainer").data("pivotUIOptions");
-        const safe = (({ rows, cols, vals, aggregatorName, rendererName, sorters, derivedAttributes, inclusions, exclusions, unusedAttrsVertical }) =>
-          ({ rows, cols, vals, aggregatorName, rendererName, sorters, derivedAttributes, inclusions, exclusions, unusedAttrsVertical }))(cfg);
-        localStorage.setItem(pivotStorageKey(), JSON.stringify(safe));
-        Swal.fire({ icon:'success', title:'已儲存目前配置' });
-      });
-    }
-
-    // 若是帶入 preset，就把下拉選單也選到那個
-    if (sel && presetKey) sel.value = presetKey;
+    _pvb.allFields = dictFields.map(f => (f.DisplayLabel||'').trim() || f.FieldName);
   }
 
+  function onShowPivot() {
+    const raw = window._lastReportData?.rows;
+    if (!raw || !raw.length) {
+      document.getElementById('pivotContainer').innerHTML =
+        '<div class="text-secondary text-center mt-5">尚未載入資料，請先執行查詢</div>';
+      return;
+    }
+    pvbBuildData();
+
+    // Restore saved config, filter to fields that exist in current data
+    const saved = localStorage.getItem(pvbStorageKey());
+    let restored = false;
+    if (saved) {
+      try {
+        const sc = JSON.parse(saved);
+        _pvb.rows = (sc.rows||[]).filter(f => _pvb.allFields.includes(f));
+        _pvb.cols = (sc.cols||[]).filter(f => _pvb.allFields.includes(f));
+        _pvb.vals = (sc.vals||[]).filter(f => _pvb.allFields.includes(f));
+        const used = new Set([..._pvb.rows, ..._pvb.cols, ..._pvb.vals]);
+        _pvb.available = _pvb.allFields.filter(f => !used.has(f));
+        const aggEl = document.getElementById('pvbAgg');
+        const renEl = document.getElementById('pvbRender');
+        if (sc.agg && aggEl) aggEl.value = sc.agg;
+        if (sc.render && renEl) renEl.value = sc.render;
+        restored = true;
+      } catch {}
+    }
+    if (!restored) {
+      _pvb.available = [..._pvb.allFields];
+      _pvb.rows = []; _pvb.cols = []; _pvb.vals = [];
+    }
+
+    pvbRenderAll();
+    pvbBindDrop();
+
+    if (restored && (_pvb.rows.length || _pvb.cols.length)) {
+      pvbApply();
+    } else {
+      document.getElementById('pivotContainer').innerHTML =
+        '<div class="text-secondary text-center mt-5" style="opacity:.55;">請將欄位拖曳至各區塊，再按「產生分析」</div>';
+    }
+  }
+
+  let _pvbDropBound = false;
+  function pvbBindDrop() {
+    if (_pvbDropBound) return;
+    _pvbDropBound = true;
+
+    // Buttons
+    document.getElementById('pvbApply')?.addEventListener('click', pvbApply);
+    document.getElementById('pvbClear')?.addEventListener('click', () => {
+      _pvb.available = [..._pvb.allFields];
+      _pvb.rows = []; _pvb.cols = []; _pvb.vals = [];
+      pvbRenderAll();
+      document.getElementById('pivotContainer').innerHTML =
+        '<div class="text-secondary text-center mt-5" style="opacity:.55;">請將欄位拖曳至各區塊，再按「產生分析」</div>';
+    });
+    document.getElementById('pvbSave')?.addEventListener('click', () => {
+      pvbSave();
+      const m = document.getElementById('pvbMsg');
+      if (m) { m.textContent = '✔ 已儲存'; setTimeout(() => m.textContent='', 2000); }
+    });
+
+    // Drop zones: body ids → state keys
+    const zoneMap = { pvbAvailFields:'available', pvbRowBody:'rows', pvbColBody:'cols', pvbValBody:'vals' };
+    Object.entries(zoneMap).forEach(([id, zone]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const highlight = () => (el.closest('.pvb-zone') || el).classList.add('drag-over');
+      const unhighlight = () => (el.closest('.pvb-zone') || el).classList.remove('drag-over');
+      el.addEventListener('dragover', e => { e.preventDefault(); highlight(); });
+      el.addEventListener('dragleave', e => { if (!el.contains(e.relatedTarget)) unhighlight(); });
+      el.addEventListener('drop', e => {
+        e.preventDefault(); unhighlight();
+        try {
+          const { field, fromZone } = JSON.parse(e.dataTransfer.getData('text/plain'));
+          if (fromZone !== zone) pvbMove(field, fromZone, zone);
+        } catch {}
+      });
+    });
+  }
+
+  function pvbArr(zone) {
+    return zone === 'available' ? _pvb.available
+         : zone === 'rows'      ? _pvb.rows
+         : zone === 'cols'      ? _pvb.cols
+         : zone === 'vals'      ? _pvb.vals : null;
+  }
+
+  function pvbMove(field, from, to) {
+    const fa = pvbArr(from), ta = pvbArr(to);
+    if (!fa || !ta) return;
+    const i = fa.indexOf(field);
+    if (i < 0) return;
+    fa.splice(i, 1);
+    if (!ta.includes(field)) ta.push(field);
+    pvbRenderAll();
+  }
+
+  function pvbRenderAll() {
+    pvbRenderZone('pvbAvailFields', _pvb.available, 'available');
+    pvbRenderZone('pvbRowBody',     _pvb.rows,      'rows');
+    pvbRenderZone('pvbColBody',     _pvb.cols,      'cols');
+    pvbRenderZone('pvbValBody',     _pvb.vals,      'vals');
+  }
+
+  function pvbRenderZone(id, fields, zone) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = '';
+    fields.forEach(f => el.appendChild(pvbChip(f, zone)));
+  }
+
+  function pvbChip(field, zone) {
+    const c = document.createElement('div');
+    c.className = 'pvb-chip';
+    c.draggable = true;
+    c.dataset.field = field;
+    c.dataset.zone = zone;
+    if (zone !== 'available') {
+      c.innerHTML = field + ' <span class="pvb-chip-del" title="移回">&#10005;<\/span>';
+      c.querySelector('.pvb-chip-del').addEventListener('click', e => {
+        e.stopPropagation(); pvbMove(field, zone, 'available');
+      });
+    } else {
+      c.textContent = field;
+    }
+    c.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', JSON.stringify({ field, fromZone: zone }));
+      c.classList.add('dragging');
+    });
+    c.addEventListener('dragend', () => c.classList.remove('dragging'));
+    return c;
+  }
+
+  function pvbApply() {
+    if (!_pvb.data.length) {
+      Swal.fire({ icon:'info', title:'請先執行查詢以載入資料' }); return;
+    }
+    if (!_pvb.rows.length && !_pvb.cols.length) {
+      Swal.fire({ icon:'warning', title:'請至少指定一個「列」或「欄」欄位' }); return;
+    }
+    const agg    = document.getElementById('pvbAgg')?.value    || 'Count';
+    const render = document.getElementById('pvbRender')?.value || 'Table';
+    const opts   = { rows: _pvb.rows, cols: _pvb.cols, aggregatorName: agg, rendererName: render };
+    if (_pvb.vals.length) opts.vals = _pvb.vals;
+    document.getElementById('pivotContainer').innerHTML = '';
+    try {
+      $("#pivotContainer").pivotUI(_pvb.data, opts, true);
+      pvbHideNativeUI();
+    } catch(err) {
+      document.getElementById('pivotContainer').innerHTML =
+        '<div class="alert alert-danger">產生分析失敗：' + (err.message||err) + '<\/div>';
+    }
+  }
+
+  function pvbHideNativeUI() {
+    const c = document.getElementById('pivotContainer');
+    if (!c) return;
+    // 隱藏原生軸容器、renderer/aggregator 控制列及 renderer 下拉
+    c.querySelectorAll('.pvtAxisContainer, .pvtVals, select.pvtRenderer').forEach(el => {
+      el.style.cssText = 'display:none!important;';
+    });
+    // 把 .pvtUi table 降級成 block，讓 .pvtRendererArea 自然填滿
+    const ui = c.querySelector('table.pvtUi');
+    if (!ui) return;
+    ui.style.cssText = 'display:block;width:100%;margin:0;';
+    ui.querySelectorAll('tbody').forEach(el => { el.style.display = 'block'; });
+    // 隱藏不含 .pvtRendererArea 的控制行（即使子 cell 已 hidden，tr 本身仍佔空間）
+    ui.querySelectorAll('tr').forEach(row => {
+      if (row.querySelector('.pvtRendererArea')) {
+        row.style.display = 'block';
+      } else {
+        row.style.cssText = 'display:none!important;';
+      }
+    });
+    const ra = ui.querySelector('.pvtRendererArea');
+    if (ra) ra.style.cssText = 'display:block;width:100%;padding:0;';
+  }
+
+  function pvbSave() {
+    const agg    = document.getElementById('pvbAgg')?.value    || 'Count';
+    const render = document.getElementById('pvbRender')?.value || 'Table';
+    localStorage.setItem(pvbStorageKey(),
+      JSON.stringify({ rows: _pvb.rows, cols: _pvb.cols, vals: _pvb.vals, agg, render }));
+  }
+
+  // ====== 圖表 ======
+  let chartInstance = null;
+  function refreshChartFromPivot() {
+    const pivotTable = document.querySelector('#pivotContainer .pvtTable');
+    const ctx = document.getElementById('pivotChart');
+    const chartType = document.getElementById('chartType').value || 'bar';
+    const chartContainer = document.getElementById('chartScrollArea');
+    if (!pivotTable) {
+      ctx.replaceWith(ctx.cloneNode(true));
+      Swal.fire({ icon: 'info', title: '請先建立樞紐分析表格' });
+      return;
+    }
+    const headers = [...pivotTable.querySelectorAll('thead tr:last-child th')]
+      .map(th => th.textContent.trim()).filter(t => t !== 'Totals');
+    const trows = [...pivotTable.querySelectorAll('tbody tr')];
+    const labels = [], values = [];
+    trows.forEach(tr => {
+      const cells = tr.querySelectorAll('th,td');
+      if (cells.length < 2) return;
+      const label = cells[0].textContent.trim();
+      const val = parseFloat(cells[cells.length-1].textContent.trim().replace(/,/g,'')) || 0;
+      if (label && !isNaN(val)) { labels.push(label); values.push(val); }
+    });
+    if (!labels.length) { ctx.replaceWith(ctx.cloneNode(true)); Swal.fire({ icon:'info', title:'無法擷取有效資料' }); return; }
+    const dynamicH = Math.min(800, Math.max(400, labels.length * 25));
+    chartContainer.style.height = dynamicH + 'px';
+    if (chartInstance) chartInstance.destroy();
+    chartInstance = new Chart(document.getElementById('pivotChart'), {
+      type: chartType,
+      data: {
+        labels,
+        datasets: [{ label: headers[0]||'數值', data: values, backgroundColor:'rgba(54,162,235,0.6)', borderColor:'rgba(54,162,235,1)', borderWidth:1 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend:{position:'top'}, title:{display:true, text:headers[0]||'樞紐分析圖表'} },
+        scales: { x:{title:{display:true, text:headers[0]||'分類'}}, y:{title:{display:true, text:'數值'}} }
+      }
+    });
+  }
+
+  // ====== 欄寬拖曳 ======
+  function makeColsResizable(table, storageKey) {
+    if (!table) return;
+    const ths = table.querySelectorAll('thead th');
+    ths.forEach(th => {
+      const resizer = th.querySelector('.col-resizer') || (() => {
+        const r = document.createElement('span'); r.className = 'col-resizer'; th.appendChild(r); return r;
+      })();
+      let startX, startW;
+      resizer.addEventListener('mousedown', e => {
+        startX = e.pageX; startW = th.offsetWidth;
+        e.stopPropagation(); e.preventDefault();
+        const onMove = e => {
+          const newW = Math.max(30, startW + (e.pageX - startX));
+          th.style.width = newW + 'px'; th.style.minWidth = newW + 'px';
+        };
+        const onUp = () => {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          const widths = {};
+          ths.forEach(t => { if (t.dataset.field) widths[t.dataset.field] = t.offsetWidth; });
+          try { localStorage.setItem(storageKey, JSON.stringify(widths)); } catch {}
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
+  }
+
+  // ====== 列導覽 ======
+  let _navCurrentIdx = -1;
+  let _navTotal = 0;
+
+  function navUpdateUI() {
+    const badge  = document.getElementById('rowNavBadge');
+    const area   = document.getElementById('rowNavArea');
+    const btnF   = document.getElementById('btnNavFirst');
+    const btnP   = document.getElementById('btnNavPrev');
+    const btnN   = document.getElementById('btnNavNext');
+    const btnL   = document.getElementById('btnNavLast');
+    if (!area) return;
+    if (_navTotal === 0) { area.style.display = 'none'; return; }
+    area.style.display = 'flex';
+    badge.textContent = `${_navCurrentIdx + 1} / ${_navTotal}`;
+    btnF.disabled = _navCurrentIdx <= 0;
+    btnP.disabled = _navCurrentIdx <= 0;
+    btnN.disabled = _navCurrentIdx >= _navTotal - 1;
+    btnL.disabled = _navCurrentIdx >= _navTotal - 1;
+  }
+
+  function navGoTo(idx) {
+    const tbody = document.getElementById('tableBody');
+    if (!tbody) return;
+    const rows = tbody.querySelectorAll('tr');
+    if (!rows.length) return;
+    idx = Math.max(0, Math.min(rows.length - 1, idx));
+    _navCurrentIdx = idx;
+    _navTotal = rows.length;
+    // 清除舊選取
+    tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+    const tr = rows[idx];
+    tr.classList.add('row-selected');
+    // 捲動到該列（在 rawScrollArea 中）
+    const scrollArea = document.getElementById('rawScrollArea');
+    if (scrollArea) {
+      const trTop    = tr.offsetTop;
+      const trH      = tr.offsetHeight;
+      const areaH    = scrollArea.clientHeight;
+      const scrollTo = trTop - areaH / 2 + trH / 2;
+      scrollArea.scrollTop = scrollTo;
+    }
+    navUpdateUI();
+  }
+
+  // 點擊列選取
+  function bindRowClick() {
+    const tbody = document.getElementById('tableBody');
+    if (!tbody) return;
+    tbody.addEventListener('click', e => {
+      const tr = e.target.closest('tr');
+      if (!tr) return;
+      const rows = [...tbody.querySelectorAll('tr')];
+      const idx = rows.indexOf(tr);
+      if (idx >= 0) navGoTo(idx);
+    });
+  }
+
+  // ====== F3 辭典 ======
+  function openFieldDict() {
+    const el = document.getElementById("fieldDictModal");
+    if (!el) return;
+    if (typeof window.initFieldDictModal === "function") window.initFieldDictModal(window._dictTableName, "fieldDictModal");
+    else if (typeof window.loadFieldDict === "function") window.loadFieldDict(window._dictTableName);
+    new bootstrap.Modal(el).show();
+  }
+  document.addEventListener("keydown", e => {
+    const tag = (e.target.tagName || "").toLowerCase();
+    if (e.key === "F3" && tag !== "input" && tag !== "textarea" && !e.target.isContentEditable) {
+      e.preventDefault(); openFieldDict();
+    }
+  });
+  window.addEventListener("field-dict-saved", () => location.reload());
+
+  // ====== DOMContentLoaded ======
+  document.addEventListener('DOMContentLoaded', () => {
+    initParams();
+
+    // 查詢按鈕（Modal 內）
+    document.getElementById('btnSearch')?.addEventListener('click', e => {
+      e.preventDefault();
+      bootstrap.Modal.getInstance(document.getElementById('queryModal'))?.hide();
+      doSearch();
+    });
+
+    // 列印
+    document.getElementById('btnPrintReport')?.addEventListener('click', e => {
+      e.preventDefault(); printReport();
+    });
+
+    // 匯出 Excel
+    document.getElementById('btnExportExcel')?.addEventListener('click', e => {
+      e.preventDefault(); exportToExcel();
+    });
+
+    // 列導覽按鈕
+    document.getElementById('btnNavFirst')?.addEventListener('click', () => navGoTo(0));
+    document.getElementById('btnNavPrev') ?.addEventListener('click', () => navGoTo(_navCurrentIdx - 1));
+    document.getElementById('btnNavNext') ?.addEventListener('click', () => navGoTo(_navCurrentIdx + 1));
+    document.getElementById('btnNavLast') ?.addEventListener('click', () => navGoTo(_navTotal - 1));
+
+    // 底部頁籤
+    document.querySelectorAll('#bottomTabs .nav-link').forEach(btn => {
+      btn.addEventListener('click', () => switchView(btn.dataset.target));
+    });
+
+    // 圖表重新產生
+    document.getElementById('btnDrawChart')?.addEventListener('click', () => refreshChartFromPivot());
+
+    // Enter 鍵在 Modal 觸發查詢
+    document.getElementById('queryModal')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
+        document.getElementById('btnSearch')?.click();
+      }
+    });
+
+    // Picker Modal — 篩選即時過濾
+    document.getElementById('pickerFilterCode')?.addEventListener('input', () => {
+      renderPickerRows(
+        document.getElementById('pickerFilterCode').value,
+        document.getElementById('pickerFilterDesc').value
+      );
+    });
+    document.getElementById('pickerFilterDesc')?.addEventListener('input', () => {
+      renderPickerRows(
+        document.getElementById('pickerFilterCode').value,
+        document.getElementById('pickerFilterDesc').value
+      );
+    });
+    // Picker 確定按鈕
+    document.getElementById('pickerConfirm')?.addEventListener('click', confirmPicker);
+    // Picker Enter 確定
+    document.getElementById('comboPickerModal')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') confirmPicker();
+    });
+  });
 
 })();
-
 </script>

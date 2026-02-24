@@ -900,6 +900,36 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         return Ok(ToDictList(dt));
     }
 
+    [HttpDelete]
+    public async Task<IActionResult> DeleteByKeys(
+        [FromQuery] string table,
+        [FromQuery] string[] keyNames,
+        [FromQuery] string[] keyValues)
+    {
+        if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required.");
+        if (keyNames == null || keyValues == null || keyNames.Length == 0 || keyNames.Length != keyValues.Length)
+            return BadRequest("keyNames and keyValues must be non-empty and equal length.");
+
+        var tblOk = await TableExistsAsync(table);
+        if (!tblOk) return NotFound($"Table '{table}' not found.");
+
+        foreach (var k in keyNames)
+            if (!await ColumnExistsAsync(table, k))
+                return BadRequest($"Column '{k}' not found in table '{table}'.");
+
+        var whereParts = keyNames.Select((k, i) => $"[{k}] = @p{i}").ToList();
+        var sql = $"DELETE FROM [{table}] WHERE {string.Join(" AND ", whereParts)}";
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var cmd = new SqlCommand(sql, conn);
+        for (int i = 0; i < keyNames.Length; i++)
+            cmd.Parameters.AddWithValue($"@p{i}", (object?)keyValues[i] ?? DBNull.Value);
+
+        var affected = await cmd.ExecuteNonQueryAsync();
+        return Ok(new { success = true, affected });
+    }
+
     private Task<bool> TableExistsAsync(string name)
     {
         const string sql = @"
