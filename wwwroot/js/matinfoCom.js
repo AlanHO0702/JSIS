@@ -448,17 +448,20 @@
         hiddenPart.name = 'PartNum';
         hiddenPart.value = getKey().partnum;
         hiddenPart.className = 'mmd-fk-hidden';
-        tr.appendChild(hiddenPart);
 
         const hiddenRev = document.createElement('input');
         hiddenRev.type = 'hidden';
         hiddenRev.name = 'Revision';
         hiddenRev.value = getKey().revision;
         hiddenRev.className = 'mmd-fk-hidden';
-        tr.appendChild(hiddenRev);
 
-        cfg.columns.forEach((col) => {
-          tr.appendChild(buildCell(col.name, getRowValue(row, col.name), col.readonly, col.type));
+        cfg.columns.forEach((col, colIdx) => {
+          const td = buildCell(col.name, getRowValue(row, col.name), col.readonly, col.type);
+          if (colIdx === 0) {
+            td.appendChild(hiddenPart);
+            td.appendChild(hiddenRev);
+          }
+          tr.appendChild(td);
         });
 
         tr.addEventListener('click', () => selectRow(idx));
@@ -1956,7 +1959,17 @@
     if (!enableColumnResize || !table) return null;
     const key = table.dataset.resizeKey || table.id;
     if (!key) return null;
-    return `matinfo:detail-col-widths:${itemIdUpper}:${key}`;
+    return `matinfo:detail-col-widths:v2:${itemIdUpper}:${key}`;
+  }
+
+  function clearDetailWidthMap(table) {
+    const storageKey = getDetailTableStorageKey(table);
+    if (!storageKey) return;
+    try {
+      localStorage.removeItem(storageKey);
+    } catch {
+      // ignore storage errors
+    }
   }
 
   function ensureDetailResizeKey(table) {
@@ -2000,18 +2013,39 @@
     const widthMap = loadDetailWidthMap(table);
     const ths = Array.from(table.querySelectorAll('thead th'));
     if (!ths.length) return;
-    ths.forEach((th, idx) => {
-      const value = Number(widthMap[idx]);
-      if (!Number.isFinite(value) || value <= 20) return;
-      const width = `${Math.round(value)}px`;
-      th.style.width = width;
-      table.querySelectorAll('tbody tr').forEach((row) => {
-        const cell = row.children[idx];
-        if (cell) cell.style.width = width;
-      });
+    const badIndex = Object.values(widthMap).some((v) => {
+      const n = Number(v);
+      return Number.isFinite(n) && (n > 1200 || n < 20);
     });
-    lockDetailTableWidths(table);
-    refreshDetailTableWidth(table);
+    if (badIndex) {
+      clearDetailWidthMap(table);
+      Object.keys(widthMap).forEach((k) => { delete widthMap[k]; });
+    }
+    let total = 0;
+    ths.forEach((th, idx) => {
+      let w = Number(widthMap[idx] || th.dataset.w || 0);
+      if (!Number.isFinite(w) || w <= 0) {
+        w = Math.max(70, Math.round(th.getBoundingClientRect().width || th.offsetWidth || 90));
+      }
+      const safe = Math.max(40, Math.min(1200, Math.round(w)));
+      th.dataset.w = String(safe);
+      const width = `${safe}px`;
+      th.style.width = width;
+      th.style.minWidth = width;
+      th.style.maxWidth = width;
+      table.querySelectorAll('tbody tr').forEach((row) => {
+        const cell = row.querySelectorAll('td')[idx];
+        if (!cell) return;
+        cell.style.width = width;
+        cell.style.minWidth = width;
+        cell.style.maxWidth = width;
+      });
+      total += safe;
+    });
+    if (total > 0) {
+      table.style.tableLayout = 'fixed';
+      table.style.width = `${total}px`;
+    }
   }
 
   function lockDetailTableWidths(table) {
@@ -2020,12 +2054,21 @@
     if (!ths.length) return;
     let total = 0;
     ths.forEach((th, idx) => {
-      const width = Math.round(th.getBoundingClientRect().width || th.offsetWidth || 0);
+      let width = Number(th.dataset.w || 0);
+      if (!Number.isFinite(width) || width <= 0) {
+        width = Math.round(th.getBoundingClientRect().width || th.offsetWidth || 0);
+      }
       if (width <= 0) return;
+      th.dataset.w = String(width);
       th.style.width = `${width}px`;
+      th.style.minWidth = `${width}px`;
+      th.style.maxWidth = `${width}px`;
       table.querySelectorAll('tbody tr').forEach((row) => {
-        const cell = row.children[idx];
-        if (cell) cell.style.width = `${width}px`;
+        const cell = row.querySelectorAll('td')[idx];
+        if (!cell) return;
+        cell.style.width = `${width}px`;
+        cell.style.minWidth = `${width}px`;
+        cell.style.maxWidth = `${width}px`;
       });
       total += width;
     });
@@ -2040,7 +2083,7 @@
     const ths = Array.from(table.querySelectorAll('thead th'));
     if (!ths.length) return;
     const total = ths.reduce((sum, th) => {
-      const width = Math.round(th.getBoundingClientRect().width || th.offsetWidth || 0);
+      const width = Math.round(Number(th.dataset.w || 0) || th.getBoundingClientRect().width || th.offsetWidth || 0);
       return width > 0 ? sum + width : sum;
     }, 0);
     if (total > 0) table.style.width = `${total}px`;
@@ -2050,13 +2093,19 @@
     if (!enableColumnResize || !table) return;
     const ths = table.querySelectorAll('thead th');
     if (!ths || !ths[index]) return;
-    const next = Math.max(20, Math.round(width));
+    const next = Math.max(40, Math.min(1200, Math.round(width)));
     const th = ths[index];
     const widthValue = `${next}px`;
+    th.dataset.w = String(next);
     th.style.width = widthValue;
+    th.style.minWidth = widthValue;
+    th.style.maxWidth = widthValue;
     table.querySelectorAll('tbody tr').forEach((row) => {
-      const cell = row.children[index];
-      if (cell) cell.style.width = widthValue;
+      const cell = row.querySelectorAll('td')[index];
+      if (!cell) return;
+      cell.style.width = widthValue;
+      cell.style.minWidth = widthValue;
+      cell.style.maxWidth = widthValue;
     });
     refreshDetailTableWidth(table);
     if (persist) {

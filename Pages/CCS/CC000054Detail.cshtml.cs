@@ -315,7 +315,8 @@ namespace PcbErpApi.Pages.CCS
                 tabs.Add(new DetailTab("forwarder", "Forwarder", "AJNdCompanyForwarder", "AJNdCompanyForwarder", new[] { "CompanyId", "SerialNum" }));
             }
 
-            if (TryGetAvlTable(pt, SystemId, showCustomerTabs, out var avlTable, out var avlTitle))
+            if (!string.Equals(ItemId, "CC000054", StringComparison.OrdinalIgnoreCase)
+                && TryGetAvlTable(pt, SystemId, showCustomerTabs, out var avlTable, out var avlTitle))
                 tabs.Add(new DetailTab("avl", avlTitle, avlTable, avlTable, new[] { "CompanyId" }));
 
             if (SystemId == 1 && showCustomerTabs)
