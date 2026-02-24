@@ -1314,6 +1314,22 @@ VALUES
         return Ok(new { success = true, count = list.Count });
     }
 
+    // POST /api/DictSetupApi/SysButton/Import/{itemId}
+    [HttpPost("SysButton/Import/{itemId}")]
+    public async Task<IActionResult> ImportSysButton(string itemId)
+    {
+        if (string.IsNullOrWhiteSpace(itemId))
+            return BadRequest(new { success = false, message = "itemId is required" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        var cmd = new SqlCommand("exec CURdOCXImportSysButton @ItemId", conn);
+        cmd.Parameters.AddWithValue("@ItemId", itemId);
+        await cmd.ExecuteNonQueryAsync();
+
+        return Ok(new { success = true });
+    }
+
     // ===== G. 其他規則設定（CURdOCXItemOtherRule）=====
     public class ItemOtherRuleRow
     {

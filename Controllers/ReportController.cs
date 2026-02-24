@@ -14,11 +14,13 @@ namespace PcbErpApi.Controllers
     {
         private readonly IConfiguration _config;
         private readonly PcbErpContext _context;
-        public ReportController(IConfiguration config,PcbErpContext context)
-        { 
+        private readonly IHttpClientFactory _httpFactory;
+        public ReportController(IConfiguration config, PcbErpContext context, IHttpClientFactory httpFactory)
+        {
             _config = config;
             _context = context;
-        } 
+            _httpFactory = httpFactory;
+        }
 
         [HttpPost("generate-url")]
         public async Task<IActionResult> GenerateUrl([FromBody] BuildRequest req)
@@ -53,7 +55,7 @@ namespace PcbErpApi.Controllers
             var baseUrl = _config["ReportApi:CrystalUrl"];
             if (string.IsNullOrWhiteSpace(baseUrl))
                 return StatusCode(500, "ReportApi:CrystalUrl is not configured.");
-            using var http = new HttpClient { BaseAddress = new Uri(baseUrl) };
+            var http = _httpFactory.CreateClient("CrystalReport");
             var resp = await http.PostAsJsonAsync("/api/report/render", renderPayload);
             if (!resp.IsSuccessStatusCode)
                 return StatusCode((int)resp.StatusCode, await resp.Content.ReadAsStringAsync());

@@ -59,43 +59,43 @@ SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CURdOCXItemCustBut
     // ===== DTO =====
     public class CustomButtonRow
     {
-        public string ItemId { get; set; }
+        public string? ItemId { get; set; }
         public int? SerialNum { get; set; }
-        public string ButtonName { get; set; }
+        public string? ButtonName { get; set; }
 
-        public string CustCaption { get; set; }
-        public string CustCaptionE { get; set; }   // 可能不存在，會回傳空字串
-        public string CustHint { get; set; }
-        public string CustHintE { get; set; }      // 可能不存在，會回傳空字串
+        public string? CustCaption { get; set; }
+        public string? CustCaptionE { get; set; }
+        public string? CustHint { get; set; }
+        public string? CustHintE { get; set; }
 
-        public string OCXName { get; set; }
-        public string CoClassName { get; set; }
-        public string SpName { get; set; }
+        public string? OCXName { get; set; }
+        public string? CoClassName { get; set; }
+        public string? SpName { get; set; }
 
         public int? bVisible { get; set; }
-        public int? ChkCanUpdate { get; set; }   // 會對應到實際欄位（ChkCanUpdate 或 ChkCanbUpdate）
+        public int? ChkCanUpdate { get; set; }
         public int? bNeedNum { get; set; }
         public int? DesignType { get; set; }
         public int? bSpHasResult { get; set; }
-        public string SearchTemplate { get; set; }
-        public string MultiSelectDD { get; set; }
-        public string ExecSpName { get; set; }
+        public string? SearchTemplate { get; set; }
+        public string? MultiSelectDD { get; set; }
+        public string? ExecSpName { get; set; }
         public int? AllowSelCount { get; set; }
         public int? ReplaceExists { get; set; }
-        public string DialogCaption { get; set; }
+        public string? DialogCaption { get; set; }
         public int? bTranByGlobalId { get; set; }
-        public string PrintSQL { get; set; }
-        public string PrintSp { get; set; }
-        public string PrintRptName { get; set; }
-        public string GetPohtoSQL { get; set; }
-        public string NewPohtoName { get; set; }
+        public string? PrintSQL { get; set; }
+        public string? PrintSp { get; set; }
+        public string? PrintRptName { get; set; }
+        public string? GetPohtoSQL { get; set; }
+        public string? NewPohtoName { get; set; }
         public int? iMultiSelUseDtl { get; set; }
-        public string MultiSelDtlSQL { get; set; }
-        public string MultiSelDtlDDName { get; set; }
-        public string MultiSelDtlKeyName { get; set; }
+        public string? MultiSelDtlSQL { get; set; }
+        public string? MultiSelDtlDDName { get; set; }
+        public string? MultiSelDtlKeyName { get; set; }
         public int? iEditGridType { get; set; }
-        public string EditGridTableKind { get; set; }
-        public string EditGridTableField { get; set; }
+        public string? EditGridTableKind { get; set; }
+        public string? EditGridTableField { get; set; }
         public int? NeediFlag { get; set; }
         public int? NeediSeqNum { get; set; }
     }
@@ -229,6 +229,16 @@ ORDER BY SerialNum, ButtonName;";
             if (schema.HasCaptionE) cols.Insert(4, "CustCaptionE"); // 放在 CustCaption 後
             if (schema.HasHintE) cols.Insert(schema.HasCaptionE ? 6 : 5, "CustHintE"); // 放在 CustHint 後
 
+            // 擴充欄位（依 schema 動態加入）
+            var extStr = new[]{"SearchTemplate","MultiSelectDD","ExecSpName","DialogCaption",
+                "PrintSQL","PrintSp","PrintRptName","GetPohtoSQL","NewPohtoName",
+                "MultiSelDtlSQL","MultiSelDtlDDName","MultiSelDtlKeyName",
+                "EditGridTableKind","EditGridTableField"};
+            var extInt = new[]{"bSpHasResult","AllowSelCount","ReplaceExists","bTranByGlobalId",
+                "iMultiSelUseDtl","iEditGridType","NeediFlag","NeediSeqNum"};
+            foreach (var c in extStr) { if (schema.Has(c)) cols.Add(c); }
+            foreach (var c in extInt) { if (schema.Has(c)) cols.Add(c); }
+
             var pCols = new List<string>();
             foreach (var c in cols) pCols.Add("@" + c);
 
@@ -256,6 +266,10 @@ ORDER BY SerialNum, ButtonName;";
             Add(schema.ChkCanUpdateCol, SqlDbType.Int);
             Add("bNeedNum", SqlDbType.Int);
             Add("DesignType", SqlDbType.Int);
+            // 擴充 string 參數
+            foreach (var c in extStr) { if (schema.Has(c)) Add(c, SqlDbType.NVarChar, -1); }
+            // 擴充 int 參數
+            foreach (var c in extInt) { if (schema.Has(c)) Add(c, SqlDbType.Int); }
 
             foreach (var r in rows)
             {
@@ -276,7 +290,32 @@ ORDER BY SerialNum, ButtonName;";
                 ins.Parameters["@bVisible"].Value = (object?)r.bVisible ?? 0;
                 ins.Parameters["@" + schema.ChkCanUpdateCol].Value = (object?)r.ChkCanUpdate ?? 0;
                 ins.Parameters["@bNeedNum"].Value = (object?)r.bNeedNum ?? 0;
-                ins.Parameters["@DesignType"].Value = DbNull(r.DesignType);
+                ins.Parameters["@DesignType"].Value = r.DesignType ?? 0;
+
+                // 擴充 string 欄位賦值（資料庫不允許 NULL，預設空字串）
+                if (schema.Has("SearchTemplate")) ins.Parameters["@SearchTemplate"].Value = r.SearchTemplate ?? "";
+                if (schema.Has("MultiSelectDD")) ins.Parameters["@MultiSelectDD"].Value = r.MultiSelectDD ?? "";
+                if (schema.Has("ExecSpName")) ins.Parameters["@ExecSpName"].Value = r.ExecSpName ?? "";
+                if (schema.Has("DialogCaption")) ins.Parameters["@DialogCaption"].Value = r.DialogCaption ?? "";
+                if (schema.Has("PrintSQL")) ins.Parameters["@PrintSQL"].Value = r.PrintSQL ?? "";
+                if (schema.Has("PrintSp")) ins.Parameters["@PrintSp"].Value = r.PrintSp ?? "";
+                if (schema.Has("PrintRptName")) ins.Parameters["@PrintRptName"].Value = r.PrintRptName ?? "";
+                if (schema.Has("GetPohtoSQL")) ins.Parameters["@GetPohtoSQL"].Value = r.GetPohtoSQL ?? "";
+                if (schema.Has("NewPohtoName")) ins.Parameters["@NewPohtoName"].Value = r.NewPohtoName ?? "";
+                if (schema.Has("MultiSelDtlSQL")) ins.Parameters["@MultiSelDtlSQL"].Value = r.MultiSelDtlSQL ?? "";
+                if (schema.Has("MultiSelDtlDDName")) ins.Parameters["@MultiSelDtlDDName"].Value = r.MultiSelDtlDDName ?? "";
+                if (schema.Has("MultiSelDtlKeyName")) ins.Parameters["@MultiSelDtlKeyName"].Value = r.MultiSelDtlKeyName ?? "";
+                if (schema.Has("EditGridTableKind")) ins.Parameters["@EditGridTableKind"].Value = r.EditGridTableKind ?? "";
+                if (schema.Has("EditGridTableField")) ins.Parameters["@EditGridTableField"].Value = r.EditGridTableField ?? "";
+                // 擴充 int 欄位賦值（資料庫不允許 NULL，預設 0）
+                if (schema.Has("bSpHasResult")) ins.Parameters["@bSpHasResult"].Value = r.bSpHasResult ?? 0;
+                if (schema.Has("AllowSelCount")) ins.Parameters["@AllowSelCount"].Value = r.AllowSelCount ?? 0;
+                if (schema.Has("ReplaceExists")) ins.Parameters["@ReplaceExists"].Value = r.ReplaceExists ?? 0;
+                if (schema.Has("bTranByGlobalId")) ins.Parameters["@bTranByGlobalId"].Value = r.bTranByGlobalId ?? 0;
+                if (schema.Has("iMultiSelUseDtl")) ins.Parameters["@iMultiSelUseDtl"].Value = r.iMultiSelUseDtl ?? 0;
+                if (schema.Has("iEditGridType")) ins.Parameters["@iEditGridType"].Value = r.iEditGridType ?? 0;
+                if (schema.Has("NeediFlag")) ins.Parameters["@NeediFlag"].Value = r.NeediFlag ?? 0;
+                if (schema.Has("NeediSeqNum")) ins.Parameters["@NeediSeqNum"].Value = r.NeediSeqNum ?? 0;
 
                 await ins.ExecuteNonQueryAsync();
             }
@@ -290,8 +329,185 @@ ORDER BY SerialNum, ButtonName;";
             return StatusCode(500, new { success = false, message = ex.Message });
         }
     }
-    
+
+    // POST /api/CustomButtonApi/SaveSearchParam
+    [HttpPost("SaveSearchParam")]
+    public async Task<IActionResult> SaveSearchParam([FromBody] SaveSearchParamDto dto)
+    {
+        if (dto == null || string.IsNullOrWhiteSpace(dto.ItemId)
+            || string.IsNullOrWhiteSpace(dto.ButtonName)
+            || string.IsNullOrWhiteSpace(dto.ParamName))
+            return BadRequest(new { success = false, message = "ItemId, ButtonName, ParamName required" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        var sql = @"
+UPDATE CURdOCXSearchParams
+   SET CommandText = @CommandText,
+       DefaultType = @DefaultType,
+       DefaultValue = @DefaultValue,
+       SuperId = @SuperId
+ WHERE ItemId = @ItemId
+   AND ButtonName = @ButtonName
+   AND ParamName = @ParamName;";
+
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@ItemId", dto.ItemId);
+        cmd.Parameters.AddWithValue("@ButtonName", dto.ButtonName);
+        cmd.Parameters.AddWithValue("@ParamName", dto.ParamName);
+        cmd.Parameters.AddWithValue("@CommandText", (object?)dto.CommandText ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@DefaultType", (object?)dto.DefaultType ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@DefaultValue", (object?)dto.DefaultValue ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@SuperId", (object?)dto.SuperId ?? DBNull.Value);
+
+        var affected = await cmd.ExecuteNonQueryAsync();
+        if (affected == 0)
+            return NotFound(new { success = false, message = "找不到該參數列" });
+
+        return Ok(new { success = true, count = affected });
+    }
+
+    // POST /api/CustomButtonApi/FetchParams
+    [HttpPost("FetchParams")]
+    public async Task<IActionResult> FetchParams([FromBody] FetchParamsDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto?.ItemId) || string.IsNullOrWhiteSpace(dto.ButtonName) || string.IsNullOrWhiteSpace(dto.ObjectName))
+            return BadRequest(new { success = false, message = "ItemId, ButtonName, ObjectName required" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        await using var cmd = new SqlCommand("CURdOCXSearchParamsGet", conn);
+        cmd.CommandType = System.Data.CommandType.StoredProcedure;
+        cmd.Parameters.AddWithValue("@ItemId", dto.ItemId);
+        cmd.Parameters.AddWithValue("@ButtonName", dto.ButtonName);
+        cmd.Parameters.AddWithValue("@ObjectName", dto.ObjectName);
+        await cmd.ExecuteNonQueryAsync();
+
+        return Ok(new { success = true });
+    }
+
+    public class FetchParamsDto
+    {
+        public string? ItemId { get; set; }
+        public string? ButtonName { get; set; }
+        public string? ObjectName { get; set; }
+    }
+
+    // POST /api/CustomButtonApi/SaveSearchParams (批次)
+    [HttpPost("SaveSearchParams")]
+    public async Task<IActionResult> SaveSearchParams([FromBody] SaveSearchParamsBatchDto batch)
+    {
+        if (batch == null || string.IsNullOrWhiteSpace(batch.ItemId)
+            || string.IsNullOrWhiteSpace(batch.ButtonName)
+            || batch.Rows == null)
+            return BadRequest(new { success = false, message = "ItemId, ButtonName, Rows required" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+        try
+        {
+            // 刪除該按鈕的所有 SearchParams
+            var del = new SqlCommand(
+                "DELETE FROM CURdOCXSearchParams WHERE ItemId=@id AND ButtonName=@btn;",
+                conn, (SqlTransaction)tx);
+            del.Parameters.AddWithValue("@id", batch.ItemId);
+            del.Parameters.AddWithValue("@btn", batch.ButtonName);
+            await del.ExecuteNonQueryAsync();
+
+            if (batch.Rows.Count > 0)
+            {
+                // 偵測欄位是否存在
+                var colSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                {
+                    var schCmd = new SqlCommand(
+                        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='CURdOCXSearchParams'",
+                        conn, (SqlTransaction)tx);
+                    using var srd = await schCmd.ExecuteReaderAsync();
+                    while (await srd.ReadAsync()) colSet.Add(srd.GetString(0));
+                }
+
+                var baseCols = new List<string>{
+                    "ItemId","ButtonName","ParamName","DisplayName","CommandText",
+                    "DefaultValue","DefaultType","TableKind","EditMask","SuperId",
+                    "ParamSN","ParamValue","ParamType","iReadOnly","iVisible"
+                };
+                var extCols = new[]{"ControlType","iForInput","iDateTime",
+                    "DisplayNameCN","DisplayNameEN","DisplayNameJP","DisplayNameTH"};
+                foreach (var c in extCols) { if (colSet.Contains(c)) baseCols.Add(c); }
+
+                var pList = baseCols.Select(c => "@" + c).ToList();
+                var insertSql = $"INSERT INTO CURdOCXSearchParams({string.Join(",", baseCols)}) VALUES({string.Join(",", pList)});";
+
+                var ins = new SqlCommand(insertSql, conn, (SqlTransaction)tx);
+                foreach (var c in baseCols)
+                {
+                    var p = ins.Parameters.Add("@" + c, SqlDbType.NVarChar, -1);
+                    // int 欄位用 Int
+                    if (c is "DefaultType" or "ParamSN" or "ParamType" or "ControlType"
+                        or "iReadOnly" or "iVisible" or "iForInput" or "iDateTime")
+                        ins.Parameters["@" + c].SqlDbType = SqlDbType.Int;
+                }
+
+                foreach (var r in batch.Rows)
+                {
+                    ins.Parameters["@ItemId"].Value = batch.ItemId;
+                    ins.Parameters["@ButtonName"].Value = batch.ButtonName;
+                    ins.Parameters["@ParamName"].Value = r.ParamName ?? "";
+                    ins.Parameters["@DisplayName"].Value = r.DisplayName ?? "";
+                    ins.Parameters["@CommandText"].Value = r.CommandText ?? "";
+                    ins.Parameters["@DefaultValue"].Value = r.DefaultValue ?? "";
+                    ins.Parameters["@DefaultType"].Value = r.DefaultType ?? 0;
+                    ins.Parameters["@TableKind"].Value = r.TableKind ?? "";
+                    ins.Parameters["@EditMask"].Value = r.EditMask ?? "";
+                    ins.Parameters["@SuperId"].Value = r.SuperId ?? "";
+                    ins.Parameters["@ParamSN"].Value = r.ParamSN ?? 0;
+                    ins.Parameters["@ParamValue"].Value = r.ParamValue ?? "";
+                    ins.Parameters["@ParamType"].Value = r.ParamType ?? 0;
+                    ins.Parameters["@iReadOnly"].Value = r.iReadOnly ?? 0;
+                    ins.Parameters["@iVisible"].Value = r.iVisible ?? 0;
+                    if (colSet.Contains("ControlType")) ins.Parameters["@ControlType"].Value = r.ControlType ?? (object)DBNull.Value;
+                    if (colSet.Contains("iForInput")) ins.Parameters["@iForInput"].Value = r.iForInput ?? 0;
+                    if (colSet.Contains("iDateTime")) ins.Parameters["@iDateTime"].Value = r.iDateTime ?? 0;
+                    if (colSet.Contains("DisplayNameCN")) ins.Parameters["@DisplayNameCN"].Value = r.DisplayNameCN ?? "";
+                    if (colSet.Contains("DisplayNameEN")) ins.Parameters["@DisplayNameEN"].Value = r.DisplayNameEN ?? "";
+                    if (colSet.Contains("DisplayNameJP")) ins.Parameters["@DisplayNameJP"].Value = r.DisplayNameJP ?? "";
+                    if (colSet.Contains("DisplayNameTH")) ins.Parameters["@DisplayNameTH"].Value = r.DisplayNameTH ?? "";
+                    await ins.ExecuteNonQueryAsync();
+                }
+            }
+
+            await tx.CommitAsync();
+            return Ok(new { success = true, count = batch.Rows.Count });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
+    public class SaveSearchParamsBatchDto
+    {
+        public string? ItemId { get; set; }
+        public string? ButtonName { get; set; }
+        public List<SearchParamRow> Rows { get; set; } = new();
+    }
+
     // ====== DTOs ======
+    public class SaveSearchParamDto
+    {
+        public string? ItemId { get; set; }
+        public string? ButtonName { get; set; }
+        public string? ParamName { get; set; }
+        public string? CommandText { get; set; }
+        public string? DefaultValue { get; set; }
+        public string? SuperId { get; set; }
+        public int? DefaultType { get; set; }
+    }
+
 public class SearchParamRow {
     public string? ItemId { get; set; }
     public string? ButtonName { get; set; }
