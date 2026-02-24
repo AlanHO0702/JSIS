@@ -188,6 +188,7 @@
             const th = document.createElement('th');
             const w = calcColWidth(c);
             th.style.width = w + 'px';
+            if (c.isCheckbox) th.style.textAlign = 'center';
             totalW += w;
             th.textContent = c.label;
             const handle = document.createElement('div');
@@ -1045,7 +1046,42 @@
     }
 
     // ==================== Splitter ====================
+    const LAYOUT_KEY = 'EMOdTmpBOM_SC.layout';
+
+    function saveLayout() {
+        const masterPanel = document.getElementById('masterPanel');
+        const detailGridContainer = document.getElementById('detailGridContainer');
+        const layout = {
+            masterWidth: masterPanel ? masterPanel.offsetWidth : null,
+            detailHeight: detailGridContainer ? detailGridContainer.offsetHeight : null,
+        };
+        localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+        alert('欄寬已保存');
+    }
+
+    function restoreLayout() {
+        try {
+            const raw = localStorage.getItem(LAYOUT_KEY);
+            if (!raw) return;
+            const layout = JSON.parse(raw);
+            if (layout.masterWidth) {
+                const masterPanel = document.getElementById('masterPanel');
+                if (masterPanel) masterPanel.style.flex = `0 0 ${layout.masterWidth}px`;
+            }
+            if (layout.detailHeight) {
+                const detailGridContainer = document.getElementById('detailGridContainer');
+                if (detailGridContainer) {
+                    detailGridContainer.style.flex = `0 0 ${layout.detailHeight}px`;
+                    detailGridContainer.style.maxHeight = 'none';
+                }
+            }
+        } catch (_) { }
+    }
+
     function initSplitters() {
+        // 還原上次保存的位置
+        restoreLayout();
+
         // Vertical splitter (between master panel and detail panel)
         const vSplitter = document.getElementById('vSplitter');
         const masterPanel = document.getElementById('masterPanel');
@@ -1094,6 +1130,9 @@
             document.removeEventListener('mousemove', onHSplitterMove);
             document.removeEventListener('mouseup', onHSplitterUp);
         }
+
+        // 保存欄寬按鈕
+        document.getElementById('btnSaveLayout')?.addEventListener('click', saveLayout);
     }
 
     // ==================== Initialize ====================

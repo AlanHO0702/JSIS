@@ -296,6 +296,17 @@ public class EMOdTmpPressController : ControllerBase
 
         await using var conn = new SqlConnection(_connStr);
         await conn.OpenAsync();
+
+        // 防呆：狀態=1 不可修改
+        await using (var chk = new SqlCommand(
+            "SELECT Status FROM EMOdTmpPressMas WITH (NOLOCK) WHERE TmpId = @TmpId", conn))
+        {
+            AddParam(chk, "@TmpId", req.TmpId.Trim());
+            var status = await chk.ExecuteScalarAsync();
+            if (status != null && Convert.ToInt32(status) == 1)
+                return Ok(new { ok = false, error = "此範本已使用中，不可修改!" });
+        }
+
         await using var tran = conn.BeginTransaction();
 
         try
@@ -362,6 +373,17 @@ public class EMOdTmpPressController : ControllerBase
 
         await using var conn = new SqlConnection(_connStr);
         await conn.OpenAsync();
+
+        // 防呆：狀態=1 不可修改
+        await using (var chk = new SqlCommand(
+            "SELECT Status FROM EMOdTmpPressMas WITH (NOLOCK) WHERE TmpId = @TmpId", conn))
+        {
+            AddParam(chk, "@TmpId", req.TmpId.Trim());
+            var status = await chk.ExecuteScalarAsync();
+            if (status != null && Convert.ToInt32(status) == 1)
+                return Ok(new { ok = false, error = "此範本已使用中，不可修改!" });
+        }
+
         await using var tran = conn.BeginTransaction();
 
         try
@@ -645,7 +667,16 @@ public class EMOdTmpPressController : ControllerBase
         await using var cmd = new SqlCommand(sql, conn);
         AddParam(cmd, "@TmpId", req.TmpId.Trim());
         AddParam(cmd, "@Value", req.Value?.Trim() ?? "");
-        await cmd.ExecuteNonQueryAsync();
+
+        try
+        {
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "UpdateMasterField failed for TmpId={TmpId}, Field={Field}", req.TmpId, req.FieldName);
+            return Ok(new { ok = false, error = ex.Message });
+        }
 
         return Ok(new { ok = true });
     }
@@ -878,7 +909,16 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         AddParam(cmd, "@TmpId", req.TmpId.Trim());
         AddParam(cmd, "@UserId", userId);
         AddParam(cmd, "@TableName", "EMOdTmpPressMas");
-        await cmd.ExecuteNonQueryAsync();
+
+        try
+        {
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "UpdateUserId failed for TmpId={TmpId}", req.TmpId);
+            return Ok(new { ok = false, error = ex.Message });
+        }
 
         return Ok(new { ok = true });
     }

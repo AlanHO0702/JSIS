@@ -151,13 +151,19 @@
 
         // Header
         thead.innerHTML = '';
+        let masterTotalW = 0;
         cols.forEach(col => {
             const th = document.createElement('th');
+            const w = calcColWidth(col);
             th.textContent = col.label;
-            th.style.width = calcColWidth(col) + 'px';
+            th.style.width = w + 'px';
+            if (col.isCheckbox) th.style.textAlign = 'center';
             th.innerHTML += '<div class="th-resize"></div>';
             thead.appendChild(th);
+            masterTotalW += w;
         });
+        const masterTable = thead.closest('table');
+        if (masterTable) masterTable.style.width = masterTotalW + 'px';
         enableThResize(thead);
 
         // Body
@@ -168,8 +174,14 @@
                 const td = document.createElement('td');
                 let val = row[col.field];
                 if (col.isCheckbox) {
-                    td.textContent = val == 1 ? '\u2611' : '\u2610';
+                    const chk = document.createElement('input');
+                    chk.type = 'checkbox';
+                    chk.checked = (val == 1 || val === true);
+                    chk.disabled = true;
+                    chk.className = 'form-check-input';
+                    chk.style.cssText = 'margin:0; pointer-events:none;';
                     td.style.textAlign = 'center';
+                    td.appendChild(chk);
                 } else if (col.field === 'Status') {
                     td.textContent = val == 1 ? (sysParams.activeType === '1' ? '已核准' : '使用中') : '設定中';
                 } else {
@@ -297,10 +309,7 @@
                 item.appendChild(spacer);
             }
 
-            const icon = document.createElement('span');
-            icon.className = 'tree-node-icon';
-            icon.innerHTML = node.children.length > 0 ? '<i class="bi bi-folder2-open" style="color:#e6a817;"></i>' : '<i class="bi bi-file-earmark" style="color:#6c757d;"></i>';
-            item.appendChild(icon);
+            // icon 不顯示
 
             const label = document.createElement('span');
             label.textContent = node.name;
@@ -370,13 +379,18 @@
 
         // Header
         thead.innerHTML = '';
+        let detailTotalW = 0;
         cols.forEach(col => {
             const th = document.createElement('th');
+            const w = calcColWidth(col);
             th.textContent = col.label;
-            th.style.width = calcColWidth(col) + 'px';
+            th.style.width = w + 'px';
             th.innerHTML += '<div class="th-resize"></div>';
             thead.appendChild(th);
+            detailTotalW += w;
         });
+        const detailTable = thead.closest('table');
+        if (detailTable) detailTable.style.width = detailTotalW + 'px';
         enableThResize(thead);
 
         // Body
@@ -426,11 +440,13 @@
                 const startW = th.offsetWidth;
                 const colIdx = Array.from(th.parentElement.children).indexOf(th);
                 const table = thead.closest('table');
+                const startTableW = table ? table.offsetWidth : 0;
 
                 const onMove = (ev) => {
                     const w = Math.max(startW + ev.clientX - startX, 30);
                     th.style.width = w + 'px';
                     if (table) {
+                        table.style.width = (startTableW + (w - startW)) + 'px';
                         table.querySelectorAll('tbody tr').forEach(tr => {
                             const td = tr.children[colIdx];
                             if (td) td.style.width = w + 'px';
@@ -448,7 +464,36 @@
     }
 
     // ==================== Splitter ====================
-    function initSplitter(splitterId, leftPanelId, direction) {
+    const LAYOUT_KEY = 'EMOdTmpPress.layout';
+
+    function saveLayout() {
+        const masterPanel = document.getElementById('masterPanel');
+        const treePanel = document.getElementById('treePanel');
+        const layout = {
+            masterWidth: masterPanel ? masterPanel.offsetWidth : null,
+            treeWidth: treePanel ? treePanel.offsetWidth : null,
+        };
+        localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+        alert('欄寬已保存');
+    }
+
+    function restoreLayout() {
+        try {
+            const raw = localStorage.getItem(LAYOUT_KEY);
+            if (!raw) return;
+            const layout = JSON.parse(raw);
+            if (layout.masterWidth) {
+                const masterPanel = document.getElementById('masterPanel');
+                if (masterPanel) masterPanel.style.flex = `0 0 ${layout.masterWidth}px`;
+            }
+            if (layout.treeWidth) {
+                const treePanel = document.getElementById('treePanel');
+                if (treePanel) treePanel.style.flex = `0 0 ${layout.treeWidth}px`;
+            }
+        } catch (_) { }
+    }
+
+    function initSplitter(splitterId, leftPanelId) {
         const splitter = document.getElementById(splitterId);
         const leftPanel = document.getElementById(leftPanelId);
         if (!splitter || !leftPanel) return;
@@ -627,7 +672,7 @@
         const tmpId = String(selectedMasterRow.TmpId || '').trim();
 
         try {
-            await apiPost('/api/EMOdTmpPress/SavePressDtl', {
+            const res = await apiPost('/api/EMOdTmpPress/SavePressDtl', {
                 TmpId: tmpId,
                 LayerId: currLayer,
                 Items: msTargetItems.map(item => ({
@@ -635,6 +680,7 @@
                     MatName: item.matName || item.caption
                 }))
             });
+            if (!res.ok) { alert(res.error || '儲存失敗'); return; }
 
             // 關閉 modal
             const modalEl = document.getElementById('pressSetModal');
@@ -891,8 +937,8 @@
             btn.classList.toggle('active', isEditMode);
         }
 
-        // 顯示/隱藏編輯按鈕
-        ['btnAddRow', 'btnDelRow', 'sepAddDel', 'btnApprove', 'btnReject'].forEach(id => {
+        // 顯示/隱藏編輯按鈕 (送審/退審不受此控制，常駐顯示)
+        ['btnAddRow', 'btnDelRow', 'sepAddDel'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.style.display = isEditMode ? '' : 'none';
         });
@@ -1009,8 +1055,10 @@
         await loadMasterGrid();
 
         // Splitters
+        restoreLayout();
         initSplitter('vSplitter1', 'masterPanel');
         initSplitter('vSplitter2', 'treePanel');
+        document.getElementById('btnSaveLayout')?.addEventListener('click', saveLayout);
 
         // Toolbar events
         document.getElementById('btnModeToggle')?.addEventListener('click', toggleEditMode);
