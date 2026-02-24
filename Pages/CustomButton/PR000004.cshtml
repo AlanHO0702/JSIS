@@ -849,13 +849,94 @@
     };
 
     // 確定按鈕
+    // 完成確認後的共用流程（關閉 modal → 刷新 → 開啟沖帳明細）
+    const finishConfirmFlow = async () => {
+        // 關閉 modal
+        hideModal();
+
+        // 刷新單頭和單身的資料
+        if (typeof window.__refreshHeaderData === "function") {
+            try { await window.__refreshHeaderData(); } catch {}
+        }
+        if (typeof window.__refreshMultiTab === "function") {
+            try { await window.__refreshMultiTab(); } catch {}
+        }
+
+        // 自動開啟沖帳明細維護
+        const openDtl = window.ActionRailCustomHandlers?.['PR000004']?.btnC2;
+        if (typeof openDtl === 'function') {
+            try { await openDtl({ paperNum: state.paperNum }); } catch (e) { console.error('Auto open strike detail error:', e); }
+        }
+        if (window.Swal) Swal.close();
+    };
+
+    // 顯示外幣匯率確認對話框 (對應 Delphi StrikeOtherAmountSelect)
+    const showOtherOgRateDialog = async (ogData) => {
+        // 取得幣別名稱（從已載入的幣別選項中查找）
+        let moneyDisplayName = ogData.moneyName || '';
+        const moneyOpt = els.money?.querySelector(`option[value="${ogData.moneyCode}"]`);
+        if (moneyOpt) moneyDisplayName = moneyOpt.textContent;
+
+        const result = await Swal.fire({
+            title: '沖帳幣別匯率確認',
+            html: `
+                <div style="text-align: left; font-size: 14px;">
+                    <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                        <label style="width: 60px; text-align: right;">幣別:</label>
+                        <input type="text" id="swal-og-money" class="swal2-input" value="${moneyDisplayName}" readonly
+                               style="margin: 0; width: 180px; background: #e9ecef; font-size: 14px; height: 32px; padding: 4px 8px;" />
+                    </div>
+                    <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                        <label style="width: 60px; text-align: right;">匯率:</label>
+                        <input type="text" id="swal-og-rate" class="swal2-input" value="${ogData.currentRate || 0}"
+                               style="margin: 0; width: 180px; font-size: 14px; height: 32px; padding: 4px 8px;" />
+                    </div>
+                    <div style="display: flex; justify-content: flex-start; padding-left: 68px;">
+                        <button type="button" id="swal-og-fetch-rate" class="btn btn-sm btn-outline-secondary">取用三旬匯率</button>
+                    </div>
+                </div>`,
+            showCancelButton: true,
+            confirmButtonText: '確定',
+            cancelButtonText: '取消',
+            didOpen: () => {
+                const fetchBtn = document.getElementById('swal-og-fetch-rate');
+                if (fetchBtn) {
+                    fetchBtn.addEventListener('click', async () => {
+                        try {
+                            const resp = await fetch(`/api/StrikeSelect/GetHistoricalRate?moneyCode=${ogData.moneyCode}`, withJwtHeaders());
+                            if (resp.ok) {
+                                const d = await resp.json();
+                                if (d.ok && d.rate) {
+                                    document.getElementById('swal-og-rate').value = d.rate;
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Fetch historical rate error:', e);
+                        }
+                    });
+                }
+            },
+            preConfirm: () => {
+                const rateVal = document.getElementById('swal-og-rate')?.value;
+                const parsed = parseFloat(rateVal);
+                if (isNaN(parsed) || rateVal.trim() === '') {
+                    Swal.showValidationMessage('匯率格式不符!!');
+                    return false;
+                }
+                return parsed;
+            }
+        });
+
+        return result;
+    };
+
     const doConfirm = async () => {
         if (state.targetRows.length === 0) {
             await notify('info', '請選擇要加入的憑證');
             return;
         }
 
-        // 確認後立刻顯示載入提示，涵蓋整段過程（API → 關閉 modal → refresh → 開啟沖帳明細）
+        // 確認後立刻顯示載入提示
         if (window.Swal) Swal.fire({ title: '沖帳明細維護開啟中...', allowOutsideClick: false, allowEscapeKey: false, showConfirmButton: false, didOpen: () => Swal.showLoading() });
 
         try {
@@ -878,23 +959,41 @@
                 return;
             }
 
-            // 關閉 modal
-            hideModal();
+            // 檢查是否需要外幣匯率確認 (對應 Delphi APRdStrikeUseOtherOg)
+            if (data.needOtherOg) {
+                if (window.Swal) Swal.close();
 
-            // 刷新單頭和單身的資料
-            if (typeof window.__refreshHeaderData === "function") {
-                try { await window.__refreshHeaderData(); } catch {}
-            }
-            if (typeof window.__refreshMultiTab === "function") {
-                try { await window.__refreshMultiTab(); } catch {}
+                const ogResult = await showOtherOgRateDialog(data);
+
+                if (!ogResult.isConfirmed || ogResult.value === false) {
+                    // 使用者取消，不繼續（來源已寫入但 Status 未更新，對應 Delphi 的 ModalResult:=mrNone）
+                    return;
+                }
+
+                // 使用者確認匯率，送出更新
+                if (window.Swal) Swal.fire({ title: '匯率更新中...', allowOutsideClick: false, allowEscapeKey: false, showConfirmButton: false, didOpen: () => Swal.showLoading() });
+
+                const ogResp = await fetch('/api/StrikeSelect/ConfirmOtherOgRate', withJwtHeaders({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        paperNum: state.paperNum,
+                        newRate: ogResult.value
+                    })
+                }));
+
+                const ogRaw = await ogResp.text();
+                let ogData2;
+                try { ogData2 = JSON.parse(ogRaw); } catch { ogData2 = { ok: false, error: ogRaw }; }
+
+                if (!ogResp.ok || !ogData2.ok) {
+                    if (window.Swal) Swal.close();
+                    await Swal.fire({ icon: 'error', title: '匯率更新失敗', text: ogData2.error || `HTTP ${ogResp.status}` });
+                    return;
+                }
             }
 
-            // 自動開啟沖帳明細維護
-            const openDtl = window.ActionRailCustomHandlers?.['PR000004']?.btnC2;
-            if (typeof openDtl === 'function') {
-                try { await openDtl({ paperNum: state.paperNum }); } catch (e) { console.error('Auto open strike detail error:', e); }
-            }
-            if (window.Swal) Swal.close();
+            await finishConfirmFlow();
         } catch (err) {
             if (window.Swal) Swal.close();
             console.error('Confirm error:', err);
@@ -1649,6 +1748,7 @@
     let autoCount = 0;
     let oriAmount = 0;
     let iSALMode = 0; // 0:一般, 1:出納已收款(隱藏現金tab), 2:出納收款(現金tab唯讀)
+    let enableSAL = 0; // 0:停用SAL模式, 1:啟用SAL模式 (由呼叫端傳入)
 
     // 資料暫存
     let lastAmountData = null; // 最近一次 APRdStrikeCalcAllAmount 回傳資料
@@ -2130,6 +2230,30 @@
 
     // 載入 SAL 模式 (出納收款模式)
     const loadSALMode = async () => {
+        // enableSAL 為 0 時停用 SAL 模式功能，並還原先前 SAL 模式修改過的 DOM 狀態
+        if (enableSAL !== 1) {
+            iSALMode = 0;
+            const navTabs = document.getElementById('strike-dtl-detail-navtabs');
+            if (navTabs) {
+                const cashTab = navTabs.querySelector('[data-tab-target="#strike-dtl-cash"]');
+                const bankTab = navTabs.querySelector('[data-tab-target="#strike-dtl-bank"]');
+                const billTab = navTabs.querySelector('[data-tab-target="#strike-dtl-bill"]');
+                if (cashTab) {
+                    cashTab.closest('.nav-item').style.display = '';
+                    cashTab.textContent = '現金沖帳';
+                }
+                if (bankTab) bankTab.closest('.nav-item').style.display = '';
+                if (billTab) billTab.closest('.nav-item').style.display = '';
+            }
+            if (els['cash-amount']) els['cash-amount'].readOnly = false;
+            const useBankSpan = document.getElementById('strike-dtl-txt-use-bank')?.parentElement;
+            const useBillSpan = document.getElementById('strike-dtl-txt-use-bill')?.parentElement;
+            if (useBankSpan) useBankSpan.style.display = '';
+            if (useBillSpan) useBillSpan.style.display = '';
+            const modalTitle = els.modal?.querySelector('.modal-title');
+            if (modalTitle) modalTitle.textContent = '沖帳明細維護';
+            return;
+        }
         try {
             const resp = await fetch(`/api/StrikeSelect/GetSALMode?paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
             if (!resp.ok) return;
@@ -4415,6 +4539,9 @@
             await notify('info', '沒有單號');
             return;
         }
+
+        // 讀取 enableSAL 參數 (1:啟用SAL模式, 0:停用)
+        enableSAL = (ctx?.enableSAL !== undefined) ? Number(ctx.enableSAL) : 0;
 
         try {
             const success = await loadMasterData();
