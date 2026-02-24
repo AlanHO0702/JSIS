@@ -122,15 +122,24 @@ namespace PcbErpApi.Pages.SPO
                     if (!DefaultQueryValues.ContainsKey(field) && DefaultQueryValues.TryGetValue(param, out var v))
                         DefaultQueryValues[field] = v;
                 }
-                var rows = await ExecInqAsync(conn, paramStr, SpId, item, DefaultQueryValues);
+                if (HasEffectiveQuery(Request.Query))
+                {
+                    var rows = await ExecInqAsync(conn, paramStr, SpId, item, DefaultQueryValues);
 
-                TotalCount = rows.Count;
-                TotalPages = Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize));
+                    TotalCount = rows.Count;
+                    TotalPages = Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize));
 
-                Items = rows
-                    .Skip((PageNumber - 1) * PageSize)
-                    .Take(PageSize)
-                    .ToList();
+                    Items = rows
+                        .Skip((PageNumber - 1) * PageSize)
+                        .Take(PageSize)
+                        .ToList();
+                }
+                else
+                {
+                    TotalCount = 0;
+                    TotalPages = 1;
+                    Items = new List<Dictionary<string, object?>>();
+                }
 
                 CurrentUserId = ResolveUserId();
                 CurrentUseId = ResolveUseId();
@@ -221,7 +230,31 @@ namespace PcbErpApi.Pages.SPO
                     }
                 }
 
-                // Avoid AdjustToContents to prevent font engine version conflicts.
+                try
+                {
+                    ws.Columns().AdjustToContents();
+                }
+                catch
+                {
+                    // Fallback: estimate widths from header/data text length.
+                    for (var c = 0; c < fields.Count; c++)
+                    {
+                        var header = fields[c].DisplayLabel ?? fields[c].FieldName ?? string.Empty;
+                        var maxLen = header.Length;
+                        var field = fields[c].FieldName ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(field))
+                        {
+                            for (var r = 0; r < rows.Count; r++)
+                            {
+                                rows[r].TryGetValue(field, out var v);
+                                var s = v?.ToString() ?? string.Empty;
+                                if (s.Length > maxLen) maxLen = s.Length;
+                            }
+                        }
+                        var width = Math.Min(60, Math.Max(10, maxLen + 2));
+                        ws.Column(c + 1).Width = width;
+                    }
+                }
 
                 var fileName = $"SPO00009_{DateTime.Now:yyyyMMdd}.xlsx";
                 using var stream = new MemoryStream();
@@ -479,6 +512,29 @@ namespace PcbErpApi.Pages.SPO
             map["page"] = page.ToString();
             map["pageSize"] = PageSize.ToString();
             return QueryString.Create(map).ToString();
+        }
+
+        private static bool HasEffectiveQuery(IQueryCollection query)
+        {
+            foreach (var key in query.Keys)
+            {
+                if (string.IsNullOrWhiteSpace(key)) continue;
+                if (IsControlQueryKey(key)) continue;
+                if (!string.IsNullOrWhiteSpace(query[key].ToString())) return true;
+            }
+            return false;
+        }
+
+        private static bool IsControlQueryKey(string key)
+        {
+            if (key.StartsWith("Cond_", StringComparison.OrdinalIgnoreCase)) return true;
+            return key.Equals("page", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("pageSize", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("pageIndex", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("spId", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("handler", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("__RequestVerificationToken", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("debug", StringComparison.OrdinalIgnoreCase);
         }
 
         private string ResolveUseId()
