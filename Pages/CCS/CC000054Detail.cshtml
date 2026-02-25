@@ -44,6 +44,73 @@
     </div>
   </div>
 </div>
+<div class="modal fade" id="cc000054DetailQueryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title">客戶廠商資料查詢</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body ccs-query-modal-body">
+        <div class="ccs-query-grid">
+          <label class="ccs-query-label" id="dqLblSubClass">客戶分類</label>
+          <select class="form-select form-select-sm" id="dqSubClass"></select>
+
+          <label class="ccs-query-label" id="dqLblCompanyLike">客戶編號(模糊查詢)</label>
+          <input type="text" class="form-control form-control-sm" id="dqCompanyLike">
+
+          <label class="ccs-query-label" id="dqLblCompanyStart">客戶編號起</label>
+          <input type="text" class="form-control form-control-sm" id="dqCompanyStart" list="dqCompanyList">
+
+          <label class="ccs-query-label" id="dqLblCompanyEnd">客戶編號迄</label>
+          <input type="text" class="form-control form-control-sm" id="dqCompanyEnd" list="dqCompanyList">
+
+          <label class="ccs-query-label" id="dqLblShortName">客戶簡稱</label>
+          <input type="text" class="form-control form-control-sm" id="dqShortName">
+
+          <label class="ccs-query-label">電話</label>
+          <div class="ccs-query-inline3">
+            <select class="form-select form-select-sm" id="dqPhoneCond">
+              <option value="0">開頭以</option>
+              <option value="1">包含</option>
+            </select>
+            <input type="text" class="form-control form-control-sm" id="dqPhone">
+          </div>
+
+          <label class="ccs-query-label">傳真</label>
+          <div class="ccs-query-inline3">
+            <select class="form-select form-select-sm" id="dqFaxCond">
+              <option value="0">開頭以</option>
+              <option value="1">包含</option>
+            </select>
+            <input type="text" class="form-control form-control-sm" id="dqFax">
+          </div>
+
+          <label class="ccs-query-label" id="dqLblUniFormId">統一編號(模糊查詢)</label>
+          <input type="text" class="form-control form-control-sm" id="dqUniFormId">
+
+          <label class="ccs-query-label" id="dqLblName">客戶名稱(模糊查詢)</label>
+          <input type="text" class="form-control form-control-sm" id="dqCompanyName">
+
+          <label class="ccs-query-label" id="dqLblAddr">客戶地址(模糊查詢)</label>
+          <input type="text" class="form-control form-control-sm" id="dqCompanyAddr">
+
+          <label class="ccs-query-label">營業項目(模糊查詢)</label>
+          <input type="text" class="form-control form-control-sm" id="dqBnsItem">
+
+          <label class="ccs-query-label" id="dqLblSales">業務員</label>
+          <select class="form-select form-select-sm" id="dqSalesId"></select>
+        </div>
+        <datalist id="dqCompanyList"></datalist>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-light btn-sm border" id="btnDetailQuerySearch">查詢</button>
+        <button type="button" class="btn btn-light btn-sm border" id="btnDetailQueryClear">清除</button>
+        <button type="button" class="btn btn-light btn-sm border" data-bs-dismiss="modal">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 @if (cfg == null)
 {
@@ -725,12 +792,223 @@ function enableFormLayoutEditing(container, dictName) {
       }
     });
   };
+  const initDetailQueryDialog = () => {
+    const modalEl = document.getElementById('cc000054DetailQueryModal');
+    const modal = modalEl && window.bootstrap ? bootstrap.Modal.getOrCreateInstance(modalEl) : null;
+    const qCompanyList = document.getElementById('dqCompanyList');
+    const qSubClass = document.getElementById('dqSubClass');
+    const qSalesId = document.getElementById('dqSalesId');
+    const qPhoneCond = document.getElementById('dqPhoneCond');
+    const qFaxCond = document.getElementById('dqFaxCond');
+    const btnSearch = document.getElementById('btnDetailQuerySearch');
+    const btnClear = document.getElementById('btnDetailQueryClear');
+    if (!modal || !btnSearch || !btnClear) return;
+
+    let loaded = false;
+    let queryInitPromise = null;
+    let showSales = true;
+    let systemId = detailSystemId || 1;
+    const labels = {
+      companyLike: document.getElementById('dqLblCompanyLike'),
+      companyStart: document.getElementById('dqLblCompanyStart'),
+      companyEnd: document.getElementById('dqLblCompanyEnd'),
+      shortName: document.getElementById('dqLblShortName'),
+      uniFormId: document.getElementById('dqLblUniFormId'),
+      name: document.getElementById('dqLblName'),
+      addr: document.getElementById('dqLblAddr'),
+      subClass: document.getElementById('dqLblSubClass'),
+      sales: document.getElementById('dqLblSales')
+    };
+    const setVendorLabels = () => {
+      if (labels.companyLike) labels.companyLike.textContent = '廠商編號(模糊查詢)';
+      if (labels.companyStart) labels.companyStart.textContent = '廠商編號起';
+      if (labels.companyEnd) labels.companyEnd.textContent = '廠商編號迄';
+      if (labels.shortName) labels.shortName.textContent = '廠商簡稱';
+      if (labels.name) labels.name.textContent = '廠商名稱(模糊查詢)';
+      if (labels.addr) labels.addr.textContent = '廠商地址(模糊查詢)';
+      if (labels.subClass) labels.subClass.textContent = '廠商分類';
+    };
+    const toggleSalesRow = (visible) => {
+      const salesLabel = labels.sales;
+      const salesInput = document.getElementById('dqSalesId');
+      if (!salesLabel || !salesInput) return;
+      salesLabel.classList.toggle('d-none', !visible);
+      salesInput.classList.toggle('d-none', !visible);
+    };
+    const getInput = (id) => document.getElementById(id);
+    const clearForm = () => {
+      ['dqCompanyLike','dqCompanyStart','dqCompanyEnd','dqShortName','dqPhone','dqFax','dqUniFormId','dqCompanyName','dqCompanyAddr','dqBnsItem']
+        .forEach(id => { const el = getInput(id); if (el) el.value = ''; });
+      if (qPhoneCond) qPhoneCond.value = '0';
+      if (qFaxCond) qFaxCond.value = '0';
+      if (qSubClass) qSubClass.value = '';
+      if (qSalesId) qSalesId.value = '';
+    };
+    const applyQueryToModal = () => {
+      const qs = new URLSearchParams(window.location.search || '');
+      const map = [
+        ['dqCompanyLike', 'cs_companyLike'],
+        ['dqCompanyStart', 'cs_companyStart'],
+        ['dqCompanyEnd', 'cs_companyEnd'],
+        ['dqShortName', 'cs_shortName'],
+        ['dqPhoneCond', 'cs_phoneCond'],
+        ['dqPhone', 'cs_phone'],
+        ['dqFaxCond', 'cs_faxCond'],
+        ['dqFax', 'cs_fax'],
+        ['dqUniFormId', 'cs_uniFormId'],
+        ['dqCompanyName', 'cs_companyName'],
+        ['dqCompanyAddr', 'cs_companyAddr'],
+        ['dqBnsItem', 'cs_bnsItem'],
+        ['dqSubClass', 'cs_subClass'],
+        ['dqSalesId', 'cs_salesId']
+      ];
+      map.forEach(([id, key]) => {
+        const el = getInput(id);
+        if (el) el.value = qs.get(key) || '';
+      });
+      if (!qs.get('cs_phoneCond') && qPhoneCond) qPhoneCond.value = '0';
+      if (!qs.get('cs_faxCond') && qFaxCond) qFaxCond.value = '0';
+    };
+    const loadQueryInit = async () => {
+      if (loaded) return;
+      if (queryInitPromise) return queryInitPromise;
+      queryInitPromise = (async () => {
+      const q = new URLSearchParams();
+      q.set('itemId', ('@Model.ItemId' || 'CC000054').toString());
+      q.set('systemId', String(detailSystemId || 1));
+      const jwt = localStorage.getItem('jwtId');
+      const resp = await fetch(`/api/CCSCompanyAdd/query-init?${q.toString()}`, {
+        headers: jwt ? { 'X-JWTID': jwt } : {}
+      });
+      const txt = await resp.text();
+      let data = {};
+      try { data = txt ? JSON.parse(txt) : {}; } catch { data = {}; }
+      if (!resp.ok || !data?.success) {
+        const msg = data?.message || data?.error || txt || `${resp.status} ${resp.statusText || ''}`.trim() || 'query-init failed';
+        throw new Error(msg);
+      }
+      systemId = Number(data.systemId || detailSystemId || 1);
+      showSales = !!data.showSales;
+      if (![1, 9, 103].includes(systemId)) setVendorLabels();
+      toggleSalesRow(showSales);
+      if (qCompanyList) {
+        qCompanyList.innerHTML = '';
+        (Array.isArray(data.companyList) ? data.companyList : []).forEach(r => {
+          const id = (r.companyId ?? r.CompanyId ?? '').toString();
+          if (!id) return;
+          const opt = document.createElement('option');
+          opt.value = id;
+          qCompanyList.appendChild(opt);
+        });
+      }
+      if (qSubClass) {
+        qSubClass.innerHTML = '<option value=""></option>';
+        (Array.isArray(data.subClassList) ? data.subClassList : []).forEach(r => {
+          const val = (r.subSystemId ?? r.SubSystemId ?? '').toString();
+          const name = (r.subSystemName ?? r.SubSystemName ?? '').toString();
+          if (!val) return;
+          const opt = document.createElement('option');
+          opt.value = val;
+          opt.textContent = `${val}${name ? ' ' + name : ''}`;
+          qSubClass.appendChild(opt);
+        });
+      }
+      if (qSalesId) {
+        qSalesId.innerHTML = '<option value=""></option>';
+        (Array.isArray(data.users) ? data.users : []).forEach(r => {
+          const id = (r.userId ?? r.UserId ?? '').toString();
+          const name = (r.userName ?? r.UserName ?? '').toString();
+          if (!id) return;
+          const opt = document.createElement('option');
+          opt.value = id;
+          opt.textContent = `${id}${name ? ' ' + name : ''}`;
+          qSalesId.appendChild(opt);
+        });
+      }
+      loaded = true;
+      applyQueryToModal();
+      })();
+      try {
+        await queryInitPromise;
+      } finally {
+        queryInitPromise = null;
+      }
+    };
+    window.openCcsDetailQueryDialog = async () => {
+      try {
+        if (!loaded || (qSubClass && qSubClass.options.length <= 1)) await loadQueryInit();
+        applyQueryToModal();
+        modal.show();
+        getInput('dqCompanyLike')?.focus();
+      } catch (err) {
+        alert('讀取查詢條件失敗：' + err);
+      }
+    };
+    btnClear.addEventListener('click', clearForm);
+    ['dqCompanyLike','dqCompanyStart','dqCompanyEnd','dqShortName','dqPhone','dqFax','dqUniFormId','dqCompanyName','dqCompanyAddr','dqBnsItem']
+      .forEach(id => {
+        const el = getInput(id);
+        if (!el) return;
+        el.addEventListener('keydown', (ev) => {
+          if (ev.key !== 'Enter') return;
+          ev.preventDefault();
+          btnSearch.click();
+        });
+      });
+    btnSearch.addEventListener('click', async () => {
+      const setParam = (url, key, id) => {
+        const el = getInput(id);
+        const val = (el?.value || '').toString().trim();
+        if (val) url.searchParams.set(key, val);
+      };
+      try {
+        const listBase = document.getElementById('btnBackList')?.getAttribute('href') || '';
+        const dataUrl = new URL(listBase || '@Url.Page("CC000054", new { itemId = Model.ItemId, systemId = Model.SystemId })', window.location.origin);
+        dataUrl.searchParams.set('handler', 'Data');
+        dataUrl.searchParams.set('pageIndex', '1');
+        dataUrl.searchParams.set('pageSize', '1');
+        setParam(dataUrl, 'cs_companyLike', 'dqCompanyLike');
+        setParam(dataUrl, 'cs_companyStart', 'dqCompanyStart');
+        setParam(dataUrl, 'cs_companyEnd', 'dqCompanyEnd');
+        setParam(dataUrl, 'cs_shortName', 'dqShortName');
+        setParam(dataUrl, 'cs_phoneCond', 'dqPhoneCond');
+        setParam(dataUrl, 'cs_phone', 'dqPhone');
+        setParam(dataUrl, 'cs_faxCond', 'dqFaxCond');
+        setParam(dataUrl, 'cs_fax', 'dqFax');
+        setParam(dataUrl, 'cs_uniFormId', 'dqUniFormId');
+        setParam(dataUrl, 'cs_companyName', 'dqCompanyName');
+        setParam(dataUrl, 'cs_companyAddr', 'dqCompanyAddr');
+        setParam(dataUrl, 'cs_bnsItem', 'dqBnsItem');
+        setParam(dataUrl, 'cs_subClass', 'dqSubClass');
+        if (showSales) setParam(dataUrl, 'cs_salesId', 'dqSalesId');
+
+        const resp = await fetch(dataUrl.toString());
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || !json?.success) throw new Error(json?.error || json?.message || resp.statusText || 'query failed');
+        const first = Array.isArray(json.items) ? json.items[0] : null;
+        if (!first) { alert('查無資料'); return; }
+        const cidKey = Object.keys(first).find(k => String(k).toLowerCase() === 'companyid');
+        const cid = cidKey ? String(first[cidKey] || '').trim() : '';
+        if (!cid) { alert('查無公司代碼'); return; }
+        modal.hide();
+        const u = new URL('@Url.Page("CC000054Detail", new { itemId = Model.ItemId, systemId = Model.SystemId })', window.location.origin);
+        u.searchParams.set('CompanyId', cid);
+        u.searchParams.set('systemId', String(detailSystemId || 1));
+        window.location.href = u.toString();
+      } catch (err) {
+        alert('查詢失敗：' + err);
+      }
+    });
+    // Preload once so first open equals second open.
+    loadQueryInit().catch(() => { });
+  };
 
   function getDict(dictName) {
     return fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictName)}`)
       .then(r => r.json());
   }
   initDetailAddDialog();
+  initDetailQueryDialog();
 
   function buildGridViewText(field, rawVal) {
     const span = document.createElement('span');
@@ -1994,7 +2272,9 @@ function enableFormLayoutEditing(container, dictName) {
       alert('刪除失敗：' + err);
     }
   });
-  topQuery?.addEventListener('click', () => document.getElementById('btnBackList')?.click());
+  topQuery?.addEventListener('click', () => {
+    if (typeof window.openCcsDetailQueryDialog === 'function') window.openCcsDetailQueryDialog();
+  });
   const withJwtHeaders = (init = {}) => {
     const jwt = localStorage.getItem("jwtId");
     const headers = Object.assign({}, init.headers || {});
@@ -2748,6 +3028,88 @@ body.ccs-editing .ccs-detail-page .mf-container[data-editing="1"] .mf-lk-edit-na
   gap: 8px;
   margin: 0;
   font-size: 14px;
+}
+#cc000054DetailAddModal .modal-dialog {
+  max-width: 340px;
+}
+#cc000054DetailAddModal .modal-content {
+  border-radius: 4px;
+  border: 1px solid #b8b8b8;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+}
+#cc000054DetailAddModal .modal-header {
+  padding: 8px 10px;
+}
+#cc000054DetailAddModal .modal-title {
+  font-size: 16px;
+  font-weight: 500;
+}
+.ccs-add-modal-body {
+  padding: 10px 10px 8px;
+}
+.ccs-add-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.ccs-add-label {
+  text-align: right;
+  margin: 0;
+  font-size: 14px;
+}
+.ccs-add-inline {
+  display: grid;
+  grid-template-columns: 1fr 100px;
+  gap: 6px;
+}
+.ccs-add-code-select,
+.ccs-add-short,
+#detailAddCompanyName {
+  height: 28px;
+  border-radius: 0;
+  font-size: 14px;
+}
+#cc000054DetailAddModal .modal-footer {
+  padding: 6px 10px 10px;
+  border-top: 0;
+}
+#cc000054DetailAddModal .modal-footer .btn {
+  min-width: 72px;
+  border-radius: 2px;
+}
+#cc000054DetailQueryModal .modal-dialog {
+  max-width: 620px;
+}
+#cc000054DetailQueryModal .form-control-sm,
+#cc000054DetailQueryModal .form-select-sm {
+  height: 32px;
+}
+#cc000054DetailQueryModal .modal-footer .btn {
+  min-width: 72px;
+}
+.ccs-query-modal-body {
+  padding: 10px 12px 6px;
+}
+.ccs-query-grid {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 8px 10px;
+  align-items: center;
+}
+.ccs-query-label {
+  text-align: right;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+.ccs-query-inline3 {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 6px;
 }
 </style>
 <script src="~/js/ccsUpdateLog.js" asp-append-version="true"></script>

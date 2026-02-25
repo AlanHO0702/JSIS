@@ -190,7 +190,7 @@ order by SubSystemId;", conn))
                 {
                     subClassList.Add(new SubClassRow
                     {
-                        SubSystemId = Convert.ToInt32(rd["SubSystemId"]),
+                        SubSystemId = rd["SubSystemId"]?.ToString()?.Trim() ?? string.Empty,
                         SubSystemName = rd["SubSystemName"]?.ToString() ?? string.Empty
                     });
                 }
@@ -508,7 +508,7 @@ where CompanyId = @CompanyId
 
     private sealed class SubClassRow
     {
-        public int SubSystemId { get; set; }
+        public string SubSystemId { get; set; } = string.Empty;
         public string SubSystemName { get; set; } = string.Empty;
     }
 
