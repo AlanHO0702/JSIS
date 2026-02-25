@@ -215,10 +215,12 @@
     function updateMasterRecordCount() {
         const el = document.getElementById('masterRecordCount');
         const el2 = document.getElementById('recordCountMas');
+        const el3 = document.getElementById('modeStatusCount');
         const idx = selectedMasterIdx >= 0 ? selectedMasterIdx + 1 : 0;
         const total = masterRows.length;
         if (el) el.textContent = `${idx} / ${total}`;
         if (el2) el2.textContent = `${idx} / ${total}`;
+        if (el3) el3.textContent = `${idx} / ${total}`;
     }
 
     // ==================== TreeView (BOM 疊構) ====================
@@ -929,19 +931,24 @@
     // ==================== 工具列操作 ====================
     function toggleEditMode() {
         isEditMode = !isEditMode;
+        const box = document.getElementById('modeStatusBox');
+        const label = document.getElementById('modeStatusLabel');
         const btn = document.getElementById('btnModeToggle');
-        if (btn) {
-            btn.innerHTML = isEditMode
-                ? '<i class="bi bi-pencil"></i> 編輯模式'
-                : '<i class="bi bi-eye"></i> 瀏覽模式';
-            btn.classList.toggle('active', isEditMode);
+        const btnAdd = document.getElementById('btnAddRow');
+        const btnDel = document.getElementById('btnDelRow');
+        if (isEditMode) {
+            if (box) box.classList.add('edit-mode');
+            if (label) label.textContent = '編輯模式';
+            if (btn) { btn.textContent = '瀏覽'; btn.title = '切換至瀏覽模式'; }
+            if (btnAdd) btnAdd.disabled = false;
+            if (btnDel) btnDel.disabled = false;
+        } else {
+            if (box) box.classList.remove('edit-mode');
+            if (label) label.textContent = '瀏覽模式';
+            if (btn) { btn.textContent = '修改'; btn.title = '切換至編輯模式'; }
+            if (btnAdd) btnAdd.disabled = true;
+            if (btnDel) btnDel.disabled = true;
         }
-
-        // 顯示/隱藏編輯按鈕 (送審/退審不受此控制，常駐顯示)
-        ['btnAddRow', 'btnDelRow', 'sepAddDel'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.style.display = isEditMode ? '' : 'none';
-        });
     }
 
     async function addMasterRow() {

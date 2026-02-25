@@ -228,7 +228,7 @@
 
     function updateRecordCount() {
         const idx = selectedMasterRow ? masterRows.findIndex(r => r.TmpId === selectedMasterRow.TmpId) + 1 : 0;
-        document.getElementById('recordCount').textContent = `${idx} / ${masterRows.length}`;
+        document.getElementById('modeStatusCount').textContent = `${idx} / ${masterRows.length}`;
     }
 
     // ==================== Detail / TreeView ====================
@@ -407,22 +407,25 @@
     // ==================== Mode Toggle ====================
     function setMode(edit) {
         isEditMode = edit;
+        const box = document.getElementById('modeStatusBox');
+        const label = document.getElementById('modeStatusLabel');
         const btn = document.getElementById('btnModeToggle');
         const btnAdd = document.getElementById('btnAddRow');
         const btnDel = document.getElementById('btnDelRow');
-        const sepAD = document.getElementById('sepAddDel');
         if (edit) {
-            btn.innerHTML = '<i class="bi bi-pencil-square"></i> 編輯模式';
-            btn.classList.add('active');
-            btnAdd.style.display = '';
-            btnDel.style.display = '';
-            sepAD.style.display = '';
+            box.classList.add('edit-mode');
+            label.textContent = '編輯模式';
+            btn.textContent = '瀏覽';
+            btn.title = '切換至瀏覽模式';
+            btnAdd.disabled = false;
+            btnDel.disabled = false;
         } else {
-            btn.innerHTML = '<i class="bi bi-eye"></i> 瀏覽模式';
-            btn.classList.remove('active');
-            btnAdd.style.display = 'none';
-            btnDel.style.display = 'none';
-            sepAD.style.display = 'none';
+            box.classList.remove('edit-mode');
+            label.textContent = '瀏覽模式';
+            btn.textContent = '修改';
+            btn.title = '切換至編輯模式';
+            btnAdd.disabled = true;
+            btnDel.disabled = true;
         }
     }
 

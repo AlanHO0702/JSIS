@@ -143,8 +143,10 @@
             });
             tbody.appendChild(tr);
         });
-        document.getElementById('masterRecordCount').textContent =
-            `${masterRows.length > 0 ? (selectedMasterIdx + 1) : 0} / ${masterRows.length}`;
+        const countText = `${masterRows.length > 0 ? (selectedMasterIdx + 1) : 0} / ${masterRows.length}`;
+        document.getElementById('masterRecordCount').textContent = countText;
+        const statusCount = document.getElementById('modeStatusCount');
+        if (statusCount) statusCount.textContent = countText;
     }
 
     async function selectMasterRow(idx) {
@@ -307,23 +309,24 @@
     // ==================== Edit Mode ====================
     function setEditMode(editOn) {
         isEditMode = editOn;
+        const box = document.getElementById('modeStatusBox');
+        const label = document.getElementById('modeStatusLabel');
         const btn = document.getElementById('btnModeToggle');
         const btnAdd = document.getElementById('btnAddRow');
         const btnDel = document.getElementById('btnDelRow');
-        const sep = document.getElementById('sepAddDel');
 
         if (editOn) {
-            btn.innerHTML = '<i class="bi bi-pencil"></i> 編輯模式';
-            btn.classList.add('active');
-            btnAdd.style.display = '';
-            btnDel.style.display = '';
-            sep.style.display = '';
+            if (box) box.classList.add('edit-mode');
+            if (label) label.textContent = '編輯模式';
+            if (btn) { btn.textContent = '瀏覽'; btn.title = '切換至瀏覽模式'; }
+            if (btnAdd) btnAdd.disabled = false;
+            if (btnDel) btnDel.disabled = false;
         } else {
-            btn.innerHTML = '<i class="bi bi-eye"></i> 瀏覽模式';
-            btn.classList.remove('active');
-            btnAdd.style.display = 'none';
-            btnDel.style.display = 'none';
-            sep.style.display = 'none';
+            if (box) box.classList.remove('edit-mode');
+            if (label) label.textContent = '瀏覽模式';
+            if (btn) { btn.textContent = '修改'; btn.title = '切換至編輯模式'; }
+            if (btnAdd) btnAdd.disabled = true;
+            if (btnDel) btnDel.disabled = true;
         }
 
         // 備註區塊 readonly 狀態
