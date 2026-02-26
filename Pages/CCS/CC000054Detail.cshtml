@@ -151,7 +151,6 @@ else
                 <button type="button" class="btn toolbar-btn" id="btnTopDelete"><i class="bi bi-trash3"></i>刪除</button>
                 <button type="button" class="btn toolbar-btn" id="btnTopEdit"><i class="bi bi-pencil-square"></i>修改</button>
                 <button type="button" class="btn toolbar-btn" id="btnTopLog"><i class="bi bi-clock-history"></i>記錄</button>
-                <button type="button" class="btn toolbar-btn" id="btnTopReject"><i class="bi bi-arrow-counterclockwise"></i>撤除</button>
                 <button type="button" class="btn toolbar-btn d-none" id="btnTopSave"><i class="bi bi-bookmark-check"></i>保留</button>
             </div>
         </div>
@@ -216,7 +215,7 @@ else
                                     <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-refresh" data-tab-tool="edit" data-tab="@tab.Key" title="重新整理" aria-label="重新整理"><i class="bi bi-arrow-clockwise"></i></button>
                                     @if (string.Equals(tab.Key, "attach", StringComparison.OrdinalIgnoreCase))
                                     {
-                                        <button type="button" class="btn btn-outline-secondary btn-sm ccs-tool-text" data-tab-tool="setpath" data-tab="@tab.Key">指定路徑及檔名</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm ccs-tool-text" data-tab-tool="setpath" data-tab="@tab.Key">上傳檔案</button>
                                         <button type="button" class="btn btn-outline-secondary btn-sm ccs-tool-text" data-tab-tool="preview" data-tab="@tab.Key">檢視檔案</button>
                                     }
                                 </div>
@@ -671,6 +670,51 @@ function enableFormLayoutEditing(container, dictName) {
   let hasGridPendingAdd = false;
   const detailBaseUrl = '@Url.Page("CC000054Detail", new { itemId = Model.ItemId, systemId = Model.SystemId })';
   const detailSystemId = Number('@Model.SystemId');
+  const detailQuery = new URLSearchParams(window.location.search || '');
+  const returnUrlRaw = (detailQuery.get('returnUrl') || '').trim();
+  const defaultListUrl = '@Url.Page("CC000054", new { itemId = Model.ItemId, systemId = Model.SystemId })';
+  const backListBtn = document.getElementById('btnBackList');
+
+  const getBackListUrl = () => {
+    let urlObj;
+    try {
+      urlObj = returnUrlRaw ? new URL(returnUrlRaw, window.location.origin) : new URL(defaultListUrl, window.location.origin);
+    } catch {
+      urlObj = new URL(defaultListUrl, window.location.origin);
+    }
+    urlObj.searchParams.delete('handler');
+    if (!urlObj.searchParams.get('systemId')) {
+      urlObj.searchParams.set('systemId', String(detailSystemId || 1));
+    }
+    return urlObj;
+  };
+
+  const syncBackListLink = () => {
+    if (!backListBtn) return;
+    const urlObj = getBackListUrl();
+    const cid = String(currentCompany || '').trim();
+    if (cid) urlObj.searchParams.set('selectedCompanyId', cid);
+    else urlObj.searchParams.delete('selectedCompanyId');
+    backListBtn.setAttribute('href', urlObj.toString());
+  };
+  syncBackListLink();
+
+  const getListSelectKey = (urlObj) => {
+    const path = (urlObj?.pathname || '').trim();
+    const pathParts = path.split('/').filter(Boolean);
+    const sysFromPath = pathParts.length > 0 ? pathParts[pathParts.length - 1] : '';
+    const sys = (sysFromPath || urlObj?.searchParams?.get('systemId') || String(detailSystemId || 1)).trim();
+    return `cc000054:selectedCompanyId:${path}:${sys}`;
+  };
+
+  backListBtn?.addEventListener('click', () => {
+    const cid = String(currentCompany || '').trim();
+    if (!cid) return;
+    const listUrl = getBackListUrl();
+    try {
+      sessionStorage.setItem(getListSelectKey(listUrl), cid);
+    } catch { }
+  });
 
   const initDetailAddDialog = () => {
     const modalEl = document.getElementById('cc000054DetailAddModal');
@@ -771,6 +815,7 @@ function enableFormLayoutEditing(container, dictName) {
             const u = new URL(detailBaseUrl, window.location.origin);
             u.searchParams.set('CompanyId', cid);
             u.searchParams.set('systemId', String(sysId));
+            if (returnUrlRaw) u.searchParams.set('returnUrl', returnUrlRaw);
             window.location.href = u.toString();
             return;
           }
@@ -995,6 +1040,7 @@ function enableFormLayoutEditing(container, dictName) {
         const u = new URL('@Url.Page("CC000054Detail", new { itemId = Model.ItemId, systemId = Model.SystemId })', window.location.origin);
         u.searchParams.set('CompanyId', cid);
         u.searchParams.set('systemId', String(detailSystemId || 1));
+        if (returnUrlRaw) u.searchParams.set('returnUrl', returnUrlRaw);
         window.location.href = u.toString();
       } catch (err) {
         alert('查詢失敗：' + err);
@@ -1368,7 +1414,7 @@ function enableFormLayoutEditing(container, dictName) {
     const btnDelete = bar.querySelector('[data-tab-tool="delete"]');
     if (btnSave) btnSave.disabled = !editing;
     if (btnAdd) btnAdd.disabled = !editing;
-    if (btnDelete) btnDelete.disabled = true;
+    if (btnDelete) btnDelete.disabled = !editing;
   };
 
   const syncGridButtons = (tabKey) => {
@@ -1534,6 +1580,10 @@ function enableFormLayoutEditing(container, dictName) {
     const tbody = table?.querySelector('tbody');
     if (!tbody) return;
     tbody.querySelectorAll('tr[data-state="added"]').forEach(tr => tr.remove());
+    tbody.querySelectorAll('tr[data-state="deleted"]').forEach(tr => {
+      delete tr.dataset.state;
+      tr.classList.remove('d-none', 'table-danger');
+    });
     hasGridPendingAdd = false;
     if (!opts.keepEditingFlag) setTopEditUI(false);
     syncGridButtons(tabKey);
@@ -1816,6 +1866,7 @@ function enableFormLayoutEditing(container, dictName) {
     if (!row) return;
     currentCompany = row.CompanyId || row.companyid || row.COMPANYID;
     if (!currentCompany) return;
+    syncBackListLink();
     tabs.forEach(btn => {
       const isActive = btn.classList.contains('active');
       if (isActive) loadTabData(btn.dataset.tabKey || btn.dataset.target || btn.id.replace('tab-','').replace('-tab',''), currentCompany);
@@ -1921,11 +1972,14 @@ function enableFormLayoutEditing(container, dictName) {
         }
         return { idx: -1, field: '' };
       };
-      const getSelectedAttachRow = () => {
-        const bodyRows = Array.from(table?.querySelectorAll('tbody tr') || [])
-          .filter(r => r.querySelector('td[data-field]'));
-        const selected = table?.querySelector('tbody tr.selected, tbody tr.table-active');
-        return selected || bodyRows[0] || null;
+      const getSelectedAttachRow = () => table?.querySelector('tbody tr.selected, tbody tr.table-active') || null;
+      const ensureSelectedAttachRow = () => {
+        const row = getSelectedAttachRow();
+        if (!row) {
+          alert('請先選取一筆附件資料');
+          return null;
+        }
+        return row;
       };
       const getAttachCell = (row) => {
         if (!row) return null;
@@ -1962,6 +2016,71 @@ function enableFormLayoutEditing(container, dictName) {
         s = s.replace(/[;；]+$/g, '').trim();
         return s;
       };
+      const setAttachPath = (row, raw) => {
+        const value = normalizeAttachPath(raw);
+        if (!row) return;
+        const input = getAttachInput(row);
+        const cell = getAttachCell(row);
+        if (input && !input.readOnly && !input.disabled) input.value = value;
+        const view = cell?.querySelector('.cell-view');
+        if (view) view.textContent = value;
+        if (!input && !view && cell) cell.textContent = value;
+      };
+      const ensureAttachPreviewModal = () => {
+        let modalEl = document.getElementById('ccsAttachPreviewModal');
+        if (!modalEl) {
+          const wrap = document.createElement('div');
+          wrap.innerHTML = `
+            <div class="modal fade" id="ccsAttachPreviewModal" tabindex="-1" aria-hidden="true">
+              <div class="modal-dialog modal-xl modal-dialog-centered">
+                <div class="modal-content">
+                  <div class="modal-header">
+                    <h5 class="modal-title">附件預覽</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                  </div>
+                  <div class="modal-body p-0 text-center" style="background:#fff;">
+                    <img id="ccsAttachPreviewImage" alt="附件預覽"
+                         style="display:none; max-width:100%; max-height:75vh; width:auto; height:auto; object-fit:contain;">
+                    <iframe id="ccsAttachPreviewFrame" title="附件預覽"
+                            style="display:none; width:100%; height:75vh; border:0; background:#fff;"></iframe>
+                  </div>
+                </div>
+              </div>
+            </div>`;
+          document.body.appendChild(wrap.firstElementChild);
+          modalEl = document.getElementById('ccsAttachPreviewModal');
+        }
+        return modalEl;
+      };
+      const isImagePath = (raw) => {
+        const s = normalizeAttachPath(raw).split(/[?#]/)[0];
+        return /\.(bmp|png|jpe?g|gif|webp|svg)$/i.test(s);
+      };
+      const openAttachPreview = (url, rawPath) => {
+        const modalEl = ensureAttachPreviewModal();
+        const img = modalEl?.querySelector('#ccsAttachPreviewImage');
+        const frame = modalEl?.querySelector('#ccsAttachPreviewFrame');
+        if (!modalEl || !frame || !img) {
+          alert('預覽視窗初始化失敗');
+          return;
+        }
+        if (isImagePath(rawPath)) {
+          img.style.display = '';
+          frame.style.display = 'none';
+          frame.removeAttribute('src');
+          img.src = url;
+        } else {
+          img.style.display = 'none';
+          img.removeAttribute('src');
+          frame.style.display = '';
+          frame.src = url;
+        }
+        if (window.bootstrap?.Modal) {
+          window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+          return;
+        }
+        window.open(url, '_blank');
+      };
       const toPreviewUrl = (raw) => {
         const s = normalizeAttachPath(raw);
         if (!s) return '';
@@ -1991,39 +2110,80 @@ function enableFormLayoutEditing(container, dictName) {
         return;
       }
       if (action === 'delete') {
-        alert('此按鈕暫不開放');
+        const editor = tabState[tabKey];
+        if (!editor) return;
+        if (!editor.isEdit?.()) toggleGridEdit(tabKey, true);
+        const selectedRow = table?.querySelector('tbody tr.selected, tbody tr.table-active');
+        if (!selectedRow) { alert('請先選擇要刪除的資料列'); return; }
+
+        // New unsaved row: remove directly. Existing row: stage delete only.
+        if (selectedRow.dataset.state === 'added') {
+          selectedRow.remove();
+        } else {
+          selectedRow.dataset.state = 'deleted';
+          selectedRow.classList.add('d-none');
+          selectedRow.classList.remove('selected', 'table-active');
+        }
+
+        const nextRow = Array.from(table?.querySelectorAll('tbody tr') || [])
+          .find(r => r.dataset.state !== 'deleted' && r.querySelector('td[data-field]'));
+        if (nextRow) selectGridRow(table, nextRow);
+        syncGridButtons(tabKey);
         return;
       }
       if (action === 'setpath') {
-        if (!tabState[tabKey]?.isEdit?.()) toggleGridEdit(tabKey, true);
-        const row = getSelectedAttachRow();
-        if (!row) { alert('請先選取一筆附件資料'); return; }
+        const row = ensureSelectedAttachRow();
+        if (!row) return;
         selectGridRow(table, row);
+        if (!tabState[tabKey]?.isEdit?.()) toggleGridEdit(tabKey, true);
         const input = getAttachInput(row);
         if (!input) { alert('找不到夾檔路徑欄位'); return; }
         if (input.readOnly || input.disabled) { alert('夾檔路徑欄位目前為唯讀，請先確認資料辭典設定。'); return; }
-        input.focus();
-        try {
-          const len = String(input.value || '').length;
-          input.setSelectionRange(len, len);
-        } catch { }
+        const picker = document.createElement('input');
+        picker.type = 'file';
+        picker.style.display = 'none';
+        document.body.appendChild(picker);
+        picker.onchange = async () => {
+          const file = picker.files?.[0];
+          if (file) {
+            try {
+              const formData = new FormData();
+              formData.append('file', file);
+              const resp = await fetch('/api/CompanyAttachFile/Upload', { method: 'POST', body: formData });
+              if (!resp.ok) {
+                alert(await resp.text());
+                return;
+              }
+              const result = await resp.json();
+              const savedPath = String(result?.fullPath || result?.fileName || '').trim();
+              if (!savedPath) {
+                alert('上傳成功但未取得檔案路徑');
+                return;
+              }
+              setAttachPath(row, savedPath);
+            } catch (err) {
+              alert('上傳失敗：' + err);
+              return;
+            }
+          }
+          input.focus();
+          try {
+            const len = String(input.value || '').length;
+            input.setSelectionRange(len, len);
+          } catch { }
+          picker.remove();
+        };
+        picker.click();
         return;
       }
       if (action === 'preview') {
-        const row = getSelectedAttachRow();
-        if (!row) { alert('請先選取一筆附件資料'); return; }
+        const row = ensureSelectedAttachRow();
+        if (!row) return;
         const rawPath = getAttachPath(row);
         if (!rawPath) { alert('目前附件路徑為空白'); return; }
         const openUrl = toPreviewUrl(rawPath);
         if (!openUrl) { alert('目前附件路徑為空白'); return; }
-        // Use a two-step open to reliably detect popup blocking.
-        const win = window.open('', '_blank');
-        if (!win) {
-          alert('檢視失敗，請確認瀏覽器是否封鎖彈出視窗');
-          return;
-        }
-        try { win.opener = null; } catch { }
-        win.location.href = openUrl;
+        openAttachPreview(openUrl, rawPath);
       }
     });
   });
@@ -2034,7 +2194,6 @@ function enableFormLayoutEditing(container, dictName) {
   const topAdd  = document.getElementById('btnTopAdd');
   const topDelete = document.getElementById('btnTopDelete');
   const topQuery = document.getElementById('btnTopQuery');
-  const topReject = document.getElementById('btnTopReject');
   const topLog = document.getElementById('btnTopLog');
   const topShowSys = document.getElementById('btnTopShowSys');
   const detailCountBox = document.getElementById('detailCountBox');
@@ -2046,7 +2205,7 @@ function enableFormLayoutEditing(container, dictName) {
   const navLast = document.getElementById('btnNavLast');
   const mainToolbarGroup = document.querySelector('.ccs-detail-page .top-toolbar .toolbar-main > .d-flex');
   if (mainToolbarGroup) {
-    const orderedIds = ['btnBackList', 'btnTopQuery', 'btnTopShowSys', 'btnTopAdd', 'btnTopDelete', 'btnTopEdit', 'btnTopLog', 'btnTopReject', 'btnTopSave'];
+    const orderedIds = ['btnBackList', 'btnTopQuery', 'btnTopShowSys', 'btnTopAdd', 'btnTopDelete', 'btnTopEdit', 'btnTopLog', 'btnTopSave'];
     orderedIds.forEach(id => {
       const el = document.getElementById(id);
       if (el && el.parentElement === mainToolbarGroup) mainToolbarGroup.appendChild(el);
@@ -2265,7 +2424,9 @@ function enableFormLayoutEditing(container, dictName) {
         systemId: Number(window._cc000054SystemId || '@Model.SystemId' || 0)
       });
       alert(json?.message || '刪除完成');
-      location.href = '@Url.Page("CC000054", new { itemId = Model.ItemId, systemId = Model.SystemId })';
+      const backUrl = getBackListUrl();
+      backUrl.searchParams.delete('selectedCompanyId');
+      location.href = backUrl.toString();
     } catch (err) {
       alert('刪除失敗：' + err);
     }
@@ -2299,23 +2460,6 @@ function enableFormLayoutEditing(container, dictName) {
       return;
     }
     alert('記錄視窗尚未載入');
-  });
-  topReject?.addEventListener('click', async () => {
-    const paperNum = String(currentCompany || '').trim();
-    if (!paperNum) { alert('尚未選取公司代碼'); return; }
-    if (!confirm(`確定要撤除：${paperNum} ?`)) return;
-    try {
-      const json = await window.CcsCompanyActions.backReview({
-        companyId: paperNum,
-        itemId: (window._singleItemId || '@Model.ItemId').toString(),
-        systemId: Number(window._cc000054SystemId || '@Model.SystemId' || 0),
-        userId: (window._userId || localStorage.getItem('erpLoginUserId') || 'admin').toString(),
-        rejectNotes: ''
-      });
-      alert(json?.message || '撤除完成');
-    } catch (err) {
-      alert('撤除失敗：' + err);
-    }
   });
   topShowSys?.addEventListener('click', async () => {
     const cid = String(currentCompany || '').trim();
