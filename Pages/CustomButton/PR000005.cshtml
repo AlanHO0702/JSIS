@@ -1,0 +1,213 @@
+@*
+    PR000005 - 應付票據單
+    對應 Delphi: APRdBillHisDLL.pas / APRdBillHisDLL.dfm
+    自訂按鈕功能:
+      - btnC3: 票據歷史 (查詢此來源單號的票據沖帳紀錄)
+*@
+@model dynamic
+
+<style>
+  #pr5-billhis-modal .modal-dialog { --bs-modal-width: 560px; margin-top: 15vh; }
+  #pr5-billhis-modal .modal-header { padding: 6px 12px; cursor: move; user-select: none; }
+  #pr5-billhis-modal .modal-header :is(button, input) { cursor: default; }
+  #pr5-billhis-modal .modal-title { font-size: 16px; line-height: 1.2; }
+  #pr5-billhis-modal .modal-body { padding: 8px 12px; overflow: auto; max-height: calc(70vh - 100px); }
+  #pr5-billhis-modal .modal-footer { padding: 6px 12px; }
+  #pr5-billhis-modal table { border-collapse: collapse; width: 100%; }
+  #pr5-billhis-modal th,
+  #pr5-billhis-modal td {
+    border: 1px solid #dee2e6; vertical-align: middle;
+    white-space: nowrap; font-size: var(--field-value-size, 13px);
+    padding: 2px 8px; line-height: 1.4;
+  }
+  #pr5-billhis-modal thead th {
+    position: sticky; top: 0; background: #f8fafc; z-index: 2;
+    font-size: var(--field-label-size, 12px); font-weight: 600;
+  }
+</style>
+
+<div class="modal" id="pr5-billhis-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">狀態歷史</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <table class="table table-sm table-striped mb-0">
+          <thead>
+            <tr>
+              <th>歷史單號</th>
+              <th>歷史狀態</th>
+              <th>變更日期</th>
+            </tr>
+          </thead>
+          <tbody id="pr5-billhis-body"></tbody>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">關閉</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+    window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+    const DOM_PREFIX = 'pr5-billhis';
+
+    let bsModal = null;
+    let manualBackdrop = null;
+    let eventsBound = false;
+
+    const readPaperNum = (ctx) => {
+        const v = (ctx?.paperNum || window._paperNum || '').toString().trim();
+        if (v) return v;
+        if (typeof window.getPaperNum === 'function') {
+            try { return (window.getPaperNum() || '').toString().trim(); } catch { /* ignore */ }
+        }
+        return '';
+    };
+
+    const withJwtHeaders = (init = {}) => {
+        const jwt = localStorage.getItem('jwtId');
+        const headers = Object.assign({}, init.headers || {});
+        if (jwt) headers['X-JWTID'] = jwt;
+        return { ...init, headers };
+    };
+
+    const formatDate = (val) => {
+        if (!val) return '';
+        const d = new Date(val);
+        if (isNaN(d.getTime())) return '';
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    const showModal = () => {
+        const el = document.getElementById(`${DOM_PREFIX}-modal`);
+        if (!el) return;
+        if (window.bootstrap?.Modal) {
+            if (!bsModal) bsModal = new bootstrap.Modal(el, { backdrop: 'static' });
+            bsModal.show();
+        } else {
+            el.classList.add('show');
+            el.style.display = 'block';
+            el.removeAttribute('aria-hidden');
+            el.setAttribute('aria-modal', 'true');
+            if (!manualBackdrop) {
+                manualBackdrop = document.createElement('div');
+                manualBackdrop.className = 'modal-backdrop fade show';
+                document.body.appendChild(manualBackdrop);
+            }
+        }
+    };
+
+const renderTable = (rows) => {
+        const body = document.getElementById(`${DOM_PREFIX}-body`);
+        if (!body) return;
+        if (!rows || rows.length === 0) {
+            body.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">無資料</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(r => `
+            <tr>
+                <td>${r.paperNum || ''}</td>
+                <td>${r.billStatusName || ''}</td>
+                <td>${formatDate(r.paperDate)}</td>
+            </tr>
+        `).join('');
+    };
+
+    const initEvents = () => {
+        if (eventsBound) return;
+        const el = document.getElementById(`${DOM_PREFIX}-modal`);
+        if (!el) return;
+        eventsBound = true;
+
+        // 拖曳功能
+        const headerEl = el.querySelector('.modal-header');
+        const dialogEl = el.querySelector('.modal-dialog');
+        if (headerEl && dialogEl) {
+            let dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
+            headerEl.addEventListener('mousedown', (e) => {
+                dragging = true;
+                const rect = dialogEl.getBoundingClientRect();
+                startX = e.clientX; startY = e.clientY;
+                origX = rect.left; origY = rect.top;
+                dialogEl.style.position = 'fixed';
+                dialogEl.style.left = `${origX}px`;
+                dialogEl.style.top = `${origY}px`;
+                dialogEl.style.transform = 'none';
+                dialogEl.style.margin = '0';
+                e.preventDefault();
+            });
+            document.addEventListener('mousemove', (e) => {
+                if (!dragging) return;
+                dialogEl.style.left = `${origX + e.clientX - startX}px`;
+                dialogEl.style.top = `${origY + e.clientY - startY}px`;
+            });
+            document.addEventListener('mouseup', () => { dragging = false; });
+        }
+
+        // Modal 關閉時清除 manualBackdrop
+        el.addEventListener('hidden.bs.modal', () => {
+            if (manualBackdrop) { manualBackdrop.remove(); manualBackdrop = null; }
+        });
+    };
+
+    // btnC3: 票據歷史
+    const openBillHis = async (ctx) => {
+        if (!eventsBound) initEvents();
+
+        const paperNum = readPaperNum(ctx);
+        if (!paperNum) {
+            return Swal.fire({ icon: 'info', title: '沒有單號' });
+        }
+
+        // 清空並顯示 Modal
+        const body = document.getElementById(`${DOM_PREFIX}-body`);
+        if (body) body.innerHTML = '<tr><td colspan="3" class="text-center">載入中...</td></tr>';
+        showModal();
+
+        try {
+            const resp = await fetch(
+                `/api/PR000005/GetBillHis?paperNum=${encodeURIComponent(paperNum)}`,
+                withJwtHeaders()
+            );
+            if (!resp.ok) {
+                renderTable([]);
+                await Swal.fire({ icon: 'error', title: '載入失敗', text: `HTTP ${resp.status}` });
+                return;
+            }
+            const data = await resp.json();
+            if (!data.ok) {
+                renderTable([]);
+                await Swal.fire({ icon: 'error', title: '載入失敗', text: data.error || '查詢失敗' });
+                return;
+            }
+            renderTable(data.rows || []);
+        } catch (err) {
+            console.error('openBillHis error:', err);
+            renderTable([]);
+            await Swal.fire({ icon: 'error', title: '執行錯誤', text: err.message });
+        }
+    };
+
+    // DOM 載入後初始化（支援動態載入）
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initEvents);
+    } else {
+        initEvents();
+    }
+
+    // 註冊按鈕處理函式
+    window.ActionRailCustomHandlers['PR000005'] = {
+        btnC3: openBillHis
+    };
+
+    // 全域函式（供其他模組呼叫）
+    window.BillHisHandler = { open: openBillHis };
+})();
+</script>
