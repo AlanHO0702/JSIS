@@ -17,6 +17,7 @@
 
 @await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", null, ViewData)
 <script src="~/js/editableGrid.js"></script>
+<script src="~/js/ccsCompanyActions.js"></script>
 <div class="modal fade" id="cc000054DetailAddModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-sm modal-dialog-centered">
     <div class="modal-content">
@@ -1397,9 +1398,11 @@ function enableFormLayoutEditing(container, dictName) {
     if (!meta || !table || !tbody) return;
     if (!meta.dict || !meta.dict.length) return;
 
-    // Remove placeholder row before adding a new row.
+    // Remove placeholder rows (rendered when dataset is empty) before adding a new row.
     tbody.querySelectorAll('tr').forEach(tr => {
-      if (tr.querySelector('.text-muted') && !tr.dataset.state) tr.remove();
+      if (tr.dataset.state) return;
+      const hasFieldCell = !!tr.querySelector('td[data-field]');
+      if (!hasFieldCell) tr.remove();
     });
 
     const extrasMap = {};
@@ -2013,8 +2016,14 @@ function enableFormLayoutEditing(container, dictName) {
         if (!rawPath) { alert('目前附件路徑為空白'); return; }
         const openUrl = toPreviewUrl(rawPath);
         if (!openUrl) { alert('目前附件路徑為空白'); return; }
-        const win = window.open(openUrl, '_blank', 'noopener');
-        if (!win) alert('檢視失敗，請確認瀏覽器是否封鎖彈出視窗');
+        // Use a two-step open to reliably detect popup blocking.
+        const win = window.open('', '_blank');
+        if (!win) {
+          alert('檢視失敗，請確認瀏覽器是否封鎖彈出視窗');
+          return;
+        }
+        try { win.opener = null; } catch { }
+        win.location.href = openUrl;
       }
     });
   });
@@ -2249,23 +2258,12 @@ function enableFormLayoutEditing(container, dictName) {
     const paperNum = String(currentCompany || '').trim();
     if (!paperNum) { alert('尚未選取公司代碼'); return; }
     if (!confirm(`確定要刪除：${paperNum} ?`)) return;
-    const payload = {
-      paperId: 'AJNdCompany',
-      paperNum,
-      itemId: (window._singleItemId || 'CC000054').toString(),
-      userId: (window._userId || localStorage.getItem('erpLoginUserId') || 'admin').toString(),
-      useId: (window._useId || 'A001').toString(),
-      eoc: 0,
-      aftFinished: 2
-    };
     try {
-      const resp = await fetch('/api/PaperAction/DoAction', withJwtHeaders({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }));
-      const json = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(json?.message || resp.statusText || '刪除失敗');
+      const json = await window.CcsCompanyActions.deleteSystemLink({
+        companyId: paperNum,
+        itemId: (window._singleItemId || 'CC000054').toString(),
+        systemId: Number(window._cc000054SystemId || '@Model.SystemId' || 0)
+      });
       alert(json?.message || '刪除完成');
       location.href = '@Url.Page("CC000054", new { itemId = Model.ItemId, systemId = Model.SystemId })';
     } catch (err) {
@@ -2275,12 +2273,7 @@ function enableFormLayoutEditing(container, dictName) {
   topQuery?.addEventListener('click', () => {
     if (typeof window.openCcsDetailQueryDialog === 'function') window.openCcsDetailQueryDialog();
   });
-  const withJwtHeaders = (init = {}) => {
-    const jwt = localStorage.getItem("jwtId");
-    const headers = Object.assign({}, init.headers || {});
-    if (jwt) headers["X-JWTID"] = jwt;
-    return { ...init, headers };
-  };
+  const withJwtHeaders = (init = {}) => (window.CcsCompanyActions?.withJwtHeaders || ((x) => x))(init);
   const fetchJsonWithTimeout = async (url, timeoutMs = 6000) => {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -2297,8 +2290,8 @@ function enableFormLayoutEditing(container, dictName) {
   topLog?.addEventListener('click', async () => {
     const paperNum = String(currentCompany || '').trim();
     if (!paperNum) { alert('尚未選取公司代碼'); return; }
-    if (typeof window.openCcsUpdateLog === 'function') {
-      await window.openCcsUpdateLog({
+    if (typeof window.openSharedUpdateLog === 'function') {
+      await window.openSharedUpdateLog({
         paperId: (window._singleRealTable || 'AJNdCompany').toString(),
         paperNum,
         itemId: (window._singleItemId || '@Model.ItemId').toString()
@@ -2311,22 +2304,14 @@ function enableFormLayoutEditing(container, dictName) {
     const paperNum = String(currentCompany || '').trim();
     if (!paperNum) { alert('尚未選取公司代碼'); return; }
     if (!confirm(`確定要撤除：${paperNum} ?`)) return;
-    const payload = {
-      paperId: (window._singleRealTable || 'AJNdCompany').toString(),
-      paperNum,
-      itemId: (window._singleItemId || '@Model.ItemId').toString(),
-      userId: (window._userId || localStorage.getItem('erpLoginUserId') || 'admin').toString(),
-      useId: (window._useId || 'A001').toString(),
-      rejectNotes: ''
-    };
     try {
-      const resp = await fetch('/api/PaperAction/RejectForEdit', withJwtHeaders({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }));
-      const json = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(json?.message || resp.statusText || '撤除失敗');
+      const json = await window.CcsCompanyActions.backReview({
+        companyId: paperNum,
+        itemId: (window._singleItemId || '@Model.ItemId').toString(),
+        systemId: Number(window._cc000054SystemId || '@Model.SystemId' || 0),
+        userId: (window._userId || localStorage.getItem('erpLoginUserId') || 'admin').toString(),
+        rejectNotes: ''
+      });
       alert(json?.message || '撤除完成');
     } catch (err) {
       alert('撤除失敗：' + err);
@@ -3115,3 +3100,5 @@ body.ccs-editing .ccs-detail-page .mf-container[data-editing="1"] .mf-lk-edit-na
 <script src="~/js/ccsUpdateLog.js" asp-append-version="true"></script>
 
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
+

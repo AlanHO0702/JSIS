@@ -674,54 +674,26 @@ document.addEventListener('DOMContentLoaded', () => {
   initCompanySelectQuery();
 });
 </script>
+<script src="~/js/ccsCompanyActions.js"></script>
 <script>
   window.SingleGridCustomHandlers = window.SingleGridCustomHandlers || {};
-  const withJwtHeaders = (init = {}) => {
-    const jwt = localStorage.getItem("jwtId");
-    const headers = Object.assign({}, init.headers || {});
-    if (jwt) headers["X-JWTID"] = jwt;
-    return { ...init, headers };
-  };
-  const fetchJsonWithTimeout = async (url, timeoutMs = 6000) => {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-      const resp = await fetch(url, withJwtHeaders({ signal: ctrl.signal }));
-      const json = await resp.json().catch(() => ({}));
-      return { ok: resp.ok && json?.ok !== false, json, status: resp.status };
-    } catch (err) {
-      return { ok: false, json: { error: String(err) }, status: 0 };
-    } finally {
-      clearTimeout(t);
-    }
-  };
   window.SingleGridCustomHandlers.rejectPaper = async function(ctx) {
     const row = (ctx && ctx.selectedRow) || {};
-    const keys = Object.keys(row || {});
-    const idKey = keys.find(k => String(k).toLowerCase() === 'companyid');
-    const paperNum = idKey ? String(row[idKey] || '').trim() : '';
+    const paperNum = (window.CcsCompanyActions?.getCompanyIdFromRow || (() => ''))(row);
     if (!paperNum) {
       alert('請先選取一筆資料');
       return;
     }
     if (!confirm(`確定要撤除：${paperNum} ?`)) return;
 
-    const payload = {
-      paperId: (window._singleRealTable || 'AJNdCompany').toString(),
-      paperNum,
-      itemId: (window._singleItemId || 'CC000054').toString(),
-      userId: (window._userId || localStorage.getItem('erpLoginUserId') || 'admin').toString(),
-      useId: (window._useId || 'A001').toString(),
-      rejectNotes: ''
-    };
     try {
-      const resp = await fetch('/api/PaperAction/RejectForEdit', withJwtHeaders({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }));
-      const json = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(json?.message || resp.statusText || '撤除失敗');
+      const json = await window.CcsCompanyActions.backReview({
+        companyId: paperNum,
+        itemId: (window._singleItemId || 'CC000054').toString(),
+        systemId: Number(window._cc000054SystemId || 0),
+        userId: (window._userId || localStorage.getItem('erpLoginUserId') || 'admin').toString(),
+        rejectNotes: ''
+      });
       alert(json?.message || '撤除完成');
     } catch (err) {
       alert('撤除失敗：' + err);
@@ -729,32 +701,19 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   window.SingleGridCustomHandlers.deletePaper = async function(ctx) {
     const row = (ctx && ctx.selectedRow) || {};
-    const keys = Object.keys(row || {});
-    const idKey = keys.find(k => String(k).toLowerCase() === 'companyid');
-    const paperNum = idKey ? String(row[idKey] || '').trim() : '';
+    const paperNum = (window.CcsCompanyActions?.getCompanyIdFromRow || (() => ''))(row);
     if (!paperNum) {
       alert('請先選取一筆資料');
       return;
     }
     if (!confirm(`確定要刪除：${paperNum} ?`)) return;
 
-    const payload = {
-      paperId: (window._singleRealTable || 'AJNdCompany').toString(),
-      paperNum,
-      itemId: (window._singleItemId || 'CC000054').toString(),
-      userId: (window._userId || localStorage.getItem('erpLoginUserId') || 'admin').toString(),
-      useId: (window._useId || 'A001').toString(),
-      eoc: 0,
-      aftFinished: 2
-    };
     try {
-      const resp = await fetch('/api/PaperAction/DoAction', withJwtHeaders({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }));
-      const json = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(json?.message || resp.statusText || '刪除失敗');
+      const json = await window.CcsCompanyActions.deleteSystemLink({
+        companyId: paperNum,
+        itemId: (window._singleItemId || 'CC000054').toString(),
+        systemId: Number(window._cc000054SystemId || 0)
+      });
       alert(json?.message || '刪除完成');
       location.reload();
     } catch (err) {
@@ -763,15 +722,13 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   window.SingleGridCustomHandlers.showLog = async function(ctx) {
     const row = (ctx && ctx.selectedRow) || {};
-    const keys = Object.keys(row || {});
-    const idKey = keys.find(k => String(k).toLowerCase() === 'companyid');
-    const paperNum = idKey ? String(row[idKey] || '').trim() : '';
+    const paperNum = (window.CcsCompanyActions?.getCompanyIdFromRow || (() => ''))(row);
     if (!paperNum) {
       alert('請先選取一筆資料');
       return;
     }
-    if (typeof window.openCcsUpdateLog === 'function') {
-      await window.openCcsUpdateLog({
+    if (typeof window.openSharedUpdateLog === 'function') {
+      await window.openSharedUpdateLog({
         paperId: (window._singleRealTable || 'AJNdCompany').toString(),
         paperNum,
         itemId: (window._singleItemId || 'CC000054').toString()
@@ -974,9 +931,12 @@ document.addEventListener('DOMContentLoaded', () => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px 12px;
 }
+
 </style>
 <script src="~/js/ccsUpdateLog.js" asp-append-version="true"></script>
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
+
 
 
 
