@@ -668,11 +668,7 @@ SELECT TOP 1 RunSQLAfterAdd
             string? filterSql = null;
             if (!string.IsNullOrWhiteSpace(req.ItemId))
             {
-                filterSql = await _ctx.CurdOcxtableSetUp
-                    .AsNoTracking()
-                    .Where(x => x.ItemId == req.ItemId && x.TableName == dictTable)
-                    .Select(x => x.FilterSql)
-                    .FirstOrDefaultAsync();
+                filterSql = await ResolveMasterFilterSqlAsync(req.ItemId, dictTable);
             }
             if (!string.IsNullOrWhiteSpace(filterSql))
             {
@@ -1214,6 +1210,34 @@ SELECT TOP (@top) {selectCols}
             }
 
             return map;
+        }
+
+        private async Task<string?> ResolveMasterFilterSqlAsync(string itemId, string dictTable)
+        {
+            if (string.IsNullOrWhiteSpace(itemId) || string.IsNullOrWhiteSpace(dictTable))
+                return null;
+
+            var rows = await _ctx.CurdOcxtableSetUp
+                .AsNoTracking()
+                .Where(x => x.ItemId == itemId && x.TableName == dictTable)
+                .Select(x => new { x.TableKind, x.FilterSql })
+                .ToListAsync();
+
+            if (rows.Count == 0) return null;
+
+            var masters = rows
+                .Where(x => !string.IsNullOrWhiteSpace(x.TableKind)
+                    && x.TableKind.StartsWith("Master", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(x => string.Equals(x.TableKind, "Master1", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(x => x.TableKind, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var source = masters.Count > 0
+                ? masters
+                : rows.OrderBy(x => x.TableKind ?? string.Empty, StringComparer.OrdinalIgnoreCase).ToList();
+
+            var preferred = source.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.FilterSql));
+            return preferred?.FilterSql ?? source.FirstOrDefault()?.FilterSql;
         }
 
         private async Task<string?> ResolveDetailFieldAsync(string dictTable, string rawField)

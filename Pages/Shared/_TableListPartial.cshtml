@@ -481,6 +481,34 @@ function renderTable(data) {
     tbody.appendChild(tr);
   });
 
+  // 儲存本頁的導覽 ID 列表，供單身頁 initRowNavigation() 優先使用
+  // 使用 sessionStorage：分頁關閉/重整自動清除，避免跨 session 的舊 filter 汙染
+  try {
+    const _tn = String(window._tableName || '').trim().toLowerCase();
+    if (_tn) {
+      if (data.length > 0) {
+        const _navIds = data.map(item => {
+          const v = item[keyFieldName];
+          return v != null ? String(v).trim() : null;
+        }).filter(Boolean);
+        if (_navIds.length > 0) {
+          sessionStorage.setItem(`listNavIds:${_tn}`, JSON.stringify(_navIds));
+        }
+      }
+      // 無論有無資料都更新 listNavFilters，反映目前查詢狀態，避免舊 filter 被 restore
+      // 若無篩選條件（orderListQueryFilters = []），用 pagination-only 代表「顯示全部」
+      const _cf = localStorage.getItem(`orderListQueryFilters:${_tn}`);
+      if (_cf && _cf !== 'null' && _cf !== '[]') {
+        sessionStorage.setItem(`listNavFilters:${_tn}`, _cf);
+      } else {
+        sessionStorage.setItem(`listNavFilters:${_tn}`, JSON.stringify([
+          { Field: 'page', Op: '', Value: '1' },
+          { Field: 'pageSize', Op: '', Value: '50' }
+        ]));
+      }
+    }
+  } catch {}
+
   highlightLastViewedRow();
 
   document.querySelectorAll(".row-link").forEach(row => {
@@ -598,7 +626,14 @@ function doQuery(page = 1) {
   // 深拷貝 filters，避免修改原始 lastQueryFilters 中的物件
   let filters = lastQueryFilters.map(f => ({ ...f }));
   let hasPage = false, hasSize = false;
-  const itemId = (window._itemId || window._singleItemId || '').toString().trim();
+  const itemId = (
+    window._itemId ||
+    window._singleItemId ||
+    ((location.pathname.match(/\/DynamicTemplate\/Paper\/([^\/?#]+)/i) || [])[1]
+      ? decodeURIComponent((location.pathname.match(/\/DynamicTemplate\/Paper\/([^\/?#]+)/i) || [])[1])
+      : '') ||
+    ''
+  ).toString().trim();
   const tableName = (window._tableName || '').toLowerCase();
 
   filters.forEach(f => {
@@ -701,6 +736,7 @@ document.addEventListener("DOMContentLoaded", function () {
     paperAction: { url: '/api/PaperAction/DoAction', paperId: "@tableName", eoc: 0, aftFinished: 2 },
     detailRouteTemplate: "@(detailRouteTemplate)",
     tableName: "@tableName",
+    itemId: window._itemId || '',
     pagedQueryUrl: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(ViewData["PagedQueryUrl"]?.ToString() ?? "/api/PagedQuery/PagedQuery")),
     pageSize: 50,
     renderTable,
@@ -839,8 +875,8 @@ document.addEventListener("DOMContentLoaded", function () {
       sessionStorage.removeItem(`lookupCache:${tn}`);
       sessionStorage.removeItem(`lookupFilters:${tn}`);
     } catch {}
-  } else {
-    // 沒有 URL 參數，使用 localStorage 的查詢條件
+  } else if (useStoredQuery) {
+    // useStoredQuery=1：從 localStorage 讀取查詢條件（從查詢按鈕跳轉過來）
     finalFilters = (state.filters || [])
       .filter(f => {
         if (!f) return false;
@@ -854,6 +890,7 @@ document.addEventListener("DOMContentLoaded", function () {
         return f;
       });
   }
+  // 否則（直接進入 / 重整 / 無參數）：finalFilters 保持 [] → 不查詢，顯示空白
 
   if (finalFilters.length) {
     lastQueryFilters = finalFilters;
@@ -864,6 +901,9 @@ document.addEventListener("DOMContentLoaded", function () {
     if (urlPageParam && initialPage > 1) {
       doQuery(initialPage);
     } else {
+      // 明確儲存空條件：確保從單身頁返回時，列表頁顯示與離開時一致的狀態
+      // 防止其他頁面操作留下的舊 localStorage 條件被套用
+      saveQueryState([], 1);
       renderTable(@Html.Raw(Json.Serialize(Model.Items)));
       renderOrderCount(@Model.TotalCount, @Model.PageSize, @Model.PageNumber);
     }
