@@ -13,6 +13,7 @@
     let sysParams = {};
     let masterDict = [];  // 主檔欄位辭典 [{FieldName, DisplayLabel, Visible, ...}]
     let detailDict = [];  // 明細欄位辭典
+    let queryParams = {}; // 查詢參數
 
     // BOM Set Dialog state
     let bomSetReadOnly = false;
@@ -164,7 +165,11 @@
     // ==================== Master Grid ====================
     async function loadMasterGrid() {
         try {
-            const result = await apiGet('/api/EMOdTmpBOMMas/paged?page=1&pageSize=500');
+            let url = '/api/EMOdTmpBOMMas/paged?page=1&pageSize=500';
+            if (queryParams.TmpId) url += `&TmpId=${encodeURIComponent(queryParams.TmpId)}`;
+            if (queryParams.Notes) url += `&Notes=${encodeURIComponent(queryParams.Notes)}`;
+            if (queryParams.Status !== undefined && queryParams.Status !== '') url += `&Status=${queryParams.Status}`;
+            const result = await apiGet(url);
             masterRows = result.data || [];
             renderMasterGrid();
             updateRecordCount();
@@ -228,7 +233,11 @@
 
     function updateRecordCount() {
         const idx = selectedMasterRow ? masterRows.findIndex(r => r.TmpId === selectedMasterRow.TmpId) + 1 : 0;
-        document.getElementById('modeStatusCount').textContent = `${idx} / ${masterRows.length}`;
+        const text = `${idx} / ${masterRows.length}`;
+        const el1 = document.getElementById('modeStatusCount');
+        const el2 = document.getElementById('recordCountMas');
+        if (el1) el1.textContent = text;
+        if (el2) el2.textContent = text;
     }
 
     // ==================== Detail / TreeView ====================
@@ -437,6 +446,22 @@
 
         document.getElementById('btnAddRow').addEventListener('click', handleAddRow);
         document.getElementById('btnDelRow').addEventListener('click', handleDelRow);
+        document.getElementById('btnAddMasterOk').addEventListener('click', doAddMaster);
+        // Enter 鍵觸發確定
+        document.getElementById('addMasterModal')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') doAddMaster();
+        });
+        document.getElementById('btnQuery')?.addEventListener('click', openQueryDialog);
+        document.getElementById('btnQueryOk')?.addEventListener('click', executeQuery);
+        document.getElementById('btnQueryCancel')?.addEventListener('click', closeQueryDialog);
+        document.getElementById('btnQueryClose')?.addEventListener('click', closeQueryDialog);
+        document.getElementById('queryOverlay')?.addEventListener('click', (e) => {
+            if (e.target === document.getElementById('queryOverlay')) closeQueryDialog();
+        });
+        document.getElementById('queryOverlay')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') executeQuery();
+            if (e.key === 'Escape') closeQueryDialog();
+        });
         document.getElementById('btnChange').addEventListener('click', handleChange);
         document.getElementById('btnFormView').addEventListener('click', handleFormView);
         document.getElementById('btnSaveAs').addEventListener('click', handleSaveAs);
@@ -445,35 +470,45 @@
     }
 
     // ==================== Add / Delete Master Row ====================
-    async function handleAddRow() {
+    function handleAddRow() {
         if (!isEditMode) return;
+        // 清空欄位
+        const idInput = document.getElementById('addTmpId');
+        const notesInput = document.getElementById('addTmpNotes');
+        if (idInput) idInput.value = '';
+        if (notesInput) notesInput.value = '';
+        const modal = new bootstrap.Modal(document.getElementById('addMasterModal'));
+        modal.show();
+        // 開啟後自動 focus 代碼欄位
+        document.getElementById('addMasterModal').addEventListener('shown.bs.modal', () => {
+            idInput?.focus();
+        }, { once: true });
+    }
 
-        const tmpId = prompt('請輸入新的組合模型代碼 (最多12碼):');
-        if (!tmpId || !tmpId.trim()) return;
-        const id = tmpId.trim();
-        if (id.length > 12) { alert('長度不可超過12碼'); return; }
+    async function doAddMaster() {
+        const idInput = document.getElementById('addTmpId');
+        const notesInput = document.getElementById('addTmpNotes');
+        const id = (idInput?.value || '').trim();
+        const notes = (notesInput?.value || '').trim();
 
-        // 檢查是否已存在
-        if (masterRows.some(r => r.TmpId === id)) {
-            alert('此代碼已存在');
-            return;
-        }
-
-        const notes = prompt('請輸入備註:') || '';
+        if (!id) { idInput?.focus(); alert('請輸入模型代碼'); return; }
+        if (id.length > 12) { idInput?.focus(); alert('代碼長度不可超過12碼'); return; }
+        if (masterRows.some(r => r.TmpId === id)) { idInput?.focus(); alert('此代碼已存在'); return; }
 
         try {
-            const result = await apiPost('/api/EMOdTmpBOM_SC/InsertMaster', { tmpId: id, notes: notes.trim() });
-            if (!result.ok) {
-                alert('新增失敗: ' + (result.error || '未知錯誤'));
-                return;
-            }
-            alert('新增成功');
+            const result = await apiPost('/api/EMOdTmpBOM_SC/InsertMaster', { tmpId: id, notes });
+            if (!result.ok) { alert('新增失敗: ' + (result.error || '未知錯誤')); return; }
+
+            // 關閉 modal
+            const modalEl = document.getElementById('addMasterModal');
+            bootstrap.Modal.getInstance(modalEl)?.hide();
+
             await loadMasterGrid();
             const newRow = masterRows.find(r => r.TmpId === id);
             if (newRow) {
-                const trs = document.querySelectorAll('#masterBody tr');
                 const idx = masterRows.indexOf(newRow);
-                if (trs[idx]) selectMasterRow(newRow, trs[idx]);
+                const tr = document.querySelectorAll('#masterBody tr')[idx];
+                if (tr) selectMasterRow(newRow, tr);
             }
         } catch (e) {
             alert('新增失敗: ' + e.message);
@@ -610,6 +645,73 @@
             }
         } catch (e) {
             alert(`${action}失敗: ${e.message}`);
+        }
+    }
+
+    // ==================== 查詢 (自訂 overlay，不用 Bootstrap Modal) ====================
+    function openQueryDialog() {
+        const dialog = document.getElementById('queryDialog');
+        // 每次開啟重設置中位置
+        dialog.style.position = 'absolute';
+        dialog.style.top = '50%';
+        dialog.style.left = '50%';
+        dialog.style.transform = 'translate(-50%,-50%)';
+        document.getElementById('queryOverlay').style.display = 'block';
+        document.getElementById('qryTmpId')?.focus();
+    }
+
+    function initQueryDrag() {
+        const overlay = document.getElementById('queryOverlay');
+        const dialog = document.getElementById('queryDialog');
+        const header = dialog?.querySelector('div:first-child');
+        if (!header) return;
+        header.style.cursor = 'move';
+        header.addEventListener('pointerdown', (e) => {
+            if (e.target?.closest('button')) return;
+            // 切換成 fixed 定位，避免 transform 座標系干擾
+            const rect = dialog.getBoundingClientRect();
+            dialog.style.transform = 'none';
+            dialog.style.position = 'fixed';
+            dialog.style.left = rect.left + 'px';
+            dialog.style.top = rect.top + 'px';
+            const startX = e.clientX - rect.left;
+            const startY = e.clientY - rect.top;
+            function onMove(ev) {
+                dialog.style.left = (ev.clientX - startX) + 'px';
+                dialog.style.top  = (ev.clientY - startY) + 'px';
+            }
+            function onUp() {
+                document.removeEventListener('pointermove', onMove);
+                document.removeEventListener('pointerup', onUp);
+            }
+            document.addEventListener('pointermove', onMove);
+            document.addEventListener('pointerup', onUp);
+            header.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        });
+    }
+
+    function closeQueryDialog() {
+        document.getElementById('queryOverlay').style.display = 'none';
+    }
+
+    async function executeQuery() {
+        queryParams.TmpId = document.getElementById('qryTmpId')?.value?.trim() || '';
+        queryParams.Notes = document.getElementById('qryNotes')?.value?.trim() || '';
+        queryParams.Status = document.getElementById('qryStatus')?.value ?? '';
+
+        closeQueryDialog();
+        await loadMasterGrid();
+
+        if (masterRows.length > 0) {
+            const firstTr = document.querySelector('#masterBody tr');
+            if (firstTr) selectMasterRow(masterRows[0], firstTr);
+        } else {
+            selectedMasterRow = null;
+            detailRows = [];
+            renderTreeView([]);
+            renderDetailGrid([]);
+            updateRecordCount();
         }
     }
 
@@ -1142,6 +1244,7 @@
     async function init() {
         await Promise.all([loadSysParams(), loadFieldDicts()]);
         initToolbar();
+        initQueryDrag();
         initContextMenu();
         initRenameLayer();
         initSpinners();

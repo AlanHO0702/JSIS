@@ -212,7 +212,7 @@ public class EMOdTmpPressController : ControllerBase
         await using var cmd = new SqlCommand("EMOdMatClassSelectEx", conn);
         cmd.CommandType = CommandType.StoredProcedure;
         cmd.CommandTimeout = 30;
-        AddParam(cmd, "@Flag", 1);
+        AddParam(cmd, "@ClassType", 1);
 
         var rows = await ReadRowsAsync(cmd);
         return Ok(new { ok = true, data = rows });

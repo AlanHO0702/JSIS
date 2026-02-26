@@ -951,15 +951,37 @@
         }
     }
 
-    async function addMasterRow() {
-        const tmpId = prompt('請輸入壓合代碼:');
-        if (!tmpId || !tmpId.trim()) return;
+    function addMasterRow() {
+        const idInput = document.getElementById('addTmpId');
+        const notesInput = document.getElementById('addTmpNotes');
+        if (idInput) idInput.value = '';
+        if (notesInput) notesInput.value = '';
+        const modal = new bootstrap.Modal(document.getElementById('addMasterModal'));
+        modal.show();
+        document.getElementById('addMasterModal').addEventListener('shown.bs.modal', () => {
+            idInput?.focus();
+        }, { once: true });
+    }
+
+    async function doAddMaster() {
+        const idInput = document.getElementById('addTmpId');
+        const notesInput = document.getElementById('addTmpNotes');
+        const id = (idInput?.value || '').trim();
+        const notes = (notesInput?.value || '').trim();
+
+        if (!id) { idInput?.focus(); alert('請輸入壓合代碼'); return; }
+        if (id.length > 12) { idInput?.focus(); alert('代碼長度不可超過12碼'); return; }
+        if (masterRows.some(r => String(r.TmpId || '').trim() === id)) { idInput?.focus(); alert('此代碼已存在'); return; }
 
         try {
-            const res = await apiPost('/api/EMOdTmpPress/InsertMaster', { TmpId: tmpId.trim(), Notes: '' });
+            const res = await apiPost('/api/EMOdTmpPress/InsertMaster', { TmpId: id, Notes: notes });
             if (!res.ok) { alert(res.error || '新增失敗'); return; }
+
+            const modalEl = document.getElementById('addMasterModal');
+            bootstrap.Modal.getInstance(modalEl)?.hide();
+
             await loadMasterGrid();
-            const newIdx = masterRows.findIndex(r => String(r.TmpId || '').trim() === tmpId.trim());
+            const newIdx = masterRows.findIndex(r => String(r.TmpId || '').trim() === id);
             if (newIdx >= 0) selectMasterRow(newIdx);
         } catch (e) {
             alert('新增失敗: ' + e.message);
@@ -1029,10 +1051,48 @@
         }
     }
 
-    // ==================== 查詢 ====================
+    // ==================== 查詢 (自訂 overlay) ====================
     function openQueryDialog() {
-        const modal = new bootstrap.Modal(document.getElementById('queryModal'));
-        modal.show();
+        const dialog = document.getElementById('queryDialog');
+        dialog.style.position = 'absolute';
+        dialog.style.top = '50%';
+        dialog.style.left = '50%';
+        dialog.style.transform = 'translate(-50%,-50%)';
+        document.getElementById('queryOverlay').style.display = 'block';
+        document.getElementById('qryTmpId')?.focus();
+    }
+
+    function closeQueryDialog() {
+        document.getElementById('queryOverlay').style.display = 'none';
+    }
+
+    function initQueryDrag() {
+        const dialog = document.getElementById('queryDialog');
+        const header = dialog?.querySelector('div:first-child');
+        if (!header) return;
+        header.style.cursor = 'move';
+        header.addEventListener('pointerdown', (e) => {
+            if (e.target?.closest('button')) return;
+            const rect = dialog.getBoundingClientRect();
+            dialog.style.transform = 'none';
+            dialog.style.position = 'fixed';
+            dialog.style.left = rect.left + 'px';
+            dialog.style.top = rect.top + 'px';
+            const startX = e.clientX - rect.left;
+            const startY = e.clientY - rect.top;
+            function onMove(ev) {
+                dialog.style.left = (ev.clientX - startX) + 'px';
+                dialog.style.top  = (ev.clientY - startY) + 'px';
+            }
+            function onUp() {
+                document.removeEventListener('pointermove', onMove);
+                document.removeEventListener('pointerup', onUp);
+            }
+            document.addEventListener('pointermove', onMove);
+            document.addEventListener('pointerup', onUp);
+            header.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        });
     }
 
     async function executeQuery() {
@@ -1041,11 +1101,7 @@
         queryParams.Status = document.getElementById('qryStatus')?.value ?? '';
 
         currentPage = 1;
-
-        const modalEl = document.getElementById('queryModal');
-        const modal = bootstrap.Modal.getInstance(modalEl);
-        if (modal) modal.hide();
-
+        closeQueryDialog();
         await loadMasterGrid();
     }
 
@@ -1071,6 +1127,10 @@
         document.getElementById('btnModeToggle')?.addEventListener('click', toggleEditMode);
         document.getElementById('btnAddRow')?.addEventListener('click', addMasterRow);
         document.getElementById('btnDelRow')?.addEventListener('click', deleteMasterRow);
+        document.getElementById('btnAddMasterOk')?.addEventListener('click', doAddMaster);
+        document.getElementById('addMasterModal')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') doAddMaster();
+        });
         document.getElementById('btnChange')?.addEventListener('click', openPressSetDialog);
         document.getElementById('btnChangeRoute')?.addEventListener('click', openBOMSelectDialog);
         document.getElementById('btnSaveAs')?.addEventListener('click', saveAsMaster);
@@ -1094,6 +1154,16 @@
 
         // 查詢 Dialog events
         document.getElementById('btnQueryOk')?.addEventListener('click', executeQuery);
+        document.getElementById('btnQueryCancel')?.addEventListener('click', closeQueryDialog);
+        document.getElementById('btnQueryClose')?.addEventListener('click', closeQueryDialog);
+        document.getElementById('queryOverlay')?.addEventListener('click', (e) => {
+            if (e.target === document.getElementById('queryOverlay')) closeQueryDialog();
+        });
+        document.getElementById('queryOverlay')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') executeQuery();
+            if (e.key === 'Escape') closeQueryDialog();
+        });
+        initQueryDrag();
     }
 
     // DOM Ready

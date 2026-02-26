@@ -671,15 +671,51 @@
         }
     }
 
-    // ==================== 查詢 Modal ====================
-    let queryModal = null;
-
+    // ==================== 查詢 (自訂 overlay) ====================
     function openQueryModal() {
         document.getElementById('qryTmpId').value = queryParams.TmpId || '';
         document.getElementById('qryNotes').value = queryParams.Notes || '';
         document.getElementById('qryStatus').value = queryParams.Status !== undefined ? String(queryParams.Status) : '';
-        if (!queryModal) queryModal = new bootstrap.Modal(document.getElementById('queryModal'));
-        queryModal.show();
+        const dialog = document.getElementById('queryDialog');
+        dialog.style.position = 'absolute';
+        dialog.style.top = '50%';
+        dialog.style.left = '50%';
+        dialog.style.transform = 'translate(-50%,-50%)';
+        document.getElementById('queryOverlay').style.display = 'block';
+        document.getElementById('qryTmpId')?.focus();
+    }
+
+    function closeQueryDialog() {
+        document.getElementById('queryOverlay').style.display = 'none';
+    }
+
+    function initQueryDrag() {
+        const dialog = document.getElementById('queryDialog');
+        const header = dialog?.querySelector('div:first-child');
+        if (!header) return;
+        header.style.cursor = 'move';
+        header.addEventListener('pointerdown', (e) => {
+            if (e.target?.closest('button')) return;
+            const rect = dialog.getBoundingClientRect();
+            dialog.style.transform = 'none';
+            dialog.style.position = 'fixed';
+            dialog.style.left = rect.left + 'px';
+            dialog.style.top = rect.top + 'px';
+            const startX = e.clientX - rect.left;
+            const startY = e.clientY - rect.top;
+            function onMove(ev) {
+                dialog.style.left = (ev.clientX - startX) + 'px';
+                dialog.style.top  = (ev.clientY - startY) + 'px';
+            }
+            function onUp() {
+                document.removeEventListener('pointermove', onMove);
+                document.removeEventListener('pointerup', onUp);
+            }
+            document.addEventListener('pointermove', onMove);
+            document.addEventListener('pointerup', onUp);
+            header.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        });
     }
 
     function applyQuery() {
@@ -687,7 +723,7 @@
         queryParams.Notes = document.getElementById('qryNotes').value.trim();
         const s = document.getElementById('qryStatus').value;
         queryParams.Status = s === '' ? '' : parseInt(s, 10);
-        if (queryModal) queryModal.hide();
+        closeQueryDialog();
         loadMaster(true);
     }
 
@@ -804,11 +840,18 @@
         document.getElementById('btnReject').addEventListener('click', () => doApproval(false));
         document.getElementById('btnSaveLayout').addEventListener('click', saveLayout);
 
-        // Query modal confirm (Enter key)
+        // Query overlay events
         document.getElementById('btnQueryOk').addEventListener('click', applyQuery);
-        ['qryTmpId', 'qryNotes'].forEach(id => {
-            document.getElementById(id).addEventListener('keydown', e => { if (e.key === 'Enter') applyQuery(); });
+        document.getElementById('btnQueryCancel')?.addEventListener('click', closeQueryDialog);
+        document.getElementById('btnQueryClose')?.addEventListener('click', closeQueryDialog);
+        document.getElementById('queryOverlay')?.addEventListener('click', (e) => {
+            if (e.target === document.getElementById('queryOverlay')) closeQueryDialog();
         });
+        document.getElementById('queryOverlay')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') applyQuery();
+            if (e.key === 'Escape') closeQueryDialog();
+        });
+        initQueryDrag();
 
         // Insert modal
         document.getElementById('btnInsertOk').addEventListener('click', confirmInsert);
