@@ -168,7 +168,6 @@
             let url = '/api/EMOdTmpBOMMas/paged?page=1&pageSize=500';
             if (queryParams.TmpId) url += `&TmpId=${encodeURIComponent(queryParams.TmpId)}`;
             if (queryParams.Notes) url += `&Notes=${encodeURIComponent(queryParams.Notes)}`;
-            if (queryParams.Status !== undefined && queryParams.Status !== '') url += `&Status=${queryParams.Status}`;
             const result = await apiGet(url);
             masterRows = result.data || [];
             renderMasterGrid();
@@ -698,7 +697,6 @@
     async function executeQuery() {
         queryParams.TmpId = document.getElementById('qryTmpId')?.value?.trim() || '';
         queryParams.Notes = document.getElementById('qryNotes')?.value?.trim() || '';
-        queryParams.Status = document.getElementById('qryStatus')?.value ?? '';
 
         closeQueryDialog();
         await loadMasterGrid();

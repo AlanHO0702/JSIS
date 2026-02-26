@@ -30,49 +30,64 @@ public class EMOdTmpBOM_SCController : ControllerBase
     public async Task<IActionResult> GetPaged(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
-        [FromQuery] string? TmpId = null)
+        [FromQuery] string? TmpId = null,
+        [FromQuery] string? Notes = null)
     {
-        await using var conn = new SqlConnection(_connStr);
-        await conn.OpenAsync();
-
-        var where = new List<string>();
-        var parameters = new List<SqlParameter>();
-
-        if (!string.IsNullOrWhiteSpace(TmpId))
+        try
         {
-            where.Add("TmpId LIKE @TmpId");
-            parameters.Add(new SqlParameter("@TmpId", $"%{TmpId.Trim()}%"));
+            await using var conn = new SqlConnection(_connStr);
+            await conn.OpenAsync();
+
+            var where = new List<string>();
+            var parameters = new List<SqlParameter>();
+
+            if (!string.IsNullOrWhiteSpace(TmpId))
+            {
+                where.Add("TmpId LIKE @TmpId");
+                parameters.Add(new SqlParameter("@TmpId", $"%{TmpId.Trim()}%"));
+            }
+
+            if (!string.IsNullOrWhiteSpace(Notes))
+            {
+                where.Add("Notes LIKE @Notes");
+                parameters.Add(new SqlParameter("@Notes", $"%{Notes.Trim()}%"));
+            }
+
+            var whereClause = where.Count > 0 ? "WHERE " + string.Join(" AND ", where) : "";
+
+            // 取得總筆數
+            await using var countCmd = new SqlCommand($"SELECT COUNT(*) FROM EMOdTmpBOMMas WITH (NOLOCK) {whereClause}", conn);
+            foreach (var p in parameters) countCmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value));
+            var totalCount = (int)(await countCmd.ExecuteScalarAsync() ?? 0);
+
+            // 取得分頁資料
+            var offset = (page - 1) * pageSize;
+            var sql = $@"SELECT * FROM EMOdTmpBOMMas WITH (NOLOCK) {whereClause}
+                         ORDER BY TmpId
+                         OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
+
+            await using var dataCmd = new SqlCommand(sql, conn);
+            foreach (var p in parameters) dataCmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value));
+            dataCmd.Parameters.AddWithValue("@Offset", offset);
+            dataCmd.Parameters.AddWithValue("@PageSize", pageSize);
+
+            var rows = new List<Dictionary<string, object?>>();
+            await using var reader = await dataCmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var row = new Dictionary<string, object?>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                rows.Add(row);
+            }
+
+            return Ok(new { totalCount, data = rows });
         }
-
-        var whereClause = where.Count > 0 ? "WHERE " + string.Join(" AND ", where) : "";
-
-        // 取得總筆數
-        await using var countCmd = new SqlCommand($"SELECT COUNT(*) FROM EMOdTmpBOMMas WITH (NOLOCK) {whereClause}", conn);
-        foreach (var p in parameters) countCmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value));
-        var totalCount = (int)(await countCmd.ExecuteScalarAsync() ?? 0);
-
-        // 取得分頁資料
-        var offset = (page - 1) * pageSize;
-        var sql = $@"SELECT * FROM EMOdTmpBOMMas WITH (NOLOCK) {whereClause}
-                     ORDER BY TmpId
-                     OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
-
-        await using var dataCmd = new SqlCommand(sql, conn);
-        foreach (var p in parameters) dataCmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value));
-        dataCmd.Parameters.AddWithValue("@Offset", offset);
-        dataCmd.Parameters.AddWithValue("@PageSize", pageSize);
-
-        var rows = new List<Dictionary<string, object?>>();
-        await using var reader = await dataCmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
+        catch (Exception ex)
         {
-            var row = new Dictionary<string, object?>();
-            for (int i = 0; i < reader.FieldCount; i++)
-                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
-            rows.Add(row);
+            _logger.LogError(ex, "GetPaged failed: page={Page}, TmpId={TmpId}, Notes={Notes}", page, TmpId, Notes);
+            return StatusCode(500, new { ok = false, error = ex.Message });
         }
-
-        return Ok(new { totalCount, data = rows });
     }
 
     private static void AddParam(SqlCommand cmd, string name, object? value)
