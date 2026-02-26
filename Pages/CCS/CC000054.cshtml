@@ -159,6 +159,7 @@
   window._cc000054KeyFields = @Html.Raw(JsonSerializer.Serialize((Model.KeyFields != null && Model.KeyFields.Count > 0) ? Model.KeyFields : new List<string> { "CompanyId" }));
   window._cc000054SystemId = @Model.SystemId;
   window._cc000054CanAdd = @((ViewData["CCSCanAdd"] as bool? ?? false).ToString().ToLowerInvariant());
+  window._cc000054SelectKey = `cc000054:selectedCompanyId:${window.location.pathname}:@Model.SystemId`;
 </script>
 <script>
 // 單檔專用：強制查詢提交時帶入參數並重導向（避免共用樣板被覆蓋）
@@ -253,6 +254,137 @@ document.addEventListener('DOMContentLoaded', () => {
     url.search = qs.toString();
     window.location.href = url.toString();
   }, true);
+
+  const normalizeIdText = (v) => String(v ?? '').replace(/\s+/g, '').trim().toUpperCase();
+  const getKeyCandidates = () => {
+    const fromConfig = (Array.isArray(window._cc000054KeyFields) ? window._cc000054KeyFields : [])
+      .map(k => String(k || '').toLowerCase())
+      .filter(Boolean);
+    const defaults = ['companyid', 'companyyid', 'custid', 'vendorid', 'code'];
+    return Array.from(new Set([...fromConfig, ...defaults]));
+  };
+  const extractRowKeyFromDom = (row) => {
+    if (!row) return '';
+    const candidates = getKeyCandidates();
+    const cells = Array.from(row.querySelectorAll('td[data-field]'));
+    for (const key of candidates) {
+      const cell = cells.find(td => String(td.dataset.field || '').toLowerCase() === key);
+      if (!cell) continue;
+      const value = normalizeIdText(
+        cell.querySelector('.cell-edit')?.value
+        || cell.querySelector('.cell-view')?.textContent
+        || cell.textContent
+        || ''
+      );
+      if (value) return value;
+    }
+    const firstCell = cells[0];
+    return normalizeIdText(
+      firstCell?.querySelector('.cell-edit')?.value
+      || firstCell?.querySelector('.cell-view')?.textContent
+      || firstCell?.textContent
+      || ''
+    );
+  };
+  const extractRowKeyFromData = (rowData) => {
+    const row = rowData || {};
+    const keys = Object.keys(row);
+    const candidates = getKeyCandidates();
+    for (const target of candidates) {
+      const hit = keys.find(k => String(k || '').toLowerCase() === target);
+      if (!hit) continue;
+      const v = normalizeIdText(row[hit]);
+      if (v) return v;
+    }
+    const first = keys[0];
+    return normalizeIdText(first ? row[first] : '');
+  };
+
+  const restoreSelectedRowFromQuery = () => {
+    const pageUrl = new URL(window.location.href);
+    const selectedCompanyId = normalizeIdText(
+      pageUrl.searchParams.get('selectedCompanyId')
+      || sessionStorage.getItem(window._cc000054SelectKey || '')
+      || ''
+    );
+    if (!selectedCompanyId) return;
+
+    let hasSelected = false;
+    let lastMutationAt = Date.now();
+
+    const trySelect = () => {
+      const rows = Array.from(document.querySelectorAll('#mainGrid tbody tr'))
+        .filter(r => r.querySelector('td'));
+      if (rows.length === 0) return false;
+
+      const target = rows.find((row) => {
+        const value = extractRowKeyFromDom(row);
+        if (value && value === selectedCompanyId) return true;
+        const firstCellText = normalizeIdText(row.querySelector('td')?.textContent || '');
+        return firstCellText === selectedCompanyId;
+      });
+      if (!target) return false;
+
+      target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      target.click?.();
+      try { target.scrollIntoView({ block: 'center', behavior: 'auto' }); } catch { }
+      hasSelected = true;
+      return true;
+    };
+
+    const tbody = document.querySelector('#mainGrid tbody');
+    let done = false;
+    const stop = () => {
+      done = true;
+      try { observer.disconnect(); } catch { }
+      window.clearInterval(timer);
+      if (hasSelected) {
+        pageUrl.searchParams.delete('selectedCompanyId');
+        try {
+          sessionStorage.removeItem(window._cc000054SelectKey || '');
+        } catch { }
+        window.history.replaceState({}, '', pageUrl.toString());
+      }
+    };
+    const attempt = () => {
+      if (done) return;
+      trySelect();
+    };
+
+    trySelect();
+
+    const observer = new MutationObserver(() => {
+      lastMutationAt = Date.now();
+      attempt();
+    });
+    if (tbody) {
+      observer.observe(tbody, { childList: true });
+    }
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      attempt();
+      if (done) return;
+      if (hasSelected && Date.now() - lastMutationAt > 1200) {
+        stop();
+        return;
+      }
+      if (Date.now() - startedAt > 20000) stop();
+    }, 150);
+  };
+
+  const rememberSelectedRow = () => {
+    const table = document.getElementById('mainGrid');
+    if (!table) return;
+    table.addEventListener('click', (ev) => {
+      const tr = ev.target?.closest?.('tbody tr');
+      if (!tr || !tr.querySelector('td[data-field]')) return;
+      const cid = extractRowKeyFromDom(tr);
+      if (!cid) return;
+      try {
+        sessionStorage.setItem(window._cc000054SelectKey || '', cid);
+      } catch { }
+    });
+  };
 
   // 單檔專用：新增按鈕與提交
   const initAddButton = () => {
@@ -354,7 +486,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return data;
     };
 
-    addBtn?.addEventListener('click', async () => {
+    const openAddDialog = async () => {
       try {
         renderCodeLabel();
         if (!initLoaded) await loadAddInit();
@@ -364,7 +496,9 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (err) {
         alert('讀取新增清單失敗：' + err);
       }
-    });
+    };
+
+    addBtn?.addEventListener('click', openAddDialog);
 
     addCompanyId?.addEventListener('change', syncShortName);
     addCompanyId?.addEventListener('blur', syncShortName);
@@ -419,6 +553,15 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('新增失敗：' + err);
       }
     });
+
+    const qs = new URLSearchParams(window.location.search || '');
+    if (qs.get('openAdd') === '1') {
+      openAddDialog();
+      qs.delete('openAdd');
+      const newQuery = qs.toString();
+      const newUrl = `${window.location.pathname}${newQuery ? `?${newQuery}` : ''}`;
+      window.history.replaceState({}, '', newUrl);
+    }
   };
 
   const initOuterToolbarButtons = () => {
@@ -437,8 +580,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnDelete = byName('deletePaper');
     const btnEdit = document.getElementById('btnEditToggle');
     const btnLog = byName('showLog');
-    const btnReject = byName('rejectPaper');
-    const ordered = [btnDetail, btnQuery, btnShowSystem, btnAdd, btnDelete, btnEdit, btnLog, btnReject].filter(Boolean);
+    const ordered = [btnDetail, btnQuery, btnShowSystem, btnAdd, btnDelete, btnEdit, btnLog].filter(Boolean);
 
     ordered.forEach(btn => {
       btn.classList.add('toolbar-btn');
@@ -472,6 +614,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const qFaxCond = document.getElementById('qFaxCond');
 
     let loaded = false;
+    let queryInitPromise = null;
     let showSales = true;
     let systemId = Number(window._cc000054SystemId || 1);
 
@@ -547,6 +690,9 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const loadQueryInit = async () => {
+      if (loaded) return;
+      if (queryInitPromise) return queryInitPromise;
+      queryInitPromise = (async () => {
       const q = new URLSearchParams();
       q.set('itemId', (window._singleItemId || 'CC000054').toString());
       q.set('systemId', (window._cc000054SystemId || '1').toString());
@@ -600,6 +746,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
       loaded = true;
       applyQueryToModal();
+      })();
+      try {
+        await queryInitPromise;
+      } finally {
+        queryInitPromise = null;
+      }
     };
 
     document.addEventListener('click', async (e) => {
@@ -643,94 +795,52 @@ document.addEventListener('DOMContentLoaded', () => {
       if (showSales) setParam('cs_salesId', 'qSalesId');
       window.location.href = url.toString();
     });
+
+    // Preload once so first open equals second open.
+    loadQueryInit().catch(() => { });
   };
 
+  restoreSelectedRowFromQuery();
+  rememberSelectedRow();
   initAddButton();
   initOuterToolbarButtons();
   initCompanySelectQuery();
 });
 </script>
+<script src="~/js/ccsCompanyActions.js"></script>
 <script>
   window.SingleGridCustomHandlers = window.SingleGridCustomHandlers || {};
-  const withJwtHeaders = (init = {}) => {
-    const jwt = localStorage.getItem("jwtId");
-    const headers = Object.assign({}, init.headers || {});
-    if (jwt) headers["X-JWTID"] = jwt;
-    return { ...init, headers };
-  };
-  const fetchJsonWithTimeout = async (url, timeoutMs = 6000) => {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-      const resp = await fetch(url, withJwtHeaders({ signal: ctrl.signal }));
-      const json = await resp.json().catch(() => ({}));
-      return { ok: resp.ok && json?.ok !== false, json, status: resp.status };
-    } catch (err) {
-      return { ok: false, json: { error: String(err) }, status: 0 };
-    } finally {
-      clearTimeout(t);
+  const getSelectedKeyFromData = (rowData) => {
+    const row = rowData || {};
+    const keys = Object.keys(row);
+    const fromConfig = (Array.isArray(window._cc000054KeyFields) ? window._cc000054KeyFields : [])
+      .map(k => String(k || '').toLowerCase())
+      .filter(Boolean);
+    const candidates = Array.from(new Set([...fromConfig, 'companyid', 'companyyid', 'custid', 'vendorid', 'code']));
+    for (const target of candidates) {
+      const hit = keys.find(k => String(k || '').toLowerCase() === target);
+      if (!hit) continue;
+      const v = String(row[hit] ?? '').trim();
+      if (v) return v;
     }
-  };
-  window.SingleGridCustomHandlers.rejectPaper = async function(ctx) {
-    const row = (ctx && ctx.selectedRow) || {};
-    const keys = Object.keys(row || {});
-    const idKey = keys.find(k => String(k).toLowerCase() === 'companyid');
-    const paperNum = idKey ? String(row[idKey] || '').trim() : '';
-    if (!paperNum) {
-      alert('請先選取一筆資料');
-      return;
-    }
-    if (!confirm(`確定要撤除：${paperNum} ?`)) return;
-
-    const payload = {
-      paperId: (window._singleRealTable || 'AJNdCompany').toString(),
-      paperNum,
-      itemId: (window._singleItemId || 'CC000054').toString(),
-      userId: (window._userId || localStorage.getItem('erpLoginUserId') || 'admin').toString(),
-      useId: (window._useId || 'A001').toString(),
-      rejectNotes: ''
-    };
-    try {
-      const resp = await fetch('/api/PaperAction/RejectForEdit', withJwtHeaders({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }));
-      const json = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(json?.message || resp.statusText || '撤除失敗');
-      alert(json?.message || '撤除完成');
-    } catch (err) {
-      alert('撤除失敗：' + err);
-    }
+    const first = keys[0];
+    return String(first ? row[first] : '').trim();
   };
   window.SingleGridCustomHandlers.deletePaper = async function(ctx) {
     const row = (ctx && ctx.selectedRow) || {};
-    const keys = Object.keys(row || {});
-    const idKey = keys.find(k => String(k).toLowerCase() === 'companyid');
-    const paperNum = idKey ? String(row[idKey] || '').trim() : '';
+    const paperNum = (window.CcsCompanyActions?.getCompanyIdFromRow || (() => ''))(row);
     if (!paperNum) {
       alert('請先選取一筆資料');
       return;
     }
     if (!confirm(`確定要刪除：${paperNum} ?`)) return;
 
-    const payload = {
-      paperId: (window._singleRealTable || 'AJNdCompany').toString(),
-      paperNum,
-      itemId: (window._singleItemId || 'CC000054').toString(),
-      userId: (window._userId || localStorage.getItem('erpLoginUserId') || 'admin').toString(),
-      useId: (window._useId || 'A001').toString(),
-      eoc: 0,
-      aftFinished: 2
-    };
     try {
-      const resp = await fetch('/api/PaperAction/DoAction', withJwtHeaders({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }));
-      const json = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(json?.message || resp.statusText || '刪除失敗');
+      const json = await window.CcsCompanyActions.deleteSystemLink({
+        companyId: paperNum,
+        itemId: (window._singleItemId || 'CC000054').toString(),
+        systemId: Number(window._cc000054SystemId || 0)
+      });
       alert(json?.message || '刪除完成');
       location.reload();
     } catch (err) {
@@ -739,15 +849,13 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   window.SingleGridCustomHandlers.showLog = async function(ctx) {
     const row = (ctx && ctx.selectedRow) || {};
-    const keys = Object.keys(row || {});
-    const idKey = keys.find(k => String(k).toLowerCase() === 'companyid');
-    const paperNum = idKey ? String(row[idKey] || '').trim() : '';
+    const paperNum = (window.CcsCompanyActions?.getCompanyIdFromRow || (() => ''))(row);
     if (!paperNum) {
       alert('請先選取一筆資料');
       return;
     }
-    if (typeof window.openCcsUpdateLog === 'function') {
-      await window.openCcsUpdateLog({
+    if (typeof window.openSharedUpdateLog === 'function') {
+      await window.openSharedUpdateLog({
         paperId: (window._singleRealTable || 'AJNdCompany').toString(),
         paperNum,
         itemId: (window._singleItemId || 'CC000054').toString()
@@ -823,15 +931,26 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     const qs = new URLSearchParams();
+    let selectedCompanyId = '';
     keys.forEach(k => {
       const v = row[k] ?? row[k?.toLowerCase()] ?? '';
       if (v !== undefined && v !== null && v !== '') {
         qs.append(k, v);
       }
     });
+    selectedCompanyId = getSelectedKeyFromData(row);
     if (!qs.toString()) {
       alert('找不到主鍵欄位，無法開啟明細');
       return;
+    }
+    const returnUrl = new URL(window.location.href);
+    returnUrl.searchParams.delete('selectedCompanyId');
+    if (selectedCompanyId) returnUrl.searchParams.set('selectedCompanyId', selectedCompanyId);
+    qs.set('returnUrl', returnUrl.toString());
+    if (selectedCompanyId) {
+      try {
+        sessionStorage.setItem(window._cc000054SelectKey || '', selectedCompanyId);
+      } catch { }
     }
     const url = window._cc000054DetailUrl + '?' + qs.toString();
     const sysId = window._cc000054SystemId || '';
@@ -950,9 +1069,12 @@ document.addEventListener('DOMContentLoaded', () => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px 12px;
 }
+
 </style>
 <script src="~/js/ccsUpdateLog.js" asp-append-version="true"></script>
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
+
 
 
 

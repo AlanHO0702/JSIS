@@ -15,9 +15,9 @@
     var DeleteApiUrl = ViewData["DeleteApiUrl"]?.ToString() ?? "";
     var headerPaperNum = "";
     if (TryGetHeaderValue(headerData, "PaperNum", out var pn))
-    {
         headerPaperNum = pn?.ToString() ?? "";
-    }
+    if (string.IsNullOrWhiteSpace(headerPaperNum))
+        headerPaperNum = ViewData["PaperNum"]?.ToString() ?? "";
     static int NormalizeShowWhere(int? v)
     {
         // 有些單據字典的 iShowWhere 會是 0（代表第一頁），若過濾會導致單頭整段消失
@@ -38,7 +38,14 @@
         value = null;
         if (data == null || string.IsNullOrWhiteSpace(fieldName)) return false;
         if (data is IDictionary<string, object> dict)
-            return dict.TryGetValue(fieldName, out value);
+        {
+            if (dict.TryGetValue(fieldName, out value)) return true;
+            // 大小寫不敏感 fallback
+            var key = dict.Keys.FirstOrDefault(k => string.Equals(k, fieldName, StringComparison.OrdinalIgnoreCase));
+            if (key == null) return false;
+            value = dict[key];
+            return true;
+        }
         var prop = data.GetType().GetProperty(fieldName);
         if (prop == null) return false;
         value = prop.GetValue(data);
@@ -62,7 +69,11 @@
     if (firstTabKey <= 0) firstTabKey = 1;
     var lookupMap = ViewData["LookupDisplayMap"] as Dictionary<string, Dictionary<string, string>>;
 
-    var PaperNum = headerData.ContainsKey("PaperNum") ? headerData["PaperNum"]?.ToString() ?? "" : "";
+    var PaperNum = "";
+    if (TryGetHeaderValue(headerData, "PaperNum", out var pnVal))
+        PaperNum = pnVal?.ToString() ?? "";
+    if (string.IsNullOrWhiteSpace(PaperNum))
+        PaperNum = ViewData["PaperNum"]?.ToString() ?? "";
 
     var headerLookupMap = ViewData["HeaderLookupMap"] as Dictionary<string, string>;
     var headerLookupTypeMap = ViewData["HeaderLookupResultTypes"] as Dictionary<string, string>;
@@ -1714,6 +1725,18 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
+    // 若 server-side LoadHeaderAsync 回傳空資料，用 client-side refreshHeaderData() 補救
+    // （client-side 帶 JWT，能正確取得資料）
+    const pn = (window._paperNum || '').toString().trim();
+    const ht = (window._headerTableName || '').toString().trim();
+    if (pn && ht) {
+      // 若任一可見輸入欄位是空的，就刷新單頭資料
+      const firstInput = document.querySelector('form#orderHeaderForm input[type="text"], form#orderHeaderForm input[type="number"], form#orderHeaderForm textarea');
+      if (!firstInput || !firstInput.value.trim()) {
+        refreshHeaderData().catch(() => {});
+      }
+    }
+
     const btn = document.getElementById('btnPaperTrace');
     if (btn) {
       btn.addEventListener('click', (e) => {
@@ -2000,6 +2023,7 @@
 // 0) 頁面常數／Razor 注入
 // ============================
 const PAGE = {
+  itemId: ("@(Model.ItemId ?? "")".trim() || ""),
   paperNum: "@PaperNum",
   keyField: ("@(keyFieldName ?? "PaperNum")" || "PaperNum").trim(),
   headerTable: ("@(Model.HeaderTableName ?? "")".trim() || "").toLowerCase(),
@@ -2041,6 +2065,7 @@ new ToolbarHandler({
   paperAction: { url: '/api/PaperAction/DoAction', paperId: "@Model.HeaderTableName", eoc: 0, aftFinished: 2 },
   detailRouteTemplate: subTpl,  // 使用單身頁路徑，新增後跳轉到單身頁
   tableName: PAGE.headerTable || "@tableName",  // 優先使用主表（單頭）進行查詢
+  itemId: PAGE.itemId,
   renderTable: null,
   renderPagination: null,
   renderOrderCount: null,
@@ -2065,7 +2090,19 @@ new ToolbarHandler({
       if (id) {
         localStorage.setItem("lastViewedPaperNum", id);
       }
-      location.href = base;
+      // 切換前，將 sessionStorage 中的列表查詢條件 restore 回 localStorage
+      // sessionStorage 在同一分頁 session 內有效，無跨 session 舊資料污染問題
+      const _tn = (PAGE.headerTable || '').toString().trim().toLowerCase();
+      if (_tn) {
+        try {
+          const _lf = sessionStorage.getItem(`listNavFilters:${_tn}`);
+          if (_lf && _lf !== 'null') {
+            localStorage.setItem(`orderListQueryFilters:${_tn}`, _lf);
+            localStorage.setItem('orderListQueryFilters', _lf);
+          }
+        } catch {}
+      }
+      location.href = base + "?useStoredQuery=1";
   }, { capture: true });
 })();
 
@@ -3927,6 +3964,33 @@ function loadLastFilters() {
   }
   catch { return []; }
 }
+function normalizeNavFilters(filters) {
+  if (!Array.isArray(filters)) return [];
+  return filters
+    .filter(f => f && typeof f === 'object')
+    .filter(f => {
+      const field = (f.Field || '').toString().trim();
+      const value = (f.Value ?? '').toString().trim();
+      if (!field || !value) return false;
+      const key = field.toLowerCase();
+      return key !== 'page' && key !== 'pagesize';
+    })
+    .map(f => ({ ...f }));
+}
+function readNavKeyFromRow(row) {
+  if (!row || typeof row !== 'object') return '';
+  const keyField = (PAGE.keyField || 'PaperNum').toString().trim();
+  if (!keyField) return '';
+
+  const direct = row[keyField];
+  if (direct != null && direct !== '') return String(direct).trim();
+
+  const target = keyField.toLowerCase();
+  const matchKey = Object.keys(row).find(k => (k || '').toString().toLowerCase() === target);
+  if (!matchKey) return '';
+  const val = row[matchKey];
+  return val == null ? '' : String(val).trim();
+}
 function getDetailBasePath() { return location.pathname.replace(/\/[^\/]+$/, "/"); }
 function gotoPaper(pn) { if (!pn) return; localStorage.setItem("lastViewedPaperNum", pn); location.href = getDetailBasePath() + pn; }
 function updateNavButtons() {
@@ -3953,42 +4017,164 @@ function updateNavButtons() {
   updateToolbarCounts();
 }
 async function fetchIdListByPagedQuery(filters) {
-  const fs = [...(filters || []), {Field:"page",Op:"",Value:"1"}, {Field:"pageSize",Op:"",Value:"999999"}];
-  const res = await fetch('/api/PagedQuery/PagedQuery', {
+  const baseFilters = normalizeNavFilters(filters);
+  const fs = [...baseFilters, { Field: "page", Op: "", Value: "1" }, { Field: "pageSize", Op: "", Value: "1000" }];
+  const res = await fetch('/api/PagedQuery/PagedQuery', withJwtHeaders({
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ table: PAGE.headerTable, filters: fs })
-  });
+  }));
+  if (!res.ok) throw new Error('PagedQuery/PagedQuery failed');
   const json = await res.json();
   const rows = Array.isArray(json.data) ? json.data : [];
-  return rows.map(r => r[PAGE.keyField]).filter(Boolean);
+  const ids = rows.map(readNavKeyFromRow).filter(Boolean);
+  return Array.from(new Set(ids));
 }
 async function fetchIdListByDynamicTable(filters) {
-  const fs = [...(filters || []), { Field: "page", Op: "", Value: "1" }, { Field: "pageSize", Op: "", Value: "999999" }];
-  const itemId = (window._itemId || window._singleItemId || '').toString().trim();
-  const res = await fetch('/api/DynamicTable/PagedQuery', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table: PAGE.headerTable, itemId, filters: fs })
-  });
-  if (!res.ok) throw new Error('DynamicTable/PagedQuery failed');
-  const json = await res.json();
-  const rows = Array.isArray(json.data) ? json.data : [];
-  return rows.map(r => (r?.[PAGE.keyField] ?? r?.[PAGE.keyField?.toLowerCase?.()]))
-    .filter(Boolean)
-    .map(x => x.toString());
+  const baseFilters = normalizeNavFilters(filters);
+  const itemId = (PAGE.itemId || window._itemId || window._singleItemId || '').toString().trim();
+  const pageSize = 1000;
+  let page = 1;
+  const ids = [];
+  const seen = new Set();
+  let totalCount = 0;
+
+  for (let guard = 0; guard < 500; guard++) {
+    const fs = [...baseFilters,
+      { Field: "page", Op: "", Value: String(page) },
+      { Field: "pageSize", Op: "", Value: String(pageSize) }];
+
+    const res = await fetch('/api/DynamicTable/PagedQuery', withJwtHeaders({
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ table: PAGE.headerTable, itemId, filters: fs })
+    }));
+    if (!res.ok) throw new Error('DynamicTable/PagedQuery failed');
+
+    const json = await res.json();
+    const rows = Array.isArray(json.data) ? json.data : [];
+    const tc = Number(json.totalCount);
+    if (Number.isFinite(tc) && tc > 0) totalCount = tc;
+
+    for (const row of rows) {
+      const id = readNavKeyFromRow(row);
+      if (!id) continue;
+      const hash = id.toLowerCase();
+      if (seen.has(hash)) continue;
+      seen.add(hash);
+      ids.push(id);
+    }
+
+    if (rows.length < pageSize) break;
+    if (totalCount > 0 && ids.length >= totalCount) break;
+    page += 1;
+  }
+
+  return ids;
+}
+async function buildNavIds(filters) {
+  let ids = [];
+  try { ids = await fetchIdListByDynamicTable(filters); }
+  catch { ids = []; }
+  if ((!Array.isArray(ids) || ids.length === 0) && typeof fetchIdListByApi === 'function') {
+    try { ids = await fetchIdListByApi(filters); } catch {}
+  }
+  if (!Array.isArray(ids) || ids.length === 0) {
+    try { ids = await fetchIdListByPagedQuery(filters); } catch {}
+  }
+  return Array.isArray(ids) ? ids : [];
+}
+function getStoredNavIndex() {
+  try {
+    const tn = (PAGE.headerTable || '').toString().trim().toLowerCase();
+    if (!tn) return -1;
+    const n = parseInt(localStorage.getItem(`orderListQueryIndex:${tn}`) || '0', 10);
+    return Number.isFinite(n) && n > 0 ? (n - 1) : -1;
+  } catch {
+    return -1;
+  }
 }
 async function initRowNavigation() {
   try {
-    const filters = loadLastFilters();
-    // 依序嘗試：IdList（若有）→ PagedQuery（EF DbSet）→ DynamicTable（SQL 動態查詢，最通用）
-    try { navIds = await fetchIdListByApi(filters); }
-    catch {
-      try { navIds = await fetchIdListByPagedQuery(filters); }
-      catch { navIds = await fetchIdListByDynamicTable(filters); }
-    }
     const cur = (PAGE.paperNum || '').toString().trim().toLowerCase();
+    const tn = (PAGE.headerTable || '').toString().trim().toLowerCase();
+    let filters = normalizeNavFilters(loadLastFilters());
+    let source = 'filter';
+
+    // 1. 優先使用列表頁儲存的當前頁 ID 列表（與列表頁顯示完全一致）
+    if (tn) {
+      try {
+        const listIdsJson = sessionStorage.getItem(`listNavIds:${tn}`);
+        if (listIdsJson) {
+          const listIds = JSON.parse(listIdsJson);
+          if (Array.isArray(listIds) && listIds.length > 0) {
+            const idx = listIds.findIndex(x => (x || '').toString().trim().toLowerCase() === cur);
+            if (idx >= 0) {
+              navIds = listIds.map(x => String(x).trim());
+              navIndex = idx;
+              source = 'listNavIds';
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // 2. 若列表頁無 ID 或找不到當前單號，改用 filter 查詢
+    if (source !== 'listNavIds') {
+      navIds = await buildNavIds(filters);
+      navIndex = navIds.findIndex(x => (x || '').toString().trim().toLowerCase() === cur);
+
+      // 若 filter 的結果中找不到當前單號，用空 filter 重試
+      // 注意：不清除 localStorage，讓「切換」仍能用原始 filter 顯示正確筆數
+      if (navIndex < 0 && filters.length > 0) {
+        navIds = await buildNavIds([]);
+        navIndex = navIds.findIndex(x => (x || '').toString().trim().toLowerCase() === cur);
+        if (navIndex >= 0) source = 'emptyFilter';
+      }
+    }
+
+    if (!Array.isArray(navIds)) navIds = [];
     navIndex = navIds.findIndex(x => (x || '').toString().trim().toLowerCase() === cur);
+    if (navIndex < 0 && navIds.length > 0) {
+      const storedIdx = getStoredNavIndex();
+      if (storedIdx >= 0 && storedIdx < navIds.length) navIndex = storedIdx;
+    }
+    window.__paperNavState = {
+      table: PAGE.headerTable,
+      currentPaperNum: PAGE.paperNum,
+      filterCount: filters.length,
+      navCount: navIds.length,
+      navIndex,
+      firstIds: navIds.slice(0, 10),
+      source
+    };
     updateNavButtons();
+
+    // 3. 若來自列表頁的當前頁 ID 列表（有頁數限制），背景非同步載入完整 ID 清單
+    //    使用 listNavFilters（renderTable 時儲存）而非 orderListQueryFilters（可能被汙染）
+    if (source === 'listNavIds' && tn) {
+      try {
+        const _savedFiltersJson = sessionStorage.getItem(`listNavFilters:${tn}`);
+        const _bgFilters = _savedFiltersJson
+          ? normalizeNavFilters(JSON.parse(_savedFiltersJson))
+          : filters;
+        buildNavIds(_bgFilters).then(_allIds => {
+          if (!Array.isArray(_allIds) || _allIds.length <= navIds.length) return;
+          const _newIdx = _allIds.findIndex(x => (x || '').toString().trim().toLowerCase() === cur);
+          if (_newIdx < 0) return;
+          navIds = _allIds;
+          navIndex = _newIdx;
+          window.__paperNavState.navCount = navIds.length;
+          window.__paperNavState.navIndex = navIndex;
+          window.__paperNavState.source = 'listNavIds+fullFetch';
+          updateNavButtons();
+        }).catch(() => {});
+      } catch {}
+    }
   } catch {
+    window.__paperNavState = {
+      table: PAGE.headerTable,
+      currentPaperNum: PAGE.paperNum,
+      error: 'initRowNavigation_failed'
+    };
     if (NAV_BTN_FIRST) NAV_BTN_FIRST.disabled = true;
     if (NAV_BTN_PREV) NAV_BTN_PREV.disabled = true;
     if (NAV_BTN_NEXT) NAV_BTN_NEXT.disabled = true;
@@ -4015,7 +4201,19 @@ function updateToolbarCounts() {
   if (headerCountEl) {
     const total = navIds.length;
     if (total > 0 && navIndex >= 0) {
-      headerCountEl.textContent = `${navIndex + 1}/${total}`;
+      const tn = (PAGE.headerTable || '').toString().trim().toLowerCase();
+      try {
+        const storedTotal = parseInt(localStorage.getItem(`orderListQueryTotal:${tn}`) || '0', 10);
+        const storedPageStart = parseInt(localStorage.getItem(`orderListQueryPageStart:${tn}`) || '1', 10);
+        // 若 navIds 是列表頁當前頁的子集（total < storedTotal），用全域位置顯示
+        if (Number.isFinite(storedTotal) && storedTotal > total && storedPageStart > 0) {
+          headerCountEl.textContent = `${storedPageStart + navIndex}/${storedTotal}`;
+        } else {
+          headerCountEl.textContent = `${navIndex + 1}/${total}`;
+        }
+      } catch {
+        headerCountEl.textContent = `${navIndex + 1}/${total}`;
+      }
     } else {
       const tn = (PAGE.headerTable || '').toString().trim().toLowerCase();
       let storedTotal = 0;

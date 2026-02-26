@@ -348,7 +348,6 @@ namespace PcbErpApi.Pages.CCS
                 parts.Add("<button type='button' class='btn toolbar-btn' id='btnAddCustomer'><i class='bi bi-plus-lg'></i>新增</button>");
             }
             parts.Add("<button type='button' class='btn toolbar-btn' data-custom-btn='1' data-button-name='deletePaper'><i class='bi bi-trash3'></i>刪除</button>");
-            parts.Add("<button type='button' class='btn toolbar-btn' data-custom-btn='1' data-button-name='rejectPaper'><i class='bi bi-arrow-counterclockwise'></i>撤除</button>");
             parts.Add("<button type='button' class='btn toolbar-btn' data-custom-btn='1' data-button-name='showLog'><i class='bi bi-clock-history'></i>記錄</button>");
             parts.Add("<button type='button' class='btn toolbar-btn' data-custom-btn='1' data-button-name='showSystem'><i class='bi bi-person-badge'></i>檢視身分</button>");
             parts.Add("<button type='button' class='btn toolbar-btn' data-custom-btn='1' data-button-name='openDetail'><i class='bi bi-list-ul'></i>明細</button>");
@@ -946,4 +945,3 @@ SELECT FieldName, DisplaySize
         }
     }
 }
-

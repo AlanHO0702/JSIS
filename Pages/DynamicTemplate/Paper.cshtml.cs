@@ -84,7 +84,8 @@ namespace PcbErpApi.Pages.DynamicTemplate
 
             var master = setupList
                 .Where(x => (x.TableKind ?? "").Contains("Master", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(x => x.TableKind)
+                .OrderBy(x => string.Equals(x.TableKind, "Master1", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(x => x.TableKind)
                 .FirstOrDefault()
                 ?? setupList.FirstOrDefault();
 
@@ -137,7 +138,16 @@ namespace PcbErpApi.Pages.DynamicTemplate
             ViewData["QueryFields"] = QueryFields;
             ViewData["PagedQueryUrl"] = "/api/DynamicTable/PagedQuery";
 
-            await FetchListByDynamicTableAsync();
+            // 只有 URL 帶有查詢條件時才做 server-side 資料載入
+            // 初始進入頁面（無查詢參數）時保持空白，讓使用者自行點查詢
+            var hasQueryParams = Request.Query.Keys.Any(k =>
+                !string.Equals(k, "page", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(k, "pageSize", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(k, "useStoredQuery", StringComparison.OrdinalIgnoreCase));
+            if (hasQueryParams)
+            {
+                await FetchListByDynamicTableAsync();
+            }
 
             FieldDictList = _dictService.GetFieldDict(DictTableName, typeof(object));
 

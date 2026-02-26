@@ -520,6 +520,17 @@
 
     const addRow = () => {
       if (!isEditMode || !getKey().partnum) return;
+
+      // Remove phantom empty rows before adding the next row.
+      state.rows = state.rows.filter((r) => {
+        if (!r || typeof r !== 'object') return false;
+        if (r.__state === 'added' || r.__state === 'deleted') return true;
+        const part = String(r.PartNum ?? '').trim();
+        const rev = String(r.Revision ?? '').trim();
+        const hasValue = (cfg.columns || []).some((col) => String(r[col.name] ?? '').trim() !== '');
+        return hasValue || part !== '' || rev !== '';
+      });
+
       const row = { PartNum: getKey().partnum, Revision: getKey().revision || '' };
       if (cfg.autoIncField) {
         const max = Math.max(0, ...state.rows.map((r) => Number(r[cfg.autoIncField]) || 0));

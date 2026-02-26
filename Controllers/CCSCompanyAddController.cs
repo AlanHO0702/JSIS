@@ -8,6 +8,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using PcbErpApi.Data;
+using System.Text;
 
 namespace PcbErpApi.Controllers;
 
@@ -190,7 +191,7 @@ order by SubSystemId;", conn))
                 {
                     subClassList.Add(new SubClassRow
                     {
-                        SubSystemId = Convert.ToInt32(rd["SubSystemId"]),
+                        SubSystemId = rd["SubSystemId"]?.ToString()?.Trim() ?? string.Empty,
                         SubSystemName = rd["SubSystemName"]?.ToString() ?? string.Empty
                     });
                 }
@@ -377,6 +378,105 @@ exec AJNdCompanyAdd
         }
     }
 
+    [HttpPost("reject-edit")]
+    public async Task<IActionResult> RejectEdit([FromBody] CcsBackReviewRequest req)
+    {
+        // backward-compatible route; keep old callers working.
+        return await BackReview(req);
+    }
+
+    [HttpPost("back-review")]
+    public async Task<IActionResult> BackReview([FromBody] CcsBackReviewRequest req)
+    {
+        var companyId = (req.CompanyId ?? string.Empty).Trim();
+        if (companyId.Length == 0)
+            return BadRequest(new { success = false, message = "CompanyId is required." });
+
+        var userId = string.IsNullOrWhiteSpace(req.UserId) ? ResolveUserId() : req.UserId.Trim();
+        var context = await LoadContextAsync((req.ItemId ?? string.Empty).Trim(), req.SystemId);
+        var systemId = req.SystemId ?? context?.SystemId ?? 0;
+
+        try
+        {
+            await using var conn = new SqlConnection(GetConnStr());
+            await conn.OpenAsync();
+
+            if (!string.IsNullOrWhiteSpace(req.RejectNotes))
+            {
+                await using var noteCmd = new SqlCommand("exec CURdRejNotes @PaperId, @Reason, @PaperNum, @ItemId, @UserId", conn);
+                noteCmd.Parameters.Add(new SqlParameter("@PaperId", SqlDbType.VarChar, 50) { Value = "AJNdCompany" });
+                noteCmd.Parameters.Add(new SqlParameter("@Reason", SqlDbType.NVarChar, 1000) { Value = req.RejectNotes.Trim() });
+                noteCmd.Parameters.Add(new SqlParameter("@PaperNum", SqlDbType.VarChar, 16) { Value = companyId });
+                noteCmd.Parameters.Add(new SqlParameter("@ItemId", SqlDbType.VarChar, 16) { Value = (req.ItemId ?? string.Empty).Trim() });
+                noteCmd.Parameters.Add(new SqlParameter("@UserId", SqlDbType.VarChar, 30) { Value = userId });
+                await noteCmd.ExecuteNonQueryAsync();
+            }
+
+            var procName = await ResolveExistingProcedureAsync(conn, "CCSdBackReview", "AJNdCompanyBackReview", "CCSdCompanyBackReview");
+            if (string.IsNullOrWhiteSpace(procName))
+            {
+                return Ok(new { success = true, message = "此主檔不需退審，可直接編修" });
+            }
+
+            var affected = await ExecuteProcedureWithKnownParamsAsync(conn, procName, new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["CompanyId"] = companyId,
+                ["PowerType"] = systemId,
+                ["SystemId"] = systemId,
+                ["UserId"] = userId
+            });
+
+            return Ok(new { success = true, message = "退審完成", affected });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "CCSCompanyAdd back-review failed for {CompanyId}", companyId);
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPost("delete-system-link")]
+    public async Task<IActionResult> DeleteSystemLink([FromBody] CcsDeleteSystemLinkRequest req)
+    {
+        var companyId = (req.CompanyId ?? string.Empty).Trim();
+        if (companyId.Length == 0)
+            return BadRequest(new { success = false, message = "CompanyId is required." });
+
+        var context = await LoadContextAsync((req.ItemId ?? string.Empty).Trim(), req.SystemId);
+        var systemId = req.SystemId ?? context?.SystemId ?? 0;
+        var subSystemId = req.SubSystemId ?? context?.SubSystemId ?? 0;
+        if (systemId <= 0)
+            return BadRequest(new { success = false, message = "SystemId is required." });
+
+        try
+        {
+            await using var conn = new SqlConnection(GetConnStr());
+            await conn.OpenAsync();
+
+            await using var cmd = new SqlCommand(@"
+delete AJNdCompanySystem
+ where CompanyId = @CompanyId
+   and SystemId = @SystemId
+   and SubSystemId = @SubSystemId;", conn);
+            cmd.Parameters.Add(new SqlParameter("@CompanyId", SqlDbType.VarChar, 16) { Value = companyId });
+            cmd.Parameters.Add(new SqlParameter("@SystemId", SqlDbType.Int) { Value = systemId });
+            cmd.Parameters.Add(new SqlParameter("@SubSystemId", SqlDbType.Int) { Value = subSystemId });
+            var affected = await cmd.ExecuteNonQueryAsync();
+
+            return Ok(new
+            {
+                success = true,
+                message = affected > 0 ? "刪除完成" : "查無可刪除資料",
+                affected
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "CCSCompanyAdd delete-system-link failed for {CompanyId}", companyId);
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
     private async Task<ItemContext?> LoadContextAsync(string itemId, int? requestedSystemId)
     {
         var item = await _ctx.CurdSysItems.AsNoTracking()
@@ -477,6 +577,68 @@ where CompanyId = @CompanyId
         return cs;
     }
 
+    private static async Task<string?> ResolveExistingProcedureAsync(SqlConnection conn, params string[] candidates)
+    {
+        if (candidates == null || candidates.Length == 0) return null;
+        await using var cmd = new SqlCommand(@"
+select top 1 o.name
+from sys.objects o
+where o.type in ('P','PC')
+  and o.name in ({0});", conn);
+        var names = new List<string>();
+        for (var i = 0; i < candidates.Length; i++)
+        {
+            var pn = $"@p{i}";
+            names.Add(pn);
+            cmd.Parameters.AddWithValue(pn, candidates[i]);
+        }
+        cmd.CommandText = string.Format(cmd.CommandText, string.Join(",", names));
+        var obj = await cmd.ExecuteScalarAsync();
+        return obj == null || obj == DBNull.Value ? null : obj.ToString()?.Trim();
+    }
+
+    private static async Task<int> ExecuteProcedureWithKnownParamsAsync(SqlConnection conn, string procedureName, Dictionary<string, object?> values)
+    {
+        var paramNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var pCmd = new SqlCommand(@"
+select p.name
+from sys.parameters p
+join sys.objects o on o.object_id = p.object_id
+where o.type in ('P','PC') and o.name = @procName;", conn))
+        {
+            pCmd.Parameters.AddWithValue("@procName", procedureName);
+            await using var rd = await pCmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var name = rd.GetString(0).TrimStart('@');
+                if (!string.IsNullOrWhiteSpace(name))
+                    paramNames.Add(name);
+            }
+        }
+
+        if (paramNames.Count == 0)
+        {
+            await using var noParam = new SqlCommand($"exec {procedureName}", conn);
+            return await noParam.ExecuteNonQueryAsync();
+        }
+
+        var sql = new StringBuilder();
+        sql.Append("exec ").Append(procedureName).Append(' ');
+        var list = new List<string>();
+        await using var cmd = new SqlCommand();
+        cmd.Connection = conn;
+        foreach (var kv in values)
+        {
+            if (!paramNames.Contains(kv.Key)) continue;
+            var name = $"@{kv.Key}";
+            list.Add($"{name}={name}");
+            cmd.Parameters.AddWithValue(name, kv.Value ?? DBNull.Value);
+        }
+        sql.Append(string.Join(",", list));
+        cmd.CommandText = sql.ToString();
+        return await cmd.ExecuteNonQueryAsync();
+    }
+
     private static int GetInt(SqlDataReader rd, string fieldName)
     {
         try
@@ -508,7 +670,7 @@ where CompanyId = @CompanyId
 
     private sealed class SubClassRow
     {
-        public int SubSystemId { get; set; }
+        public string SubSystemId { get; set; } = string.Empty;
         public string SubSystemName { get; set; } = string.Empty;
     }
 
@@ -543,5 +705,22 @@ where CompanyId = @CompanyId
         public string? CompanyName { get; set; }
         public bool Overwrite { get; set; }
         public bool AllowOtherSubSystem { get; set; }
+    }
+
+    public sealed class CcsBackReviewRequest
+    {
+        public string? CompanyId { get; set; }
+        public string? ItemId { get; set; }
+        public int? SystemId { get; set; }
+        public string? UserId { get; set; }
+        public string? RejectNotes { get; set; }
+    }
+
+    public sealed class CcsDeleteSystemLinkRequest
+    {
+        public string? CompanyId { get; set; }
+        public string? ItemId { get; set; }
+        public int? SystemId { get; set; }
+        public int? SubSystemId { get; set; }
     }
 }
