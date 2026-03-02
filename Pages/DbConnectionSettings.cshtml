@@ -1,0 +1,566 @@
+@page
+@model PcbErpApi.Pages.DbConnectionSettingsModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "資料庫連線設定";
+}
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+
+<div class="dbconn-page">
+  <div id="dbConnAlert" class="alert d-none py-2 mb-2" role="alert"></div>
+
+  <section class="card mb-3">
+    <div class="card-header d-flex align-items-center">
+      <span class="fw-bold">公司主檔（CURdBU）</span>
+      <div class="ms-auto d-flex gap-2">
+        <button class="btn btn-sm btn-success" id="btnBuAdd">新增</button>
+        <button class="btn btn-sm btn-primary" id="btnBuSave">儲存</button>
+        <button class="btn btn-sm btn-danger" id="btnBuDelete">刪除</button>
+      </div>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-wrap">
+        <table class="table table-bordered table-sm align-middle mb-0" id="tblBu">
+          <thead>
+            <tr>
+              <th style="width:90px;">是否公司</th>
+              <th style="width:90px;">公司別</th>
+              <th style="width:180px;">公司簡稱</th>
+              <th style="width:180px;">伺服器</th>
+              <th style="width:150px;">資料庫</th>
+              <th style="width:280px;">報表路徑</th>
+              <th style="width:280px;">執行檔路徑</th>
+              <th style="width:180px;">公司名稱</th>
+              <th style="width:260px;">公司地址</th>
+              <th style="width:260px;">英文公司地址</th>
+              <th style="width:130px;">電話</th>
+              <th style="width:130px;">傳真</th>
+            </tr>
+          </thead>
+          <tbody id="buBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header d-flex align-items-center">
+      <span class="fw-bold">系統連線明細（CURdBUSystem）</span>
+      <span class="ms-2 text-muted small">目前公司：<span id="selectedBuText">-</span></span>
+      <div class="ms-auto d-flex gap-2">
+        <button class="btn btn-sm btn-success" id="btnSystemAdd">新增</button>
+        <button class="btn btn-sm btn-primary" id="btnSystemSave">儲存</button>
+        <button class="btn btn-sm btn-danger" id="btnSystemDelete">刪除</button>
+      </div>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-wrap">
+        <table class="table table-bordered table-sm align-middle mb-0" id="tblSystem">
+          <thead>
+            <tr>
+              <th style="width:90px;">系統別</th>
+              <th style="width:180px;">伺服器</th>
+              <th style="width:150px;">資料庫</th>
+              <th style="width:140px;">帳號</th>
+              <th style="width:140px;">密碼</th>
+              <th style="width:280px;">報表路徑</th>
+              <th style="width:280px;">執行檔路徑</th>
+              <th style="width:280px;">網頁報表伺服器</th>
+              <th style="width:280px;">網頁報表分享路徑</th>
+              <th style="width:280px;">網頁報表本機路徑</th>
+            </tr>
+          </thead>
+          <tbody id="systemBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<style>
+.dbconn-page {
+  height: calc(100vh - 84px);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px;
+  gap: 10px;
+}
+
+.table-wrap {
+  overflow: auto;
+  max-height: 280px;
+}
+
+#tblBu, #tblSystem {
+  table-layout: fixed;
+  min-width: 2100px;
+}
+
+#tblBu thead th, #tblSystem thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f8f9fa;
+  white-space: nowrap;
+}
+
+#tblBu tbody tr.selected, #tblSystem tbody tr.selected {
+  background: #e7f1ff;
+}
+
+#tblBu input.form-control-sm, #tblSystem input.form-control-sm {
+  min-width: 0;
+}
+</style>
+
+<script>
+const state = {
+  buRows: [],
+  selectedBuId: "",
+  selectedBuRowKey: "",
+  systemRows: [],
+  selectedSystemId: "",
+  selectedSystemRowKey: ""
+};
+
+let _rowSeed = 1;
+function newRowKey(prefix) {
+  return `${prefix}-${Date.now()}-${_rowSeed++}`;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  bindEvents();
+  loadBuList();
+});
+
+function bindEvents() {
+  document.getElementById("btnBuAdd").addEventListener("click", addBuRow);
+  document.getElementById("btnBuSave").addEventListener("click", saveSelectedBu);
+  document.getElementById("btnBuDelete").addEventListener("click", deleteSelectedBu);
+
+  document.getElementById("btnSystemAdd").addEventListener("click", addSystemRow);
+  document.getElementById("btnSystemSave").addEventListener("click", saveSelectedSystem);
+  document.getElementById("btnSystemDelete").addEventListener("click", deleteSelectedSystem);
+}
+
+async function loadBuList(preferBuId) {
+  try {
+    const rows = await apiGet("/api/DbConnectionSettings/bu");
+    state.buRows = Array.isArray(rows)
+      ? rows.map(x => ({ ...x, isNew: false, _rowKey: newRowKey("bu") }))
+      : [];
+
+    const fallbackBuId = preferBuId || state.selectedBuId || "";
+    let selectedRow = state.buRows.find(x => pick(x, "Buid", "buid") === fallbackBuId);
+    if (!selectedRow) selectedRow = state.buRows[0];
+
+    state.selectedBuId = selectedRow ? pick(selectedRow, "Buid", "buid") : "";
+    state.selectedBuRowKey = selectedRow ? selectedRow._rowKey : "";
+    renderBuRows();
+    await loadSystemList(state.selectedBuId);
+  } catch (err) {
+    showAlert(err.message || "載入公司資料失敗", false);
+  }
+}
+
+async function loadSystemList(buId) {
+  state.systemRows = [];
+  state.selectedSystemId = "";
+  state.selectedSystemRowKey = "";
+  if (!buId) {
+    renderSystemRows();
+    document.getElementById("selectedBuText").textContent = "-";
+    return;
+  }
+
+  document.getElementById("selectedBuText").textContent = buId;
+
+  try {
+    const rows = await apiGet(`/api/DbConnectionSettings/bu/${encodeURIComponent(buId)}/system`);
+    state.systemRows = Array.isArray(rows)
+      ? rows.map(x => ({ ...x, isNew: false, _rowKey: newRowKey("sys") }))
+      : [];
+
+    const selectedRow = state.systemRows[0];
+    state.selectedSystemId = selectedRow ? pick(selectedRow, "SystemId", "systemId") : "";
+    state.selectedSystemRowKey = selectedRow ? selectedRow._rowKey : "";
+    renderSystemRows();
+  } catch (err) {
+    showAlert(err.message || "載入系統資料失敗", false);
+  }
+}
+
+function renderBuRows() {
+  const tbody = document.getElementById("buBody");
+  tbody.innerHTML = "";
+
+  state.buRows.forEach((r) => {
+    const buid = pick(r, "Buid", "buid");
+    const rowKey = r._rowKey || (r._rowKey = newRowKey("bu"));
+    const isSelected = rowKey === state.selectedBuRowKey;
+    const tr = document.createElement("tr");
+    tr.className = isSelected ? "selected" : "";
+    tr.dataset.buid = buid || "";
+    tr.dataset.rowKey = rowKey;
+    tr.dataset.isNew = r.isNew ? "1" : "0";
+    tr.addEventListener("click", async () => {
+      state.selectedBuRowKey = rowKey;
+      state.selectedBuId = getBuIdInput(tr);
+      renderBuRows();
+      await loadSystemList(state.selectedBuId);
+    });
+
+    tr.innerHTML = `
+      <td class="text-center"><input type="checkbox" class="form-check-input bu-iscompany" ${toInt(pick(r, "IsCompany", "isCompany")) === 1 ? "checked" : ""}></td>
+      <td><input class="form-control form-control-sm bu-buid" value="${escapeHtml(buid)}" ${r.isNew ? "" : "readonly"}></td>
+      <td><input class="form-control form-control-sm bu-buname" value="${escapeHtml(pick(r, "Buname", "buname"))}"></td>
+      <td><input class="form-control form-control-sm bu-dbserver" value="${escapeHtml(pick(r, "Dbserver", "dbserver"))}"></td>
+      <td><input class="form-control form-control-sm bu-dbname" value="${escapeHtml(pick(r, "Dbname", "dbname"))}"></td>
+      <td><input class="form-control form-control-sm bu-report" value="${escapeHtml(pick(r, "ReportServer", "reportServer"))}"></td>
+      <td><input class="form-control form-control-sm bu-socket" value="${escapeHtml(pick(r, "SocketServer", "socketServer"))}"></td>
+      <td><input class="form-control form-control-sm bu-name" value="${escapeHtml(pick(r, "Name", "name"))}"></td>
+      <td><input class="form-control form-control-sm bu-address" value="${escapeHtml(pick(r, "Address", "address"))}"></td>
+      <td><input class="form-control form-control-sm bu-englishaddr" value="${escapeHtml(pick(r, "EnglishAddr", "englishAddr"))}"></td>
+      <td><input class="form-control form-control-sm bu-phone" value="${escapeHtml(pick(r, "Phone", "phone"))}"></td>
+      <td><input class="form-control form-control-sm bu-fax" value="${escapeHtml(pick(r, "Fax", "fax"))}"></td>
+    `;
+
+    tbody.appendChild(tr);
+  });
+}
+
+function renderSystemRows() {
+  const tbody = document.getElementById("systemBody");
+  tbody.innerHTML = "";
+
+  state.systemRows.forEach((r) => {
+    const systemId = pick(r, "SystemId", "systemId");
+    const rowKey = r._rowKey || (r._rowKey = newRowKey("sys"));
+    const isSelected = rowKey === state.selectedSystemRowKey;
+    const tr = document.createElement("tr");
+    tr.className = isSelected ? "selected" : "";
+    tr.dataset.systemId = systemId || "";
+    tr.dataset.rowKey = rowKey;
+    tr.dataset.isNew = r.isNew ? "1" : "0";
+    tr.addEventListener("click", () => {
+      state.selectedSystemRowKey = rowKey;
+      state.selectedSystemId = getSystemIdInput(tr);
+      renderSystemRows();
+    });
+
+    tr.innerHTML = `
+      <td><input class="form-control form-control-sm sys-systemid" value="${escapeHtml(systemId)}" ${r.isNew ? "" : "readonly"}></td>
+      <td><input class="form-control form-control-sm sys-dbserver" value="${escapeHtml(pick(r, "Dbserver", "dbserver"))}"></td>
+      <td><input class="form-control form-control-sm sys-dbname" value="${escapeHtml(pick(r, "Dbname", "dbname"))}"></td>
+      <td><input class="form-control form-control-sm sys-loginname" value="${escapeHtml(pick(r, "LoginName", "loginName"))}"></td>
+      <td><input class="form-control form-control-sm sys-loginpwd" value="${escapeHtml(pick(r, "LoginPwd", "loginPwd"))}"></td>
+      <td><input class="form-control form-control-sm sys-report" value="${escapeHtml(pick(r, "ReportServer", "reportServer"))}"></td>
+      <td><input class="form-control form-control-sm sys-socket" value="${escapeHtml(pick(r, "SocketServer", "socketServer"))}"></td>
+      <td><input class="form-control form-control-sm sys-webserver" value="${escapeHtml(pick(r, "WebreportServer", "webreportServer"))}"></td>
+      <td><input class="form-control form-control-sm sys-webshare" value="${escapeHtml(pick(r, "WebreportShare", "webreportShare"))}"></td>
+      <td><input class="form-control form-control-sm sys-weblocal" value="${escapeHtml(pick(r, "WebreportLocal", "webreportLocal"))}"></td>
+    `;
+
+    tbody.appendChild(tr);
+  });
+}
+
+function addBuRow() {
+  const row = {
+    Buid: "",
+    Buname: "",
+    Dbserver: "",
+    Dbname: "",
+    ReportServer: "",
+    SocketServer: "",
+    Name: "",
+    Address: "",
+    EnglishAddr: "",
+    Phone: "",
+    Fax: "",
+    IsCompany: 0,
+    _rowKey: newRowKey("bu"),
+    isNew: true
+  };
+  state.buRows.unshift(row);
+  state.selectedBuId = "";
+  state.selectedBuRowKey = row._rowKey;
+  renderBuRows();
+  loadSystemList("");
+}
+
+async function saveSelectedBu() {
+  const tr = getSelectedBuRow();
+  if (!tr) {
+    showAlert("請先選取一筆公司資料", false);
+    return;
+  }
+
+  const payload = collectBu(tr);
+  if (!payload.buid) {
+    showAlert("BUId 不可空白", false);
+    return;
+  }
+
+  try {
+    if (tr.dataset.isNew === "1") {
+      await apiSend("/api/DbConnectionSettings/bu", "POST", payload);
+      state.selectedBuId = payload.buid;
+      showAlert(`新增公司 [${payload.buid}] 成功`, true);
+    } else {
+      await apiSend(`/api/DbConnectionSettings/bu/${encodeURIComponent(tr.dataset.buid || payload.buid)}`, "PUT", payload);
+      state.selectedBuId = payload.buid;
+      showAlert(`更新公司 [${payload.buid}] 成功`, true);
+    }
+    await loadBuList(state.selectedBuId);
+  } catch (err) {
+    showAlert(err.message || "儲存公司失敗", false);
+  }
+}
+
+async function deleteSelectedBu() {
+  const tr = getSelectedBuRow();
+  if (!tr) {
+    showAlert("請先選取一筆公司資料", false);
+    return;
+  }
+
+  if (tr.dataset.isNew === "1") {
+    state.buRows = state.buRows.filter(x => x._rowKey !== tr.dataset.rowKey);
+    state.selectedBuId = "";
+    state.selectedBuRowKey = "";
+    renderBuRows();
+    loadSystemList("");
+    return;
+  }
+
+  const buid = tr.dataset.buid || getBuIdInput(tr);
+  if (!buid) return;
+  if (!confirm(`確認刪除公司 [${buid}] 及其系統明細？`)) return;
+
+  try {
+    await apiSend(`/api/DbConnectionSettings/bu/${encodeURIComponent(buid)}`, "DELETE");
+    state.selectedBuId = "";
+    state.selectedBuRowKey = "";
+    showAlert(`刪除公司 [${buid}] 成功`, true);
+    await loadBuList();
+  } catch (err) {
+    showAlert(err.message || "刪除公司失敗", false);
+  }
+}
+
+function addSystemRow() {
+  if (!state.selectedBuId) {
+    showAlert("請先選取公司別", false);
+    return;
+  }
+
+  state.systemRows.unshift({
+    Buid: state.selectedBuId,
+    SystemId: "",
+    Dbserver: "",
+    Dbname: "",
+    LoginName: "",
+    LoginPwd: "",
+    ReportServer: "",
+    SocketServer: "",
+    WebreportServer: "",
+    WebreportShare: "",
+    WebreportLocal: "",
+    _rowKey: newRowKey("sys"),
+    isNew: true
+  });
+  state.selectedSystemId = "";
+  state.selectedSystemRowKey = state.systemRows[0]._rowKey;
+  renderSystemRows();
+}
+
+async function saveSelectedSystem() {
+  if (!state.selectedBuId) {
+    showAlert("請先選取公司別", false);
+    return;
+  }
+
+  const tr = getSelectedSystemRow();
+  if (!tr) {
+    showAlert("請先選取一筆系統資料", false);
+    return;
+  }
+
+  const payload = collectSystem(tr);
+  payload.buid = state.selectedBuId;
+  if (!payload.systemId) {
+    showAlert("系統別不可空白", false);
+    return;
+  }
+
+  try {
+    if (tr.dataset.isNew === "1") {
+      await apiSend("/api/DbConnectionSettings/system", "POST", payload);
+      state.selectedSystemId = payload.systemId;
+      showAlert(`新增系統 [${payload.systemId}] 成功`, true);
+    } else {
+      const oldSystemId = tr.dataset.systemId || payload.systemId;
+      await apiSend(`/api/DbConnectionSettings/system/${encodeURIComponent(state.selectedBuId)}/${encodeURIComponent(oldSystemId)}`, "PUT", payload);
+      state.selectedSystemId = payload.systemId;
+      showAlert(`更新系統 [${payload.systemId}] 成功`, true);
+    }
+    await loadSystemList(state.selectedBuId);
+  } catch (err) {
+    showAlert(err.message || "儲存系統失敗", false);
+  }
+}
+
+async function deleteSelectedSystem() {
+  if (!state.selectedBuId) {
+    showAlert("請先選取公司別", false);
+    return;
+  }
+
+  const tr = getSelectedSystemRow();
+  if (!tr) {
+    showAlert("請先選取一筆系統資料", false);
+    return;
+  }
+
+  if (tr.dataset.isNew === "1") {
+    state.systemRows = state.systemRows.filter(x => x._rowKey !== tr.dataset.rowKey);
+    state.selectedSystemId = "";
+    state.selectedSystemRowKey = "";
+    renderSystemRows();
+    return;
+  }
+
+  const systemId = tr.dataset.systemId || getSystemIdInput(tr);
+  if (!systemId) return;
+  if (!confirm(`確認刪除系統 [${systemId}]？`)) return;
+
+  try {
+    await apiSend(`/api/DbConnectionSettings/system/${encodeURIComponent(state.selectedBuId)}/${encodeURIComponent(systemId)}`, "DELETE");
+    state.selectedSystemId = "";
+    state.selectedSystemRowKey = "";
+    showAlert(`刪除系統 [${systemId}] 成功`, true);
+    await loadSystemList(state.selectedBuId);
+  } catch (err) {
+    showAlert(err.message || "刪除系統失敗", false);
+  }
+}
+
+function collectBu(tr) {
+  return {
+    buid: getBuIdInput(tr),
+    buname: tr.querySelector(".bu-buname")?.value ?? "",
+    dbserver: tr.querySelector(".bu-dbserver")?.value ?? "",
+    dbname: tr.querySelector(".bu-dbname")?.value ?? "",
+    reportServer: tr.querySelector(".bu-report")?.value ?? "",
+    socketServer: tr.querySelector(".bu-socket")?.value ?? "",
+    name: tr.querySelector(".bu-name")?.value ?? "",
+    address: tr.querySelector(".bu-address")?.value ?? "",
+    englishAddr: tr.querySelector(".bu-englishaddr")?.value ?? "",
+    phone: tr.querySelector(".bu-phone")?.value ?? "",
+    fax: tr.querySelector(".bu-fax")?.value ?? "",
+    isCompany: tr.querySelector(".bu-iscompany")?.checked ? 1 : 0
+  };
+}
+
+function collectSystem(tr) {
+  return {
+    systemId: getSystemIdInput(tr),
+    dbserver: tr.querySelector(".sys-dbserver")?.value ?? "",
+    dbname: tr.querySelector(".sys-dbname")?.value ?? "",
+    loginName: tr.querySelector(".sys-loginname")?.value ?? "",
+    loginPwd: tr.querySelector(".sys-loginpwd")?.value ?? "",
+    reportServer: tr.querySelector(".sys-report")?.value ?? "",
+    socketServer: tr.querySelector(".sys-socket")?.value ?? "",
+    webreportServer: tr.querySelector(".sys-webserver")?.value ?? "",
+    webreportShare: tr.querySelector(".sys-webshare")?.value ?? "",
+    webreportLocal: tr.querySelector(".sys-weblocal")?.value ?? ""
+  };
+}
+
+function getSelectedBuRow() {
+  return document.querySelector("#buBody tr.selected");
+}
+
+function getSelectedSystemRow() {
+  return document.querySelector("#systemBody tr.selected");
+}
+
+function getBuIdInput(tr) {
+  return (tr?.querySelector(".bu-buid")?.value || "").trim();
+}
+
+function getSystemIdInput(tr) {
+  return (tr?.querySelector(".sys-systemid")?.value || "").trim();
+}
+
+async function apiGet(url) {
+  const res = await fetch(url);
+  const text = await res.text();
+  const payload = text ? safeJson(text) : null;
+  if (!res.ok) {
+    throw new Error(getApiMessage(payload) || `HTTP ${res.status}`);
+  }
+  return payload;
+}
+
+async function apiSend(url, method, body) {
+  const options = {
+    method,
+    headers: { "Content-Type": "application/json" }
+  };
+  if (body !== undefined) {
+    options.body = JSON.stringify(body);
+  }
+
+  const res = await fetch(url, options);
+  const text = await res.text();
+  const payload = text ? safeJson(text) : null;
+  if (!res.ok) {
+    throw new Error(getApiMessage(payload) || `HTTP ${res.status}`);
+  }
+  return payload;
+}
+
+function getApiMessage(payload) {
+  if (!payload) return "";
+  return payload.message || payload.Message || "";
+}
+
+function safeJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function showAlert(message, ok) {
+  const box = document.getElementById("dbConnAlert");
+  box.textContent = message || "";
+  box.classList.remove("d-none", "alert-success", "alert-danger");
+  box.classList.add(ok ? "alert-success" : "alert-danger");
+}
+
+function pick(obj, ...keys) {
+  for (const k of keys) {
+    if (obj && obj[k] !== undefined && obj[k] !== null) return obj[k];
+  }
+  return "";
+}
+
+function toInt(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
+}
+</script>

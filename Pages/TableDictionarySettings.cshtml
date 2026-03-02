@@ -1,0 +1,687 @@
+@page
+@model PcbErpApi.Pages.TableDictionarySettingsModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "資料辭典";
+}
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+
+<div class="td-page">
+  <div id="tdAlert" class="alert d-none py-2 mb-2" role="alert"></div>
+
+  <div class="td-wrap">
+    <aside class="td-left card">
+      <div class="card-header p-2">
+        <ul class="nav nav-tabs nav-sm" id="tdTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#td-tab-system" type="button">系統查詢</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#td-tab-advanced" type="button">進階查詢</button>
+          </li>
+        </ul>
+      </div>
+      <div class="card-body p-2 tab-content">
+        <div class="tab-pane fade show active" id="td-tab-system">
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="tdUseSystemFilter" checked>
+            <label class="form-check-label" for="tdUseSystemFilter">系統查詢</label>
+          </div>
+          <div class="td-system-tree" id="tdSystemTree"></div>
+        </div>
+        <div class="tab-pane fade" id="td-tab-advanced">
+          <div class="mb-2">
+            <label class="form-label form-label-sm mb-1">資料表名稱</label>
+            <input class="form-control form-control-sm" id="tdTableNameFilter">
+          </div>
+          <div class="mb-2">
+            <label class="form-label form-label-sm mb-1">資料表顯示名稱</label>
+            <input class="form-control form-control-sm" id="tdDisplayLabelFilter">
+          </div>
+          <div class="mb-2">
+            <label class="form-label form-label-sm mb-1">欄位名稱</label>
+            <input class="form-control form-control-sm" id="tdFieldNameFilter">
+          </div>
+          <div class="mb-2">
+            <label class="form-label form-label-sm mb-1">欄位顯示名稱</label>
+            <input class="form-control form-control-sm" id="tdFieldDisplayLabelFilter">
+          </div>
+          <button class="btn btn-sm btn-primary w-100" id="tdBtnQuery">查詢</button>
+        </div>
+      </div>
+    </aside>
+
+    <section class="td-right card">
+      <div class="card-header d-flex align-items-center gap-2">
+        <button class="btn btn-sm btn-primary" id="tdBtnFieldSetting">欄位設定</button>
+        <span class="ms-2 text-muted small">筆數：<span id="tdRowCount">0</span></span>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-wrap">
+          <table class="table table-bordered table-sm align-middle mb-0" id="tdTable" data-dict-table="CURdTableName">
+            <thead>
+              <tr>
+                <th data-field="TableName" style="width:130px;">資料表名稱</th>
+                <th data-field="DisplayLabel" style="width:180px;">資料表顯示名稱</th>
+                <th data-field="SystemId" style="width:90px;">系統別</th>
+                <th data-field="TableNote" style="width:180px;">說明(公用資料表名稱)</th>
+                <th data-field="TableType" style="width:90px;">是否公用資料表</th>
+                <th data-field="RealTableName" style="width:180px;">實體資料表名稱</th>
+                <th data-field="DisplayLabelCN" style="width:150px;">顯示名稱(簡)</th>
+                <th data-field="DisplayLabelEN" style="width:150px;">顯示名稱(英)</th>
+                <th data-field="DisplayLabelJP" style="width:150px;">顯示名稱(日)</th>
+                <th data-field="DisplayLabelTH" style="width:150px;">顯示名稱(其它)</th>
+              </tr>
+            </thead>
+            <tbody id="tdTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<style>
+.td-page {
+  height: calc(100vh - 84px);
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.td-wrap {
+  display: flex;
+  gap: 10px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.td-left {
+  width: 280px;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+}
+
+.td-right {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.td-system-tree {
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+  border: 1px solid #d8dee8;
+  border-radius: 6px;
+  background: #fff;
+  padding: 4px;
+}
+
+.td-tree-node {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-size: .9rem;
+  line-height: 1.4;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #334155;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.td-tree-node:hover {
+  background: #eef2ff;
+  color: #312e81;
+}
+
+.td-tree-node.active {
+  background: #e0e7ff;
+  color: #312e81;
+  font-weight: 600;
+}
+
+.td-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.td-tree-toggle {
+  width: 20px;
+  min-width: 20px;
+  border: 0;
+  background: transparent;
+  color: #475569;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.td-tree-toggle.empty {
+  cursor: default;
+  color: transparent;
+}
+
+.table-wrap {
+  overflow: auto;
+  flex: 1 1 auto;
+}
+
+#tdTable {
+  table-layout: fixed;
+  min-width: 1460px;
+}
+
+#tdTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f8f9fa;
+  white-space: nowrap;
+  padding: .25rem .35rem;
+}
+
+#tdTable td {
+  padding: .2rem .3rem;
+}
+
+#tdTable input.form-control-sm {
+  height: 28px;
+  min-height: 28px;
+  padding: 2px 6px;
+  font-size: .88rem;
+}
+
+#tdTable tbody tr.selected {
+  background: #eef4ff;
+}
+
+.nav-tabs.nav-sm .nav-link {
+  padding: .25rem .6rem;
+  font-size: .88rem;
+}
+</style>
+
+<script>
+const tdState = {
+  tree: [],
+  rows: [],
+  selectedSystemId: "",
+  originalMap: new Map(),
+  selectedRowKey: "",
+  expandedNodes: new Set(),
+  parentMap: new Map()
+};
+
+let tdDebounceTimer = null;
+
+document.addEventListener("DOMContentLoaded", () => {
+  bindTdEvents();
+  initTableDictionaryPage();
+});
+
+function bindTdEvents() {
+  document.getElementById("tdBtnQuery").addEventListener("click", () => loadTableRows());
+  document.getElementById("tdBtnFieldSetting").addEventListener("click", () => openSelectedRowFieldSetting());
+  document.getElementById("tdUseSystemFilter").addEventListener("change", () => loadTableRows());
+
+  ["tdTableNameFilter", "tdDisplayLabelFilter", "tdFieldNameFilter", "tdFieldDisplayLabelFilter"]
+    .forEach(id => {
+      document.getElementById(id).addEventListener("input", () => {
+        if (tdDebounceTimer) clearTimeout(tdDebounceTimer);
+        tdDebounceTimer = setTimeout(() => loadTableRows(), 300);
+      });
+    });
+}
+
+async function initTableDictionaryPage() {
+  try {
+    await applyDictColumnHeaders();
+    await loadSystemTree();
+    await loadTableRows();
+  } catch (err) {
+    showTdAlert(err.message || "初始化失敗", false);
+  }
+}
+
+async function loadSystemTree() {
+  let rows = await apiGet("/api/TableDictionarySettings/tree");
+  if (!Array.isArray(rows) || rows.length === 0) {
+    rows = await apiGet("/api/TableDictionarySettings/systems");
+  }
+
+  tdState.tree = (Array.isArray(rows) ? rows : []).map(x => ({
+    itemId: toText(x.ItemId ?? x.SystemId),
+    itemName: toText(x.ItemName ?? x.SystemName),
+    superId: toText(x.SuperId),
+    levelNo: toNullableInt(x.LevelNo) ?? 0
+  })).filter(x => x.itemId);
+
+  const withParent = tdState.tree.filter(x => x.superId && x.superId !== x.itemId).length;
+  if (withParent === 0) {
+    tdState.tree = synthesizeGroupTree(tdState.tree);
+  }
+
+  rebuildParentMap();
+
+  const first = tdState.tree.find(x => !hasChildren(x.itemId) && x.itemId.length >= 2) ?? tdState.tree[0];
+  tdState.selectedSystemId = first?.itemId ?? "";
+  expandAncestors(tdState.selectedSystemId);
+  renderSystemTree();
+}
+
+function renderSystemTree() {
+  const host = document.getElementById("tdSystemTree");
+  host.innerHTML = "";
+  if (!tdState.tree.length) return;
+
+  const roots = getChildren("").concat(getOrphanRoots());
+  const uniqRoots = dedupNodes(roots);
+
+  uniqRoots.forEach(node => renderTreeNode(host, node, 0));
+}
+
+function renderTreeNode(host, node, depth) {
+  const children = getChildren(node.itemId);
+  const childList = dedupNodes(children);
+  const hasChild = childList.length > 0;
+  const expanded = tdState.expandedNodes.has(node.itemId);
+
+  const row = document.createElement("div");
+  row.className = "td-tree-row";
+  row.style.paddingLeft = `${Math.max(0, depth) * 12}px`;
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = `td-tree-toggle ${hasChild ? "" : "empty"}`;
+  toggle.textContent = hasChild ? (expanded ? "▾" : "▸") : "•";
+  if (hasChild) {
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (expanded) tdState.expandedNodes.delete(node.itemId);
+      else tdState.expandedNodes.add(node.itemId);
+      renderSystemTree();
+    });
+  }
+
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = `td-tree-node ${node.itemId === tdState.selectedSystemId ? "active" : ""}`;
+  item.textContent = `${node.itemId}${node.itemName ? " - " + node.itemName : ""}`;
+  item.addEventListener("click", async () => {
+    tdState.selectedSystemId = node.itemId;
+    if (hasChild) tdState.expandedNodes.add(node.itemId);
+    renderSystemTree();
+    await loadTableRows();
+  });
+
+  row.appendChild(toggle);
+  row.appendChild(item);
+  host.appendChild(row);
+
+  if (hasChild && expanded) {
+    childList.forEach(child => renderTreeNode(host, child, depth + 1));
+  }
+}
+
+function getChildren(parentId) {
+  const p = toText(parentId);
+  return tdState.tree
+    .filter(x => toText(x.superId) === p && x.itemId !== p)
+    .sort((a, b) => a.itemId.localeCompare(b.itemId));
+}
+
+function hasChildren(nodeId) {
+  return tdState.tree.some(x => toText(x.superId) === toText(nodeId) && x.itemId !== nodeId);
+}
+
+function getOrphanRoots() {
+  const idSet = new Set(tdState.tree.map(x => x.itemId));
+  return tdState.tree.filter(x => {
+    const p = toText(x.superId);
+    if (!p) return false;
+    if (p === x.itemId) return false;
+    return !idSet.has(p);
+  });
+}
+
+function dedupNodes(nodes) {
+  const m = new Map();
+  (nodes || []).forEach(n => {
+    const k = toKey(n.itemId);
+    if (!k || m.has(k)) return;
+    m.set(k, n);
+  });
+  return [...m.values()];
+}
+
+function rebuildParentMap() {
+  tdState.parentMap = new Map();
+  const idSet = new Set(tdState.tree.map(x => x.itemId));
+  tdState.tree.forEach(n => {
+    const p = toText(n.superId);
+    if (p && p !== n.itemId && idSet.has(p)) {
+      tdState.parentMap.set(n.itemId, p);
+    }
+  });
+}
+
+function expandAncestors(nodeId) {
+  let cur = toText(nodeId);
+  let guard = 0;
+  while (tdState.parentMap.has(cur) && guard < 30) {
+    const p = tdState.parentMap.get(cur);
+    if (!p) break;
+    tdState.expandedNodes.add(p);
+    cur = p;
+    guard++;
+  }
+}
+
+function synthesizeGroupTree(nodes) {
+  const list = Array.isArray(nodes) ? [...nodes] : [];
+  const groups = new Map();
+  const result = [];
+
+  list.forEach(n => {
+    const id = toText(n.itemId);
+    if (!id) return;
+    const head = id.substring(0, 1).toUpperCase();
+    if (!groups.has(head)) {
+      const gNode = {
+        itemId: head,
+        itemName: `${head}=模組`,
+        superId: "",
+        levelNo: 0
+      };
+      groups.set(head, gNode);
+      result.push(gNode);
+    }
+  });
+
+  list.forEach(n => {
+    const id = toText(n.itemId);
+    const p = toText(n.superId);
+    if (p) result.push(n);
+    else {
+      const head = id.substring(0, 1).toUpperCase();
+      result.push({ ...n, superId: head, levelNo: 1 });
+    }
+  });
+
+  return dedupNodes(result);
+}
+
+async function loadTableRows() {
+  const query = new URLSearchParams();
+  const useSystemFilter = document.getElementById("tdUseSystemFilter").checked;
+  query.set("useSystemFilter", useSystemFilter ? "true" : "false");
+  if (useSystemFilter && tdState.selectedSystemId) {
+    query.set("systemId", tdState.selectedSystemId);
+  }
+
+  const tableName = document.getElementById("tdTableNameFilter").value.trim();
+  const displayLabel = document.getElementById("tdDisplayLabelFilter").value.trim();
+  const fieldName = document.getElementById("tdFieldNameFilter").value.trim();
+  const fieldDisplayLabel = document.getElementById("tdFieldDisplayLabelFilter").value.trim();
+
+  if (tableName) query.set("tableName", tableName);
+  if (displayLabel) query.set("displayLabel", displayLabel);
+  if (fieldName) query.set("fieldName", fieldName);
+  if (fieldDisplayLabel) query.set("fieldDisplayLabel", fieldDisplayLabel);
+
+  const rows = await apiGet(`/api/TableDictionarySettings/rows?${query.toString()}`);
+  tdState.rows = Array.isArray(rows) ? rows.map(x => ({ ...x, _rowKey: newRowKey() })) : [];
+  tdState.originalMap = new Map(
+    tdState.rows.map(r => [toKey(r.TableName || r.tableName), serializeTdRow(normalizeTdRow(r))])
+  );
+  tdState.selectedRowKey = tdState.rows[0]?._rowKey || "";
+  document.getElementById("tdRowCount").textContent = String(tdState.rows.length);
+  renderTableRows();
+}
+
+function renderTableRows() {
+  const tbody = document.getElementById("tdTableBody");
+  tbody.innerHTML = "";
+  tdState.rows.forEach(r => {
+    const row = normalizeTdRow(r);
+    const tr = document.createElement("tr");
+    tr.dataset.rowKey = r._rowKey;
+    tr.dataset.serialNum = showNum(row.serialNum);
+    tr.dataset.levelNo = showNum(row.levelNo);
+    tr.dataset.superId = row.superId;
+    tr.className = r._rowKey === tdState.selectedRowKey ? "selected" : "";
+    tr.addEventListener("click", () => {
+      tdState.selectedRowKey = r._rowKey;
+      renderTableRows();
+    });
+
+    tr.innerHTML = `
+      <td><input class="form-control form-control-sm td-tableName" value="${escapeHtml(row.tableName)}" readonly></td>
+      <td><input class="form-control form-control-sm td-displayLabel" value="${escapeHtml(row.displayLabel)}"></td>
+      <td><input class="form-control form-control-sm td-systemId" value="${escapeHtml(row.systemId)}"></td>
+      <td><input class="form-control form-control-sm td-tableNote" value="${escapeHtml(row.tableNote)}"></td>
+      <td><input type="number" class="form-control form-control-sm td-tableType" value="${showNum(row.tableType)}"></td>
+      <td><input class="form-control form-control-sm td-realTableName" value="${escapeHtml(row.realTableName)}"></td>
+      <td><input class="form-control form-control-sm td-displayLabelCn" value="${escapeHtml(row.displayLabelCn)}"></td>
+      <td><input class="form-control form-control-sm td-displayLabelEn" value="${escapeHtml(row.displayLabelEn)}"></td>
+      <td><input class="form-control form-control-sm td-displayLabelJp" value="${escapeHtml(row.displayLabelJp)}"></td>
+      <td><input class="form-control form-control-sm td-displayLabelTh" value="${escapeHtml(row.displayLabelTh)}"></td>
+    `;
+
+    tbody.appendChild(tr);
+  });
+}
+
+async function saveTableRows() {
+  const currentRows = collectRowsFromDom();
+  const changed = currentRows.filter(r => {
+    const key = toKey(r.tableName);
+    return tdState.originalMap.get(key) !== serializeTdRow(r);
+  });
+
+  if (changed.length === 0) {
+    showTdAlert("沒有異動資料", true);
+    return;
+  }
+
+  try {
+    for (const row of changed) {
+      await apiSend(`/api/TableDictionarySettings/row/${encodeURIComponent(row.tableName)}`, "PUT", {
+        tableName: row.tableName,
+        displayLabel: row.displayLabel,
+        tableNote: row.tableNote,
+        serialNum: row.serialNum,
+        tableType: row.tableType,
+        levelNo: row.levelNo,
+        systemId: row.systemId,
+        superId: row.superId,
+        realTableName: row.realTableName,
+        displayLabelCn: row.displayLabelCn,
+        displayLabelEn: row.displayLabelEn,
+        displayLabelJp: row.displayLabelJp,
+        displayLabelTh: row.displayLabelTh
+      });
+    }
+
+    showTdAlert(`儲存完成，共 ${changed.length} 筆`, true);
+    await loadTableRows();
+  } catch (err) {
+    showTdAlert(err.message || "儲存失敗", false);
+  }
+}
+
+function openSelectedRowFieldSetting() {
+  const row = tdState.rows.find(x => x._rowKey === tdState.selectedRowKey);
+  const tableName = toText(row?.TableName ?? row?.tableName);
+  if (!tableName) {
+    showTdAlert("請先選取一筆資料", false);
+    return;
+  }
+  if (typeof window.showDictModal !== "function") {
+    showTdAlert("欄位辭典功能尚未載入", false);
+    return;
+  }
+  window.showDictModal("fieldDictModal", tableName);
+}
+
+function collectRowsFromDom() {
+  const rows = [];
+  document.querySelectorAll("#tdTableBody tr").forEach(tr => {
+    rows.push(normalizeTdRow({
+      tableName: tr.querySelector(".td-tableName")?.value,
+      displayLabel: tr.querySelector(".td-displayLabel")?.value,
+      systemId: tr.querySelector(".td-systemId")?.value,
+      tableNote: tr.querySelector(".td-tableNote")?.value,
+      superId: tr.dataset.superId || "",
+      tableType: tr.querySelector(".td-tableType")?.value,
+      realTableName: tr.querySelector(".td-realTableName")?.value,
+      displayLabelCn: tr.querySelector(".td-displayLabelCn")?.value,
+      displayLabelEn: tr.querySelector(".td-displayLabelEn")?.value,
+      displayLabelJp: tr.querySelector(".td-displayLabelJp")?.value,
+      displayLabelTh: tr.querySelector(".td-displayLabelTh")?.value,
+      serialNum: tr.dataset.serialNum || "",
+      levelNo: tr.dataset.levelNo || ""
+    }));
+  });
+  return rows;
+}
+
+function normalizeTdRow(row) {
+  return {
+    tableName: toText(row.tableName ?? row.TableName),
+    displayLabel: toText(row.displayLabel ?? row.DisplayLabel),
+    tableNote: toText(row.tableNote ?? row.TableNote),
+    serialNum: toNullableInt(row.serialNum ?? row.SerialNum),
+    tableType: toNullableInt(row.tableType ?? row.TableType),
+    levelNo: toNullableInt(row.levelNo ?? row.LevelNo),
+    systemId: toText(row.systemId ?? row.SystemId),
+    superId: toText(row.superId ?? row.SuperId),
+    realTableName: toText(row.realTableName ?? row.RealTableName),
+    displayLabelCn: toText(row.displayLabelCn ?? row.DisplayLabelCn ?? row.DisplayLabelCN),
+    displayLabelEn: toText(row.displayLabelEn ?? row.DisplayLabelEn ?? row.DisplayLabelEN),
+    displayLabelJp: toText(row.displayLabelJp ?? row.DisplayLabelJp ?? row.DisplayLabelJP),
+    displayLabelTh: toText(row.displayLabelTh ?? row.DisplayLabelTh ?? row.DisplayLabelTH)
+  };
+}
+
+function serializeTdRow(row) {
+  return JSON.stringify({
+    tableName: row.tableName,
+    displayLabel: row.displayLabel,
+    tableNote: row.tableNote,
+    serialNum: row.serialNum,
+    tableType: row.tableType,
+    levelNo: row.levelNo,
+    systemId: row.systemId,
+    superId: row.superId,
+    realTableName: row.realTableName,
+    displayLabelCn: row.displayLabelCn,
+    displayLabelEn: row.displayLabelEn,
+    displayLabelJp: row.displayLabelJp,
+    displayLabelTh: row.displayLabelTh
+  });
+}
+
+function showTdAlert(message, ok) {
+  const box = document.getElementById("tdAlert");
+  const text = message || "";
+  if (!text.trim()) {
+    box.textContent = "";
+    box.classList.add("d-none");
+    box.classList.remove("alert-success", "alert-danger");
+    return;
+  }
+  box.textContent = text;
+  box.classList.remove("d-none", "alert-success", "alert-danger");
+  box.classList.add(ok ? "alert-success" : "alert-danger");
+}
+
+function newRowKey() {
+  return `td-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function showNum(v) {
+  if (v === null || v === undefined) return "";
+  const n = Number(v);
+  return Number.isFinite(n) ? String(n) : "";
+}
+
+function toNullableInt(v) {
+  if (v === null || v === undefined || String(v).trim() === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function toText(v) {
+  return String(v ?? "").trim();
+}
+
+function toKey(v) {
+  return String(v ?? "").trim();
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+async function apiGet(url) {
+  const res = await fetch(url);
+  const text = await res.text();
+  const payload = text ? safeJson(text) : null;
+  if (!res.ok) throw new Error(payload?.message || payload?.Message || `HTTP ${res.status}`);
+  return payload;
+}
+
+async function apiSend(url, method, body) {
+  const res = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const text = await res.text();
+  const payload = text ? safeJson(text) : null;
+  if (!res.ok) throw new Error(payload?.message || payload?.Message || `HTTP ${res.status}`);
+  return payload;
+}
+
+function safeJson(text) {
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+async function applyDictColumnHeaders() {
+  try {
+    const fields = await apiGet("/api/DictSetupApi/FieldSettings/CURdTableName");
+    const map = new Map();
+    (Array.isArray(fields) ? fields : []).forEach(f => {
+      const key = toText(f.FieldName).toLowerCase();
+      const caption = toText(f.DisplayLabel);
+      if (key && caption) map.set(key, caption);
+    });
+
+    document.querySelectorAll("#tdTable thead th[data-field]").forEach(th => {
+      const field = toText(th.getAttribute("data-field")).toLowerCase();
+      const cap = map.get(field);
+      if (cap) th.textContent = cap;
+    });
+  } catch {
+    // keep fallback hardcoded labels
+  }
+}
+
+</script>
+
+<partial name="Shared/_FieldDictModal" model="@(new System.Collections.Generic.List<PcbErpApi.Models.CURdTableField>())" />
+<script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
