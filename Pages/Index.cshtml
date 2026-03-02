@@ -7,6 +7,9 @@
     var requestPath = ViewContext.HttpContext.Request.Path;
     var isPaperInfo = requestPath.StartsWithSegments("/PaperInfo");
     var isSysParams = requestPath.StartsWithSegments("/SysParams");
+    var isDbConnectionSettings = requestPath.StartsWithSegments("/DbConnectionSettings");
+    var isSystemSelectSettings = requestPath.StartsWithSegments("/SystemSelectSettings");
+    var isTableDictionarySettings = requestPath.StartsWithSegments("/TableDictionarySettings");
     var isIndexPage = requestPath == "/" || requestPath.StartsWithSegments("/Index");
     var selectedLevel1Id = Model.SelectedLevel1Id ?? "";
     var sysCode = selectedLevel1Id.Length >= 3 ? selectedLevel1Id.Substring(0, 3) : "";
@@ -14,6 +17,30 @@
 }
 
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+
+<div class="index-global-tabs-wrap">
+  <ul class="nav nav-pills index-global-nav">
+    <li class="nav-item">
+      <a class="nav-link @(isSysParams ? "active" : "") @(string.IsNullOrEmpty(sysCode) ? "disabled" : "")"
+         href="@(string.IsNullOrEmpty(sysCode) ? "#" : $"/SysParams?SelectedSystem={sysCode}")"
+         aria-disabled="@(string.IsNullOrEmpty(sysCode) ? "true" : "false")">
+        系統參數設定
+      </a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link @(isPaperInfo ? "active" : "")" href="/PaperInfo">單據設定</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link @(isDbConnectionSettings ? "active" : "")" href="/DbConnectionSettings">資料庫連線設定</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link @(isSystemSelectSettings ? "active" : "")" href="/SystemSelectSettings">系統別設定</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link @(isTableDictionarySettings ? "active" : "")" href="/TableDictionarySettings">資料辭典</a>
+    </li>
+  </ul>
+</div>
 
 <div style="display:flex; gap:20px;" class="index-page">
   <!-- 左側模組 -->
@@ -61,16 +88,6 @@
           </button>
         </li>
         <li class="nav-item">
-          <a class="nav-link @(isSysParams ? "active" : "") @(string.IsNullOrEmpty(sysCode) ? "disabled" : "")"
-             href="@(string.IsNullOrEmpty(sysCode) ? "#" : $"/SysParams?SelectedSystem={sysCode}")"
-             aria-disabled="@(string.IsNullOrEmpty(sysCode) ? "true" : "false")">
-            系統參數設定
-          </a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link @(isPaperInfo ? "active" : "")" href="/PaperInfo">單據設定</a>
-        </li>
-        <li class="nav-item">
           <a id="btnFunctionSetupTab"
              class="nav-link disabled"
              href="#"
@@ -99,7 +116,7 @@
               id="li-@item.ItemId"
               data-item-id="@item.ItemId"
               onclick="selectItem('@item.ItemId')"
-              ondblclick="openEditModal('@item.ItemId', '@item.ItemName', '@item.SuperId', '@item.SystemId', '@item.SerialNum', @((item.Enabled)), '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Notes ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Ocxtemplete ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.SWebMenuId ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.SWebSuperMenuId ?? ""))', '@(item.IWebMenuOrderSeq?.ToString() ?? "")', '@(item.IWebMenuLevel?.ToString() ?? "")', '@(item.IWebEnable?.ToString() ?? "")')"
+              ondblclick="openEditModal('@item.ItemId', '@item.ItemName', '@item.SuperId', '@item.SystemId', '@item.SerialNum', @((item.Enabled)), '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Notes ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Ocxtemplete ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.SWebMenuId ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.SWebSuperMenuId ?? ""))', '@(item.IWebMenuOrderSeq?.ToString() ?? "")', '@(item.IWebMenuLevel?.ToString() ?? "")', '@(item.IWebEnable?.ToString() ?? "")', '@(item.ItemType)', '@(item.OutputType)', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.ObjectName ?? ""))')"
               style="cursor:pointer;">
               <div class="item-row">
                 <div class="item-main">
@@ -146,7 +163,6 @@
   {
     <div class="d-flex justify-content-between align-items-center mb-2">
       <h4 class="mb-0">功能列表</h4>
-      <button class="btn btn-primary" onclick="openAddModal()">新增功能</button>
     </div>
     <p>請從左側展開模組並選擇子模組查看功能</p>
   }
@@ -230,6 +246,22 @@
           </div>
           <div>
             <div class="row align-items-center g-1">
+              <label class="col-4 col-form-label col-form-label-sm">資料來源</label>
+              <div class="col-8">
+                <select class="form-select form-select-sm" id="editItemType"></select>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="row align-items-center g-1">
+              <label class="col-4 col-form-label col-form-label-sm">輸出方式</label>
+              <div class="col-8">
+                <select class="form-select form-select-sm" id="editOutputType"></select>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="row align-items-center g-1">
               <label class="col-4 col-form-label col-form-label-sm">前台選單代碼</label>
               <div class="col-8">
                 <input type="text" class="form-control form-control-sm" id="editSWebMenuId" />
@@ -279,6 +311,14 @@
                   <input type="checkbox" class="form-check-input" id="editIWebEnable">
                   <label class="form-check-label" for="editIWebEnable"></label>
                 </div>
+              </div>
+            </div>
+          </div>
+          <div class="grid-span-2">
+            <div class="row align-items-center g-1">
+              <label class="col-2 col-form-label col-form-label-sm">報表程序</label>
+              <div class="col-10">
+                <input type="text" class="form-control form-control-sm" id="editObjectName" />
               </div>
             </div>
           </div>
@@ -851,7 +891,7 @@ window.openAddModal = async function () {
   new bootstrap.Modal(document.getElementById('addItemModal')).show();
 };
 
-window.openEditModal = function (itemId, itemName, superId, systemId, serialNum, enabled, Notes, ocxtemplete, sWebMenuId, sWebSuperMenuId, iWebMenuOrderSeq, iWebMenuLevel, iWebEnable) {
+window.openEditModal = async function (itemId, itemName, superId, systemId, serialNum, enabled, Notes, ocxtemplete, sWebMenuId, sWebSuperMenuId, iWebMenuOrderSeq, iWebMenuLevel, iWebEnable, itemType, outputType, objectName) {
   document.getElementById('editItemId').value    = itemId;
   document.getElementById('editItemName').value  = itemName;
   document.getElementById('editSuperId').value   = superId;
@@ -861,8 +901,13 @@ window.openEditModal = function (itemId, itemName, superId, systemId, serialNum,
   document.getElementById('editSWebSuperMenuId').value = (sWebSuperMenuId ?? '');
   document.getElementById('editIWebMenuOrderSeq').value = (iWebMenuOrderSeq ?? '');
   document.getElementById('editIWebMenuLevel').value = (iWebMenuLevel ?? '');
+  document.getElementById('editObjectName').value = (objectName ?? '');
   document.getElementById('editNotes').value     = (Notes ?? '');
-  ensureOcxTempleteOptions(ocxtemplete ?? '');
+  await Promise.all([
+    ensureOcxTempleteOptions(ocxtemplete ?? ''),
+    ensureItemTypeOptions(itemType ?? ''),
+    ensureOutputTypeOptions(outputType ?? '')
+  ]);
   const isEnabled = (enabled === 1 || enabled === '1' || enabled === true || enabled === 'true');
   document.getElementById('editEnabled').checked = isEnabled;
   const isWebEnabled = (iWebEnable === 1 || iWebEnable === '1' || iWebEnable === true || iWebEnable === 'true');
@@ -874,6 +919,8 @@ window.openEditModal = function (itemId, itemName, superId, systemId, serialNum,
 
 /* ========= 新增 / 編輯提交 ========= */
 let _ocxTempleteCache = null;
+let _itemTypeCache = null;
+let _outputTypeCache = null;
 async function ensureOcxTempleteOptions(selectedValue) {
   const select = document.getElementById('editOcxtemplete');
   if (!select) return;
@@ -899,6 +946,74 @@ async function ensureOcxTempleteOptions(selectedValue) {
     select.appendChild(o);
   });
   select.value = selectedValue || "";
+}
+
+function bindValueTextOptions(select, list, selectedValue) {
+  if (!select) return;
+  const selected = selectedValue === null || selectedValue === undefined ? "" : String(selectedValue);
+  const options = Array.isArray(list) ? list : [];
+
+  select.innerHTML = "";
+  const emptyOpt = document.createElement("option");
+  emptyOpt.value = "";
+  emptyOpt.textContent = "";
+  select.appendChild(emptyOpt);
+
+  const mapped = options
+    .map(opt => {
+      const value = opt?.value ?? opt?.Value ?? opt?.itemType ?? opt?.ItemType ?? opt?.outputType ?? opt?.OutputType;
+      const text = opt?.text ?? opt?.Text ?? opt?.name ?? opt?.Name ?? "";
+      return { value, text };
+    })
+    .filter(x => x.value !== null && x.value !== undefined && String(x.value).trim() !== "");
+
+  mapped.forEach(x => {
+    const valueStr = String(x.value).trim();
+    const textStr = String(x.text ?? "").trim();
+    const o = document.createElement("option");
+    o.value = valueStr;
+    o.textContent = textStr && textStr !== valueStr ? `${valueStr} - ${textStr}` : valueStr;
+    select.appendChild(o);
+  });
+
+  if (selected && !mapped.some(x => String(x.value).trim() === selected)) {
+    const fallback = document.createElement("option");
+    fallback.value = selected;
+    fallback.textContent = selected;
+    select.appendChild(fallback);
+  }
+
+  select.value = selected;
+}
+
+async function ensureItemTypeOptions(selectedValue) {
+  const select = document.getElementById('editItemType');
+  if (!select) return;
+  if (!_itemTypeCache) {
+    try {
+      const fetcher = window.busyFetch || fetch;
+      const res = await fetcher("/api/EditItemApi/ItemTypeOptions");
+      _itemTypeCache = res.ok ? await res.json() : [];
+    } catch {
+      _itemTypeCache = [];
+    }
+  }
+  bindValueTextOptions(select, _itemTypeCache, selectedValue);
+}
+
+async function ensureOutputTypeOptions(selectedValue) {
+  const select = document.getElementById('editOutputType');
+  if (!select) return;
+  if (!_outputTypeCache) {
+    try {
+      const fetcher = window.busyFetch || fetch;
+      const res = await fetcher("/api/EditItemApi/OutputTypeOptions");
+      _outputTypeCache = res.ok ? await res.json() : [];
+    } catch {
+      _outputTypeCache = [];
+    }
+  }
+  bindValueTextOptions(select, _outputTypeCache, selectedValue);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -945,7 +1060,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const itemName  = document.getElementById('editItemName').value.trim();
     const superId   = document.getElementById('editSuperId').value.trim();
     const serialNum = Number(document.getElementById('editSerialNum').value || 0);
+    const itemTypeRaw = document.getElementById('editItemType').value.trim();
+    const outputTypeRaw = document.getElementById('editOutputType').value.trim();
+    const itemType = itemTypeRaw === "" ? null : Number(itemTypeRaw);
+    const outputType = outputTypeRaw === "" ? null : Number(outputTypeRaw);
     const enabled   = document.getElementById('editEnabled').checked ? 1 : 0;
+    const objectName = document.getElementById('editObjectName').value;
     const notes     = document.getElementById('editNotes').value;
     const ocxtemplete = document.getElementById('editOcxtemplete').value;
     const sWebMenuId = document.getElementById('editSWebMenuId').value.trim();
@@ -957,6 +1077,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const iWebEnable = document.getElementById('editIWebEnable').checked ? 1 : 0;
     const alertBox  = document.getElementById('editAlert');
     if (!itemId || !itemName) { alertBox.textContent = "請填寫完整資料"; alertBox.classList.remove('d-none'); return; }
+    if (itemType === null || !Number.isFinite(itemType)) { alertBox.textContent = "資料來源(ItemType)必須輸入數字"; alertBox.classList.remove('d-none'); return; }
+    if (outputType === null || !Number.isFinite(outputType)) { alertBox.textContent = "輸出方式(OutputType)必須輸入數字"; alertBox.classList.remove('d-none'); return; }
     try {
       const res = await fetch("/api/EditItemApi", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -964,6 +1086,9 @@ document.addEventListener('DOMContentLoaded', () => {
           itemId,
           itemName,
           superId,
+          itemType,
+          outputType,
+          objectName,
           serialNum,
           enabled,
           notes,
@@ -987,7 +1112,7 @@ document.addEventListener('DOMContentLoaded', () => {
         li.innerHTML = `${orderSpan}<span>${itemId} - ${itemName}</span>${webMenuSpan}${enabledSpan}${webEnabledSpan}`;
         const systemId = document.getElementById('editSystemId').value.trim();
         const q = (v) => JSON.stringify(v ?? "");
-        const dbl = `openEditModal(${q(itemId)}, ${q(itemName)}, ${q(superId)}, ${q(systemId)}, ${serialNum}, ${enabled}, ${q(notes)}, ${q(ocxtemplete)}, ${q(sWebMenuId)}, ${q(sWebSuperMenuId)}, ${q(iWebMenuOrderSeq ?? "")}, ${q(iWebMenuLevel ?? "")}, ${q(iWebEnable)})`;
+        const dbl = `openEditModal(${q(itemId)}, ${q(itemName)}, ${q(superId)}, ${q(systemId)}, ${serialNum}, ${enabled}, ${q(notes)}, ${q(ocxtemplete)}, ${q(sWebMenuId)}, ${q(sWebSuperMenuId)}, ${q(iWebMenuOrderSeq ?? "")}, ${q(iWebMenuLevel ?? "")}, ${q(iWebEnable)}, ${q(itemType)}, ${q(outputType)}, ${q(objectName)})`;
         li.setAttribute("ondblclick", dbl);
       }
       safeGetModal('editItemModal')?.hide();
@@ -2219,6 +2344,48 @@ function _saveSysButtons(){
 </script>
 
 <style>
+  .index-global-tabs-wrap {
+    background: #ffffff;
+    border: 1px solid #e6eaf2;
+    border-radius: 12px;
+    box-shadow: 0 8px 18px rgba(79, 70, 229, 0.06);
+    padding: 8px 12px;
+    margin: 0 12px 10px;
+  }
+
+  .index-global-nav {
+    gap: 6px;
+  }
+
+  .index-global-nav .nav-link {
+    padding: 6px 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    color: #475569;
+    border: 1px solid transparent;
+    background: transparent;
+  }
+
+  .index-global-nav .nav-link:hover {
+    color: #4f46e5;
+    background: #eef2ff;
+  }
+
+  .index-global-nav .nav-link.active {
+    color: #312e81;
+    background: #e0e7ff;
+    border-color: #c7d2fe;
+    font-weight: 600;
+  }
+
+  .index-global-nav .nav-link.disabled {
+    color: #94a3b8;
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    pointer-events: none;
+  }
+
   .index-page {
     background: #f6f5ff;
     padding: 0 12px 12px;

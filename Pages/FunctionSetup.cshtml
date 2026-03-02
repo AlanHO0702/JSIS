@@ -1612,7 +1612,7 @@ function createOtherRuleRow(r = {}) {
   ths.forEach(th => {
     const f = th.dataset.field;
     if (f === "RuleId") {
-      tr.insertAdjacentHTML("beforeend", `<td data-field="RuleId"><select class="form-select form-select-sm">${opts}</select></td>`);
+      tr.insertAdjacentHTML("beforeend", `<td data-field="RuleId"><input class="form-control form-control-sm" value="${esc(currentRuleId ?? "")}" readonly></td>`);
     } else if (f === "Lk_RuleName") {
       tr.insertAdjacentHTML("beforeend", `<td data-field="Lk_RuleName"><input class="form-control form-control-sm" value="${esc(currentRuleName)}" readonly></td>`);
     } else {
@@ -1620,16 +1620,52 @@ function createOtherRuleRow(r = {}) {
     }
   });
 
-  const sel = tr.querySelector('td[data-field="RuleId"] select');
+  const ruleIdTd = tr.querySelector('td[data-field="RuleId"]');
+  const ruleIdInput = tr.querySelector('td[data-field="RuleId"] input');
   const ruleNameInput = tr.querySelector('td[data-field="Lk_RuleName"] input');
-  if (sel && ruleNameInput) {
-    if (!ruleNameInput.value) {
-      ruleNameInput.value = sel.options[sel.selectedIndex]?.getAttribute("data-name") || "";
-    }
-    sel.addEventListener("change", () => {
-      const text = sel.options[sel.selectedIndex]?.getAttribute("data-name") || "";
-      ruleNameInput.value = text;
-    });
+  if (ruleIdTd && ruleIdInput && ruleNameInput) {
+    const syncRuleName = () => {
+      const selectedRuleId = String(ruleIdInput.value || "");
+      const hit = normalizedOptions.find(x => String(pick(x, "RuleId", "ruleId")) === selectedRuleId);
+      ruleNameInput.value = String(pick(hit, "RuleName", "ruleName") || "");
+    };
+
+    if (!ruleNameInput.value) syncRuleName();
+
+    const closeEditor = (sel) => {
+      if (!sel) return;
+      ruleIdInput.value = sel.value || "";
+      syncRuleName();
+      sel.remove();
+      ruleIdInput.style.display = "";
+    };
+
+    const openEditor = () => {
+      if (ruleIdTd.querySelector("select")) return;
+      const sel = document.createElement("select");
+      sel.className = "form-select form-select-sm";
+      sel.innerHTML = opts;
+      if (Array.from(sel.options).some(o => o.value === String(ruleIdInput.value || ""))) {
+        sel.value = String(ruleIdInput.value || "");
+      }
+      ruleIdInput.style.display = "none";
+      ruleIdTd.appendChild(sel);
+      sel.focus();
+      if (typeof sel.showPicker === "function") {
+        try { sel.showPicker(); } catch {}
+      }
+      sel.addEventListener("change", () => closeEditor(sel));
+      sel.addEventListener("blur", () => closeEditor(sel));
+      sel.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          sel.value = String(ruleIdInput.value || "");
+          closeEditor(sel);
+        }
+      });
+    };
+
+    ruleIdTd.addEventListener("dblclick", () => openEditor());
   }
 
   tr.addEventListener("click", () => {
