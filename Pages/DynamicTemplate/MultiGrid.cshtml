@@ -103,6 +103,21 @@ else
     @await Html.PartialAsync("~/Pages/Shared/_QueryFieldModals.cshtml")
 }
 
+<script>
+  window._multiGridItemId = '@Model.ItemId';
+</script>
+<script>
+  (function() {
+    const itemId = '@Model.ItemId';
+    if (!itemId) return;
+    const s = document.createElement('script');
+    s.src = `/js/multigrid/${encodeURIComponent(itemId)}.js`;
+    s.async = true;
+    s.onerror = function() { console.debug('no custom multigrid script for', itemId); };
+    document.head.appendChild(s);
+  })();
+</script>
+
 <!-- CondRunSp Modal -->
 <div class="modal fade" id="condRunSpModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog cond-runsp-dialog">
@@ -1005,6 +1020,24 @@ document.addEventListener('DOMContentLoaded', () => {
             paperNum: paperNum,
             selectedRow: selected
         };
+        const handlerMap = window.MultiGridCustomHandlers || {};
+        const itemHandlers = handlerMap[ctx.itemId] || {};
+        const itemHandlerKey = Object.keys(itemHandlers).find(k => String(k).toLowerCase() === String(name).toLowerCase());
+        const rootHandlerKey = Object.keys(handlerMap).find(k => String(k).toLowerCase() === String(name).toLowerCase());
+        const customHandler =
+            (typeof itemHandlers[name] === "function" ? itemHandlers[name] : null) ||
+            (itemHandlerKey && typeof itemHandlers[itemHandlerKey] === "function" ? itemHandlers[itemHandlerKey] : null) ||
+            (typeof handlerMap[name] === "function" ? handlerMap[name] : null) ||
+            (rootHandlerKey && typeof handlerMap[rootHandlerKey] === "function" ? handlerMap[rootHandlerKey] : null);
+        if (customHandler) {
+            try {
+                await customHandler(ctx);
+            } catch (err) {
+                console.error("multigrid custom button handler error", err);
+                alert(`執行失敗: ${err?.message || err}`);
+            }
+            return;
+        }
         if (searchTemplate === "jsdcondrunspdll.dll" && designType === 1) {
             await condRunSp.open(ctx, { dialogCaption: btn.dataset.dialogCaption || "" });
             return;
