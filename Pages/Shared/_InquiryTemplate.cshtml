@@ -1,4 +1,7 @@
 ﻿@model dynamic
+@inject PcbErpApi.Services.IBreadcrumbService BreadcrumbService
+@inject PcbErpApi.Data.PcbErpContext DbContext
+@using Microsoft.EntityFrameworkCore
 @{
     Layout = "_Layout";
 
@@ -11,6 +14,22 @@
         && !actionPartial.EndsWith("_ActionRail.Empty.cshtml", StringComparison.OrdinalIgnoreCase);
     var showHeader = (ViewData["ShowInqHeader"] as bool?) ?? true;
     var showRail = (ViewData["ShowInqRail"] as bool?) ?? (hasRailSection || hasActionRail);
+
+    if (ViewData["Breadcrumbs"] == null)
+    {
+        var itemId = title.Split(' ').FirstOrDefault() ?? "";
+        if (!string.IsNullOrWhiteSpace(itemId))
+        {
+            try
+            {
+                var sysItem = await DbContext.CurdSysItems.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.ItemId == itemId);
+                if (!string.IsNullOrWhiteSpace(sysItem?.SuperId))
+                    ViewData["Breadcrumbs"] = await BreadcrumbService.BuildBreadcrumbsAsync(sysItem.SuperId);
+            }
+            catch { }
+        }
+    }
 }
 
 <style>
