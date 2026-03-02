@@ -76,11 +76,13 @@
    * @param {Array<any>} keyValues - Key 值陣列
    * @returns {Promise<Array>} 資料列陣列
    */
-  const fetchByKeys = async (tableName, keyNames, keyValues) => {
+  const fetchByKeys = async (tableName, keyNames, keyValues, orderBy = null, orderDir = "ASC") => {
     if (!tableName || !keyNames || !keyValues) return [];
     const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}`
       + keyNames.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
-      + keyValues.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("");
+      + keyValues.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("")
+      + (orderBy ? `&orderBy=${encodeURIComponent(orderBy)}` : "")
+      + (orderBy ? `&orderDir=${encodeURIComponent(orderDir || "ASC")}` : "");
     return await fetch(url).then(r => r.json());
   };
 
@@ -875,11 +877,7 @@ const loadAllDetails = async (row) => {
     });
     tbody._lastQueryCtx = ctx;
 
-    const rowsRaw = await fetchByKeys(d.DetailTable, names, values);
-    const itemKey = (detailDicts[i] || [])
-      .map(f => f.FieldName)
-      .find(n => normalizeKeyName(n) === "item");
-    const rows = sortRowsByItemIfNeeded(rowsRaw, itemKey ? [itemKey] : []);
+    const rows = await fetchByKeys(d.DetailTable, names, values, d.OrderByField);
 
     // ★ 為 Detail 表格添加 row click 事件處理，實現 Focus 功能
     await buildBody(tbody, detailDicts[i], rows, (row, tr) => {
@@ -978,11 +976,7 @@ const loadAllDetails = async (row) => {
       });
       tbody._lastQueryCtx = ctx;
 
-      const rowsRaw = await fetchByKeys(nextDetail.DetailTable, names, values);
-      const itemKey = (detailDicts[nextIndex] || [])
-        .map(f => f.FieldName)
-        .find(n => normalizeKeyName(n) === "item");
-      const rows = sortRowsByItemIfNeeded(rowsRaw, itemKey ? [itemKey] : []);
+      const rows = await fetchByKeys(nextDetail.DetailTable, names, values, nextDetail.OrderByField);
 
       // 載入下一層 Detail 的資料，同時保留 Focus 聯動功能
       await buildBody(tbody, detailDicts[nextIndex], rows, (row, tr) => {
@@ -1058,11 +1052,7 @@ const loadAllDetails = async (row) => {
         });
         tbody._lastQueryCtx = ctx;
 
-        const rowsRaw = await fetchByKeys(nextDetail.DetailTable, names, values);
-        const itemKey = (detailDicts[nextIndex] || [])
-          .map(f => f.FieldName)
-          .find(n => normalizeKeyName(n) === "item");
-        const rows = sortRowsByItemIfNeeded(rowsRaw, itemKey ? [itemKey] : []);
+        const rows = await fetchByKeys(nextDetail.DetailTable, names, values, nextDetail.OrderByField);
 
         // 載入 SubDetail 的資料（不需要遞迴，因為迴圈已經處理所有層級）
         await buildBody(tbody, detailDicts[nextIndex], rows, (row, tr) => {
@@ -1358,8 +1348,8 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
     };
 
     const sortRowsByItemIfNeeded = (rows, keyFields) => {
-      const itemKey = (keyFields || []).find(k => normalizeKeyName(k) === "item");
-      if (!itemKey) return rows;
+      const sortKey = Array.isArray(keyFields) && keyFields.length ? keyFields[0] : null;
+      if (!sortKey) return rows;
       const getRowValue = (row, field) => {
         if (!row || !field) return "";
         const want = normalizeKeyName(field);
@@ -1371,8 +1361,8 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
         return Number.isFinite(n) ? n : null;
       };
       return rows.slice().sort((a, b) => {
-        const av = getRowValue(a, itemKey);
-        const bv = getRowValue(b, itemKey);
+        const av = getRowValue(a, sortKey);
+        const bv = getRowValue(b, sortKey);
         const an = toNum(av);
         const bn = toNum(bv);
         if (an != null && bn != null) return an - bn;

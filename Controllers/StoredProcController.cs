@@ -1,8 +1,13 @@
 using System.Data;
+using System.Globalization;
+using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using NPOI.HSSF.UserModel;
+using NPOI.SS.UserModel;
 using PcbErpApi.Data;
 
 [ApiController]
@@ -11,6 +16,8 @@ using PcbErpApi.Data;
 public class StoredProcController : ControllerBase
 {
     private readonly string _cs;
+    private readonly IConfiguration _cfg;
+    private readonly IHttpClientFactory _httpFactory;
     // 白名單：前端 key -> SP 名稱 + 必填/可選參數
     private static readonly Dictionary<string, StoredProcDef> _registry =
         new(StringComparer.OrdinalIgnoreCase)
@@ -119,17 +126,20 @@ public class StoredProcController : ControllerBase
 
         };
 
-    public StoredProcController(IConfiguration cfg, PcbErpContext db)
+    public StoredProcController(IConfiguration cfg, PcbErpContext db, IHttpClientFactory httpFactory)
     {
+        _cfg = cfg;
         _cs = cfg.GetConnectionString("DefaultConnection")
               ?? cfg.GetConnectionString("Default")
               ?? db?.Database.GetDbConnection().ConnectionString
               ?? throw new InvalidOperationException("找不到 ConnectionStrings:Default 或 DbContext 連線字串");
+        _httpFactory = httpFactory;
     }
 
     public record ExecSpRequest(string Key, Dictionary<string, object>? Args);
     public record ExecByButtonRequest(string ItemId, string ButtonName, string PaperNum, Dictionary<string, object>? Args);
     public record QueryDirectRequest(string TableName, string? WhereClause, Dictionary<string, object>? Parameters, string[]? Columns);
+    public record ReportOrderScheduleRequest(string ItemId, string? ApiKey);
     private record StoredProcDef(string ProcName, string[] RequiredParams, string[]? OptionalParams = null);
 
     [HttpPost("exec")]
@@ -347,6 +357,9 @@ public class StoredProcController : ControllerBase
             if (string.IsNullOrWhiteSpace(spNameRaw))
                 return BadRequest(new { ok = false, error = "找不到 SP 名稱" });
 
+            var spNameNorm = NormalizeIdentifier(spNameRaw)
+                .Replace("[", string.Empty)
+                .Replace("]", string.Empty);
             var spName = QuoteIdentifier(spNameRaw);
             var opKind = GetOpKind(req.Args);
             var paramDefs = await LoadButtonParamsAsync(conn, tx, req.ItemId, req.ButtonName, opKind);
@@ -355,6 +368,63 @@ public class StoredProcController : ControllerBase
 
             var systemId = await LoadSystemIdAsync(conn, tx, req.ItemId);
             var userId = User?.Identity?.Name ?? string.Empty;
+
+            if (IsSpName(spNameNorm, "CURdReportOrderRunNow"))
+            {
+                var reportItemId = await ResolveReportOrderItemIdAsync(
+                    conn, tx, tableMap, req.PaperNum, paramDefs, systemId, userId, req.Args);
+
+                if (string.IsNullOrWhiteSpace(reportItemId))
+                    return BadRequest(new { ok = false, error = "找不到報表程式項目(ItemId)" });
+
+                var run = await RunReportOrderNowAsync(conn, tx, reportItemId);
+                await tx.CommitAsync();
+                return Ok(new
+                {
+                    ok = true,
+                    message = "MESGE:已完成",
+                    reportItemId,
+                    total = run.Total,
+                    sent = run.Sent,
+                    skipped = run.Skipped
+                });
+            }
+
+            if (IsSpName(spNameNorm, "CURdReportOrderExam"))
+            {
+                var reportItemId = await ResolveReportOrderItemIdAsync(
+                    conn, tx, tableMap, req.PaperNum, paramDefs, systemId, userId, req.Args);
+
+                if (string.IsNullOrWhiteSpace(reportItemId))
+                    return BadRequest(new { ok = false, error = "找不到報表程式項目(ItemId)" });
+
+                var message = await ApproveReportOrderAsync(conn, tx, reportItemId);
+                await tx.CommitAsync();
+                return Ok(new
+                {
+                    ok = true,
+                    message,
+                    reportItemId
+                });
+            }
+
+            if (IsSpName(spNameNorm, "CURdReportOrderReject"))
+            {
+                var reportItemId = await ResolveReportOrderItemIdAsync(
+                    conn, tx, tableMap, req.PaperNum, paramDefs, systemId, userId, req.Args);
+
+                if (string.IsNullOrWhiteSpace(reportItemId))
+                    return BadRequest(new { ok = false, error = "找不到報表程式項目(ItemId)" });
+
+                var message = await RejectReportOrderAsync(conn, tx, reportItemId);
+                await tx.CommitAsync();
+                return Ok(new
+                {
+                    ok = true,
+                    message,
+                    reportItemId
+                });
+            }
 
             var placeholders = paramDefs.Count == 0
                 ? string.Empty
@@ -382,6 +452,975 @@ public class StoredProcController : ControllerBase
             if (tx != null) { try { await tx.RollbackAsync(); } catch { } }
             return StatusCode(500, new { ok = false, error = ex.GetBaseException().Message });
         }
+    }
+
+    [HttpPost("reportOrder/runNowScheduled")]
+    public async Task<IActionResult> RunNowScheduled([FromBody] ReportOrderScheduleRequest req)
+    {
+        var itemId = (req?.ItemId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(itemId))
+            return BadRequest(new { ok = false, error = "ItemId 為必填" });
+
+        var expectedApiKey = (_cfg["ReportOrder:SchedulerApiKey"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(expectedApiKey))
+        {
+            var incomingApiKey = (req?.ApiKey ?? string.Empty).Trim();
+            if (!string.Equals(incomingApiKey, expectedApiKey, StringComparison.Ordinal))
+                return Unauthorized(new { ok = false, error = "排程驗證失敗" });
+        }
+
+        await using var conn = new SqlConnection(_cs);
+        SqlTransaction? tx = null;
+
+        try
+        {
+            await conn.OpenAsync();
+            tx = (SqlTransaction)await conn.BeginTransactionAsync();
+
+            var run = await RunReportOrderNowAsync(conn, tx, itemId);
+            await tx.CommitAsync();
+
+            return Ok(new
+            {
+                ok = true,
+                message = "MESGE:已完成",
+                reportItemId = itemId,
+                total = run.Total,
+                sent = run.Sent,
+                skipped = run.Skipped
+            });
+        }
+        catch (Exception ex)
+        {
+            if (tx != null) { try { await tx.RollbackAsync(); } catch { } }
+            return StatusCode(500, new { ok = false, error = ex.GetBaseException().Message });
+        }
+    }
+
+    private static bool IsSpName(string normalizedName, string targetProc)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedName) || string.IsNullOrWhiteSpace(targetProc))
+            return false;
+
+        return normalizedName.Equals(targetProc, StringComparison.OrdinalIgnoreCase)
+            || normalizedName.Equals($"dbo.{targetProc}", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed record ReportOrderRunResult(int Total, int Sent, int Skipped);
+    private sealed record ReportOrderBasRow(int? OrderFreqType, int? DayOfEvery, int? HourOfEvery, int? OrderExpType, int Finished);
+    private sealed record ReportOrderScheduleDef(int FreqType, int FreqInterval, int FreqRecurrenceFactor, int StartDate, int StartTime);
+    private sealed record ReportOrderCheckRow(string ItemId, int OrderExpType, string PrintRptName, string ReportPath);
+    private sealed record ReportOrderSqlRow(string SqlText, string ObjectName, string ItemName);
+
+    private async Task<string?> ResolveReportOrderItemIdAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        Dictionary<string, string> tableMap,
+        string paperNum,
+        List<ButtonParamRow> paramDefs,
+        string? systemId,
+        string userId,
+        Dictionary<string, object>? args)
+    {
+        var ordered = paramDefs.OrderBy(p => p.SeqNum).ToList();
+        foreach (var p in ordered)
+        {
+            var val = await ResolveParamValueAsync(conn, tx, tableMap, paperNum, p, systemId, userId, args);
+            var s = Convert.ToString(val)?.Trim();
+            if (!string.IsNullOrWhiteSpace(s)) return s;
+        }
+
+        var row = GetArgValue(args ?? new Dictionary<string, object>(), "masterRow");
+        var fromMaster = row == null ? null : ReadFieldFromRow(row, "ItemId");
+        var fromMasterText = Convert.ToString(fromMaster)?.Trim();
+        if (!string.IsNullOrWhiteSpace(fromMasterText)) return fromMasterText;
+
+        var fromPaperNum = (paperNum ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(fromPaperNum) ? null : fromPaperNum;
+    }
+
+    private async Task<ReportOrderRunResult> RunReportOrderNowAsync(SqlConnection conn, SqlTransaction tx, string itemId)
+    {
+        if (!await ReportOrderItemExistsAsync(conn, tx, itemId))
+            throw new InvalidOperationException("報表程式項目不存在");
+
+        if (!await ReportOrderItemFinishedAsync(conn, tx, itemId))
+            throw new InvalidOperationException("報表程式項目尚未審核");
+
+        var rows = await LoadReportOrderCheckRowsAsync(conn, tx, itemId);
+        var sent = 0;
+        var skipped = 0;
+
+        foreach (var row in rows)
+        {
+            var sqlInfo = await LoadReportOrderSqlAsync(conn, tx, row.ItemId);
+            if (string.IsNullOrWhiteSpace(sqlInfo.SqlText))
+            {
+                skipped++;
+                continue;
+            }
+
+            var attFile = await BuildReportOrderAttachmentAsync(conn, tx, row, sqlInfo);
+            if (string.IsNullOrWhiteSpace(attFile))
+            {
+                skipped++;
+                continue;
+            }
+
+            await SendReportOrderMailAsync(conn, tx, row.ItemId, attFile);
+            sent++;
+        }
+
+        return new ReportOrderRunResult(rows.Count, sent, skipped);
+    }
+
+    private async Task<string> ApproveReportOrderAsync(SqlConnection conn, SqlTransaction tx, string itemId)
+    {
+        var bas = await LoadReportOrderBasAsync(conn, tx, itemId)
+            ?? throw new InvalidOperationException("報表程式項目不存在");
+
+        if (bas.Finished == 1)
+            throw new InvalidOperationException("此程式項目已審核，不可重覆操作");
+
+        await ValidateReportOrderApproveAsync(conn, tx, itemId, bas);
+
+        var scheduleDef = BuildReportOrderScheduleDef(bas);
+        var jobName = BuildReportOrderJobName(conn.Database, itemId);
+        await DeleteSqlAgentJobIfExistsAsync(conn, tx, jobName);
+
+        var cmdExec = BuildReportOrderScheduleCommand(itemId);
+        await CreateSqlAgentJobAsync(conn, tx, jobName, conn.Database, scheduleDef, cmdExec);
+
+        await SetReportOrderFinishedAsync(conn, tx, itemId, 1);
+        return "MESGE:已建立排程";
+    }
+
+    private async Task<string> RejectReportOrderAsync(SqlConnection conn, SqlTransaction tx, string itemId)
+    {
+        if (!await ReportOrderItemExistsAsync(conn, tx, itemId))
+            throw new InvalidOperationException("報表程式項目不存在");
+
+        var jobName = BuildReportOrderJobName(conn.Database, itemId);
+        await DeleteSqlAgentJobIfExistsAsync(conn, tx, jobName);
+        await SetReportOrderFinishedAsync(conn, tx, itemId, 0);
+
+        return "MESGE:已退審";
+    }
+
+    private static async Task<ReportOrderBasRow?> LoadReportOrderBasAsync(SqlConnection conn, SqlTransaction tx, string itemId)
+    {
+        const string sql = @"
+SELECT TOP 1
+       OrderFreqType,
+       DayOfEvery,
+       HourOfEvery,
+       OrderExpType,
+       ISNULL(Finished, 0) AS Finished
+  FROM CURdReportOrderBas WITH (NOLOCK)
+ WHERE ItemId = @itemId;";
+
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@itemId", itemId ?? string.Empty);
+        await using var rd = await cmd.ExecuteReaderAsync();
+        if (!await rd.ReadAsync()) return null;
+
+        return new ReportOrderBasRow(
+            OrderFreqType: ReadNullableInt(rd, "OrderFreqType"),
+            DayOfEvery: ReadNullableInt(rd, "DayOfEvery"),
+            HourOfEvery: ReadNullableInt(rd, "HourOfEvery"),
+            OrderExpType: ReadNullableInt(rd, "OrderExpType"),
+            Finished: ReadInt(rd, "Finished")
+        );
+    }
+
+    private static async Task SetReportOrderFinishedAsync(SqlConnection conn, SqlTransaction tx, string itemId, int finished)
+    {
+        const string sql = "UPDATE CURdReportOrderBas SET Finished = @finished WHERE ItemId = @itemId;";
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@finished", finished);
+        cmd.Parameters.AddWithValue("@itemId", itemId ?? string.Empty);
+        var affected = await cmd.ExecuteNonQueryAsync();
+        if (affected <= 0)
+            throw new InvalidOperationException("更新狀態...發生錯誤");
+    }
+
+    private static async Task ValidateReportOrderApproveAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        string itemId,
+        ReportOrderBasRow bas)
+    {
+        if (!await ReportOrderHasSubscriberAsync(conn, tx, itemId))
+            throw new InvalidOperationException("沒有訂閱者，不可審核");
+
+        var noEmailUser = await FirstSubscriberWithoutEmailAsync(conn, tx, itemId);
+        if (!string.IsNullOrWhiteSpace(noEmailUser))
+            throw new InvalidOperationException($"訂閱者{noEmailUser}沒有E_Mail資料");
+
+        var disabledUser = await FirstDisabledSubscriberAsync(conn, tx, itemId);
+        if (!string.IsNullOrWhiteSpace(disabledUser))
+            throw new InvalidOperationException($"訂閱者{disabledUser}已停用");
+
+        if (!bas.OrderFreqType.HasValue || !await ReportOrderFreqTypeExistsAsync(conn, tx, bas.OrderFreqType.Value))
+            throw new InvalidOperationException("訂閱頻率不正確");
+
+        if (!bas.OrderExpType.HasValue || !await ReportOrderExpTypeExistsAsync(conn, tx, bas.OrderExpType.Value))
+            throw new InvalidOperationException("夾檔種類不正確");
+
+        if (!bas.HourOfEvery.HasValue)
+            throw new InvalidOperationException("必須輸入「幾點發送」");
+
+        if (bas.HourOfEvery.Value < 0 || bas.HourOfEvery.Value > 23)
+            throw new InvalidOperationException("輸入的「幾點發送」有誤");
+
+        if (bas.OrderFreqType is 1 or 2)
+        {
+            if (!bas.DayOfEvery.HasValue)
+                throw new InvalidOperationException("必須輸入「第幾日發送」");
+
+            if (bas.OrderFreqType == 1 && (bas.DayOfEvery.Value < 1 || bas.DayOfEvery.Value > 31))
+                throw new InvalidOperationException("輸入的「第幾日發送」有誤");
+
+            if (bas.OrderFreqType == 2 && (bas.DayOfEvery.Value < 1 || bas.DayOfEvery.Value > 7))
+                throw new InvalidOperationException("輸入的「第幾日發送」有誤");
+        }
+    }
+
+    private static async Task<bool> ReportOrderHasSubscriberAsync(SqlConnection conn, SqlTransaction tx, string itemId)
+    {
+        const string sql = "SELECT TOP 1 1 FROM CURdReportOrderUser WITH (NOLOCK) WHERE ItemId = @itemId;";
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@itemId", itemId ?? string.Empty);
+        var obj = await cmd.ExecuteScalarAsync();
+        return obj != null && obj != DBNull.Value;
+    }
+
+    private static async Task<string?> FirstSubscriberWithoutEmailAsync(SqlConnection conn, SqlTransaction tx, string itemId)
+    {
+        const string sql = @"
+SELECT TOP 1 t1.UserId
+  FROM CURdUsers t1 WITH (NOLOCK)
+  JOIN CURdReportOrderUser t2 WITH (NOLOCK) ON t1.UserId = t2.UserId
+ WHERE t2.ItemId = @itemId
+   AND LTRIM(RTRIM(ISNULL(t1.E_Mail, ''))) = '';";
+
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@itemId", itemId ?? string.Empty);
+        var obj = await cmd.ExecuteScalarAsync();
+        return obj == null || obj == DBNull.Value ? null : Convert.ToString(obj);
+    }
+
+    private static async Task<string?> FirstDisabledSubscriberAsync(SqlConnection conn, SqlTransaction tx, string itemId)
+    {
+        const string sql = @"
+SELECT TOP 1 t1.UserId
+  FROM CURdUsers t1 WITH (NOLOCK)
+  JOIN CURdReportOrderUser t2 WITH (NOLOCK) ON t1.UserId = t2.UserId
+ WHERE t2.ItemId = @itemId
+   AND ISNULL(t1.Permit, 0) = 0;";
+
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@itemId", itemId ?? string.Empty);
+        var obj = await cmd.ExecuteScalarAsync();
+        return obj == null || obj == DBNull.Value ? null : Convert.ToString(obj);
+    }
+
+    private static async Task<bool> ReportOrderFreqTypeExistsAsync(SqlConnection conn, SqlTransaction tx, int orderFreqType)
+    {
+        const string sql = "SELECT TOP 1 1 FROM CURdReportOrderFreq WITH (NOLOCK) WHERE OrderFreqType = @val;";
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@val", orderFreqType);
+        var obj = await cmd.ExecuteScalarAsync();
+        return obj != null && obj != DBNull.Value;
+    }
+
+    private static async Task<bool> ReportOrderExpTypeExistsAsync(SqlConnection conn, SqlTransaction tx, int orderExpType)
+    {
+        const string sql = "SELECT TOP 1 1 FROM CURdReportOrderExpType WITH (NOLOCK) WHERE OrderExpType = @val;";
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@val", orderExpType);
+        var obj = await cmd.ExecuteScalarAsync();
+        return obj != null && obj != DBNull.Value;
+    }
+
+    private static ReportOrderScheduleDef BuildReportOrderScheduleDef(ReportOrderBasRow bas)
+    {
+        var orderFreqType = bas.OrderFreqType ?? 0;
+        var dayOfEvery = bas.DayOfEvery ?? 0;
+        var hourOfEvery = bas.HourOfEvery ?? 0;
+
+        var startDate = int.Parse(DateTime.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
+        var startTime = hourOfEvery * 10000;
+
+        if (orderFreqType == 1)
+            return new ReportOrderScheduleDef(16, dayOfEvery, 1, startDate, startTime);
+
+        if (orderFreqType == 2)
+        {
+            var weeklyInterval = dayOfEvery switch
+            {
+                1 => 2,   // Monday
+                2 => 4,   // Tuesday
+                3 => 8,   // Wednesday
+                4 => 16,  // Thursday
+                5 => 32,  // Friday
+                6 => 64,  // Saturday
+                7 => 1,   // Sunday
+                _ => 0
+            };
+            if (weeklyInterval == 0)
+                throw new InvalidOperationException("輸入的「第幾日發送」有誤");
+            return new ReportOrderScheduleDef(8, weeklyInterval, 1, startDate, startTime);
+        }
+
+        if (orderFreqType == 3)
+            return new ReportOrderScheduleDef(4, 1, 0, startDate, startTime);
+
+        throw new InvalidOperationException("訂閱頻率不正確");
+    }
+
+    private static string BuildReportOrderJobName(string dbName, string itemId)
+    {
+        var safeDb = string.IsNullOrWhiteSpace(dbName) ? "DB" : dbName.Trim();
+        var safeItem = string.IsNullOrWhiteSpace(itemId) ? "Item" : itemId.Trim();
+        return $"RptOrder_{safeDb}_{safeItem}";
+    }
+
+    private static async Task DeleteSqlAgentJobIfExistsAsync(SqlConnection conn, SqlTransaction tx, string jobName)
+    {
+        const string checkSql = "SELECT TOP 1 1 FROM msdb.dbo.sysjobs_view WITH (NOLOCK) WHERE name = @jobName;";
+        await using (var checkCmd = new SqlCommand(checkSql, conn, tx))
+        {
+            checkCmd.Parameters.AddWithValue("@jobName", jobName);
+            var exists = await checkCmd.ExecuteScalarAsync();
+            if (exists == null || exists == DBNull.Value) return;
+        }
+
+        const string deleteSql = "EXEC msdb.dbo.sp_delete_job @job_name = @jobName, @delete_unused_schedule = 1;";
+        await using var deleteCmd = new SqlCommand(deleteSql, conn, tx);
+        deleteCmd.Parameters.AddWithValue("@jobName", jobName);
+        await deleteCmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task CreateSqlAgentJobAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        string jobName,
+        string dbName,
+        ReportOrderScheduleDef schedule,
+        string cmdExec)
+    {
+        var description = $"Report Order Schedule ({dbName}:{jobName})";
+        await using (var addJobCmd = new SqlCommand(
+            "EXEC msdb.dbo.sp_add_job @job_name = @jobName, @enabled = 1, @description = @desc;",
+            conn, tx))
+        {
+            addJobCmd.Parameters.AddWithValue("@jobName", jobName);
+            addJobCmd.Parameters.AddWithValue("@desc", description);
+            await addJobCmd.ExecuteNonQueryAsync();
+        }
+
+        await using (var addStepCmd = new SqlCommand(
+            @"EXEC msdb.dbo.sp_add_jobstep
+                @job_name = @jobName,
+                @step_name = N'RunReportOrder',
+                @subsystem = N'CmdExec',
+                @command = @cmdExec,
+                @on_success_action = 1,
+                @on_fail_action = 2,
+                @retry_attempts = 0,
+                @retry_interval = 0;",
+            conn, tx))
+        {
+            addStepCmd.Parameters.AddWithValue("@jobName", jobName);
+            addStepCmd.Parameters.AddWithValue("@cmdExec", cmdExec);
+            await addStepCmd.ExecuteNonQueryAsync();
+        }
+
+        var scheduleName = jobName.Length > 120 ? jobName[..120] : jobName;
+        scheduleName = $"{scheduleName}_Schedule";
+        if (scheduleName.Length > 128) scheduleName = scheduleName[..128];
+
+        await using (var addScheduleCmd = new SqlCommand(
+            @"EXEC msdb.dbo.sp_add_jobschedule
+                @job_name = @jobName,
+                @name = @scheduleName,
+                @enabled = 1,
+                @freq_type = @freqType,
+                @freq_interval = @freqInterval,
+                @freq_recurrence_factor = @freqRecurrence,
+                @active_start_date = @startDate,
+                @active_start_time = @startTime;",
+            conn, tx))
+        {
+            addScheduleCmd.Parameters.AddWithValue("@jobName", jobName);
+            addScheduleCmd.Parameters.AddWithValue("@scheduleName", scheduleName);
+            addScheduleCmd.Parameters.AddWithValue("@freqType", schedule.FreqType);
+            addScheduleCmd.Parameters.AddWithValue("@freqInterval", schedule.FreqInterval);
+            addScheduleCmd.Parameters.AddWithValue("@freqRecurrence", schedule.FreqRecurrenceFactor);
+            addScheduleCmd.Parameters.AddWithValue("@startDate", schedule.StartDate);
+            addScheduleCmd.Parameters.AddWithValue("@startTime", schedule.StartTime);
+            await addScheduleCmd.ExecuteNonQueryAsync();
+        }
+
+        await using var addServerCmd = new SqlCommand("EXEC msdb.dbo.sp_add_jobserver @job_name = @jobName;", conn, tx);
+        addServerCmd.Parameters.AddWithValue("@jobName", jobName);
+        await addServerCmd.ExecuteNonQueryAsync();
+    }
+
+    private string BuildReportOrderScheduleCommand(string itemId)
+    {
+        var callbackUrl = BuildReportOrderScheduleCallbackUrl();
+        var apiKey = (_cfg["ReportOrder:SchedulerApiKey"] ?? string.Empty).Trim();
+        var ps = BuildReportOrderPowerShellScript(callbackUrl, itemId, apiKey);
+        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(ps));
+        return $"powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}";
+    }
+
+    private string BuildReportOrderScheduleCallbackUrl()
+    {
+        var explicitUrl = (_cfg["ReportOrder:SchedulerCallbackUrl"] ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(explicitUrl))
+            return explicitUrl;
+
+        var host = (_cfg["PcbErpApi:HostAddress"] ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            var req = HttpContext?.Request;
+            if (req != null && req.Host.HasValue)
+                host = $"{req.Scheme}://{req.Host.Value}";
+        }
+
+        if (string.IsNullOrWhiteSpace(host))
+            throw new InvalidOperationException("找不到 API 位址，請設定 PcbErpApi:HostAddress。");
+
+        return $"{host.TrimEnd('/')}/api/StoredProc/reportOrder/runNowScheduled";
+    }
+
+    private static string BuildReportOrderPowerShellScript(string callbackUrl, string itemId, string apiKey)
+    {
+        var safeUrl = (callbackUrl ?? string.Empty).Replace("'", "''");
+        var safeItem = (itemId ?? string.Empty).Replace("'", "''");
+        var safeApiKey = (apiKey ?? string.Empty).Replace("'", "''");
+
+        return "$ErrorActionPreference='Stop';"
+             + "$ProgressPreference='SilentlyContinue';"
+             + $"$body = ConvertTo-Json @{{ itemId = '{safeItem}'; apiKey = '{safeApiKey}' }} -Compress;"
+             + $"Invoke-RestMethod -Method Post -Uri '{safeUrl}' -ContentType 'application/json; charset=utf-8' -Body $body | Out-Null;";
+    }
+
+    private static async Task<bool> ReportOrderItemExistsAsync(SqlConnection conn, SqlTransaction tx, string itemId)
+    {
+        const string sql = "SELECT TOP 1 1 FROM CURdReportOrderBas WITH (NOLOCK) WHERE ItemId = @itemId;";
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@itemId", itemId ?? string.Empty);
+        var obj = await cmd.ExecuteScalarAsync();
+        return obj != null && obj != DBNull.Value;
+    }
+
+    private static async Task<bool> ReportOrderItemFinishedAsync(SqlConnection conn, SqlTransaction tx, string itemId)
+    {
+        const string sql = "SELECT TOP 1 1 FROM CURdReportOrderBas WITH (NOLOCK) WHERE ItemId = @itemId AND Finished = 1;";
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@itemId", itemId ?? string.Empty);
+        var obj = await cmd.ExecuteScalarAsync();
+        return obj != null && obj != DBNull.Value;
+    }
+
+    private static async Task<List<ReportOrderCheckRow>> LoadReportOrderCheckRowsAsync(SqlConnection conn, SqlTransaction tx, string itemId)
+    {
+        var list = new List<ReportOrderCheckRow>();
+        await using var cmd = new SqlCommand("CURdReportOrderCheckTime", conn, tx)
+        {
+            CommandType = CommandType.StoredProcedure,
+            CommandTimeout = 180
+        };
+        cmd.Parameters.AddWithValue("@ItemId", itemId ?? string.Empty);
+
+        await using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            var currentItemId = ReadString(rd, "ItemId");
+            if (string.IsNullOrWhiteSpace(currentItemId))
+                currentItemId = itemId;
+
+            list.Add(new ReportOrderCheckRow(
+                ItemId: currentItemId ?? string.Empty,
+                OrderExpType: ReadInt(rd, "OrderExpType"),
+                PrintRptName: ReadString(rd, "sPrintRptName"),
+                ReportPath: ReadString(rd, "ReportOrderPDFPath")
+            ));
+        }
+        return list;
+    }
+
+    private static async Task<ReportOrderSqlRow> LoadReportOrderSqlAsync(SqlConnection conn, SqlTransaction tx, string itemId)
+    {
+        await using var cmd = new SqlCommand("CURdReportOrderGetSQL", conn, tx)
+        {
+            CommandType = CommandType.StoredProcedure,
+            CommandTimeout = 180
+        };
+        cmd.Parameters.AddWithValue("@ItemId", itemId ?? string.Empty);
+
+        await using var rd = await cmd.ExecuteReaderAsync();
+        if (!await rd.ReadAsync())
+            return new ReportOrderSqlRow(string.Empty, string.Empty, string.Empty);
+
+        return new ReportOrderSqlRow(
+            SqlText: ReadString(rd, "sSQL"),
+            ObjectName: ReadString(rd, "ObjectName"),
+            ItemName: ReadString(rd, "ItemName")
+        );
+    }
+
+    private async Task<string?> BuildReportOrderAttachmentAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        ReportOrderCheckRow row,
+        ReportOrderSqlRow sqlInfo)
+    {
+        var reportDir = ResolveWritableReportDir(row.ReportPath);
+
+        // 1: PDF（優先走 Crystal Report API），失敗則回退成 Excel
+        if (row.OrderExpType == 1)
+        {
+            try
+            {
+                var pdfPath = BuildUniqueAttachmentPath(reportDir, row.ItemId, ".pdf");
+                await RenderPdfByCrystalApiAsync(row.PrintRptName, row.ItemId, pdfPath);
+                return pdfPath;
+            }
+            catch
+            {
+                // fallback
+            }
+        }
+
+        var dt = await QueryToDataTableAsync(conn, tx, sqlInfo.SqlText);
+        if (string.Equals(row.ItemId, "ACA00062", StringComparison.OrdinalIgnoreCase) && dt.Rows.Count == 0)
+            return null;
+
+        var xlsPath = BuildUniqueAttachmentPath(reportDir, row.ItemId, ".xls");
+        var exportColumns = await LoadExportColumnsAsync(conn, tx, row.ItemId);
+        await WriteStyledXlsAsync(dt, xlsPath, exportColumns);
+        return xlsPath;
+    }
+
+    private async Task RenderPdfByCrystalApiAsync(string printRptName, string itemId, string outPath)
+    {
+        var reportName = Path.GetFileNameWithoutExtension((printRptName ?? string.Empty).Trim());
+        if (string.IsNullOrWhiteSpace(reportName))
+            throw new InvalidOperationException("找不到報表名稱(sPrintRptName)");
+
+        var client = _httpFactory.CreateClient("CrystalReport");
+        var payload = new
+        {
+            reportName,
+            format = "pdf",
+            @params = new Dictionary<string, object>
+            {
+                ["ItemId"] = itemId ?? string.Empty
+            }
+        };
+
+        using var resp = await client.PostAsJsonAsync("/api/report/render", payload);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var err = await resp.Content.ReadAsStringAsync();
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(err)
+                ? $"Crystal API error: {(int)resp.StatusCode}"
+                : err);
+        }
+
+        var bytes = await resp.Content.ReadAsByteArrayAsync();
+        await System.IO.File.WriteAllBytesAsync(outPath, bytes);
+    }
+
+    private static async Task<DataTable> QueryToDataTableAsync(SqlConnection conn, SqlTransaction tx, string sqlText)
+    {
+        if (string.IsNullOrWhiteSpace(sqlText)) return new DataTable();
+        await using var cmd = new SqlCommand(sqlText, conn, tx)
+        {
+            CommandType = CommandType.Text,
+            CommandTimeout = 900
+        };
+
+        var dt = new DataTable();
+        await using var rd = await cmd.ExecuteReaderAsync();
+        dt.Load(rd);
+        return dt;
+    }
+
+    private sealed record ExportColumnDef(string FieldName, string DisplayLabel, string? DataType, string? FormatStr);
+
+    private static async Task<List<ExportColumnDef>> LoadExportColumnsAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        string dictTableName)
+    {
+        var list = new List<ExportColumnDef>();
+        if (string.IsNullOrWhiteSpace(dictTableName)) return list;
+
+        const string sql = @"
+SELECT f.FieldName,
+       COALESCE(NULLIF(l.DisplayLabel,''), NULLIF(f.DisplayLabel,''), f.FieldName) AS DisplayLabel,
+       ISNULL(f.DataType, '') AS DataType,
+       ISNULL(f.FormatStr, '') AS FormatStr
+  FROM CURdTableField f WITH (NOLOCK)
+  LEFT JOIN CURdTableFieldLang l WITH (NOLOCK)
+    ON l.TableName = f.TableName
+   AND l.FieldName = f.FieldName
+   AND l.LanguageId = 'TW'
+ WHERE f.TableName = @tbl
+   AND ISNULL(f.Visible,1) = 1
+  ORDER BY ISNULL(f.SerialNum, 99999), f.FieldName;";
+
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@tbl", dictTableName.Trim());
+        await using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            var field = rd["FieldName"]?.ToString()?.Trim();
+            var label = rd["DisplayLabel"]?.ToString()?.Trim();
+            var dataType = rd["DataType"]?.ToString()?.Trim();
+            var formatStr = rd["FormatStr"]?.ToString()?.Trim();
+            if (string.IsNullOrWhiteSpace(field)) continue;
+            if (string.IsNullOrWhiteSpace(label)) label = field;
+            if (list.Any(x => string.Equals(x.FieldName, field, StringComparison.OrdinalIgnoreCase))) continue;
+            list.Add(new ExportColumnDef(field!, label!, dataType, formatStr));
+        }
+        return list;
+    }
+
+    private static Task WriteStyledXlsAsync(DataTable dt, string filePath, IReadOnlyList<ExportColumnDef> exportColumns)
+    {
+        var workbook = new HSSFWorkbook();
+        var sheet = workbook.CreateSheet("Report");
+
+        var headerStyle = workbook.CreateCellStyle();
+        headerStyle.BorderTop = BorderStyle.Thin;
+        headerStyle.BorderRight = BorderStyle.Thin;
+        headerStyle.BorderBottom = BorderStyle.Thin;
+        headerStyle.BorderLeft = BorderStyle.Thin;
+        headerStyle.Alignment = HorizontalAlignment.Center;
+        headerStyle.VerticalAlignment = VerticalAlignment.Center;
+        headerStyle.FillPattern = FillPattern.SolidForeground;
+        headerStyle.FillForegroundColor = IndexedColors.Grey25Percent.Index;
+
+        var headerFont = workbook.CreateFont();
+        headerFont.IsBold = true;
+        headerStyle.SetFont(headerFont);
+
+        var bodyStyle = workbook.CreateCellStyle();
+        bodyStyle.BorderTop = BorderStyle.Thin;
+        bodyStyle.BorderRight = BorderStyle.Thin;
+        bodyStyle.BorderBottom = BorderStyle.Thin;
+        bodyStyle.BorderLeft = BorderStyle.Thin;
+        bodyStyle.VerticalAlignment = VerticalAlignment.Center;
+
+        var allColumns = dt.Columns.Cast<DataColumn>().ToList();
+        var selectedColumns = new List<(DataColumn Column, ExportColumnDef Def)>();
+        if (exportColumns != null && exportColumns.Count > 0)
+        {
+            foreach (var cfg in exportColumns)
+            {
+                var hit = allColumns.FirstOrDefault(c => string.Equals(c.ColumnName, cfg.FieldName, StringComparison.OrdinalIgnoreCase));
+                if (hit == null) continue;
+                selectedColumns.Add((hit, cfg));
+            }
+        }
+        if (selectedColumns.Count == 0)
+        {
+            selectedColumns.AddRange(allColumns.Select(c =>
+                (c, new ExportColumnDef(c.ColumnName, c.ColumnName, c.DataType?.Name, string.Empty))));
+        }
+
+        var widthLen = new int[selectedColumns.Count];
+        var headerRow = sheet.CreateRow(0);
+        for (var c = 0; c < selectedColumns.Count; c++)
+        {
+            var title = selectedColumns[c].Def.DisplayLabel;
+            var cell = headerRow.CreateCell(c);
+            cell.SetCellValue(title);
+            cell.CellStyle = headerStyle;
+            widthLen[c] = CalcDisplayLength(title);
+        }
+
+        for (var r = 0; r < dt.Rows.Count; r++)
+        {
+            var row = sheet.CreateRow(r + 1);
+            var dr = dt.Rows[r];
+            for (var c = 0; c < selectedColumns.Count; c++)
+            {
+                var val = dr[selectedColumns[c].Column];
+                var cell = row.CreateCell(c);
+                var text = FormatExportText(val, selectedColumns[c].Def);
+                cell.SetCellValue(SanitizeCell(text));
+                cell.CellStyle = bodyStyle;
+                var visualLen = CalcDisplayLength(text);
+                if (visualLen > widthLen[c]) widthLen[c] = visualLen;
+            }
+        }
+
+        // 快速欄寬計算（比 AutoSizeColumn 快很多）
+        for (var c = 0; c < selectedColumns.Count; c++)
+        {
+            var width = (Math.Min(widthLen[c] + 2, 60)) * 256;
+            var minWidth = 12 * 256;
+            var maxWidth = 60 * 256;
+            if (width < minWidth) sheet.SetColumnWidth(c, minWidth);
+            else if (width > maxWidth) sheet.SetColumnWidth(c, maxWidth);
+            else sheet.SetColumnWidth(c, width);
+        }
+        sheet.CreateFreezePane(0, 1);
+
+        using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.Read);
+        workbook.Write(fs);
+        return Task.CompletedTask;
+    }
+
+    private static int CalcDisplayLength(string? text)
+    {
+        var s = text ?? string.Empty;
+        var len = 0;
+        foreach (var ch in s)
+            len += ch > 255 ? 2 : 1;
+        return len;
+    }
+
+    private static string FormatExportText(object? raw, ExportColumnDef col)
+    {
+        if (raw == null || raw == DBNull.Value) return string.Empty;
+
+        var dataType = (col.DataType ?? string.Empty).Trim().ToLowerInvariant();
+        var s = Convert.ToString(raw, CultureInfo.InvariantCulture) ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+
+        if (IsDateType(dataType) || raw is DateTime || DateTime.TryParse(s, out _))
+        {
+            if (!TryGetDateTime(raw, out var dt) && !DateTime.TryParse(s, out dt))
+                return s;
+
+            // 避免出現「上午 12:00:00」：整點 00:00:00 一律只顯示日期
+            if (dt.TimeOfDay == TimeSpan.Zero)
+                return dt.ToString("yyyy/M/d", CultureInfo.InvariantCulture);
+
+            return dt.ToString("yyyy/M/d HH:mm:ss", CultureInfo.InvariantCulture);
+        }
+
+        if (IsNumericType(dataType) || IsNumericValue(raw) || decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out _))
+        {
+            if (!TryGetDecimal(raw, out var num) && !decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out num))
+                return s;
+
+            // 去除尾端無效 0，避免 100.00000000
+            if (num == decimal.Truncate(num))
+                return num.ToString("0", CultureInfo.InvariantCulture);
+            return num.ToString("0.########", CultureInfo.InvariantCulture);
+        }
+
+        return s;
+    }
+
+    private static bool IsDateType(string dt)
+    {
+        if (string.IsNullOrWhiteSpace(dt)) return false;
+        return dt.Contains("date", StringComparison.OrdinalIgnoreCase)
+            || dt.Contains("time", StringComparison.OrdinalIgnoreCase)
+            || dt.Equals("datetime2", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsNumericType(string dt)
+    {
+        if (string.IsNullOrWhiteSpace(dt)) return false;
+        return dt.Contains("int", StringComparison.OrdinalIgnoreCase)
+            || dt.Contains("dec", StringComparison.OrdinalIgnoreCase)
+            || dt.Contains("num", StringComparison.OrdinalIgnoreCase)
+            || dt.Contains("float", StringComparison.OrdinalIgnoreCase)
+            || dt.Contains("double", StringComparison.OrdinalIgnoreCase)
+            || dt.Contains("money", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsNumericValue(object raw)
+    {
+        return raw is byte or sbyte
+            or short or ushort
+            or int or uint
+            or long or ulong
+            or float or double
+            or decimal;
+    }
+
+    private static bool TryGetDateTime(object raw, out DateTime dt)
+    {
+        if (raw is DateTime d)
+        {
+            dt = d;
+            return true;
+        }
+        if (raw is DateTimeOffset dto)
+        {
+            dt = dto.DateTime;
+            return true;
+        }
+        return DateTime.TryParse(Convert.ToString(raw), out dt);
+    }
+
+    private static bool TryGetDecimal(object raw, out decimal d)
+    {
+        switch (raw)
+        {
+            case decimal dec:
+                d = dec;
+                return true;
+            case byte b:
+                d = b;
+                return true;
+            case sbyte sb:
+                d = sb;
+                return true;
+            case short s:
+                d = s;
+                return true;
+            case ushort us:
+                d = us;
+                return true;
+            case int i:
+                d = i;
+                return true;
+            case uint ui:
+                d = ui;
+                return true;
+            case long l:
+                d = l;
+                return true;
+            case ulong ul:
+                d = ul;
+                return true;
+            case float f:
+                d = Convert.ToDecimal(f);
+                return true;
+            case double db:
+                d = Convert.ToDecimal(db);
+                return true;
+            default:
+                return decimal.TryParse(Convert.ToString(raw), NumberStyles.Any, CultureInfo.InvariantCulture, out d);
+        }
+    }
+
+    private static string SanitizeCell(string s)
+    {
+        return (s ?? string.Empty)
+            .Replace("\r\n", " ")
+            .Replace('\r', ' ')
+            .Replace('\n', ' ')
+            .Replace('\t', ' ');
+    }
+
+    private static async Task SendReportOrderMailAsync(SqlConnection conn, SqlTransaction tx, string itemId, string attFileName)
+    {
+        await using var cmd = new SqlCommand("CURdReportOrderSendMail", conn, tx)
+        {
+            CommandType = CommandType.StoredProcedure,
+            CommandTimeout = 180
+        };
+        cmd.Parameters.AddWithValue("@ItemId", itemId ?? string.Empty);
+        cmd.Parameters.AddWithValue("@AttFileName", attFileName ?? string.Empty);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static string NormalizeDir(string? dir)
+    {
+        var s = (dir ?? string.Empty).Trim().Trim('"');
+        return string.IsNullOrWhiteSpace(s) ? string.Empty : s;
+    }
+
+    private static string BuildUniqueAttachmentPath(string reportDir, string? itemId, string ext)
+    {
+        var rawName = string.IsNullOrWhiteSpace(itemId) ? "ReportOrder" : itemId.Trim();
+        var invalid = Path.GetInvalidFileNameChars();
+        var sb = new StringBuilder(rawName.Length);
+        foreach (var ch in rawName)
+        {
+            sb.Append(Array.IndexOf(invalid, ch) >= 0 ? '_' : ch);
+        }
+
+        var safeName = sb.ToString().Trim();
+        if (string.IsNullOrWhiteSpace(safeName))
+            safeName = "ReportOrder";
+
+        var extension = string.IsNullOrWhiteSpace(ext)
+            ? ".dat"
+            : (ext.StartsWith('.') ? ext : "." + ext);
+
+        var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
+        var token = Guid.NewGuid().ToString("N").Substring(0, 8);
+        return Path.Combine(reportDir, $"{safeName}_{stamp}_{token}{extension}");
+    }
+
+    private string ResolveWritableReportDir(string? preferredPath)
+    {
+        var candidates = new List<string>();
+
+        var preferred = NormalizeDir(preferredPath);
+        if (!string.IsNullOrWhiteSpace(preferred))
+            candidates.Add(preferred);
+
+        var cfgPath = NormalizeDir(_cfg["ReportOrder:OutputPath"]);
+        if (!string.IsNullOrWhiteSpace(cfgPath)
+            && !candidates.Any(x => string.Equals(x, cfgPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            candidates.Add(cfgPath);
+        }
+
+        foreach (var path in candidates)
+        {
+            try
+            {
+                Directory.CreateDirectory(path);
+                return path;
+            }
+            catch
+            {
+                // try next candidate
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"報表輸出路徑不可用。原設定：{preferredPath ?? "(空白)"}。請設定可由 Web 與 SQL Server 同時存取的共享路徑(UNC)到 appsettings 的 ReportOrder:OutputPath，例如 \\\\fileserver\\ReportOrder\\Out");
+    }
+
+    private static int FindOrdinal(IDataRecord r, string columnName)
+    {
+        for (var i = 0; i < r.FieldCount; i++)
+        {
+            if (string.Equals(r.GetName(i), columnName, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+        return -1;
+    }
+
+    private static string ReadString(IDataRecord r, string columnName)
+    {
+        var ord = FindOrdinal(r, columnName);
+        if (ord < 0 || r.IsDBNull(ord)) return string.Empty;
+        return Convert.ToString(r.GetValue(ord)) ?? string.Empty;
+    }
+
+    private static int ReadInt(IDataRecord r, string columnName)
+    {
+        var ord = FindOrdinal(r, columnName);
+        if (ord < 0 || r.IsDBNull(ord)) return 0;
+        return int.TryParse(Convert.ToString(r.GetValue(ord)), out var n) ? n : 0;
+    }
+
+    private static int? ReadNullableInt(IDataRecord r, string columnName)
+    {
+        var ord = FindOrdinal(r, columnName);
+        if (ord < 0 || r.IsDBNull(ord)) return null;
+        if (int.TryParse(Convert.ToString(r.GetValue(ord)), out var n)) return n;
+        return null;
     }
 
     private sealed record ButtonRow(string ItemId, string ButtonName, int DesignType, string? SpName, string? ExecSpName);

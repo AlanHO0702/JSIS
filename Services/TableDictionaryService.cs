@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
@@ -22,13 +23,67 @@ public class TableDictionaryService : ITableDictionaryService
         _context = context;
     }
 
+    private static string Clean(string s) => (s ?? "")
+        .Trim().Trim('[', ']')
+        .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase)
+        .ToLowerInvariant();
+
+    private static int GetKeySelfRank(string? keySelfName, string? fieldName)
+    {
+        var keySelf = (keySelfName ?? "").Trim();
+        var field = (fieldName ?? "").Trim();
+
+        if (string.IsNullOrWhiteSpace(keySelf) || string.IsNullOrWhiteSpace(field)) return 9;
+        if (string.Equals(keySelf, field, StringComparison.OrdinalIgnoreCase)) return 0;
+
+        if (field.EndsWith("Name", StringComparison.OrdinalIgnoreCase) && field.Length > 4)
+        {
+            var baseName = field.Substring(0, field.Length - 4);
+            if (string.Equals(keySelf, baseName + "Id", StringComparison.OrdinalIgnoreCase)) return 1;
+            if (string.Equals(keySelf, baseName, StringComparison.OrdinalIgnoreCase)) return 2;
+        }
+
+        return 5;
+    }
+
+    private static bool TryLoadLookupValues(
+        DbConnection conn,
+        string lookupTableName,
+        string keyFieldName,
+        string resultFieldName,
+        out Dictionary<string, string> lookupDict)
+    {
+        lookupDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        static string Q(string ident) => $"[{ident.Replace("]", "]]")}]";
+        var sql = $"SELECT {Q(keyFieldName)} AS [__k], {Q(resultFieldName)} AS [__v] FROM {Q(lookupTableName)}";
+
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var key = reader["__k"]?.ToString();
+                var value = reader["__v"]?.ToString();
+                var normalizedKey = key?.Trim();
+                if (!string.IsNullOrWhiteSpace(normalizedKey) && value != null)
+                {
+                    lookupDict[normalizedKey.ToLowerInvariant()] = value;
+                }
+            }
+
+            return lookupDict.Count > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public List<CURdTableField> GetFieldDict(string tableName, Type modelType)
     {
-        static string Clean(string s) => (s ?? "")
-            .Trim().Trim('[', ']')
-            .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase)
-            .ToLowerInvariant();
-
         var tname = Clean(tableName);
 
         // 取得 model 各屬性型別
@@ -36,11 +91,19 @@ public class TableDictionaryService : ITableDictionaryService
             .GetProperties()
             .ToDictionary(p => p.Name, p => GetInputType(p.PropertyType));
 
-        var fields = _context.CURdTableFields
+        var rawFields = _context.CURdTableFields
             .Where(x => x.TableName != null
                         && (x.TableName.ToLower() == tname
                             || x.TableName.ToLower().Replace("dbo.", "") == tname))
             .OrderBy(x => x.SerialNum)
+            .ToList();
+
+        var fields = rawFields
+            .OrderBy(x => string.Equals(Clean(x.TableName ?? ""), tname, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(x => x.SerialNum ?? int.MaxValue)
+            .ThenBy(x => x.FieldName)
+            .GroupBy(x => x.FieldName ?? "", StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
             .ToList();
 
         // 語系欄位設定（目前預設 TW；不存在就略過）
@@ -54,8 +117,12 @@ public class TableDictionaryService : ITableDictionaryService
         if (langRows.Count > 0)
         {
             var langMap = langRows
-                .GroupBy(x => x.FieldName, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+                .Where(x => !string.IsNullOrWhiteSpace(x.FieldName))
+                .GroupBy(x => x.FieldName!, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderBy(x => string.Equals(Clean(x.TableName ?? ""), tname, StringComparison.OrdinalIgnoreCase) ? 0 : 1).First(),
+                    StringComparer.OrdinalIgnoreCase);
 
             foreach (var f in fields)
             {
@@ -90,14 +157,9 @@ public class TableDictionaryService : ITableDictionaryService
 
     public List<OCXLookupMap> GetOCXLookups(string tableName)
     {
-        static string Clean(string s) => (s ?? "")
-            .Trim().Trim('[', ']')
-            .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase)
-            .ToLowerInvariant();
-
         var tname = Clean(tableName);
 
-        var fieldDefs = _context.CURdTableFields
+        var rawFieldDefs = _context.CURdTableFields
             .Where(x => x.TableName != null
                         && (x.TableName.ToLower() == tname
                             || x.TableName.ToLower().Replace("dbo.", "") == tname)
@@ -105,9 +167,15 @@ public class TableDictionaryService : ITableDictionaryService
                         && !string.IsNullOrWhiteSpace(x.OCXLKResultName))
             .ToList();
 
-        var result = new List<OCXLookupMap>();
+        var fieldDefs = rawFieldDefs
+            .OrderBy(x => string.Equals(Clean(x.TableName ?? ""), tname, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(x => x.SerialNum ?? int.MaxValue)
+            .ThenBy(x => x.FieldName)
+            .GroupBy(x => x.FieldName ?? "", StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
 
-        static string Q(string ident) => $"[{ident.Replace("]", "]]")}]";
+        var result = new List<OCXLookupMap>();
 
         static bool HasInvalidLookupSetting(string? table, string? keyField, string? resultField)
         {
@@ -126,19 +194,27 @@ public class TableDictionaryService : ITableDictionaryService
 
         foreach (var field in fieldDefs)
         {
-            var lkSetting = _context.CURdOCXTableFieldLK
-                .FirstOrDefault(x => x.TableName != null
-                                     && (x.TableName.ToLower() == tname
-                                         || x.TableName.ToLower().Replace("dbo.", "") == tname)
-                                     && x.FieldName == field.FieldName);
-
-                if (lkSetting == null) continue;
-
             var ocxTableName = field.OCXLKTableName;
             var ocxResultName = field.OCXLKResultName;
-            var keyField = lkSetting.KeyFieldName;
+            var fieldName = field.FieldName ?? "";
+            var fieldNameLower = fieldName.ToLowerInvariant();
 
-            if (HasInvalidLookupSetting(ocxTableName, keyField, ocxResultName))
+            var lkSettings = _context.CURdOCXTableFieldLK
+                .Where(x => x.TableName != null
+                            && (x.TableName.ToLower() == tname
+                                || x.TableName.ToLower().Replace("dbo.", "") == tname)
+                            && x.FieldName != null
+                            && x.FieldName.ToLower() == fieldNameLower)
+                .ToList()
+                .OrderBy(x => GetKeySelfRank(x.KeySelfName, fieldName))
+                .ThenBy(x => x.KeyFieldName)
+                .ThenBy(x => x.KeySelfName)
+                .ToList();
+
+            if (lkSettings.Count == 0)
+                continue;
+
+            if (HasInvalidLookupSetting(ocxTableName, "X", ocxResultName))
                 continue;
 
             var ocxTableClean = Clean(ocxTableName ?? "");
@@ -150,40 +226,47 @@ public class TableDictionaryService : ITableDictionaryService
                 .Select(x => x.DataType)
                 .FirstOrDefault();
 
-            // 用 raw SQL 動態查表（用固定 alias，避免欄名空白/重複/特殊字元造成 reader 取值失敗）
-            var sql = $"SELECT {Q(keyField!)} AS [__k], {Q(ocxResultName!)} AS [__v] FROM {Q(ocxTableName!)}";
-            var lookupDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, string>? lookupDict = null;
+            string selectedKeyField = "";
+            string selectedKeySelf = "";
 
-            try
+            foreach (var lkSetting in lkSettings)
             {
-                using (var cmd = conn.CreateCommand())
+                var keyCandidates = new List<string>();
+                if (!string.IsNullOrWhiteSpace(lkSetting.KeyFieldName))
+                    keyCandidates.Add(lkSetting.KeyFieldName.Trim());
+                if (!string.IsNullOrWhiteSpace(lkSetting.KeySelfName)
+                    && !keyCandidates.Any(x => string.Equals(x, lkSetting.KeySelfName, StringComparison.OrdinalIgnoreCase)))
+                    keyCandidates.Add(lkSetting.KeySelfName.Trim());
+
+                foreach (var keyCandidate in keyCandidates)
                 {
-                    cmd.CommandText = sql;
-                    using (var reader = cmd.ExecuteReader())
+                    if (HasInvalidLookupSetting(ocxTableName, keyCandidate, ocxResultName))
+                        continue;
+
+                    if (TryLoadLookupValues(conn, ocxTableName!, keyCandidate, ocxResultName!, out var loadedLookupDict))
                     {
-                        while (reader.Read())
-                        {
-                            var key = reader["__k"]?.ToString();
-                            var value = reader["__v"]?.ToString();
-                            if (!string.IsNullOrWhiteSpace(key) && value != null)
-                            {
-                                lookupDict[key] = value;
-                            }
-                        }
+                        lookupDict = loadedLookupDict;
+                        selectedKeyField = keyCandidate;
+                        selectedKeySelf = string.IsNullOrWhiteSpace(lkSetting.KeySelfName)
+                            ? keyCandidate
+                            : lkSetting.KeySelfName;
+                        break;
                     }
                 }
+
+                if (lookupDict != null)
+                    break;
             }
-            catch
-            {
-                // 當 lookup 設定不完整/查表失敗時，不讓整頁爆炸，直接略過該欄位的 lookup
+
+            if (lookupDict == null || lookupDict.Count == 0)
                 continue;
-            }
 
             result.Add(new OCXLookupMap
             {
-                FieldName = field.FieldName,
-                KeySelfName = lkSetting.KeySelfName,
-                KeyFieldName = keyField,
+                FieldName = fieldName,
+                KeySelfName = selectedKeySelf,
+                KeyFieldName = selectedKeyField,
                 LookupValues = lookupDict,
                 ResultDataType = resultType
             });

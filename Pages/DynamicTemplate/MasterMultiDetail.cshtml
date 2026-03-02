@@ -1136,8 +1136,32 @@ document.addEventListener('DOMContentLoaded', () => {
         const raw = await resp.text();
         let data; try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
         if (resp.ok && data.ok) {
-          localStorage.setItem("afterSave", "1");
-          location.reload();
+          const msgRaw = String(data.message ?? data.Message ?? "").trim();
+          const msgText = msgRaw.replace(/^MESGE:\s*/i, "").trim();
+
+          const total = Number(data.total ?? data.Total);
+          const sent = Number(data.sent ?? data.Sent);
+          const skipped = Number(data.skipped ?? data.Skipped);
+          const hasStats = Number.isFinite(total) && Number.isFinite(sent) && Number.isFinite(skipped);
+
+          const title = hasStats
+            ? "已寄出"
+            : (msgText || "執行完成");
+          const tip = hasStats
+            ? `已寄出 ${sent} 筆（總數 ${total}，略過 ${skipped}）`
+            : msgText;
+
+          if (window.Swal?.fire) {
+            await Swal.fire({
+              icon: "success",
+              title,
+              text: tip,
+              timer: 1800,
+              showConfirmButton: false
+            });
+          } else {
+            alert(tip || title);
+          }
           return;
         }
         alert(`執行失敗: ${data.error || `HTTP ${resp.status}`}`);
