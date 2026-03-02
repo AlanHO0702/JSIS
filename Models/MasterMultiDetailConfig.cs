@@ -82,6 +82,7 @@ namespace WebRazor.Models
         public string DetailTable { get; set; }
         public string DetailDict { get; set; }
         public string DetailApi { get; set; }
+        public string? OrderByField { get; set; }
 
         public List<KeyMapMulti> KeyMap { get; set; } = new();
         public List<string> PkFields { get; set; } = new();
