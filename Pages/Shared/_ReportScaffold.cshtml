@@ -1,6 +1,7 @@
 @using System.Text.Json
 @{
     var cfg = ViewData["ReportConfig"] as ReportConfig;
+    var hideAnalyzeTabs = (cfg?.ItemType == 2 && cfg?.OutputType == 7);
     var json = JsonSerializer.Serialize(cfg ?? new ReportConfig(), new JsonSerializerOptions { PropertyNamingPolicy = null })
                .Replace("</", @"<\/");   // 防止 </script> 截斷 script 區塊
     var fieldsJson = System.Text.Json.JsonSerializer.Serialize(
@@ -250,6 +251,7 @@
   .pvb-options-row label { color: #555; margin: 0; }
   .pvb-options-row .form-select-sm { padding-top: 0.08rem; padding-bottom: 0.08rem; font-size: 0.79rem; }
   .pvb-options-row .btn-sm { padding: 0.1rem 0.5rem; font-size: 0.79rem; }
+  #pvbPreset { min-width: 180px; }
 
   /* Result Area */
   #pivotContainer { flex: 1; overflow: auto; padding: 0; }
@@ -436,7 +438,7 @@
     </div>
 
     <!-- 分析（Pivot Builder） -->
-    <div class="view-pane" id="viewPivot">
+    <div class="view-pane @(hideAnalyzeTabs ? "d-none" : "")" id="viewPivot">
 
       <!-- ── Builder Panel ── -->
       <div id="pvbPanel">
@@ -448,6 +450,10 @@
 
         <!-- Three Drop Zones -->
         <div class="pvb-zones">
+          <div class="pvb-zone" id="pvbValZone" data-zone="vals">
+            <div class="pvb-zone-title">&#9632; 數值 (Values)</div>
+            <div class="pvb-zone-body" id="pvbValBody"></div>
+          </div>
           <div class="pvb-zone" id="pvbRowZone" data-zone="rows">
             <div class="pvb-zone-title">&#9654; 列 (Rows)</div>
             <div class="pvb-zone-body" id="pvbRowBody"></div>
@@ -456,14 +462,14 @@
             <div class="pvb-zone-title">&#9660; 欄 (Columns)</div>
             <div class="pvb-zone-body" id="pvbColBody"></div>
           </div>
-          <div class="pvb-zone" id="pvbValZone" data-zone="vals">
-            <div class="pvb-zone-title">&#9632; 數值 (Values)</div>
-            <div class="pvb-zone-body" id="pvbValBody"></div>
-          </div>
         </div>
 
         <!-- Options Row -->
         <div class="pvb-options-row">
+          <label>BI Report 自訂格式：</label>
+          <select id="pvbPreset" class="form-select form-select-sm" style="width:180px;"></select>
+          <button id="pvbPresetSaveAs" class="btn btn-outline-secondary btn-sm">另存格式</button>
+          <button id="pvbPresetDelete" class="btn btn-outline-danger btn-sm">刪除格式</button>
           <label>聚合方式：</label>
           <select id="pvbAgg" class="form-select form-select-sm" style="width:100px;">
             <option value="Count">筆數</option>
@@ -483,6 +489,7 @@
           <button id="pvbApply" class="btn btn-primary btn-sm px-3">產生分析</button>
           <button id="pvbClear" class="btn btn-outline-secondary btn-sm">重置</button>
           <button id="pvbSave" class="btn btn-outline-success btn-sm">儲存配置</button>
+          <button id="pvbExport" class="btn btn-outline-primary btn-sm">匯出Excel</button>
           <span id="pvbMsg" class="text-muted" style="font-size:0.78rem;"></span>
         </div>
       </div>
@@ -497,7 +504,7 @@
     </div>
 
     <!-- 圖形 -->
-    <div class="view-pane" id="viewChart">
+    <div class="view-pane @(hideAnalyzeTabs ? "d-none" : "")" id="viewChart">
       <div style="padding:4px 8px; border-bottom:1px solid #dee2e6; flex-shrink:0; display:flex; align-items:center; gap:12px; background:#fafbff;">
         <label class="mb-0" style="font-size:0.85rem;">圖表類型：</label>
         <select id="chartType" class="form-select form-select-sm" style="width:150px;">
@@ -514,20 +521,23 @@
 
   </div><!-- /tabContentArea -->
 
-  <!-- 底部頁籤 -->
-  <div id="bottomTabs">
-    <ul class="nav nav-tabs" role="tablist">
-      <li class="nav-item">
-        <button class="nav-link active" data-target="viewRaw">資料</button>
-      </li>
-      <li class="nav-item">
-        <button class="nav-link" data-target="viewPivot">分析</button>
-      </li>
-      <li class="nav-item">
-        <button class="nav-link" data-target="viewChart">圖形</button>
-      </li>
-    </ul>
-  </div>
+  @if (!hideAnalyzeTabs)
+  {
+    <!-- 底部頁籤 -->
+    <div id="bottomTabs">
+      <ul class="nav nav-tabs" role="tablist">
+        <li class="nav-item">
+          <button class="nav-link active" data-target="viewRaw">資料</button>
+        </li>
+        <li class="nav-item">
+          <button class="nav-link" data-target="viewPivot">分析</button>
+        </li>
+        <li class="nav-item">
+          <button class="nav-link" data-target="viewChart">圖形</button>
+        </li>
+      </ul>
+    </div>
+  }
 
 </div><!-- /reportWrapper -->
 
@@ -658,6 +668,7 @@
 <script>
 (function () {
   const cfg = @Html.Raw(json);
+  const onlyRawMode = Number(cfg?.ItemType ?? 0) === 2 && Number(cfg?.OutputType ?? 0) === 7;
 
   cfg.ParamDefs = Array.isArray(cfg.ParamDefs)
     ? cfg.ParamDefs
@@ -860,13 +871,29 @@
       if (def.Ui === 1 && typeof defVal === "string" && defVal.startsWith("today")) {
         el.value = todayOffset(defVal);
       } else {
-        el.value = defVal;
-        if (!el.value && el.options?.length > 0) {
-          for (const opt of el.options) {
-            if (String(opt.value).trim() === defVal) { el.value = opt.value; break; }
+        if (el.tagName === "SELECT") {
+          let matched = null;
+          if (el.options?.length > 0) {
+            matched = Array.from(el.options).find(opt => String(opt.value).trim() === defVal) || null;
           }
+          if (matched) {
+            el.value = matched.value;
+          } else if (defVal) {
+            // lookup 沒帶到預設碼時，仍保留預設值（避免畫面顯示空白）
+            const fallbackOpt = new Option(defVal, defVal);
+            fallbackOpt.dataset.dynamicDefault = "1";
+            el.appendChild(fallbackOpt);
+            el.value = defVal;
+            if (Array.isArray(el._allOpts) && !el._allOpts.some(o => String(o.value).trim() === defVal)) {
+              el._allOpts.push({ value: defVal, code: defVal, desc: defVal });
+            }
+          } else {
+            el.value = "";
+            if (!el.value && el.options?.length > 0) el.selectedIndex = 0;
+          }
+        } else {
+          el.value = defVal;
         }
-        if (!el.value && el.options?.length > 0) el.selectedIndex = 0;
       }
       // Combo 視覺同步
       if (el.closest?.('.combo-wrap')) syncComboFromSelect(el);
@@ -994,8 +1021,119 @@
     URL.revokeObjectURL(url);
   }
 
+  // Export pivot table as an Excel-readable .xls file.
+  function exportPivotToExcel() {
+    const pivotTable = document.querySelector('#pivotContainer .pvtTable');
+    if (!pivotTable) {
+      Swal.fire({ icon: 'info', title: '請先產生分析結果' });
+      return;
+    }
+
+    const clone = pivotTable.cloneNode(true);
+
+    // 1) Estimate column widths by text length (avoid #### in Excel).
+    const srcRows = Array.from(pivotTable.querySelectorAll('tr'));
+    let colCount = 0;
+    srcRows.forEach(row => {
+      let count = 0;
+      Array.from(row.children).forEach(cell => {
+        count += Math.max(1, Number(cell.getAttribute('colspan') || 1));
+      });
+      if (count > colCount) colCount = count;
+    });
+
+    const maxChars = Array.from({ length: Math.max(1, colCount) }, () => 6);
+    srcRows.forEach(row => {
+      let colIdx = 0;
+      Array.from(row.children).forEach(cell => {
+        const span = Math.max(1, Number(cell.getAttribute('colspan') || 1));
+        const txt = (cell.textContent || '').replace(/\s+/g, ' ').trim();
+        const share = Math.max(1, Math.ceil((txt.length || 1) / span));
+        for (let i = 0; i < span; i += 1) {
+          maxChars[colIdx + i] = Math.max(maxChars[colIdx + i] || 6, share);
+        }
+        colIdx += span;
+      });
+    });
+
+    // Merge visible pixel widths and text-based widths, take the wider one.
+    const visualWidths = Array.from({ length: Math.max(1, colCount) }, () => 56);
+    srcRows.forEach(row => {
+      let colIdx = 0;
+      Array.from(row.children).forEach(cell => {
+        const span = Math.max(1, Number(cell.getAttribute('colspan') || 1));
+        const rectW = Math.max(36, Math.round(cell.getBoundingClientRect().width));
+        const eachW = Math.max(36, Math.round(rectW / span));
+        for (let i = 0; i < span; i += 1) {
+          visualWidths[colIdx + i] = Math.max(visualWidths[colIdx + i] || 56, eachW);
+        }
+        colIdx += span;
+      });
+    });
+
+    const widthCols = visualWidths.map((w, idx) => {
+      const byText = Math.min(260, Math.max(56, (maxChars[idx] || 6) * 8 + 18));
+      return Math.max(w, byText);
+    });
+
+    const colgroup = document.createElement('colgroup');
+    widthCols.forEach(w => {
+      const col = document.createElement('col');
+      col.style.width = w + 'px';
+      colgroup.appendChild(col);
+    });
+    clone.prepend(colgroup);
+
+    // 2) Apply old-system-like Excel styles.
+    clone.style.borderCollapse = 'collapse';
+    clone.style.tableLayout = 'fixed';
+    clone.style.fontFamily = "PMingLiU, MingLiU, serif";
+    clone.style.fontSize = '8pt';
+    clone.style.background = '#ffffff';
+
+    const allCells = Array.from(clone.querySelectorAll('th,td'));
+    allCells.forEach(cell => {
+      const text = (cell.textContent || '').trim();
+      const numLike = /^-?\d+([,]\d{3})*(\.\d+)?$/.test(text);
+      cell.style.border = '1px solid #000';
+      cell.style.padding = '1px 4px';
+      cell.style.whiteSpace = 'nowrap';
+      cell.style.background = '#ffffff';
+      cell.style.color = '#000000';
+      cell.style.verticalAlign = 'middle';
+      cell.style.fontFamily = "PMingLiU, MingLiU, serif";
+      cell.style.fontSize = '8pt';
+      if (cell.tagName === 'TH') {
+        cell.style.fontWeight = '700';
+        cell.style.textAlign = 'left';
+      } else {
+        cell.style.fontWeight = '400';
+        cell.style.textAlign = numLike ? 'right' : 'left';
+        if (numLike) cell.style.msoNumberFormat = '0.########';
+      }
+    });
+
+    let safeTitle = String(cfg.Title || 'report');
+    safeTitle = safeTitle.split(' ').join('_');
+    safeTitle = safeTitle.split('　').join('_');
+    const stamp = new Date().toISOString().slice(0, 10);
+    const html = clone.outerHTML;
+
+    const bom = String.fromCharCode(0xFEFF);
+    const blob = new Blob([bom + html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = safeTitle + '_Pivot_' + stamp + '.xls';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   // ====== 底部頁籤切換 ======
   function switchView(targetId) {
+    if (onlyRawMode && targetId !== 'viewRaw') targetId = 'viewRaw';
     document.querySelectorAll('.view-pane').forEach(p => p.classList.remove('is-active'));
     const pane = document.getElementById(targetId);
     if (pane) pane.classList.add('is-active');
@@ -1096,10 +1234,278 @@
   };
 
   // ====== Pivot Builder ======
-  const _pvb = { rows: [], cols: [], vals: [], available: [], data: [], allFields: [] };
+  const _pvb = {
+    rows: [],
+    cols: [],
+    vals: [],
+    available: [],
+    data: [],
+    allFields: [],
+    presets: {},
+    presetMeta: {},
+    activePreset: '',
+    fieldNameToLabel: {},
+    fieldLabelToName: {}
+  };
 
-  function pvbStorageKey() {
-    return 'pvbCfg:' + (window._dictTableName || 'default');
+  function pvbStorageGet(key) {
+    try { return localStorage.getItem(key); } catch { return null; }
+  }
+
+  function pvbStorageSet(key, value) {
+    try { localStorage.setItem(key, value); return true; } catch { return false; }
+  }
+
+  function pvbCurrentUserId() {
+    try {
+      return (localStorage.getItem('erpLoginUserId') || window._userId || 'admin').toString().trim() || 'admin';
+    } catch {
+      return 'admin';
+    }
+  }
+
+  function pvbCurrentItemId() {
+    const id = (cfg.DictTableName || '').toString().trim();
+    if (id) return id;
+    const parts = (location.pathname || '').split('/').filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : '';
+  }
+
+  function pvbSelectedStorageKey() {
+    const uid = pvbCurrentUserId().toLowerCase();
+    const itemId = pvbCurrentItemId() || 'default';
+    return `pvbPresetSelected:${itemId}:${uid}`;
+  }
+
+  function pvbRememberSelectedPreset(name) {
+    pvbStorageSet(pvbSelectedStorageKey(), String(name || '').trim());
+  }
+
+  function pvbLoadRememberedPreset() {
+    return String(pvbStorageGet(pvbSelectedStorageKey()) || '').trim();
+  }
+
+  function pvbNormalizeDbFieldName(v) {
+    let s = String(v || '').trim();
+    if (!s) return '';
+    s = s.replace(/^grdOlapCond/i, '');
+    s = s.replace(/^grdOlap/i, '');
+    return s.trim();
+  }
+
+  function pvbDbFieldToLabel(v) {
+    const raw = pvbNormalizeDbFieldName(v);
+    if (!raw) return '';
+    const byField = _pvb.fieldNameToLabel[raw.toLowerCase()];
+    if (byField) return byField;
+    if (_pvb.allFields.includes(raw)) return raw;
+    return _pvb.allFields.find(f => String(f).toLowerCase() === raw.toLowerCase()) || '';
+  }
+
+  function pvbLabelToDbField(v) {
+    const label = String(v || '').trim();
+    if (!label) return '';
+    const fieldName = _pvb.fieldLabelToName[label.toLowerCase()] || label;
+    return `grdOlap${fieldName}`;
+  }
+
+  async function pvbLoadStore() {
+    const itemId = pvbCurrentItemId();
+    const userId = pvbCurrentUserId();
+    if (!itemId) return { presets: {}, meta: {}, selected: '' };
+
+    const res = await fetch(`/api/report/pivot-presets?itemId=${encodeURIComponent(itemId)}&userId=${encodeURIComponent(userId)}`, {
+      method: 'GET',
+      cache: 'no-store'
+    });
+    if (!res.ok) throw new Error(await res.text() || '讀取格式失敗');
+
+    const data = await res.json();
+    const presets = {};
+    const meta = {};
+
+    (data?.presets || []).forEach(p => {
+      const name = String(p?.name || p?.Name || '').trim();
+      if (!name) return;
+
+      const rows = (p?.rows || p?.Rows || []).map(pvbDbFieldToLabel).filter(Boolean);
+      const cols = (p?.cols || p?.Cols || []).map(pvbDbFieldToLabel).filter(Boolean);
+      const vals = (p?.vals || p?.Vals || []).map(pvbDbFieldToLabel).filter(Boolean);
+      presets[name] = pvbNormalizeCfg({ rows, cols, vals, agg: 'Count', render: 'Table' });
+
+      const sourceUserId = String(p?.sourceUserId || p?.SourceUserId || '').trim();
+      const isShared = !!(p?.isShared ?? p?.IsShared ?? !sourceUserId);
+      meta[name] = { sourceUserId, isShared };
+    });
+
+    return { presets, meta, selected: pvbLoadRememberedPreset() };
+  }
+
+  async function pvbSaveToDb(name) {
+    const itemId = pvbCurrentItemId();
+    const userId = pvbCurrentUserId();
+    if (!itemId || !name) return false;
+
+    const payload = {
+      itemId,
+      userId,
+      name,
+      rows: _pvb.rows.map(pvbLabelToDbField).filter(Boolean),
+      cols: _pvb.cols.map(pvbLabelToDbField).filter(Boolean),
+      vals: _pvb.vals.map(pvbLabelToDbField).filter(Boolean)
+    };
+
+    const res = await fetch('/api/report/pivot-presets/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error(await res.text() || '儲存格式失敗');
+    return true;
+  }
+
+  async function pvbDeleteFromDb(name) {
+    const itemId = pvbCurrentItemId();
+    const userId = pvbCurrentUserId();
+    if (!itemId || !name) return false;
+
+    const url = `/api/report/pivot-presets?itemId=${encodeURIComponent(itemId)}&userId=${encodeURIComponent(userId)}&name=${encodeURIComponent(name)}`;
+    const res = await fetch(url, { method: 'DELETE' });
+    if (!res.ok) throw new Error(await res.text() || '刪除格式失敗');
+    return true;
+  }
+
+  function pvbShowHint(text) {
+    const c = document.getElementById('pivotContainer');
+    if (!c) return;
+    c.innerHTML = `<div class="text-secondary text-center mt-5" style="opacity:.55;">${text}</div>`;
+  }
+
+  function pvbShowMsg(text, ms = 2200) {
+    const m = document.getElementById('pvbMsg');
+    if (!m) return;
+    m.textContent = text;
+    if (ms > 0) setTimeout(() => { if (m.textContent === text) m.textContent = ''; }, ms);
+  }
+
+  function pvbValidOption(selectId, value, fallback) {
+    const el = document.getElementById(selectId);
+    if (!el) return fallback;
+    return Array.from(el.options).some(o => o.value === value) ? value : fallback;
+  }
+
+  function pvbNormalizeCfg(sc) {
+    const toUniq = (arr) => {
+      const out = [];
+      const seen = new Set();
+      (Array.isArray(arr) ? arr : []).forEach(v => {
+        const s = String(v || '').trim();
+        if (!s || !_pvb.allFields.includes(s) || seen.has(s)) return;
+        seen.add(s);
+        out.push(s);
+      });
+      return out;
+    };
+    const rows = toUniq(sc?.rows);
+    const cols = toUniq(sc?.cols);
+    const vals = toUniq(sc?.vals);
+    const agg = pvbValidOption('pvbAgg', String(sc?.agg || '').trim(), 'Count');
+    const render = pvbValidOption('pvbRender', String(sc?.render || '').trim(), 'Table');
+    return { rows, cols, vals, agg, render, updatedAt: sc?.updatedAt || new Date().toISOString() };
+  }
+
+  function pvbCaptureCfg() {
+    const agg = document.getElementById('pvbAgg')?.value || 'Count';
+    const render = document.getElementById('pvbRender')?.value || 'Table';
+    return {
+      rows: [..._pvb.rows],
+      cols: [..._pvb.cols],
+      vals: [..._pvb.vals],
+      agg: pvbValidOption('pvbAgg', agg, 'Count'),
+      render: pvbValidOption('pvbRender', render, 'Table'),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  function pvbApplyCfgToState(sc) {
+    const clean = pvbNormalizeCfg(sc);
+    _pvb.rows = clean.rows;
+    _pvb.cols = clean.cols;
+    _pvb.vals = clean.vals;
+    const used = new Set([..._pvb.rows, ..._pvb.cols, ..._pvb.vals]);
+    _pvb.available = _pvb.allFields.filter(f => !used.has(f));
+
+    const aggEl = document.getElementById('pvbAgg');
+    const renEl = document.getElementById('pvbRender');
+    if (aggEl) aggEl.value = clean.agg;
+    if (renEl) renEl.value = clean.render;
+  }
+
+  function pvbResetState() {
+    _pvb.available = [..._pvb.allFields];
+    _pvb.rows = [];
+    _pvb.cols = [];
+    _pvb.vals = [];
+  }
+
+  function pvbBindPresetSelect() {
+    const sel = document.getElementById('pvbPreset');
+    if (!sel) return;
+    const names = Object.keys(_pvb.presets || {});
+    sel.innerHTML = '';
+    const emptyOpt = document.createElement('option');
+    emptyOpt.value = '';
+    emptyOpt.textContent = names.length ? '（請選擇格式）' : '（尚未儲存格式）';
+    sel.appendChild(emptyOpt);
+    names.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+    sel.value = _pvb.activePreset || '';
+  }
+
+  function pvbSelectPreset(name, autoApply = true) {
+    if (!name || !_pvb.presets[name]) {
+      _pvb.activePreset = '';
+      pvbRememberSelectedPreset('');
+      pvbResetState();
+      pvbRenderAll();
+      pvbShowHint('請將欄位拖曳至各區塊，再按「產生分析」');
+      return;
+    }
+
+    _pvb.activePreset = name;
+    pvbApplyCfgToState(_pvb.presets[name]);
+    pvbRenderAll();
+    pvbRememberSelectedPreset(name);
+
+    if (autoApply && (_pvb.rows.length || _pvb.cols.length || _pvb.vals.length)) {
+      pvbApply();
+    } else {
+      pvbShowHint('請將欄位拖曳至各區塊，再按「產生分析」');
+    }
+  }
+
+  async function pvbAskPresetName(defaultValue) {
+    const r = await Swal.fire({
+      title: '儲存自訂格式',
+      input: 'text',
+      inputLabel: '請輸入格式名稱',
+      inputValue: defaultValue || '',
+      showCancelButton: true,
+      confirmButtonText: '儲存',
+      cancelButtonText: '取消',
+      inputValidator: (v) => {
+        const n = (v || '').trim();
+        if (!n) return '格式名稱不可空白';
+        if (n.length > 40) return '格式名稱最多 40 字';
+        return null;
+      }
+    });
+    if (!r.isConfirmed) return '';
+    return (r.value || '').trim();
   }
 
   function pvbBuildData() {
@@ -1107,16 +1513,35 @@
     const dictFields = (window._tableFields || []).filter(f => f.Visible)
       .sort((a,b) => (a.SerialNum??0)-(b.SerialNum??0));
     const nameMap = {};
-    dictFields.forEach(f => { nameMap[(f.FieldName||'').trim()] = (f.DisplayLabel||'').trim() || f.FieldName; });
+    _pvb.fieldNameToLabel = {};
+    _pvb.fieldLabelToName = {};
+    dictFields.forEach(f => {
+      const fieldName = (f.FieldName || '').trim();
+      const label = (f.DisplayLabel || '').trim() || fieldName;
+      if (!fieldName || !label) return;
+      nameMap[fieldName] = label;
+      _pvb.fieldNameToLabel[fieldName.toLowerCase()] = label;
+      if (!_pvb.fieldLabelToName[label.toLowerCase()]) _pvb.fieldLabelToName[label.toLowerCase()] = fieldName;
+    });
+
+    const firstRowKeys = raw.length ? Object.keys(raw[0] || {}) : [];
+    firstRowKeys.forEach(k => {
+      const key = String(k || '').trim();
+      if (!key || nameMap[key]) return;
+      nameMap[key] = key;
+      if (!_pvb.fieldNameToLabel[key.toLowerCase()]) _pvb.fieldNameToLabel[key.toLowerCase()] = key;
+      if (!_pvb.fieldLabelToName[key.toLowerCase()]) _pvb.fieldLabelToName[key.toLowerCase()] = key;
+    });
+
     _pvb.data = raw.map(row => {
       const o = {};
       Object.keys(row).forEach(k => { if (nameMap[k]) o[nameMap[k]] = row[k]; });
       return o;
     });
-    _pvb.allFields = dictFields.map(f => (f.DisplayLabel||'').trim() || f.FieldName);
+    _pvb.allFields = [...new Set(Object.values(nameMap))];
   }
 
-  function onShowPivot() {
+  async function onShowPivot() {
     const raw = window._lastReportData?.rows;
     if (!raw || !raw.length) {
       document.getElementById('pivotContainer').innerHTML =
@@ -1125,37 +1550,38 @@
     }
     pvbBuildData();
 
-    // Restore saved config, filter to fields that exist in current data
-    const saved = localStorage.getItem(pvbStorageKey());
-    let restored = false;
-    if (saved) {
-      try {
-        const sc = JSON.parse(saved);
-        _pvb.rows = (sc.rows||[]).filter(f => _pvb.allFields.includes(f));
-        _pvb.cols = (sc.cols||[]).filter(f => _pvb.allFields.includes(f));
-        _pvb.vals = (sc.vals||[]).filter(f => _pvb.allFields.includes(f));
-        const used = new Set([..._pvb.rows, ..._pvb.cols, ..._pvb.vals]);
-        _pvb.available = _pvb.allFields.filter(f => !used.has(f));
-        const aggEl = document.getElementById('pvbAgg');
-        const renEl = document.getElementById('pvbRender');
-        if (sc.agg && aggEl) aggEl.value = sc.agg;
-        if (sc.render && renEl) renEl.value = sc.render;
-        restored = true;
-      } catch {}
-    }
-    if (!restored) {
-      _pvb.available = [..._pvb.allFields];
-      _pvb.rows = []; _pvb.cols = []; _pvb.vals = [];
+    _pvb.presets = {};
+    _pvb.presetMeta = {};
+    try {
+      const store = await pvbLoadStore();
+      _pvb.presets = store?.presets || {};
+      _pvb.presetMeta = store?.meta || {};
+      const preferred = String(store?.selected || '').trim();
+
+      if (preferred && _pvb.presets[preferred]) {
+        _pvb.activePreset = preferred;
+        pvbApplyCfgToState(_pvb.presets[preferred]);
+      } else {
+        const first = Object.keys(_pvb.presets)[0] || '';
+        _pvb.activePreset = first;
+        if (first) pvbApplyCfgToState(_pvb.presets[first]);
+        else pvbResetState();
+      }
+    } catch (err) {
+      console.error('load pivot presets failed', err);
+      _pvb.activePreset = '';
+      pvbResetState();
+      pvbShowMsg('讀取資料庫格式失敗', 2800);
     }
 
     pvbRenderAll();
+    pvbBindPresetSelect();
     pvbBindDrop();
 
-    if (restored && (_pvb.rows.length || _pvb.cols.length)) {
+    if (_pvb.activePreset && (_pvb.rows.length || _pvb.cols.length || _pvb.vals.length)) {
       pvbApply();
     } else {
-      document.getElementById('pivotContainer').innerHTML =
-        '<div class="text-secondary text-center mt-5" style="opacity:.55;">請將欄位拖曳至各區塊，再按「產生分析」</div>';
+      pvbShowHint('請將欄位拖曳至各區塊，再按「產生分析」');
     }
   }
 
@@ -1167,17 +1593,72 @@
     // Buttons
     document.getElementById('pvbApply')?.addEventListener('click', pvbApply);
     document.getElementById('pvbClear')?.addEventListener('click', () => {
-      _pvb.available = [..._pvb.allFields];
-      _pvb.rows = []; _pvb.cols = []; _pvb.vals = [];
+      pvbResetState();
       pvbRenderAll();
-      document.getElementById('pivotContainer').innerHTML =
-        '<div class="text-secondary text-center mt-5" style="opacity:.55;">請將欄位拖曳至各區塊，再按「產生分析」</div>';
+      pvbShowHint('請將欄位拖曳至各區塊，再按「產生分析」');
     });
-    document.getElementById('pvbSave')?.addEventListener('click', () => {
-      pvbSave();
-      const m = document.getElementById('pvbMsg');
-      if (m) { m.textContent = '✔ 已儲存'; setTimeout(() => m.textContent='', 2000); }
+    document.getElementById('pvbPreset')?.addEventListener('change', (e) => {
+      pvbSelectPreset(e.target.value, true);
     });
+    document.getElementById('pvbSave')?.addEventListener('click', async () => {
+      let name = (_pvb.activePreset || '').trim();
+      if (!name) {
+        name = await pvbAskPresetName('自訂格式1');
+        if (!name) return;
+      }
+      const ok = await pvbSave(name);
+      if (ok) pvbShowMsg(`✔ 已儲存「${name}」`);
+    });
+    document.getElementById('pvbPresetSaveAs')?.addEventListener('click', async () => {
+      const baseName = (_pvb.activePreset || '').trim() || `自訂格式${Object.keys(_pvb.presets || {}).length + 1}`;
+      const name = await pvbAskPresetName(baseName);
+      if (!name) return;
+
+      if (_pvb.presets[name]) {
+        const ok = await Swal.fire({
+          icon: 'question',
+          title: `格式「${name}」已存在`,
+          text: '是否覆蓋原有格式？',
+          showCancelButton: true,
+          confirmButtonText: '覆蓋',
+          cancelButtonText: '取消'
+        });
+        if (!ok.isConfirmed) return;
+      }
+
+      const ok2 = await pvbSave(name);
+      if (ok2) pvbShowMsg(`✔ 已另存為「${name}」`);
+    });
+    document.getElementById('pvbPresetDelete')?.addEventListener('click', async () => {
+      const name = (_pvb.activePreset || document.getElementById('pvbPreset')?.value || '').trim();
+      if (!name || !_pvb.presets[name]) {
+        Swal.fire({ icon: 'info', title: '請先選擇要刪除的格式' });
+        return;
+      }
+      if (_pvb.presetMeta?.[name]?.isShared) {
+        Swal.fire({ icon: 'info', title: '共用格式不可直接刪除', text: '可先另存為個人格式後再刪除個人格式。' });
+        return;
+      }
+      const ok = await Swal.fire({
+        icon: 'warning',
+        title: `刪除格式「${name}」？`,
+        text: '刪除後無法復原',
+        showCancelButton: true,
+        confirmButtonText: '刪除',
+        cancelButtonText: '取消'
+      });
+      if (!ok.isConfirmed) return;
+
+      try {
+        await pvbDeleteFromDb(name);
+      } catch (err) {
+        Swal.fire({ icon: 'error', title: '刪除失敗', text: err?.message || '請稍後再試' });
+        return;
+      }
+      await onShowPivot();
+      pvbShowMsg(`✔ 已刪除「${name}」`);
+    });
+    document.getElementById('pvbExport')?.addEventListener('click', exportPivotToExcel);
 
     // Drop zones: body ids → state keys
     const zoneMap = { pvbAvailFields:'available', pvbRowBody:'rows', pvbColBody:'cols', pvbValBody:'vals' };
@@ -1255,13 +1736,17 @@
     if (!_pvb.data.length) {
       Swal.fire({ icon:'info', title:'請先執行查詢以載入資料' }); return;
     }
-    if (!_pvb.rows.length && !_pvb.cols.length) {
-      Swal.fire({ icon:'warning', title:'請至少指定一個「列」或「欄」欄位' }); return;
+    const noRowCol = !_pvb.rows.length && !_pvb.cols.length;
+    const hasVals = _pvb.vals.length > 0;
+    let agg = document.getElementById('pvbAgg')?.value || 'Count';
+    if (noRowCol && hasVals) {
+      agg = 'Sum';
+      const aggEl = document.getElementById('pvbAgg');
+      if (aggEl) aggEl.value = 'Sum';
     }
-    const agg    = document.getElementById('pvbAgg')?.value    || 'Count';
     const render = document.getElementById('pvbRender')?.value || 'Table';
     const opts   = { rows: _pvb.rows, cols: _pvb.cols, aggregatorName: agg, rendererName: render };
-    if (_pvb.vals.length) opts.vals = _pvb.vals;
+    if (_pvb.vals.length) opts.vals = noRowCol ? [_pvb.vals[0]] : _pvb.vals;
     document.getElementById('pivotContainer').innerHTML = '';
     try {
       $("#pivotContainer").pivotUI(_pvb.data, opts, true);
@@ -1296,11 +1781,22 @@
     if (ra) ra.style.cssText = 'display:block;width:100%;padding:0;';
   }
 
-  function pvbSave() {
-    const agg    = document.getElementById('pvbAgg')?.value    || 'Count';
-    const render = document.getElementById('pvbRender')?.value || 'Table';
-    localStorage.setItem(pvbStorageKey(),
-      JSON.stringify({ rows: _pvb.rows, cols: _pvb.cols, vals: _pvb.vals, agg, render }));
+  async function pvbSave(name) {
+    const n = String(name || '').trim();
+    if (!n) return false;
+    try {
+      await pvbSaveToDb(n);
+    } catch (err) {
+      Swal.fire({ icon: 'error', title: '儲存失敗', text: err?.message || '請稍後再試' });
+      return false;
+    }
+
+    _pvb.presets[n] = pvbCaptureCfg();
+    _pvb.presetMeta[n] = { isShared: false, sourceUserId: pvbCurrentUserId() };
+    _pvb.activePreset = n;
+    pvbRememberSelectedPreset(n);
+    pvbBindPresetSelect();
+    return true;
   }
 
   // ====== 圖表 ======

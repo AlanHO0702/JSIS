@@ -51,6 +51,7 @@ namespace PcbErpApi.Data
         public virtual DbSet<CurdModule> CurdModules { get; set; }
         public virtual DbSet<CurdVSystems> CurdVSystems { get; set; }
         public virtual DbSet<CurdBu> CurdBus { get; set; }
+        public virtual DbSet<CurdBuSystem> CurdBuSystems { get; set; }
         public virtual DbSet<FmedVProcNisToStd> FmedVProcNisToStd { get; set; }
         public virtual DbSet<FmedIssueMain> FmedIssueMain { get; set; }
         public virtual DbSet<FmedIssueSub> FmedIssueSub { get; set; }
@@ -1354,6 +1355,56 @@ namespace PcbErpApi.Data
                     .IsUnicode(false)
                     .IsFixedLength()
                     .HasColumnName("ToBUId");
+                entity.Property(e => e.WebreportLocal)
+                    .HasMaxLength(50)
+                    .IsUnicode(false)
+                    .HasColumnName("WEBReportLocal");
+                entity.Property(e => e.WebreportServer)
+                    .HasMaxLength(50)
+                    .IsUnicode(false)
+                    .HasColumnName("WEBReportServer");
+                entity.Property(e => e.WebreportShare)
+                    .HasMaxLength(50)
+                    .IsUnicode(false)
+                    .HasColumnName("WEBReportShare");
+            });
+
+            modelBuilder.Entity<CurdBuSystem>(entity =>
+            {
+                entity.HasKey(e => new { e.Buid, e.SystemId });
+
+                entity.ToTable("CURdBUSystem");
+
+                entity.Property(e => e.Buid)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .IsFixedLength()
+                    .HasColumnName("BUId");
+                entity.Property(e => e.SystemId)
+                    .HasMaxLength(8)
+                    .IsUnicode(false)
+                    .IsFixedLength();
+                entity.Property(e => e.Dbname)
+                    .HasMaxLength(24)
+                    .IsUnicode(false)
+                    .HasColumnName("DBName");
+                entity.Property(e => e.Dbserver)
+                    .HasMaxLength(24)
+                    .IsUnicode(false)
+                    .HasColumnName("DBServer");
+                entity.Property(e => e.LoginName)
+                    .HasMaxLength(24)
+                    .IsUnicode(false);
+                entity.Property(e => e.LoginPwd)
+                    .HasMaxLength(24)
+                    .IsUnicode(false)
+                    .HasColumnName("LoginPWD");
+                entity.Property(e => e.ReportServer)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
+                entity.Property(e => e.SocketServer)
+                    .HasMaxLength(50)
+                    .IsUnicode(false);
                 entity.Property(e => e.WebreportLocal)
                     .HasMaxLength(50)
                     .IsUnicode(false)

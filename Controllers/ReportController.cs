@@ -4,6 +4,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using System.Data;
+using System.Data.Common;
 using System.Text.Json;
 
 namespace PcbErpApi.Controllers
@@ -236,6 +237,193 @@ SELECT SerialNum, ItemName, Enabled, ClassName, ObjectName
             return Ok(list);
         }
 
+        // ====== Pivot 自訂格式（DB）======
+        [HttpGet("pivot-presets")]
+        public async Task<IActionResult> GetPivotPresets([FromQuery] string itemId, [FromQuery] string? userId = null)
+        {
+            itemId = (itemId ?? string.Empty).Trim();
+            userId = ResolveUserId(userId);
+            if (string.IsNullOrWhiteSpace(itemId))
+                return BadRequest(new { ok = false, error = "itemId required" });
+
+            var connStr = _config.GetConnectionString("DefaultConnection");
+            await using var conn = new SqlConnection(connStr);
+            await conn.OpenAsync();
+
+            var list = new List<PivotPresetDto>();
+
+            const string sqlSubNames = @"
+;WITH cte AS (
+    SELECT
+        SubName,
+        UserId,
+        ROW_NUMBER() OVER (
+            PARTITION BY SubName
+            ORDER BY CASE WHEN UserId = @userId THEN 0 ELSE 1 END, UserId
+        ) AS rn
+    FROM CURdSysItemsUser WITH (NOLOCK)
+    WHERE ItemId = @itemId
+      AND (UserId = @userId OR UserId = '')
+      AND ISNULL(SubName, '') <> ''
+)
+SELECT SubName, UserId
+FROM cte
+WHERE rn = 1
+ORDER BY SubName;";
+
+            await using (var cmd = new SqlCommand(sqlSubNames, conn))
+            {
+                cmd.Parameters.AddWithValue("@itemId", itemId);
+                cmd.Parameters.AddWithValue("@userId", userId);
+                await using var rd = await cmd.ExecuteReaderAsync();
+                while (await rd.ReadAsync())
+                {
+                    var subName = rd["SubName"]?.ToString() ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(subName)) continue;
+                    var owner = rd["UserId"]?.ToString() ?? string.Empty;
+                    list.Add(new PivotPresetDto
+                    {
+                        Name = subName,
+                        SourceUserId = owner,
+                        IsShared = string.IsNullOrWhiteSpace(owner)
+                    });
+                }
+            }
+
+            const string sqlFields = @"
+SELECT FieldName, AreaId, AreaIndex
+FROM CURdSysItemsUserField WITH (NOLOCK)
+WHERE ItemId = @itemId
+  AND UserId = @ownerUserId
+  AND SubName = @subName
+ORDER BY AreaId, AreaIndex;";
+
+            foreach (var preset in list)
+            {
+                await using var cmd = new SqlCommand(sqlFields, conn);
+                cmd.Parameters.AddWithValue("@itemId", itemId);
+                cmd.Parameters.AddWithValue("@ownerUserId", preset.SourceUserId ?? string.Empty);
+                cmd.Parameters.AddWithValue("@subName", preset.Name ?? string.Empty);
+
+                await using var rd = await cmd.ExecuteReaderAsync();
+                while (await rd.ReadAsync())
+                {
+                    var fieldName = rd["FieldName"]?.ToString() ?? string.Empty;
+                    var areaId = rd["AreaId"] == DBNull.Value ? 0 : Convert.ToInt32(rd["AreaId"]);
+                    if (string.IsNullOrWhiteSpace(fieldName)) continue;
+
+                    switch (areaId)
+                    {
+                        case 1:
+                            preset.Rows.Add(fieldName);
+                            break;
+                        case 2:
+                            preset.Cols.Add(fieldName);
+                            break;
+                        case 3:
+                            preset.Vals.Add(fieldName);
+                            break;
+                    }
+                }
+            }
+
+            return Ok(new { ok = true, itemId, userId, presets = list });
+        }
+
+        [HttpPost("pivot-presets/save")]
+        public async Task<IActionResult> SavePivotPreset([FromBody] PivotPresetSaveRequest req)
+        {
+            req ??= new PivotPresetSaveRequest();
+            var itemId = (req.ItemId ?? string.Empty).Trim();
+            var name = (req.Name ?? string.Empty).Trim();
+            var userId = ResolveUserId(req.UserId);
+
+            if (string.IsNullOrWhiteSpace(itemId))
+                return BadRequest(new { ok = false, error = "itemId required" });
+            if (string.IsNullOrWhiteSpace(name))
+                return BadRequest(new { ok = false, error = "name required" });
+
+            var rows = NormalizeFields(req.Rows);
+            var cols = NormalizeFields(req.Cols);
+            var vals = NormalizeFields(req.Vals);
+
+            var connStr = _config.GetConnectionString("DefaultConnection");
+            await using var conn = new SqlConnection(connStr);
+            await conn.OpenAsync();
+            await using var tx = await conn.BeginTransactionAsync();
+
+            try
+            {
+                // 只覆蓋目前使用者版本，避免誤刪共用或他人版本
+                await ExecNonQueryAsync(conn, tx, @"
+DELETE FROM CURdSysItemsUserField
+WHERE ItemId = @itemId AND UserId = @userId AND SubName = @subName;", itemId, userId, name);
+
+                await ExecNonQueryAsync(conn, tx, @"
+DELETE FROM CURdSysItemsUser
+WHERE ItemId = @itemId AND UserId = @userId AND SubName = @subName;", itemId, userId, name);
+
+                await using (var cmdInsHead = new SqlCommand(@"
+INSERT INTO CURdSysItemsUser(ItemId, UserId, SubName)
+VALUES(@itemId, @userId, @subName);", conn, (SqlTransaction)tx))
+                {
+                    cmdInsHead.Parameters.AddWithValue("@itemId", itemId);
+                    cmdInsHead.Parameters.AddWithValue("@userId", userId);
+                    cmdInsHead.Parameters.AddWithValue("@subName", name);
+                    await cmdInsHead.ExecuteNonQueryAsync();
+                }
+
+                await InsertFieldRowsAsync(conn, tx, itemId, userId, name, rows, 1);
+                await InsertFieldRowsAsync(conn, tx, itemId, userId, name, cols, 2);
+                await InsertFieldRowsAsync(conn, tx, itemId, userId, name, vals, 3);
+
+                await tx.CommitAsync();
+                return Ok(new { ok = true, itemId, userId, name });
+            }
+            catch (Exception ex)
+            {
+                await tx.RollbackAsync();
+                return StatusCode(500, new { ok = false, error = ex.Message });
+            }
+        }
+
+        [HttpDelete("pivot-presets")]
+        public async Task<IActionResult> DeletePivotPreset([FromQuery] string itemId, [FromQuery] string name, [FromQuery] string? userId = null)
+        {
+            itemId = (itemId ?? string.Empty).Trim();
+            name = (name ?? string.Empty).Trim();
+            userId = ResolveUserId(userId);
+
+            if (string.IsNullOrWhiteSpace(itemId))
+                return BadRequest(new { ok = false, error = "itemId required" });
+            if (string.IsNullOrWhiteSpace(name))
+                return BadRequest(new { ok = false, error = "name required" });
+
+            var connStr = _config.GetConnectionString("DefaultConnection");
+            await using var conn = new SqlConnection(connStr);
+            await conn.OpenAsync();
+            await using var tx = await conn.BeginTransactionAsync();
+
+            try
+            {
+                await ExecNonQueryAsync(conn, tx, @"
+DELETE FROM CURdSysItemsUserField
+WHERE ItemId = @itemId AND UserId = @userId AND SubName = @subName;", itemId, userId, name);
+
+                var affected = await ExecNonQueryAsync(conn, tx, @"
+DELETE FROM CURdSysItemsUser
+WHERE ItemId = @itemId AND UserId = @userId AND SubName = @subName;", itemId, userId, name);
+
+                await tx.CommitAsync();
+                return Ok(new { ok = true, itemId, userId, name, affected });
+            }
+            catch (Exception ex)
+            {
+                await tx.RollbackAsync();
+                return StatusCode(500, new { ok = false, error = ex.Message });
+            }
+        }
+
         private async Task<List<object>> RunLookupQuery(string sql, string? parentVal = null)
         {
             await using var conn = _context.Database.GetDbConnection();
@@ -324,6 +512,97 @@ SELECT SerialNum, ItemName, Enabled, ClassName, ObjectName
                 default:
                     return je.ToString();
             }
+        }
+
+        private string ResolveUserId(string? userId)
+        {
+            var v = (userId ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(v)) return v;
+
+            v = (HttpContext?.Items["UserId"]?.ToString() ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(v)) return v;
+
+            v = (User?.Claims?.FirstOrDefault(c => string.Equals(c.Type, "UserId", StringComparison.OrdinalIgnoreCase))?.Value ?? string.Empty).Trim();
+            return string.IsNullOrWhiteSpace(v) ? "admin" : v;
+        }
+
+        private static List<string> NormalizeFields(IEnumerable<string>? source)
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var list = new List<string>();
+            if (source == null) return list;
+
+            foreach (var s in source)
+            {
+                var v = (s ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(v)) continue;
+                if (v.Length > 200) v = v[..200];
+                if (set.Add(v)) list.Add(v);
+            }
+            return list;
+        }
+
+        private static async Task<int> ExecNonQueryAsync(
+            SqlConnection conn,
+            DbTransaction tx,
+            string sql,
+            string itemId,
+            string userId,
+            string subName)
+        {
+            await using var cmd = new SqlCommand(sql, conn, (SqlTransaction)tx);
+            cmd.Parameters.AddWithValue("@itemId", itemId);
+            cmd.Parameters.AddWithValue("@userId", userId);
+            cmd.Parameters.AddWithValue("@subName", subName);
+            return await cmd.ExecuteNonQueryAsync();
+        }
+
+        private static async Task InsertFieldRowsAsync(
+            SqlConnection conn,
+            DbTransaction tx,
+            string itemId,
+            string userId,
+            string subName,
+            IReadOnlyList<string> fields,
+            int areaId)
+        {
+            if (fields.Count == 0) return;
+
+            const string sql = @"
+INSERT INTO CURdSysItemsUserField(ItemId, UserId, SubName, FieldName, AreaId, AreaIndex)
+VALUES(@itemId, @userId, @subName, @fieldName, @areaId, @areaIndex);";
+
+            for (var i = 0; i < fields.Count; i++)
+            {
+                await using var cmd = new SqlCommand(sql, conn, (SqlTransaction)tx);
+                cmd.Parameters.AddWithValue("@itemId", itemId);
+                cmd.Parameters.AddWithValue("@userId", userId);
+                cmd.Parameters.AddWithValue("@subName", subName);
+                cmd.Parameters.AddWithValue("@fieldName", fields[i]);
+                cmd.Parameters.AddWithValue("@areaId", areaId);
+                cmd.Parameters.AddWithValue("@areaIndex", i);
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        public class PivotPresetDto
+        {
+            public string Name { get; set; } = string.Empty;
+            public bool IsShared { get; set; }
+            public string SourceUserId { get; set; } = string.Empty;
+            public List<string> Rows { get; set; } = new();
+            public List<string> Cols { get; set; } = new();
+            public List<string> Vals { get; set; } = new();
+        }
+
+        public class PivotPresetSaveRequest
+        {
+            public string ItemId { get; set; } = string.Empty;
+            public string UserId { get; set; } = string.Empty;
+            public string Name { get; set; } = string.Empty;
+            public List<string> Rows { get; set; } = new();
+            public List<string> Cols { get; set; } = new();
+            public List<string> Vals { get; set; } = new();
         }
 
     }
