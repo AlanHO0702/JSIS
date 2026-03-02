@@ -149,10 +149,41 @@
     else alert(await res.text());
   }
 
-  // 預留 SOP 相關按鈕（若後端提供對應 API，填上即可）
-  async function uploadSop() { alert('尚未實作：上傳 SOP'); }
-  async function viewSop() { alert('尚未實作：檢視 SOP'); }
-  async function deleteSop() { alert('尚未實作：刪除 SOP'); }
+  async function uploadSop() {
+    const ctx = getCtx();
+    if (!ctx || !ctx.systemCode) return alert('請先選擇系統代碼');
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.doc,.docx,.pdf';
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('SystemCode', ctx.systemCode);
+      formData.append('File', file);
+      const res = await fetch('/api/SystemGraph/UploadSop', { method: 'POST', body: formData });
+      if (res.ok) { alert('上傳完成'); location.reload(); }
+      else alert(await res.text());
+    };
+    input.click();
+  }
+
+  async function viewSop() {
+    const ctx = getCtx();
+    if (!ctx || !ctx.systemCode) return alert('請先選擇系統代碼');
+    const fileName = ctx.row.SOPName || ctx.row.sopName || ctx.row.SopName || '';
+    if (!fileName) return alert('沒有 SOP 檔名');
+    window.open(`/api/SystemGraph/GetSop/${encodeURIComponent(fileName)}`, '_blank');
+  }
+
+  async function deleteSop() {
+    const ctx = getCtx();
+    if (!ctx || !ctx.systemCode) return alert('請先選擇系統代碼');
+    if (!confirm('確定刪除 SOP？')) return;
+    const res = await fetch(`/api/SystemGraph/DeleteSop?systemCode=${encodeURIComponent(ctx.systemCode)}`, { method: 'DELETE' });
+    if (res.ok) { alert('刪除完成'); location.reload(); }
+    else alert(await res.text());
+  }
 
   // 註冊到 SingleGrid handlers
   window.SingleGridCustomHandlers = window.SingleGridCustomHandlers || {};

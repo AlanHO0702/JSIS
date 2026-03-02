@@ -44,6 +44,16 @@ builder.Services.AddHttpClient("MyApiClient", (sp, client) =>
     client.BaseAddress = new Uri(apiSettings.HostAddress);
 });
 
+// Crystal Reports API — 報表產生可能較久，給予較長的 Timeout
+builder.Services.AddHttpClient("CrystalReport", (sp, client) =>
+{
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var baseUrl = cfg["ReportApi:CrystalUrl"];
+    if (!string.IsNullOrWhiteSpace(baseUrl))
+        client.BaseAddress = new Uri(baseUrl);
+    client.Timeout = TimeSpan.FromMinutes(10);
+});
+
 // 註冊 HttpClient，讓服務可注入 HttpClient 用於發送 HTTP 請求
 builder.Services.AddHttpClient();
 

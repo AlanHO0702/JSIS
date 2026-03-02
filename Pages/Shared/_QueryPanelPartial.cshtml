@@ -85,7 +85,11 @@
     const normalizeKey = (v) => (v || "").toString().trim().replace(/^@@+/, "").toLowerCase();
 
     const getItemId = () => (window._itemId || window._singleItemId || "").toString().trim();
-    const getTable = () => (window._dictTableName || window._tableName || "").toString().trim();
+    const getTable = () => {
+        // 單身頁優先用 PAGE.headerTable（主表），確保查詢面板欄位與 sub-ToolbarHandler 搜尋的表一致
+        if (typeof PAGE !== "undefined" && PAGE.headerTable) return PAGE.headerTable;
+        return (window._dictTableName || window._tableName || "").toString().trim();
+    };
 
     const getUserId = () => (localStorage.getItem("erpLoginUserId") || window._userId || "").toString().trim();
     const getUseId = () => (localStorage.getItem("erpLoginBUId") || window.DEFAULT_USEID || window._useId || "A001").toString().trim();
@@ -466,8 +470,14 @@
                     console.warn('[QueryPanel] 沒有查詢欄位，無法建立表單');
                     return;
                 }
-                for (let i = 0; i < fields.length; i++) {
-                    await buildField(fields[i], equals, i);
+                // 只建立 iVisible !== 0 的欄位，與 server-side IVisible==1 過濾一致
+                // 避免隱藏欄位的 DefaultValue 被 ToolbarHandler 收集成過濾條件
+                const visibleFields = fields.filter(f => {
+                    const iv = f.iVisible ?? f.IVisible;
+                    return iv == null || Number(iv) !== 0;
+                });
+                for (let i = 0; i < visibleFields.length; i++) {
+                    await buildField(visibleFields[i], equals, i);
                 }
                 wireSuperChange();
             } catch (err) {

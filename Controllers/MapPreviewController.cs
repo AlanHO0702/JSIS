@@ -91,6 +91,7 @@ namespace PcbErpApi.Controllers
                     ".png" => "image/png",
                     ".bmp" => "image/bmp",
                     ".wmf" => "image/wmf",
+                    ".pdf" => "application/pdf",
                     _ => "application/octet-stream"
                 };
                 return File(bytes, contentType);

@@ -68,9 +68,11 @@
             var cls = (item?.ClassName ?? string.Empty).ToString().Trim();
             if (!cls.Equals("CCSdCompanyDLL.dll", StringComparison.OrdinalIgnoreCase))
                 return null;
+            var itemId = (item?.ItemId ?? string.Empty).ToString().Trim();
+            if (string.IsNullOrWhiteSpace(itemId)) return null;
             var sysId = ResolveCompanySystem(item?.PowerType);
             if (!sysId.HasValue) return null;
-            return $"/CCS/CC000054/{sysId.Value}";
+            return $"/CCS/{itemId}/{sysId.Value}";
         }
         catch { return null; }
     }
@@ -97,7 +99,7 @@
         }
 
         if (item.ItemType == 2 && item.OutputType == 0) return "Report(Direct)";
-        if (item.ItemType == 2 && item.OutputType == 6) return "Report(Generic)";
+        if (item.ItemType == 2 && (item.OutputType == 6 || item.OutputType == 7)) return "Report(Generic)";
 
         return "未設定";
     }
@@ -367,6 +369,7 @@ body {
                              ? pageMap[item.ItemId]
                              : ResolveCompanyLink(item) // 公司/廠商主檔樣板
                              ?? (item.ItemType == 2 && item.OutputType == 0 ? $"/Report/Direct/{item.ItemId}"
+                                : item.ItemType == 2 && (item.OutputType == 6 || item.OutputType == 7) ? $"/Report/Generic/{item.ItemId}"
                                 : item.ItemType == 6 && ocx.Contains("jsdpaper3ldll") ? $"/DynamicTemplate/Paper3L/{item.ItemId}"
                                 : item.ItemType == 6 && ocx.Contains("jsdpaperorgdll") ? $"/DynamicTemplate/Paper/{item.ItemId}"
                                 : item.ItemType == 6 && ocx.Contains("jsdsinglegriddll") ? $"/CUR/SingleGrid/{item.ItemId}"
@@ -461,14 +464,16 @@ body {
         return map[num] ?? null;
     }
 
-    function resolveCompanyLinkFromMeta(meta) {
+    function resolveCompanyLinkFromMeta(meta, itemId) {
         if (!meta) return null;
         const cls = String(meta.className ?? meta.ClassName ?? "").trim().toLowerCase();
         if (cls !== "ccsdcompanydll.dll") return null;
+        const resolvedId = String(itemId ?? meta.itemId ?? meta.ItemId ?? "").trim();
+        if (!resolvedId) return null;
         const pt = meta.powerType ?? meta.PowerType;
         const sysId = getSystemIdFromPowerType(pt);
         if (!sysId) return null;
-        return `/CCS/CC000054/${sysId}`;
+        return `/CCS/${resolvedId}/${sysId}`;
     }
 
     const itemHintCache = new Map();
@@ -477,7 +482,7 @@ body {
         const hard = pageMap[itemId];
         if (hard) return hard;
 
-        const companyLink = resolveCompanyLinkFromMeta(meta);
+        const companyLink = resolveCompanyLinkFromMeta(meta, itemId);
         if (companyLink) return companyLink;
 
         const itemType = Number(meta?.itemType ?? meta?.ItemType);
@@ -506,7 +511,7 @@ body {
         }
 
         if (itemType === 2 && outputType === 0) return 'Report(Direct)';
-        if (itemType === 2 && outputType === 6) return 'Report(Generic)';
+        if (itemType === 2 && (outputType === 6 || outputType === 7)) return 'Report(Generic)';
 
         return '未設定';
     }
@@ -515,7 +520,7 @@ body {
         const hard = pageMap[itemId];
         if (hard) return hard;
         const localMeta = { ClassName: className, PowerType: powerType };
-        const companyLink = resolveCompanyLinkFromMeta(localMeta);
+        const companyLink = resolveCompanyLinkFromMeta(localMeta, itemId);
         return companyLink || null;
     }
 
@@ -557,7 +562,7 @@ body {
 
         // 先嘗試本地 className/powerType 映射（我的最愛可帶進來）
         const localMeta = { ClassName: className, PowerType: powerType };
-        const localLink = resolveCompanyLinkFromMeta(localMeta);
+        const localLink = resolveCompanyLinkFromMeta(localMeta, itemId);
         if (localLink) { location.href = localLink; return; }
 
         try {
@@ -582,7 +587,7 @@ body {
                 }
             } catch (err) { console.warn('favorite meta backfill failed', err); }
 
-            const companyLink = resolveCompanyLinkFromMeta(meta);
+            const companyLink = resolveCompanyLinkFromMeta(meta, itemId);
             if (companyLink) { location.href = companyLink; return; }
 
             const itemType = Number(meta.itemType ?? meta.ItemType);
@@ -601,7 +606,7 @@ body {
             const ocx = String(ocxRaw).trim().toLowerCase();
             let url = '';
             if (itemType === 2 && outputType === 0) url = `/Report/Direct/${itemId}`;
-            else if (itemType === 2 && outputType === 6) url = `/Report/Generic/${itemId}`;
+            else if (itemType === 2 && (outputType === 6 || outputType === 7)) url = `/Report/Generic/${itemId}`;
             else if (itemType === 6 && (ocx === 'jsdpaper3ldll.dll' || ocx.includes('jsdpaper3ldll'))) url = `/DynamicTemplate/Paper3L/${itemId}`;
             else if (itemType === 6 && (ocx === 'jsdpaperorgdll.dll' || ocx.includes('jsdpaperorgdll'))) url = `/DynamicTemplate/Paper/${itemId}`;
             else if (itemType === 6 && (ocx === 'jsdsinglegriddll.dll' || ocx.includes('jsdsinglegriddll'))) url = `/CUR/SingleGrid/${itemId}`;

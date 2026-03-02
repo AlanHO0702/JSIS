@@ -135,6 +135,7 @@ function openPaperTypeModal(types) {
     this.deleteApiUrlFn      = opts.deleteApiUrlFn; // function(id)
     this.detailRouteTemplate = opts.detailRouteTemplate;
     this.tableName           = opts.tableName;
+    this.itemId              = opts.itemId || null;
     this.pageSize            = opts.pageSize || 50;
 
     this.renderTable         = opts.renderTable;
@@ -151,6 +152,16 @@ function openPaperTypeModal(types) {
 
      this.init();
    }
+
+  resolveItemId() {
+    const fromWin = (window._itemId || window._singleItemId || this.itemId || '').toString().trim();
+    if (fromWin) return fromWin;
+    const m = (location.pathname || '').match(/\/DynamicTemplate\/Paper\/([^\/?#]+)/i);
+    if (m && m[1]) {
+      try { return decodeURIComponent(m[1]).trim(); } catch { return m[1].trim(); }
+    }
+    return '';
+  }
 
   init() {
     // 查詢面板
@@ -503,10 +514,11 @@ function openPaperTypeModal(types) {
       }
 
       // AJAX 查詢（單頁查詢用）
+      const itemId = this.resolveItemId();
       const resp = await fetchWithBusy(this.pagedQueryUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ table: this.tableName, filters })
+        body: JSON.stringify({ table: this.tableName, itemId, filters })
       }, '查詢中…');
 
       if (!resp.ok) { Swal.fire({ icon:'error', title:'查詢失敗' }); return; }

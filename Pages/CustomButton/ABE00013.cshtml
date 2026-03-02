@@ -1,0 +1,267 @@
+@*
+    ABE00013 - 銀行匯款單
+    對應 Delphi: AccountPayDLL.pas / RptGridDLL.pas
+    自訂按鈕功能:
+      - btnC2 (SendRPT):  轉出報表 — 執行 SP 顯示報表 Grid Modal
+      - btnC3 (SendTXT):  轉出匯款檔 — 執行 SP 下載 TXT/DAT
+      - btnC8 (SendTXT2): 郵局匯款檔 — 執行 ABEdBankTranGetData_TCI 下載 TXT
+*@
+@model dynamic
+
+@* ── 報表 Grid Modal (對應 Delphi RptGridDLL) ── *@
+<div class="modal fade" id="abe00013-rptModal" tabindex="-1" aria-labelledby="abe00013-rptModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="abe00013-rptModalLabel">轉檔內容驗證</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="table-responsive" style="max-height:60vh;">
+                    <table class="table table-sm table-bordered table-hover mb-0" id="abe00013-rptTable">
+                        <thead class="table-light" id="abe00013-rptHead"></thead>
+                        <tbody id="abe00013-rptBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer py-1">
+                <button type="button" class="btn btn-sm btn-primary" data-bs-dismiss="modal">確定</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(() => {
+    window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+    // ── 共用工具 ──
+
+    const readPaperNum = (ctx) => {
+        const v = (ctx?.paperNum || window._paperNum || '').toString().trim();
+        if (v) return v;
+        if (typeof window.getPaperNum === 'function') {
+            try { return (window.getPaperNum() || '').toString().trim(); } catch { /* ignore */ }
+        }
+        return '';
+    };
+
+    const withJwtHeaders = (init = {}) => {
+        const jwt = localStorage.getItem('jwtId');
+        const headers = Object.assign({}, init.headers || {});
+        if (jwt) headers['X-JWTID'] = jwt;
+        return { ...init, headers };
+    };
+
+    /** 檢查完成狀態 (Finished 必須為 1 或 4) */
+    const checkFinished = async (paperNum) => {
+        const resp = await fetch(`/api/ABE00013/CheckFinished?paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
+        const data = await resp.json();
+        if (!data.ok) {
+            await Swal.fire({ icon: 'warning', title: data.error || '完成狀態不符，無法轉出!!' });
+            return false;
+        }
+        return true;
+    };
+
+    // ── btnC2 (SendRPT): 轉出報表 ──
+
+    let rptModal = null;
+
+    const sendRPT = async (ctx) => {
+        const paperNum = readPaperNum(ctx);
+        if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+        // 1. 檢查完成狀態
+        if (!await checkFinished(paperNum)) return;
+
+        // 2. 執行報表 SP
+        Swal.fire({
+            title: '處理中...',
+            text: '正在產生報表資料',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            didOpen: () => Swal.showLoading()
+        });
+
+        try {
+            const resp = await fetch('/api/ABE00013/ExecReport', withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ PaperNum: paperNum })
+            }));
+            const data = await resp.json();
+            Swal.close();
+
+            if (!data.ok) {
+                return Swal.fire({ icon: 'error', title: '執行失敗', text: data.error });
+            }
+
+            if (!data.rows || data.rows.length === 0) {
+                return Swal.fire({ icon: 'info', title: '查無資料' });
+            }
+
+            // 3. 渲染報表 Grid Modal (對應 Delphi RptGridDLL)
+            renderRptGrid(data.columns, data.rows);
+            showRptModal();
+
+        } catch (err) {
+            Swal.close();
+            console.error('SendRPT error:', err);
+            await Swal.fire({ icon: 'error', title: '執行錯誤', text: err.message });
+        }
+    };
+
+    /** 渲染報表 Grid */
+    const renderRptGrid = (columns, rows) => {
+        const thead = document.getElementById('abe00013-rptHead');
+        const tbody = document.getElementById('abe00013-rptBody');
+        if (!thead || !tbody) return;
+
+        // 表頭
+        thead.innerHTML = '<tr>' + columns.map(c =>
+            `<th class="text-nowrap px-2" style="position:sticky;top:0;z-index:1;">${escHtml(c)}</th>`
+        ).join('') + '</tr>';
+
+        // 表身
+        tbody.innerHTML = rows.map(r =>
+            '<tr>' + columns.map(c =>
+                `<td class="text-nowrap px-2">${escHtml(r[c] ?? '')}</td>`
+            ).join('') + '</tr>'
+        ).join('');
+    };
+
+    const showRptModal = () => {
+        const el = document.getElementById('abe00013-rptModal');
+        if (!el) return;
+        if (!rptModal) rptModal = new bootstrap.Modal(el, { backdrop: 'static' });
+        rptModal.show();
+    };
+
+    const escHtml = (v) => {
+        const s = String(v);
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    };
+
+    // ── btnC3 (SendTXT): 轉出匯款檔 ──
+
+    const sendTXT = async (ctx) => {
+        const paperNum = readPaperNum(ctx);
+        if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+        // 1. 檢查完成狀態
+        if (!await checkFinished(paperNum)) return;
+
+        // 2. 下載檔案
+        Swal.fire({
+            title: '處理中...',
+            text: '正在產生匯款檔',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            didOpen: () => Swal.showLoading()
+        });
+
+        try {
+            const resp = await fetch('/api/ABE00013/DownloadTxt', withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ PaperNum: paperNum })
+            }));
+
+            Swal.close();
+
+            if (!resp.ok) {
+                const errData = await resp.json().catch(() => ({}));
+                return Swal.fire({ icon: 'error', title: '轉檔失敗', text: errData.error || `HTTP ${resp.status}` });
+            }
+
+            // 觸發瀏覽器下載
+            const blob = await resp.blob();
+            const cd = resp.headers.get('content-disposition') || '';
+            const fnMatch = cd.match(/filename\*?=(?:UTF-8'')?([^;\s]+)/i);
+            const fileName = fnMatch ? decodeURIComponent(fnMatch[1].replace(/"/g, '')) : `AccountPay_${paperNum}.txt`;
+
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+
+            await Swal.fire({ icon: 'success', title: '轉檔完成!', timer: 1500, showConfirmButton: false });
+
+        } catch (err) {
+            Swal.close();
+            console.error('SendTXT error:', err);
+            await Swal.fire({ icon: 'error', title: '執行錯誤', text: err.message });
+        }
+    };
+
+    // ── btnC8 (SendTXT2): 郵局匯款檔 ──
+
+    const sendTXT2 = async (ctx) => {
+        const paperNum = readPaperNum(ctx);
+        if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+        // 1. 檢查完成狀態
+        if (!await checkFinished(paperNum)) return;
+
+        // 2. 下載檔案
+        Swal.fire({
+            title: '處理中...',
+            text: '正在產生郵局匯款檔',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            didOpen: () => Swal.showLoading()
+        });
+
+        try {
+            const resp = await fetch('/api/ABE00013/DownloadPostTxt', withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ PaperNum: paperNum })
+            }));
+
+            Swal.close();
+
+            if (!resp.ok) {
+                const errData = await resp.json().catch(() => ({}));
+                return Swal.fire({ icon: 'error', title: '轉檔失敗', text: errData.error || `HTTP ${resp.status}` });
+            }
+
+            // 觸發瀏覽器下載
+            const blob = await resp.blob();
+            const cd = resp.headers.get('content-disposition') || '';
+            const fnMatch = cd.match(/filename\*?=(?:UTF-8'')?([^;\s]+)/i);
+            const fileName = fnMatch ? decodeURIComponent(fnMatch[1].replace(/"/g, '')) : `PostTransfer_${paperNum}.txt`;
+
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+
+            await Swal.fire({ icon: 'success', title: '轉檔完成!', timer: 1500, showConfirmButton: false });
+
+        } catch (err) {
+            Swal.close();
+            console.error('SendTXT2 error:', err);
+            await Swal.fire({ icon: 'error', title: '執行錯誤', text: err.message });
+        }
+    };
+
+    // ── 註冊按鈕處理函式 ──
+    window.ActionRailCustomHandlers['ABE00013'] = {
+        btnC2: sendRPT,     // 轉出報表
+        btnC3: sendTXT,     // 轉出匯款檔
+        btnC8: sendTXT2     // 郵局匯款檔
+    };
+})();
+</script>

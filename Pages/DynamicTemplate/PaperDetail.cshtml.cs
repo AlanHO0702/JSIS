@@ -100,7 +100,8 @@ namespace PcbErpApi.Pages.DynamicTemplate
 
             var master = setupList
                 .Where(x => (x.TableKind ?? "").Contains("Master", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(x => x.TableKind)
+                .OrderBy(x => string.Equals(x.TableKind, "Master1", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(x => x.TableKind)
                 .FirstOrDefault()
                 ?? setupList.FirstOrDefault();
 

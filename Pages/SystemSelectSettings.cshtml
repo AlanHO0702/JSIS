@@ -1,0 +1,287 @@
+@page
+@model PcbErpApi.Pages.SystemSelectSettingsModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "系統別設定";
+}
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+
+<div class="system-select-page">
+  <div id="systemSelectAlert" class="alert d-none py-2 mb-2" role="alert"></div>
+
+  <section class="card">
+    <div class="card-header d-flex align-items-center">
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-primary" id="btnSystemSelectSave">儲存</button>
+        <button class="btn btn-sm btn-secondary" id="btnSystemSelectReload">取消</button>
+      </div>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-wrap">
+        <table class="table table-bordered table-sm align-middle mb-0" id="tblSystemSelect">
+          <thead>
+            <tr>
+              <th style="width:80px;">系統代號</th>
+              <th style="width:130px;">系統名稱</th>
+              <th style="width:60px;">啟用</th>
+              <th style="width:80px;">呈現系統</th>
+              <th style="width:80px;">Menu順序</th>
+              <th style="width:80px;">模組代號</th>
+              <th style="width:60px;">序號</th>
+              <th style="width:190px;">圖檔名稱</th>
+              <th style="width:220px;">使用手冊檔名</th>
+              <th style="width:220px;">模組SOP檔名</th>
+            </tr>
+          </thead>
+          <tbody id="systemSelectBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<style>
+.system-select-page {
+  height: calc(100vh - 84px);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px;
+}
+
+.table-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 180px);
+}
+
+#tblSystemSelect {
+  table-layout: fixed;
+  min-width: 1400px;
+}
+
+#tblSystemSelect thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f8f9fa;
+  white-space: nowrap;
+}
+
+#tblSystemSelect th,
+#tblSystemSelect td {
+  padding: .2rem .3rem;
+  line-height: 1.15;
+}
+
+#tblSystemSelect input.form-control-sm {
+  height: 28px;
+  min-height: 28px;
+  padding: 2px 6px;
+  font-size: .88rem;
+}
+
+#tblSystemSelect .form-check-input {
+  width: 14px;
+  height: 14px;
+  margin-top: 0;
+}
+
+#tblSystemSelect tbody tr.selected {
+  background: #e7f1ff;
+}
+</style>
+
+<script>
+const systemSelectState = {
+  rows: [],
+  originalMap: new Map(),
+  selectedSystemId: ""
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("btnSystemSelectSave").addEventListener("click", saveSystemSelectRows);
+  document.getElementById("btnSystemSelectReload").addEventListener("click", loadSystemSelectRows);
+  loadSystemSelectRows();
+});
+
+async function loadSystemSelectRows() {
+  try {
+    const rows = await apiGet("/api/CURdSystemSelect/all");
+    systemSelectState.rows = Array.isArray(rows) ? rows : [];
+    systemSelectState.originalMap = new Map(
+      systemSelectState.rows.map(r => [toKey(r.SystemId || r.systemId), serializeRow(normalizeRow(r))])
+    );
+    systemSelectState.selectedSystemId = systemSelectState.rows[0]?.SystemId || systemSelectState.rows[0]?.systemId || "";
+    renderSystemSelectRows();
+    showSystemSelectAlert("", true);
+  } catch (err) {
+    showSystemSelectAlert(err.message || "載入資料失敗", false);
+  }
+}
+
+function renderSystemSelectRows() {
+  const tbody = document.getElementById("systemSelectBody");
+  tbody.innerHTML = "";
+
+  systemSelectState.rows.forEach(r => {
+    const row = normalizeRow(r);
+    const tr = document.createElement("tr");
+    tr.dataset.systemId = row.systemId;
+    tr.className = row.systemId === systemSelectState.selectedSystemId ? "selected" : "";
+    tr.addEventListener("click", () => {
+      systemSelectState.selectedSystemId = row.systemId;
+      renderSystemSelectRows();
+    });
+
+    tr.innerHTML = `
+      <td><input class="form-control form-control-sm fld-systemid" value="${escapeHtml(row.systemId)}" readonly></td>
+      <td><input class="form-control form-control-sm fld-systemname" value="${escapeHtml(row.systemName)}" readonly></td>
+      <td class="text-center"><input type="checkbox" class="form-check-input fld-selected" ${row.selected === 1 ? "checked" : ""}></td>
+      <td class="text-center"><input type="checkbox" class="form-check-input fld-isdll" ${row.isDLL === 1 ? "checked" : ""}></td>
+      <td><input type="number" class="form-control form-control-sm fld-ordernum" value="${row.orderNum}"></td>
+      <td><input class="form-control form-control-sm fld-moduleid" value="${escapeHtml(row.moduleId)}"></td>
+      <td><input type="number" class="form-control form-control-sm fld-serialnum" value="${row.serialNum}"></td>
+      <td><input class="form-control form-control-sm fld-graphname" value="${escapeHtml(row.graphName)}"></td>
+      <td><input class="form-control form-control-sm fld-manualname" value="${escapeHtml(row.manualName)}"></td>
+      <td><input class="form-control form-control-sm fld-sopname" value="${escapeHtml(row.sopName)}"></td>
+    `;
+
+    tbody.appendChild(tr);
+  });
+}
+
+async function saveSystemSelectRows() {
+  try {
+    const currentRows = collectRowsFromDom();
+    const changed = currentRows.filter(r => {
+      const key = toKey(r.systemId);
+      return systemSelectState.originalMap.get(key) !== serializeRow(r);
+    });
+
+    if (changed.length === 0) {
+      showSystemSelectAlert("沒有異動資料", true);
+      return;
+    }
+
+    for (const row of changed) {
+      await apiSend(`/api/CURdSystemSelect/${encodeURIComponent(row.systemId)}`, "PUT", row);
+    }
+
+    showSystemSelectAlert(`儲存完成，共 ${changed.length} 筆`, true);
+    await loadSystemSelectRows();
+  } catch (err) {
+    showSystemSelectAlert(err.message || "儲存失敗", false);
+  }
+}
+
+function collectRowsFromDom() {
+  const rows = [];
+  document.querySelectorAll("#systemSelectBody tr").forEach(tr => {
+    rows.push({
+      systemId: (tr.querySelector(".fld-systemid")?.value || "").trim(),
+      selected: tr.querySelector(".fld-selected")?.checked ? 1 : 0,
+      isDLL: tr.querySelector(".fld-isdll")?.checked ? 1 : 0,
+      orderNum: toInt(tr.querySelector(".fld-ordernum")?.value),
+      moduleId: (tr.querySelector(".fld-moduleid")?.value || "").trim(),
+      serialNum: toInt(tr.querySelector(".fld-serialnum")?.value),
+      graphName: (tr.querySelector(".fld-graphname")?.value || "").trim(),
+      manualName: (tr.querySelector(".fld-manualname")?.value || "").trim(),
+      sopName: (tr.querySelector(".fld-sopname")?.value || "").trim()
+    });
+  });
+  return rows.map(normalizeRow);
+}
+
+function normalizeRow(row) {
+  return {
+    systemId: toKey(row.systemId ?? row.SystemId),
+    systemName: toText(row.systemName ?? row.SystemName),
+    selected: toInt(row.selected ?? row.Selected),
+    isDLL: toInt(row.isDLL ?? row.IsDLL),
+    orderNum: toInt(row.orderNum ?? row.OrderNum),
+    moduleId: toText(row.moduleId ?? row.ModuleId),
+    serialNum: toInt(row.serialNum ?? row.SerialNum),
+    graphName: toText(row.graphName ?? row.GraphName),
+    manualName: toText(row.manualName ?? row.ManualName),
+    sopName: toText(row.sopName ?? row.SOPName)
+  };
+}
+
+function serializeRow(row) {
+  return JSON.stringify({
+    systemId: row.systemId,
+    selected: row.selected,
+    isDLL: row.isDLL,
+    orderNum: row.orderNum,
+    moduleId: row.moduleId,
+    serialNum: row.serialNum,
+    graphName: row.graphName,
+    manualName: row.manualName,
+    sopName: row.sopName
+  });
+}
+
+function showSystemSelectAlert(message, ok) {
+  const box = document.getElementById("systemSelectAlert");
+  const text = message || "";
+  if (!text.trim()) {
+    box.textContent = "";
+    box.classList.add("d-none");
+    box.classList.remove("alert-success", "alert-danger");
+    return;
+  }
+  box.textContent = text;
+  box.classList.remove("d-none", "alert-success", "alert-danger");
+  box.classList.add(ok ? "alert-success" : "alert-danger");
+}
+
+async function apiGet(url) {
+  const res = await fetch(url);
+  const text = await res.text();
+  const payload = text ? safeJson(text) : null;
+  if (!res.ok) {
+    throw new Error(payload?.message || payload?.Message || `HTTP ${res.status}`);
+  }
+  return payload;
+}
+
+async function apiSend(url, method, body) {
+  const res = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const text = await res.text();
+  const payload = text ? safeJson(text) : null;
+  if (!res.ok) {
+    throw new Error(payload?.message || payload?.Message || `HTTP ${res.status}`);
+  }
+  return payload;
+}
+
+function safeJson(text) {
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+function toKey(value) {
+  return String(value ?? "").trim();
+}
+
+function toText(value) {
+  return String(value ?? "").trim();
+}
+
+function toInt(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
+}
+</script>

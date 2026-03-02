@@ -160,7 +160,9 @@ public class GenericReportPageModel : PageModel
             Title         = $"{item.ItemId}{item.ItemName}",
             SpName        = item.ObjectName ?? "",
             ReportName    = Path.GetFileNameWithoutExtension(item.ClassName) ?? "",
-            DictTableName = item.ItemId
+            DictTableName = item.ItemId,
+            ItemType      = item.ItemType,
+            OutputType    = item.OutputType
         };
 
         var addonParams = _ctx.CurdAddonParams

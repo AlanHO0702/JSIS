@@ -1,0 +1,114 @@
+@*
+    PR000058 - 應付票據單 (相關頁)
+    自訂按鈕功能:
+      - btnC3: 票據歷史 (調用 PR000005 的 openBillHis)
+*@
+@model dynamic
+
+<script>
+(() => {
+    window._PR000005_Loading = window._PR000005_Loading || false;
+
+    /**
+     * 動態載入 PR000005.cshtml 的功能
+     * returns {Promise<boolean>} 載入成功返回 true
+     */
+    const ensurePR000005Loaded = async () => {
+        if (typeof window.BillHisHandler?.open === 'function') {
+            return true;
+        }
+
+        if (window._PR000005_Loading) {
+            for (let i = 0; i < 100; i++) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                if (typeof window.BillHisHandler?.open === 'function') {
+                    return true;
+                }
+            }
+            console.error('等待 PR000005 載入超時');
+            return false;
+        }
+
+        window._PR000005_Loading = true;
+
+        try {
+            const response = await fetch('/api/PR000005/GetViewContent');
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const html = await response.text();
+
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+
+            // 1. 注入 style 標籤
+            const styles = tempDiv.querySelectorAll('style');
+            styles.forEach(style => {
+                document.head.appendChild(style.cloneNode(true));
+            });
+
+            // 2. 注入所有 modal HTML
+            const modals = tempDiv.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                document.body.appendChild(modal.cloneNode(true));
+            });
+
+            // 3. 手動執行 script 內容
+            const scripts = tempDiv.querySelectorAll('script');
+            for (const script of scripts) {
+                const scriptContent = script.textContent || script.innerText;
+                if (scriptContent) {
+                    try {
+                        (new Function(scriptContent))();
+                    } catch (err) {
+                        console.error('執行 script 失敗:', err);
+                        throw err;
+                    }
+                }
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            if (typeof window.BillHisHandler?.open === 'function') {
+                return true;
+            } else {
+                console.error('PR000005.cshtml 載入後功能仍不可用');
+                return false;
+            }
+        } catch (error) {
+            console.error('載入 PR000005.cshtml 失敗:', error);
+            return false;
+        } finally {
+            window._PR000005_Loading = false;
+        }
+    };
+
+    const showLoadError = async () => {
+        console.error('PR000005 功能載入失敗');
+        if (window.Swal) {
+            await window.Swal.fire({
+                icon: 'error',
+                title: '功能載入失敗',
+                text: '無法載入票據歷史功能，請重新整理頁面或聯繫系統管理員'
+            });
+        } else {
+            alert('功能載入失敗，請重新整理頁面或聯繫系統管理員');
+        }
+    };
+
+    // 註冊按鈕處理函式
+    window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+    window.ActionRailCustomHandlers['PR000058'] = {
+        // 票據歷史
+        btnC3: async (ctx) => {
+            const loaded = await ensurePR000005Loaded();
+            if (loaded) {
+                await window.BillHisHandler.open(ctx);
+            } else {
+                await showLoadError();
+            }
+        }
+    };
+})();
+</script>

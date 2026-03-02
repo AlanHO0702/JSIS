@@ -1,4 +1,5 @@
 @page "/SPO/SPO00014"
+@using PcbErpApi.Models
 @model PcbErpApi.Pages.SPO.SPO00014Model
 @{
     Layout = "_InquiryTemplate";
@@ -41,56 +42,64 @@
   <table class="table table-sm table-hover align-middle inq-table">
     <thead>
       <tr>
-        <th data-field="PaperNum">單據編號</th>
-        <th data-field="PaperDate">單據日期</th>
-        <th data-field="CustomerId">客戶代碼</th>
-        <th data-field="ShortName">客戶名稱</th>
-        <th data-field="FinishedName">狀態</th>
-        <th data-field="Item">項次</th>
-        <th data-field="PartNum">品號</th>
-        <th data-field="UOMQnty">UOMQty</th>
-        <th data-field="SourNum">來源單號</th>
-        <th data-field="SourItem">來源項次</th>
-        <th data-field="Treatment">處置</th>
-        <th data-field="Defects">不良現象</th>
-        <th data-field="ChangedName">更換原因</th>
-        <th data-field="ActionName">動作</th>
-        <th data-field="Qnty">數量</th>
-        <th data-field="PaperId">單據別</th>
+        @{
+          var gFields = (Model.FieldDictList ?? new List<CURdTableField>())
+            .Where(f => (f.Visible ?? 1) != 0)
+            .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
+            .OrderBy(f => f.SerialNum ?? int.MaxValue)
+            .ToList();
+
+          if (gFields.Count == 0)
+          {
+            var fallback = new[]
+            {
+              "PaperNum","PaperDate","CustomerId","ShortName","FinishedName","Item","PartNum","UOMQnty",
+              "SourNum","SourItem","Treatment","Defects","ChangedName","ActionName","Qnty","PaperId"
+            };
+            gFields = fallback.Select(f => new CURdTableField { FieldName = f, DisplayLabel = f }).ToList();
+          }
+
+          string GLabel(CURdTableField f) => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel!;
+        }
+        @foreach (var f in gFields)
+        {
+          <th data-field="@f.FieldName">
+            <span class="th-text">@GLabel(f)</span>
+            <span class="col-resizer" draggable="false"></span>
+          </th>
+        }
       </tr>
     </thead>
     <tbody>
+    @{
+      var dict = (Model.FieldDictList ?? new List<CURdTableField>())
+        .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
+        .ToDictionary(f => f.FieldName!, StringComparer.OrdinalIgnoreCase);
+
+      string FormatVal(Dictionary<string, object?> row, string fieldName)
+      {
+          if (!row.TryGetValue(fieldName, out var v)) return "";
+          if (dict.TryGetValue(fieldName, out var f))
+              return FormatHelper.FormatValue(v, f.DataType, f.FormatStr);
+          return v?.ToString() ?? "";
+      }
+    }
     @if (Model.Items.Count == 0)
     {
       <tr>
-        <td colspan="16" class="text-center text-muted py-2">沒有資料</td>
+        <td colspan="@(Math.Max(1, gFields.Count))" class="text-center text-muted py-2">沒有資料</td>
       </tr>
     }
     else
     {
       foreach (var row in Model.Items)
       {
-        string Get(string name)
-        {
-            return row.TryGetValue(name, out var v) ? (v?.ToString() ?? "") : "";
-        }
+        string Get(string name) => FormatVal(row, name);
         <tr data-paper-id="@Get("PaperId")" data-paper-num="@Get("PaperNum")">
-          <td>@Get("PaperNum")</td>
-          <td>@Get("PaperDate")</td>
-          <td>@Get("CustomerId")</td>
-          <td>@Get("ShortName")</td>
-          <td>@Get("FinishedName")</td>
-          <td>@Get("Item")</td>
-          <td>@Get("PartNum")</td>
-          <td>@Get("UOMQnty")</td>
-          <td>@Get("SourNum")</td>
-          <td>@Get("SourItem")</td>
-          <td>@Get("Treatment")</td>
-          <td>@Get("Defects")</td>
-          <td>@Get("ChangedName")</td>
-          <td>@Get("ActionName")</td>
-          <td>@Get("Qnty")</td>
-          <td>@Get("PaperId")</td>
+          @foreach (var f in gFields)
+          {
+            <td>@Get(f.FieldName)</td>
+          }
         </tr>
       }
     }
@@ -128,19 +137,45 @@
     border: 1px solid #d8dee8;
     border-radius: 8px;
     background: #fff;
-    padding: 6px;
+    padding: 0;
     overflow-x: auto;
+  }
+  .inq-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+    width: max-content;
+    min-width: 100%;
+    margin: 0;
   }
   .inq-table th,
   .inq-table td {
     white-space: nowrap;
     font-size: 0.82rem;
     padding: 4px 6px;
+    border: 1px solid #e1e7f0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .inq-table th {
     background: #f3f7ff;
     color: #2056ac;
     font-weight: 600;
+    position: relative;
+  }
+  .inq-table th .th-text {
+    display: inline-block;
+    padding-right: 8px;
+  }
+  .inq-table th .col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 2;
   }
   .inq-table th.inq-sort-asc::after {
     content: " ▲";
@@ -263,6 +298,93 @@
     window.location.href = url.toString();
   });
 
+  const table = document.querySelector(".inq-table");
+  const dictTableName = window._dictTableName || "";
+  const fieldNames = Array.from(document.querySelectorAll(".inq-table thead th"))
+    .map(th => (th.dataset.field || "").toString());
+
+  function applyColumnWidth(tableEl, ths, index, width) {
+    const w = Math.max(20, Math.round(width));
+    const th = ths[index];
+    if (!th) return;
+    th.style.width = `${w}px`;
+    th.style.minWidth = `${w}px`;
+    Array.from(tableEl.querySelectorAll(`tbody tr td:nth-child(${index + 1})`))
+      .forEach(td => {
+        td.style.width = `${w}px`;
+        td.style.minWidth = `${w}px`;
+      });
+  }
+
+  function applySavedWidths(tableEl, dictTable, fields) {
+    const tn = (dictTable || "").trim();
+    if (!tn) return;
+    try {
+      const raw = localStorage.getItem(`colwidth:${tn}`);
+      if (!raw) return;
+      const cols = JSON.parse(raw) || [];
+      const ths = Array.from(tableEl.querySelectorAll('thead th'));
+      cols.forEach(c => {
+        const f = (c.fieldName || '').toString();
+        const w = Number(c.width);
+        if (!f || !Number.isFinite(w)) return;
+        const idx = fields.findIndex(x => x.toLowerCase() === f.toLowerCase());
+        if (idx >= 0) applyColumnWidth(tableEl, ths, idx, w);
+      });
+    } catch { }
+  }
+
+  function initColumnResize(tableEl, dictTable, fields) {
+    if (!tableEl) return;
+    const ths = Array.from(tableEl.querySelectorAll('thead th'));
+    applySavedWidths(tableEl, dictTable, fields);
+
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+    let thIndex = -1;
+
+    ths.forEach((th, idx) => {
+      const handle = th.querySelector('.col-resizer');
+      if (!handle) return;
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        isResizing = true;
+        th.dataset.resizing = "1";
+        startX = e.pageX;
+        startWidth = th.getBoundingClientRect().width;
+        thIndex = idx;
+        document.body.classList.add('resizing');
+      });
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing || thIndex < 0) return;
+      const dx = e.pageX - startX;
+      const newW = Math.max(20, startWidth + dx);
+      applyColumnWidth(tableEl, ths, thIndex, newW);
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!isResizing) return;
+      isResizing = false;
+      document.body.classList.remove('resizing');
+      if (thIndex >= 0 && ths[thIndex]) {
+        setTimeout(() => { delete ths[thIndex].dataset.resizing; }, 0);
+      }
+      const tn = (dictTable || "").trim();
+      if (tn) {
+        const payload = ths.map(th => ({ fieldName: th.dataset.field, width: Math.round(th.getBoundingClientRect().width) }));
+        try {
+          localStorage.setItem(`colwidth:${tn}`, JSON.stringify(payload));
+        } catch { }
+      }
+      thIndex = -1;
+    });
+  }
+
+  initColumnResize(table, dictTableName, fieldNames);
+
   const rows = Array.from(document.querySelectorAll(".inq-table tbody tr"))
     .filter(r => !r.querySelector("td[colspan]"));
   let selectedIndex = rows.length > 0 ? 0 : -1;
@@ -285,7 +407,9 @@
   const bindHeaderSort = () => {
     const headers = Array.from(document.querySelectorAll(".inq-table thead th[data-field]"));
     headers.forEach(th => {
-      th.addEventListener("click", () => {
+      th.addEventListener("click", (e) => {
+        if (e.target && e.target.classList?.contains("col-resizer")) return;
+        if (th.dataset.resizing === "1") return;
         const field = th.getAttribute("data-field");
         if (!field) return;
         const url = new URL(window.location.href);
