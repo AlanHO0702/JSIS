@@ -4,7 +4,7 @@
 
     window.showDictModal = async function (modalId = 'fieldDictModal', tableName = window._dictTableName) {
       const el = document.getElementById(modalId);
-      if (!el) { console.warn("[fieldDictModal] ?æ‰???modal:", modalId); return; }
+      if (!el) { console.warn("[fieldDictModal] ?ÔøΩÔøΩ???modal:", modalId); return; }
       await window.initFieldDictModal(tableName, modalId);
 
       const md = bootstrap.Modal.getOrCreateInstance(el);
@@ -69,7 +69,7 @@
 
   window.showDictModal = async function (modalId = 'fieldDictModal', tableName = window._dictTableName) {
     const el = document.getElementById(modalId);
-    if (!el) { console.warn("[fieldDictModal] ?æ‰???modal:", modalId); return; }
+    if (!el) { console.warn("[fieldDictModal] ?ÔøΩÔøΩ???modal:", modalId); return; }
     await window.initFieldDictModal(tableName, modalId);
 
     const displayEl = document.getElementById('dictTableNameDisplay');
@@ -92,7 +92,7 @@
       scope.querySelector('.dictTableBody') ||
       scope.querySelector('tbody[data-role="dict"]');
 
-    if (!tbody) { console.warn("[fieldDictModal] ?æ‰???tbody"); return; }
+    if (!tbody) { console.warn("[fieldDictModal] ?ÔøΩÔøΩ???tbody"); return; }
     const loadedFor  = (tbody.getAttribute('data-loaded-for') || '').toLowerCase();
     const want       = tname.toLowerCase();
     const needReload = loadedFor !== want;
@@ -204,7 +204,7 @@
             </td>
             <td style="width:60px" class="text-center">
               <button type="button" class="btn btn-sm btn-outline-secondary"
-                      aria-label="Ë®≠Â?"
+                      aria-label="Ë®≠ÔøΩ?"
                       onclick="window.editFieldDetail && window.editFieldDetail('${x.FieldName}')">
                 <i class="bi bi-gear"></i>
               </button>
@@ -216,7 +216,7 @@
         }
       } catch (err) {
         if (!QUIET) alert("\u6b04\u4f4d\u6e05\u55ae\u8f09\u5165\u5931\u6557");
-        console.warn('[fieldDictModal] ËºâÂÖ•Â§±Ê?:', err);
+        console.warn('[fieldDictModal] ËºâÂÖ•Â§±ÔøΩ?:', err);
       }
     }
 
@@ -295,7 +295,7 @@
       });
       return { updated };
     } catch (err) {
-      console.warn('[fieldDictModal] ?åÊ≠•Ë≥áÊ??ãÊ?Â§±Ê?:', err);
+      console.warn('[fieldDictModal] ?ÔøΩÊ≠•Ë≥áÔøΩ??ÔøΩÔøΩ?Â§±ÔøΩ?:', err);
       return { updated: 0 };
     }
   }
@@ -508,7 +508,7 @@
       window.dispatchEvent(new Event("field-dict-saved"));
       setTimeout(() => location.reload(), 300);
     } catch (err) {
-      alert("API ?ØË™§: " + err);
+      alert("API ?ÔøΩË™§: " + err);
     } finally {
       document.body.style.cursor = "default";
       saveAllDictFields.__busy = false;
@@ -557,7 +557,7 @@
       }
 
       const modalId = resolveModalId();
-      if (!modalId) { console.warn("[fieldDictModal] ?æ‰???modal"); return; }
+      if (!modalId) { console.warn("[fieldDictModal] ?ÔøΩÔøΩ???modal"); return; }
       const focusEl = document.activeElement?.closest?.('[data-dict-table]');
       const pt      = window.__lastMouse || { x: 0, y: 0 };
       const hoverEl = document.elementFromPoint?.(pt.x, pt.y)?.closest?.('[data-dict-table]');
@@ -617,6 +617,15 @@
         overlay.style.display = 'none';
       }
       document.body.removeAttribute('aria-busy');
+    }
+
+    // Ë©≥Á¥∞Ë®≠ÂÆöË¶ñÁ™óÈóúÈñâÂæåÔºåÁ¢∫‰øù body ‰ªç‰øùÊåÅ modal-openÔºàÊ¨Ñ‰ΩçÊ∏ÖÂñÆ‰ªçÈñãËëóÔºâ
+    if (e.target.id === 'fieldDetailModal') {
+      const listModal = document.getElementById('fieldDictModal');
+      if (listModal && listModal.classList.contains('show')) {
+        document.body.classList.add('modal-open');
+        document.body.style.overflow = 'hidden';
+      }
     }
   });
 
@@ -736,7 +745,7 @@
 
           const tr = document.querySelector(`.dictTableBody tr[data-fieldname="${safeName}"]`);
           if (!tr) {
-              alert("?æ‰??∞Ê?‰Ω? " + fieldName);
+              alert("?ÔøΩÔøΩ??ÔøΩÔøΩ?ÔøΩ? " + fieldName);
               return;
           }
 

@@ -358,6 +358,10 @@ namespace PcbErpApi.Pages.CUR
 
             var rows = await LoadAllRowsAsync(TableName, combinedFilter, orderBy, filterParams);
 
+            // 載入 lookup 對照表（key: fieldName lower, value: OCXLookupMap）
+            var lookupMaps = _dictService.GetOCXLookups(DictTableName)
+                .ToDictionary(l => (l.FieldName ?? "").ToLowerInvariant(), l => l);
+
             using var wb = new XLWorkbook();
             var ws = wb.AddWorksheet("SingleGrid");
 
@@ -374,6 +378,20 @@ namespace PcbErpApi.Pages.CUR
                 {
                     var field = TableFields[c].FieldName ?? string.Empty;
                     if (string.IsNullOrWhiteSpace(field)) continue;
+
+                    // 嘗試解析 lookup 顯示值
+                    if (lookupMaps.TryGetValue(field.ToLowerInvariant(), out var lk))
+                    {
+                        var keyField = !string.IsNullOrWhiteSpace(lk.KeySelfName) ? lk.KeySelfName : field;
+                        row.TryGetValue(keyField, out var keyRaw);
+                        var keyStr = keyRaw?.ToString() ?? "";
+                        if (!string.IsNullOrWhiteSpace(keyStr) && lk.LookupValues.TryGetValue(keyStr, out var display))
+                        {
+                            ws.Cell(r + 2, c + 1).Value = display;
+                            continue;
+                        }
+                    }
+
                     row.TryGetValue(field, out var val);
                     ws.Cell(r + 2, c + 1).Value = val == null
                         ? default(XLCellValue)
@@ -381,7 +399,22 @@ namespace PcbErpApi.Pages.CUR
                 }
             }
 
-            ws.Columns().AdjustToContents();
+            // 欄寬依辭典設定（DisplaySize 字元數優先，次用 iFieldWidth 像素除7，最小8）
+            for (var c = 0; c < TableFields.Count; c++)
+            {
+                var f = TableFields[c];
+                double width;
+                if (f.DisplaySize.HasValue && f.DisplaySize > 0)
+                    width = Math.Max(f.DisplaySize.Value, 8);
+                else if (f.iFieldWidth.HasValue && f.iFieldWidth > 0)
+                    width = Math.Max(Math.Round(f.iFieldWidth.Value / 7.0), 8);
+                else
+                {
+                    var labelLen = (f.DisplayLabel ?? f.FieldName ?? "").Length;
+                    width = Math.Max(labelLen + 4, 10);
+                }
+                ws.Column(c + 1).Width = Math.Min(width, 80);
+            }
 
             var fileName = $"{TableName}_{DateTime.Now:yyyyMMdd}.xlsx";
             using var stream = new MemoryStream();

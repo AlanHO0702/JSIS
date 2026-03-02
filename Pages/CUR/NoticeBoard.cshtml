@@ -404,6 +404,15 @@
         body: JSON.stringify({ TableName: detailTable, KeyFields: ['SerialNum', 'ToUserId'], Data: [data] })
       });
       if (!res.ok) { alert('新增失敗：' + res.status); return; }
+      const result = await res.json();
+      const failed = Array.isArray(result?.results)
+        ? result.results.filter(x => x && x.ok === false)
+        : [];
+      if (!result?.success || failed.length > 0) {
+        const reasons = failed.map(x => x.reason).filter(Boolean).join('\n');
+        alert('新增失敗：' + (reasons || JSON.stringify(result)));
+        return;
+      }
     }
     for (const row of pending.toDelete) {
       const url = `/api/CommonTable/DeleteByKeys?table=${encodeURIComponent(detailTable)}&keyNames=SerialNum&keyNames=ToUserId&keyValues=${encodeURIComponent(row.SerialNum)}&keyValues=${encodeURIComponent(row.ToUserId)}`;
@@ -449,23 +458,50 @@
   }
 
   async function onSaveEdit() {
-    const data = {
-      PostUserId: document.getElementById('editPostUser') .value?.trim(),
-      Subjects:   document.getElementById('editSubjects') .value ?? '',
-      BeginDate:  document.getElementById('editBeginDate').value || null,
-      EndDate:    document.getElementById('editEndDate')  .value || null,
-      BoardText:  document.getElementById('editBoardText').value ?? ''
-    };
-    if (!isNew && currentMasterRow?.SerialNum != null) data.SerialNum = currentMasterRow.SerialNum;
-    const res = await fetch('/api/CommonTable/SaveTableChanges', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ TableName: masterTable, KeyFields: ['SerialNum'], Data: [data] })
-    });
-    if (!res.ok) { alert('儲存失敗：' + res.status); return; }
-    const result = await res.json();
-    if (result.success) { editModal.hide(); await reloadMaster(isNew ? null : currentMasterRow?.SerialNum); }
-    else alert('儲存失敗：' + JSON.stringify(result));
+    try {
+      const data = {
+        PostUserId: document.getElementById('editPostUser') .value?.trim(),
+        Subjects:   document.getElementById('editSubjects') .value ?? '',
+        BeginDate:  document.getElementById('editBeginDate').value || null,
+        EndDate:    document.getElementById('editEndDate')  .value || null,
+        BoardText:  document.getElementById('editBoardText').value ?? ''
+      };
+      if (isNew) {
+        data.SerialNum = await getNextMasterSerialNum();
+      } else if (currentMasterRow?.SerialNum != null) {
+        data.SerialNum = currentMasterRow.SerialNum;
+      }
+      const res = await fetch('/api/CommonTable/SaveTableChanges', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ TableName: masterTable, KeyFields: ['SerialNum'], Data: [data] })
+      });
+      if (!res.ok) { alert('儲存失敗：' + res.status); return; }
+      const result = await res.json();
+      const failed = Array.isArray(result?.results)
+        ? result.results.filter(x => x && x.ok === false)
+        : [];
+      if (result.success && failed.length === 0) {
+        editModal.hide();
+        await reloadMaster(data.SerialNum ?? null);
+        return;
+      }
+      const reasons = failed.map(x => x.reason).filter(Boolean).join('\n');
+      alert('儲存失敗：' + (reasons || JSON.stringify(result)));
+    } catch (err) {
+      alert('儲存失敗：' + (err?.message || err));
+    }
+  }
+
+  async function getNextMasterSerialNum() {
+    const url = `/api/CommonTable/TopRows?table=${encodeURIComponent(masterTable)}&top=1&orderBy=SerialNum&orderDir=DESC`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('無法取得下一個公告代號：' + res.status);
+    const rows = await res.json();
+    const first = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    const raw = first?.SerialNum ?? first?.serialNum;
+    const maxSerial = Number(raw);
+    return Number.isFinite(maxSerial) ? maxSerial + 1 : 1;
   }
 
   // ── 導航 ──────────────────────────────────────────────────
