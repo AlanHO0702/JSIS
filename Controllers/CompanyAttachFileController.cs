@@ -20,7 +20,17 @@ public sealed class CompanyAttachFileController : ControllerBase
         _logger = logger;
     }
 
-    private string BaseDir => Path.Combine(_env.ContentRootPath, "CompanyAttach");
+    private string BaseDir
+    {
+        get
+        {
+            // Keep uploaded files outside the project root so dotnet-watch
+            // does not treat uploads as source changes and force browser refresh.
+            var parent = Directory.GetParent(_env.ContentRootPath)?.FullName;
+            var root = string.IsNullOrWhiteSpace(parent) ? _env.ContentRootPath : parent;
+            return Path.Combine(root, "JSIS_Uploads", "CompanyAttach");
+        }
+    }
 
     private bool IsSafePath(string filePath)
     {

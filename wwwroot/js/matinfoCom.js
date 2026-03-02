@@ -1,4 +1,4 @@
-﻿(() => {
+﻿(async () => {
   const tbody = document.getElementById('matinfo-browse-body');
   const theadRow = document.getElementById('matinfo-browse-head');
   const form = document.querySelector('.matinfo-form');
@@ -33,6 +33,8 @@
   const mapWrap = document.getElementById('matinfo-map-wrap');
   const specTable = document.getElementById('matinfo-spec-table');
   const specWrap = document.getElementById('matinfo-spec-wrap');
+  const commonTable = document.getElementById('matinfo-common-table');
+  const commonWrap = document.getElementById('matinfo-common-wrap');
   const kitTable = document.getElementById('matinfo-kit-table');
   const kitWrap = document.getElementById('matinfo-kit-wrap');
   const btnUnitFirst = document.getElementById('btnUnitFirst');
@@ -75,6 +77,15 @@
   const btnSpecReimport = document.getElementById('btnSpecReimport');
   const btnSpecClear = document.getElementById('btnSpecClear');
   const btnSpecPrint = document.getElementById('btnSpecPrint');
+  const btnCommonFirst = document.getElementById('btnCommonFirst');
+  const btnCommonPrev = document.getElementById('btnCommonPrev');
+  const btnCommonNext = document.getElementById('btnCommonNext');
+  const btnCommonLast = document.getElementById('btnCommonLast');
+  const btnCommonAdd = document.getElementById('btnCommonAdd');
+  const btnCommonDelete = document.getElementById('btnCommonDelete');
+  const btnCommonSave = document.getElementById('btnCommonSave');
+  const btnCommonCancel = document.getElementById('btnCommonCancel');
+  const btnCommonRefresh = document.getElementById('btnCommonRefresh');
   const btnKitFirst = document.getElementById('btnKitFirst');
   const btnKitPrev = document.getElementById('btnKitPrev');
   const btnKitNext = document.getElementById('btnKitNext');
@@ -88,6 +99,7 @@
   const btnCopyPN4YX = document.getElementById('btnMatInfoCopyPN4YX');
   const btnUpdateCustPn = document.getElementById('btnMatInfoUpdateCustPn');
   const glyphImage = document.getElementById('matinfo-glyph-image');
+  const glyphFrame = document.getElementById('matinfo-glyph-frame');
   const glyphEmpty = document.getElementById('matinfo-glyph-empty');
   const browseResizer = document.getElementById('matinfo-browse-resizer');
   const browseBox = document.getElementById('matinfo-browse');
@@ -101,6 +113,8 @@
   const basic1Grid = document.querySelector('#tab-basic .matinfo-grid');
   const basic1Abs = document.getElementById('matinfo-basic1-abs');
   const basic2Abs = document.getElementById('matinfo-basic2-abs');
+  const specTypeSelect = document.getElementById('specTypeSelect');
+  const specTypeNameInput = form?.querySelector('[data-field="Lk_SpecTypeName"]');
 
   let currentRecord = null;
   let currentKey = null;
@@ -118,7 +132,8 @@
     let rowHeight = 24;
     let sortKey = null;
     let sortDir = 'asc';
-    let renderScheduled = false;
+  let renderScheduled = false;
+  let specTypeOptionsLoaded = false;
     const pageSize = 200;
     const bufferRows = 8;
   const detailGrids = [];
@@ -127,6 +142,7 @@
   let propGrid = null;
   let mapGrid = null;
   let specGrid = null;
+  let commonGrid = null;
   let kitGrid = null;
   const pageRoot = document.querySelector('.matinfo-page');
   const itemId = pageRoot?.dataset?.itemId || '';
@@ -134,19 +150,19 @@
   const resizableItemIds = new Set(['MG000008', 'CPN00006', 'MG000002', 'CPN00007']);
   const enableColumnResize = resizableItemIds.has(itemIdUpper);
   const columnWidthStorageKey = enableColumnResize ? `matinfo:col-widths:${itemIdUpper}` : null;
-    const dictTableName = (() => {
-      const id = itemIdUpper;
-      if (id === 'MG000008' || id === 'CPN00006') return 'MGN_MINdMatInfo2';
-      if (id === 'MG000002' || id === 'CPN00007') return 'MGN_MINdMatInfo40';
-      return 'MINdMatInfo';
-    })();
+  const dictTableName = (() => {
+    const id = itemIdUpper;
+    if (id === 'MG000008' || id === 'CPN00006') return 'MGN_MINdMatInfo2';
+    if (id === 'MG000002' || id === 'CPN00007') return 'MGN_MINdMatInfo40';
+    return 'MINdMatInfo';
+  })();
 
-    const dictSearchTableName = (() => {
-      const id = itemIdUpper;
-      if (id === 'MG000008' || id === 'CPN00006') return 'MGN_MINdMatInfo21';
-      if (id === 'MG000002' || id === 'CPN00007') return 'MGN_MINdMatInfo41';
-      return dictTableName;
-    })();
+  const dictSearchTableName = (() => {
+    const id = itemIdUpper;
+    if (id === 'MG000008' || id === 'CPN00006') return 'MGN_MINdMatInfo21';
+    if (id === 'MG000002' || id === 'CPN00007') return 'MGN_MINdMatInfo41';
+    return dictTableName;
+  })();
 
   const dictPanelTableName = (() => {
     const id = itemIdUpper;
@@ -154,30 +170,84 @@
     if (id === 'MG000002' || id === 'CPN00007') return 'MGN_MINdMatInfo40PNL';
     return dictTableName;
   })();
-  const custTabLabel = (() => {
-    const id = itemIdUpper;
-    return (id === 'MG000008' || id === 'CPN00006') ? '客戶料號' : '廠商料號';
-  })();
   const defaultMbFilter = (() => {
     const id = itemIdUpper;
     if (id === 'MG000008' || id === 'CPN00006') return 0;
     if (id === 'MG000002' || id === 'CPN00007') return 1;
     return null;
   })();
+
+  const defaultUiConfig = {
+    powerType: itemIdUpper === 'MG000002' || itemIdUpper === 'CPN00007' ? 4 : 2,
+    custDetailTableName: 'MGNdCustPartNum',
+    custTabCaption: itemIdUpper === 'MG000002' || itemIdUpper === 'CPN00007' ? '廠商料號' : '客戶料號',
+    specTitleCaption: '規格表',
+    specPrintButtonCaption: '',
+    engTabCaption: '工程圖',
+    allowedTabs: ['基本資料', '基本資料2', itemIdUpper === 'MG000002' || itemIdUpper === 'CPN00007' ? '廠商料號' : '客戶料號', '屬性及備註', '工程圖', '圖檔', '規格表', '替代單位設定', '共用件', '組合商品']
+  };
+
+  const fetchUiConfig = async () => {
+    try {
+      const jwt = localStorage.getItem('jwtId');
+      const headers = {};
+      if (jwt) headers['X-JWTID'] = jwt;
+      const resp = await fetch(
+        `/api/MatInfoUtility/UiConfig?itemId=${encodeURIComponent(itemIdUpper)}`,
+        { headers }
+      );
+      if (!resp.ok) return { ...defaultUiConfig };
+      const cfg = await resp.json();
+      const pick = (camel, pascal, fallback = undefined) => {
+        const v1 = cfg?.[camel];
+        if (v1 !== undefined && v1 !== null) return v1;
+        const v2 = cfg?.[pascal];
+        if (v2 !== undefined && v2 !== null) return v2;
+        return fallback;
+      };
+      const allowedRaw = pick('allowedTabs', 'AllowedTabs', []);
+      const allowed = Array.isArray(allowedRaw) ? allowedRaw : [];
+      return {
+        ...defaultUiConfig,
+        powerType: Number(pick('powerType', 'PowerType', defaultUiConfig.powerType) || defaultUiConfig.powerType),
+        custDetailTableName: String(pick('custDetailTableName', 'CustDetailTableName', defaultUiConfig.custDetailTableName)),
+        custTabCaption: String(pick('custTabCaption', 'CustTabCaption', defaultUiConfig.custTabCaption)),
+        specTitleCaption: String(pick('specTitleCaption', 'SpecTitleCaption', defaultUiConfig.specTitleCaption)),
+        specPrintButtonCaption: String(pick('specPrintButtonCaption', 'SpecPrintButtonCaption', '')),
+        engTabCaption: String(pick('engTabCaption', 'EngTabCaption', defaultUiConfig.engTabCaption)),
+        allowedTabs: allowed.length ? allowed.map((x) => String(x || '').trim()).filter(Boolean) : defaultUiConfig.allowedTabs
+      };
+    } catch {
+      return { ...defaultUiConfig };
+    }
+  };
+
+  const uiConfig = await fetchUiConfig();
+  window._matinfoUiConfig = uiConfig;
+  const custDetailTableName = uiConfig.custDetailTableName || 'MGNdCustPartNum';
+  const custTabLabel = uiConfig.custTabCaption || defaultUiConfig.custTabCaption;
   const useCommonTable = dictTableName.trim().toLowerCase() !== 'mindmatinfo';
   const commonKeyFields = ['PartNum', 'Revision'];
 
   const tabDictTableMap = new Map([
     ['基本資料', dictPanelTableName],
     ['基本資料2', dictPanelTableName],
-    ['廠商料號', 'MGNdCustPartNum'],
+    ['廠商料號', custDetailTableName],
+    ['客戶料號', custDetailTableName],
     ['屬性及備註', 'MGNdMatInfoDtl'],
     ['工程圖', 'MGNdProdMap'],
     ['圖檔', 'MGNdProdMap'],
     ['規格表', 'MGNdSpecData'],
     ['替代單位設定', 'MINdMatUnit'],
+    ['共用件', 'MGNdMatDisplaceEZDtl'],
     ['組合商品', 'MGNdKitItem']
   ]);
+  if (uiConfig.specTitleCaption && uiConfig.specTitleCaption !== '規格表') {
+    tabDictTableMap.set(uiConfig.specTitleCaption, 'MGNdSpecData');
+  }
+  if (uiConfig.engTabCaption && uiConfig.engTabCaption !== '工程圖') {
+    tabDictTableMap.set(uiConfig.engTabCaption, 'MGNdProdMap');
+  }
 
   window._dictTableName = dictTableName;
   document.querySelectorAll('.matinfo-form, .matinfo-tabs').forEach((el) => {
@@ -305,6 +375,63 @@
     return { ...init, headers };
   };
 
+  const syncSpecTypeName = () => {
+    if (!specTypeSelect || !specTypeNameInput) return;
+    const selected = specTypeSelect.options[specTypeSelect.selectedIndex];
+    if (!selected || !selected.value) {
+      specTypeNameInput.value = '';
+      return;
+    }
+    const name = (selected.dataset.name || selected.textContent || '').trim();
+    specTypeNameInput.value = name;
+    if (currentRecord) {
+      currentRecord.SpecType = selected.value;
+      currentRecord.Lk_SpecTypeName = name;
+    }
+  };
+
+  const loadSpecTypeOptions = async (force = false) => {
+    if (!specTypeSelect) return;
+    if (specTypeOptionsLoaded && !force) return;
+    let rows = [];
+    try {
+      const res = await fetch('/api/CommonTable/TopRows?table=MGNdSpecMain&top=500&orderBy=SpecType', withJwtHeaders());
+      if (res.ok) {
+        const data = await res.json();
+        rows = Array.isArray(data) ? data : [];
+      }
+    } catch {
+      rows = [];
+    }
+
+    const map = new Map();
+    rows.forEach((row) => {
+      const rawType = getRowValue(row, 'SpecType');
+      const rawName = getRowValue(row, 'SpecTypeName');
+      const type = rawType == null ? '' : String(rawType).trim();
+      const name = rawName == null ? '' : String(rawName).trim();
+      if (!type || !name) return;
+      if (!map.has(type)) map.set(type, name);
+    });
+
+    const currentValue = String(specTypeSelect.value ?? '').trim();
+    specTypeSelect.innerHTML = '<option value=""></option>';
+
+    Array.from(map.entries())
+      .sort((a, b) => Number(a[0]) - Number(b[0]))
+      .forEach(([value, name]) => {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.dataset.name = name;
+        opt.textContent = value;
+        specTypeSelect.appendChild(opt);
+      });
+
+    if (currentValue) specTypeSelect.value = currentValue;
+    syncSpecTypeName();
+    specTypeOptionsLoaded = true;
+  };
+
   const applyTabDictTables = () => {
     document.querySelectorAll('.matinfo-form .tab-pane').forEach((pane) => {
       const name = pane.dataset.tabName || '';
@@ -327,15 +454,47 @@
     if (btn) {
       btn.textContent = custTabLabel;
       btn.setAttribute('aria-label', custTabLabel);
+      btn.dataset.tabName = custTabLabel;
     }
     const pane = document.querySelector('#tab-cust');
     if (pane) {
+      pane.dataset.tabName = custTabLabel;
       const title = pane.querySelector('.matinfo-section-title');
       if (title) title.textContent = custTabLabel;
     }
     const emptyCell = document.querySelector('#tab-cust tbody td');
     if (emptyCell && (emptyCell.textContent || '').includes('尚未接')) {
       emptyCell.textContent = `尚未接${custTabLabel}資料`;
+    }
+  };
+
+  const applyDynamicCaptions = () => {
+    const applyTabCaption = (target, caption) => {
+      if (!caption) return;
+      const btn = document.querySelector(`.matinfo-tabs [data-bs-target="${target}"]`);
+      if (btn) {
+        btn.textContent = caption;
+        btn.dataset.tabName = caption;
+      }
+      const pane = document.querySelector(target);
+      if (pane) {
+        pane.dataset.tabName = caption;
+        const title = pane.querySelector('.matinfo-section-title');
+        if (title) title.textContent = caption;
+      }
+    };
+
+    applyTabCaption('#tab-spec', uiConfig.specTitleCaption || '規格表');
+    applyTabCaption('#tab-map', uiConfig.engTabCaption || '工程圖');
+
+    if (btnSpecPrint) {
+      const text = (uiConfig.specPrintButtonCaption || '').trim();
+      if (!text) {
+        btnSpecPrint.style.display = 'none';
+      } else {
+        btnSpecPrint.style.display = '';
+        btnSpecPrint.textContent = text;
+      }
     }
   };
 
@@ -362,8 +521,41 @@
       revision: currentKey?.revision ?? ''
     });
 
+    const resolveMasterKeys = () => {
+      const key = getKey();
+      const source = Array.isArray(cfg.masterKeys) && cfg.masterKeys.length
+        ? cfg.masterKeys
+        : [{ name: 'PartNum', from: 'partnum' }, { name: 'Revision', from: 'revision' }];
+      const mapValue = (from) => {
+        const field = String(from ?? '').trim();
+        if (!field) return '';
+        if (Object.prototype.hasOwnProperty.call(key, field)) return key[field] ?? '';
+        const low = field.toLowerCase();
+        if (low === 'partnum') return key.partnum ?? '';
+        if (low === 'revision') return key.revision ?? '';
+        return currentKey?.[field] ?? '';
+      };
+      return source.map((item) => {
+        if (typeof item === 'string') {
+          return { name: item, value: mapValue(item) };
+        }
+        const name = String(item?.name ?? '').trim();
+        if (!name) return null;
+        let value = '';
+        if (typeof item?.value === 'function') {
+          value = item.value(key, currentKey);
+        } else if (item?.value !== undefined && item?.value !== null) {
+          value = item.value;
+        } else {
+          value = mapValue(item?.from ?? name);
+        }
+        return { name, value: value ?? '' };
+      }).filter(Boolean);
+    };
+
     const setToolbarEnabled = () => {
-      const hasKey = !!getKey().partnum;
+      const masterKeys = resolveMasterKeys();
+      const hasKey = String(masterKeys[0]?.value ?? '').trim() !== '';
       const hasRows = state.rows.length > 0;
       const inEdit = !!isEditMode;
       const navDisabled = !hasKey || !hasRows;
@@ -443,23 +635,19 @@
           tr.classList.add('table-warning');
         }
 
-        const hiddenPart = document.createElement('input');
-        hiddenPart.type = 'hidden';
-        hiddenPart.name = 'PartNum';
-        hiddenPart.value = getKey().partnum;
-        hiddenPart.className = 'mmd-fk-hidden';
-
-        const hiddenRev = document.createElement('input');
-        hiddenRev.type = 'hidden';
-        hiddenRev.name = 'Revision';
-        hiddenRev.value = getKey().revision;
-        hiddenRev.className = 'mmd-fk-hidden';
+        const hiddenMasterKeys = resolveMasterKeys().map((mk) => {
+          const hidden = document.createElement('input');
+          hidden.type = 'hidden';
+          hidden.name = mk.name;
+          hidden.value = mk.value ?? '';
+          hidden.className = 'mmd-fk-hidden';
+          return hidden;
+        });
 
         cfg.columns.forEach((col, colIdx) => {
           const td = buildCell(col.name, getRowValue(row, col.name), col.readonly, col.type);
           if (colIdx === 0) {
-            td.appendChild(hiddenPart);
-            td.appendChild(hiddenRev);
+            hiddenMasterKeys.forEach((hidden) => td.appendChild(hidden));
           }
           tr.appendChild(td);
         });
@@ -490,7 +678,8 @@
     };
 
     const loadRows = async () => {
-      if (!getKey().partnum) {
+      const masterKeys = resolveMasterKeys();
+      if (String(masterKeys[0]?.value ?? '').trim() === '') {
         state.rows = [];
         renderRows();
         return;
@@ -499,10 +688,10 @@
       try {
         const params = new URLSearchParams();
         params.set('table', cfg.tableName);
-        params.append('keyNames', 'PartNum');
-        params.append('keyValues', getKey().partnum);
-        params.append('keyNames', 'Revision');
-        params.append('keyValues', getKey().revision || '');
+        masterKeys.forEach((mk) => {
+          params.append('keyNames', mk.name);
+          params.append('keyValues', String(mk.value ?? ''));
+        });
         const res = await fetch(`/api/CommonTable/ByKeys?${params.toString()}`);
         if (!res.ok) {
           state.rows = [];
@@ -519,7 +708,8 @@
     };
 
     const addRow = () => {
-      if (!isEditMode || !getKey().partnum) return;
+      const masterKeys = resolveMasterKeys();
+      if (!isEditMode || String(masterKeys[0]?.value ?? '').trim() === '') return;
 
       // Remove phantom empty rows before adding the next row.
       state.rows = state.rows.filter((r) => {
@@ -531,7 +721,11 @@
         return hasValue || part !== '' || rev !== '';
       });
 
-      const row = { PartNum: getKey().partnum, Revision: getKey().revision || '' };
+      const row = {};
+      masterKeys.forEach((mk) => { row[mk.name] = mk.value ?? ''; });
+      if (typeof cfg.newRow === 'function') {
+        Object.assign(row, cfg.newRow({ key: getKey(), masterKeys, rows: state.rows }) || {});
+      }
       if (cfg.autoIncField) {
         const max = Math.max(0, ...state.rows.map((r) => Number(r[cfg.autoIncField]) || 0));
         row[cfg.autoIncField] = max + 1;
@@ -583,7 +777,10 @@
         notify('error', result.text || '儲存失敗');
         return;
       }
-      await loadRows();
+      if (!result.skipped) {
+        await loadRows();
+      }
+      setEditMode(false);
     };
 
     const cancelChanges = async () => {
@@ -604,6 +801,7 @@
       selectRow,
       toggleEdit,
       setToolbarEnabled,
+      getRowCount: () => state.rows.length,
       getSelectedIndex: () => state.selectedIndex,
       getSelectedRow: () => (state.selectedIndex >= 0 ? state.rows[state.selectedIndex] : null)
     };
@@ -685,7 +883,7 @@
     if (custLookupState.map) return custLookupState.map;
     if (custLookupState.loading) return custLookupState.loading;
     custLookupState.loading = (async () => {
-      const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent('MGNdCustPartNum')}&lang=TW`);
+      const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(custDetailTableName)}&lang=TW`);
       if (!res.ok) return new Map();
       const rows = await res.json();
       const meta = (rows || []).find((r) => {
@@ -808,6 +1006,24 @@
   }
 
   if (unitWrap && unitTable) {
+    const unitHeadRow = unitTable.querySelector('thead tr');
+    if (unitHeadRow) {
+      const hasUseTypeName = Array.from(unitHeadRow.children)
+        .some((th) => (th.textContent || '').trim() === '用途類型名稱');
+      if (!hasUseTypeName) {
+        const th = document.createElement('th');
+        th.style.width = '160px';
+        th.textContent = '用途類型名稱';
+        const notesTh = unitHeadRow.lastElementChild;
+        if (notesTh) unitHeadRow.insertBefore(th, notesTh);
+        else unitHeadRow.appendChild(th);
+      }
+    }
+    const unitEmptyCell = unitTable.querySelector('tbody tr td[colspan]');
+    if (unitEmptyCell && unitEmptyCell.getAttribute('colspan') === '4') {
+      unitEmptyCell.setAttribute('colspan', '5');
+    }
+
     unitGrid = createDetailGridManager({
       tableName: 'MINdMatUnit',
       wrap: unitWrap,
@@ -817,6 +1033,7 @@
         { name: 'ReplaceUnit' },
         { name: 'Ratio' },
         { name: 'UseType' },
+        { name: 'UseTypeName', readonly: true },
         { name: 'Notes' }
       ],
       toolbar: {
@@ -836,7 +1053,7 @@
 
   if (custWrap && custTable) {
     custGrid = createDetailGridManager({
-      tableName: 'MGNdCustPartNum',
+      tableName: custDetailTableName,
       wrap: custWrap,
       table: custTable,
       keyFields: ['PartNum', 'Revision', 'CompanyId'],
@@ -982,6 +1199,37 @@
     detailGrids.push(specGrid);
   }
 
+  if (commonWrap && commonTable) {
+    commonGrid = createDetailGridManager({
+      tableName: 'MGNdMatDisplaceEZDtl',
+      wrap: commonWrap,
+      table: commonTable,
+      masterKeys: [{ name: 'DisplaceMat', from: 'partnum' }],
+      keyFields: ['DisplaceMat', 'SerialNum'],
+      autoIncField: 'SerialNum',
+      columns: [
+        { name: 'SerialNum', readonly: true },
+        { name: 'MatCode' },
+        { name: 'MatName', readonly: true },
+        { name: 'UseQnty' },
+        { name: 'UseBase' }
+      ],
+      toolbar: {
+        first: btnCommonFirst,
+        prev: btnCommonPrev,
+        next: btnCommonNext,
+        last: btnCommonLast,
+        add: btnCommonAdd,
+        del: btnCommonDelete,
+        save: btnCommonSave,
+        cancel: btnCommonCancel,
+        refresh: btnCommonRefresh
+      },
+      newRow: () => ({ UseQnty: 0, UseBase: 1 })
+    });
+    detailGrids.push(commonGrid);
+  }
+
   if (kitWrap && kitTable) {
     kitGrid = createDetailGridManager({
       tableName: 'MGNdKitItem',
@@ -1036,40 +1284,124 @@
     return '';
   };
 
-  const setGlyphPreview = (url, errorMsg) => {
-    if (!glyphImage || !glyphEmpty) return;
+  const getSelectedMapTr = () => {
+    if (!mapTable) return null;
+    return mapTable.querySelector('tbody tr.is-selected');
+  };
+
+  const setSelectedMapPath = (raw) => {
+    const value = normalizeFilePath(raw);
+    const row = getSelectedMapTr();
+    if (!row || !value) return false;
+    const input = row.querySelector('.cell-edit[name="CrossName"]');
+    const view = row.querySelector('.cell-view');
+    if (input) input.value = value;
+    if (view) view.textContent = value;
+    return true;
+  };
+
+  const toMapPreviewUrl = (raw) => {
+    const s = normalizeFilePath(raw);
+    if (!s) return '';
+    if (/^https?:\/\//i.test(s)) return s;
+    if (/^\/api\//i.test(s)) return s;
+    if (/^file:\/\//i.test(s)) {
+      const local = decodeURIComponent(s.replace(/^file:\/\/\/?/i, '').replace(/\//g, '\\'));
+      return `/api/MapPreview/file?path=${encodeURIComponent(local)}`;
+    }
+    return `/api/MapPreview/file?path=${encodeURIComponent(s)}`;
+  };
+
+  const ensureMapPreviewModal = () => {
+    let modalEl = document.getElementById('matinfoMapPreviewModal');
+    if (!modalEl) {
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `
+        <div class="modal fade" id="matinfoMapPreviewModal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title">圖檔預覽</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body p-0 text-center" style="background:#fff;">
+                <img id="matinfoMapPreviewImage" alt="圖檔預覽"
+                     style="display:none; max-width:100%; max-height:75vh; width:auto; height:auto; object-fit:contain;">
+                <iframe id="matinfoMapPreviewFrame" title="圖檔預覽"
+                        style="display:none; width:100%; height:75vh; border:0; background:#fff;"></iframe>
+              </div>
+            </div>
+          </div>
+        </div>`;
+      document.body.appendChild(wrap.firstElementChild);
+      modalEl = document.getElementById('matinfoMapPreviewModal');
+    }
+    return modalEl;
+  };
+
+  const isImagePath = (raw) => {
+    const s = normalizeFilePath(raw).split(/[?#]/)[0];
+    return /\.(bmp|png|jpe?g|gif|webp|svg)$/i.test(s);
+  };
+
+  const openMapPreview = (url, rawPath) => {
+    const modalEl = ensureMapPreviewModal();
+    const img = modalEl?.querySelector('#matinfoMapPreviewImage');
+    const frame = modalEl?.querySelector('#matinfoMapPreviewFrame');
+    if (!modalEl || !img || !frame) {
+      window.open(url, '_blank');
+      return;
+    }
+    if (isImagePath(rawPath)) {
+      img.style.display = '';
+      frame.style.display = 'none';
+      frame.removeAttribute('src');
+      img.src = url;
+    } else {
+      img.style.display = 'none';
+      img.removeAttribute('src');
+      frame.style.display = '';
+      frame.src = url;
+    }
+    if (window.bootstrap?.Modal) {
+      window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+      return;
+    }
+    window.open(url, '_blank');
+  };
+
+  const setGlyphPreview = (url, errorMsg, mode) => {
+    if (!glyphImage || !glyphEmpty || !glyphFrame) return;
     if (errorMsg) {
       glyphImage.style.display = 'none';
       glyphImage.removeAttribute('src');
+      glyphFrame.style.display = 'none';
+      glyphFrame.removeAttribute('src');
       glyphEmpty.textContent = errorMsg;
       glyphEmpty.style.display = '';
       return;
     }
     glyphEmpty.style.display = 'none';
+    if (mode === 'frame') {
+      glyphImage.style.display = 'none';
+      glyphImage.removeAttribute('src');
+      glyphFrame.style.display = '';
+      glyphFrame.src = url;
+      return;
+    }
+    glyphFrame.style.display = 'none';
+    glyphFrame.removeAttribute('src');
     glyphImage.style.display = '';
     glyphImage.src = url;
   };
 
-  const isSupportedImage = (path) => {
-    const lower = path.toLowerCase();
-    return lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.bmp') || lower.endsWith('.wmf');
-  };
+  const isGlyphImagePath = (path) => /\.(bmp|png|jpe?g|gif|webp|svg)$/i.test((path || '').split(/[?#]/)[0]);
 
   const showGlyphPreview = (path, focusTab) => {
     const filePath = normalizeFilePath(path);
     if (!filePath) {
       notify('error', '沒有圖檔的完整路徑及檔名');
       setGlyphPreview('', '無 圖 檔');
-      return;
-    }
-    if (!isSupportedImage(filePath)) {
-      notify('error', '檔案格式只支援 jpg、bmp、wmf');
-      setGlyphPreview('', '檔案格式不支援');
-      return;
-    }
-    if (filePath.toLowerCase().endsWith('.wmf')) {
-      notify('error', 'WMF 瀏覽器無法預覽，請改用開視窗檢視');
-      setGlyphPreview('', 'WMF 無法預覽');
       return;
     }
     if (focusTab) {
@@ -1082,8 +1414,12 @@
         }
       }
     }
-    const url = `/api/MapPreview/file?path=${encodeURIComponent(filePath)}`;
-    setGlyphPreview(url, '');
+    const url = toMapPreviewUrl(filePath);
+    if (!url) {
+      setGlyphPreview('', '無法讀取檔案');
+      return;
+    }
+    setGlyphPreview(url, '', isGlyphImagePath(filePath) ? 'image' : 'frame');
   };
 
   const browseHeightStorageKey = itemId ? `matinfo:browse-height:${itemId}` : 'matinfo:browse-height';
@@ -1209,6 +1545,7 @@
       if (!field) return;
       setValue(el, record[field] ?? record[field.toLowerCase()] ?? record[field.toUpperCase()]);
     });
+    syncSpecTypeName();
   }
 
   function clearForm() {
@@ -1219,6 +1556,7 @@
         el.value = '';
       }
     });
+    syncSpecTypeName();
   }
 
   function setFormEditable(enabled) {
@@ -1796,8 +2134,9 @@
     const map = buildDictMap(rows);
     const panel = document.querySelector('.matinfo-form');
     if (!panel) return;
+    const basicOnlySel = '#tab-basic [data-field], #tab-basic2 [data-field]';
 
-    panel.querySelectorAll('[data-field]').forEach((el) => {
+    panel.querySelectorAll(basicOnlySel).forEach((el) => {
       const field = (el.getAttribute('data-field') || '').toLowerCase();
       if (!field) return;
       const cfg = map.get(field);
@@ -1821,7 +2160,7 @@
       }
     });
 
-    panel.querySelectorAll('.matinfo-checks').forEach((box) => {
+    panel.querySelectorAll('#tab-basic .matinfo-checks, #tab-basic2 .matinfo-checks').forEach((box) => {
       const labels = Array.from(box.querySelectorAll('label'));
       labels.forEach((label) => {
         const input = label.querySelector('[data-field]');
@@ -1831,7 +2170,7 @@
       });
     });
 
-    panel.querySelectorAll('.matinfo-grid').forEach((grid) => {
+    panel.querySelectorAll('#tab-basic .matinfo-grid, #tab-basic2 .matinfo-grid').forEach((grid) => {
       const children = Array.from(grid.children);
       for (let i = 0; i < children.length; i += 1) {
         const label = children[i];
@@ -1946,15 +2285,35 @@
     const next = Math.max(40, Math.round(width));
     columns[index].width = `${next}px`;
     const th = theadRow.querySelectorAll('th')[index];
-    if (th) th.style.width = columns[index].width;
+    if (th) {
+      th.style.width = columns[index].width;
+      th.style.minWidth = columns[index].width;
+      th.style.maxWidth = columns[index].width;
+    }
     if (tbody) {
       const rows = tbody.querySelectorAll('tr');
       rows.forEach((row) => {
         const cells = row.children;
         if (!cells || !cells.length) return;
         const cell = cells[index];
-        if (cell) cell.style.width = columns[index].width;
+        if (cell) {
+          cell.style.width = columns[index].width;
+          cell.style.minWidth = columns[index].width;
+          cell.style.maxWidth = columns[index].width;
+        }
       });
+    }
+    const total = columns.reduce((sum, col, i) => {
+      const px = Number.parseInt(String(col?.width || ''), 10);
+      if (Number.isFinite(px) && px > 0) return sum + px;
+      const thAt = theadRow.querySelectorAll('th')[i];
+      const w = Math.round(thAt?.getBoundingClientRect?.().width || thAt?.offsetWidth || 0);
+      return w > 0 ? sum + w : sum;
+    }, 0);
+    const browseTable = theadRow.closest('table');
+    if (browseTable && total > 0) {
+      browseTable.style.tableLayout = 'fixed';
+      browseTable.style.width = `${total}px`;
     }
     if (persist) {
       const map = loadColumnWidthMap();
@@ -2239,7 +2598,7 @@
 
     theadRow.innerHTML = columns
       .map((col) => {
-        const style = col.width ? ` style="width:${col.width}"` : '';
+        const style = col.width ? ` style="width:${col.width};min-width:${col.width};max-width:${col.width}"` : '';
         const cls = [
           isCheckboxColumn(col) ? 'col-checkbox' : '',
           col.key ? 'sortable' : ''
@@ -2439,7 +2798,7 @@
             col.readOnly ? 'col-readonly' : ''
           ].filter(Boolean).join(' ');
           const classAttr = cls ? ` class="${cls}"` : '';
-          const style = col.width ? ` style="width:${col.width}"` : '';
+          const style = col.width ? ` style="width:${col.width};min-width:${col.width};max-width:${col.width}"` : '';
           return `<td${classAttr}${style}>${formatCellHtml(col, getValue(item, col.key))}</td>`;
         }).join('') +
         `</tr>`;
@@ -2967,8 +3326,12 @@
       notify('error', '沒有圖檔的完整路徑及檔名');
       return;
     }
-    const url = `/api/MapPreview/file?path=${encodeURIComponent(path)}`;
-    window.open(url, '_blank');
+    const url = toMapPreviewUrl(path);
+    if (!url) {
+      notify('error', '沒有圖檔的完整路徑及檔名');
+      return;
+    }
+    openMapPreview(url, path);
   });
   btnMapViewGlyph?.addEventListener('click', () => showGlyphPreview(getSelectedMapPath(), true));
   btnMapSetPath?.addEventListener('click', () => {
@@ -2977,24 +3340,59 @@
       return;
     }
     if (!mapTable) return;
-    const input = window.prompt('請輸入圖檔完整路徑及檔名');
-    if (input == null) return;
-    const path = normalizeFilePath(input);
-    if (!path) return;
-    if (!isSupportedImage(path)) {
-      notify('error', '檔案格式只支援 jpg、bmp、wmf');
-      return;
-    }
-    let targetRow = mapTable.querySelector('tbody tr.is-selected');
+    let targetRow = getSelectedMapTr();
     if (!targetRow && mapGrid) {
       mapGrid.addRow();
-      targetRow = mapTable.querySelector('tbody tr.is-selected');
+      targetRow = getSelectedMapTr();
     }
     if (!targetRow) return;
     const cellInput = targetRow.querySelector('.cell-edit[name="CrossName"]');
-    const cellView = targetRow.querySelector('.cell-view');
-    if (cellInput) cellInput.value = path;
-    if (cellView) cellView.textContent = path;
+    if (!cellInput) {
+      notify('error', '找不到圖檔路徑欄位');
+      return;
+    }
+    if (cellInput.readOnly || cellInput.disabled) {
+      notify('error', '圖檔路徑欄位目前為唯讀，請先確認資料辭典設定。');
+      return;
+    }
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.style.display = 'none';
+    document.body.appendChild(picker);
+    picker.onchange = async () => {
+      const file = picker.files?.[0];
+      if (file) {
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          const resp = await fetch('/api/CompanyAttachFile/Upload', { method: 'POST', body: formData });
+          if (!resp.ok) {
+            notify('error', await resp.text());
+            return;
+          }
+          const result = await resp.json();
+          const savedPath = normalizeFilePath(result?.fullPath || result?.fileName || '');
+          if (!savedPath) {
+            notify('error', '上傳成功但未取得檔案路徑');
+            return;
+          }
+          if (!setSelectedMapPath(savedPath)) {
+            notify('error', '回填圖檔路徑失敗');
+          }
+        } catch (err) {
+          notify('error', `上傳失敗：${err}`);
+        }
+      }
+      picker.remove();
+    };
+    picker.click();
+  });
+
+  specTypeSelect?.addEventListener('focus', () => {
+    if (!specTypeOptionsLoaded) loadSpecTypeOptions();
+  });
+  specTypeSelect?.addEventListener('change', () => {
+    syncSpecTypeName();
   });
 
   btnSpecFirst?.addEventListener('click', () => specGrid?.selectRow(0));
@@ -3011,6 +3409,10 @@
     }
     if (!isEditMode) {
       notify('error', '請先進入編輯模式');
+      return;
+    }
+    if ((specGrid?.getRowCount?.() ?? 0) > 0) {
+      notify('error', '請先清除已存在的規格表明細資料');
       return;
     }
     const form = getFormData();
@@ -3034,6 +3436,9 @@
       return;
     }
     await specGrid?.loadRows();
+    if (btnSpecSave) btnSpecSave.disabled = false;
+    if (btnSpecCancel) btnSpecCancel.disabled = false;
+    if (btnSpecRefresh) btnSpecRefresh.disabled = false;
   });
   btnSpecClear?.addEventListener('click', async () => {
     if (!currentKey?.partnum) {
@@ -3061,6 +3466,16 @@
   btnSpecPrint?.addEventListener('click', () => {
     notify('warning', '列印功能尚未設定');
   });
+
+  btnCommonFirst?.addEventListener('click', () => commonGrid?.selectRow(0));
+  btnCommonPrev?.addEventListener('click', () => commonGrid?.selectRow((commonGrid?.getSelectedIndex() ?? 0) - 1));
+  btnCommonNext?.addEventListener('click', () => commonGrid?.selectRow((commonGrid?.getSelectedIndex() ?? 0) + 1));
+  btnCommonLast?.addEventListener('click', () => commonGrid?.selectRow(Number.MAX_SAFE_INTEGER));
+  btnCommonAdd?.addEventListener('click', () => commonGrid?.addRow());
+  btnCommonDelete?.addEventListener('click', () => commonGrid?.deleteRow());
+  btnCommonSave?.addEventListener('click', () => commonGrid?.saveRows());
+  btnCommonCancel?.addEventListener('click', () => commonGrid?.cancelChanges());
+  btnCommonRefresh?.addEventListener('click', () => commonGrid?.loadRows());
 
   btnKitFirst?.addEventListener('click', () => kitGrid?.selectRow(0));
   btnKitPrev?.addEventListener('click', () => kitGrid?.selectRow((kitGrid?.getSelectedIndex() ?? 0) - 1));
@@ -3189,19 +3604,23 @@
   });
 
   function applyTabVisibility() {
-    const id = (itemId || '').toUpperCase();
-    if (id !== 'MG000008' && id !== 'CPN00006') return;
-    const allowed = new Set([
-      '基本資料', '基本資料2', '廠商料號', '屬性及備註',
-      '工程圖', '圖檔', '規格表', '替代單位設定', '共用件', '組合商品'
-    ]);
+    const allowed = new Set((uiConfig.allowedTabs || []).map((x) => String(x || '').trim()).filter(Boolean));
     const tabs = Array.from(document.querySelectorAll('.matinfo-tabs .nav-link'));
     tabs.forEach((btn) => {
-      const name = btn.dataset.tabName || btn.textContent?.trim();
-      const show = allowed.has(name || '');
+      const target = btn.getAttribute('data-bs-target') || '';
+      const name = (btn.dataset.tabName || btn.textContent || '').trim();
+      let show = allowed.has(name);
+      if (!show && target === '#tab-cust') {
+        show = allowed.has('客戶料號') || allowed.has('廠商料號');
+      }
+      if (!show && target === '#tab-spec') {
+        show = allowed.has('規格表') || allowed.has(uiConfig.specTitleCaption || '規格表');
+      }
+      if (!show && target === '#tab-map') {
+        show = allowed.has('工程圖') || allowed.has(uiConfig.engTabCaption || '工程圖');
+      }
       const li = btn.closest('li');
       if (li) li.style.display = show ? '' : 'none';
-      const target = btn.getAttribute('data-bs-target');
       if (target) {
         const pane = document.querySelector(target);
         if (pane) pane.style.display = show ? '' : 'none';
@@ -3210,8 +3629,8 @@
     const activeVisible = document.querySelector('.matinfo-tabs .nav-link.active')?.closest('li')?.style.display !== 'none';
     if (!activeVisible) {
       const first = tabs.find((btn) => {
-        const name = btn.dataset.tabName || btn.textContent?.trim();
-        return allowed.has(name || '');
+        const li = btn.closest('li');
+        return !li || li.style.display !== 'none';
       });
       if (first) {
         if (window.bootstrap?.Tab) {
@@ -3237,12 +3656,16 @@
   });
 
   setEditMode(false);
-  applyTabDictTables();
   applyCustTabLabel();
+  applyDynamicCaptions();
+  applyTabDictTables();
   applyTopToolbarVisibility();
   applyTabVisibility();
   setActiveTabContext(document.querySelector('.matinfo-tabs .nav-link.active'));
   initBrowseResizer();
   loadBrowseHeight();
+  await loadSpecTypeOptions();
   loadData();
 })();
+
+
