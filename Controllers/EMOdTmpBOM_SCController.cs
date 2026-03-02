@@ -31,7 +31,8 @@ public class EMOdTmpBOM_SCController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         [FromQuery] string? TmpId = null,
-        [FromQuery] string? Notes = null)
+        [FromQuery] string? Notes = null,
+        [FromQuery] int? Status = null)
     {
         try
         {
@@ -51,6 +52,12 @@ public class EMOdTmpBOM_SCController : ControllerBase
             {
                 where.Add("Notes LIKE @Notes");
                 parameters.Add(new SqlParameter("@Notes", $"%{Notes.Trim()}%"));
+            }
+
+            if (Status.HasValue && Status.Value >= 0 && Status.Value <= 1)
+            {
+                where.Add("Status = @Status");
+                parameters.Add(new SqlParameter("@Status", Status.Value));
             }
 
             var whereClause = where.Count > 0 ? "WHERE " + string.Join(" AND ", where) : "";
@@ -85,7 +92,7 @@ public class EMOdTmpBOM_SCController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "GetPaged failed: page={Page}, TmpId={TmpId}, Notes={Notes}", page, TmpId, Notes);
+            _logger.LogError(ex, "GetPaged failed: page={Page}, TmpId={TmpId}, Notes={Notes}, Status={Status}", page, TmpId, Notes, Status);
             return StatusCode(500, new { ok = false, error = ex.Message });
         }
     }

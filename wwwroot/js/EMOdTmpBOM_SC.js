@@ -14,6 +14,8 @@
     let masterDict = [];  // 主檔欄位辭典 [{FieldName, DisplayLabel, Visible, ...}]
     let detailDict = [];  // 明細欄位辭典
     let queryParams = {}; // 查詢參數
+    let currentTreeRows = []; // 目前 tree 資料，供重繪使用
+    let showLayerId = true;   // 是否在名稱後顯示 (LayerId)，預設開啟
 
     // BOM Set Dialog state
     let bomSetReadOnly = false;
@@ -168,6 +170,7 @@
             let url = '/api/EMOdTmpBOMMas/paged?page=1&pageSize=500';
             if (queryParams.TmpId) url += `&TmpId=${encodeURIComponent(queryParams.TmpId)}`;
             if (queryParams.Notes) url += `&Notes=${encodeURIComponent(queryParams.Notes)}`;
+            if (queryParams.Status !== undefined && queryParams.Status !== '') url += `&Status=${queryParams.Status}`;
             const result = await apiGet(url);
             masterRows = result.data || [];
             renderMasterGrid();
@@ -227,6 +230,8 @@
         tr.classList.add('selected');
         selectedMasterRow = row;
         updateRecordCount();
+        const lbl = document.getElementById('detailTmpIdLabel');
+        if (lbl) lbl.textContent = row.TmpId ? row.TmpId.trim() : '';
         loadDetailForMaster(row.TmpId);
     }
 
@@ -259,6 +264,7 @@
     }
 
     function renderTreeView(rows) {
+        currentTreeRows = rows || [];
         const container = document.getElementById('treeContainer');
         if (!rows || rows.length === 0) {
             container.innerHTML = '<div style="color:#999; padding:20px; text-align:center;">無 BOM 組合資料</div>';
@@ -336,7 +342,9 @@
         }
 
         const text = document.createElement('span');
-        text.textContent = node.name;
+        const _name = (node.name || '').trim();
+        const _id   = (node.id   || '').trim();
+        text.textContent = showLayerId ? `${_name}（${_id}）` : _name;
         nodeDiv.appendChild(text);
 
         nodeDiv.addEventListener('click', () => {
@@ -466,6 +474,11 @@
         document.getElementById('btnSaveAs').addEventListener('click', handleSaveAs);
         document.getElementById('btnApprove').addEventListener('click', () => handleApproval(1));
         document.getElementById('btnReject').addEventListener('click', () => handleApproval(0));
+
+        document.getElementById('btnToggleLayerId')?.addEventListener('change', (e) => {
+            showLayerId = e.target.checked;
+            renderTreeView(currentTreeRows);
+        });
     }
 
     // ==================== Add / Delete Master Row ====================
@@ -697,6 +710,7 @@
     async function executeQuery() {
         queryParams.TmpId = document.getElementById('qryTmpId')?.value?.trim() || '';
         queryParams.Notes = document.getElementById('qryNotes')?.value?.trim() || '';
+        queryParams.Status = document.getElementById('qryStatus')?.value ?? '';
 
         closeQueryDialog();
         await loadMasterGrid();
@@ -710,6 +724,8 @@
             renderTreeView([]);
             renderDetailGrid([]);
             updateRecordCount();
+            const lbl = document.getElementById('detailTmpIdLabel');
+            if (lbl) lbl.textContent = '';
         }
     }
 
@@ -1157,9 +1173,10 @@
         const layout = {
             masterWidth: masterPanel ? masterPanel.offsetWidth : null,
             detailHeight: detailGridContainer ? detailGridContainer.offsetHeight : null,
+            showLayerId: showLayerId,
         };
         localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
-        alert('欄寬已保存');
+        alert('高度設定已保存');
     }
 
     function restoreLayout() {
@@ -1177,6 +1194,11 @@
                     detailGridContainer.style.flex = `0 0 ${layout.detailHeight}px`;
                     detailGridContainer.style.maxHeight = 'none';
                 }
+            }
+            if (layout.showLayerId !== undefined) {
+                showLayerId = layout.showLayerId;
+                const chk = document.getElementById('btnToggleLayerId');
+                if (chk) chk.checked = showLayerId;
             }
         } catch (_) { }
     }

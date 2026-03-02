@@ -20,6 +20,7 @@
     let bomPressNameMap = {};    // LayerId -> LayerName
     let currLayer = 'L0~0';     // 目前選取的層別
     let queryParams = {};        // 查詢參數
+    let showLayerId = true;      // 是否在名稱後顯示 (LayerId)，預設開啟
     let currentPage = 1;
     let pageSize = 200;
     let totalCount = 0;
@@ -314,7 +315,9 @@
             // icon 不顯示
 
             const label = document.createElement('span');
-            label.textContent = node.name;
+            const _name = (node.name || '').trim();
+            const _id   = (node.id   || '').trim();
+            label.textContent = showLayerId ? `${_name}（${_id}）` : _name;
             item.appendChild(label);
 
             item.addEventListener('click', () => selectTreeNode(node.id));
@@ -474,9 +477,10 @@
         const layout = {
             masterWidth: masterPanel ? masterPanel.offsetWidth : null,
             treeWidth: treePanel ? treePanel.offsetWidth : null,
+            showLayerId: showLayerId,
         };
         localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
-        alert('欄寬已保存');
+        alert('高度設定已保存');
     }
 
     function restoreLayout() {
@@ -491,6 +495,11 @@
             if (layout.treeWidth) {
                 const treePanel = document.getElementById('treePanel');
                 if (treePanel) treePanel.style.flex = `0 0 ${layout.treeWidth}px`;
+            }
+            if (layout.showLayerId !== undefined) {
+                showLayerId = layout.showLayerId;
+                const chk = document.getElementById('btnToggleLayerId');
+                if (chk) chk.checked = showLayerId;
             }
         } catch (_) { }
     }
@@ -1122,6 +1131,10 @@
         initSplitter('vSplitter1', 'masterPanel');
         initSplitter('vSplitter2', 'treePanel');
         document.getElementById('btnSaveLayout')?.addEventListener('click', saveLayout);
+        document.getElementById('btnToggleLayerId')?.addEventListener('change', (e) => {
+            showLayerId = e.target.checked;
+            renderTree();
+        });
 
         // Toolbar events
         document.getElementById('btnModeToggle')?.addEventListener('click', toggleEditMode);
