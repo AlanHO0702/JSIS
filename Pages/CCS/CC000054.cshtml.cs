@@ -226,6 +226,7 @@ namespace PcbErpApi.Pages.CCS
             ViewData["CCSCanBackReview"] = CanBackReview;
             ViewData["CCSCanTurnFormal"] = CanTurnFormal;
             ViewData["CCSCanDrop"] = CanDrop;
+            ViewData["DisableEditColor"] = true;
 
             try
             {
