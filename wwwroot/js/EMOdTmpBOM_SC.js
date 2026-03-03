@@ -15,7 +15,6 @@
     let detailDict = [];  // 明細欄位辭典
     let queryParams = {}; // 查詢參數
     let currentTreeRows = []; // 目前 tree 資料，供重繪使用
-    let showLayerId = true;   // 是否在名稱後顯示 (LayerId)，預設開啟
 
     // BOM Set Dialog state
     let bomSetReadOnly = false;
@@ -344,7 +343,7 @@
         const text = document.createElement('span');
         const _name = (node.name || '').trim();
         const _id   = (node.id   || '').trim();
-        text.textContent = showLayerId ? `${_name}（${_id}）` : _name;
+        text.innerHTML = `${_id}<span style="color:#999;">（${_name}）</span>`;
         nodeDiv.appendChild(text);
 
         nodeDiv.addEventListener('click', () => {
@@ -475,10 +474,6 @@
         document.getElementById('btnApprove').addEventListener('click', () => handleApproval(1));
         document.getElementById('btnReject').addEventListener('click', () => handleApproval(0));
 
-        document.getElementById('btnToggleLayerId')?.addEventListener('change', (e) => {
-            showLayerId = e.target.checked;
-            renderTreeView(currentTreeRows);
-        });
     }
 
     // ==================== Add / Delete Master Row ====================
@@ -1173,7 +1168,6 @@
         const layout = {
             masterWidth: masterPanel ? masterPanel.offsetWidth : null,
             detailHeight: detailGridContainer ? detailGridContainer.offsetHeight : null,
-            showLayerId: showLayerId,
         };
         localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
         alert('高度設定已保存');
@@ -1194,11 +1188,6 @@
                     detailGridContainer.style.flex = `0 0 ${layout.detailHeight}px`;
                     detailGridContainer.style.maxHeight = 'none';
                 }
-            }
-            if (layout.showLayerId !== undefined) {
-                showLayerId = layout.showLayerId;
-                const chk = document.getElementById('btnToggleLayerId');
-                if (chk) chk.checked = showLayerId;
             }
         } catch (_) { }
     }

@@ -192,7 +192,7 @@ namespace PcbErpApi.Pages.FOS
 
                 var rows = await ExecInqAsync(conn, paramStr, SpId, item, DefaultQueryValues);
                 var fields = (GridDictFields ?? new List<CURdTableField>())
-                    .Where(f => (f.Visible ?? 1) != 0)
+                    .Where(f => f.Visible == 1)
                     .OrderBy(f => f.SerialNum ?? int.MaxValue)
                     .ToList();
 
