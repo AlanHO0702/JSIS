@@ -111,7 +111,7 @@ namespace PcbErpApi.Pages.EMOdProdInfo
                 }
 
                 ExtraTabs = BuildExtraTabs();
-                MasterTabs = BuildMasterTabs();
+                MasterTabs = BuildMasterTabs(masterDict);
 
                 // 層別資料 API（EMOdProdLayer）- 用於左側層別清單
                 if (MasterKeyValues.Count > 0)
@@ -300,76 +300,85 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             };
         }
 
-        private List<MasterTab> BuildMasterTabs()
+        private List<MasterTab> BuildMasterTabs(IEnumerable<CURdTableField> dict)
         {
+            // 建立 DB 字典查詢表：FieldName -> (Visible, SerialNum)
+            var dictMap = dict
+                .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
+                .ToDictionary(
+                    f => f.FieldName!,
+                    f => f,
+                    StringComparer.OrdinalIgnoreCase
+                );
+
+            // 過濾並排序：只保留 Visible=1（或 DB 無記錄），並依 SerialNum 排序
+            IEnumerable<string> Filter(IEnumerable<string> fields) =>
+                fields
+                    .Where(fn => !dictMap.TryGetValue(fn, out var d) || (d.Visible ?? 1) == 1)
+                    .OrderBy(fn => dictMap.TryGetValue(fn, out var d) ? (d.SerialNum ?? 9999) : 9999);
+
             return new List<MasterTab>
             {
-                new MasterTab("substrate", "基板/尺寸/板厚", new[]
+                new MasterTab("substrate", "基板/尺寸/板厚", Filter(new[]
                 {
                     "TmpBomid", "DoType", "CustomerPartNum", "CustomerSname", "NumOfLayer",
                     "Materialq", "ProDstyle", "Press", "PressP", "PressM",
                     "NetThickLow", "NetThickUpp", "RftNetThick", "RftNetThickM", "RftNetThickP",
                     "Usage", "UnitArea"
-                }),
-                new MasterTab("imaging", "影像轉移", new[]
+                })),
+                new MasterTab("imaging", "影像轉移", Filter(new[]
                 {
-                    // Original fields
                     "PatternNum", "LineWid", "MinSmd",
-                    // Added fields
                     "AnnularRanMinIn", "AnnularWorkMinIn", "AnnularNonIn", "AnnularRanMinOut", "AnnularWorkMinOut", "AnnularNonOut",
                     "NetOpticAvgC", "NetOpticMinC", "NetOpticMaxC", "NetOpticNonC",
                     "NetOpticAvgS", "NetOpticMinS", "NetOpticMaxS", "NetOpticNonS"
-                }),
-                new MasterTab("plating", "電鍍", new[]
+                })),
+                new MasterTab("plating", "電鍍", Filter(new[]
                 {
                     "GoldArea", "GoldThick", "GoldMin", "GoldMax", "GoldAvg", "GoldRequest", "GoldRequestMin", "GoldRequestMax", "GoldRequestAvg",
                     "NickelThick", "NickelMin", "NickelMax", "NickelAvg", "NiRequest", "NickelRequestMin", "NickelRequestMax", "NickelRequestAvg",
                     "CuholeMin", "CuholeAvg", "CuviaMax", "CusurfaceMax", "ThickCuMin", "ThickCuMax", "ThickCuAvg",
                     "TinThick", "NetTin", "NetTinMin", "NetTinMax", "NetTinAvg",
                     "ChGoldThick", "ChSilverThick", "ChTinThick"
-                }),
-                new MasterTab("marking", "標記", new[]
+                })),
+                new MasterTab("marking", "標記", Filter(new[]
                 {
                     "ULMarkFace", "MarkCycle", "MarkCdate", "MarkBlue", "Ulmark94V", "Ullayer",
                     "MarkPlace", "MadeIn"
-                }),
-                new MasterTab("surface", "表面處理", new[]
+                })),
+                new MasterTab("surface", "表面處理", Filter(new[]
                 {
-                    // Original fields
                     "Osseal", "Entekdepth", "EntekdepthMax", "Entekchk",
-                    // Added fields
                     "Passivation", "PrintCarbon", "Strip", "Hardness", "OilThick"
-                }),
-                new MasterTab("solder", "防焊", new[]
+                })),
+                new MasterTab("solder", "防焊", Filter(new[]
                 {
                     "LsmColor", "LsmFace", "LsmMaker", "LsmViahole", "LsmColorB", "LsmIsIn", "LsmModel", "MinLsm", "Film"
-                }),
-                new MasterTab("legend", "文印", new[]
+                })),
+                new MasterTab("legend", "文印", Filter(new[]
                 {
-                    // Original fields
                     "CharColor", "CharFace", "CharColorB", "CharColorC", "CharMark", "LetterHl",
-                    // Added fields
                     "BarCodeColorT", "BarCodeColorB", "BarCodeThick", "BarCodeSize", "WordNum"
-                }),
-                new MasterTab("profile", "成型", new[]
+                })),
+                new MasterTab("profile", "成型", Filter(new[]
                 {
                     "MachWay", "DieType", "DieSeq", "Pinvcu", "VcutDist", "VcutCross", "VcutRip", "VcutDisM", "VcutWid",
                     "Pinslash", "PinslashA", "PinslashB", "GfslashAngA", "GfslashAngB", "GfslashHa", "GfslashHb",
                     "Cnc", "Cncrequest", "Cncmin", "Cncmax", "VcutAngleAvg", "VcutAngleMin", "VcutAngleMax",
                     "VcutRelicAvg", "VcutRelicMin", "VcutRelicMax", "VcutSum"
-                }),
-                new MasterTab("test", "測試", new[]
+                })),
+                new MasterTab("test", "測試", Filter(new[]
                 {
                     "TestManuFac", "HoleCheck", "SpecDemandCont",
                     "TinChk", "NetTinChk", "GoldChk", "NickelChk", "GoldRequestChk", "NickelRequestChk",
                     "SoftGoldReqChk", "SoftNickelReqChk", "ChsilverChk", "ChTinChk", "VcutDisMchk",
                     "Entekchk", "HardGoldChk",
                     "StatusChk1", "StatusChk2", "StatusChk3", "StatusChk4", "StatusChk5", "StatusChk6", "StatusChk7", "StatusChk8"
-                }),
-                new MasterTab("cam", "CAM注意事項", new[]
+                })),
+                new MasterTab("cam", "CAM注意事項", Filter(new[]
                 {
                     "ProdNotes", "OssealNotes", "ProdHints", "CmapPath", "SmapPath", "SpecDemandCont", "Cam", "Designer", "HaltNotes"
-                })
+                }))
             };
         }
 
