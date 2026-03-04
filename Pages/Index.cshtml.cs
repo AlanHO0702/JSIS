@@ -69,5 +69,10 @@ namespace PcbErpApi.Pages
 
         public List<CurdSysItem> GetCurrentLevel2() =>
             Level2Map.TryGetValue(SelectedLevel1Id, out var list) ? list : new List<CurdSysItem>();
+
+        public bool IsLevel0Selected() => Level0Items.Any(x => x.ItemId == SelectedLevel1Id);
+
+        public List<CurdSysItem> GetCurrentLevel1() =>
+            Level1Map.TryGetValue(SelectedLevel1Id, out var list) ? list : new List<CurdSysItem>();
     }
 }
