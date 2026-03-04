@@ -23,6 +23,8 @@
     var keyFieldsFromViewData = (IEnumerable<string>)(ViewData["KeyFields"] as IEnumerable<string> ?? Array.Empty<string>());
     var dictFields    = (IEnumerable<dynamic>)(ViewData["FieldDictList"] as IEnumerable<dynamic> ?? fields);
     var dictTableName = (string?)(ViewData["DictTableName"] as string) ?? tableName;
+    var disableEditColor = (ViewData["DisableEditColor"] as bool?)
+        ?? string.Equals(ViewData["DisableEditColor"]?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
     var enableRowDelete = (ViewData["EnableRowDelete"] as bool?)
         ?? (string.Equals(ViewData["EnableRowDelete"]?.ToString(), "true", StringComparison.OrdinalIgnoreCase)
             || string.Equals(ViewData["EnableRowDelete"]?.ToString(), "1", StringComparison.OrdinalIgnoreCase));
@@ -511,7 +513,7 @@
                       var isCellCheckbox = comboStyleVal == 1;
                       var editColorRaw = GetFieldProp(dictField ?? (object)f, "EditColor");
                       var cellBgColor = NormalizeEditColor(editColorRaw);
-                      var bgStyle = !string.IsNullOrWhiteSpace(cellBgColor) ? $"background-color:{cellBgColor}!important;" : "";
+                      var bgStyle = !disableEditColor && !string.IsNullOrWhiteSpace(cellBgColor) ? $"background-color:{cellBgColor}!important;" : "";
                       var tdStyle = bgStyle + hiddenStyle;
                       if (isCellCheckbox)
                       {
@@ -589,9 +591,9 @@
  .table-wrapper{height:calc(100vh - var(--app-toolbar-height, 56px));display:flex;flex-direction:column}
  .table-wrapper>.card{flex:1;display:flex;flex-direction:column;min-height:0}
  .table-wrapper>.card>.card-body{flex:1;display:flex;flex-direction:column;min-height:0;padding:0 8px}
- table.table{table-layout:fixed!important;border-collapse:collapse!important;font-size:.85rem;width:1px!important;max-width:none!important}
- table th,table td{vertical-align:middle!important;border:1px solid #dee2e6!important;padding:0!important;white-space:nowrap;overflow:hidden;min-width:0!important}
-  table th{padding:2px 4px!important}
+ #mainGrid.table{table-layout:fixed!important;border-collapse:collapse!important;font-size:.85rem;width:1px!important;max-width:none!important}
+ #mainGrid th,#mainGrid td{vertical-align:middle!important;border:1px solid #dee2e6!important;padding:0!important;white-space:nowrap;overflow:hidden;min-width:0!important}
+  #mainGrid th{padding:2px 4px!important}
   #mainGrid th .header-label{display:block;min-width:0;overflow:hidden;text-overflow:clip;white-space:nowrap}
  .table-hover tbody tr:hover{background:#f1f5ff!important}
 .cell-view,.cell-edit{display:block;width:100%;min-width:0!important;height:20px!important;min-height:20px!important;max-height:20px!important;font-size:.85rem;line-height:16px!important;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:clip;padding:2px 3px!important}
@@ -725,6 +727,7 @@
   }
 
   const customButtonsMeta = @Html.Raw(JsonSerializer.Serialize(customButtonMeta ?? new List<object>()));
+  const disableEditColor = @disableEditColor.ToString().ToLowerInvariant();
   const fieldFormatMap = @Html.Raw(JsonSerializer.Serialize(
     dictFields.Select(f => new {
       FieldName = f.FieldName,
@@ -2044,7 +2047,7 @@
       const fmtMeta = fieldFormatMap?.find?.(x => (x.FieldName || '').toLowerCase() === (fieldName || '').toLowerCase());
       const isCheckboxCell = (fmtMeta?.ComboStyle ?? 0) === 1;
       const editColorRaw = (fmtMeta?.EditColor || '').trim();
-      const bgStyle = editColorRaw ? 'background-color:' + normalizeEditColor(editColorRaw) + '!important;' : '';
+      const bgStyle = (!disableEditColor && editColorRaw) ? 'background-color:' + normalizeEditColor(editColorRaw) + '!important;' : '';
       const tdStyle = bgStyle + hiddenStyle;
 
       const td = document.createElement("td");
@@ -2596,7 +2599,7 @@
         // 辭典底色與勾選框
         const fmtMeta = fieldFormatMap?.find?.(x => (x.FieldName || '').toLowerCase() === (fieldName || '').toLowerCase());
         const editColorRaw = (fmtMeta?.EditColor || '').trim();
-        const bgStyle = editColorRaw ? 'background-color:' + normalizeEditColor(editColorRaw) + '!important;' : '';
+        const bgStyle = (!disableEditColor && editColorRaw) ? 'background-color:' + normalizeEditColor(editColorRaw) + '!important;' : '';
         const tdStyle = bgStyle + hiddenStyle;
         const isCheckboxCell = (fmtMeta?.ComboStyle ?? 0) === 1;
 

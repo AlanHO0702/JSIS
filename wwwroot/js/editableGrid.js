@@ -12,6 +12,7 @@
       : [];
     const keyFieldSet = new Set(keyFields.map(k => k.toLowerCase()));
     const saveUrl   = options.saveUrl || "/api/CommonTable/SaveTableChanges";
+    const keepInputLayout = !!options.keepInputLayout;
 
     if (!wrapper || !table) {
       console.warn("makeEditableGrid: wrapper or table not set.");
@@ -37,6 +38,58 @@
           const span = td.querySelector(".cell-view");
           const inp  = td.querySelector(".cell-edit");
           if (!span || !inp) return;
+
+          if (keepInputLayout) {
+            if (editing) {
+              inp.defaultValue = inp.type === "checkbox"
+                ? (inp.checked ? "1" : "0")
+                : inp.value;
+              if (inp.type === "checkbox") {
+                inp.defaultChecked = inp.checked;
+              }
+            }
+
+            if (inp.type === "checkbox") {
+              let viewChk = span.querySelector('input[type="checkbox"]');
+              if (!viewChk) {
+                viewChk = document.createElement("input");
+                viewChk.type = "checkbox";
+                viewChk.disabled = true;
+                viewChk.tabIndex = -1;
+                viewChk.className = "form-check-input";
+                span.innerHTML = "";
+                span.appendChild(viewChk);
+              }
+              viewChk.checked = !!inp.checked;
+              inp.value = inp.checked ? "1" : "0";
+            } else {
+              span.textContent = inp.value;
+            }
+
+            span.classList.add("d-none");
+            inp.classList.remove("d-none");
+
+            const isReadonly = inp.dataset.readonly === "1";
+            if (inp.type === "checkbox") {
+              inp.disabled = !editing || isReadonly;
+              inp.tabIndex = (!editing || isReadonly) ? -1 : 0;
+            } else if (!editing || isReadonly) {
+              inp.setAttribute("readonly", "readonly");
+              inp.setAttribute("tabindex", "-1");
+            } else {
+              inp.removeAttribute("readonly");
+              inp.removeAttribute("tabindex");
+            }
+
+            if (isReadonly) {
+              inp.classList.add("readonly-cell");
+              span.classList.add("readonly-cell");
+            } else {
+              inp.classList.remove("readonly-cell");
+              span.classList.remove("readonly-cell");
+            }
+            return;
+          }
 
           if (editing) {
 

@@ -1,49 +1,443 @@
-@page "/CPN/MGNdSetNum"
+﻿@page "/CPN/MGNdSetNum/{itemId?}"
 @model PcbErpApi.Pages.CPN.MGNdSetNumModel
 @{
     Layout = "_Layout";
     ViewData["Title"] = $"{Model.ItemId} {Model.PageTitle}";
+    var isMainOnly = Model.IsMainOnly;
+    var isEncodeOnly = Model.IsEncodeOnly;
+    var hideTabs = isMainOnly || isEncodeOnly;
+    var mainTabActive = !isEncodeOnly;
+    var encodeTabActive = isEncodeOnly;
+    var mainPaneClass = mainTabActive ? "tab-pane fade show active" : "tab-pane fade";
+    var encodePaneClass = encodeTabActive ? "tab-pane fade show active" : "tab-pane fade";
+    if (isEncodeOnly)
+    {
+        mainPaneClass += " d-none";
+    }
+    if (isMainOnly)
+    {
+        encodePaneClass += " d-none";
+    }
 }
 
 <link rel="stylesheet" href="~/css/grid-toolbar.css" />
 <style>
-  .grid-scroll { overflow: auto; max-height: 70vh; }
-  .grid-table { min-width: max-content; }
+  .grid-scroll { overflow: auto; max-height: 56vh; }
+  .setnum-page .grid-scroll { border: 1px solid #d8e0ee; background: #fff; border-radius: 0; }
+  .grid-table {
+    border-collapse: collapse !important;
+    table-layout: fixed !important;
+    width: 1px !important;
+    max-width: none !important;
+    min-width: 0;
+  }
   .grid-table th,
-  .grid-table td { white-space: nowrap; }
+  .grid-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: clip;
+    min-width: 0 !important;
+  }
   .grid-table td .form-check-input { margin: 0 auto; display: block; }
-  .grid-table td .cell-view { display: flex; justify-content: center; align-items: center; }
+  .setnum-page .grid-table td .form-check-input { opacity: 1 !important; }
+  .grid-table td .cell-view { display: block; width: 100%; text-align: inherit; }
+  .setnum-page .grid-table td.cell-text { text-align: left; }
+  .setnum-page .grid-table td.cell-number { text-align: right; }
+  .setnum-page .grid-table td.cell-check { text-align: center; }
+  .setnum-page .grid-table td.cell-text .cell-edit { text-align: left; }
+  .setnum-page .grid-table td.cell-number .cell-edit { text-align: right; }
+  .setnum-page .grid-table td.cell-check .cell-edit { text-align: center; }
+  .setnum-page .grid-table td {
+    padding: 2px 4px;
+    vertical-align: middle;
+  }
+  .setnum-page .grid-table td .cell-view,
+  .setnum-page .grid-table td .cell-edit {
+    display: block;
+    width: 100%;
+    min-width: 0 !important;
+    height: 20px !important;
+    min-height: 20px !important;
+    max-height: 20px !important;
+    font-size: .82rem !important;
+    line-height: 16px !important;
+    box-sizing: border-box;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: clip;
+    padding: 2px 3px !important;
+    margin: 0;
+    font-family: inherit !important;
+    font-weight: 400 !important;
+  }
+  /* 避免被全域 .cell-view/.cell-edit 規則覆蓋，確保編輯前後視覺一致 */
+  .setnum-page .grid-table td .cell-view {
+    font-size: .82rem !important;
+    line-height: 16px !important;
+    padding: 2px 3px !important;
+  }
+  .setnum-page .grid-table td .cell-edit {
+    font-size: .82rem !important;
+    line-height: 16px !important;
+    padding: 2px 3px !important;
+  }
+  .setnum-page .grid-table td.cell-number .cell-view,
+  .setnum-page .grid-table td.cell-number .cell-edit {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+  .setnum-page .grid-table td .cell-edit.form-control {
+    height: 20px !important;
+    min-height: 20px !important;
+    max-height: 20px !important;
+    font-size: inherit !important;
+    line-height: 16px !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    width: 100% !important;
+    text-align: inherit !important;
+    vertical-align: middle !important;
+  }
+  .setnum-page .grid-scroll.edit-mode .grid-table tbody td {
+    padding: 2px 4px !important;
+    height: 20px;
+  }
+  .setnum-page .grid-table td input.cell-edit[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+    padding-right: 0 !important;
+  }
+  .setnum-page .grid-table td input.cell-edit[type="number"]::-webkit-outer-spin-button,
+  .setnum-page .grid-table td input.cell-edit[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .setnum-page .grid-table td input.cell-edit[type="checkbox"] {
+    width: 14px !important;
+    height: 14px !important;
+    min-width: 14px !important;
+    min-height: 14px !important;
+    max-width: 14px !important;
+    max-height: 14px !important;
+    padding: 0;
+    margin: 1px auto 0 !important;
+  }
+  .setnum-page .grid-table td .cell-view .form-check-input {
+    width: 14px !important;
+    height: 14px !important;
+    min-width: 14px !important;
+    min-height: 14px !important;
+    max-width: 14px !important;
+    max-height: 14px !important;
+    margin: 1px auto 0 !important;
+    opacity: 1 !important;
+  }
+  .setnum-page .grid-table td .cell-view .form-check-input:disabled {
+    opacity: 1 !important;
+    filter: none !important;
+  }
   .grid-table thead th {
     position: sticky;
     top: 0;
     z-index: 5;
-    background: #f8f9fa;
-    box-shadow: 0 2px 2px rgba(0,0,0,0.05);
+    background: #f2f6ff;
+    color: #204a87;
+    border-bottom: 1px solid #b7c2d4;
+    border-right: 1px solid #b7c2d4;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.03);
+    user-select: none;
+    text-align: left;
+  }
+  .grid-table tbody td {
+    background: #fff;
+    border-top: 1px solid #c4cede;
+    border-bottom: 1px solid #c4cede;
+    border-right: 1px solid #c4cede;
+    height: 20px;
+  }
+  .grid-table tbody tr:hover td {
+    background: #f9fbff;
+  }
+  .grid-table tbody tr.table-primary td {
+    background: #cfe8ff !important;
+    border-color: #9fc6e6 !important;
+  }
+  .sortable-header .header-label {
+    display: inline-block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: clip;
+    white-space: nowrap;
+    padding-right: 10px;
+  }
+  .sort-icon {
+    display: inline-block;
+    margin-left: 4px;
+    color: #0d6efd;
+    font-size: .74em;
+    min-width: 10px;
+  }
+  .sortable-header:hover {
+    background: #e8f4fd !important;
+    cursor: pointer;
+  }
+  .grid-table thead th.col-dragging { opacity: .55; }
+  .grid-table thead th.col-drag-over-left { box-shadow: inset 3px 0 0 #3b82f6; }
+  .grid-table thead th.col-drag-over-right { box-shadow: inset -3px 0 0 #3b82f6; }
+
+  .setnum-page .tab-content { padding-top: 6px !important; }
+  .setnum-page .card-body[data-page-mode="main"] .tab-content { padding-top: 0 !important; }
+  .setnum-page .card-body[data-page-mode="main"] .top-toolbar { margin-bottom: 4px; }
+  .setnum-page .card-body[data-page-mode="main"] #mainWrapper.grid-scroll {
+    max-height: none !important;
+    overflow-y: visible !important;
+    overflow-x: auto;
   }
   .btn-tight-group { display: inline-flex; flex-wrap: nowrap; gap: 0; }
   .btn-tight-group > .btn { border-radius: 0; margin-right: -1px; }
   .btn-tight-group > .btn:first-child { border-top-left-radius: .25rem; border-bottom-left-radius: .25rem; margin-right: -1px; }
   .btn-tight-group > .btn:last-child { border-top-right-radius: .25rem; border-bottom-right-radius: .25rem; margin-right: 0; }
+
+  .setnum-page {
+    --top-toolbar-btn-height: 31px;
+    --top-toolbar-font-size: 13px;
+  }
+  .setnum-page .top-toolbar {
+    display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+    width:100%; margin-bottom:0; border-radius:10px;
+    background:#f6f7f9; border:1px solid #d8dee8; padding:4px 8px;
+    box-shadow: 0 1px 2px rgba(20,40,80,0.06);
+  }
+  #mainToolbar .toolbar-btn {
+    border: 1px solid #b9c8de !important;
+    background: #fff !important;
+    color: #1d2b4f !important;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.7) !important;
+  }
+  .setnum-page .toolbar-btn {
+    display:inline-flex; align-items:center; justify-content:center;
+    gap:4px; background:#fff; color:#1d2b4f;
+    border:1px solid #cfd7e6; border-radius:10px; font-size:var(--top-toolbar-font-size); font-weight:500;
+    padding:0 8px; height:var(--top-toolbar-btn-height); min-height:var(--top-toolbar-btn-height);
+    line-height:1; box-shadow:none; transition:background .18s, transform .11s, border-color .18s, color .18s;
+    cursor:pointer;
+  }
+  .setnum-page .toolbar-btn:hover,.setnum-page .toolbar-btn:focus {
+    transform: translateY(-1px) scale(1.02);
+    color:#1d2b4f;
+    background:#f8fbff;
+    border-color:#b9c8de;
+  }
+  .setnum-page .toolbar-btn.btn-primary,
+  .setnum-page .toolbar-btn.btn-success,
+  .setnum-page .toolbar-btn.btn-warning,
+  .setnum-page .toolbar-btn.btn-outline-secondary {
+    background:#fff;
+    color:#334155;
+    border-color:#c5cfdd;
+  }
+  .setnum-page .toolbar-btn.btn-danger {
+    background:#fff;
+    color:#8b2b2b;
+    border-color:#d2b7b7;
+  }
+  .setnum-page .toolbar-btn.btn-danger:hover,
+  .setnum-page .toolbar-btn.btn-danger:focus {
+    background:#f8efef;
+    border-color:#cfa4a4;
+    color:#7f1d1d;
+  }
+  .setnum-page .toolbar-count-box {
+    display:inline-flex; flex-direction:column; justify-content:center; align-items:center;
+    height:var(--top-toolbar-btn-height); min-width:74px; padding:2px 8px; border-radius:6px;
+    font-weight:700; line-height:1.05; color:#fff; user-select:none; background:#1e4db7;
+  }
+  .setnum-page .toolbar-count-box .count-line { font-size:.75rem; }
+  .setnum-page .toolbar-count-box.mode-view { background:#1e4db7; }
+  .setnum-page .toolbar-count-box.mode-edit { background:#f00000; }
+  .setnum-page .setnum-toolbar-main { display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+  .setnum-page .btn-group.btn-tight-group > .btn { height:var(--top-toolbar-btn-height); }
+  .setnum-page .setnum-section-title { font-weight:600; color:#2b476d; font-size:.9rem; }
+  .setnum-page .setnum-header-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .setnum-page .setnum-header-actions .form-control { height: var(--top-toolbar-btn-height); font-size: .82rem; }
+  .setnum-page .setnum-util { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:6px; }
+  .setnum-page .setnum-util .form-control { height:var(--top-toolbar-btn-height); font-size:.82rem; }
+  .setnum-page .card-header { padding: .35rem .55rem !important; }
+  .setnum-page .card-body { padding: .45rem .55rem; }
+  .setnum-page .table.table-sm th,
+  .setnum-page .table.table-sm td { font-size: .82rem; }
+  .setnum-page .nav-tabs .nav-link { padding: .3rem .7rem; font-size: .86rem; }
+  .setnum-page .badge { font-size: .72rem; }
+  #badgeSetClass, #badgeSubKey { display: none !important; }
+  #mainWrapper.grid-scroll { max-height: 62vh; }
+  #setMainWrapper.grid-scroll { max-height: none; height: 100%; }
+  #setSubWrapper.grid-scroll, #setDtlWrapper.grid-scroll { max-height: none; height: 100%; }
+  .setnum-page .btn-outline-info.btn-sm,
+  .setnum-page .btn-outline-primary.btn-sm,
+  .setnum-page .btn-outline-secondary.btn-sm {
+    font-size: .8rem;
+    padding: .14rem .52rem;
+    border-radius: 6px;
+  }
+  #mgAlert {
+    position: fixed;
+    right: 14px;
+    bottom: 14px;
+    z-index: 1080;
+    min-width: 220px;
+    max-width: 420px;
+    margin: 0 !important;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.16);
+    border-radius: 8px;
+    padding: .45rem .65rem;
+  }
+  #tab-encode {
+    height: calc(100vh - 124px);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #tab-encode .top-toolbar { flex: 0 0 auto; margin-bottom: 6px; }
+  #tab-encode .encode-layout { flex: 1 1 auto; min-height: 0; }
+  #tab-encode .encode-left { height: 100%; }
+  #tab-encode .encode-right {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  #tab-encode .encode-left > .card,
+  #tab-encode .encode-right > .card {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  #tab-encode .encode-right > .card { flex: 1 1 0; }
+  #tab-encode .card-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .section-action-group { display: none !important; }
+  .sortable-header { cursor: pointer; position: relative; }
+  .sortable-header .col-resizer {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+  }
+  .sortable-header .col-resizer::after {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    bottom: 2px;
+    width: 1px;
+    background: transparent;
+  }
+  .sortable-header:hover .col-resizer::after {
+    background: rgba(31, 61, 120, 0.35);
+  }
+  #mgAlert {
+    position: fixed !important;
+    right: 14px !important;
+    bottom: 14px !important;
+    z-index: 1080 !important;
+  }
+  .swal2-popup.setnum-help-popup {
+    width: 300px !important;
+    max-width: calc(100vw - 24px) !important;
+    padding: .7rem .9rem .9rem !important;
+  }
+  .setnum-help-popup .swal2-icon {
+    display: none !important;
+  }
+  .swal2-title.setnum-help-title {
+    margin: 0 0 .35rem !important;
+    padding: 0 !important;
+    font-size: 1.1rem !important;
+    text-align: left !important;
+  }
+  .setnum-help-body {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    column-gap: 8px;
+    row-gap: 2px;
+    text-align: left;
+    line-height: 1.45;
+    font-size: .92rem;
+    margin-top: 0;
+  }
+  .setnum-help-key {
+    color: #1f3d78;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .setnum-help-desc {
+    color: #374151;
+  }
+  .setnum-lookup-dropdown-list {
+    background: #fff;
+    border: 1px solid #d8e0ee;
+    border-radius: 8px;
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
+    padding: 6px;
+    overflow: auto;
+    z-index: 1100;
+  }
+  .setnum-lookup-dropdown-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 6px 10px;
+    border-radius: 6px;
+    color: #1f2937;
+    cursor: pointer;
+  }
+  .setnum-lookup-dropdown-item:hover,
+  .setnum-lookup-dropdown-item:focus {
+    background: #eff6ff;
+    outline: none;
+  }
+  .setnum-lookup-dropdown-empty {
+    padding: 8px 10px;
+    color: #64748b;
+    font-size: .82rem;
+  }
 </style>
 
-<div class="card shadow-sm mt-2">
-  <div class="card-body">
-    <ul class="nav nav-tabs" id="mg-tabs" role="tablist">
+<div class="card shadow-sm mt-2 setnum-page">
+  <div class="card-body" data-item-id="@Model.ItemId" data-page-mode="@(isEncodeOnly ? "encode" : "main")">
+    <ul class="nav nav-tabs @(hideTabs ? "d-none" : string.Empty)" id="mg-tabs" role="tablist">
       <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="tab-main-tab" data-bs-toggle="tab" data-bs-target="#tab-main" type="button" role="tab">主分類</button>
+        <button class="nav-link @(mainTabActive ? "active" : string.Empty)" id="tab-main-tab" data-bs-toggle="tab" data-bs-target="#tab-main" type="button" role="tab">主分類</button>
       </li>
       <li class="nav-item" role="presentation">
-        <button class="nav-link" id="tab-encode-tab" data-bs-toggle="tab" data-bs-target="#tab-encode" type="button" role="tab">編碼設定</button>
+        <button class="nav-link @(encodeTabActive ? "active" : string.Empty)" id="tab-encode-tab" data-bs-toggle="tab" data-bs-target="#tab-encode" type="button" role="tab">編碼設定</button>
       </li>
     </ul>
 
     <div class="tab-content pt-3">
-      <div class="tab-pane fade show active" id="tab-main" role="tabpanel" aria-labelledby="tab-main-tab">
-        <div class="btn-tight-group mb-2" id="mainToolbar">
-          <button class="btn btn-primary btn-sm" id="mainToggleEdit">編輯</button>
-          <button class="btn btn-outline-secondary btn-sm" id="mainAddRow">新增</button>
-          <button class="btn btn-success btn-sm" id="mainSave">確認</button>
-          <button class="btn btn-warning btn-sm" id="mainCancel">取消</button>
+      <div class="@mainPaneClass" id="tab-main" role="tabpanel" aria-labelledby="tab-main-tab">
+        <div class="top-toolbar">
+          <div class="toolbar-count-box mode-view" id="mainModeBox">
+            <div class="count-line">瀏覽模式</div>
+          </div>
+          <div class="d-flex gap-1 mb-0" id="mainToolbar">
+            <button class="btn toolbar-btn" id="mainToggleEdit"><i class="bi bi-pencil-square"></i>修改</button>
+            <button class="btn toolbar-btn" id="mainAddRow"><i class="bi bi-plus-circle"></i>新增</button>
+            <button class="btn toolbar-btn" id="mainSave"><i class="bi bi-check2-circle"></i>確認</button>
+            <button class="btn toolbar-btn" id="mainCancel"><i class="bi bi-x-circle"></i>取消</button>
+          </div>
         </div>
         <div class="table-responsive grid-scroll" id="mainWrapper" data-table-name="MGN_MINdMatClass">
           <table class="table table-sm table-bordered align-middle mb-0 grid-table" id="mainTable">
@@ -55,24 +449,38 @@
         </div>
       </div>
 
-      <div class="tab-pane fade" id="tab-encode" role="tabpanel" aria-labelledby="tab-encode-tab">
-        <div class="row g-3">
-          <div class="col-12 col-lg-6 col-xl-7">
+      <div class="@encodePaneClass" id="tab-encode" role="tabpanel" aria-labelledby="tab-encode-tab">
+        <div class="top-toolbar">
+          <div class="toolbar-count-box mode-view" id="encodeModeBox"><div class="count-line">瀏覽模式</div></div>
+          <div class="setnum-toolbar-main">
+            <div class="d-flex gap-1 me-2" id="encodeUnifiedToolbar">
+              <button class="btn toolbar-btn" id="encodeEdit"><i class="bi bi-pencil-square"></i>修改</button>
+              <button class="btn toolbar-btn" id="encodeAdd"><i class="bi bi-plus-circle"></i>新增</button>
+              <button class="btn toolbar-btn" id="encodeSave"><i class="bi bi-check2-circle"></i>確認</button>
+              <button class="btn toolbar-btn" id="encodeCancel"><i class="bi bi-x-circle"></i>取消</button>
+              <button class="btn toolbar-btn" id="encodeDelete"><i class="bi bi-dash-circle"></i>刪除</button>
+            </div>
+            <button class="btn toolbar-btn" id="btnRefreshAll">重取資料</button>
+            <button class="btn toolbar-btn" id="btnInfo">編碼說明</button>
+          </div>
+        </div>
+        <div class="row g-1 encode-layout">
+          <div class="col-12 col-lg-7 encode-left">
             <div class="card h-100 border-secondary-subtle">
-              <div class="card-header py-2 d-flex align-items-center justify-content-between">
-                <span>品號編碼原則 (SetNumMain)</span>
-                <div class="btn-group btn-group-sm btn-tight-group">
-                  <button class="btn btn-primary" id="setMainToggleEdit">編輯</button>
-                  <button class="btn btn-outline-secondary" id="setMainAddRow">新增</button>
-                  <button class="btn btn-success" id="setMainSave">儲存</button>
-                  <button class="btn btn-warning" id="setMainCancel">取消</button>
+              <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+                <span id="setMainTitle" class="setnum-section-title">品號編碼原則 (SetNumMain)</span>
+                <div class="setnum-header-actions">
+                  <button class="btn toolbar-btn" id="btnTestEncode">測試編碼</button>
+                  <input type="text" class="form-control form-control-sm w-auto" id="txtTestResult" placeholder="測試結果" style="min-width:120px;">
+                </div>
+                <div class="btn-group btn-group-sm btn-tight-group section-action-group">
+                  <button class="btn btn-primary toolbar-btn" id="setMainToggleEdit">修改</button>
+                  <button class="btn btn-outline-secondary toolbar-btn" id="setMainAddRow">新增</button>
+                  <button class="btn btn-success toolbar-btn" id="setMainSave">儲存</button>
+                  <button class="btn btn-warning toolbar-btn" id="setMainCancel">取消</button>
                 </div>
               </div>
               <div class="card-body p-2">
-                <div class="d-flex flex-wrap gap-2 mb-2">
-                  <button class="btn btn-outline-info btn-sm" id="btnTestEncode">測試編碼</button>
-                  <input type="text" class="form-control form-control-sm w-auto" id="txtTestResult" placeholder="測試結果" readonly>
-                </div>
                 <div class="table-responsive grid-scroll" id="setMainWrapper" data-table-name="MGNdSetNumMain">
                   <table class="table table-sm table-bordered align-middle mb-0 grid-table" id="setMainTable">
                     <thead class="table-light">
@@ -85,25 +493,23 @@
             </div>
           </div>
 
-          <div class="col-12 col-lg-6 col-xl-5">
-            <div class="card border-secondary-subtle mb-3">
-              <div class="card-header py-2 d-flex align-items-center justify-content-between flex-nowrap">
-                <div class="d-flex align-items-center gap-2 flex-wrap">
-                  <span>編碼方式屬性 (SetNumSub)</span>
-                  <span class="badge bg-light text-dark" id="badgeSetClass"></span>
+          <div class="col-12 col-lg-5 encode-right">
+            <div class="card border-secondary-subtle mb-0">
+              <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+                <span id="setSubTitle" class="setnum-section-title">編碼方式屬性 (SetNumSub)</span>
+                <span class="badge bg-light text-dark d-none" id="badgeSetClass"></span>
+                <div class="setnum-header-actions">
+                  <button class="btn toolbar-btn" id="btnCopyToMat">新增屬性到料號主檔</button>
                 </div>
-                <div class="btn-group btn-group-sm btn-tight-group flex-shrink-0">
-                  <button class="btn btn-primary" id="setSubToggleEdit">編輯</button>
-                  <button class="btn btn-outline-secondary" id="setSubAddRow">新增</button>
-                  <button class="btn btn-success" id="setSubSave">儲存</button>
-                  <button class="btn btn-warning" id="setSubCancel">取消</button>
-                  <button class="btn btn-danger" id="setSubDelete">刪除</button>
+                <div class="btn-group btn-group-sm btn-tight-group flex-shrink-0 section-action-group">
+                  <button class="btn btn-primary toolbar-btn" id="setSubToggleEdit">修改</button>
+                  <button class="btn btn-outline-secondary toolbar-btn" id="setSubAddRow">新增</button>
+                  <button class="btn btn-success toolbar-btn" id="setSubSave">儲存</button>
+                  <button class="btn btn-warning toolbar-btn" id="setSubCancel">取消</button>
+                  <button class="btn btn-danger toolbar-btn" id="setSubDelete">刪除</button>
                 </div>
               </div>
               <div class="card-body p-2">
-                <div class="d-flex mb-2">
-                  <button class="btn btn-outline-primary btn-sm" id="btnCopyToMat">新增屬性到料號主檔</button>
-                </div>
                 <div class="table-responsive grid-scroll" id="setSubWrapper" data-table-name="MGNdSetNumSub">
                   <table class="table table-sm table-bordered align-middle mb-0 grid-table" id="setSubTable">
                     <thead class="table-light">
@@ -116,22 +522,20 @@
             </div>
 
             <div class="card border-secondary-subtle">
-              <div class="card-header py-2 d-flex align-items-center justify-content-between flex-nowrap">
-                <div class="d-flex align-items-center gap-2 flex-wrap">
-                  <span>屬性種類明細 (SetNumSubDtl)</span>
-                  <span class="badge bg-light text-dark" id="badgeSubKey"></span>
+              <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+                <span id="setDtlTitle" class="setnum-section-title">屬性種類明細 (SetNumSubDtl)</span>
+                <span class="badge bg-light text-dark d-none" id="badgeSubKey"></span>
+                <div class="setnum-header-actions">
+                  <button class="btn toolbar-btn" id="btnImportMapping">匯入對應資料</button>
                 </div>
-                <div class="btn-group btn-group-sm btn-tight-group flex-shrink-0">
-                  <button class="btn btn-primary" id="setDtlToggleEdit">編輯</button>
-                  <button class="btn btn-outline-secondary" id="setDtlAddRow">新增</button>
-                  <button class="btn btn-success" id="setDtlSave">儲存</button>
-                  <button class="btn btn-warning" id="setDtlCancel">取消</button>
+                <div class="btn-group btn-group-sm btn-tight-group flex-shrink-0 section-action-group">
+                  <button class="btn btn-primary toolbar-btn" id="setDtlToggleEdit">修改</button>
+                  <button class="btn btn-outline-secondary toolbar-btn" id="setDtlAddRow">新增</button>
+                  <button class="btn btn-success toolbar-btn" id="setDtlSave">儲存</button>
+                  <button class="btn btn-warning toolbar-btn" id="setDtlCancel">取消</button>
                 </div>
               </div>
               <div class="card-body p-2">
-                <div class="d-flex flex-wrap gap-2 mb-2">
-                  <button class="btn btn-outline-secondary btn-sm" id="btnImportMapping">匯入對應的資料</button>
-                </div>
                 <div class="table-responsive grid-scroll" id="setDtlWrapper" data-table-name="MGNdSetNumSubDtl">
                   <table class="table table-sm table-bordered align-middle mb-0 grid-table" id="setDtlTable">
                     <thead class="table-light">
@@ -147,7 +551,7 @@
       </div>
     </div>
 
-    <div class="alert mt-3 d-none" id="mgAlert"></div>
+    <div class="alert d-none" id="mgAlert"></div>
   </div>
 </div>
 
@@ -158,61 +562,64 @@
 <script src="/js/gridToolbarTemplate.js"></script>
 <script src="/js/fieldDictModal.js"></script>
 <script>
+  window._itemId = '@Model.ItemId';
+  window._singleItemId = '@Model.ItemId';
+  window._mgNdSetNumMode = '@(isEncodeOnly ? "encode" : "main")';
 (() => {
   const fallbackMainCols = [
-    { key:'MatClass', label:'分類', width:'80px', required:true },
-    { key:'ClassName', label:'分類名稱', width:'160px', required:true },
-    { key:'NeedInStock', label:'庫存管理', type:'checkbox', width:'80px' },
-    { key:'MB', label:'驗收', type:'checkbox', width:'64px' },
-    { key:'iNeedBatchNum', label:'批號管理', type:'checkbox', width:'80px' },
-    { key:'iNeedDateCode', label:'DateCode', type:'checkbox', width:'80px' },
-    { key:'iNeedExpiredDate', label:'效期管理', type:'checkbox', width:'80px' },
+    { key:'MatClass', label:'分類代碼', width:'90px', required:true },
+    { key:'ClassName', label:'分類名稱', width:'170px', required:true },
+    { key:'NeedInStock', label:'庫存管理', type:'checkbox', width:'90px' },
+    { key:'MB', label:'購入件', type:'checkbox', width:'70px' },
+    { key:'iNeedBatchNum', label:'批號管理', type:'checkbox', width:'90px' },
+    { key:'iNeedDateCode', label:'DateCode管理', type:'checkbox', width:'120px' },
+    { key:'iNeedExpiredDate', label:'效期管理', type:'checkbox', width:'90px' },
     { key:'ClassType', label:'物料分類', width:'90px', type:'number' },
     { key:'Type', label:'成本分類', width:'90px', type:'number' },
     { key:'Prepared', label:'備料方式', width:'90px', type:'number' },
-    { key:'SetMon', label:'用料月數', width:'90px', type:'number' },
+    { key:'SetMon', label:'設定用料月數', width:'110px', type:'number' },
     { key:'Accept', label:'超收%', width:'90px', type:'number' },
     { key:'IsManage', label:'件號管理', type:'checkbox', width:'90px' },
     { key:'StockId', label:'倉別', width:'80px' },
-    { key:'PosId', label:'儲位', width:'90px' },
-    { key:'DistrAptToMatInfo', label:'發料超收%', width:'90px', type:'number' },
-    { key:'NeedQoute', label:'需詢價', type:'checkbox', width:'80px' },
-    { key:'DefaultUnit', label:'基礎單位', width:'90px' },
-    { key:'DefKeepDays', label:'安全天數', width:'90px', type:'number' },
-    { key:'SendMsgDayPre', label:'提醒天數', width:'90px', type:'number' },
-    { key:'FeedProc', label:'對應製程', width:'100px' },
-    { key:'IsMainMat', label:'主材', type:'checkbox', width:'70px' },
-    { key:'iUseBarCode', label:'條碼', type:'checkbox', width:'70px' },
-    { key:'SalesId', label:'業務', width:'90px' },
+    { key:'PosId', label:'庫位', width:'90px' },
+    { key:'DistrAptToMatInfo', label:'發料超收%', width:'100px', type:'number' },
+    { key:'NeedQoute', label:'需詢價單', type:'checkbox', width:'90px' },
+    { key:'DefaultUnit', label:'預設基礎單位', width:'120px' },
+    { key:'DefKeepDays', label:'預設保存天數', width:'110px', type:'number' },
+    { key:'SendMsgDayPre', label:'訊息提前天數', width:'110px', type:'number' },
+    { key:'FeedProc', label:'回饋製程', width:'100px' },
+    { key:'IsMainMat', label:'是主材', type:'checkbox', width:'80px' },
+    { key:'iUseBarCode', label:'使用條碼', type:'checkbox', width:'80px' },
+    { key:'SalesId', label:'業務代碼', width:'90px' },
     { key:'StockUser1', label:'庫管1', width:'90px' },
     { key:'StockUser2', label:'庫管2', width:'90px' },
     { key:'StockUser3', label:'庫管3', width:'90px' },
-    { key:'IsVoid', label:'是否作廢', type:'checkbox', width:'90px' },
+    { key:'IsVoid', label:'是否虛擬料', type:'checkbox', width:'100px' },
   ];
 
   const fallbackSetMainCols = [
-    { key:'SetClass', label:'分類代碼', width:'100px', required:true },
-    { key:'EnCode', label:'品號編碼方式', width:'200px', required:true },
-    { key:'SeqByFront', label:'依前碼排序', width:'90px', type:'number' },
-    { key:'IsForEMO', label:'含工單', type:'checkbox', width:'80px' },
-    { key:'EMOdEncode', label:'工單編碼', width:'80px' },
+    { key:'SetClass', label:'品號分類代碼', width:'110px', required:true },
+    { key:'EnCode', label:'品號編碼方式', width:'210px', required:true },
+    { key:'SeqByFront', label:'依前幾碼', width:'90px', type:'number' },
+    { key:'IsForEMO', label:'含臨時', type:'checkbox', width:'80px' },
+    { key:'EMOdEncode', label:'臨時編碼', width:'90px' },
     { key:'IsStop', label:'停用', type:'checkbox', width:'70px' },
-    { key:'TableName', label:'關聯Table', width:'140px' },
+    { key:'TableName', label:'關聯Table', width:'150px' },
     { key:'PKName', label:'流水號欄位', width:'120px' },
-    { key:'iGetWaterMethod', label:'取流水方式', width:'100px', type:'number' },
-    { key:'iGetWaterBegin', label:'流水起', width:'80px', type:'number' },
-    { key:'iGetWaterEnd', label:'流水迄', width:'80px', type:'number' },
+    { key:'iGetWaterMethod', label:'取流水號方式', width:'110px', type:'number' },
+    { key:'iGetWaterBegin', label:'第幾碼(起)', width:'90px', type:'number' },
+    { key:'iGetWaterEnd', label:'第幾碼(迄)', width:'90px', type:'number' },
   ];
 
   const fallbackSetSubCols = [
-    { key:'NumId', label:'屬性代碼', width:'80px', required:true },
-    { key:'NumName', label:'屬性名稱', width:'160px', required:true },
+    { key:'NumId', label:'屬性代碼', width:'90px', required:true },
+    { key:'NumName', label:'屬性名稱', width:'170px', required:true },
     { key:'IsMust', label:'需要有值', type:'checkbox', width:'90px' },
     { key:'IsHand', label:'手動給值', type:'checkbox', width:'90px' },
     { key:'iShowName', label:'顯示名稱', type:'checkbox', width:'90px' },
-    { key:'RealTableName', label:'對應TableName', width:'140px' },
-    { key:'FieldName_Id', label:'對應代號欄位', width:'140px' },
-    { key:'FieldName_Name', label:'對應名稱欄位', width:'140px' },
+    { key:'RealTableName', label:'對應TableName', width:'150px' },
+    { key:'FieldName_Id', label:'對應代號欄位', width:'150px' },
+    { key:'FieldName_Name', label:'對應名稱欄位', width:'150px' },
   ];
 
   const fallbackSetDtlCols = [
@@ -225,7 +632,6 @@
   const badgeSetClass = document.getElementById('badgeSetClass');
   const badgeSubKey = document.getElementById('badgeSubKey');
   const txtTestResult = document.getElementById('txtTestResult');
-  const txtUserId = document.getElementById('txtUserId');
   const mainTable = document.getElementById('mainTable');
   const setMainTable = document.getElementById('setMainTable');
   const setSubTable = document.getElementById('setSubTable');
@@ -242,9 +648,19 @@
   const btnSetSubCancel = document.getElementById('setSubCancel');
   const btnSetDtlToggle = document.getElementById('setDtlToggleEdit');
   const btnSetDtlCancel = document.getElementById('setDtlCancel');
+  const encodeModeBox = document.getElementById('encodeModeBox');
+  const encodeUnifiedBtns = {
+    edit: document.getElementById('encodeEdit'),
+    add: document.getElementById('encodeAdd'),
+    save: document.getElementById('encodeSave'),
+    cancel: document.getElementById('encodeCancel'),
+    del: document.getElementById('encodeDelete')
+  };
   let dictWidths = {};
   let lastTableName = '';
   let dictCache = {};
+  const lookupRowsCache = new Map();
+  let activeLookupDropdown = null;
   let mainCols = [];
   let setMainCols = [];
   let setSubCols = [];
@@ -257,7 +673,299 @@
   let mainData = [], setMainData = [], setSubData = [], setDtlData = [];
   let currentSetClass = '';
   let currentNumId = '';
+
+  function pickRowValueCI(row, fieldName) {
+    if (!row || !fieldName) return '';
+    if (row[fieldName] != null) return row[fieldName];
+    const key = String(fieldName).toLowerCase();
+    const hit = Object.keys(row).find(k => String(k).toLowerCase() === key);
+    return hit ? row[hit] : '';
+  }
+
+  function escSel(raw) {
+    return String(raw || '').replace(/["\\#.;?+*~':!^$[\]()=>|/\x40]/g, '\\$&');
+  }
+
+  function parseLookupItems(rawItems) {
+    const text = String(rawItems || '').trim();
+    if (!text) return [];
+    const parts = text
+      .split(/\r?\n|;/)
+      .map(x => x.trim())
+      .filter(Boolean);
+    const out = [];
+    for (const p of parts) {
+      let value = p;
+      let label = p;
+      if (p.includes('=')) {
+        const i = p.indexOf('=');
+        value = p.slice(0, i).trim();
+        label = p.slice(i + 1).trim() || value;
+      } else if (p.includes(':')) {
+        const i = p.indexOf(':');
+        value = p.slice(0, i).trim();
+        label = p.slice(i + 1).trim() || value;
+      } else if (p.includes(',')) {
+        const i = p.indexOf(',');
+        value = p.slice(0, i).trim();
+        label = p.slice(i + 1).trim() || value;
+      }
+      if (!value) continue;
+      out.push({ value, label });
+    }
+    return out;
+  }
+
+  function normalizeLookupIdentifier(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    if (/^[A-Za-z0-9_]+$/.test(s)) return s;
+    const m = s.match(/[A-Za-z_][A-Za-z0-9_]*/);
+    return m ? m[0] : '';
+  }
+
+  function normalizeLookupResultForApi(rawResult) {
+    return String(rawResult || '')
+      .split(',')
+      .map(part => {
+        const text = String(part || '').trim();
+        if (!text) return '';
+        const left = text.includes('=') ? text.split('=')[0].trim() : text;
+        return normalizeLookupIdentifier(left);
+      })
+      .filter(Boolean)
+      .join(',');
+  }
+
+  function getRowFieldValue(tr, fieldName) {
+    if (!tr || !fieldName) return '';
+    const key = String(fieldName || '').trim();
+    if (!key) return '';
+    const inp = tr.querySelector(`input.cell-edit[name="${escSel(key)}"]`);
+    if (inp) return String(inp.value ?? '').trim();
+    const td = tr.querySelector(`td[data-field="${escSel(key)}"]`);
+    const fromEdit = td?.querySelector('input.cell-edit')?.value;
+    const fromView = td?.querySelector('.cell-view')?.textContent;
+    return String(fromEdit ?? fromView ?? '').trim();
+  }
+
+  function getLookupMetaFromDictEntry(d) {
+    const staticItems = parseLookupItems(d?.Items ?? d?.items ?? '');
+    if (staticItems.length) {
+      return { type: 'items', items: staticItems };
+    }
+    const table = String(d?.LookupTable ?? d?.lookupTable ?? '').trim();
+    const keyFieldRaw = String(d?.LookupKeyField ?? d?.lookupKeyField ?? '').trim();
+    const resultRaw = String(d?.LookupResultField ?? d?.lookupResultField ?? '').trim();
+    const resultForApi = normalizeLookupResultForApi(resultRaw);
+    if (!table || !resultForApi) return null;
+    const parts = resultForApi.split(',').map(x => x.trim()).filter(Boolean);
+    const keyField = normalizeLookupIdentifier(keyFieldRaw) || parts[0] || '';
+    const nameField = parts.length >= 2 ? parts[1] : (parts[0] || '');
+    if (!keyField || !nameField) return null;
+    const cond1Field = String(d?.LookupCond1Field ?? d?.lookupCond1Field ?? '').trim();
+    const cond2Field = String(d?.LookupCond2Field ?? d?.lookupCond2Field ?? '').trim();
+    const cond1ResultField = String(d?.LookupCond1ResultField ?? d?.lookupCond1ResultField ?? '').trim();
+    const cond2ResultField = String(d?.LookupCond2ResultField ?? d?.lookupCond2ResultField ?? '').trim();
+    return {
+      type: 'table',
+      table,
+      keyField,
+      nameField,
+      resultField: resultForApi,
+      resultFieldRaw: resultRaw,
+      cond1Field,
+      cond2Field,
+      cond1ResultField,
+      cond2ResultField
+    };
+  }
+
+  async function getLookupOptions(meta, tr) {
+    if (!meta) return [];
+    if (meta.type === 'items') {
+      return Array.isArray(meta.items) ? meta.items : [];
+    }
+
+    const cond1Value = meta.cond1Field && meta.cond1ResultField
+      ? getRowFieldValue(tr, meta.cond1ResultField)
+      : '';
+    const cond2Value = meta.cond2Field && meta.cond2ResultField
+      ? getRowFieldValue(tr, meta.cond2ResultField)
+      : '';
+
+    const cacheKey = [
+      String(meta.table || '').toLowerCase(),
+      String(meta.keyField || '').toLowerCase(),
+      String(meta.resultField || '').toLowerCase(),
+      String(meta.cond1Field || '').toLowerCase(),
+      cond1Value,
+      String(meta.cond2Field || '').toLowerCase(),
+      cond2Value
+    ].join('|');
+    if (lookupRowsCache.has(cacheKey)) return lookupRowsCache.get(cacheKey);
+
+    const qs = new URLSearchParams({
+      table: meta.table,
+      key: meta.keyField,
+      result: meta.resultField
+    });
+    if (meta.cond1Field && meta.cond1ResultField && cond1Value) {
+      qs.set('cond1Field', meta.cond1Field);
+      qs.set('cond1Value', cond1Value);
+    }
+    if (meta.cond2Field && meta.cond2ResultField && cond2Value) {
+      qs.set('cond2Field', meta.cond2Field);
+      qs.set('cond2Value', cond2Value);
+    }
+
+    try {
+      const rows = await fetchJson(`/api/TableFieldLayout/LookupData?${qs.toString()}`);
+      const options = (Array.isArray(rows) ? rows : [])
+        .map(r => {
+          const value = String(r?.key ?? '').trim();
+          const label = String(r?.result1 ?? r?.result0 ?? '').trim() || value;
+          return value ? { value, label } : null;
+        })
+        .filter(Boolean);
+      lookupRowsCache.set(cacheKey, options);
+      return options;
+    } catch {
+      lookupRowsCache.set(cacheKey, []);
+      return [];
+    }
+  }
+
+  function closeLookupDropdown() {
+    if (!activeLookupDropdown) return;
+    const { list, onDocDown, onResize } = activeLookupDropdown;
+    document.removeEventListener('mousedown', onDocDown, true);
+    window.removeEventListener('resize', onResize, true);
+    window.removeEventListener('scroll', onResize, true);
+    list.remove();
+    activeLookupDropdown = null;
+  }
+
+  function positionLookupDropdown(input, list) {
+    const r = input.getBoundingClientRect();
+    list.style.position = 'fixed';
+    list.style.left = `${Math.max(8, r.left)}px`;
+    list.style.top = `${Math.min(window.innerHeight - 180, r.bottom + 2)}px`;
+    list.style.width = `${Math.max(220, r.width)}px`;
+    list.style.maxHeight = '280px';
+  }
+
+  function openLookupDropdown(input, options) {
+    closeLookupDropdown();
+    const list = document.createElement('div');
+    list.className = 'setnum-lookup-dropdown-list';
+    positionLookupDropdown(input, list);
+    (options || []).forEach(opt => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'setnum-lookup-dropdown-item';
+      item.textContent = opt.label ? `${opt.value} ${opt.label}` : opt.value;
+      item.title = item.textContent;
+      item.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        input.value = opt.value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        closeLookupDropdown();
+      });
+      list.appendChild(item);
+    });
+    if (!list.children.length) {
+      const empty = document.createElement('div');
+      empty.className = 'setnum-lookup-dropdown-empty';
+      empty.textContent = '無可選資料';
+      list.appendChild(empty);
+    }
+    const onDocDown = (ev) => {
+      if (ev.target === input || list.contains(ev.target)) return;
+      closeLookupDropdown();
+    };
+    const onResize = () => {
+      if (!activeLookupDropdown) return;
+      positionLookupDropdown(input, list);
+    };
+    document.body.appendChild(list);
+    document.addEventListener('mousedown', onDocDown, true);
+    window.addEventListener('resize', onResize, true);
+    window.addEventListener('scroll', onResize, true);
+    activeLookupDropdown = { list, onDocDown, onResize };
+  }
+
+  function bindLookupEditorsForTable(table, cols) {
+    if (!table || !Array.isArray(cols) || !cols.length) return;
+    const lookupCols = cols.filter(c => c?.lookup);
+    if (!lookupCols.length) return;
+    table.querySelectorAll('tbody input.cell-edit').forEach(inp => {
+      inp.removeAttribute('list');
+    });
+    lookupCols.forEach(col => {
+      const fieldLower = String(col.key || '').toLowerCase();
+      const openFromInput = async (inp, ev) => {
+        ev?.preventDefault?.();
+        ev?.stopPropagation?.();
+        if (!inp || inp.readOnly || inp.disabled || inp.classList.contains('d-none')) return;
+        const tr = inp.closest('tr');
+        const options = await getLookupOptions(col.lookup, tr);
+        openLookupDropdown(inp, options);
+      };
+      table.querySelectorAll('tbody input.cell-edit').forEach(inp => {
+        if (String(inp.name || '').toLowerCase() !== fieldLower) return;
+        if (inp.dataset.lkBound === '1') return;
+        inp.dataset.lkBound = '1';
+
+        const normalizeCode = () => {
+          const v = String(inp.value || '');
+          const first = v.split(/\s+/).filter(Boolean)[0] || '';
+          if (first !== v) inp.value = first;
+        };
+        inp.addEventListener('input', normalizeCode);
+        inp.addEventListener('change', normalizeCode);
+        inp.addEventListener('dblclick', (ev) => openFromInput(inp, ev));
+        inp.addEventListener('keydown', async (ev) => {
+          if (ev.key === 'F4' || (ev.altKey && ev.key === 'ArrowDown')) {
+            await openFromInput(inp, ev);
+          } else if (ev.key === 'Escape') {
+            closeLookupDropdown();
+          }
+        });
+
+        const td = inp.closest('td');
+        if (td && td.dataset.lkCellBound !== '1') {
+          td.dataset.lkCellBound = '1';
+          td.addEventListener('dblclick', (ev) => openFromInput(inp, ev));
+        }
+      });
+    });
+  }
   let mainDeleteBtn, setMainDeleteBtn, setSubDeleteBtn, setDtlDeleteBtn;
+  let msgTimer = null;
+  let activeEncodeSection = 'setMain';
+  const sortState = {
+    main: { field: '', dir: 'asc' },
+    setMain: { field: '', dir: 'asc' },
+    setSub: { field: '', dir: 'asc' },
+    setDtl: { field: '', dir: 'asc' }
+  };
+
+  function tableToEncodeSection(tableName) {
+    const t = (tableName || '').toLowerCase();
+    if (t === 'mgndsetnumsubdtl') return 'setDtl';
+    if (t === 'mgndsetnumsub') return 'setSub';
+    return 'setMain';
+  }
+
+  function setActiveEncodeSectionByElement(el) {
+    const t = resolveTableNameFrom(el);
+    if (!t) return;
+    activeEncodeSection = tableToEncodeSection(t);
+    refreshEncodeModeFromActive();
+  }
 
   function resolveTableNameFrom(el) {
     if (!el) return '';
@@ -289,7 +997,43 @@
     if (!grid) return;
     const next = toEdit !== undefined ? toEdit : !grid.isEdit();
     grid.toggleEdit(next);
-    if (btn) btn.textContent = next ? '保留' : '編輯';
+    if (btn?.id === 'mainToggleEdit') {
+      btn.innerHTML = next
+        ? '<i class="bi bi-eye"></i>瀏覽'
+        : '<i class="bi bi-pencil-square"></i>修改';
+    } else if (btn) {
+      btn.textContent = next ? '瀏覽' : '修改';
+    }
+    const modeLine = document.querySelector('#mainModeBox .count-line');
+    if (btn?.id === 'mainToggleEdit' && modeLine) {
+      modeLine.textContent = next ? '編輯模式' : '瀏覽模式';
+      document.getElementById('mainModeBox')?.classList.toggle('mode-edit', next);
+      document.getElementById('mainModeBox')?.classList.toggle('mode-view', !next);
+    }
+    if (btn?.id === 'setMainToggleEdit' || btn?.id === 'setSubToggleEdit' || btn?.id === 'setDtlToggleEdit') {
+      refreshEncodeModeFromActive(next);
+    }
+  }
+
+  function currentEncodeGrid() {
+    if (activeEncodeSection === 'setSub') return setSubGrid;
+    if (activeEncodeSection === 'setDtl') return setDtlGrid;
+    return setMainGrid;
+  }
+
+  function refreshEncodeModeFromActive(forceEdit) {
+    const editing = (typeof forceEdit === 'boolean')
+      ? forceEdit
+      : [setMainGrid, setSubGrid, setDtlGrid].some(g => !!(g && g.isEdit && g.isEdit()));
+    const line = encodeModeBox?.querySelector('.count-line');
+    if (line) line.textContent = editing ? '編輯模式' : '瀏覽模式';
+    encodeModeBox?.classList.toggle('mode-edit', editing);
+    encodeModeBox?.classList.toggle('mode-view', !editing);
+    if (encodeUnifiedBtns.edit) {
+      encodeUnifiedBtns.edit.innerHTML = editing
+        ? '<i class="bi bi-eye"></i>瀏覽'
+        : '<i class="bi bi-pencil-square"></i>修改';
+    }
   }
 
   function resolveTableNameByActiveTab() {
@@ -300,17 +1044,31 @@
   }
 
   function showMsg(text, type = 'info') {
+    if (type === 'success') return;
     if (!alertBox) return;
     const cls = type === 'error' ? 'alert-danger' :
                 type === 'success' ? 'alert-success' :
                 type === 'warning' ? 'alert-warning' : 'alert-info';
-    alertBox.className = `alert ${cls} mt-3`;
+    if (msgTimer) {
+      clearTimeout(msgTimer);
+      msgTimer = null;
+    }
+    alertBox.className = `alert ${cls}`;
     alertBox.textContent = text;
     alertBox.classList.remove('d-none');
+    const autoMs = (type === 'error' || type === 'warning') ? 3000 : 1200;
+    msgTimer = setTimeout(() => {
+      alertBox.classList.add('d-none');
+      msgTimer = null;
+    }, autoMs);
   }
 
   function clearMsg() {
     if (!alertBox) return;
+    if (msgTimer) {
+      clearTimeout(msgTimer);
+      msgTimer = null;
+    }
     alertBox.classList.add('d-none');
   }
 
@@ -318,14 +1076,247 @@
     headEl.innerHTML = '';
     cols.forEach(c => {
       const th = document.createElement('th');
-      th.textContent = c.label || c.key;
+      th.className = 'text-nowrap sortable-header';
+      th.dataset.field = c.key;
+      const label = document.createElement('span');
+      label.className = 'header-label';
+      label.textContent = c.label || c.key;
+      th.appendChild(label);
+      const sortIcon = document.createElement('span');
+      sortIcon.className = 'sort-icon';
+      th.appendChild(sortIcon);
+      const resizer = document.createElement('span');
+      resizer.className = 'col-resizer';
+      resizer.setAttribute('draggable', 'false');
+      th.appendChild(resizer);
       if (c.width) th.style.width = c.width;
       headEl.appendChild(th);
     });
   }
 
+  function bindColumnResize(table, widthKey) {
+    if (!table) return;
+    const storageKey = `MGNdSetNum:${window._itemId || 'MG000006'}:${widthKey}:colWidth`;
+    const headerRow = table.querySelector('thead tr');
+    if (!headerRow) return;
+
+    const getHeaderCells = () => Array.from(headerRow.querySelectorAll('th[data-field]'));
+    const getFieldKey = (el) => (el?.getAttribute('data-field') || '').toLowerCase();
+
+    const setColumnWidthByIndex = (colIdx, widthPx) => {
+      if (colIdx < 0) return;
+      const w = `${Math.max(48, Math.round(widthPx))}px`;
+      Array.from(table.rows).forEach(r => {
+        const cell = r.cells[colIdx];
+        if (cell) {
+          cell.style.width = w;
+          cell.style.minWidth = w;
+        }
+      });
+    };
+
+    const widthMap = (() => {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return (parsed && typeof parsed === 'object') ? parsed : {};
+      } catch {
+        return {};
+      }
+    })();
+
+    const applySavedWidths = () => {
+      getHeaderCells().forEach((th, idx) => {
+        const field = getFieldKey(th);
+        const saved = Number(widthMap[field] || 0);
+        if (field && saved > 0) setColumnWidthByIndex(idx, saved);
+      });
+    };
+
+    const saveWidthMap = () => {
+      try { localStorage.setItem(storageKey, JSON.stringify(widthMap)); } catch { }
+    };
+
+    getHeaderCells().forEach(th => {
+      if (th.dataset.resizeBound === '1') return;
+      th.dataset.resizeBound = '1';
+      const resizer = th.querySelector('.col-resizer');
+      if (!resizer) return;
+      resizer.addEventListener('click', (e) => e.stopPropagation());
+
+      resizer.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        document.body.style.cursor = 'col-resize';
+        const startX = e.clientX;
+        const startWidth = th.getBoundingClientRect().width;
+        const colIdx = Array.from(headerRow.children).indexOf(th);
+        const field = getFieldKey(th);
+        if (colIdx < 0 || !field) return;
+
+        const onMove = (ev) => {
+          const nextWidth = startWidth + (ev.clientX - startX);
+          setColumnWidthByIndex(colIdx, nextWidth);
+        };
+
+        const onUp = (ev) => {
+          const finalWidth = Math.max(48, Math.round(startWidth + (ev.clientX - startX)));
+          setColumnWidthByIndex(colIdx, finalWidth);
+          widthMap[field] = finalWidth;
+          saveWidthMap();
+          document.body.style.cursor = '';
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        };
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
+
+    applySavedWidths();
+  }
+
+  function bindHeaderDragReorder(table, orderKey) {
+    if (!table) return;
+    const storageKey = `MGNdSetNum:${window._itemId || 'MG000006'}:${orderKey}:colOrder`;
+
+    const getHeaderCells = () => Array.from(table.querySelectorAll('thead th[data-field]'));
+    const getFieldKey = (el) => (el?.getAttribute('data-field') || '').toLowerCase();
+    const clearMarks = () => getHeaderCells().forEach(h => h.classList.remove('col-dragging', 'col-drag-over-left', 'col-drag-over-right'));
+
+    const saveOrder = () => {
+      try {
+        const order = getHeaderCells().map(h => h.getAttribute('data-field')).filter(Boolean);
+        localStorage.setItem(storageKey, JSON.stringify(order));
+      } catch { }
+    };
+
+    const applyOrder = () => {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return;
+        const order = JSON.parse(raw);
+        if (!Array.isArray(order) || !order.length) return;
+
+        const headerRow = table.querySelector('thead tr');
+        if (!headerRow) return;
+        const headerMap = new Map(getHeaderCells().map(h => [getFieldKey(h), h]));
+        const orderedKeys = order.map(x => String(x || '').toLowerCase()).filter(k => headerMap.has(k));
+        const remainingKeys = Array.from(headerMap.keys()).filter(k => !orderedKeys.includes(k));
+        const finalKeys = [...orderedKeys, ...remainingKeys];
+        finalKeys.forEach(k => {
+          const th = headerMap.get(k);
+          if (th) headerRow.appendChild(th);
+        });
+        table.querySelectorAll('tbody tr').forEach(tr => {
+          const tdMap = new Map(Array.from(tr.querySelectorAll('td[data-field]'))
+            .map(td => [getFieldKey(td), td]));
+          finalKeys.forEach(k => {
+            const td = tdMap.get(k);
+            if (td) tr.appendChild(td);
+          });
+        });
+      } catch { }
+    };
+
+    let draggingField = '';
+    const moveColumn = (fromKey, toKey, placeAfter) => {
+      const headerRow = table.querySelector('thead tr');
+      if (!headerRow) return;
+      const headers = Array.from(headerRow.querySelectorAll('th[data-field]'));
+      const fromTh = headers.find(h => getFieldKey(h) === fromKey);
+      const toTh = headers.find(h => getFieldKey(h) === toKey);
+      if (!fromTh || !toTh || fromTh === toTh) return;
+      headerRow.insertBefore(fromTh, placeAfter ? toTh.nextSibling : toTh);
+      table.querySelectorAll('tbody tr').forEach(tr => {
+        const cells = Array.from(tr.querySelectorAll('td[data-field]'));
+        const fromTd = cells.find(td => getFieldKey(td) === fromKey);
+        const toTd = cells.find(td => getFieldKey(td) === toKey);
+        if (!fromTd || !toTd || fromTd === toTd) return;
+        tr.insertBefore(fromTd, placeAfter ? toTd.nextSibling : toTd);
+      });
+    };
+
+    getHeaderCells().forEach(th => {
+      if (th.dataset.dragBound === '1') return;
+      th.dataset.dragBound = '1';
+      th.setAttribute('draggable', 'true');
+
+      th.addEventListener('dragstart', (e) => {
+        if (e.target?.closest?.('.col-resizer')) {
+          e.preventDefault();
+          return;
+        }
+        const field = getFieldKey(th);
+        if (!field) return;
+        draggingField = field;
+        clearMarks();
+        th.classList.add('col-dragging');
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = 'move';
+          try { e.dataTransfer.setData('text/plain', field); } catch { }
+        }
+      });
+
+      th.addEventListener('dragenter', (e) => {
+        if (!draggingField) return;
+        const targetField = getFieldKey(th);
+        if (!targetField || targetField === draggingField) return;
+        e.preventDefault();
+      });
+
+      th.addEventListener('dragover', (e) => {
+        if (e.target?.closest?.('.col-resizer')) return;
+        if (!draggingField) return;
+        const targetField = getFieldKey(th);
+        if (!targetField || targetField === draggingField) return;
+        e.preventDefault();
+        const rect = th.getBoundingClientRect();
+        const placeAfter = (e.clientX - rect.left) >= rect.width / 2;
+        th.classList.toggle('col-drag-over-left', !placeAfter);
+        th.classList.toggle('col-drag-over-right', placeAfter);
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      });
+
+      th.addEventListener('dragleave', () => {
+        th.classList.remove('col-drag-over-left', 'col-drag-over-right');
+      });
+
+      th.addEventListener('drop', (e) => {
+        if (e.target?.closest?.('.col-resizer')) return;
+        if (!draggingField) return;
+        e.preventDefault();
+        const targetField = getFieldKey(th);
+        if (!targetField || targetField === draggingField) {
+          clearMarks();
+          draggingField = '';
+          table.dataset.suppressSortUntil = String(Date.now() + 260);
+          return;
+        }
+        const rect = th.getBoundingClientRect();
+        const placeAfter = (e.clientX - rect.left) >= rect.width / 2;
+        moveColumn(draggingField, targetField, placeAfter);
+        saveOrder();
+        clearMarks();
+        draggingField = '';
+        table.dataset.suppressSortUntil = String(Date.now() + 260);
+      });
+
+      th.addEventListener('dragend', () => {
+        draggingField = '';
+        clearMarks();
+        table.dataset.suppressSortUntil = String(Date.now() + 220);
+      });
+    });
+
+    applyOrder();
+  }
+
   function createCell(col, value) {
     const td = document.createElement('td');
+    td.dataset.field = col.key;
     const view = document.createElement('span');
     view.className = 'cell-view';
     const inp = document.createElement('input');
@@ -336,20 +1327,22 @@
     if (col.readonly) inp.dataset.readonly = '1';
 
     if (col.type === 'checkbox') {
+      td.classList.add('cell-check');
+      inp.classList.remove('form-control', 'form-control-sm');
       inp.type = 'checkbox';
       inp.classList.add('form-check-input');
       inp.checked = value == 1 || value === true || value === '1';
       view.innerHTML = `<input type="checkbox" disabled ${inp.checked ? 'checked' : ''} class="form-check-input">`;
     } else if (col.type === 'number') {
+      td.classList.add('cell-number');
       inp.type = 'number';
       inp.step = 'any';
       inp.value = value ?? '';
-      inp.placeholder = col.required ? '必填' : '';
       view.textContent = value ?? '';
     } else {
+      td.classList.add('cell-text');
       inp.type = 'text';
       inp.value = value ?? '';
-      inp.placeholder = col.required ? '必填' : '';
       view.textContent = value ?? '';
     }
 
@@ -382,7 +1375,7 @@
         dictWidths[tbl][field] = w;
       });
     } catch (err) {
-      showMsg(err.message || '載入欄寬辭典失敗', 'warning');
+      showMsg(err.message || '讀取欄位寬度失敗', 'warning');
     }
   }
 
@@ -393,7 +1386,6 @@
     if (dt.includes('int') || dt.includes('dec') || dt.includes('num') || dt.includes('float') || dt.includes('double')) return 'number';
     const k = (key || '').toLowerCase();
     if (k.startsWith('is') || k.startsWith('has') || k.startsWith('need') || k.startsWith('iuse') || k.includes('flag')) return 'checkbox';
-    if (k.endsWith('type') || k.endsWith('class') || k.endsWith('num') || k.endsWith('qty') || k.endsWith('count') || k.endsWith('seq') || k.endsWith('rate')) return 'number';
     return 'text';
   }
 
@@ -409,7 +1401,7 @@
     if (!dict || dict.length === 0) return fallbackCols;
     const fbMap = new Map(fallbackCols.map(c => [c.key.toLowerCase(), c]));
     const numericOverride = new Set(['setmon','classType','type','prepared','accept','distraptomatinfo','defkeepdays','sendmsgdaypre','seqbyfront','igetwatermethod','igetwaterbegin','igetwaterend']);
-    const textOverride = new Set(['matclass']);
+    const textOverride = new Set(['matclass', 'setclass', 'numid', 'dtlnumid', 'encode']);
     const cols = dict
       .filter(d => (d.Visible ?? d.visible ?? 1) == 1)
       .sort((a, b) => (a.SerialNum ?? a.serialNum ?? 9999) - (b.SerialNum ?? b.serialNum ?? 9999))
@@ -431,7 +1423,8 @@
           width: widthVal,
           required: fb.required,
           readonly: fb.readonly || (d.ReadOnly ?? d.readOnly ?? 0) == 1,
-          type: t
+          type: t,
+          lookup: getLookupMetaFromDictEntry(d)
         };
       });
     return cols.length ? cols : fallbackCols;
@@ -441,7 +1434,7 @@
     Array.from(tbody.querySelectorAll('tr')).forEach(tr => {
       tr.addEventListener('click', () => {
         if (isLocked && isLocked()) {
-          showMsg('請先確認或取消目前新增的資料', 'warning');
+          showMsg('目前有未儲存的新資料，請先儲存或取消', 'warning');
           return;
         }
         rememberTableNameFrom(tr);
@@ -483,10 +1476,138 @@
       });
       tbody.appendChild(tr);
     });
+    const table = tbody.closest('table');
+    syncRowsToHeaderOrder(table);
+    bindLookupEditorsForTable(table, cols);
+    if (table?.id === 'mainTable' && mainGrid?.toggleEdit) {
+      mainGrid.toggleEdit(!!mainGrid.isEdit?.());
+    } else if (table?.id === 'setMainTable' && setMainGrid?.toggleEdit) {
+      setMainGrid.toggleEdit(!!setMainGrid.isEdit?.());
+    } else if (table?.id === 'setSubTable' && setSubGrid?.toggleEdit) {
+      setSubGrid.toggleEdit(!!setSubGrid.isEdit?.());
+    } else if (table?.id === 'setDtlTable' && setDtlGrid?.toggleEdit) {
+      setDtlGrid.toggleEdit(!!setDtlGrid.isEdit?.());
+    }
+  }
+
+  function getTableSortKey(table) {
+    if (table === mainTable) return 'main';
+    if (table === setMainTable) return 'setMain';
+    if (table === setSubTable) return 'setSub';
+    return 'setDtl';
+  }
+
+  function compareValues(a, b, type) {
+    const av = a ?? '';
+    const bv = b ?? '';
+    if (type === 'number' || type === 'checkbox') {
+      const na = Number(av) || 0;
+      const nb = Number(bv) || 0;
+      return na - nb;
+    }
+    return String(av).localeCompare(String(bv), 'zh-Hant', { numeric: true, sensitivity: 'base' });
+  }
+
+  function updateSortIcons(table, key) {
+    const st = sortState[key];
+    table.querySelectorAll('thead th[data-field]').forEach(th => {
+      const icon = th.querySelector('.sort-icon');
+      if (!icon) return;
+      const f = (th.getAttribute('data-field') || '').toLowerCase();
+      if (f && f === (st.field || '').toLowerCase()) {
+        icon.textContent = st.dir === 'asc' ? '▲' : '▼';
+      } else {
+        icon.textContent = '';
+      }
+    });
+  }
+
+  function renderByKey(key) {
+    if (key === 'main') {
+      renderBody(mainTable.tBodies[0], mainCols, mainData, ['MatClass'], true);
+      attachRowSelection(mainTable.tBodies[0], mainData, (row) => {
+        if (pendingLock) return;
+        currentSetClass = row?.MatClass || '';
+        badgeSetClass.textContent = currentSetClass ? `SetClass: ${currentSetClass}` : '';
+        loadSetSub(currentSetClass);
+      }, () => pendingLock);
+      return;
+    }
+    if (key === 'setMain') {
+      renderBody(setMainTable.tBodies[0], setMainCols, setMainData, ['SetClass']);
+      attachRowSelection(setMainTable.tBodies[0], setMainData, (row) => {
+        if (controllers.setMain?.lock) return;
+        activeEncodeSection = 'setMain';
+        refreshEncodeModeFromActive();
+        currentSetClass = row?.SetClass || '';
+        badgeSetClass.textContent = currentSetClass ? `SetClass: ${currentSetClass}` : '';
+        loadSetSub(currentSetClass);
+      }, () => controllers.setMain?.lock);
+      return;
+    }
+    if (key === 'setSub') {
+      renderBody(setSubTable.tBodies[0], setSubCols, setSubData, ['SetClass','NumId']);
+      attachRowSelection(setSubTable.tBodies[0], setSubData, (row) => {
+        activeEncodeSection = 'setSub';
+        refreshEncodeModeFromActive();
+        currentSetClass = row?.SetClass || currentSetClass;
+        currentNumId = row?.NumId || '';
+        badgeSubKey.textContent = currentNumId ? `SetClass: ${currentSetClass} / NumId: ${currentNumId}` : '';
+        loadSetDtl(currentSetClass, currentNumId);
+      }, () => controllers.setSub?.lock);
+      return;
+    }
+    renderBody(setDtlTable.tBodies[0], setDtlCols, setDtlData, ['SetClass','NumId','EnCode']);
+    attachRowSelection(setDtlTable.tBodies[0], setDtlData, () => { activeEncodeSection = 'setDtl'; }, () => controllers.setDtl?.lock);
+  }
+
+  function bindHeaderSort(table) {
+    if (!table) return;
+    const key = getTableSortKey(table);
+    table.querySelectorAll('thead th[data-field]').forEach(th => {
+      if (th.dataset.sortBound === '1') return;
+      th.dataset.sortBound = '1';
+      th.addEventListener('click', (e) => {
+        if (e.target?.closest?.('.col-resizer')) return;
+        const suppressUntil = Number(table.dataset.suppressSortUntil || 0);
+        if (Date.now() < suppressUntil) return;
+        const field = th.getAttribute('data-field') || '';
+        if (!field) return;
+        const cols = key === 'main' ? mainCols : key === 'setMain' ? setMainCols : key === 'setSub' ? setSubCols : setDtlCols;
+        const col = cols.find(c => (c.key || '').toLowerCase() === field.toLowerCase());
+        const st = sortState[key];
+        st.dir = (st.field || '').toLowerCase() === field.toLowerCase() ? (st.dir === 'asc' ? 'desc' : 'asc') : 'asc';
+        st.field = field;
+        const arr = key === 'main' ? mainData : key === 'setMain' ? setMainData : key === 'setSub' ? setSubData : setDtlData;
+        arr.sort((a, b) => {
+          const c = compareValues(a?.[field], b?.[field], col?.type || '');
+          return st.dir === 'asc' ? c : -c;
+        });
+        renderByKey(key);
+        updateSortIcons(table, key);
+      });
+    });
+    updateSortIcons(table, key);
+  }
+
+  function syncRowsToHeaderOrder(table) {
+    if (!table) return;
+    const headerKeys = Array.from(table.querySelectorAll('thead th[data-field]'))
+      .map(th => (th.getAttribute('data-field') || '').toLowerCase())
+      .filter(Boolean);
+    if (!headerKeys.length) return;
+    table.querySelectorAll('tbody tr').forEach(tr => {
+      const tdMap = new Map(Array.from(tr.querySelectorAll('td[data-field]'))
+        .map(td => [String(td.getAttribute('data-field') || '').toLowerCase(), td]));
+      headerKeys.forEach(k => {
+        const td = tdMap.get(k);
+        if (td) tr.appendChild(td);
+      });
+    });
   }
 
   function ensureDtlKeySync() {
-    // EnCode 填入 DtlNumId（保持同步，避免送出空值造成轉型錯誤）
+    // EnCode 需同步回寫到 DtlNumId，保持後端鍵值一致
     setDtlTable?.querySelectorAll('tbody tr').forEach(tr => {
       const enInput = tr.querySelector('input[name="EnCode"]');
       const idInput = tr.querySelector('input[name="DtlNumId"]');
@@ -520,11 +1641,11 @@
         loadSetSub(currentSetClass);
       }, () => pendingLock);
     } catch (err) {
-      showMsg(err.message || '載入主分類失敗', 'error');
+      showMsg(err.message || '讀取主分類資料失敗', 'error');
     }
   }
 
-  async function loadSetMain() {
+  async function loadSetMain(preferredSetClass = '', preferredNumId = '') {
     try {
       clearMsg();
       const data = await fetchJson('/api/MG000006/setnum-main');
@@ -532,25 +1653,40 @@
       renderBody(setMainTable.tBodies[0], setMainCols, setMainData, ['SetClass']);
       attachRowSelection(setMainTable.tBodies[0], setMainData, (row) => {
         if (controllers.setMain?.lock) return;
+        activeEncodeSection = 'setMain';
         currentSetClass = row?.SetClass || '';
         badgeSetClass.textContent = currentSetClass ? `SetClass: ${currentSetClass}` : '';
         loadSetSub(currentSetClass);
       }, () => controllers.setMain?.lock);
       if (setMainData.length) {
-        currentSetClass = setMainData[0]?.SetClass || '';
+        const want = preferredSetClass || currentSetClass;
+        const idx = want
+          ? setMainData.findIndex(x => String(x?.SetClass ?? '').toLowerCase() === String(want).toLowerCase())
+          : -1;
+        const row = setMainData[idx >= 0 ? idx : 0];
+        currentSetClass = row?.SetClass || '';
         badgeSetClass.textContent = currentSetClass ? `SetClass: ${currentSetClass}` : '';
-        loadSetSub(currentSetClass);
+        const tr = setMainTable.tBodies[0]?.querySelector(`tr[data-idx="${idx >= 0 ? idx : 0}"]`);
+        if (tr) tr.classList.add('table-primary');
+        loadSetSub(currentSetClass, preferredNumId);
+      } else {
+        currentSetClass = '';
+        currentNumId = '';
+        badgeSetClass.textContent = '';
+        badgeSubKey.textContent = '';
       }
     } catch (err) {
-      showMsg(err.message || '載入編碼原則失敗', 'error');
+      showMsg(err.message || '讀取品號編碼原則失敗', 'error');
     }
   }
 
-  async function loadSetSub(setClass) {
+  async function loadSetSub(setClass, preferredNumId = '') {
     if (!setClass) {
       setSubData = [];
       renderBody(setSubTable.tBodies[0], setSubCols, setSubData, ['SetClass','NumId']);
       renderBody(setDtlTable.tBodies[0], setDtlCols, [], ['SetClass','NumId','EnCode']);
+      currentNumId = '';
+      badgeSubKey.textContent = '';
       return;
     }
     try {
@@ -558,22 +1694,31 @@
       setSubData = Array.isArray(data) ? data : [];
       renderBody(setSubTable.tBodies[0], setSubCols, setSubData, ['SetClass','NumId']);
       attachRowSelection(setSubTable.tBodies[0], setSubData, (row) => {
+        activeEncodeSection = 'setSub';
         currentSetClass = row?.SetClass || currentSetClass;
         currentNumId = row?.NumId || '';
         badgeSubKey.textContent = currentNumId ? `SetClass: ${currentSetClass} / NumId: ${currentNumId}` : '';
         loadSetDtl(currentSetClass, currentNumId);
       }, () => controllers.setSub?.lock);
-      // 若已有選擇，直接取第一筆
       if (setSubData.length) {
-        currentNumId = setSubData[0]?.NumId || '';
+        const want = preferredNumId || currentNumId;
+        const idx = want
+          ? setSubData.findIndex(x => String(x?.NumId ?? '').toLowerCase() === String(want).toLowerCase())
+          : -1;
+        const row = setSubData[idx >= 0 ? idx : 0];
+        currentNumId = row?.NumId || '';
         badgeSubKey.textContent = currentNumId ? `SetClass: ${currentSetClass} / NumId: ${currentNumId}` : '';
+        const tr = setSubTable.tBodies[0]?.querySelector(`tr[data-idx="${idx >= 0 ? idx : 0}"]`);
+        if (tr) tr.classList.add('table-primary');
         loadSetDtl(currentSetClass, currentNumId);
       } else {
+        currentNumId = '';
+        badgeSubKey.textContent = '';
         setDtlData = [];
         renderBody(setDtlTable.tBodies[0], setDtlCols, setDtlData, ['SetClass','NumId','EnCode']);
       }
     } catch (err) {
-      showMsg(err.message || '載入編碼屬性失敗', 'error');
+      showMsg(err.message || '讀取編碼方式屬性失敗', 'error');
     }
   }
 
@@ -587,10 +1732,13 @@
       const data = await fetchJson(`/api/MG000006/setnum-subdtl?setClass=${encodeURIComponent(setClass)}&numId=${encodeURIComponent(numId)}`);
       setDtlData = Array.isArray(data) ? data : [];
       renderBody(setDtlTable.tBodies[0], setDtlCols, setDtlData, ['SetClass','NumId','EnCode']);
-      attachRowSelection(setDtlTable.tBodies[0], setDtlData, () => {}, () => controllers.setDtl?.lock);
+      attachRowSelection(setDtlTable.tBodies[0], setDtlData, () => {
+        activeEncodeSection = 'setDtl';
+        refreshEncodeModeFromActive();
+      }, () => controllers.setDtl?.lock);
       ensureDtlKeySync();
     } catch (err) {
-      showMsg(err.message || '載入屬性明細失敗', 'error');
+      showMsg(err.message || '讀取屬性種類明細失敗', 'error');
     }
   }
 
@@ -610,6 +1758,7 @@
     cols.forEach(col => tr.appendChild(createCell(col, data[col.key])));
     if (tbody.firstChild) tbody.insertBefore(tr, tbody.firstChild);
     else tbody.appendChild(tr);
+    syncRowsToHeaderOrder(tbody.closest('table'));
     return tr;
   }
 
@@ -623,17 +1772,17 @@
   async function saveGrid(grid, name) {
     const res = await grid.saveChanges();
     if (res.ok) {
-      showMsg(`${name} 已儲存`, 'success');
+      showMsg(`${name} 儲存成功`, 'success');
     } else if (!res.skipped) {
       showMsg(`${name} 儲存失敗：${res.text || 'unknown'}`, 'error');
     } else {
-      showMsg(`${name} 無異動`, 'info');
+      showMsg(`${name} 沒有異動`, 'info');
     }
   }
 
   async function testEncode() {
     if (!currentSetClass) {
-      showMsg('請先選取分類(SetClass)', 'warning');
+      showMsg('請先選擇品號分類(SetClass)', 'warning');
       return;
     }
     try {
@@ -651,7 +1800,7 @@
 
   async function importMapping() {
     if (!currentSetClass || !currentNumId) {
-      showMsg('請先選取屬性(NumId)', 'warning');
+      showMsg('請先選擇編碼方式屬性(NumId)', 'warning');
       return;
     }
     try {
@@ -669,11 +1818,11 @@
 
   async function copyToMat() {
     if (!currentSetClass || !currentNumId) {
-      showMsg('請先選取屬性(NumId)', 'warning');
+      showMsg('請先選擇編碼方式屬性(NumId)', 'warning');
       return;
     }
-    const userId = txtUserId.value.trim();
-    // 取當前屬性列的 IsMust/IsHand
+    const userId = (localStorage.getItem('erpLoginUserId') || 'admin').trim();
+    // 由目前選取列帶出 IsMust / IsHand
     const row = setSubData.find(x => (x?.NumId || '').toLowerCase() === (currentNumId || '').toLowerCase());
     const isMust = row?.IsMust ?? 0;
     const isHand = row?.IsHand ?? 0;
@@ -683,7 +1832,7 @@
         headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ setClass: currentSetClass, numId: currentNumId, userId, isMust, isHand })
       });
-      showMsg('已新增到料號主檔', 'success');
+      showMsg('已新增屬性到料號主檔', 'success');
     } catch (err) {
       showMsg(err.message || '新增失敗', 'error');
     }
@@ -693,11 +1842,87 @@
     document.getElementById('btnRefreshAll')?.addEventListener('click', () => {
       Promise.all([loadMain(), loadSetMain()]);
     });
+    const encodeActionMap = {
+      setMain: { edit:'setMainToggleEdit', add:'setMainAddRow', save:'setMainSave', cancel:'setMainCancel', del:'setMainDelete' },
+      setSub:  { edit:'setSubToggleEdit',  add:'setSubAddRow',  save:'setSubSave',  cancel:'setSubCancel',  del:'setSubDelete' },
+      setDtl:  { edit:'setDtlToggleEdit',  add:'setDtlAddRow',  save:'setDtlSave',  cancel:'setDtlCancel',  del:'setDtlDelete' }
+    };
+    const triggerEncodeAction = (action) => {
+      const t = resolveTableNameByMouse() || lastTableName;
+      if (t) activeEncodeSection = tableToEncodeSection(t);
+      refreshEncodeModeFromActive();
+      const id = encodeActionMap[activeEncodeSection]?.[action];
+      const btn = id ? document.getElementById(id) : null;
+      if (!btn) {
+        showMsg('找不到對應按鈕', 'warning');
+        return;
+      }
+      btn.click();
+    };
+
+    const setAllEncodeEdit = (toEdit) => {
+      toggleEdit(setMainGrid, btnSetMainToggle, toEdit);
+      toggleEdit(setSubGrid, btnSetSubToggle, toEdit);
+      toggleEdit(setDtlGrid, btnSetDtlToggle, toEdit);
+      refreshEncodeModeFromActive(toEdit);
+    };
+
+    const clearPendingState = (state) => {
+      if (!state) return;
+      try { state.pendingRow?.remove?.(); } catch { }
+      state.pendingRow = null;
+      state.lock = false;
+    };
+
+    const clearAllEncodePending = () => {
+      clearPendingState(controllers.setMain);
+      clearPendingState(controllers.setSub);
+      clearPendingState(controllers.setDtl);
+    };
+
+    const saveAllEncode = async () => {
+      const keepSetClass = currentSetClass;
+      const keepNumId = currentNumId;
+      await saveGrid(setMainGrid, '品號編碼原則');
+      await saveGrid(setSubGrid, '編碼方式屬性');
+      await saveGrid(setDtlGrid, '屬性種類明細');
+      clearAllEncodePending();
+      setAllEncodeEdit(false);
+      await loadSetMain(keepSetClass, keepNumId);
+    };
+
+    const cancelAllEncode = async () => {
+      const keepSetClass = currentSetClass;
+      const keepNumId = currentNumId;
+      clearAllEncodePending();
+      setAllEncodeEdit(false);
+      await loadSetMain(keepSetClass, keepNumId);
+    };
+
+    encodeUnifiedBtns.edit?.addEventListener('click', () => {
+      const allEditing = [setMainGrid, setSubGrid, setDtlGrid].every(g => !!(g && g.isEdit && g.isEdit()));
+      setAllEncodeEdit(!allEditing);
+    });
+    encodeUnifiedBtns.add?.addEventListener('click', () => triggerEncodeAction('add'));
+    encodeUnifiedBtns.save?.addEventListener('click', async () => {
+      try {
+        await saveAllEncode();
+      } catch (err) {
+        showMsg(err?.message || '確認失敗', 'error');
+      }
+    });
+    encodeUnifiedBtns.cancel?.addEventListener('click', async () => {
+      try {
+        await cancelAllEncode();
+      } catch (err) {
+        showMsg(err?.message || '取消失敗', 'error');
+      }
+    });
+    encodeUnifiedBtns.del?.addEventListener('click', () => triggerEncodeAction('del'));
 
     btnMainToggle?.addEventListener('click', () => toggleEdit(mainGrid, btnMainToggle));
     document.getElementById('mainAddRow')?.addEventListener('click', () => {
       toggleEdit(mainGrid, btnMainToggle, true);
-      mainEditMode = true;
       if (pendingMainRow) pendingMainRow.remove();
       const newRow = addRow(
         mainTable.tBodies[0],
@@ -723,100 +1948,102 @@
       toggleEdit(mainGrid, btnMainToggle, false);
       await loadMain();
     });
-    // 刪除目前選取列
+    // 刪除按鈕：若是未儲存的新列，直接移除前端列
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
-    delBtn.className = 'btn btn-danger btn-sm';
-    delBtn.textContent = '刪除';
+    delBtn.className = 'btn toolbar-btn';
+    delBtn.innerHTML = '<i class="bi bi-dash-circle"></i>刪除';
     mainDeleteBtn = delBtn;
     const mainToolbar = document.getElementById('mainToolbar') || document.getElementById('mainAddRow')?.parentElement;
     if (mainToolbar) mainToolbar.appendChild(delBtn);
     delBtn.addEventListener('click', async () => {
-      // 若有未儲存的新增列，先做取消動作，不觸發刪除
+      // 先處理尚未儲存的新增列，再處理已存在資料的刪除
       if (pendingMainRow) {
         pendingMainRow.remove();
         setPendingMainRow(null);
         return;
       }
       const sel = mainTable.tBodies[0].querySelector('tr.table-primary');
-      if (!sel) { showMsg('請先選擇要刪除的分類', 'warning'); return; }
+      if (!sel) { showMsg('請先選擇要刪除的主分類資料', 'warning'); return; }
       const idx = Number(sel.dataset.idx);
       const row = mainData[idx];
       const matClass = row?.MatClass || row?.matClass || '';
-      if (!matClass) { showMsg('找不到分類代碼', 'warning'); return; }
-      if (!confirm(`確定要刪除分類 ${matClass} ?`)) return;
+      if (!matClass) { showMsg('找不到要刪除的分類代碼', 'warning'); return; }
+      if (!confirm(`確認要刪除主分類 ${matClass} 嗎？`)) return;
       try {
         await fetchJson(`/api/MG000006/mat-class/${encodeURIComponent(matClass)}`, { method:'DELETE' });
-        showMsg(`已刪除分類 ${matClass}`, 'success');
+        showMsg(`已刪除主分類 ${matClass}`, 'success');
         await loadMain();
       } catch (err) {
-        showMsg(err.message || '刪除失敗', 'error');
+        showMsg(err.message || '刪除主分類失敗', 'error');
       }
     });
 
     async function deleteSetMain() {
       const sel = setMainTable.tBodies[0].querySelector('tr.table-primary');
-      if (!sel) { showMsg('請先選擇要刪除的編碼原則', 'warning'); return; }
+      if (!sel) { showMsg('請先選擇要刪除的品號編碼原則', 'warning'); return; }
       const idx = Number(sel.dataset.idx);
       const row = setMainData[idx];
       const setClass = row?.SetClass || row?.setClass || '';
       if (!setClass) { showMsg('找不到 SetClass', 'warning'); return; }
-      if (!confirm(`確定要刪除編碼原則 ${setClass} ?`)) return;
+      if (!confirm(`確認要刪除品號編碼原則 ${setClass} 嗎？`)) return;
       await fetchJson(`/api/MG000006/setnum-main/${encodeURIComponent(setClass)}`, { method:'DELETE' });
       showMsg(`已刪除 ${setClass}`, 'success');
-      await loadSetMain();
+      await loadSetMain(currentSetClass, currentNumId);
     }
 
     async function deleteSetSub() {
       const sel = setSubTable.tBodies[0].querySelector('tr.table-primary');
-      if (!sel) { showMsg('請先選擇要刪除的屬性', 'warning'); return; }
+      if (!sel) { showMsg('請先選擇要刪除的編碼方式屬性', 'warning'); return; }
       const idx = Number(sel.dataset.idx);
       const row = setSubData[idx];
       const setClass = row?.SetClass || row?.setClass || currentSetClass;
       const numId = row?.NumId || row?.numId || '';
       if (!setClass || !numId) { showMsg('缺少 SetClass 或 NumId', 'warning'); return; }
-      if (!confirm(`確定要刪除 SetClass=${setClass} / NumId=${numId} ?`)) return;
+      if (!confirm(`確認刪除 SetClass=${setClass} / NumId=${numId} 嗎？`)) return;
       await fetchJson(`/api/MG000006/setnum-sub?setClass=${encodeURIComponent(setClass)}&numId=${encodeURIComponent(numId)}`, { method:'DELETE' });
-      showMsg('刪除完成', 'success');
+      showMsg('已刪除編碼方式屬性', 'success');
       await loadSetSub(setClass);
     }
 
     async function deleteSetDtl() {
       const sel = setDtlTable.tBodies[0].querySelector('tr.table-primary');
-      if (!sel) { showMsg('請先選擇要刪除的屬性明細', 'warning'); return; }
+      if (!sel) { showMsg('請先選擇要刪除的屬性種類明細', 'warning'); return; }
       const idx = Number(sel.dataset.idx);
       const row = setDtlData[idx];
       const setClass = row?.SetClass || row?.setClass || currentSetClass;
       const numId = row?.NumId || row?.numId || currentNumId;
       const encode = row?.EnCode || row?.encode || row?.DtlNumId || row?.dtlNumId || '';
-      if (!setClass || !numId || !encode) { showMsg('缺少必要鍵值', 'warning'); return; }
-      if (!confirm(`確定刪除 SetClass=${setClass} / NumId=${numId} / EnCode=${encode} ?`)) return;
+      if (!setClass || !numId || !encode) { showMsg('缺少刪除鍵值', 'warning'); return; }
+      if (!confirm(`確認刪除 SetClass=${setClass} / NumId=${numId} / EnCode=${encode} 嗎？`)) return;
       await fetchJson(`/api/MG000006/setnum-subdtl?setClass=${encodeURIComponent(setClass)}&numId=${encodeURIComponent(numId)}&encode=${encodeURIComponent(encode)}`, { method:'DELETE' });
-      showMsg('刪除完成', 'success');
+      showMsg('已刪除屬性種類明細', 'success');
       await loadSetDtl(setClass, numId);
     }
 
     // SetNumMain 刪除
     setMainDeleteBtn = document.getElementById('setMainDelete') || document.createElement('button');
     if (!setMainDeleteBtn.id) {
+      setMainDeleteBtn.id = 'setMainDelete';
       setMainDeleteBtn.type = 'button';
-      setMainDeleteBtn.className = 'btn btn-danger btn-sm';
+      setMainDeleteBtn.className = 'btn btn-danger btn-sm toolbar-btn';
       setMainDeleteBtn.textContent = '刪除';
       document.getElementById('setMainToggleEdit')?.parentElement?.appendChild(setMainDeleteBtn);
     }
 
-    // SetNumSub 刪除（使用現有按鈕，避免重複）
+    // SetNumSub 刪除按鈕在畫面已存在，直接使用
     setSubDeleteBtn = document.getElementById('setSubDelete');
 
     // SetNumSubDtl 刪除
     setDtlDeleteBtn = document.getElementById('setDtlDelete') || document.createElement('button');
     if (!setDtlDeleteBtn.id) {
+      setDtlDeleteBtn.id = 'setDtlDelete';
       setDtlDeleteBtn.type = 'button';
-      setDtlDeleteBtn.className = 'btn btn-danger btn-sm';
+      setDtlDeleteBtn.className = 'btn btn-danger btn-sm toolbar-btn';
       setDtlDeleteBtn.textContent = '刪除';
       document.getElementById('setDtlToggleEdit')?.parentElement?.appendChild(setDtlDeleteBtn);
     }
-    // 共用樣板控制（新增＝取消、刪除＝取消 pending）
+    // 套用共用控制器，維持新增/儲存/取消/刪除一致行為
     const ctrlSetMain = setupGridController({
       name: 'setMain',
       grid: setMainGrid,
@@ -836,15 +2063,21 @@
         toggleEdit(setMainGrid, btnSetMainToggle, true);
         const row = addRow(setMainTable.tBodies[0], setMainCols, { TableName: 'MINdMatInfo', PKName: 'PartNum' }, ['SetClass']);
         showEditRow(row);
+        refreshEncodeModeFromActive(true);
         return row;
       },
       customSave: async () => {
         await saveGrid(setMainGrid, '品號編碼原則');
-        await loadSetMain();
+        toggleEdit(setMainGrid, btnSetMainToggle, false);
+        await loadSetMain(currentSetClass, currentNumId);
+        activeEncodeSection = 'setMain';
+        refreshEncodeModeFromActive(false);
       },
       onCancelEdit: async () => {
         toggleEdit(setMainGrid, btnSetMainToggle, false);
-        await loadSetMain();
+        await loadSetMain(currentSetClass, currentNumId);
+        activeEncodeSection = 'setMain';
+        refreshEncodeModeFromActive(false);
       },
       onDelete: () => deleteSetMain().catch(err => showMsg(err.message || '刪除失敗', 'error'))
     });
@@ -863,7 +2096,7 @@
       keyFields: ['SetClass','NumId'],
       customToggle: () => toggleEdit(setSubGrid, btnSetSubToggle),
       beforeAdd: () => {
-        if (!currentSetClass) { showMsg('請先選取 SetClass', 'warning'); return false; }
+        if (!currentSetClass) { showMsg('請先選擇 SetClass', 'warning'); return false; }
       },
       newDefaults: () => ({ SetClass: currentSetClass, IsMust:1, iShowName:1 }),
       label: '編碼方式屬性',
@@ -872,15 +2105,21 @@
         toggleEdit(setSubGrid, btnSetSubToggle, true);
         const row = addRow(setSubTable.tBodies[0], setSubCols, { SetClass: currentSetClass, IsMust:1, iShowName:1 }, ['SetClass','NumId']);
         showEditRow(row);
+        refreshEncodeModeFromActive(true);
         return row;
       },
       customSave: async () => {
         await saveGrid(setSubGrid, '編碼方式屬性');
+        toggleEdit(setSubGrid, btnSetSubToggle, false);
         await loadSetSub(currentSetClass, currentNumId);
+        activeEncodeSection = 'setSub';
+        refreshEncodeModeFromActive(false);
       },
       onCancelEdit: async () => {
         toggleEdit(setSubGrid, btnSetSubToggle, false);
         await loadSetSub(currentSetClass);
+        activeEncodeSection = 'setSub';
+        refreshEncodeModeFromActive(false);
       },
       onDelete: () => deleteSetSub().catch(err => showMsg(err.message || '刪除失敗', 'error'))
     });
@@ -899,7 +2138,7 @@
       keyFields: ['SetClass','NumId','DtlNumId'],
       customToggle: () => toggleEdit(setDtlGrid, btnSetDtlToggle),
       beforeAdd: () => {
-        if (!currentSetClass || !currentNumId) { showMsg('請先選取 SetClass / NumId', 'warning'); return false; }
+        if (!currentSetClass || !currentNumId) { showMsg('請先選擇 SetClass / NumId', 'warning'); return false; }
       },
       newDefaults: () => ({ SetClass: currentSetClass, NumId: currentNumId }),
       afterAdd: () => ensureDtlKeySync(),
@@ -911,16 +2150,22 @@
         const row = addRow(setDtlTable.tBodies[0], setDtlCols, { SetClass: currentSetClass, NumId: currentNumId, DtlNumId: '' }, ['SetClass','NumId','DtlNumId']);
         ensureDtlKeySync();
         showEditRow(row);
+        refreshEncodeModeFromActive(true);
         return row;
       },
       customSave: async () => {
         ensureDtlKeySync();
         await saveGrid(setDtlGrid, '屬性種類明細');
+        toggleEdit(setDtlGrid, btnSetDtlToggle, false);
         await loadSetDtl(currentSetClass, currentNumId);
+        activeEncodeSection = 'setDtl';
+        refreshEncodeModeFromActive(false);
       },
       onCancelEdit: async () => {
         toggleEdit(setDtlGrid, btnSetDtlToggle, false);
         await loadSetDtl(currentSetClass, currentNumId);
+        activeEncodeSection = 'setDtl';
+        refreshEncodeModeFromActive(false);
       },
       onDelete: () => deleteSetDtl().catch(err => showMsg(err.message || '刪除失敗', 'error'))
     });
@@ -929,15 +2174,39 @@
     document.getElementById('btnTestEncode')?.addEventListener('click', () => testEncode());
     document.getElementById('btnImportMapping')?.addEventListener('click', () => importMapping());
     document.getElementById('btnCopyToMat')?.addEventListener('click', () => copyToMat());
+    document.getElementById('btnInfo')?.addEventListener('click', async () => {
+      const html = `
+        <div class="setnum-help-body">
+          <div class="setnum-help-key">a~z</div><div class="setnum-help-desc">查表編碼</div>
+          <div class="setnum-help-key">0~9 / A~Z</div><div class="setnum-help-desc">固定值</div>
+          <div class="setnum-help-key">! / @@</div><div class="setnum-help-desc">民國年 / 西元年</div>
+          <div class="setnum-help-key"># / $ / ~</div><div class="setnum-help-desc">月 / 日 / 流水號</div>
+        </div>`;
+      if (window.Swal?.fire) {
+        await window.Swal.fire({
+          title: '編碼說明',
+          html,
+          confirmButtonText: 'OK',
+          customClass: { popup: 'setnum-help-popup', title: 'setnum-help-title' }
+        });
+      } else {
+        alert('a~z：查表編碼\n0~9/A~Z：固定值\n!：民國年 @@：西元年\n#：月 $：日 ~：流水號');
+      }
+    });
 
     const bindDictOpen = (wrapper) => {
       if (!wrapper) return;
-      wrapper.addEventListener('click', (e) => rememberTableNameFrom(e.target));
+      wrapper.addEventListener('click', (e) => {
+        rememberTableNameFrom(e.target);
+        setActiveEncodeSectionByElement(e.target);
+      });
       wrapper.addEventListener('dblclick', (e) => {
+        if (e.target?.closest?.('input.cell-edit')) return;
+        if (e.target?.closest?.('tbody td')) return;
         const tname = wrapper.dataset.tableName || resolveTableNameFrom(e.target);
         if (tname) lastTableName = tname;
         const nameToOpen = tname || resolveTableNameByActiveTab() || lastTableName;
-        if (!nameToOpen) { showMsg('找不到可用的辭典表名', 'warning'); return; }
+        if (!nameToOpen) { showMsg('找不到可開啟的欄位設定資料表', 'warning'); return; }
         if (window.showDictModal) {
           window.showDictModal('fieldDictModal', nameToOpen);
         }
@@ -959,7 +2228,7 @@
           'MGN_MINdMatClass';
         if (tableName) lastTableName = tableName;
         if (!tableName) {
-          showMsg('找不到可用的辭典表名', 'warning');
+          showMsg('找不到可開啟的欄位設定資料表', 'warning');
           return;
         }
         if (window.showDictModal) {
@@ -968,7 +2237,7 @@
       }
     });
 
-    // EnCode 輸入時即時同步到 DtlNumId，避免空值
+    // EnCode 輸入時同步更新 DtlNumId
     setDtlTable?.addEventListener('input', (e) => {
       const target = e.target;
       if (!(target instanceof HTMLInputElement)) return;
@@ -993,32 +2262,65 @@
       wrapper: document.getElementById('mainWrapper'),
       table: document.getElementById('mainTable'),
       tableName: 'MINdMatClass',
-      keyFields: ['MatClass']
+      keyFields: ['MatClass'],
+      keepInputLayout: true
     });
 
     setMainGrid = window.makeEditableGrid({
       wrapper: document.getElementById('setMainWrapper'),
       table: document.getElementById('setMainTable'),
       tableName: 'MGNdSetNumMain',
-      keyFields: ['SetClass']
+      keyFields: ['SetClass'],
+      keepInputLayout: true
     });
 
     setSubGrid = window.makeEditableGrid({
       wrapper: document.getElementById('setSubWrapper'),
       table: document.getElementById('setSubTable'),
       tableName: 'MGNdSetNumSub',
-      keyFields: ['SetClass','NumId']
+      keyFields: ['SetClass','NumId'],
+      keepInputLayout: true
     });
 
   setDtlGrid = window.makeEditableGrid({
     wrapper: document.getElementById('setDtlWrapper'),
     table: document.getElementById('setDtlTable'),
     tableName: 'MGNdSetNumSubDtl',
-    keyFields: ['SetClass','NumId','DtlNumId']
+    keyFields: ['SetClass','NumId','DtlNumId'],
+    keepInputLayout: true
   });
+
+    bindHeaderDragReorder(mainTable, 'main');
+    bindHeaderDragReorder(setMainTable, 'setMain');
+    bindHeaderDragReorder(setSubTable, 'setSub');
+    bindHeaderDragReorder(setDtlTable, 'setDtl');
+    bindHeaderSort(mainTable);
+    bindHeaderSort(setMainTable);
+    bindHeaderSort(setSubTable);
+    bindHeaderSort(setDtlTable);
+    bindColumnResize(mainTable, 'main');
+    bindColumnResize(setMainTable, 'setMain');
+    bindColumnResize(setSubTable, 'setSub');
+    bindColumnResize(setDtlTable, 'setDtl');
   }
 
   async function init() {
+    const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    setText('tab-main-tab', '主分類');
+    setText('tab-encode-tab', '編碼設定');
+    setText('setMainToggleEdit', '修改');
+    setText('setMainAddRow', '新增');
+    setText('setMainSave', '儲存');
+    setText('setMainCancel', '取消');
+    setText('setSubToggleEdit', '修改');
+    setText('setSubAddRow', '新增');
+    setText('setSubSave', '儲存');
+    setText('setSubCancel', '取消');
+    setText('setSubDelete', '刪除');
+    setText('setDtlToggleEdit', '修改');
+    setText('setDtlAddRow', '新增');
+    setText('setDtlSave', '儲存');
+    setText('setDtlCancel', '取消');
     await loadDictWidths();
     mainCols    = await buildColumns('MGN_MINdMatClass', fallbackMainCols);
     setMainCols = await buildColumns('MGNdSetNumMain', fallbackSetMainCols);
@@ -1026,10 +2328,12 @@
     setDtlCols  = await buildColumns('MGNdSetNumSubDtl', fallbackSetDtlCols);
 
     initGrids();
-    if (btnMainToggle) btnMainToggle.textContent = '編輯';
-    if (btnSetMainToggle) btnSetMainToggle.textContent = '編輯';
-    if (btnSetSubToggle) btnSetSubToggle.textContent = '編輯';
-    if (btnSetDtlToggle) btnSetDtlToggle.textContent = '編輯';
+    if (btnMainToggle) btnMainToggle.innerHTML = '<i class="bi bi-pencil-square"></i>修改';
+    if (btnSetMainToggle) btnSetMainToggle.textContent = '修改';
+    if (btnSetSubToggle) btnSetSubToggle.textContent = '修改';
+    if (btnSetDtlToggle) btnSetDtlToggle.textContent = '修改';
+    activeEncodeSection = 'setMain';
+    refreshEncodeModeFromActive(false);
     wireButtons();
     await Promise.all([loadMain(), loadSetMain()]);
   }
@@ -1038,3 +2342,9 @@
 })();
 </script>
 }
+
+
+
+
+
+
