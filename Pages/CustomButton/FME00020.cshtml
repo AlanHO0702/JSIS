@@ -1,0 +1,319 @@
+@model dynamic
+
+<script>
+(() => {
+  window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+  // ---- 共用：讀單號 ----
+  const readPaperNum = (ctx) => {
+    const v = (ctx?.paperNum || window._paperNum || '').toString().trim();
+    if (v) return v;
+    if (typeof window.getPaperNum === 'function') {
+      try { return (window.getPaperNum() || '').toString().trim(); } catch { /* ignore */ }
+    }
+    return '';
+  };
+
+  // ---- 共用：呼叫 StoredProc API ----
+  const callSp = async (key, args) => {
+    const payload = { Key: key, Args: args };
+    const resp = await fetch('/api/StoredProc/exec', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const raw = await resp.text();
+    let data;
+    try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
+    return { ok: resp.ok && data.ok, error: data.error || `HTTP ${resp.status}`, rows: data.rows };
+  };
+
+  // ---- 匯入訂單（btnC1） ----
+  const importOrder = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const picker = window['OrderDetailPicker_issueDetailPicker'];
+    if (!picker) {
+      return Swal.fire({ icon: 'error', title: '找不到匯入視窗', text: 'OrderDetailPicker 未載入' });
+    }
+
+    let partNum = '';
+    let revision = '';
+    const partNumEl = document.querySelector('input[name="PartNum"], textarea[name="PartNum"]');
+    const revisionEl = document.querySelector('input[name="Revision"], textarea[name="Revision"]');
+    partNum = (partNumEl?.value || '').trim();
+    revision = (revisionEl?.value || '').trim();
+
+    picker.open({ paperNum, partNum, revision });
+  };
+
+  // ---- 重算（btnC2） ----
+  const recalc = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const { isConfirmed } = await Swal.fire({
+      icon: 'question',
+      title: '確定要重算嗎？',
+      html: `單號：<b>${paperNum}</b>`,
+      showCancelButton: true,
+      confirmButtonText: '重算',
+      cancelButtonText: '取消'
+    });
+    if (!isConfirmed) return;
+
+    const { ok, error } = await callSp('FMEdIssueTotalPcsDLL', { DLLPaperNum: paperNum, iNoReComputeBackQnty: 0 });
+    if (ok) {
+      await Swal.fire({ icon: 'success', title: '重算完成', timer: 1500, showConfirmButton: false });
+      location.reload();
+    } else {
+      Swal.fire({ icon: 'error', title: '重算失敗', text: error });
+    }
+  };
+
+  // ---- 清除階段（btnC3） ----
+  const clearDetails = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const { isConfirmed } = await Swal.fire({
+      icon: 'warning',
+      title: '確定要清除這張單的所有單身嗎？',
+      html: `單號：<b>${paperNum}</b>`,
+      showCancelButton: true,
+      confirmButtonText: '清除',
+      cancelButtonText: '取消'
+    });
+    if (!isConfirmed) return;
+
+    const { ok, error, rows } = await callSp('FMEdIssueClearLayer', { PaperNum: paperNum });
+    if (ok) {
+      const msg = rows != null ? `已清除 ${rows} 筆` : '清除完成';
+      await Swal.fire({ icon: 'success', title: msg, timer: 900, showConfirmButton: false });
+      location.reload();
+    } else {
+      Swal.fire({ icon: 'error', title: '清除失敗', text: error });
+    }
+  };
+
+  // ---- LOCK（btnC5） ----
+  const lock = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const { isConfirmed } = await Swal.fire({
+      icon: 'warning',
+      title: '確定要 Lock 嗎？',
+      html: `單號：<b>${paperNum}</b>`,
+      showCancelButton: true,
+      confirmButtonText: 'Lock',
+      cancelButtonText: '取消',
+      confirmButtonColor: '#dc3545'
+    });
+    if (!isConfirmed) return;
+
+    const { ok, error } = await callSp('FMEdIssueLock', { PaperNum: paperNum });
+    if (ok) {
+      await Swal.fire({ icon: 'success', title: 'Lock 完成', timer: 1500, showConfirmButton: false });
+      location.reload();
+    } else {
+      Swal.fire({ icon: 'error', title: 'Lock 失敗', text: error });
+    }
+  };
+
+  // ---- 解除LOCK（btnC16） ----
+  const unlock = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const { isConfirmed } = await Swal.fire({
+      icon: 'question',
+      title: '確定要解除 Lock 嗎？',
+      html: `單號：<b>${paperNum}</b>`,
+      showCancelButton: true,
+      confirmButtonText: '解除 Lock',
+      cancelButtonText: '取消'
+    });
+    if (!isConfirmed) return;
+
+    const { ok, error } = await callSp('FMEdIssueUnLock', { PaperNum: paperNum });
+    if (ok) {
+      await Swal.fire({ icon: 'success', title: '解除 Lock 完成', timer: 1500, showConfirmButton: false });
+      location.reload();
+    } else {
+      Swal.fire({ icon: 'error', title: '解除 Lock 失敗', text: error });
+    }
+  };
+
+  // ---- 轉領料單（btnC4） ----
+  const toIssue = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const { isConfirmed } = await Swal.fire({
+      icon: 'question',
+      title: '確定要轉領料單嗎？',
+      html: `單號：<b>${paperNum}</b>`,
+      showCancelButton: true,
+      confirmButtonText: '轉換',
+      cancelButtonText: '取消'
+    });
+    if (!isConfirmed) return;
+
+    const { ok, error } = await callSp('FMEdIssueToPickSub', { PaperNum: paperNum });
+    if (ok) {
+      await Swal.fire({ icon: 'success', title: '轉領料單完成', timer: 1500, showConfirmButton: false });
+      location.reload();
+    } else {
+      Swal.fire({ icon: 'error', title: '轉領料單失敗', text: error });
+    }
+  };
+
+  // ---- 列印管制單（btnC7） ----
+  const printCtrl = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const { ok, error } = await callSp('FMEdIssuePaper_CIR', { PaperNum: paperNum });
+    if (!ok) {
+      Swal.fire({ icon: 'error', title: '列印失敗', text: error });
+    }
+  };
+
+  // ---- 列印管制單(全)（btnC8） ----
+  const printCtrlAll = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const { ok, error } = await callSp('FMEdIssuePaperAll_CIR', { PaperNum: paperNum });
+    if (!ok) {
+      Swal.fire({ icon: 'error', title: '列印(全)失敗', text: error });
+    }
+  };
+
+  // ---- 工單P圖（btnC6） ----
+  const printPChart = async (ctx) => {
+    Swal.fire({ icon: 'info', title: '尚未實作', text: '工單P圖' });
+  };
+
+  // ---- 結案（btnClose） ----
+  const closeCase = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const { isConfirmed } = await Swal.fire({
+      icon: 'warning',
+      title: '確定要結案嗎？',
+      html: `單號：<b>${paperNum}</b>`,
+      showCancelButton: true,
+      confirmButtonText: '結案',
+      cancelButtonText: '取消',
+      confirmButtonColor: '#dc3545'
+    });
+    if (!isConfirmed) return;
+
+    const { ok, error } = await callSp('FMEdIssueCloseCase', { PaperNum: paperNum });
+    if (ok) {
+      await Swal.fire({ icon: 'success', title: '結案完成', timer: 1500, showConfirmButton: false });
+      location.reload();
+    } else {
+      Swal.fire({ icon: 'error', title: '結案失敗', text: error });
+    }
+  };
+
+  // ---- 取消結案（btnUnClose） ----
+  const unCloseCase = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const { isConfirmed } = await Swal.fire({
+      icon: 'question',
+      title: '確定要取消結案嗎？',
+      html: `單號：<b>${paperNum}</b>`,
+      showCancelButton: true,
+      confirmButtonText: '取消結案',
+      cancelButtonText: '返回'
+    });
+    if (!isConfirmed) return;
+
+    const { ok, error } = await callSp('FMEdIssueUnCloseCase', { PaperNum: paperNum });
+    if (ok) {
+      await Swal.fire({ icon: 'success', title: '取消結案完成', timer: 1500, showConfirmButton: false });
+      location.reload();
+    } else {
+      Swal.fire({ icon: 'error', title: '取消結案失敗', text: error });
+    }
+  };
+
+  // ---- 修改期望繳庫日（btnUpdtaeExp） ----
+  const updateExpDate = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const { value: newDate } = await Swal.fire({
+      title: '修改期望繳庫日',
+      input: 'date',
+      inputLabel: '期望繳庫日',
+      showCancelButton: true,
+      confirmButtonText: '確定',
+      cancelButtonText: '取消'
+    });
+    if (!newDate) return;
+
+    const { ok, error } = await callSp('FMEdIssueUpdateExpDate', { PaperNum: paperNum, ExpDate: newDate });
+    if (ok) {
+      await Swal.fire({ icon: 'success', title: '修改完成', timer: 1500, showConfirmButton: false });
+      location.reload();
+    } else {
+      Swal.fire({ icon: 'error', title: '修改失敗', text: error });
+    }
+  };
+
+  // ---- 製令製程變更（btnC14） ----
+  const changeProcess = async (ctx) => {
+    Swal.fire({ icon: 'info', title: '尚未實作', text: '製令製程變更' });
+  };
+
+  // ---- 修改母製令（btnC15） ----
+  const editMasterOrder = async (ctx) => {
+    Swal.fire({ icon: 'info', title: '尚未實作', text: '修改母製令' });
+  };
+
+  // ---- 混裁下料修改（btnC17） ----
+  const editMixCut = async (ctx) => {
+    Swal.fire({ icon: 'info', title: '尚未實作', text: '混裁下料修改' });
+  };
+
+  // ---- 功能（btnFunction）— 子選單展開 ----
+  const showFuncMenu = async (ctx) => {
+    Swal.fire({ icon: 'info', title: '尚未實作', text: '功能子選單' });
+  };
+
+  // ---- PP裁切單（btnPPCut） ----
+  const ppCut = async (ctx) => {
+    Swal.fire({ icon: 'info', title: '尚未實作', text: 'PP裁切單' });
+  };
+
+  // ---- 註冊 ----
+  window.ActionRailCustomHandlers['FME00020'] = {
+    btnC1:        importOrder,
+    btnC2:        recalc,
+    btnC3:        clearDetails,
+    btnC4:        toIssue,
+    btnC5:        lock,
+    btnC6:        printPChart,
+    btnC7:        printCtrl,
+    btnC8:        printCtrlAll,
+    btnC14:       changeProcess,
+    btnC15:       editMasterOrder,
+    btnC16:       unlock,
+    btnC17:       editMixCut,
+    btnClose:     closeCase,
+    btnUnClose:   unCloseCase,
+    btnUpdtaeExp: updateExpDate,
+    btnFunction:  showFuncMenu,
+    btnPPCut:     ppCut
+  };
+})();
+</script>

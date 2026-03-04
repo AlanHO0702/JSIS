@@ -94,9 +94,8 @@ namespace PcbErpApi.Pages.DynamicTemplate
                 _logger.LogError(ex, "Build breadcrumbs failed for {ItemId}", ItemId);
             }
 
-            var setupList = await _ctx.CurdOcxtableSetUp.AsNoTracking()
-                .Where(x => x.ItemId == itemId)
-                .ToListAsync();
+            // 用原生 SQL 避免 EF PK(ItemId,TableName) 把同 TableName 的多筆 Detail 去重
+            var setupList = await LoadTableSetupRawAsync(itemId);
 
             var master = setupList
                 .Where(x => (x.TableKind ?? "").Contains("Master", StringComparison.OrdinalIgnoreCase))
@@ -137,7 +136,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
             ViewData["PaperNum"] = PaperNum;
             ViewData["MultiTabAllowEdit"] = true;
 
-            var tabs = new List<object>(details.Count);
+            var tabs = new List<TabInfoItem>(details.Count);
             var tabFieldDicts = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
 
             for (var i = 0; i < details.Count; i++)
@@ -150,7 +149,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
                 var title = await ResolveDisplayLabelAsync(dictTable) ?? dictTable;
                 var apiUrl = $"/api/DynamicTable/ByPaperNum?table={Uri.EscapeDataString(dictTable)}";
 
-                tabs.Add(new { Id = tabId, Title = title, ApiUrl = apiUrl, DictTable = dictTable });
+                tabs.Add(new TabInfoItem { Id = tabId, Title = title, ApiUrl = apiUrl, DictTable = dictTable });
 
                 var fields = _dictService.GetFieldDict(dictTable, typeof(object));
                 tabFieldDicts[tabId] = fields
@@ -309,6 +308,42 @@ namespace PcbErpApi.Pages.DynamicTemplate
             return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : int.MaxValue;
         }
 
+        private async Task<List<CurdOcxtableSetUp>> LoadTableSetupRawAsync(string itemId)
+        {
+            var list = new List<CurdOcxtableSetUp>();
+            var cs = _ctx.Database.GetConnectionString()!;
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(@"
+SELECT ItemId, TableName, TableKind,
+       ISNULL(TableShowWere,'') AS TableShowWere,
+       FixColCount, Mdkey, LocateKeys, OrderByField,
+       FilterSQL, RunSQLAfterAdd, IsUpdateMoney
+  FROM CURdOCXTableSetUp WITH (NOLOCK)
+ WHERE ItemId = @itemId
+ ORDER BY TableKind", conn);
+            cmd.Parameters.AddWithValue("@itemId", itemId ?? "");
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                list.Add(new CurdOcxtableSetUp
+                {
+                    ItemId         = rd["ItemId"]?.ToString() ?? "",
+                    TableName      = rd["TableName"]?.ToString() ?? "",
+                    TableKind      = rd["TableKind"]?.ToString() ?? "",
+                    TableShowWere  = rd["TableShowWere"]?.ToString(),
+                    FixColCount    = rd["FixColCount"] == DBNull.Value ? null : Convert.ToInt32(rd["FixColCount"]),
+                    Mdkey          = rd["Mdkey"]?.ToString(),
+                    LocateKeys     = rd["LocateKeys"]?.ToString(),
+                    OrderByField   = rd["OrderByField"]?.ToString(),
+                    FilterSql      = rd["FilterSQL"]?.ToString(),
+                    RunSqlafterAdd = rd["RunSQLAfterAdd"]?.ToString(),
+                    IsUpdateMoney  = rd["IsUpdateMoney"] == DBNull.Value ? 0 : Convert.ToInt32(rd["IsUpdateMoney"])
+                });
+            }
+            return list;
+        }
+
         private async Task<string?> ResolveDisplayLabelAsync(string dictTableName)
         {
             var cs = _ctx.Database.GetConnectionString();
@@ -385,6 +420,14 @@ SELECT ItemId, SerialNum, ButtonName,
             }
 
             return list;
+        }
+
+        public class TabInfoItem
+        {
+            public string Id { get; set; } = "";
+            public string Title { get; set; } = "";
+            public string ApiUrl { get; set; } = "";
+            public string DictTable { get; set; } = "";
         }
 
         public class ItemCustButtonRow

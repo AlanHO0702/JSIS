@@ -187,14 +187,16 @@ SELECT TOP 1 PowerType
             if (selectType == 1)
             {
                 var hasTradeId = await HasColumnAsync(conn, "CURdPaperType", "TradeId");
-                var sql = @"
-SELECT PaperType, PaperTypeName, HeadFirst, PowerType, UpdateFieldName, UpdateValue, ";
+                var hasPowerType = await HasColumnAsync(conn, "CURdPaperType", "PowerType");
+                var powerTypeCol = hasPowerType ? "PowerType" : "POType";
+                var sql = $@"
+SELECT PaperType, PaperTypeName, HeadFirst, {powerTypeCol} AS PowerType, UpdateFieldName, UpdateValue, ";
                 sql += hasTradeId ? "TradeId" : "CAST(NULL AS NVARCHAR(50)) AS TradeId";
                 sql += @"
   FROM CURdPaperType WITH (NOLOCK)
- WHERE LOWER(PaperId) = LOWER(@paperId) OR LOWER(PaperId) = LOWER(@dictTable)";
+ WHERE (LOWER(PaperId) = LOWER(@paperId) OR LOWER(PaperId) = LOWER(@dictTable))";
                 if (powerType.HasValue)
-                    sql += " AND (PowerType = @powerType OR PowerType = -1)";
+                    sql += $" AND ({powerTypeCol} = @powerType OR {powerTypeCol} = -1)";
                 sql += " ORDER BY PaperType;";
 
                 await using var cmdTypes = new SqlCommand(sql, conn);
