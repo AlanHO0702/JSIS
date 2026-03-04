@@ -61,8 +61,8 @@ namespace PcbErpApi.Pages.SPO
 
         public async Task OnGetAsync([FromQuery(Name = "sortBy")] string? sortBy = null, [FromQuery(Name = "sortDir")] string? sortDir = null)
         {
-            PageNumber = PageNumber <= 0 ? 1 : PageNumber;
-            PageSize = PageSize <= 0 ? 50 : Math.Min(PageSize, 500);
+            PageNumber = 1;
+            PageSize = 0;
 
             var conn = _context.Database.GetDbConnection();
             var opened = conn.State != ConnectionState.Open;
@@ -75,9 +75,9 @@ namespace PcbErpApi.Pages.SPO
                 if (hasQuery)
                 {
                     var (whereSql, parameters) = BuildWhere(Request.Query, allowed);
-                    TotalCount = await CountRowsAsync(conn, whereSql, parameters);
-                    TotalPages = Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize));
-                    Items = await LoadRowsAsync(conn, whereSql, orderBy, PageNumber, PageSize, parameters);
+                    Items = await LoadRowsAllAsync(conn, whereSql, orderBy, parameters);
+                    TotalCount = Items.Count;
+                    TotalPages = 1;
                 }
                 else
                 {
@@ -230,18 +230,43 @@ namespace PcbErpApi.Pages.SPO
 
                 if (string.Equals(op, "like", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!val.Contains('%')) val = $"%{val}%";
-                    where += $" and t0.[{field}] like {paramName}";
-                }
-                else
-                {
-                    where += $" and t0.[{field}] {op} {paramName}";
-                }
+                    var trimmed = val.Trim();
+                    if (string.Equals(field, "PartNum", StringComparison.OrdinalIgnoreCase)
+                        && !trimmed.Contains('%')
+                        && !trimmed.Contains('_'))
+                    {
+                        // 料號前綴查詢改用範圍條件，避免 leading wildcard 造成全表掃描。
+                        var nextPrefix = BuildNextPrefix(trimmed);
+                        var paramName2 = $"@p{idx++}";
+                        where += $" and t0.[{field}] >= {paramName} and t0.[{field}] < {paramName2}";
+                        list.Add(MakeParam(paramName, trimmed));
+                        list.Add(MakeParam(paramName2, nextPrefix));
+                        continue;
+                    }
 
+                    if (!trimmed.Contains('%') && !trimmed.Contains('_')) trimmed = $"%{trimmed}%";
+                    where += $" and t0.[{field}] like {paramName}";
+                    list.Add(MakeParam(paramName, trimmed));
+                    continue;
+                }
+                where += $" and t0.[{field}] {op} {paramName}";
                 list.Add(MakeParam(paramName, val));
             }
 
             return (where, list);
+        }
+
+        private static string BuildNextPrefix(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return char.ConvertFromUtf32(0x10FFFF);
+            var chars = text.ToCharArray();
+            for (var i = chars.Length - 1; i >= 0; i--)
+            {
+                if (chars[i] == char.MaxValue) continue;
+                chars[i] = (char)(chars[i] + 1);
+                return new string(chars, 0, i + 1);
+            }
+            return text + char.ConvertFromUtf32(0x10FFFF);
         }
 
         private static bool HasEffectiveQuery(Microsoft.AspNetCore.Http.IQueryCollection query)
@@ -257,21 +282,52 @@ namespace PcbErpApi.Pages.SPO
 
         private static bool TryResolveField(string key, HashSet<string> allowed, out string field)
         {
-            if (allowed.Contains(key))
+            if (string.IsNullOrWhiteSpace(key))
             {
-                field = key;
-                return true;
+                field = "";
+                return false;
             }
 
-            var baseKey = TrailingDigits.Replace(key, "");
-            if (!string.IsNullOrWhiteSpace(baseKey) && allowed.Contains(baseKey))
+            var candidates = new List<string>();
+            var raw = key.Trim();
+            candidates.Add(raw);
+
+            var rawBase = TrailingDigits.Replace(raw, "");
+            if (!string.IsNullOrWhiteSpace(rawBase)) candidates.Add(rawBase);
+
+            var normalized = NormalizeColumnToken(raw);
+            if (!string.IsNullOrWhiteSpace(normalized)) candidates.Add(normalized);
+
+            var normalizedBase = TrailingDigits.Replace(normalized, "");
+            if (!string.IsNullOrWhiteSpace(normalizedBase)) candidates.Add(normalizedBase);
+
+            foreach (var candidate in candidates.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                field = baseKey;
-                return true;
+                if (allowed.Contains(candidate))
+                {
+                    field = allowed.First(x => string.Equals(x, candidate, StringComparison.OrdinalIgnoreCase));
+                    return true;
+                }
             }
 
             field = "";
             return false;
+        }
+
+        private static string NormalizeColumnToken(string token)
+        {
+            var s = (token ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(s)) return "";
+
+            // t0.PartNum / [t0].[PartNum] / [PartNum] -> PartNum
+            s = s.Replace("[", "").Replace("]", "");
+            var dot = s.LastIndexOf('.');
+            if (dot >= 0 && dot < s.Length - 1)
+            {
+                s = s[(dot + 1)..];
+            }
+
+            return s.Trim();
         }
 
         private static string NormalizeOp(string? op, string fallback)

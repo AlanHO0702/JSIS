@@ -89,8 +89,8 @@ namespace PcbErpApi.Pages.SPO
                 GridDictFields = LoadDictSafe(DictTableName);
                 (ParamNameByField, FieldNameByParam) = await LoadParamMapAsync(conn, ParamTableName);
 
-                PageNumber = PageNumber <= 0 ? 1 : PageNumber;
-                PageSize = PageSize <= 0 ? 50 : Math.Min(PageSize, 500);
+                PageNumber = 1;
+                PageSize = 0;
 
                 string paramStr;
                 if (SpId <= 0)
@@ -123,12 +123,8 @@ namespace PcbErpApi.Pages.SPO
                     var rows = await ExecInqAsync(conn, paramStr, SpId, item, DefaultQueryValues);
 
                     TotalCount = rows.Count;
-                    TotalPages = Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize));
-
-                    Items = rows
-                        .Skip((PageNumber - 1) * PageSize)
-                        .Take(PageSize)
-                        .ToList();
+                    TotalPages = 1;
+                    Items = rows;
                 }
                 else
                 {
@@ -501,8 +497,8 @@ namespace PcbErpApi.Pages.SPO
         public string BuildPageUrl(int page)
         {
             var map = Request.Query.ToDictionary(k => k.Key, v => (string?)v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
-            map["page"] = page.ToString();
-            map["pageSize"] = PageSize.ToString();
+            map["page"] = "1";
+            map["pageSize"] = "0";
             return QueryString.Create(map).ToString();
         }
 
