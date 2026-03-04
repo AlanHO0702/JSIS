@@ -165,10 +165,13 @@ else
     <div class="ccs-panel">
         <div class="p-1">
             <ul class="nav nav-tabs ccs-tabs matinfo-tabs" role="tablist">
+                @{ var tabHeaderIndex = 0; }
                 @for (int i = 0; i < Model.ExtraTabs.Count; i++)
                 {
                     var tab = Model.ExtraTabs[i];
-                    var active = i == 0 ? "active" : "";
+                    if (string.Equals(tab.Key, "ship", StringComparison.OrdinalIgnoreCase)) { continue; }
+                    var active = tabHeaderIndex == 0 ? "active" : "";
+                    tabHeaderIndex++;
                     <li class="nav-item" role="presentation">
                         <button class="nav-link @active"
                                 id="tab-@tab.Key-tab"
@@ -189,10 +192,13 @@ else
                 }
             </ul>
             <div class="tab-content ccs-form">
+                @{ var tabPaneIndex = 0; }
                 @for (int i = 0; i < Model.ExtraTabs.Count; i++)
                 {
                     var tab = Model.ExtraTabs[i];
-                    var active = i == 0 ? "show active" : "";
+                    if (string.Equals(tab.Key, "ship", StringComparison.OrdinalIgnoreCase)) { continue; }
+                    var active = tabPaneIndex == 0 ? "show active" : "";
+                    tabPaneIndex++;
                     <div class="tab-pane fade @active" id="tab-@tab.Key" role="tabpanel" aria-labelledby="tab-@tab.Key-tab" data-form="@((tab.IsForm ? "1" : "0"))">
                         @if (tab.IsForm)
                         {
@@ -320,6 +326,25 @@ function makeValueElement(field, rawVal) {
   span.style.borderRadius = '4px';
   span.style.minHeight = '14px';
   return span;
+}
+
+function normalizeEditColor(raw) {
+  if (raw == null) return '';
+  let s = String(raw).trim();
+  if (!s) return '';
+  if (s.toLowerCase().startsWith('cl')) s = s.substring(2);
+  return s;
+}
+
+function applyEditColor(el, raw, important = false) {
+  if (!el) return;
+  const color = normalizeEditColor(raw);
+  if (!color) return;
+  if (important && typeof el.style?.setProperty === 'function') {
+    el.style.setProperty('background-color', color, 'important');
+  } else {
+    el.style.backgroundColor = color;
+  }
 }
 
 // ?梁嚗?鞈?颲剖摨扳?頧?銝??雿捆?函敶ｇ?銝餅??????堆?
@@ -1063,9 +1088,11 @@ function enableFormLayoutEditing(container, dictName) {
     if (Number(field?.ComboStyle ?? 0) === 1) {
       const v = String(rawVal ?? '').trim().toLowerCase();
       span.textContent = (v === '1' || v === 'true' || v === 'y') ? '✓' : '';
+      applyEditColor(span, field?.EditColor, true);
       return span;
     }
     span.textContent = rawVal == null ? '' : String(rawVal);
+    applyEditColor(span, field?.EditColor, true);
     return span;
   }
 
@@ -1186,6 +1213,7 @@ function enableFormLayoutEditing(container, dictName) {
         visibleFields.forEach(f => {
           const td = document.createElement('td');
           td.dataset.field = f.FieldName;
+          applyEditColor(td, f?.EditColor, true);
           const raw = row[f.FieldName];
           const span = buildGridViewText(f, raw);
           const inp = document.createElement('input');
@@ -1198,6 +1226,7 @@ function enableFormLayoutEditing(container, dictName) {
             inp.classList.add('readonly-cell');
             inp.setAttribute('readonly','readonly');
           }
+          applyEditColor(inp, f?.EditColor, true);
           td.append(span, inp);
           tr.appendChild(td);
         });
@@ -1483,8 +1512,10 @@ function enableFormLayoutEditing(container, dictName) {
     meta.dict.forEach(f => {
       const td = document.createElement('td');
       td.dataset.field = f.FieldName;
+      applyEditColor(td, f?.EditColor, true);
       const span = makeValueElement(f, '');
       span.classList.add('cell-view');
+      applyEditColor(span, f?.EditColor, true);
       const inp = document.createElement('input');
       inp.className = 'form-control form-control-sm cell-edit d-none';
       inp.name = f.FieldName;
@@ -1509,6 +1540,7 @@ function enableFormLayoutEditing(container, dictName) {
         inp.classList.add('readonly-cell');
         inp.setAttribute('readonly','readonly');
       }
+      applyEditColor(inp, f?.EditColor, true);
       td.append(span, inp);
       tr.appendChild(td);
     });
@@ -1674,6 +1706,7 @@ function enableFormLayoutEditing(container, dictName) {
           span.style.width = `${layout.fieldWidth}px`;
           span.style.height = `${layout.fieldHeight}px`;
           span.style.minHeight = `${layout.fieldHeight}px`;
+          applyEditColor(span, f?.EditColor, true);
 
           let editor;
           let lookupNameEditor = null;
@@ -1707,6 +1740,7 @@ function enableFormLayoutEditing(container, dictName) {
             editor.style.width = `${codeWidth}px`;
             editor.style.height = `${layout.fieldHeight}px`;
             editor.style.minHeight = `${layout.fieldHeight}px`;
+            applyEditColor(editor, f?.EditColor, true);
             if (lookupMeta) {
               const listId = `lk-${tabKey}-${String(f.FieldName || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
               editor.setAttribute('list', listId);
@@ -1736,6 +1770,7 @@ function enableFormLayoutEditing(container, dictName) {
               lookupNameEditor.style.width = `${Math.max(60, layout.fieldWidth - codeWidth)}px`;
               lookupNameEditor.style.height = `${layout.fieldHeight}px`;
               lookupNameEditor.style.minHeight = `${layout.fieldHeight}px`;
+              applyEditColor(lookupNameEditor, f?.EditColor, true);
               editor.addEventListener('input', () => {
                 const currentCode = (editor.value || '').toString().split(/\s+/).filter(Boolean)[0] || '';
                 if (currentCode !== editor.value) editor.value = currentCode;
@@ -1771,6 +1806,7 @@ function enableFormLayoutEditing(container, dictName) {
             editor.setAttribute('readonly', 'readonly');
             editor.dataset.readonly = '1';
           }
+          applyEditColor(editor, f?.EditColor, true);
 
           const resizer = document.createElement('span');
           resizer.className = 'mf-resizer';
@@ -2994,7 +3030,13 @@ function enableFormLayoutEditing(container, dictName) {
 }
 .ccs-detail-page .table tbody tr.selected td,
 .ccs-detail-page .table tbody tr.table-active td {
-  background: #dbeafe !important;
+  background: #cfe8ff !important;
+  border-color: #9fc6e6 !important;
+}
+.ccs-detail-page .ccs-subgrid-table tbody tr.selected td,
+.ccs-detail-page .ccs-subgrid-table tbody tr.table-active td {
+  background: #cfe8ff !important;
+  border-color: #9fc6e6 !important;
 }
 .ccs-detail-page .table {
   border: 1px solid #cfd7e6;
@@ -3091,26 +3133,32 @@ function enableFormLayoutEditing(container, dictName) {
 .ccs-detail-page .ccs-subgrid-table tbody tr:hover {
   background: #f9fbff;
 }
-.ccs-detail-page .ccs-subgrid-table .cell-view {
+.ccs-detail-page .ccs-subgrid-table .cell-view,
+.ccs-detail-page .ccs-subgrid-table .cell-edit {
   display: block;
   width: 100%;
-  border: none !important;
-  background: transparent !important;
-  padding: 0 !important;
-  line-height: 1.2;
+  height: 20px !important;
+  min-height: 20px !important;
+  max-height: 20px !important;
+  padding: 2px 4px !important;
+  font-size: 0.82rem;
+  line-height: 16px !important;
+  box-sizing: border-box;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: clip;
 }
+.ccs-detail-page .ccs-subgrid-table .cell-view {
+  border: none !important;
+  background: transparent !important;
+}
 .ccs-detail-page .ccs-subgrid-table .cell-edit {
-  width: 100%;
-  height: 22px;
-  min-height: 22px;
-  padding: 1px 4px;
-  border: 1px solid #cfd7e6;
-  border-radius: 4px;
-  background: #fff;
-  font-size: 0.82rem;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  vertical-align: middle !important;
 }
 .ccs-detail-page .ccs-subgrid-table thead th .col-resizer {
   position: absolute;

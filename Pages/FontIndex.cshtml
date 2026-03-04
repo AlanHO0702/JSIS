@@ -21,7 +21,8 @@
         {"CURH0003", "/CUR/CURdV_SysProcess"},
         {"CUR00004", "/CUR/NoticeBoard"},
         {"MP000022", "/CCS/MP000022"},
-        {"MG000006", "/CPN/MGNdSetNum"},
+        {"MG000006", "/CPN/MGNdSetNum/MG000006"},
+        {"MG000007", "/CPN/MGNdSetNum/MG000007"},
         {"MG000008", "/CPN/MG000008"},
         {"CPN00006", "/CPN/CPN00006"},
         {"MG000002", "/CPN/MG000002"},
@@ -293,7 +294,7 @@ body {
 }
 #systemGraphImg {
     width: 100%;
-    max-height: calc((100vh - 60px) * 0.78);
+    max-height: calc((100vh - 60px) * 0.67);
     display: block;
     object-fit: fill;
 }
@@ -377,6 +378,43 @@ body {
 #quickStartTableBody tr.selected:hover {
     background-color: #b8d9f7 !important;
 }
+/* 互動式流程圖按鈕節點 */
+.flow-node {
+    position: absolute;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+    border: 2px solid rgba(0,0,0,0.18);
+    transition: filter 0.15s, transform 0.1s;
+    text-align: center;
+    line-height: 1.2;
+    padding: 2px 4px;
+    text-decoration: none;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.12);
+    z-index: 2;
+}
+.flow-node[href]:hover {
+    filter: brightness(1.15);
+    transform: translateY(-1px);
+    text-decoration: none;
+}
+.flow-node-green  { background: #43a047; color: #fff; border-color: #1b5e20; cursor: pointer; }
+.flow-node-green2 { background: #66bb6a; color: #fff; border-color: #2e7d32; cursor: pointer; }
+.flow-node-blue   { background: #80deea; color: #006064; border-color: #4dd0e1; cursor: pointer; }
+.flow-node-orange { background: #ffb300; color: #7f3900; border-color: #ff8f00; cursor: pointer; }
+.flow-node-white  { background: #fff; color: #333; border-color: #aaa; cursor: pointer; }
+.flow-node-red    { background: #c0392b; color: #fff; border-color: #922b21; cursor: pointer; }
+.flow-node:not([href]) { cursor: default; }
+.flow-svg-overlay {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 1;
+}
 </style>
 
 <div class="container" style="padding: 0.5rem 0.75rem;">
@@ -431,9 +469,31 @@ body {
                 <hr id="functionListDivider" style="margin: 0 0 8px 0; border-top: 2px solid #555;">
 
                 <div id="systemGraphPanel" class="mb-1" style="display:none;">
-                    <div class="system-graph-frame">
-                        <img id="systemGraphImg" alt="系統流程圖" style="display:none;" />
-                        <div id="systemGraphEmpty" class="text-secondary small" style="display:none;">尚未提供流程圖</div>
+                    <ul class="nav nav-tabs mb-0" id="graphTabsList" style="font-size:0.82rem;">
+                        <li class="nav-item">
+                            <a class="nav-link active py-1 px-3" data-bs-toggle="tab" href="#tab-interactive">互動流程圖</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link py-1 px-3" data-bs-toggle="tab" href="#tab-image">流程圖圖片</a>
+                        </li>
+                    </ul>
+                    <div class="tab-content">
+                        <div class="tab-pane fade show active" id="tab-interactive">
+                            <div id="interactiveFlowchart" style="position:relative; width:100%; overflow:hidden;
+                                 background:#f5f8ff; border:1px solid #e5eaf2; border-top:none;
+                                 border-radius:0 0 8px 8px; height:calc((100vh - 60px) * 0.68);">
+                                <div id="interactiveFlowchartEmpty" style="display:none; padding:40px;
+                                     text-align:center; color:#aaa; font-size:0.9rem;">
+                                    尚無互動流程圖設定
+                                </div>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="tab-image">
+                            <div class="system-graph-frame" style="border-top:none; border-radius:0 0 8px 8px;">
+                                <img id="systemGraphImg" alt="系統流程圖" style="display:none;" />
+                                <div id="systemGraphEmpty" class="text-secondary small" style="display:none;">尚未提供流程圖</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -673,7 +733,8 @@ body {
     "CUR00004": "/CUR/NoticeBoard",
     "QC000209": "/FQCdProcInfo/Index",
     "MP000022": "/CCS/MP000022",
-    "MG000006": "/CPN/MGNdSetNum",
+    "MG000006": "/CPN/MGNdSetNum/MG000006",
+    "MG000007": "/CPN/MGNdSetNum/MG000007",
     "MG000008": "/CPN/MG000008",
     "CPN00006": "/CPN/CPN00006",
     "MG000002": "/CPN/MG000002",
@@ -691,6 +752,775 @@ body {
     "EMO00048": "/EMOdTmpRoute",
     // 其它功能自行補上
     };
+
+    // ==========================================
+    // 互動式流程圖設定（各系統模組節點與連線）
+    // ==========================================
+    const systemFlowcharts = {
+        "SPO": {
+            nodes: [
+                // id, label, x(%), y(%), w(%), h(%), color, link(null=不可點擊)
+                // 左列主流: x=21 w=32(中心37%)；客戶主檔稍靠左 x=2 w=32(中心18%)，連線可沿左側繞過預測訂單
+                // 右列: x=60 w=36(中心78%)
+                { id:"ccs",  label:"客戶主檔",       x:6,  y:3,  w:32, h:9, color:"green",  link:"/CCS/CC000054/1" },
+                { id:"cpn",  label:"產品料號主檔",    x:60, y:3,  w:36, h:9, color:"green",  link:"/CPN/MG000008" },
+                { id:"fore", label:"預測訂單",        x:6,  y:16, w:32, h:9, color:"blue",   link:null },
+                { id:"so",   label:"銷售訂單",        x:6,  y:29, w:32, h:9, color:"blue",   link:"/DynamicTemplate/Paper/SA000002" },
+                { id:"dn",   label:"銷貨單",          x:6,  y:42, w:32, h:9, color:"blue",   link:"/DynamicTemplate/Paper/SPO00010" },
+                { id:"pi",   label:"Packing/Invoice", x:60, y:42, w:36, h:9, color:"blue",  link:null },
+                { id:"out",  label:"銷貨出庫單",      x:60, y:55, w:36, h:9, color:"orange", link:"/DynamicTemplate/Paper3L/MIN00002" },
+                { id:"inv",  label:"銷貨發票",        x:6,  y:65, w:32, h:9, color:"blue",   link:"/DynamicTemplate/Paper/SA000006" },
+                { id:"ret",  label:"客戶退貨單",      x:60, y:65, w:36, h:9, color:"blue",   link:"/DynamicTemplate/Paper3L/SPO00011" },
+                { id:"disc", label:"銷貨折讓",        x:60, y:77, w:36, h:9, color:"blue",   link:"/DynamicTemplate/Paper/SA000005" },
+                { id:"ar",   label:"應收帳款",        x:6,  y:88, w:32, h:9, color:"orange", link:"/DynamicTemplate/Paper/PR000003" }
+            ],
+            connections: [
+                // fromPort/toPort: "top" | "bottom" | "left" | "right"
+                { from:"ccs",  fromPort:"bottom", to:"fore", toPort:"top",    style:"solid"  },
+                { from:"cpn",  fromPort:"bottom", to:"fore", toPort:"right",  style:"dashed" },
+                { from:"cpn",  fromPort:"bottom", to:"so",   toPort:"right",  style:"solid"  },
+                { from:"fore", fromPort:"bottom", to:"so",   toPort:"top",    style:"solid"  },
+                { from:"so",   fromPort:"bottom", to:"dn",   toPort:"top",    style:"solid"  },
+                { from:"dn",   fromPort:"right",  to:"pi",   toPort:"left",   style:"dashed" },
+                { from:"dn",   fromPort:"right",  to:"out",  toPort:"left",   style:"solid"  },
+                { from:"dn",   fromPort:"bottom", to:"inv",  toPort:"top",    style:"solid"  },
+                { from:"inv",  fromPort:"right",  to:"ret",  toPort:"left",   style:"dashed" },
+                { from:"inv",  fromPort:"bottom", to:"ar",   toPort:"top",    style:"solid"  },
+                { from:"ret",  fromPort:"bottom", to:"disc", toPort:"top",    style:"solid"  },
+                { from:"disc", fromPort:"bottom", to:"ar",   toPort:"right",  style:"solid"  }
+            ]
+        }
+        ,
+        // CCS 客戶廠商
+        "CCS": {
+            nodes: [
+                // 上方參考主檔（左群）
+                { id:"cur",  label:"幣別匯率主檔",                        x:1,  y:3,  w:29, h:9,  color:"blue",  link:"/CUR/MasterDetail/SP000011" },
+                { id:"ivt",  label:"發票種類主檔",                        x:1,  y:15, w:29, h:9,  color:"blue",  link:"/CUR/MultiGrid/AT000002?tab=Master1" },
+                // 上方參考主檔（中群）
+                { id:"pmt",  label:"付款條件主檔",                        x:35, y:3,  w:30, h:9,  color:"blue",  link:"/CUR/MultiGrid/CCS00018" },
+                { id:"sub",  label:"客廠子分類",                          x:35, y:15, w:30, h:9,  color:"blue",  link:"/CUR/MasterDetail/CCS00003" },
+                // 上方參考主檔（右群，高框含3項）
+                { id:"trd",  label:"貿易條件主檔\n出貨區域主檔\n運貨方式主檔", x:70, y:3,  w:29, h:21, color:"blue",  link:null },
+                // 主要節點
+                { id:"cust", label:"客戶主檔",                            x:4,  y:32, w:42, h:10, color:"blue",   link:"/CCS/CC000054/1" },
+                { id:"vdr",  label:"廠商主檔",                            x:54, y:32, w:42, h:10, color:"blue",   link:"/CCS/CC000055/2" },
+                // 下游輸出
+                { id:"sout", label:"進階報價\n銷售管理\n應收帳款",        x:4,  y:52, w:42, h:20, color:"orange", link:null },
+                { id:"pout", label:"廠商詢價\n採購/委外/費用申請\n應付帳款", x:54, y:52, w:42, h:20, color:"orange", link:null }
+            ],
+            connections: [
+                { from:"cur",  fromPort:"bottom", to:"cust", toPort:"top",   style:"solid" },
+                { from:"ivt",  fromPort:"bottom", to:"cust", toPort:"top",   style:"solid" },
+                { from:"pmt",  fromPort:"bottom", to:"cust", toPort:"top",   style:"solid" },
+                { from:"pmt",  fromPort:"bottom", to:"vdr",  toPort:"top",   style:"solid" },
+                { from:"sub",  fromPort:"bottom", to:"cust", toPort:"top",   style:"solid" },
+                { from:"sub",  fromPort:"bottom", to:"vdr",  toPort:"top",   style:"solid" },
+                { from:"trd",  fromPort:"bottom", to:"vdr",  toPort:"top",   style:"solid" },
+                { from:"cust", fromPort:"bottom", to:"sout", toPort:"top",   style:"solid" },
+                { from:"vdr",  fromPort:"bottom", to:"pout", toPort:"top",   style:"solid" }
+            ]
+        },
+        // CPN 料號主檔
+        "CPN": {
+            nodes: [
+                { id:"cat",  label:"料號主分類",       x:27, y:3,  w:46, h:9, color:"green",  link:"/CPN/MGNdSetNum" },
+                { id:"cod",  label:"主分類編碼原則",   x:27, y:17, w:46, h:9, color:"blue",   link:"/CPN/MGNdSetNum" },
+                { id:"prd",  label:"產品料號主檔",     x:6,  y:33, w:40, h:9, color:"blue",   link:"/CPN/MG000008" },
+                { id:"raw",  label:"原物料料號主檔",   x:54, y:33, w:40, h:9, color:"blue",   link:"/CPN/MG000002" },
+                { id:"eng",  label:"產品工程資料",     x:6,  y:52, w:40, h:9, color:"orange", link:"/EMOdProdInfo" },
+                { id:"bom",  label:"BOM",              x:54, y:52, w:40, h:9, color:"orange", link:null },
+                { id:"mes",  label:"MES 製令",         x:6,  y:71, w:40, h:9, color:"orange", link:"/DynamicTemplate/Paper/FME00020" },
+                { id:"asm",  label:"組裝業製令",       x:54, y:71, w:40, h:9, color:"orange", link:null }
+            ],
+            connections: [
+                { from:"cat",  fromPort:"bottom", to:"cod",  toPort:"top",    style:"solid" },
+                { from:"cod",  fromPort:"bottom", to:"prd",  toPort:"top",    style:"solid" },
+                { from:"cod",  fromPort:"bottom", to:"raw",  toPort:"top",    style:"solid" },
+                { from:"prd",  fromPort:"bottom", to:"eng",  toPort:"top",    style:"solid" },
+                { from:"raw",  fromPort:"bottom", to:"bom",  toPort:"top",    style:"solid" },
+                { from:"eng",  fromPort:"bottom", to:"mes",  toPort:"top",    style:"solid" },
+                { from:"bom",  fromPort:"bottom", to:"asm",  toPort:"top",    style:"solid" }
+            ]
+        },
+        // SQU 報價管理
+        "SQU": {
+            nodes: [
+                // 左欄主流
+                { id:"cat",  label:"料號主分類",     x:6,  y:3,  w:40, h:9, color:"green",  link:"/CPN/MGNdSetNum" },
+                { id:"cod",  label:"主分類編碼原則", x:6,  y:16, w:40, h:9, color:"green",  link:"/CPN/MGNdSetNum" },
+                { id:"tmp",  label:"臨時料號",       x:6,  y:29, w:40, h:9, color:"green",  link:null },
+                { id:"est",  label:"品號估價單",     x:6,  y:44, w:40, h:9, color:"blue",   link:null },
+                { id:"so",   label:"銷售訂單",       x:6,  y:57, w:40, h:9, color:"orange", link:"/DynamicTemplate/Paper/SA000002" },
+                // 右欄支流
+                { id:"prd",  label:"正式料號",       x:54, y:44, w:40, h:9, color:"green",  link:"/CPN/MG000008" },
+                { id:"eng",  label:"產品工程",       x:54, y:68, w:40, h:9, color:"orange", link:"/EMOdProdInfo" },
+                { id:"mes",  label:"MES 製令",       x:54, y:81, w:40, h:9, color:"orange", link:"/DynamicTemplate/Paper/FME00020" }
+            ],
+            connections: [
+                { from:"cat",  fromPort:"bottom", to:"cod",  toPort:"top",   style:"solid" },
+                { from:"cod",  fromPort:"bottom", to:"tmp",  toPort:"top",   style:"solid" },
+                { from:"tmp",  fromPort:"bottom", to:"est",  toPort:"top",   style:"solid" },
+                // 臨時料號右側 → 正式料號頂端（右→上路由）
+                { from:"tmp",  fromPort:"right",  to:"prd",  toPort:"top",   style:"solid" },
+                { from:"est",  fromPort:"bottom", to:"so",   toPort:"top",   style:"solid" },
+                // 品號估價單右側 → 產品工程左側
+                { from:"est",  fromPort:"right",  to:"eng",  toPort:"left",  style:"solid" },
+                // 正式料號底部 → 銷售訂單右側
+                { from:"prd",  fromPort:"bottom", to:"so",   toPort:"right", style:"solid" },
+                { from:"prd",  fromPort:"bottom", to:"eng",  toPort:"top",   style:"solid" },
+                { from:"eng",  fromPort:"bottom", to:"mes",  toPort:"top",   style:"solid" }
+            ]
+        },
+        // EMO 產品工程（依模組架構圖_06產品工程）
+        "EMO": {
+            nodes: [
+                { id:"base",  label:"組合模型\n壓合疊構\n途程主檔", x:10, y:3,  w:34, h:13, color:"blue",   link:null },
+                { id:"prd",   label:"產品料號主檔",               x:52, y:3,  w:40, h:7,  color:"green2", link:"/CPN/MG000008" },
+                { id:"raw",   label:"原物料料號主檔",             x:52, y:11, w:40, h:7,  color:"green2", link:"/CPN/MG000002" },
+                { id:"eng",   label:"工程資料建立",               x:10, y:22, w:34, h:10, color:"blue",   link:"/EMOdProdInfo" },
+                { id:"lay",   label:"層別明細檔",                 x:17, y:33, w:27, h:7,  color:"blue",   link:null },
+                { id:"mat",   label:"壓合材料檔",                 x:17, y:40, w:27, h:7,  color:"blue",   link:null },
+                { id:"imp",   label:"鑽孔/阻抗檔",                x:17, y:47, w:27, h:7,  color:"blue",   link:null },
+                { id:"copy",  label:"品號/版本複製",              x:52, y:26, w:33, h:7,  color:"blue",   link:null },
+                { id:"apr",   label:"審核/核准",                  x:10, y:60, w:34, h:8,  color:"blue",   link:"/EMOdProdInfo" },
+                { id:"plat",  label:"審核機制平台",               x:52, y:60, w:33, h:8,  color:"blue",   link:null },
+                { id:"print", label:"列印工單",                   x:52, y:70, w:33, h:7,  color:"blue",   link:null },
+                { id:"ecn",   label:"ECN工程變更審核",            x:52, y:79, w:33, h:8,  color:"blue",   link:null },
+                { id:"stop",  label:"暫停下料",                   x:52, y:89, w:33, h:7,  color:"blue",   link:null },
+                { id:"mes",   label:"MES生產管理",                x:10, y:89, w:34, h:8,  color:"orange", link:"/DynamicTemplate/Paper/FME00020" },
+
+                // 隱藏轉折點：重現圖中的左側虛線輸入與上方料號接點
+                { id:"piv1",  label:"", x:49, y:27, w:0, h:0, color:"white", link:null, hidden:true },
+                { id:"ext1",  label:"", x:3,  y:27, w:0, h:0, color:"white", link:null, hidden:true },
+                { id:"ext2",  label:"", x:3,  y:83, w:0, h:0, color:"white", link:null, hidden:true }
+            ],
+            connections: [
+                { from:"base", fromPort:"bottom", to:"eng",   toPort:"top",   style:"solid"  },
+
+                { from:"prd",  fromPort:"left",   to:"piv1",  toPort:"top",   style:"solid"  },
+                { from:"piv1", fromPort:"right",  to:"eng",   toPort:"right", style:"dashed" },
+
+                { from:"raw",  fromPort:"bottom", to:"copy",  toPort:"top",   style:"solid"  },
+                { from:"copy", fromPort:"left",   to:"eng",   toPort:"right", style:"dashed" },
+                { from:"copy", fromPort:"bottom", to:"mat",   toPort:"right", style:"solid"  },
+
+                { from:"imp",  fromPort:"bottom", to:"apr",   toPort:"top",   style:"solid"  },
+
+                { from:"apr",  fromPort:"right",  to:"plat",  toPort:"left",  style:"dashed" },
+                { from:"plat", fromPort:"left",   to:"apr",   toPort:"right", style:"dashed" },
+
+                { from:"apr",  fromPort:"bottom", to:"print", toPort:"left",  style:"solid"  },
+                { from:"apr",  fromPort:"bottom", to:"mes",   toPort:"top",   style:"solid"  },
+                { from:"stop", fromPort:"left",   to:"mes",   toPort:"right", style:"dashed" },
+
+                { from:"ext1", fromPort:"right",  to:"eng",   toPort:"left",  style:"dashed" },
+                { from:"ext1", fromPort:"bottom", to:"ext2",  toPort:"top",   style:"dashed" },
+                { from:"ext2", fromPort:"right",  to:"ecn",   toPort:"left",  style:"dashed" }
+            ]
+        }
+        ,
+        // SBP 生產管理
+        "SBP": {
+            nodes: [
+                { id:"so",    label:"銷售訂單\n預測訂單",            x:10, y:3,  w:36, h:10, color:"green",  link:"/DynamicTemplate/Paper/SA000002" },
+                { id:"eng",   label:"產品工程資料",                  x:52, y:3,  w:34, h:8,  color:"green",  link:"/EMOdProdInfo" },
+
+                { id:"wo",    label:"製令單",                        x:10, y:19, w:36, h:10, color:"blue",   link:"/DynamicTemplate/Paper/FME00020" },
+                { id:"woN",   label:"一般(正常)製令",               x:16, y:30, w:30, h:5,  color:"blue",   link:null },
+                { id:"woR",   label:"補料製令",                      x:16, y:36, w:30, h:5,  color:"blue",   link:null },
+                { id:"woRW",  label:"重工製令",                      x:16, y:42, w:30, h:5,  color:"blue",   link:null },
+
+                { id:"lack",  label:"缺料查詢",                      x:52, y:21, w:34, h:7,  color:"blue",   link:null },
+                { id:"req",   label:"缺料轉請購",                    x:52, y:29, w:34, h:7,  color:"blue",   link:null },
+                { id:"mph",   label:"採購管理",                      x:52, y:41, w:34, h:8,  color:"orange", link:"/FontIndex?level1Id=PO000008" },
+
+                { id:"rel",   label:"確認/Release",                  x:10, y:54, w:36, h:8,  color:"blue",   link:null },
+                { id:"lot",   label:"批號資訊",                      x:52, y:54, w:34, h:7,  color:"blue",   link:null },
+                { id:"print", label:"列印工單(帶條碼)",               x:52, y:62, w:34, h:7,  color:"blue",   link:null },
+                { id:"pick",  label:"轉領料單",                      x:52, y:70, w:34, h:7,  color:"blue",   link:null },
+                { id:"stop",  label:"批號暫停\n製令階段暫停\n製程暫停", x:52, y:78, w:34, h:13, color:"blue",   link:null },
+                { id:"scrap", label:"批號報廢",                      x:52, y:92, w:34, h:7,  color:"blue",   link:null },
+                { id:"mes",   label:"MES製造執行",                   x:10, y:92, w:36, h:8,  color:"orange", link:"/FontIndex?level1Id=FPE00002" }
+            ],
+            connections: [
+                { from:"so",     fromPort:"bottom", to:"wo",      toPort:"top",   style:"solid"  },
+                { from:"eng",    fromPort:"bottom", to:"wo",      toPort:"top",   style:"solid"  },
+
+                { from:"lack",   fromPort:"left",   to:"wo",      toPort:"right", style:"dashed" },
+                { from:"lack",   fromPort:"bottom", to:"req",     toPort:"top",   style:"solid"  },
+                { from:"req",    fromPort:"bottom", to:"mph",     toPort:"top",   style:"solid"  },
+
+                { from:"wo",     fromPort:"bottom", to:"rel",     toPort:"top",   style:"solid"  },
+
+                { from:"rel",    fromPort:"right",  to:"lot",     toPort:"left",  style:"solid"  },
+                { from:"rel",    fromPort:"right",  to:"print",   toPort:"left",  style:"solid"  },
+                { from:"rel",    fromPort:"bottom", to:"pick",    toPort:"left",  style:"solid"  },
+                { from:"rel",    fromPort:"bottom", to:"mes",     toPort:"top",   style:"solid"  },
+
+                { from:"stop",   fromPort:"left",   to:"mes",     toPort:"right", style:"dashed" },
+                { from:"scrap",  fromPort:"left",   to:"mes",     toPort:"right", style:"dashed" }
+            ]
+        },
+        // FME 製造執行
+        "FME": {
+            nodes: [
+                { id:"wo",      label:"製令單",                  x:10, y:3,  w:36, h:8,  color:"green",  link:"/DynamicTemplate/Paper/FME00020" },
+                { id:"pick",    label:"領料單",                  x:52, y:10, w:34, h:8,  color:"green",  link:"/DynamicTemplate/Paper3L/MT001504" },
+
+                { id:"post",    label:"過帳單",                  x:10, y:20, w:36, h:10, color:"blue",   link:"/DynamicTemplate/Paper/FME00022" },
+                { id:"postM",   label:"多批過帳",                x:16, y:31, w:30, h:5,  color:"blue",   link:null },
+                { id:"postS",   label:"單批過帳",                x:16, y:37, w:30, h:5,  color:"blue",   link:null },
+                { id:"postA",   label:"過帳批次審核",            x:16, y:43, w:30, h:6,  color:"blue",   link:null },
+
+                { id:"qNow",    label:"製程現帳查詢",            x:52, y:23, w:34, h:6,  color:"blue",   link:"/CUR/SingleGrid/FME00023" },
+                { id:"qBatch",  label:"批量資訊查詢",            x:52, y:30, w:34, h:6,  color:"blue",   link:"/CUR/MasterMultiDetail/FME00024" },
+                { id:"qHist",   label:"過帳歷史查詢",            x:52, y:37, w:34, h:6,  color:"blue",   link:"/CUR/SingleGrid/FPE00021" },
+                { id:"dispatch",label:"製程現帳派工",            x:52, y:48, w:34, h:6,  color:"blue",   link:null },
+
+                { id:"split",   label:"拆批/併批",               x:10, y:57, w:36, h:7,  color:"blue",   link:null },
+                { id:"rework",  label:"批量重工單",              x:10, y:65, w:36, h:7,  color:"blue",   link:"/DynamicTemplate/Paper3L/FPE00026" },
+                { id:"finIn",   label:"完工入庫單",              x:10, y:76, w:36, h:8,  color:"blue",   link:null },
+                { id:"inv",     label:"庫存管理",                x:10, y:88, w:36, h:8,  color:"orange", link:"/FontIndex?level1Id=MIN00028" },
+
+                { id:"mrbForm", label:"報廢過MRB單",             x:52, y:57, w:34, h:7,  color:"blue",   link:"/DynamicTemplate/Paper/FME00027" },
+                { id:"ecn",     label:"ECN調料",                 x:52, y:65, w:34, h:7,  color:"blue",   link:null },
+                { id:"wipChk",  label:"在製盤點",                x:52, y:73, w:34, h:7,  color:"blue",   link:"/CUR/SingleGrid/FME00050" },
+                { id:"qaMrb",   label:"品管MRB",                 x:52, y:88, w:34, h:8,  color:"orange", link:"/FontIndex?level1Id=FQC00008" },
+
+                // 隱藏轉折點：重現圖中的左/右虛線與中間幹線
+                { id:"extTop",   label:"", x:3,  y:7,  w:0, h:0, color:"white", link:null, hidden:true },
+                { id:"extBottom",label:"", x:3,  y:68, w:0, h:0, color:"white", link:null, hidden:true },
+                { id:"midWP",    label:"", x:28, y:15, w:0, h:0, color:"white", link:null, hidden:true },
+                { id:"extRTop",  label:"", x:93, y:26, w:0, h:0, color:"white", link:null, hidden:true },
+                { id:"extRBot",  label:"", x:93, y:76, w:0, h:0, color:"white", link:null, hidden:true }
+            ],
+            connections: [
+                // 製令單→[中繼點]→過帳單，領料單左側連到中繼點
+                { from:"wo",        fromPort:"bottom", to:"midWP",    toPort:"top",   style:"solid",  arrow:false, path:"straight" },
+                { from:"midWP",     fromPort:"bottom", to:"post",     toPort:"top",   style:"solid",  path:"straight" },
+                { from:"pick",      fromPort:"left",   to:"midWP",    toPort:"right", style:"solid",  arrow:false, path:"straight" },
+
+                { from:"postA",     fromPort:"bottom", to:"split",    toPort:"top",   style:"solid"  },
+                { from:"split",     fromPort:"bottom", to:"rework",   toPort:"top",   style:"solid"  },
+                { from:"rework",    fromPort:"bottom", to:"finIn",    toPort:"top",   style:"solid"  },
+                { from:"finIn",     fromPort:"bottom", to:"inv",      toPort:"top",   style:"solid"  },
+
+                // 製程現帳派工左側 → 製程現帳查詢左側（弧線）
+                { from:"dispatch",  fromPort:"left",   to:"qNow",     toPort:"left",  style:"solid"  },
+                // 報廢過MRB單左側 → 品管MRB左側（弧線）
+                { from:"mrbForm",   fromPort:"left",   to:"qaMrb",    toPort:"left",  style:"solid"  },
+
+                { from:"rework",    fromPort:"right",  to:"ecn",      toPort:"left",  style:"dashed", path:"straight" },
+                { from:"wipChk",    fromPort:"right",  to:"extRBot",  toPort:"left",  style:"dashed", arrow:false, path:"straight" },
+                { from:"extRBot",   fromPort:"top",    to:"extRTop",  toPort:"bottom",style:"dashed", arrow:false, path:"straight" },
+                { from:"extRTop",   fromPort:"left",   to:"qNow",     toPort:"right", style:"dashed", path:"straight" },
+
+                { from:"extTop",    fromPort:"right",  to:"wo",       toPort:"left",  style:"dashed", path:"straight" },
+                { from:"extTop",    fromPort:"bottom", to:"extBottom",toPort:"top",   style:"dashed", arrow:false, path:"straight" },
+                { from:"extBottom", fromPort:"right",  to:"rework",   toPort:"left",  style:"dashed", path:"straight" }
+            ]
+        },
+        // FOS 製程委外
+        "FOS": {
+            nodes: [
+                // 左欄
+                { id:"cur",     label:"製程現帳",           x:5,  y:3,  w:40, h:8,  color:"green",  link:"/CUR/SingleGrid/FME00023" },
+                { id:"outShip", label:"委外出廠單",         x:5,  y:21, w:40, h:8,  color:"blue",   link:"/DynamicTemplate/Paper/FOS00002" },
+                { id:"retShip", label:"委外回廠單",         x:5,  y:38, w:40, h:8,  color:"blue",   link:"/DynamicTemplate/Paper/FOS00015" },
+                { id:"settle",  label:"過帳單/報廢判定單",  x:5,  y:52, w:40, h:8,  color:"green",  link:"/DynamicTemplate/Paper/FME00022" },
+                { id:"close",   label:"委外結帳單",         x:5,  y:67, w:40, h:8,  color:"blue",   link:"/DynamicTemplate/Paper/FOS00018" },
+                { id:"pay",     label:"應付帳款",           x:5,  y:83, w:40, h:9,  color:"orange", link:"/FontIndex?level1Id=AP000001" },
+                // 右欄
+                { id:"fmla",    label:"委外計價公式設計",   x:55, y:3,  w:40, h:8,  color:"blue",   link:"/FontIndex?level1Id=FOS00004" },
+                { id:"price",   label:"委外價格表",         x:55, y:13, w:40, h:7,  color:"blue",   link:null },
+                // 隱藏中繼點：製程現帳↔委外出廠單連線中間
+                { id:"midCO",   label:"", x:25, y:16, w:0,  h:0,  color:"white",  link:null, hidden:true },
+                { id:"qOut",    label:"出廠單查詢",         x:55, y:23, w:40, h:7,  color:"blue",   link:"/FontIndex?level1Id=OS000010" },
+                { id:"qRet",    label:"回廠單查詢",         x:55, y:32, w:40, h:7,  color:"blue",   link:"/FontIndex?level1Id=OS000010" },
+                { id:"qSettle", label:"結帳單查詢",         x:55, y:41, w:40, h:7,  color:"blue",   link:"/FontIndex?level1Id=OS000010" },
+                { id:"scrap",   label:"報廢扣款單",         x:55, y:54, w:40, h:7,  color:"blue",   link:"/DynamicTemplate/Paper/FOS00013" },
+                { id:"rework",  label:"重工扣款單",         x:55, y:63, w:40, h:7,  color:"blue",   link:"/DynamicTemplate/Paper/FOS00014" },
+                { id:"disc",    label:"委外折讓單",         x:55, y:75, w:40, h:8,  color:"blue",   link:"/DynamicTemplate/Paper3L/FOS00017" }
+            ],
+            connections: [
+                // 左欄垂直主流程（cur→中繼點→outShip，委外價格表接中繼點）
+                { from:"cur",     fromPort:"bottom", to:"midCO",   toPort:"top",   style:"solid", arrow:false, path:"straight" },
+                { from:"midCO",   fromPort:"bottom", to:"outShip", toPort:"top",   style:"solid", path:"straight" },
+                { from:"price",   fromPort:"left",   to:"midCO",   toPort:"right", style:"solid", arrow:false, path:"straight" },
+                { from:"outShip", fromPort:"bottom", to:"retShip", toPort:"top",   style:"solid" },
+                { from:"retShip", fromPort:"bottom", to:"settle",  toPort:"top",   style:"solid" },
+                { from:"settle",  fromPort:"bottom", to:"close",   toPort:"top",   style:"solid" },
+                { from:"close",   fromPort:"bottom", to:"pay",     toPort:"top",   style:"solid" },
+                // 出廠單 → 查詢群（右側分支）
+                { from:"outShip", fromPort:"right",  to:"qOut",    toPort:"left",  style:"solid", path:"straight" },
+                { from:"retShip", fromPort:"right",  to:"qRet",    toPort:"left",  style:"solid", path:"straight" },
+                // 過帳單/報廢判定單 → 扣款單
+                { from:"settle",  fromPort:"right",  to:"scrap",   toPort:"left",  style:"solid", path:"straight" },
+                { from:"close",   fromPort:"right",  to:"qSettle", toPort:"left",  style:"solid", path:"straight" },
+                // 重工扣款單連線
+                { from:"rework",  fromPort:"bottom", to:"disc",    toPort:"top",   style:"solid" },
+                { from:"rework",  fromPort:"left",   to:"close",   toPort:"right", style:"dashed" },
+                // 委外折讓單 虛線
+                { from:"close",   fromPort:"bottom", to:"disc",    toPort:"left",  style:"dashed" },
+                { from:"disc",    fromPort:"bottom", to:"pay",     toPort:"right", style:"dashed" }
+            ]
+        },
+        // FQC 品質管理
+        "FQC": {
+            nodes: [
+                // ── 品質檢驗 上半區 ──
+                { id:"vendor",      label:"廠商進貨單\n廠商進貨入庫",  x:2,  y:2,  w:30, h:14, color:"green",  link:null },
+                { id:"iqc",         label:"IQC\n品質檢驗",             x:35, y:4,  w:30, h:10, color:"blue",   link:null },
+                { id:"outsRC",      label:"委外回廠單\n回廠入WIP",     x:68, y:2,  w:30, h:14, color:"green",  link:null },
+                { id:"wip1",        label:"WIP\n製程現帳",             x:2,  y:22, w:30, h:12, color:"red",    link:null },
+                { id:"ipqc",        label:"IPQC\n製程中檢驗",          x:35, y:23, w:30, h:10, color:"blue",   link:null },
+                // ── 報廢判定 下半區 ──
+                { id:"rework",      label:"重工判定單",                x:2,  y:40, w:30, h:9,  color:"blue",   link:null },
+                { id:"wip2",        label:"WIP\n製程現帳",             x:35, y:39, w:30, h:11, color:"red",    link:null },
+                { id:"mrbReject",   label:"MRB剔退產線",               x:56, y:51, w:24, h:9,  color:"blue",   link:null },
+                { id:"mrbForm",     label:"報廢過MRB單",               x:23, y:51, w:24, h:9,  color:"blue",   link:null },
+                { id:"mrbWH",       label:"MRB倉",                     x:35, y:63, w:30, h:11, color:"red",    link:null },
+                { id:"directScrap", label:"報廢直接判定單",            x:68, y:77, w:30, h:9,  color:"blue",   link:null },
+                { id:"mrbJudge",    label:"MRB報廢判定",               x:23, y:77, w:24, h:9,  color:"blue",   link:null },
+                { id:"scrapWH",     label:"報廢倉",                    x:35, y:89, w:30, h:11, color:"red",    link:null },
+                { id:"outsrc",      label:"製程委外",                  x:2,  y:91, w:30, h:9,  color:"orange", link:null }
+            ],
+            connections: [
+                // 品質檢驗：雙向箭頭（上下各偏移 1.5 形成平行雙線）
+                { from:"vendor",      fromPort:"right",  to:"iqc",       toPort:"left",   style:"solid", offsetY:-1.5 },
+                { from:"iqc",         fromPort:"left",   to:"vendor",    toPort:"right",  style:"solid", offsetY: 1.5 },
+                { from:"iqc",         fromPort:"right",  to:"outsRC",    toPort:"left",   style:"solid", offsetY:-1.5 },
+                { from:"outsRC",      fromPort:"left",   to:"iqc",       toPort:"right",  style:"solid", offsetY: 1.5 },
+                { from:"wip1",        fromPort:"right",  to:"ipqc",      toPort:"left",   style:"solid", offsetY:-1.5, path:"straight" },
+                { from:"ipqc",        fromPort:"left",   to:"wip1",      toPort:"right",  style:"solid", offsetY: 1.5, path:"straight" },
+                // 報廢判定
+                { from:"rework",      fromPort:"right",  to:"wip2",      toPort:"left",   style:"solid", path:"straight" },
+                { from:"mrbWH",       fromPort:"right",  to:"mrbReject", toPort:"bottom", style:"solid", arrow:false },
+                { from:"mrbReject",   fromPort:"top",    to:"wip2",      toPort:"right",  style:"solid" },
+                { from:"wip2",        fromPort:"bottom", to:"mrbWH",     toPort:"top",    style:"solid" },
+                { from:"mrbWH",       fromPort:"bottom", to:"scrapWH",   toPort:"top",    style:"solid" },
+                { from:"directScrap", fromPort:"bottom", to:"scrapWH",   toPort:"right",  style:"solid" },
+                { from:"wip2",        fromPort:"top",    to:"directScrap", toPort:"top",  style:"solid" },
+                { from:"mrbJudge",    fromPort:"bottom", to:"outsrc",    toPort:"top",    style:"dashed", path:"straight" },
+                { from:"rework",      fromPort:"bottom", to:"outsrc",    toPort:"top",    style:"solid", path:"straight" }
+            ]
+        },
+        // MPH 採購管理
+        "MPH": {
+            nodes: [
+                { id:"base",   label:"廠商主檔\n原物料料號主檔",         x:3,  y:2,  w:40, h:10, color:"green",  link:"/CCS/CC000055/2" },
+                { id:"lack",   label:"缺料轉請購",                      x:56, y:9,  w:36, h:8,  color:"green",  link:null },
+                { id:"req",    label:"請購單",                          x:3,  y:18, w:40, h:9,  color:"blue",   link:"/DynamicTemplate/Paper/PO000036" },
+                { id:"reqPo",  label:"請購轉採購",                      x:56, y:26, w:36, h:8,  color:"blue",   link:null },
+                { id:"po",     label:"採購單",                          x:3,  y:34, w:40, h:9,  color:"blue",   link:"/DynamicTemplate/Paper/PO000009" },
+                { id:"query",  label:"採購單查詢\n進貨單查詢\n廠商發票查詢", x:56, y:42, w:36, h:18, color:"blue",   link:"/FontIndex?level1Id=PO000008" },
+                { id:"inWh",   label:"廠商進貨入庫單",                  x:3,  y:50, w:40, h:8,  color:"green",  link:"/DynamicTemplate/Paper3L/MT001510" },
+                { id:"acc",    label:"採購進貨驗收單",                  x:3,  y:59, w:40, h:8,  color:"blue",   link:"/DynamicTemplate/Paper/PO000015" },
+                { id:"rtn",    label:"進貨退出單",                      x:56, y:64, w:36, h:8,  color:"blue",   link:"/DynamicTemplate/Paper/PO000016" },
+                { id:"inv",    label:"廠商發票",                        x:3,  y:76, w:40, h:8,  color:"blue",   link:"/DynamicTemplate/Paper/PO000024" },
+                { id:"disc",   label:"進貨折讓",                        x:56, y:80, w:36, h:8,  color:"blue",   link:"/DynamicTemplate/Paper/MP000018" },
+                { id:"ap",     label:"應付帳款",                        x:3,  y:92, w:40, h:8,  color:"orange", link:"/FontIndex?level1Id=AP000001" }
+            ],
+            connections: [
+                { from:"base",  fromPort:"bottom", to:"req",   toPort:"top",   style:"solid"  },
+                { from:"lack",  fromPort:"left",   to:"req",   toPort:"right", style:"solid",  offsetY:-1.2 },
+                { from:"req",   fromPort:"right",  to:"reqPo", toPort:"top",   style:"solid",  offsetY: 1.2 },
+                { from:"reqPo", fromPort:"bottom", to:"po",    toPort:"right", style:"solid"  },
+                { from:"req",   fromPort:"bottom", to:"po",    toPort:"top",   style:"solid"  },
+                { from:"po",    fromPort:"bottom", to:"inWh",  toPort:"top",   style:"solid"  },
+                { from:"inWh",  fromPort:"bottom", to:"acc",   toPort:"top",   style:"solid"  },
+                { from:"acc",   fromPort:"bottom", to:"inv",   toPort:"top",   style:"solid"  },
+                { from:"acc",   fromPort:"bottom", to:"rtn",   toPort:"left",  style:"solid"  },
+                { from:"rtn",   fromPort:"bottom", to:"disc",  toPort:"top",   style:"solid"  },
+                { from:"inv",   fromPort:"right",  to:"disc",  toPort:"left",  style:"dashed", path:"straight" },
+                { from:"inv",   fromPort:"bottom", to:"ap",    toPort:"top",   style:"solid"  },
+                { from:"disc",  fromPort:"bottom", to:"ap",    toPort:"right", style:"solid"  }
+            ]
+        }
+        ,
+        // MIN 庫存管理
+        "MIN": {
+            nodes: [
+                { id:"rcv",  label:"收料入庫",         x:6,  y:3,  w:36, h:9, color:"green",  link:null },
+                { id:"rtn",  label:"生產領料",         x:60, y:3,  w:36, h:9, color:"green",  link:null },
+                { id:"adj",  label:"庫存調整",         x:6,  y:16, w:36, h:9, color:"blue",   link:null },
+                { id:"trf",  label:"庫存移轉",         x:60, y:16, w:36, h:9, color:"blue",   link:null },
+                { id:"cnt",  label:"盤點作業",         x:6,  y:29, w:36, h:9, color:"blue",   link:null },
+                { id:"sto",  label:"庫存查詢",         x:60, y:29, w:36, h:9, color:"blue",   link:null },
+                { id:"out",  label:"銷貨出庫",         x:6,  y:42, w:36, h:9, color:"orange", link:"/DynamicTemplate/Paper3L/MIN00002" },
+                { id:"rpt",  label:"庫存報表",         x:60, y:42, w:36, h:9, color:"orange", link:null }
+            ],
+            connections: [
+                { from:"rcv",  fromPort:"bottom", to:"adj",  toPort:"top",   style:"solid"  },
+                { from:"rtn",  fromPort:"bottom", to:"trf",  toPort:"top",   style:"solid"  },
+                { from:"adj",  fromPort:"right",  to:"trf",  toPort:"left",  style:"dashed" },
+                { from:"adj",  fromPort:"bottom", to:"cnt",  toPort:"top",   style:"solid"  },
+                { from:"trf",  fromPort:"bottom", to:"sto",  toPort:"top",   style:"solid"  },
+                { from:"cnt",  fromPort:"right",  to:"sto",  toPort:"left",  style:"dashed" },
+                { from:"cnt",  fromPort:"bottom", to:"out",  toPort:"top",   style:"solid"  },
+                { from:"sto",  fromPort:"bottom", to:"rpt",  toPort:"top",   style:"solid"  }
+            ]
+        },
+        // ARM 應收帳款
+        "ARM": {
+            nodes: [
+                { id:"inv",  label:"銷貨發票",         x:6,  y:3,  w:36, h:9, color:"green",  link:"/DynamicTemplate/Paper/SA000006" },
+                { id:"ar",   label:"應收帳款建立",      x:6,  y:16, w:36, h:9, color:"blue",   link:null },
+                { id:"set",  label:"對帳作業",         x:6,  y:29, w:36, h:9, color:"blue",   link:null },
+                { id:"rcv",  label:"收款單",           x:6,  y:42, w:36, h:9, color:"blue",   link:"/DynamicTemplate/Paper/PR000003" },
+                { id:"disc", label:"折讓沖帳",         x:60, y:42, w:36, h:9, color:"blue",   link:null },
+                { id:"woff", label:"壞帳沖銷",         x:60, y:55, w:36, h:9, color:"blue",   link:null },
+                { id:"rpt",  label:"應收帳款報表",      x:6,  y:68, w:36, h:9, color:"orange", link:null }
+            ],
+            connections: [
+                { from:"inv",  fromPort:"bottom", to:"ar",   toPort:"top",   style:"solid"  },
+                { from:"ar",   fromPort:"bottom", to:"set",  toPort:"top",   style:"solid"  },
+                { from:"set",  fromPort:"bottom", to:"rcv",  toPort:"top",   style:"solid"  },
+                { from:"rcv",  fromPort:"right",  to:"disc", toPort:"left",  style:"dashed" },
+                { from:"disc", fromPort:"bottom", to:"woff", toPort:"top",   style:"solid"  },
+                { from:"rcv",  fromPort:"bottom", to:"rpt",  toPort:"top",   style:"solid"  },
+                { from:"woff", fromPort:"bottom", to:"rpt",  toPort:"right", style:"dashed" }
+            ]
+        },
+        // APR 應付帳款
+        "APR": {
+            nodes: [
+                { id:"po",   label:"採購進料",         x:6,  y:3,  w:36, h:9, color:"green",  link:null },
+                { id:"ap",   label:"應付帳款建立",      x:6,  y:16, w:36, h:9, color:"blue",   link:null },
+                { id:"set",  label:"對帳作業",         x:6,  y:29, w:36, h:9, color:"blue",   link:null },
+                { id:"pay",  label:"付款單",           x:6,  y:42, w:36, h:9, color:"blue",   link:null },
+                { id:"disc", label:"折讓沖帳",         x:60, y:42, w:36, h:9, color:"blue",   link:null },
+                { id:"pre",  label:"預付款",           x:60, y:55, w:36, h:9, color:"blue",   link:null },
+                { id:"rpt",  label:"應付帳款報表",      x:6,  y:68, w:36, h:9, color:"orange", link:null }
+            ],
+            connections: [
+                { from:"po",   fromPort:"bottom", to:"ap",   toPort:"top",   style:"solid"  },
+                { from:"ap",   fromPort:"bottom", to:"set",  toPort:"top",   style:"solid"  },
+                { from:"set",  fromPort:"bottom", to:"pay",  toPort:"top",   style:"solid"  },
+                { from:"pay",  fromPort:"right",  to:"disc", toPort:"left",  style:"dashed" },
+                { from:"disc", fromPort:"bottom", to:"pre",  toPort:"top",   style:"solid"  },
+                { from:"pay",  fromPort:"bottom", to:"rpt",  toPort:"top",   style:"solid"  },
+                { from:"pre",  fromPort:"bottom", to:"rpt",  toPort:"right", style:"dashed" }
+            ]
+        },
+        // ABE 票據管理
+        "ABE": {
+            nodes: [
+                { id:"rcv",  label:"收到票據",         x:6,  y:3,  w:36, h:9, color:"green",  link:null },
+                { id:"pay",  label:"開出票據",         x:60, y:3,  w:36, h:9, color:"green",  link:null },
+                { id:"dep",  label:"票據存入",         x:6,  y:16, w:36, h:9, color:"blue",   link:null },
+                { id:"dis",  label:"票據轉讓/貼現",    x:6,  y:29, w:36, h:9, color:"blue",   link:null },
+                { id:"due",  label:"票據到期",         x:6,  y:42, w:36, h:9, color:"blue",   link:null },
+                { id:"bns",  label:"票據跳票",         x:60, y:42, w:36, h:9, color:"blue",   link:null },
+                { id:"rpt",  label:"票據報表",         x:6,  y:55, w:36, h:9, color:"orange", link:null }
+            ],
+            connections: [
+                { from:"rcv",  fromPort:"bottom", to:"dep",  toPort:"top",   style:"solid"  },
+                { from:"dep",  fromPort:"bottom", to:"dis",  toPort:"top",   style:"solid"  },
+                { from:"dis",  fromPort:"bottom", to:"due",  toPort:"top",   style:"solid"  },
+                { from:"due",  fromPort:"right",  to:"bns",  toPort:"left",  style:"dashed" },
+                { from:"due",  fromPort:"bottom", to:"rpt",  toPort:"top",   style:"solid"  },
+                { from:"pay",  fromPort:"bottom", to:"due",  toPort:"right", style:"dashed" },
+                { from:"bns",  fromPort:"bottom", to:"rpt",  toPort:"right", style:"dashed" }
+            ]
+        },
+        // AFA 固定資產
+        "AFA": {
+            nodes: [
+                { id:"acq",  label:"資產取得",         x:6,  y:3,  w:36, h:9, color:"green",  link:null },
+                { id:"reg",  label:"資產建檔",         x:6,  y:16, w:36, h:9, color:"blue",   link:null },
+                { id:"dep",  label:"折舊計算",         x:6,  y:29, w:36, h:9, color:"blue",   link:null },
+                { id:"trf",  label:"資產移轉/改良",    x:60, y:29, w:36, h:9, color:"blue",   link:null },
+                { id:"ret",  label:"資產報廢/出售",    x:6,  y:42, w:36, h:9, color:"blue",   link:null },
+                { id:"rpt",  label:"固定資產報表",      x:6,  y:55, w:36, h:9, color:"orange", link:null }
+            ],
+            connections: [
+                { from:"acq",  fromPort:"bottom", to:"reg",  toPort:"top",   style:"solid"  },
+                { from:"reg",  fromPort:"bottom", to:"dep",  toPort:"top",   style:"solid"  },
+                { from:"reg",  fromPort:"right",  to:"trf",  toPort:"top",   style:"solid"  },
+                { from:"dep",  fromPort:"bottom", to:"ret",  toPort:"top",   style:"solid"  },
+                { from:"trf",  fromPort:"bottom", to:"ret",  toPort:"right", style:"dashed" },
+                { from:"ret",  fromPort:"bottom", to:"rpt",  toPort:"top",   style:"solid"  }
+            ]
+        }
+        ,
+        // AJN 總帳管理
+        "AJN": {
+            nodes: [
+                { id:"sub",  label:"各模組傳票",        x:6,  y:3,  w:36, h:9, color:"green",  link:null },
+                { id:"jnl",  label:"手工傳票",          x:60, y:3,  w:36, h:9, color:"green",  link:null },
+                { id:"gl",   label:"總帳科目",          x:27, y:16, w:46, h:9, color:"blue",   link:null },
+                { id:"clr",  label:"結帳作業",          x:27, y:29, w:46, h:9, color:"blue",   link:null },
+                { id:"tb",   label:"試算表",            x:6,  y:42, w:36, h:9, color:"orange", link:null },
+                { id:"fs",   label:"財務報表",          x:60, y:42, w:36, h:9, color:"orange", link:null }
+            ],
+            connections: [
+                { from:"sub",  fromPort:"bottom", to:"gl",   toPort:"top",   style:"solid"  },
+                { from:"jnl",  fromPort:"bottom", to:"gl",   toPort:"right", style:"solid"  },
+                { from:"gl",   fromPort:"bottom", to:"clr",  toPort:"top",   style:"solid"  },
+                { from:"clr",  fromPort:"bottom", to:"tb",   toPort:"top",   style:"solid"  },
+                { from:"clr",  fromPort:"bottom", to:"fs",   toPort:"top",   style:"solid"  },
+                { from:"tb",   fromPort:"right",  to:"fs",   toPort:"left",  style:"dashed" }
+            ]
+        },
+        // ACA 成本分析
+        "ACA": {
+            nodes: [
+                { id:"mat",  label:"原料成本",          x:6,  y:3,  w:36, h:9, color:"green",  link:null },
+                { id:"lab",  label:"人工成本",          x:60, y:3,  w:36, h:9, color:"green",  link:null },
+                { id:"ovh",  label:"製造費用",          x:6,  y:16, w:36, h:9, color:"green",  link:null },
+                { id:"std",  label:"標準成本設定",       x:27, y:29, w:46, h:9, color:"blue",   link:null },
+                { id:"act",  label:"實際成本計算",       x:27, y:42, w:46, h:9, color:"blue",   link:null },
+                { id:"var",  label:"差異分析",          x:27, y:55, w:46, h:9, color:"blue",   link:null },
+                { id:"rpt",  label:"成本報表",          x:27, y:68, w:46, h:9, color:"orange", link:null }
+            ],
+            connections: [
+                { from:"mat",  fromPort:"bottom", to:"std",  toPort:"top",   style:"solid"  },
+                { from:"lab",  fromPort:"bottom", to:"std",  toPort:"right", style:"solid"  },
+                { from:"ovh",  fromPort:"bottom", to:"std",  toPort:"top",   style:"solid"  },
+                { from:"std",  fromPort:"bottom", to:"act",  toPort:"top",   style:"solid"  },
+                { from:"act",  fromPort:"bottom", to:"var",  toPort:"top",   style:"solid"  },
+                { from:"var",  fromPort:"bottom", to:"rpt",  toPort:"top",   style:"solid"  }
+            ]
+        },
+        // ATX 媒體申報
+        "ATX": {
+            nodes: [
+                { id:"src",  label:"資料來源匯總",       x:27, y:3,  w:46, h:9, color:"green",  link:null },
+                { id:"chk",  label:"資料檢核",          x:27, y:16, w:46, h:9, color:"blue",   link:null },
+                { id:"gen",  label:"申報檔產生",         x:27, y:29, w:46, h:9, color:"blue",   link:null },
+                { id:"exp",  label:"匯出申報媒體",       x:27, y:42, w:46, h:9, color:"orange", link:null }
+            ],
+            connections: [
+                { from:"src",  fromPort:"bottom", to:"chk",  toPort:"top",   style:"solid"  },
+                { from:"chk",  fromPort:"bottom", to:"gen",  toPort:"top",   style:"solid"  },
+                { from:"gen",  fromPort:"bottom", to:"exp",  toPort:"top",   style:"solid"  }
+            ]
+        },
+        // HPS 人事管理
+        "HPS": {
+            nodes: [
+                { id:"emp",  label:"員工主檔",          x:27, y:3,  w:46, h:9, color:"green",  link:null },
+                { id:"dep",  label:"部門/職位設定",      x:6,  y:16, w:36, h:9, color:"blue",   link:null },
+                { id:"att",  label:"出勤管理",          x:60, y:16, w:36, h:9, color:"blue",   link:null },
+                { id:"lea",  label:"請假管理",          x:6,  y:29, w:36, h:9, color:"blue",   link:null },
+                { id:"ovt",  label:"加班管理",          x:60, y:29, w:36, h:9, color:"blue",   link:null },
+                { id:"per",  label:"考核管理",          x:6,  y:42, w:36, h:9, color:"blue",   link:null },
+                { id:"rpt",  label:"人事報表",          x:27, y:55, w:46, h:9, color:"orange", link:null }
+            ],
+            connections: [
+                { from:"emp",  fromPort:"bottom", to:"dep",  toPort:"top",   style:"solid"  },
+                { from:"emp",  fromPort:"bottom", to:"att",  toPort:"top",   style:"solid"  },
+                { from:"dep",  fromPort:"bottom", to:"lea",  toPort:"top",   style:"solid"  },
+                { from:"att",  fromPort:"bottom", to:"ovt",  toPort:"top",   style:"solid"  },
+                { from:"lea",  fromPort:"bottom", to:"per",  toPort:"top",   style:"solid"  },
+                { from:"per",  fromPort:"bottom", to:"rpt",  toPort:"top",   style:"solid"  },
+                { from:"ovt",  fromPort:"bottom", to:"rpt",  toPort:"right", style:"dashed" }
+            ]
+        },
+        // HSA 薪資管理
+        "HSA": {
+            nodes: [
+                { id:"emp",  label:"員工主檔",          x:6,  y:3,  w:36, h:9, color:"green",  link:null },
+                { id:"att",  label:"出勤資料",          x:60, y:3,  w:36, h:9, color:"green",  link:null },
+                { id:"sal",  label:"薪資設定",          x:6,  y:16, w:36, h:9, color:"blue",   link:null },
+                { id:"ded",  label:"加班/扣薪計算",      x:60, y:16, w:36, h:9, color:"blue",   link:null },
+                { id:"ins",  label:"勞健保計算",         x:6,  y:29, w:36, h:9, color:"blue",   link:null },
+                { id:"tax",  label:"所得稅計算",         x:60, y:29, w:36, h:9, color:"blue",   link:null },
+                { id:"pay",  label:"薪資結算",          x:27, y:42, w:46, h:9, color:"blue",   link:null },
+                { id:"slp",  label:"薪資單/轉帳",        x:27, y:55, w:46, h:9, color:"orange", link:null }
+            ],
+            connections: [
+                { from:"emp",  fromPort:"bottom", to:"sal",  toPort:"top",   style:"solid"  },
+                { from:"att",  fromPort:"bottom", to:"ded",  toPort:"top",   style:"solid"  },
+                { from:"sal",  fromPort:"bottom", to:"ins",  toPort:"top",   style:"solid"  },
+                { from:"ded",  fromPort:"bottom", to:"tax",  toPort:"top",   style:"solid"  },
+                { from:"ins",  fromPort:"bottom", to:"pay",  toPort:"top",   style:"solid"  },
+                { from:"tax",  fromPort:"bottom", to:"pay",  toPort:"right", style:"solid"  },
+                { from:"pay",  fromPort:"bottom", to:"slp",  toPort:"top",   style:"solid"  }
+            ]
+        },
+        // CFW 電子簽核
+        "CFW": {
+            nodes: [
+                { id:"tmpl", label:"簽核流程設定",       x:27, y:3,  w:46, h:9, color:"green",  link:null },
+                { id:"sub",  label:"表單送審",          x:27, y:16, w:46, h:9, color:"blue",   link:null },
+                { id:"ntf",  label:"簽核通知",          x:6,  y:29, w:36, h:9, color:"blue",   link:null },
+                { id:"apr",  label:"審核/退回",         x:60, y:29, w:36, h:9, color:"blue",   link:null },
+                { id:"fin",  label:"簽核完成",          x:6,  y:42, w:36, h:9, color:"blue",   link:null },
+                { id:"rej",  label:"退回修改",          x:60, y:42, w:36, h:9, color:"blue",   link:null },
+                { id:"arc",  label:"簽核紀錄",          x:27, y:55, w:46, h:9, color:"orange", link:null }
+            ],
+            connections: [
+                { from:"tmpl", fromPort:"bottom", to:"sub",  toPort:"top",   style:"solid"  },
+                { from:"sub",  fromPort:"bottom", to:"ntf",  toPort:"top",   style:"solid"  },
+                { from:"ntf",  fromPort:"right",  to:"apr",  toPort:"left",  style:"solid"  },
+                { from:"apr",  fromPort:"bottom", to:"fin",  toPort:"right", style:"solid"  },
+                { from:"apr",  fromPort:"bottom", to:"rej",  toPort:"top",   style:"solid"  },
+                { from:"rej",  fromPort:"bottom", to:"sub",  toPort:"right", style:"dashed" },
+                { from:"fin",  fromPort:"bottom", to:"arc",  toPort:"top",   style:"solid"  }
+            ]
+        }
+    };
+
+    function renderInteractiveFlowchart(systemId) {
+        const container = document.getElementById('interactiveFlowchart');
+        const emptyEl   = document.getElementById('interactiveFlowchartEmpty');
+        if (!container) return;
+
+        // 清除舊有節點與 SVG
+        container.querySelectorAll('.flow-node, .flow-svg-overlay').forEach(el => el.remove());
+
+        const config = systemFlowcharts[systemId];
+        if (!config || !config.nodes || config.nodes.length === 0) {
+            if (emptyEl) emptyEl.style.display = 'block';
+            return;
+        }
+        if (emptyEl) emptyEl.style.display = 'none';
+
+        const ns = 'http://www.w3.org/2000/svg';
+
+        // 建立 SVG 連線層（viewBox 0 0 100 100，preserveAspectRatio none 確保坐標與節點 % 對齊）
+        const svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('class', 'flow-svg-overlay');
+        svg.setAttribute('viewBox', '0 0 100 100');
+        svg.setAttribute('preserveAspectRatio', 'none');
+
+        // 定義箭頭 marker（solid / dashed 各一）
+        const defs = document.createElementNS(ns, 'defs');
+        [['arrow-solid','#555'], ['arrow-dashed','#888']].forEach(([id, fill]) => {
+            const marker = document.createElementNS(ns, 'marker');
+            marker.setAttribute('id', id);
+            marker.setAttribute('markerUnits', 'userSpaceOnUse');
+            marker.setAttribute('markerWidth', '2');
+            marker.setAttribute('markerHeight', '2');
+            marker.setAttribute('refX', '0');
+            marker.setAttribute('refY', '1');
+            marker.setAttribute('orient', 'auto');
+            const poly = document.createElementNS(ns, 'polygon');
+            poly.setAttribute('points', '0 0, 2 1, 0 2');
+            poly.setAttribute('fill', fill);
+            marker.appendChild(poly);
+            defs.appendChild(marker);
+        });
+        svg.appendChild(defs);
+
+        // 節點查找 Map
+        const nodeMap = {};
+        config.nodes.forEach(n => { nodeMap[n.id] = n; });
+
+        // 計算連接點坐標（百分比空間）
+        function getPort(node, port) {
+            switch (port) {
+                case 'top':    return { x: node.x + node.w / 2, y: node.y };
+                case 'bottom': return { x: node.x + node.w / 2, y: node.y + node.h };
+                case 'left':   return { x: node.x,              y: node.y + node.h / 2 };
+                case 'right':  return { x: node.x + node.w,     y: node.y + node.h / 2 };
+            }
+        }
+
+        // 路徑終點提前 ARROW_LEN，讓箭頭尾端在此，尖端落在節點邊界
+        const ARROW_LEN = 2;
+        function getPortTarget(node, port) {
+            switch (port) {
+                case 'top':    return { x: node.x + node.w / 2, y: node.y - ARROW_LEN };
+                case 'bottom': return { x: node.x + node.w / 2, y: node.y + node.h + ARROW_LEN };
+                case 'left':   return { x: node.x - ARROW_LEN,  y: node.y + node.h / 2 };
+                case 'right':  return { x: node.x + node.w + ARROW_LEN, y: node.y + node.h / 2 };
+            }
+        }
+
+        // 繪製連線 SVG path
+        config.connections.forEach(conn => {
+            const src = nodeMap[conn.from];
+            const dst = nodeMap[conn.to];
+            if (!src || !dst) return;
+
+            const rawP1 = getPort(src, conn.fromPort);
+            const rawP2 = conn.arrow !== false ? getPortTarget(dst, conn.toPort) : getPort(dst, conn.toPort);
+            const offY = conn.offsetY || 0;
+            const offX = conn.offsetX || 0;
+            const p1 = { x: rawP1.x + offX, y: rawP1.y + offY };
+            const p2 = { x: rawP2.x + offX, y: rawP2.y + offY };
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+
+            let d;
+            const fp = conn.fromPort, tp = conn.toPort;
+
+            if (conn.path === 'straight') {
+                d = `M${p1.x},${p1.y} L${p2.x},${p2.y}`;
+            } else if (fp === 'bottom' && tp === 'top') {
+                // 垂直：若 x 有偏差則 L 形
+                if (Math.abs(dx) < 1) {
+                    d = `M${p1.x},${p1.y} L${p2.x},${p2.y}`;
+                } else {
+                    // 水平段盡量靠近目標節點上方，避免穿越中間節點
+                    const pivot = Math.max(p1.y + 2, p2.y - 3);
+                    d = `M${p1.x},${p1.y} L${p1.x},${pivot} L${p2.x},${pivot} L${p2.x},${p2.y}`;
+                }
+            } else if (fp === 'bottom' && (tp === 'left' || tp === 'right')) {
+                // 向下再水平
+                d = `M${p1.x},${p1.y} L${p1.x},${p2.y} L${p2.x},${p2.y}`;
+            } else if ((fp === 'right' || fp === 'left') && tp === 'top') {
+                // 先水平延伸至目標 x，再垂直向下
+                d = `M${p1.x},${p1.y} L${p2.x},${p1.y} L${p2.x},${p2.y}`;
+            } else if (fp === 'left' && tp === 'left') {
+                // 兩端都是左側：向左繞 U 形，箭頭從左側朝右進入目標
+                const loopX = Math.min(p1.x, p2.x) - 2;
+                d = `M${p1.x},${p1.y} L${loopX},${p1.y} L${loopX},${p2.y} L${p2.x},${p2.y}`;
+            } else if ((fp === 'right' || fp === 'left') && (tp === 'left' || tp === 'right')) {
+                // 水平：若 y 有偏差則 L 形
+                if (Math.abs(dy) < 1) {
+                    d = `M${p1.x},${p1.y} L${p2.x},${p2.y}`;
+                } else {
+                    const midX = (p1.x + p2.x) / 2;
+                    d = `M${p1.x},${p1.y} L${midX},${p1.y} L${midX},${p2.y} L${p2.x},${p2.y}`;
+                }
+            } else if ((fp === 'right' || fp === 'left') && tp === 'bottom') {
+                // 先水平延伸至目標 x，再垂直
+                d = `M${p1.x},${p1.y} L${p2.x},${p1.y} L${p2.x},${p2.y}`;
+            } else if (fp === 'top' && (tp === 'left' || tp === 'right')) {
+                // 先垂直延伸至目標 y，再水平
+                d = `M${p1.x},${p1.y} L${p1.x},${p2.y} L${p2.x},${p2.y}`;
+            } else if (fp === 'top' && tp === 'top') {
+                // 兩端都是頂側：向上繞 U 形
+                const loopY = Math.min(p1.y, p2.y) - 2;
+                d = `M${p1.x},${p1.y} L${p1.x},${loopY} L${p2.x},${loopY} L${p2.x},${p2.y}`;
+            } else {
+                d = `M${p1.x},${p1.y} L${p2.x},${p2.y}`;
+            }
+
+            const path = document.createElementNS(ns, 'path');
+            path.setAttribute('d', d);
+            path.setAttribute('fill', 'none');
+            path.setAttribute('stroke', conn.style === 'dashed' ? '#888' : '#555');
+            path.setAttribute('stroke-width', '1.0');
+            if (conn.arrow !== false) {
+                path.setAttribute('marker-end', `url(#arrow-${conn.style})`);
+            }
+            if (conn.style === 'dashed') path.setAttribute('stroke-dasharray', '2.5,1.5');
+            svg.appendChild(path);
+        });
+
+        container.appendChild(svg);
+
+        // 建立節點 HTML 元素
+        config.nodes.forEach(node => {
+            if (node.hidden) return;
+            const el = document.createElement(node.link ? 'a' : 'div');
+            el.className = `flow-node flow-node-${node.color}`;
+            el.style.left   = `${node.x}%`;
+            el.style.top    = `${node.y}%`;
+            el.style.width  = `${node.w}%`;
+            el.style.height = `${node.h}%`;
+            el.innerHTML    = node.label.replace(/\n/g, '<br>');
+            if (node.link) { el.href = node.link; el.target = '_blank'; }
+            if (!node.link) el.title = '尚未設定連結';
+            container.appendChild(el);
+        });
+    }
 
     function getSystemIdFromPowerType(ptRaw) {
         if (ptRaw === null || ptRaw === undefined) return null;
@@ -884,6 +1714,9 @@ body {
 
         const sid = (systemId || '').toString().trim();
         if (!sid) return;
+
+        // 渲染互動流程圖（頁籤 1）
+        renderInteractiveFlowchart(sid);
 
         panel.style.display = 'block';
 

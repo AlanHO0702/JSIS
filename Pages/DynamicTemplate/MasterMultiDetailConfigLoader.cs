@@ -105,6 +105,7 @@ namespace PcbErpApi.Pages.CUR
                         DetailTable = detailTableName,
                         DetailDict = d.TableName,
                         DetailApi = string.Empty,
+                        OrderByField = NormalizeOrderBy(d.OrderByField),
                         KeyMap = BuildKeyMap(d.Mdkey),
                         PkFields = pkFields
                     });
@@ -161,6 +162,18 @@ namespace PcbErpApi.Pages.CUR
                 .Select(s => s.Trim())
                 .Where(s => !string.IsNullOrWhiteSpace(s))
                 .ToList();
+        }
+
+        private static string? NormalizeOrderBy(string? raw)
+        {
+            var s = (raw ?? string.Empty)
+                .Replace('*', ' ')
+                .Replace('+', ' ')
+                .Trim();
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            while (s.Contains("  "))
+                s = s.Replace("  ", " ");
+            return s;
         }
 
         private static async Task<List<string>> GetPrimaryKeyColumnsAsync(string connStr, string tableName)

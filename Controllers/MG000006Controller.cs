@@ -1,23 +1,27 @@
-using System.Data;
+﻿using System.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using PcbErpApi.Data;
+using PcbErpApi.Models;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 [ApiController]
 [Route("api/[controller]")]
 public class MG000006Controller : ControllerBase
 {
     private readonly string _connStr;
+    private readonly PcbErpContext _db;
     private readonly ILogger<MG000006Controller> _logger;
 
     public MG000006Controller(IConfiguration cfg, PcbErpContext db, ILogger<MG000006Controller> logger)
     {
+        _db = db;
         _connStr = cfg.GetConnectionString("Default")
                    ?? db?.Database.GetDbConnection().ConnectionString
-                   ?? throw new InvalidOperationException("缺少資料庫連線字串");
+                   ?? throw new InvalidOperationException("蝻箏?鞈?摨恍??摮葡");
         _logger = logger;
     }
 
@@ -32,6 +36,55 @@ public class MG000006Controller : ControllerBase
     {
         const string sql = @"SELECT * FROM dbo.MINdMatClass WITH (NOLOCK) ORDER BY MatClass";
         var list = await QueryListAsync(sql);
+
+        // 與 Client / 動態模板一致：先補 OCX Lookup 非實體欄位
+        try
+        {
+            var dictService = new TableDictionaryService(_db);
+            var dictCandidates = new[] { "MGN_MINdMatClass", "MGN_MINMatClass", "MINdMatClass" };
+            List<TableDictionaryService.OCXLookupMap> lookupMaps = new();
+            foreach (var dictTable in dictCandidates)
+            {
+                lookupMaps = dictService.GetOCXLookups(dictTable);
+                if (lookupMaps.Count > 0) break;
+            }
+
+            if (lookupMaps.Count > 0)
+            {
+                static string ToKey(object? v) => v == null || v == DBNull.Value ? "" : v.ToString()?.Trim() ?? "";
+
+                foreach (var row in list)
+                {
+                    foreach (var map in lookupMaps)
+                    {
+                        if (map == null || string.IsNullOrWhiteSpace(map.FieldName)) continue;
+                        if (row.ContainsKey(map.FieldName)) continue;
+
+                        var key = "";
+                        if (!string.IsNullOrWhiteSpace(map.KeyFieldName) && row.TryGetValue(map.KeyFieldName, out var keyFieldVal))
+                            key = ToKey(keyFieldVal);
+                        if (string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(map.KeySelfName) && row.TryGetValue(map.KeySelfName, out var keySelfVal))
+                            key = ToKey(keySelfVal);
+                        if (string.IsNullOrWhiteSpace(key) && row.TryGetValue(map.FieldName, out var rawVal))
+                            key = ToKey(rawVal);
+
+                        var display = "";
+                        if (!string.IsNullOrWhiteSpace(key) && map.LookupValues != null && map.LookupValues.TryGetValue(key, out var dv) && dv != null)
+                            display = dv;
+
+                        row[map.FieldName] = display;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "MG000006 mat-class: build OCX lookup display failed");
+        }
+
+        // 通用補值：依字典 Lookup，自動回填所有 Lk_xxxName（一次套用）
+        await FillLookupNameFallbackAsync(list, "MGN_MINdMatClass", "MGN_MINMatClass", "MINdMatClass");
+
         return Ok(list);
     }
 
@@ -39,7 +92,7 @@ public class MG000006Controller : ControllerBase
     public async Task<IActionResult> DeleteMatClassAsync(string matClass)
     {
         if (string.IsNullOrWhiteSpace(matClass))
-            return BadRequest(new { ok = false, error = "缺少 MatClass" });
+            return BadRequest(new { ok = false, error = "蝻箏? MatClass" });
 
         await using var conn = new SqlConnection(_connStr);
         await conn.OpenAsync();
@@ -67,7 +120,7 @@ SELECT m.*,
     public async Task<IActionResult> DeleteSetNumMainAsync(string setClass)
     {
         if (string.IsNullOrWhiteSpace(setClass))
-            return BadRequest(new { ok = false, error = "缺少 SetClass" });
+            return BadRequest(new { ok = false, error = "蝻箏? SetClass" });
 
         await using var conn = new SqlConnection(_connStr);
         await conn.OpenAsync();
@@ -81,7 +134,7 @@ SELECT m.*,
     public async Task<ActionResult<IEnumerable<IDictionary<string, object?>>>> GetSetNumSubAsync([FromQuery] string? setClass)
     {
         if (string.IsNullOrWhiteSpace(setClass))
-            return BadRequest(new { ok = false, error = "缺少 SetClass" });
+            return BadRequest(new { ok = false, error = "蝻箏? SetClass" });
 
         const string sql = @"SELECT * FROM dbo.MGNdSetNumSub WITH (NOLOCK) WHERE SetClass = @setClass ORDER BY NumId";
         var list = await QueryListAsync(sql, new SqlParameter("@setClass", SqlDbType.VarChar, 12) { Value = setClass.Trim() });
@@ -92,7 +145,7 @@ SELECT m.*,
     public async Task<IActionResult> DeleteSetNumSubAsync([FromQuery] string? setClass, [FromQuery] string? numId)
     {
         if (string.IsNullOrWhiteSpace(setClass) || string.IsNullOrWhiteSpace(numId))
-            return BadRequest(new { ok = false, error = "缺少 SetClass 或 NumId" });
+            return BadRequest(new { ok = false, error = "蝻箏? SetClass ??NumId" });
 
         await using var conn = new SqlConnection(_connStr);
         await conn.OpenAsync();
@@ -107,7 +160,7 @@ SELECT m.*,
     public async Task<ActionResult<IEnumerable<IDictionary<string, object?>>>> GetSetNumSubDtlAsync([FromQuery] string? setClass, [FromQuery] string? numId)
     {
         if (string.IsNullOrWhiteSpace(setClass) || string.IsNullOrWhiteSpace(numId))
-            return BadRequest(new { ok = false, error = "缺少 SetClass 或 NumId" });
+            return BadRequest(new { ok = false, error = "蝻箏? SetClass ??NumId" });
 
         const string sql = @"SELECT * FROM dbo.MGNdSetNumSubDtl WITH (NOLOCK) WHERE SetClass = @setClass AND NumId = @numId ORDER BY EnCode";
         var list = await QueryListAsync(
@@ -121,7 +174,7 @@ SELECT m.*,
     public async Task<IActionResult> DeleteSetNumSubDtlAsync([FromQuery] string? setClass, [FromQuery] string? numId, [FromQuery] string? encode)
     {
         if (string.IsNullOrWhiteSpace(setClass) || string.IsNullOrWhiteSpace(numId) || string.IsNullOrWhiteSpace(encode))
-            return BadRequest(new { ok = false, error = "缺少 SetClass / NumId / EnCode" });
+            return BadRequest(new { ok = false, error = "蝻箏? SetClass / NumId / EnCode" });
 
         await using var conn = new SqlConnection(_connStr);
         await conn.OpenAsync();
@@ -137,7 +190,7 @@ SELECT m.*,
     public async Task<ActionResult<object>> TestNumberAsync([FromBody] TestRequest req)
     {
         if (string.IsNullOrWhiteSpace(req?.SetClass))
-            return BadRequest(new { ok = false, error = "缺少 SetClass" });
+            return BadRequest(new { ok = false, error = "蝻箏? SetClass" });
 
         await using var conn = new SqlConnection(_connStr);
         await conn.OpenAsync();
@@ -163,7 +216,7 @@ SELECT m.*,
     public async Task<IActionResult> ImportMappingAsync([FromBody] ImportRequest req)
     {
         if (string.IsNullOrWhiteSpace(req?.SetClass) || string.IsNullOrWhiteSpace(req?.NumId))
-            return BadRequest(new { ok = false, error = "缺少 SetClass 或 NumId" });
+            return BadRequest(new { ok = false, error = "蝻箏? SetClass ??NumId" });
 
         var sql = "exec MGNdSetNumSubDtlImp @SetClass, @NumId";
 
@@ -189,7 +242,7 @@ SELECT m.*,
     public async Task<IActionResult> CopyToMatAsync([FromBody] CopyRequest req)
     {
         if (string.IsNullOrWhiteSpace(req?.SetClass) || string.IsNullOrWhiteSpace(req?.NumId))
-            return BadRequest(new { ok = false, error = "缺少 SetClass 或 NumId" });
+            return BadRequest(new { ok = false, error = "蝻箏? SetClass ??NumId" });
 
         var sql = "exec MGNdSetNumSubCopyToMat @SetClass, @NumId, @UserId, @IsMust, @IsHand";
 
@@ -245,6 +298,158 @@ SELECT TableName, FieldName, ISNULL(iFieldWidth, 0) AS W, ISNULL(DisplaySize, 0)
         return Ok(list);
     }
 
+    private async Task FillLookupNameFallbackAsync(List<IDictionary<string, object?>> rows, params string[] dictCandidates)
+    {
+        if (rows == null || rows.Count == 0) return;
+
+        try
+        {
+            static string ToText(object? v) => v == null || v == DBNull.Value ? "" : v.ToString()?.Trim() ?? "";
+
+            var dictFields = await LoadDictFieldsByCandidatesAsync(dictCandidates);
+            if (dictFields.Count == 0) return;
+
+            var sourceLookupFields = dictFields
+                .Where(f => !string.IsNullOrWhiteSpace(f.FieldName)
+                            && !string.IsNullOrWhiteSpace(f.LookupTable)
+                            && !string.IsNullOrWhiteSpace(f.LookupKeyField)
+                            && !string.IsNullOrWhiteSpace(f.LookupResultField))
+                .ToDictionary(f => f.FieldName!, f => f, StringComparer.OrdinalIgnoreCase);
+
+            var rules = new List<(string TargetField, string SourceField, string LookupTable, string LookupKeyField, string LookupNameField)>();
+
+            foreach (var lkField in dictFields)
+            {
+                var target = lkField.FieldName?.Trim() ?? "";
+                if (!target.StartsWith("Lk_", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!target.EndsWith("Name", StringComparison.OrdinalIgnoreCase)) continue;
+                if (target.Length <= 7) continue;
+
+                var core = target.Substring(3, target.Length - 7).Trim();
+                if (string.IsNullOrWhiteSpace(core)) continue;
+
+                var sourceCandidates = new[] { core, core + "Id", core + "Code" };
+                CURdTableField? sourceField = null;
+                var sourceName = "";
+                foreach (var sc in sourceCandidates)
+                {
+                    if (sourceLookupFields.TryGetValue(sc, out var hit))
+                    {
+                        sourceField = hit;
+                        sourceName = sc;
+                        break;
+                    }
+                }
+                if (sourceField == null) continue;
+
+                var resultParts = (sourceField.LookupResultField ?? "")
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(x => x.Trim())
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .ToList();
+                if (resultParts.Count == 0) continue;
+
+                var nameField = resultParts.Count >= 2 ? resultParts[1] : resultParts[0];
+                if (string.IsNullOrWhiteSpace(nameField)) continue;
+
+                rules.Add((
+                    target,
+                    sourceName,
+                    sourceField.LookupTable!.Trim(),
+                    sourceField.LookupKeyField!.Trim(),
+                    nameField
+                ));
+            }
+
+            if (rules.Count == 0) return;
+
+            var lookupCache = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rule in rules)
+            {
+                var cacheKey = $"{rule.LookupTable}|{rule.LookupKeyField}|{rule.LookupNameField}";
+                if (lookupCache.ContainsKey(cacheKey)) continue;
+                lookupCache[cacheKey] = await LoadLookupMapAsync(rule.LookupTable, rule.LookupKeyField, rule.LookupNameField);
+            }
+
+            foreach (var row in rows)
+            {
+                foreach (var rule in rules)
+                {
+                    var current = row.TryGetValue(rule.TargetField, out var currentVal) ? ToText(currentVal) : "";
+                    if (!string.IsNullOrWhiteSpace(current)) continue;
+
+                    var sourceKey = row.TryGetValue(rule.SourceField, out var sourceVal) ? ToText(sourceVal) : "";
+                    if (string.IsNullOrWhiteSpace(sourceKey)) continue;
+
+                    var cacheKey = $"{rule.LookupTable}|{rule.LookupKeyField}|{rule.LookupNameField}";
+                    if (!lookupCache.TryGetValue(cacheKey, out var map) || map.Count == 0) continue;
+                    if (!map.TryGetValue(sourceKey, out var displayName) || string.IsNullOrWhiteSpace(displayName)) continue;
+
+                    row[rule.TargetField] = displayName;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "MG000006 mat-class: fallback lookup fill failed");
+        }
+    }
+
+    private async Task<List<CURdTableField>> LoadDictFieldsByCandidatesAsync(IEnumerable<string> candidates)
+    {
+        foreach (var raw in candidates ?? Enumerable.Empty<string>())
+        {
+            var table = (raw ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(table)) continue;
+
+            var fields = await _db.CURdTableFields.AsNoTracking()
+                .Where(x => x.TableName == table || x.TableName == ("dbo." + table))
+                .ToListAsync();
+            if (fields.Count > 0) return fields;
+        }
+        return new List<CURdTableField>();
+    }
+
+    private async Task<Dictionary<string, string>> LoadLookupMapAsync(string lookupTable, string keyField, string nameField)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var tableSql = QuoteObjectName(lookupTable);
+        var keySql = QuoteIdentifier(keyField);
+        var nameSql = QuoteIdentifier(nameField);
+        if (tableSql == null || keySql == null || nameSql == null) return map;
+
+        var sql = $"SELECT {keySql} AS [K], {nameSql} AS [N] FROM {tableSql} WITH (NOLOCK)";
+        var rows = await QueryListAsync(sql);
+        foreach (var row in rows)
+        {
+            var k = row.TryGetValue("K", out var keyVal) ? keyVal?.ToString()?.Trim() ?? "" : "";
+            var n = row.TryGetValue("N", out var nameVal) ? nameVal?.ToString()?.Trim() ?? "" : "";
+            if (!string.IsNullOrWhiteSpace(k) && !string.IsNullOrWhiteSpace(n))
+                map[k] = n;
+        }
+        return map;
+    }
+
+    private static string? QuoteIdentifier(string value)
+    {
+        var v = (value ?? string.Empty).Trim().Trim('[', ']');
+        if (!Regex.IsMatch(v, @"^[A-Za-z0-9_]+$")) return null;
+        return $"[{v}]";
+    }
+
+    private static string? QuoteObjectName(string value)
+    {
+        var v = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(v)) return null;
+        var parts = v.Split('.', StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => p.Trim().Trim('[', ']'))
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .ToList();
+        if (parts.Count == 0) return null;
+        if (parts.Any(p => !Regex.IsMatch(p, @"^[A-Za-z0-9_]+$"))) return null;
+        return string.Join(".", parts.Select(p => $"[{p}]"));
+    }
+
     private async Task<List<IDictionary<string, object?>>> QueryListAsync(string sql, params SqlParameter[] parameters)
     {
         var list = new List<IDictionary<string, object?>>();
@@ -269,3 +474,4 @@ SELECT TableName, FieldName, ISNULL(iFieldWidth, 0) AS W, ISNULL(DisplaySize, 0)
         return list;
     }
 }
+

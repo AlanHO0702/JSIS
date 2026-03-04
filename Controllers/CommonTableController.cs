@@ -632,7 +632,9 @@ ORDER BY idx.index_id, ic.key_ordinal";
                     await using var rd = await cmdAll.ExecuteReaderAsync();
                     allDt.Load(rd);
                 }
-                return Ok(new { totalCount, data = ToDictList(allDt) });
+                var allRows = ToDictList(allDt);
+                await EnrichRowsWithOcxLookupAsync(table, actualTable, allRows);
+                return Ok(new { totalCount, data = allRows });
             }
 
             if (string.IsNullOrWhiteSpace(orderSql))
@@ -653,7 +655,9 @@ ORDER BY idx.index_id, ic.key_ordinal";
                 await using var rd = await cmd.ExecuteReaderAsync();
                 dt.Load(rd);
             }
-            return Ok(new { totalCount, data = ToDictList(dt) });
+            var rows = ToDictList(dt);
+            await EnrichRowsWithOcxLookupAsync(table, actualTable, rows);
+            return Ok(new { totalCount, data = rows });
         }
 
 
@@ -681,7 +685,8 @@ ORDER BY idx.index_id, ic.key_ordinal";
             await using var rd = await cmd.ExecuteReaderAsync();
             dt.Load(rd);
         }
-        return Ok(ToDictList(dt));
+        var rows = ToDictList(dt);
+        return Ok(rows);
     }
 
     // ?啣?嚗yKeys(table, keyNames[], keyValues[]) ??憭?= 璇辣 (AND)
@@ -726,7 +731,9 @@ ORDER BY idx.index_id, ic.key_ordinal";
             await using var rd = await cmd.ExecuteReaderAsync();
             dt.Load(rd);
         }
-        return Ok(ToDictList(dt));
+        var rows = ToDictList(dt);
+        await EnrichRowsWithOcxLookupAsync(table, actualTable, rows);
+        return Ok(rows);
     }
 
     private static List<Dictionary<string, object?>> ToDictList(DataTable dt)
@@ -740,6 +747,54 @@ ORDER BY idx.index_id, ic.key_ordinal";
             list.Add(d);
         }
         return list;
+    }
+
+    private Task EnrichRowsWithOcxLookupAsync(string dictTableName, string actualTableName, List<Dictionary<string, object?>> rows)
+    {
+        if (rows == null || rows.Count == 0) return Task.CompletedTask;
+
+        try
+        {
+            var dictService = new TableDictionaryService(_context);
+            var lookupMaps = dictService.GetOCXLookups(dictTableName);
+            if (lookupMaps.Count == 0 && !string.Equals(dictTableName, actualTableName, StringComparison.OrdinalIgnoreCase))
+                lookupMaps = dictService.GetOCXLookups(actualTableName);
+            if (lookupMaps.Count == 0 && dictTableName.StartsWith("MGN_", StringComparison.OrdinalIgnoreCase))
+                lookupMaps = dictService.GetOCXLookups(dictTableName.Substring(4));
+            if (lookupMaps.Count == 0 && !dictTableName.StartsWith("MGN_", StringComparison.OrdinalIgnoreCase))
+                lookupMaps = dictService.GetOCXLookups("MGN_" + dictTableName);
+            if (lookupMaps.Count == 0) return Task.CompletedTask;
+
+            static string ToKey(object? v) => v == null || v == DBNull.Value ? "" : v.ToString()?.Trim() ?? "";
+
+            foreach (var row in rows)
+            {
+                foreach (var map in lookupMaps)
+                {
+                    if (map == null || string.IsNullOrWhiteSpace(map.FieldName)) continue;
+                    if (row.ContainsKey(map.FieldName)) continue;
+
+                    var key = "";
+                    if (!string.IsNullOrWhiteSpace(map.KeyFieldName) && row.TryGetValue(map.KeyFieldName, out var keyFieldVal))
+                        key = ToKey(keyFieldVal);
+                    if (string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(map.KeySelfName) && row.TryGetValue(map.KeySelfName, out var keySelfVal))
+                        key = ToKey(keySelfVal);
+                    if (string.IsNullOrWhiteSpace(key) && row.TryGetValue(map.FieldName, out var rawVal))
+                        key = ToKey(rawVal);
+
+                    var display = "";
+                    if (!string.IsNullOrWhiteSpace(key) && map.LookupValues != null && map.LookupValues.TryGetValue(key, out var dv) && dv != null)
+                        display = dv;
+
+                    row[map.FieldName] = display;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "CommonTable: enrich OCX lookup failed for {Dict}/{Actual}", dictTableName, actualTableName);
+        }
+        return Task.CompletedTask;
     }
 
     private async Task<string> BuildOrderBySqlAsync(string table, string? orderByRaw, string? defaultDir = "ASC")
@@ -897,7 +952,8 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             await using var rd = await cmd.ExecuteReaderAsync();
             dt.Load(rd);
         }
-        return Ok(ToDictList(dt));
+        var rows = ToDictList(dt);
+        return Ok(rows);
     }
 
     [HttpDelete]
@@ -968,4 +1024,3 @@ SELECT 1
     }
     }
 }
-

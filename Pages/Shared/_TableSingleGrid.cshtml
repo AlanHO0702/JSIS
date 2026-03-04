@@ -23,36 +23,8 @@
     var keyFieldsFromViewData = (IEnumerable<string>)(ViewData["KeyFields"] as IEnumerable<string> ?? Array.Empty<string>());
     var dictFields    = (IEnumerable<dynamic>)(ViewData["FieldDictList"] as IEnumerable<dynamic> ?? fields);
     var dictTableName = (string?)(ViewData["DictTableName"] as string) ?? tableName;
-
-    // 建立 fieldFormatMap 資料
-    var fieldFormatMapData = new List<object>();
-    if (dictFields != null)
-    {
-        foreach (var f in dictFields)
-        {
-            try
-            {
-                fieldFormatMapData.Add(new
-                {
-                    FieldName = f?.FieldName?.ToString() ?? "",
-                    DataType = f?.DataType?.ToString() ?? "",
-                    FormatStr = f?.FormatStr?.ToString() ?? "",
-                    ComboStyle = f?.ComboStyle != null ? Convert.ToInt32(f.ComboStyle) : (int?)null
-                });
-            }
-            catch (Exception ex)
-            {
-                // 如果轉換失敗，使用預設值
-                fieldFormatMapData.Add(new
-                {
-                    FieldName = f?.FieldName?.ToString() ?? "",
-                    DataType = "",
-                    FormatStr = "",
-                    ComboStyle = (int?)null
-                });
-            }
-        }
-    }
+    var disableEditColor = (ViewData["DisableEditColor"] as bool?)
+        ?? string.Equals(ViewData["DisableEditColor"]?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
     var enableRowDelete = (ViewData["EnableRowDelete"] as bool?)
         ?? (string.Equals(ViewData["EnableRowDelete"]?.ToString(), "true", StringComparison.OrdinalIgnoreCase)
             || string.Equals(ViewData["EnableRowDelete"]?.ToString(), "1", StringComparison.OrdinalIgnoreCase));
@@ -308,6 +280,15 @@
         }
         return true;
     }
+
+    private static string NormalizeEditColor(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+        var s = raw.Trim();
+        if (s.StartsWith("cl", StringComparison.OrdinalIgnoreCase))
+            s = s.Substring(2);
+        return s;
+    }
 }
 
 <style>
@@ -527,16 +508,36 @@
                       }
 
                       var cellClass = IsNumberDataType(dictField ?? f) ? "cell-number" : "cell-text";
-                      <td class="text-nowrap @cellClass @(isReadOnly ? "readonly-td" : "")" data-field="@name" style="@hiddenStyle">
-                        <span class="cell-view @(isReadOnly ? "readonly-cell" : "")" data-raw="@rawVal" data-lookupkey="@lookupKey">@displayValue</span>
-                        <input class="form-control form-control-sm cell-edit d-none @(isReadOnly ? "readonly-cell" : "")"
-                               name="@name"
-                               value="@rawVal"
-                               data-raw="@rawVal"
-                               data-lookupkey="@lookupKey"
-                               data-readonly="@(isReadOnly ? "1" : "0")"
-                               @(isReadOnly ? "readonly" : "") />
-                      </td>
+                      var comboStyleStr = GetFieldProp(dictField ?? (object)f, "ComboStyle");
+                      int.TryParse(comboStyleStr, out int comboStyleVal);
+                      var isCellCheckbox = comboStyleVal == 1;
+                      var editColorRaw = GetFieldProp(dictField ?? (object)f, "EditColor");
+                      var cellBgColor = NormalizeEditColor(editColorRaw);
+                      var bgStyle = !disableEditColor && !string.IsNullOrWhiteSpace(cellBgColor) ? $"background-color:{cellBgColor}!important;" : "";
+                      var tdStyle = bgStyle + hiddenStyle;
+                      if (isCellCheckbox)
+                      {
+                          var isChecked = rawVal == "1" || string.Equals(rawVal, "true", StringComparison.OrdinalIgnoreCase);
+                          var initVal = isChecked ? "1" : "0";
+                          <td class="text-nowrap text-center @(isReadOnly ? "readonly-td" : "")" data-field="@name" data-checkbox="1" style="@tdStyle">
+                            <input type="checkbox" class="sg-chk-view form-check-input" @(isChecked ? "checked" : "") disabled />
+                            <input type="hidden" class="cell-edit" name="@name" value="@initVal" data-raw="@initVal" data-readonly="@(isReadOnly ? "1" : "0")" />
+                            <input type="checkbox" class="sg-chk-edit form-check-input" @(isChecked ? "checked" : "") @(isReadOnly ? "disabled" : "") data-readonly="@(isReadOnly ? "1" : "0")" />
+                          </td>
+                      }
+                      else
+                      {
+                          <td class="text-nowrap @cellClass @(isReadOnly ? "readonly-td" : "")" data-field="@name" style="@tdStyle">
+                            <span class="cell-view @(isReadOnly ? "readonly-cell" : "")" data-raw="@rawVal" data-lookupkey="@lookupKey">@displayValue</span>
+                            <input class="form-control form-control-sm cell-edit d-none @(isReadOnly ? "readonly-cell" : "")"
+                                   name="@name"
+                                   value="@rawVal"
+                                   data-raw="@rawVal"
+                                   data-lookupkey="@lookupKey"
+                                   data-readonly="@(isReadOnly ? "1" : "0")"
+                                   @(isReadOnly ? "readonly" : "") />
+                          </td>
+                      }
                   }
                 </tr>
               }
@@ -590,9 +591,9 @@
  .table-wrapper{height:calc(100vh - var(--app-toolbar-height, 56px));display:flex;flex-direction:column}
  .table-wrapper>.card{flex:1;display:flex;flex-direction:column;min-height:0}
  .table-wrapper>.card>.card-body{flex:1;display:flex;flex-direction:column;min-height:0;padding:0 8px}
- table.table{table-layout:fixed!important;border-collapse:collapse!important;font-size:.85rem;width:1px!important;max-width:none!important}
- table th,table td{vertical-align:middle!important;border:1px solid #dee2e6!important;padding:0!important;white-space:nowrap;overflow:hidden;min-width:0!important}
-  table th{padding:2px 4px!important}
+ #mainGrid.table{table-layout:fixed!important;border-collapse:collapse!important;font-size:.85rem;width:1px!important;max-width:none!important}
+ #mainGrid th,#mainGrid td{vertical-align:middle!important;border:1px solid #dee2e6!important;padding:0!important;white-space:nowrap;overflow:hidden;min-width:0!important}
+  #mainGrid th{padding:2px 4px!important}
   #mainGrid th .header-label{display:block;min-width:0;overflow:hidden;text-overflow:clip;white-space:nowrap}
  .table-hover tbody tr:hover{background:#f1f5ff!important}
 .cell-view,.cell-edit{display:block;width:100%;min-width:0!important;height:20px!important;min-height:20px!important;max-height:20px!important;font-size:.85rem;line-height:16px!important;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:clip;padding:2px 3px!important}
@@ -604,7 +605,12 @@
 #mainGrid tbody td{background:#fff!important;border-top:1px solid #c4cede!important;border-bottom:1px solid #c4cede!important;border-right:1px solid #c4cede!important;padding:2px 3px!important}
 #mainGrid thead th:last-child{border-right:1px solid #b7c2d4!important}
 #mainGrid tbody td:last-child{border-right:1px solid #c4cede!important}
-.edit-mode #mainGrid tbody td.readonly-td{background:#f3f4f6!important}
+#mainGrid tbody td.readonly-td{background:silver!important}
+/* 勾選框欄位：view/edit 模式切換 */
+#mainGrid tbody td[data-checkbox] .sg-chk-view{display:block!important;margin:auto;width:16px;height:16px;cursor:default}
+#mainGrid tbody td[data-checkbox] .sg-chk-edit{display:none!important}
+.edit-mode #mainGrid tbody td[data-checkbox]:not(.readonly-td) .sg-chk-view{display:none!important}
+.edit-mode #mainGrid tbody td[data-checkbox]:not(.readonly-td) .sg-chk-edit{display:block!important;margin:auto;width:16px;height:16px}
 #mainGrid thead th{user-select:none}
 #mainGrid thead th.col-dragging{opacity:.55}
 #mainGrid thead th.col-drag-over-left{box-shadow:inset 3px 0 0 #3b82f6}
@@ -763,15 +769,55 @@
   const table   = document.getElementById("mainGrid");
   console.log('[DEBUG] table loaded');
   const ocxLookupMaps = @Html.Raw(JsonSerializer.Serialize(ocxLookupPayload));
-  console.log('[DEBUG] ocxLookupMaps loaded');
+
+  function normalizeEditColor(raw) {
+    if (!raw) return '';
+    let s = String(raw).trim();
+    if (s.toLowerCase().startsWith('cl')) s = s.substring(2);
+    return s;
+  }
+
+  function syncCheckboxVisible(td, val) {
+    const v = String(val ?? '');
+    const checked = v === '1' || v.toLowerCase() === 'true';
+    const chkView = td.querySelector('.sg-chk-view');
+    const chkEdit = td.querySelector('.sg-chk-edit');
+    if (chkView) chkView.checked = checked;
+    if (chkEdit) chkEdit.checked = checked;
+  }
+
   const customButtonsMeta = @Html.Raw(JsonSerializer.Serialize(customButtonMeta ?? new List<object>()));
-  console.log('[DEBUG] customButtonsMeta loaded');
-  const fieldFormatMap = @Html.Raw(JsonSerializer.Serialize(fieldFormatMapData));
-  console.log('[DEBUG] fieldFormatMap loaded:', fieldFormatMap);
+  const disableEditColor = @disableEditColor.ToString().ToLowerInvariant();
+  const fieldFormatMap = @Html.Raw(JsonSerializer.Serialize(
+    dictFields.Select(f => new {
+      FieldName = f.FieldName,
+      DataType = f.DataType,
+      FormatStr = f.FormatStr,
+      ComboStyle = f.ComboStyle,
+      EditColor = f.EditColor
+    })
+  ));
     const customButtonBar = null;
     const customButtonBarBottom = document.getElementById("customButtonBarBottom");
     const dictTableName = "@dictTableName";
-    let lookupMaps = ocxLookupMaps || {};
+    // 初始化時將 map key 全部轉小寫，確保後續比對不受大小寫影響
+    // （C# Dictionary 用 OrdinalIgnoreCase，JS 物件屬性存取區分大小寫，需補齊）
+    let lookupMaps = (() => {
+      const src = ocxLookupMaps || {};
+      const out = {};
+      for (const [field, cfg] of Object.entries(src)) {
+        if (cfg && cfg.map) {
+          const normalizedMap = {};
+          for (const [k, v] of Object.entries(cfg.map)) {
+            normalizedMap[String(k).trim().toLowerCase()] = v;
+          }
+          out[field] = { ...cfg, map: normalizedMap };
+        } else {
+          out[field] = cfg;
+        }
+      }
+      return out;
+    })();
     let isEdit = false;
     let totalCountAll = @totalCount;
     let currentPage = @pageNumber;
@@ -1430,8 +1476,8 @@
   const lookupDisplay = (fieldName, rawVal, fallback, lookupKey) => {
     const fieldKey = String(fieldName || "").toLowerCase();
     const map = lookupMaps[fieldKey]?.map;
-    if (!fieldName || !map) return fallback ?? (rawVal ?? "");
-    const key = String(lookupKey ?? rawVal ?? "");
+    if (!fieldName || !map) return rawVal ?? fallback ?? "";
+    const key = String(lookupKey ?? rawVal ?? "").trim().toLowerCase(); // 去除固定長度字串尾端空白後再比對
     if (key === "") return fallback ?? "";
     if (Object.prototype.hasOwnProperty.call(map, key)) {
       return map[key] ?? fallback ?? key;
@@ -1633,14 +1679,16 @@
       setDirty(true);
     });
 
-    // checkbox 的 change 事件也要觸發 dirty
-    table.addEventListener("change", (e) => {
+    // 勾選框變更 → 更新 hidden input + dirty
+    table.addEventListener('change', (e) => {
+      const chk = e.target;
+      if (!(chk instanceof HTMLInputElement) || chk.type !== 'checkbox' || !chk.classList.contains('sg-chk-edit')) return;
       if (!isEdit) return;
-      const inp = e.target;
-      if (!(inp instanceof HTMLInputElement)) return;
-      if (inp.type !== "checkbox") return;
-      if (!inp.classList.contains("cell-edit")) return;
-      if (inp.dataset.readonly === "1") return;
+      const td = chk.closest('td[data-checkbox]');
+      if (!td) return;
+      const hidden = td.querySelector('.cell-edit');
+      if (!hidden || hidden.dataset.readonly === '1') return;
+      hidden.value = chk.checked ? '1' : '0';
       setDirty(true);
     });
   });
@@ -1673,15 +1721,14 @@
           const inp  = cell.querySelector(".cell-edit");
           const span = cell.querySelector(".cell-view");
           if (inp) {
-            if (inp.type === "checkbox") {
-              // checkbox: 更新 data-raw
-              inp.dataset.raw = newVal;
-            } else {
-              // 一般 input: 更新 defaultValue
-              inp.defaultValue = newVal;
-            }
+            inp.defaultValue = newVal;
+            inp.dataset.raw  = newVal;
           }
-          if (span) span.textContent  = lookupDisplay(field, newVal, span.textContent, inp?.dataset.lookupkey ?? newVal);
+          if (cell.dataset.checkbox) {
+            syncCheckboxVisible(cell, newVal);
+          } else if (span) {
+            span.textContent = lookupDisplay(field, newVal, span.textContent, inp?.dataset.lookupkey ?? newVal);
+          }
         }
       });
       setDirty(false);
@@ -1839,12 +1886,14 @@
   sgCancel?.addEventListener("click", cancelEdit);
 
   function findRowByKeys(change) {
+    const changeLC = {};
+    for (const [ck, cv] of Object.entries(change)) changeLC[ck.toLowerCase()] = cv;
     const rows = Array.from(table.querySelectorAll("tbody tr"));
     return rows.find(tr => {
       return KEY_FIELDS.every(k => {
         const inp = Array.from(tr.querySelectorAll('.cell-edit')).find(i => i.name.toLowerCase() === k);
         if (!inp) return false;
-        const changeVal = change[k];
+        const changeVal = changeLC[k];
         if (changeVal == null) return false;
         return String(inp.value) === String(changeVal) || String(inp.defaultValue) === String(changeVal);
       });
@@ -1864,18 +1913,8 @@
         const name = inp.name;
         if (!name) return;
 
-        // 處理 checkbox 和一般 input 的值
-        let oldVal, newVal;
-        if (inp.type === "checkbox") {
-          // checkbox: 使用 data-raw 作為舊值，checked 狀態作為新值
-          oldVal = inp.dataset.raw ?? "";
-          newVal = inp.checked ? "1" : "0";
-        } else {
-          // 一般 input: 使用 defaultValue 和 value
-          oldVal = inp.defaultValue ?? "";
-          newVal = inp.value ?? "";
-        }
-
+        const oldVal = inp.dataset.raw ?? inp.defaultValue ?? "";
+        const newVal = inp.value ?? "";
         const isReadonly = inp.dataset.readonly === "1";
         const isKey = KEY_FIELDS.includes(name.toLowerCase());
 
@@ -2186,48 +2225,33 @@
         || dt.startsWith('int') || dt.startsWith('smallint') || dt.startsWith('tinyint') || dt.startsWith('bigint');
       const cellClass = isNumber ? 'cell-number' : 'cell-text';
       const isReadOnly = f.ReadOnly != null && f.ReadOnly != 0;
-      const isCheckbox = isCheckboxField(fieldName);
+      const fmtMeta = fieldFormatMap?.find?.(x => (x.FieldName || '').toLowerCase() === (fieldName || '').toLowerCase());
+      const isCheckboxCell = (fmtMeta?.ComboStyle ?? 0) === 1;
+      const editColorRaw = (fmtMeta?.EditColor || '').trim();
+      const bgStyle = (!disableEditColor && editColorRaw) ? 'background-color:' + normalizeEditColor(editColorRaw) + '!important;' : '';
+      const tdStyle = bgStyle + hiddenStyle;
 
       const td = document.createElement("td");
-      td.className = `text-nowrap ${cellClass}`;
       td.dataset.field = fieldName;
-      td.setAttribute("style", hiddenStyle);
+      td.setAttribute("style", tdStyle);
 
-      const span = document.createElement("span");
-      span.className = "cell-view d-none";
-      span.dataset.raw = "";
-      span.dataset.lookupkey = "";
-
-      let inp;
-      if (isCheckbox) {
-        // 建立 checkbox 輸入框
-        inp = document.createElement("input");
-        inp.type = "checkbox";
-        inp.className = `cell-edit ${isReadOnly ? "readonly-cell" : ""}`;
-        inp.name = fieldName;
-        inp.checked = false;
-        inp.value = "0";
-        inp.dataset.raw = "0";
-        inp.dataset.lookupkey = "";
-        inp.dataset.readonly = isReadOnly ? "1" : "0";
-
-        // 初始狀態根據當前模式設定
-        if (isReadOnly || !isEdit) {
-          inp.disabled = true;
-        }
-
-        // 監聽變更事件
-        inp.addEventListener("change", () => {
-          inp.value = inp.checked ? "1" : "0";
-          if (isEdit && !isReadOnly) setDirty(true);
-        });
-
-        // span 保持空的，不放任何內容
-        span.textContent = "";
+      if (isCheckboxCell) {
+        td.className = "text-nowrap text-center" + (isReadOnly ? " readonly-td" : "");
+        td.dataset.checkbox = "1";
+        td.innerHTML =
+          '<input type="checkbox" class="sg-chk-view form-check-input" disabled />' +
+          '<input type="hidden" class="cell-edit" name="' + fieldName + '" value="0" data-raw="0" data-readonly="' + (isReadOnly ? '1' : '0') + '" />' +
+          '<input type="checkbox" class="sg-chk-edit form-check-input"' + (isReadOnly ? ' disabled data-readonly="1"' : ' data-readonly="0"') + ' />';
       } else {
-        // 建立一般文字輸入框
+        td.className = `text-nowrap ${cellClass}`;
+
+        const span = document.createElement("span");
+        span.className = "cell-view d-none";
+        span.dataset.raw = "";
+        span.dataset.lookupkey = "";
         span.textContent = "";
-        inp = document.createElement("input");
+
+        const inp = document.createElement("input");
         inp.className = `form-control form-control-sm cell-edit ${isReadOnly ? "readonly-cell" : ""}`;
         inp.name = fieldName;
         inp.value = "";
@@ -2235,10 +2259,11 @@
         inp.dataset.lookupkey = "";
         inp.dataset.readonly = isReadOnly ? "1" : "0";
         if (isReadOnly) inp.readOnly = true;
+
+        td.appendChild(span);
+        td.appendChild(inp);
       }
 
-      td.appendChild(span);
-      td.appendChild(inp);
       tr.appendChild(td);
     });
     return tr;
@@ -2271,22 +2296,13 @@
     const inp = inputs.find(i => (i.name || '').toLowerCase() === fieldName.toLowerCase());
     if (!inp) return;
     const val = value == null ? "" : String(value);
-
-    if (inp.type === "checkbox") {
-      // checkbox: 設定 checked 狀態
-      inp.checked = val === "1" || val === "true" || val.toLowerCase() === "y";
-      inp.value = inp.checked ? "1" : "0";
-      if (!keepDefaultEmpty) inp.dataset.raw = inp.value;
-      const span = inp.closest("td")?.querySelector(".cell-view");
-      if (span) {
-        const viewChk = span.querySelector("input[type='checkbox']");
-        if (viewChk) viewChk.checked = inp.checked;
-      }
+    inp.value = val;
+    if (!keepDefaultEmpty) inp.defaultValue = val;
+    const td = inp.closest("td");
+    if (td && td.dataset.checkbox) {
+      syncCheckboxVisible(td, val);
     } else {
-      // 一般 input
-      inp.value = val;
-      if (!keepDefaultEmpty) inp.defaultValue = val;
-      const span = inp.closest("td")?.querySelector(".cell-view");
+      const span = td?.querySelector(".cell-view");
       if (span) span.textContent = val;
     }
   }
@@ -2312,22 +2328,14 @@
         return;
       }
       tr.querySelectorAll(".cell-edit").forEach(inp => {
-        if (inp.type === "checkbox") {
-          // checkbox: 從 data-raw 復原
-          const val = inp.dataset.raw ?? "0";
-          inp.checked = val === "1" || val === "true";
-          inp.value = inp.checked ? "1" : "0";
-          const span = inp.closest("td")?.querySelector(".cell-view");
-          if (span) {
-            const viewChk = span.querySelector("input[type='checkbox']");
-            if (viewChk) viewChk.checked = inp.checked;
-          }
+        const val = inp.dataset.raw ?? inp.defaultValue ?? "";
+        inp.value = val;
+        inp.dataset.raw = val;
+        const td = inp.closest("td");
+        if (td && td.dataset.checkbox) {
+          syncCheckboxVisible(td, val);
         } else {
-          // 一般 input: 從 defaultValue 復原
-          const val = inp.defaultValue ?? "";
-          inp.value = val;
-          inp.dataset.raw = val;
-          const span = inp.closest("td")?.querySelector(".cell-view");
+          const span = td?.querySelector(".cell-view");
           if (span) span.textContent = val;
         }
       });
@@ -2769,9 +2777,28 @@
         const safeLookupKey = (lookupKey !== null && lookupKey !== undefined) ? String(lookupKey) : '';
         const safeDisplayVal = (displayVal !== null && displayVal !== undefined) ? String(displayVal) : '';
 
+        // 辭典底色與勾選框
+        const fmtMeta = fieldFormatMap?.find?.(x => (x.FieldName || '').toLowerCase() === (fieldName || '').toLowerCase());
+        const editColorRaw = (fmtMeta?.EditColor || '').trim();
+        const bgStyle = (!disableEditColor && editColorRaw) ? 'background-color:' + normalizeEditColor(editColorRaw) + '!important;' : '';
+        const tdStyle = bgStyle + hiddenStyle;
+        const isCheckboxCell = (fmtMeta?.ComboStyle ?? 0) === 1;
+
+        if (isCheckboxCell) {
+          const checked = safeRawVal === '1' || safeRawVal.toLowerCase() === 'true';
+          const initVal = checked ? '1' : '0';
+          const chkAttr = checked ? 'checked' : '';
+          const roAttr = isReadOnly ? 'disabled data-readonly="1"' : 'data-readonly="0"';
+          return '<td class="text-nowrap text-center' + (isReadOnly ? ' readonly-td' : '') + '" data-field="' + fieldName + '" data-checkbox="1" style="' + tdStyle + '">' +
+            '<input type="checkbox" class="sg-chk-view form-check-input" ' + chkAttr + ' disabled />' +
+            '<input type="hidden" class="cell-edit" name="' + fieldName + '" value="' + initVal + '" data-raw="' + initVal + '" data-readonly="' + (isReadOnly ? '1' : '0') + '" />' +
+            '<input type="checkbox" class="sg-chk-edit form-check-input" ' + chkAttr + ' ' + roAttr + ' />' +
+            '</td>';
+        }
+
         // 產生與初始渲染一致的結構，包含 data-field, cell-view, cell-edit
         const tdClass = 'text-nowrap ' + cellClass + (isReadOnly ? ' readonly-td' : '');
-        return '<td class="' + tdClass + '" data-field="' + fieldName + '" style="' + hiddenStyle + '">' +
+        return '<td class="' + tdClass + '" data-field="' + fieldName + '" style="' + tdStyle + '">' +
           '<span class="cell-view' + (isReadOnly ? ' readonly-cell' : '') + '" data-raw="' + safeRawVal + '" data-lookupkey="' + safeLookupKey + '">' + safeDisplayVal + '</span>' +
           '<input class="form-control form-control-sm cell-edit d-none ' + (isReadOnly ? 'readonly-cell' : '') + '" ' +
           'name="' + fieldName + '" ' +
