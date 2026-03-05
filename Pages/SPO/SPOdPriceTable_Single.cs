@@ -272,7 +272,11 @@ namespace PcbErpApi.Pages.SPO
             }
 
             await ApplyLangDisplaySizeAsync(DictTableName, FieldDictList);
-            var keyFields = await LoadPrimaryKeyColumnsAsync(TableName);
+            var keyFields = BuildKeyFields(setup.Mdkey, setup.LocateKeys);
+            if (keyFields.Count == 0)
+            {
+                keyFields = await LoadPrimaryKeyColumnsAsync(TableName);
+            }
             if (keyFields.Count > 0)
                 ViewData["KeyFields"] = keyFields;
 
