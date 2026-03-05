@@ -12,6 +12,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
+using PcbErpApi.Services;
 using WebRazor.Models;
 
 namespace PcbErpApi.Pages.EMOdProdInfo
@@ -24,6 +25,7 @@ namespace PcbErpApi.Pages.EMOdProdInfo
         private readonly ILogger<DetailModel> _logger;
         private readonly Services.AuditImageService _auditImageService;
         private readonly IWebHostEnvironment? _env;
+        private readonly IBreadcrumbService _breadcrumbService;
 
         private const string MasterDict = "EMOdProdInfo";
         private const string MasterTable = "EMOdProdInfo";
@@ -33,12 +35,14 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             ITableDictionaryService dictService,
             ILogger<DetailModel> logger,
             Services.AuditImageService auditImageService,
+            IBreadcrumbService breadcrumbService,
             IWebHostEnvironment? env = null)
         {
             _ctx = ctx;
             _dictService = dictService;
             _logger = logger;
             _auditImageService = auditImageService;
+            _breadcrumbService = breadcrumbService;
             _env = env;
         }
 
@@ -81,6 +85,22 @@ namespace PcbErpApi.Pages.EMOdProdInfo
         public async Task<IActionResult> OnGetAsync()
         {
             ViewData["Title"] = PageTitle;
+
+            // 麵包屑：用目前的 ItemId（EMO00004 或 EMO00018）查 SuperId
+            try
+            {
+                var currentItemId = ItemId ?? (IsViewOnly ? "EMO00018" : "EMO00004");
+                var sysItem = await _ctx.CurdSysItems.AsNoTracking()
+                    .Where(x => x.ItemId == currentItemId)
+                    .Select(x => new { x.SuperId })
+                    .FirstOrDefaultAsync();
+                if (!string.IsNullOrWhiteSpace(sysItem?.SuperId))
+                    ViewData["Breadcrumbs"] = await _breadcrumbService.BuildBreadcrumbsAsync(sysItem.SuperId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Build breadcrumbs failed");
+            }
 
             try
             {
@@ -360,31 +380,37 @@ WHERE ItemId = @itemId
             Dictionary<int, string> tabCaptions,
             List<CurdTableFieldLang> fieldLangs)
         {
-            // Visible 過濾用
-            var dictMap = dict
-                .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
-                .ToDictionary(f => f.FieldName!, f => f, StringComparer.OrdinalIgnoreCase);
+            var dictList = dict.Where(f => !string.IsNullOrWhiteSpace(f.FieldName)).ToList();
+            var dictMap = dictList.ToDictionary(f => f.FieldName!, f => f, StringComparer.OrdinalIgnoreCase);
 
-            // IShowWhere -> 欄位清單（依 SerialNum 排序，過濾 Visible=0）
-            var grouped = fieldLangs
+            // Lang 表的 IShowWhere 對應（優先）
+            var langShowWhere = fieldLangs
                 .Where(l => l.IShowWhere >= 1 && !string.IsNullOrWhiteSpace(l.FieldName))
-                .GroupBy(l => l.IShowWhere)
+                .ToDictionary(l => l.FieldName!, l => l.IShowWhere, StringComparer.OrdinalIgnoreCase);
+
+            // 合併：Lang 表有的用 Lang，否則 fallback 到主表 iShowWhere
+            // 以欄位為單位，取得 (FieldName, ShowWhere, SerialNum)
+            var fieldShowWhere = dictList
+                .Where(f => (f.Visible ?? 1) == 1)
+                .Select(f =>
+                {
+                    var sw = langShowWhere.TryGetValue(f.FieldName!, out var v) ? v
+                             : (f.iShowWhere ?? 0);
+                    return (FieldName: f.FieldName!, ShowWhere: sw, SerialNum: f.SerialNum ?? 9999);
+                })
+                .Where(x => x.ShowWhere >= 1)
+                .GroupBy(x => x.ShowWhere)
                 .ToDictionary(
                     g => g.Key,
-                    g => g.OrderBy(l => l.SerialNum ?? 9999)
-                          .Select(l => l.FieldName)
-                          .Where(fn => !dictMap.TryGetValue(fn, out var d) || (d.Visible ?? 1) == 1)
-                          .ToList()
+                    g => g.OrderBy(x => x.SerialNum).Select(x => x.FieldName).ToList()
                 );
 
             var tabs = new List<MasterTab>();
-            // 依 tabCaptions 中有設定的 IShowWhere 產生頁籤（有 Caption 才顯示）
             foreach (var kv in tabCaptions.OrderBy(kv => kv.Key))
             {
                 var n = kv.Key;
-                var caption = kv.Value;
-                grouped.TryGetValue(n, out var fields);
-                tabs.Add(new MasterTab($"spec{n}", caption, fields ?? new List<string>(), n));
+                fieldShowWhere.TryGetValue(n, out var fields);
+                tabs.Add(new MasterTab($"spec{n}", kv.Value, fields ?? new List<string>(), n));
             }
             return tabs;
         }

@@ -87,14 +87,20 @@
 }
 
 <style>
+/* 移除大頁籤底線，讓兩排頁籤緊貼 */
+#main-category-tabs {
+  border-bottom: none;
+  margin-bottom: 0;
+}
 /* === 規格/表單 大頁籤 + 子頁籤 縮小 === */
 #main-category-tabs .nav-link,
-#master-tabs .nav-link {
+#master-tabs .nav-link,
+#extra-tabs .nav-link {
   --bs-nav-link-padding-y: 2px;
-  --bs-nav-link-padding-x: 6px;
-  --bs-nav-link-font-size: 11px;
-  font-size: 11px;
-  padding: 2px 6px;
+  --bs-nav-link-padding-x: 8px;
+  --bs-nav-link-font-size: 12px;
+  font-size: 12px;
+  padding: 2px 8px;
   line-height: 1.4;
   white-space: nowrap;
 }
@@ -249,7 +255,7 @@ else
             </ul>
 
             <!-- 規格/表單 內容區 -->
-            <div class="tab-content pt-3">
+            <div class="tab-content pt-0">
                 <!-- 規格頁籤內容 (原主單頁籤區) -->
                 <div class="tab-pane fade show active" id="spec-content" role="tabpanel" aria-labelledby="spec-tab">
                     <ul class="nav nav-tabs flex-wrap" role="tablist" id="master-tabs" style="gap:1px;">
@@ -292,7 +298,7 @@ else
 
                 <!-- 表單頁籤內容 (原單身頁籤區) -->
                 <div class="tab-pane fade" id="form-content" role="tabpanel" aria-labelledby="form-tab">
-                    <ul class="nav nav-tabs flex-wrap" role="tablist">
+                    <ul class="nav nav-tabs flex-wrap" role="tablist" id="extra-tabs">
                         @for (int i = 0; i < Model.ExtraTabs.Count; i++)
                         {
                             var tab = Model.ExtraTabs[i];
@@ -505,44 +511,26 @@ document.addEventListener('DOMContentLoaded', () => {
     return rootNodes;
   }
 
-  // 遞迴渲染樹狀節點
-  function renderLayerNode(node, level = 0, isFirst = false) {
+  // 遞迴渲染樹狀節點（巢狀 DOM 結構）
+  function renderLayerNode(node, isFirst = false) {
     const layerId = (node.LayerId || node.layerid || '').trim();
     const layerName = node.LayerName || node.layername || layerId;
     const hasChildren = node.children && node.children.length > 0;
-    const degree = node.Degree || node.degree || 0;
+    const isActive = isFirst ? 'active' : '';
 
-    // 縮排距離（每層 16px）
-    const indent = level * 16;
-
-    // 展開圖示（預設全展開）
-    const toggleIcon = hasChildren ? '▼' : '';
-    const isActive = isFirst && level === 0 ? 'active' : '';
-
-    // 預設全展開，所以 display 設為空字串（顯示）
-    const displayStyle = 'display: block;';
-
-    let html = `
-      <div class="layer-item ${isActive}"
-           data-layer-id="${layerId}"
-           data-layer-name="${layerName}"
-           data-level="${level}"
-           data-has-children="${hasChildren}"
-           data-expanded="true"
-           style="padding-left: ${indent + 12}px; ${displayStyle}">
-        ${toggleIcon ? `<span class="toggle-icon" style="margin-right: 4px; cursor: pointer; user-select: none;">${toggleIcon}</span>` : '<span style="margin-right: 14px;"></span>'}
-        <span class="layer-name">${layerName}</span>
-      </div>
-    `;
-
-    // 遞迴渲染子節點（預設全展開）
+    let childrenHtml = '';
     if (hasChildren) {
-      node.children.forEach((child, idx) => {
-        html += renderLayerNode(child, level + 1, false);
-      });
+      const childNodes = node.children.map(c => renderLayerNode(c, false)).join('');
+      childrenHtml = `<div class="layer-children">${childNodes}</div>`;
     }
 
-    return html;
+    return `<div>
+      <div class="layer-item ${isActive}" data-layer-id="${layerId}" data-layer-name="${layerName}" data-expanded="true">
+        <button class="layer-toggle${hasChildren ? ' expanded' : ' leaf'}" tabindex="-1"></button>
+        <span class="layer-name">${layerName}</span>
+      </div>
+      ${childrenHtml}
+    </div>`;
   }
 
   // 載入層別資料
@@ -571,35 +559,26 @@ document.addEventListener('DOMContentLoaded', () => {
         // 渲染樹狀清單
         let html = '';
         tree.forEach((rootNode, idx) => {
-          html += renderLayerNode(rootNode, 0, idx === 0);
+          html += renderLayerNode(rootNode, idx === 0);
         });
 
         layerListEl.innerHTML = html;
 
-        // 點擊層別項目（選中並載入資料）
-        layerListEl.querySelectorAll('.layer-item').forEach(item => {
-          // 綁定點擊整個層別項目的事件
-          item.addEventListener('click', (e) => {
-            // 移除所有 active 狀態
+        // 事件委派：toggle 展開/收合，item 選中並載入資料
+        layerListEl.addEventListener('click', (e) => {
+          const toggle = e.target.closest('.layer-toggle');
+          const item = e.target.closest('.layer-item');
+
+          if (toggle && !toggle.classList.contains('leaf')) {
+            e.stopPropagation();
+            toggleLayerNode(toggle);
+            return;
+          }
+
+          if (item) {
             layerListEl.querySelectorAll('.layer-item').forEach(el => el.classList.remove('active'));
             item.classList.add('active');
-
-            // 取得選中的層別資料
-            const layerId = item.dataset.layerId;
-            const layerName = item.dataset.layerName;
-
-            // 觸發載入壓合明細資料
-            loadLayerPressDetail(layerId, layerName);
-          });
-
-          // 綁定展開/收合事件（優先級更高）
-          const toggleIcon = item.querySelector('.toggle-icon');
-          if (toggleIcon) {
-            toggleIcon.addEventListener('click', (e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              toggleLayerNode(item);
-            });
+            loadLayerPressDetail(item.dataset.layerId, item.dataset.layerName);
           }
         });
 
@@ -615,81 +594,13 @@ document.addEventListener('DOMContentLoaded', () => {
       });
   }
 
-  // 展開/收合層別節點
-  function toggleLayerNode(item) {
-    const layerId = item.dataset.layerId;
-    const isExpanded = item.dataset.expanded === 'true';
-    const level = parseInt(item.dataset.level || '0');
-    const toggleIcon = item.querySelector('.toggle-icon');
-
-    if (!toggleIcon) return;
-
-    // 切換展開狀態
-    const newExpanded = !isExpanded;
-    item.dataset.expanded = newExpanded;
-    toggleIcon.textContent = newExpanded ? '▼' : '▶';
-
-    // 遞迴顯示/隱藏子節點
-    function toggleChildren(parentLevel, shouldShow) {
-      let nextItem = item.nextElementSibling;
-
-      while (nextItem && nextItem.classList.contains('layer-item')) {
-        const nextLevel = parseInt(nextItem.dataset.level || '0');
-
-        // 只處理子節點
-        if (nextLevel <= parentLevel) {
-          break;
-        }
-
-        if (shouldShow) {
-          // 展開：顯示直接子節點
-          if (nextLevel === parentLevel + 1) {
-            nextItem.style.display = 'block';
-
-            // 如果這個子節點本身也是展開的，遞迴顯示它的子節點
-            const childExpanded = nextItem.dataset.expanded === 'true';
-            if (childExpanded) {
-              // 遞迴處理這個子節點的子節點
-              showExpandedDescendants(nextItem, nextLevel);
-            }
-          }
-        } else {
-          // 收合：隱藏所有子孫節點
-          nextItem.style.display = 'none';
-        }
-
-        nextItem = nextItem.nextElementSibling;
-      }
-    }
-
-    // 遞迴顯示所有展開狀態的子孫節點
-    function showExpandedDescendants(parentItem, parentLevel) {
-      let nextItem = parentItem.nextElementSibling;
-
-      while (nextItem && nextItem.classList.contains('layer-item')) {
-        const nextLevel = parseInt(nextItem.dataset.level || '0');
-
-        // 只處理子節點
-        if (nextLevel <= parentLevel) {
-          break;
-        }
-
-        // 顯示直接子節點
-        if (nextLevel === parentLevel + 1) {
-          nextItem.style.display = 'block';
-
-          // 如果這個子節點也是展開的，繼續遞迴
-          const childExpanded = nextItem.dataset.expanded === 'true';
-          if (childExpanded) {
-            showExpandedDescendants(nextItem, nextLevel);
-          }
-        }
-
-        nextItem = nextItem.nextElementSibling;
-      }
-    }
-
-    toggleChildren(level, newExpanded);
+  // 展開/收合層別節點（toggle 直屬的 .layer-children）
+  function toggleLayerNode(toggleBtn) {
+    const childrenEl = toggleBtn.closest('div').parentElement.querySelector('.layer-children');
+    if (!childrenEl) return;
+    const isExpanded = toggleBtn.classList.contains('expanded');
+    toggleBtn.classList.toggle('expanded', !isExpanded);
+    childrenEl.style.display = isExpanded ? 'none' : '';
   }
 
   // 載入層別相關的資料（壓合明細、壓合方式、途程內容）
@@ -1299,9 +1210,6 @@ let html = '';
 
     // Make editable
     const tableName = table.dataset.tableName;
-    const dictName = table.dataset.dictName;
-    // keyFields 已在上方宣告，這裡不需要重複宣告
-
 
     if (!tabState[tabKey]) {
       tabState[tabKey] = { editor: null };
@@ -1310,7 +1218,6 @@ let html = '';
     const wrapper = table.closest('.table-responsive');
     const saveUrl = "/api/CommonTable/SaveTableChanges";
 
-
     tabState[tabKey].editor = window.makeEditableGrid({
       wrapper: wrapper,
       table: table,
@@ -1318,7 +1225,6 @@ let html = '';
       keyFields: keyFields,
       saveUrl: saveUrl
     });
-
 
     // Show controls
     const controls = wrapper?.parentElement?.querySelector('.tab-local-controls');
@@ -1546,7 +1452,6 @@ let html = '';
         editor.toggleEdit(true);
         btn.classList.add('d-none');
         btn.parentElement?.querySelector('[data-btn="save"]')?.classList.remove('d-none');
-      } else {
       }
     });
   });
@@ -1579,103 +1484,39 @@ let html = '';
     });
   }
 
-  const btnEditToggle = document.getElementById('btnEditToggle');
-  if (btnEditToggle) {
-    btnEditToggle.addEventListener('click', function() {
-      // 檢查狀態
-      const statusValue = (masterData?.Status ?? masterData?.status ?? '').toString();
-      if (statusValue !== '0') {
-        alert('只有「設計中」狀態才能修改！\n\n目前狀態：' +
-              (statusValue === '1' ? '設計完成' :
-               statusValue === '2' ? '已審核' :
-               statusValue === '3' ? '已核准' : statusValue));
-        return;
-      }
-
-      // TODO: 這裡可以加入切換編輯模式的邏輯
-      alert('編輯模式（此功能待實作）');
-    });
-  }
 });
 </script>
 
 <style>
-/* 資料數量顯示框 */
-.toolbar-count-box {
-  display: inline-flex;
-  justify-content: center;
-  align-items: center;
-  height: 31px;
-  min-width: 74px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-weight: 700;
-  line-height: 1.05;
-  color: #fff;
-  background: #1e4db7;
-  user-select: none;
-  font-size: 14px;
-}
-.toolbar-count-box.mode-edit,
-.toolbar-count-box.mode-view {
-  background: #1e4db7;
-}
-.count-line {
-  text-align: center;
-}
-
 /* 規格頁籤欄位樣式 */
 .readonly-field {
   background-color: #e9ecef !important;
   cursor: not-allowed !important;
 }
 
-/* 層別項目樣式 */
+/* 層別 Tree 樣式 */
+#layer-list { padding: 6px 4px; min-width: 160px; }
 .layer-item {
-  cursor: pointer;
-  padding: 8px 12px;
-  border-bottom: 1px solid #dee2e6;
-  transition: all 0.15s ease;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  white-space: nowrap;
+  padding: 3px 6px; margin: 1px 0; cursor: pointer; border-radius: 4px;
+  font-size: 12px; user-select: none; display: flex; align-items: center; gap: 4px;
+  white-space: nowrap; transition: background 0.1s;
 }
-
-.layer-item:hover {
-  background-color: #e9ecef;
+.layer-item:hover { background: #f0f8ff; }
+.layer-item.active { background: #e6f2ff; border-left: 3px solid #2564b3; font-weight: 600; color: #2564b3; }
+.layer-children { margin-left: 16px; }
+.layer-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; flex-shrink: 0; cursor: pointer;
+  border: none; background: none; padding: 0;
 }
-
-.layer-item.active {
-  background-color: #007bff;
-  color: white;
-  font-weight: bold;
-  border-left: 4px solid #0056b3;
+.layer-toggle::before {
+  content: ''; display: block; width: 0; height: 0;
+  border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+  border-left: 6px solid #666; transition: transform 0.15s;
 }
-
-.layer-item .toggle-icon {
-  display: inline-block;
-  width: 12px;
-  font-size: 10px;
-  color: #666;
-  transition: transform 0.2s ease;
-}
-
-.layer-item.active .toggle-icon {
-  color: white;
-}
-
-.layer-item .layer-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-/* 層別面板內的項目不換行 */
-#layer-list {
-  min-width: 180px;
-}
+.layer-toggle.expanded::before { transform: rotate(90deg); }
+.layer-toggle.leaf { visibility: hidden; }
+.layer-item.active .layer-toggle::before { border-left-color: #2564b3; }
 
 /* 頂部勾選框樣式 */
 .header-checkbox {
@@ -1702,14 +1543,16 @@ let html = '';
   opacity: 1 !important;
 }
 
-/* 表格表頭不換行 */
+/* 表格縮小（對齊銷售訂單樣式） */
 .table thead th {
   white-space: nowrap !important;
+  font-size: 12px !important;
+  padding: 2px 6px !important;
 }
-
-/* 表格內容不換行（可選，如果也希望表格內容不換行）*/
 .table tbody td {
   white-space: nowrap !important;
+  font-size: 12px !important;
+  padding: 1px 6px !important;
 }
 
 /* 表格使用固定布局，根据列宽设置显示 */
@@ -2407,8 +2250,4 @@ let html = '';
 })();
 </script>
 
-<!-- jQuery UI（規格頁籤手拉排版用） -->
-<link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css" />
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
 
