@@ -330,7 +330,6 @@ public class EMOdTmpPressController : ControllerBase
                 AddParam(insCmd, "@LayerId", req.LayerId.Trim());
                 AddParam(insCmd, "@SerialNum", i + 1);
                 AddParam(insCmd, "@MatClass", req.Items[i].MatClass);
-                AddParam(insCmd, "@MatName", req.Items[i].MatName);
                 await insCmd.ExecuteNonQueryAsync();
             }
 
@@ -478,7 +477,6 @@ public class EMOdTmpPressController : ControllerBase
                     AddParam(dtlCmd, "@LayerId", req.LayerId.Trim());
                     AddParam(dtlCmd, "@SerialNum", i + 1);
                     AddParam(dtlCmd, "@MatClass", req.Items[i].MatClass);
-                    AddParam(dtlCmd, "@MatName", req.Items[i].MatName);
                     await dtlCmd.ExecuteNonQueryAsync();
                 }
             }
@@ -552,7 +550,7 @@ public class EMOdTmpPressController : ControllerBase
             uidCmd.CommandTimeout = 30;
             AddParam(uidCmd, "@TmpId", req.TmpId.Trim());
             AddParam(uidCmd, "@UserId", userId);
-            AddParam(uidCmd, "@TableName", "EMOdTmpPressMas");
+            AddParam(uidCmd, "@SourceId", "EMOdTmpPressMas");
             await uidCmd.ExecuteNonQueryAsync();
         }
         catch (SqlException ex)
@@ -908,7 +906,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         cmd.CommandTimeout = 30;
         AddParam(cmd, "@TmpId", req.TmpId.Trim());
         AddParam(cmd, "@UserId", userId);
-        AddParam(cmd, "@TableName", "EMOdTmpPressMas");
+        AddParam(cmd, "@SourceId", "EMOdTmpPressMas");
 
         try
         {
@@ -917,6 +915,43 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         catch (SqlException ex)
         {
             _logger.LogError(ex, "UpdateUserId failed for TmpId={TmpId}", req.TmpId);
+            return Ok(new { ok = false, error = ex.Message });
+        }
+
+        return Ok(new { ok = true });
+    }
+
+    public class UpdateBefLayerRequest
+    {
+        public string TmpId { get; set; } = "";
+        public string LayerId { get; set; } = "";
+        public int SerialNum { get; set; }
+        public string BefLayer { get; set; } = "";
+    }
+
+    [HttpPost("UpdateBefLayer")]
+    public async Task<IActionResult> UpdateBefLayer([FromBody] UpdateBefLayerRequest req)
+    {
+        if (req == null || string.IsNullOrWhiteSpace(req.TmpId) || string.IsNullOrWhiteSpace(req.LayerId))
+            return BadRequest(new { ok = false, error = "TmpId and LayerId required." });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        await using var cmd = new SqlCommand(
+            @"UPDATE EMOdTmpPressDtl SET BefLayer = @BefLayer
+              WHERE TmpId = @TmpId AND LayerId = @LayerId AND SerialNum = @SerialNum", conn);
+        AddParam(cmd, "@TmpId", req.TmpId.Trim());
+        AddParam(cmd, "@LayerId", req.LayerId.Trim());
+        AddParam(cmd, "@SerialNum", req.SerialNum);
+        AddParam(cmd, "@BefLayer", req.BefLayer.Trim());
+
+        try
+        {
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (SqlException ex)
+        {
             return Ok(new { ok = false, error = ex.Message });
         }
 

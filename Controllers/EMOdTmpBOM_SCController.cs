@@ -484,7 +484,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         cmd.CommandTimeout = 30;
         AddParam(cmd, "@TmpId", req.TmpId.Trim());
         AddParam(cmd, "@UserId", userId);
-        AddParam(cmd, "@TableName", "EMOdTmpBOMMas");
+        AddParam(cmd, "@SourceId", "EMOdTmpBOMMas");
         await cmd.ExecuteNonQueryAsync();
 
         return Ok(new { ok = true });

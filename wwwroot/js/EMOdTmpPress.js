@@ -414,8 +414,21 @@
                 if (col.field === 'LayerName' && !val) {
                     val = bomPressNameMap[String(row.FullLayerId || '').trim()] || '';
                 }
-                td.textContent = val != null ? String(val).trim() : '';
                 td.style.width = calcColWidth(col) + 'px';
+                // BefLayer 欄位：編輯模式下改為 input，雙擊開 popup 選子層
+                if (col.field === 'BefLayer' && isEditMode) {
+                    td.classList.add('beflayer-cell');
+                    td.style.padding = '0';
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.value = val != null ? String(val).trim() : '';
+                    input.style.cssText = 'width:100%; height:100%; border:none; background:transparent; padding:4px 10px; font-size:13px; font-family:inherit; outline:none; box-sizing:border-box;';
+                    input.addEventListener('dblclick', () => openBefLayerDialog(row, idx, input));
+                    input.addEventListener('change', () => saveBefLayerInput(row, input.value.trim()));
+                    td.appendChild(input);
+                } else {
+                    td.textContent = val != null ? String(val).trim() : '';
+                }
                 tr.appendChild(td);
             });
             tbody.appendChild(tr);
@@ -555,7 +568,7 @@
             }));
 
             msTargetItems = (defaultRes.data || []).map(r => ({
-                caption: String(r.MatName || r.ClassName || '').trim(),
+                caption: String(r.ClassName || '').trim(),
                 matClass: String(r.MatClass || '').trim(),
                 matName: String(r.MatName || '').trim(),
                 className: String(r.ClassName || '').trim()
@@ -591,7 +604,7 @@
         tbody.innerHTML = '';
         msSourceItems.forEach((item, idx) => {
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${esc(item.caption)}</td><td>${esc(item.matClass)}</td><td>${esc(item.matClass)}</td><td>${esc(item.className)}</td>`;
+            tr.innerHTML = `<td>${esc(item.caption)}</td><td></td><td>${esc(item.matClass)}</td><td></td>`;
             tr.addEventListener('click', () => {
                 msSelectedSource = idx;
                 tbody.querySelectorAll('tr').forEach((r, i) => r.classList.toggle('selected', i === idx));
@@ -606,7 +619,7 @@
         tbody.innerHTML = '';
         msTargetItems.forEach((item, idx) => {
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${esc(item.caption)}</td><td>${esc(item.matClass)}</td><td>${esc(item.matClass)}</td><td>${esc(item.className)}</td>`;
+            tr.innerHTML = `<td>${esc(item.caption)}</td><td></td><td>${esc(item.matClass)}</td><td></td>`;
             tr.addEventListener('click', () => {
                 msSelectedTarget = idx;
                 tbody.querySelectorAll('tr').forEach((r, i) => r.classList.toggle('selected', i === idx));
@@ -699,6 +712,79 @@
             alert('儲存壓合材料失敗: ' + e.message);
         }
     }
+
+    // ==================== 子層別選擇 Dialog ====================
+    let befLayerTargetRow = null;
+    let befLayerTargetInput = null;
+
+    function openBefLayerDialog(row, idx, inputEl) {
+        const children = bomDtlRows.filter(r =>
+            String(r.AftLayerId || '').trim() === currLayer
+        );
+        if (children.length === 0) {
+            alert('此層別沒有子層別可選擇');
+            return;
+        }
+
+        befLayerTargetRow = { row, idx };
+        befLayerTargetInput = inputEl;
+
+        const list = document.getElementById('befLayerList');
+        list.innerHTML = '';
+        children.forEach(r => {
+            const div = document.createElement('div');
+            const id = String(r.LayerId || '').trim();
+            const name = String(r.LayerName || r.LayerId || '').trim();
+            div.textContent = name;
+            div.style.cssText = 'padding:6px 10px; cursor:pointer; border-bottom:1px solid #f0f0f0;';
+            // 若目前 input 值與此項相符，預先高亮
+            if (inputEl && inputEl.value.trim() === id) div.style.background = '#cfe2ff';
+            div.addEventListener('mouseenter', () => { if (inputEl?.value.trim() !== id) div.style.background = '#e8f0fe'; });
+            div.addEventListener('mouseleave', () => { if (inputEl?.value.trim() !== id) div.style.background = ''; });
+            div.addEventListener('click', () => {
+                list.querySelectorAll('div').forEach(d => d.style.background = '');
+                div.style.background = '#cfe2ff';
+                if (befLayerTargetInput) befLayerTargetInput.value = id;
+            });
+            list.appendChild(div);
+        });
+
+        document.getElementById('befLayerOverlay').style.display = '';
+    }
+
+    async function confirmBefLayer() {
+        if (!befLayerTargetRow || !befLayerTargetInput) return;
+        const { row } = befLayerTargetRow;
+        await saveBefLayerInput(row, befLayerTargetInput.value.trim());
+        document.getElementById('befLayerOverlay').style.display = 'none';
+    }
+
+    async function saveBefLayerInput(row, value) {
+        const tmpId = String(selectedMasterRow.TmpId || '').trim();
+        try {
+            const res = await apiPost('/api/EMOdTmpPress/UpdateBefLayer', {
+                TmpId: tmpId,
+                LayerId: currLayer,
+                SerialNum: row.SerialNum,
+                BefLayer: value
+            });
+            if (!res.ok) { alert(res.error || '更新失敗'); }
+        } catch (e) {
+            alert('更新內層 Id 失敗: ' + e.message);
+        }
+    }
+
+    document.getElementById('btnBefLayerOk').addEventListener('click', confirmBefLayer);
+    document.getElementById('btnBefLayerClear').addEventListener('click', () => {
+        if (befLayerTargetInput) befLayerTargetInput.value = '';
+        confirmBefLayer();
+    });
+    document.getElementById('btnBefLayerCancel').addEventListener('click', () => {
+        document.getElementById('befLayerOverlay').style.display = 'none';
+    });
+    document.getElementById('btnBefLayerClose').addEventListener('click', () => {
+        document.getElementById('befLayerOverlay').style.display = 'none';
+    });
 
     // ==================== BOM 選擇 Dialog ====================
     async function openBOMSelectDialog() {
@@ -953,6 +1039,7 @@
             if (btnAdd) btnAdd.disabled = true;
             if (btnDel) btnDel.disabled = true;
         }
+        renderDetailGrid();
     }
 
     function addMasterRow() {

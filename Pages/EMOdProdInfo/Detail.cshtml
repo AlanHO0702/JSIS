@@ -86,6 +86,40 @@
     </style>
 }
 
+<style>
+/* === 規格/表單 大頁籤 + 子頁籤 縮小 === */
+#main-category-tabs .nav-link,
+#master-tabs .nav-link {
+  --bs-nav-link-padding-y: 2px;
+  --bs-nav-link-padding-x: 6px;
+  --bs-nav-link-font-size: 11px;
+  font-size: 11px;
+  padding: 2px 6px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+/* === 規格頁籤絕對座標排版 === */
+:root { --field-label-size: 12px; --field-value-size: 12px; }
+.master-spec-tab { position: relative; box-sizing: border-box; padding-top: 6px; padding-bottom: 8px; }
+.spec-field-label { position: absolute; display: flex; align-items: center; justify-content: flex-end; text-align: right; font-size: var(--field-label-size); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 4px 0 2px; pointer-events: none; color: #333; }
+.spec-draggable { position: absolute; display: flex; flex-direction: row; align-items: center; box-sizing: border-box; overflow: hidden; background: #fff; }
+.spec-draggable .master-field {
+  width: 100%;
+  height: 100%;
+  min-height: 20px;
+  padding: 2px 6px;
+  font-size: var(--field-value-size);
+  border: 1px solid #999;
+  border-radius: 2px;
+  box-sizing: border-box;
+  background: #fff;
+  color: #333;
+  outline: none;
+}
+.spec-draggable.field-number .master-field { text-align: right; }
+.spec-draggable.md-selected { outline: 2px solid #5b8def; border-radius: 4px; background: rgba(91,141,239,0.08); }
+</style>
+
 @* 左側自訂按鈕區（Action Rail） *@
 @if (!string.IsNullOrWhiteSpace(Model.ActionRailPartial))
 {
@@ -197,8 +231,7 @@ else
                             data-bs-target="#spec-content"
                             type="button"
                             role="tab"
-                            aria-selected="true"
-                            style="font-size: 1.1rem; padding: 0.75rem 1.5rem;">
+                            aria-selected="true">
                         規格
                     </button>
                 </li>
@@ -209,8 +242,7 @@ else
                             data-bs-target="#form-content"
                             type="button"
                             role="tab"
-                            aria-selected="false"
-                            style="font-size: 1.1rem; padding: 0.75rem 1.5rem;">
+                            aria-selected="false">
                         表單
                     </button>
                 </li>
@@ -220,7 +252,7 @@ else
             <div class="tab-content pt-3">
                 <!-- 規格頁籤內容 (原主單頁籤區) -->
                 <div class="tab-pane fade show active" id="spec-content" role="tabpanel" aria-labelledby="spec-tab">
-                    <ul class="nav nav-tabs flex-wrap" role="tablist" id="master-tabs">
+                    <ul class="nav nav-tabs flex-wrap" role="tablist" id="master-tabs" style="gap:1px;">
                         @for (int i = 0; i < Model.MasterTabs.Count; i++)
                         {
                             var tab = Model.MasterTabs[i];
@@ -234,21 +266,25 @@ else
                                         role="tab"
                                         aria-selected="@(i == 0 ? "true" : "false")"
                                         data-tab-key="@tab.Key"
-                                        data-tab-fields="@string.Join(",", tab.FieldNames)">
+                                        data-tab-show-where="@tab.ShowWhere">
                                     @tab.Title
                                 </button>
                             </li>
                         }
                     </ul>
-                    <div class="tab-content p-3">
+                    <div class="tab-content" style="overflow-x: auto;">
                         @for (int i = 0; i < Model.MasterTabs.Count; i++)
                         {
                             var tab = Model.MasterTabs[i];
                             var active = i == 0 ? "show active" : "";
                             <div class="tab-pane fade @active"
                                  id="master-content-@tab.Key"
-                                 role="tabpanel">
-                                <div class="row g-2" data-tab-key="@tab.Key"></div>
+                                 role="tabpanel"
+                                 style="padding: 12px;">
+                                <ul class="list-unstyled master-spec-tab"
+                                    data-tab-key="@tab.Key"
+                                    data-show-where="@tab.ShowWhere"
+                                    style="position: relative; min-height: 300px; margin: 0; padding: 0;"></ul>
                             </div>
                         }
                     </div>
@@ -511,12 +547,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 載入層別資料
   function loadLayerPress() {
-    console.log('[DEBUG loadLayerPress] 開始載入層別資料');
-    console.log('[DEBUG loadLayerPress] layerPressApiUrl:', layerPressApiUrl);
 
     const layerListEl = document.getElementById('layer-list');
     if (!layerListEl || !layerPressApiUrl) {
-      console.log('[DEBUG loadLayerPress] 無法載入: layerListEl=', layerListEl, 'layerPressApiUrl=', layerPressApiUrl);
       if (layerListEl) layerListEl.innerHTML = '<div class="text-center text-muted py-3">無層別資料</div>';
       return;
     }
@@ -524,7 +557,6 @@ document.addEventListener('DOMContentLoaded', () => {
     fetch(layerPressApiUrl)
       .then(r => r.json())
       .then(rows => {
-        console.log('[DEBUG loadLayerPress] 層別資料載入完成, rows:', rows?.length, rows);
         if (!rows || rows.length === 0) {
           layerListEl.innerHTML = '<div class="text-center text-muted py-3">無層別資料</div>';
           return;
@@ -662,7 +694,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 載入層別相關的資料（壓合明細、壓合方式、途程內容）
   function loadLayerPressDetail(layerId, layerName) {
-    console.log('[DEBUG loadLayerPressDetail] 開始載入, layerId:', layerId, 'layerName:', layerName);
 
     // 需要根據 LayerId 載入的頁籤列表
     const layerTabs = [
@@ -673,7 +704,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 為每個頁籤載入資料
     layerTabs.forEach(tab => {
-      console.log('[DEBUG loadLayerPressDetail] 載入頁籤:', tab.key);
       // 建立查詢參數（使用 LayerId 來篩選）
       const qs = new URLSearchParams();
       qs.append('keyNames', 'PartNum');
@@ -689,7 +719,6 @@ document.addEventListener('DOMContentLoaded', () => {
         getDict(tab.dict),
         fetch(url).then(r => r.json())
       ]).then(([dict, rows]) => {
-        console.log('[DEBUG loadLayerPressDetail] 載入完成, tab:', tab.key, 'rows:', rows?.length);
         buildTable(tab.key, dict, rows);
       }).catch(err => {
         console.error('[DEBUG loadLayerPressDetail] 載入失敗, tab:', tab.key, 'err:', err);
@@ -885,163 +914,147 @@ document.addEventListener('DOMContentLoaded', () => {
     row2Container.innerHTML = row2Html;
   }
 
+  // 計算欄位的最大底部，用來設定容器最小高度
+  function calcTabMinHeight(fields) {
+    let max = 300;
+    fields.forEach(f => {
+      const top = (f.iFieldTop || 0) + 6;
+      const h = f.iFieldHeight || 22;
+      if (top + h + 20 > max) max = top + h + 20;
+    });
+    return max;
+  }
+
+  // 計算欄位的最大右側，用來設定容器最小寬度
+  function calcTabMinWidth(fields) {
+    let max = 400;
+    fields.forEach(f => {
+      const fieldRight = (f.iFieldLeft || 0) + (f.iFieldWidth || 160);
+      const labRight = (f.iLabLeft || 0) + (f.iLabWidth || 80);
+      if (fieldRight + 10 > max) max = fieldRight + 10;
+      if (labRight + 10 > max) max = labRight + 10;
+    });
+    return max;
+  }
+
   function renderMasterTab(tabKey, dict, row) {
     const tabBtn = document.querySelector(`[data-tab-key="${tabKey}"]`);
     if (!tabBtn) return;
 
-    const fieldNames = (tabBtn.dataset.tabFields || '').split(',').filter(f => f.trim());
-    const container = document.querySelector(`#master-content-${tabKey} .row`);
+    const showWhere = parseInt(tabBtn.dataset.tabShowWhere || '0', 10);
+    const container = document.querySelector(`#master-content-${tabKey} .master-spec-tab`);
     if (!container) return;
 
-    const fields = fieldNames.map(fn => dict.find(f => f.FieldName === fn)).filter(f => f);
+    // 從 dict 篩選此 IShowWhere 且 Visible != 0 的欄位，依 SerialNum 排序
+    const fields = (dict || [])
+      .filter(f => (f.IShowWhere ?? f.iShowWhere ?? 0) === showWhere)
+      .filter(f => (f.Visible ?? 1) != 0)
+      .sort((a, b) => (a.SerialNum ?? 9999) - (b.SerialNum ?? 9999));
 
     if (fields.length === 0) {
-      container.innerHTML = '<div class="col-12"><p class="text-muted">此頁籤暫無欄位資料</p></div>';
+      container.innerHTML = '<li class="text-muted p-3">此頁籤暫無欄位資料</li>';
       return;
     }
 
-    container.innerHTML = fields.map(f => {
-      const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
-      const isReadOnly = (f.ReadOnly ?? 0) !== 0;
-      return `<div class="col-md-3">
-        <label class="form-label">${f.DisplayLabel || f.FieldName}</label>
-        <input type="text"
-               class="form-control form-control-sm master-field ${isReadOnly ? 'readonly-field' : ''}"
-               name="${f.FieldName}"
-               value="${val}"
-               data-original="${val}"
-               ${isReadOnly ? 'readonly' : 'readonly'}>
-      </div>`;
-    }).join('');
+    // 判斷是否有任一欄位設定了座標（非全 0）
+    const hasCoords = fields.some(f =>
+      (f.iFieldTop ?? 0) > 0 || (f.iFieldLeft ?? 0) > 0
+    );
+    const headerTopPad = 6;
 
-    // 加入編輯/儲存按鈕
-    const btnContainer = container.parentElement;
-    if (btnContainer && !btnContainer.querySelector('.master-tab-controls')) {
-      const controlsDiv = document.createElement('div');
-      controlsDiv.className = 'mt-3 d-flex gap-2 master-tab-controls';
-      const disabledAttr = isViewOnly ? 'disabled' : '';
-      controlsDiv.innerHTML = `
-        <button type="button" class="btn btn-warning btn-sm" data-btn="master-edit" data-tab="${tabKey}" ${disabledAttr}>
-          <i class="bi bi-pencil-square me-1"></i> 編輯
-        </button>
-        <button type="button" class="btn btn-success btn-sm d-none" data-btn="master-save" data-tab="${tabKey}" ${disabledAttr}>
-          <i class="bi bi-save me-1"></i> 儲存
-        </button>
-      `;
-      btnContainer.appendChild(controlsDiv);
+let html = '';
+    if (hasCoords) {
+      // === 絕對座標模式（複用 _DetailHeaderSection 邏輯）===
+      const minH = calcTabMinHeight(fields);
+      const minW = calcTabMinWidth(fields);
+      container.style.minHeight = minH + 'px';
+      // position:absolute 的子元素不撐開 scrollWidth，用一個佔位 div 來撐
+      const spacer = document.createElement('div');
+      spacer.style.cssText = `position:absolute;top:0;left:0;width:${minW}px;height:${minH}px;pointer-events:none;`;
+      container.appendChild(spacer);
+      container.parentElement.style.overflowX = 'auto';
+      let labelHtml = '';
+      let inputHtml2 = '';
+      fields.forEach(f => {
+        const fn = f.FieldName ?? '';
+        const hideInput = (f.iFieldWidth ?? -1) === 0;
+        let val = row[fn] ?? row[fn.toLowerCase()] ?? '';
+        // 日期欄位：格式化，1899-12-30 視為空值
+        const isDate = /^(date|datetime|smalldatetime)/i.test(f.DataType ?? '') || /^\d{4}-\d{2}-\d{2}T/.test(String(val));
+        if (isDate && val) {
+          const d = new Date(val);
+          if (!isNaN(d) && d.getFullYear() <= 1899) val = '';
+          else if (!isNaN(d)) val = d.toLocaleDateString('zh-TW');
+        }
+        const isReadOnly = (f.ReadOnly ?? 0) !== 0;
+        const isNumber = /^(number|int|smallint|tinyint|bigint|decimal|numeric|money|float|real)/i.test(f.DataType ?? '');
+        const isCheckbox = (f.ComboStyle ?? 0) === 1;
+
+        const top = (f.iFieldTop || 0) + headerTopPad;
+        const left = f.iFieldLeft || 0;
+        const width = f.iFieldWidth || 160;
+        const height = f.iFieldHeight || 22;
+        const labTop = (f.iLabTop || 0) + headerTopPad;
+        const labLeft = f.iLabLeft || 0;
+        const labWidth = f.iLabWidth || 80;
+        const labHeight = f.iLabHeight || 22;
+
+        const label = f.DisplayLabel || fn;
+
+        // 所有 label 先收集（先渲染 = 在下層），iLabWidth=0 不顯示
+        if ((f.iLabWidth ?? -1) !== 0) {
+          labelHtml += `<li class="spec-field-label"
+            data-field="${fn}" data-show-where="${showWhere}"
+            style="top:${labTop}px; left:${labLeft}px; width:${labWidth}px; height:${labHeight}px;"
+            title="${fn}">${label}</li>`;
+        }
+
+        // input 後收集（後渲染 = 在上層，白色背景蓋住不相關的 label）
+        if (!hideInput) {
+          const fieldClass = `spec-draggable${isNumber ? ' field-number' : ' field-text'}`;
+          let inputHtml = '';
+          if (isCheckbox) {
+            const checked = (val == 1 || val === true || val === 'true') ? 'checked' : '';
+            inputHtml = `<input type="checkbox" class="master-field" name="${fn}" value="1" ${checked} ${isReadOnly || isViewOnly ? 'disabled' : ''} style="width:16px;height:16px;cursor:default;accent-color:#0066cc;">`;
+          } else {
+            inputHtml = `<input type="text"
+              class="master-field${isReadOnly ? ' readonly-field' : ''}"
+              name="${fn}" value="${val}" data-original="${val}" readonly>`;
+          }
+          inputHtml2 += `<li class="${fieldClass}"
+            data-field="${fn}" data-show-where="${showWhere}"
+            style="top:${top}px; left:${left}px; width:${width}px; height:${height}px;"
+            title="${fn}">${inputHtml}</li>`;
+        }
+      });
+      // label 全部在前（下層），input 全部在後（上層蓋住不相關 label）
+      html = labelHtml + inputHtml2;
+    } else {
+      // === Fallback：流式排列（欄位無座標設定時）===
+      container.style.minHeight = '';
+      container.style.position = 'relative';
+      container.style.display = 'flex';
+      container.style.flexWrap = 'wrap';
+      container.style.gap = '8px';
+      container.style.padding = '8px';
+
+      fields.forEach(f => {
+        const fn = f.FieldName ?? '';
+        const val = row[fn] ?? row[fn.toLowerCase()] ?? '';
+        const isReadOnly = (f.ReadOnly ?? 0) !== 0;
+        const w = f.iFieldWidth ? `${f.iFieldWidth}px` : '150px';
+        const label = f.DisplayLabel || fn;
+        html += `<div class="d-flex align-items-center gap-1" style="white-space:nowrap;">
+          <label class="mb-0 me-1" style="font-size:12px; font-weight:600; color:#0066cc; white-space:nowrap;">${label}</label>
+          <input type="text"
+            class="master-field${isReadOnly ? ' readonly-field' : ''}"
+            name="${fn}" value="${val}" data-original="${val}"
+            style="width:${w}; font-size:12px; border:1px solid #999; border-radius:2px; padding:2px 6px; background:#fff; box-sizing:border-box;" readonly>
+        </div>`;
+      });
     }
 
-    // 設定編輯功能
-    setupMasterTabEdit(tabKey, container);
-  }
-
-  function setupMasterTabEdit(tabKey, container) {
-    const editBtn = document.querySelector(`[data-btn="master-edit"][data-tab="${tabKey}"]`);
-    const saveBtn = document.querySelector(`[data-btn="master-save"][data-tab="${tabKey}"]`);
-
-    if (!editBtn || !saveBtn) return;
-
-    let isEdit = false;
-
-    // 編輯按鈕事件
-    editBtn.addEventListener('click', () => {
-      const inputs = container.querySelectorAll('.master-field');
-
-      if (!isEdit) {
-        // 查詢模式下不允許編輯
-        if (isViewOnly) {
-          alert('查詢模式下無法編輯資料');
-          return;
-        }
-
-        // 準備進入編輯模式 - 先檢查權限
-        if (!checkEditPermission()) return;
-
-        // 檢查通過，進入編輯模式
-        isEdit = true;
-        editBtn.innerHTML = '<i class="bi bi-eye me-1"></i> 檢視';
-        saveBtn.classList.remove('d-none');
-
-        // 啟用 V/X 按鈕
-        document.getElementById('btnSaveHeader')?.removeAttribute('disabled');
-        document.getElementById('btnCancelChanges')?.removeAttribute('disabled');
-
-        // 解除 readonly（除了真正唯讀的欄位）
-        inputs.forEach(inp => {
-          if (!inp.classList.contains('readonly-field')) {
-            inp.removeAttribute('readonly');
-            inp.style.backgroundColor = '#fff';
-          }
-        });
-      } else {
-        // 切回檢視模式
-        isEdit = false;
-        editBtn.innerHTML = '<i class="bi bi-pencil-square me-1"></i> 編輯';
-        saveBtn.classList.add('d-none');
-
-        // 禁用 V/X 按鈕
-        document.getElementById('btnSaveHeader')?.setAttribute('disabled', '');
-        document.getElementById('btnCancelChanges')?.setAttribute('disabled', '');
-
-        // 恢復 readonly
-        inputs.forEach(inp => {
-          inp.setAttribute('readonly', 'readonly');
-          inp.style.backgroundColor = '';
-        });
-      }
-    });
-
-    // 儲存按鈕事件
-    saveBtn.addEventListener('click', async () => {
-      const inputs = container.querySelectorAll('.master-field');
-      const changes = {};
-      let hasChanges = false;
-
-      // 收集有變更的欄位
-      inputs.forEach(inp => {
-        if (inp.value !== inp.dataset.original && !inp.readOnly) {
-          changes[inp.name] = inp.value;
-          hasChanges = true;
-        }
-      });
-
-      if (!hasChanges) {
-        alert('沒有變更');
-        return;
-      }
-
-      // 加入主鍵
-      Object.keys(currentMasterKeys).forEach(k => {
-        changes[k] = currentMasterKeys[k];
-      });
-
-      try {
-        const resp = await fetch('/api/CommonTable/SaveTableChanges', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            TableName: dictName,
-            Data: [changes]
-          })
-        });
-
-        const responseText = await resp.text();
-
-        if (resp.ok) {
-          alert('儲存成功');
-          // 更新 data-original
-          inputs.forEach(inp => {
-            inp.dataset.original = inp.value;
-          });
-          // 切回檢視模式
-          editBtn.click();
-        } else {
-          alert(`儲存失敗 (HTTP ${resp.status})\n\n${responseText}`);
-        }
-      } catch (err) {
-        alert('儲存失敗: ' + err.message);
-      }
-    });
+    container.innerHTML = html;
   }
 
   // 載入產品工程圖的四張圖片
@@ -1289,9 +1302,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const dictName = table.dataset.dictName;
     // keyFields 已在上方宣告，這裡不需要重複宣告
 
-    console.log('[DEBUG buildTable] tabKey:', tabKey);
-    console.log('[DEBUG buildTable] tableName:', tableName);
-    console.log('[DEBUG buildTable] keyFields:', keyFields);
 
     if (!tabState[tabKey]) {
       tabState[tabKey] = { editor: null };
@@ -1300,8 +1310,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const wrapper = table.closest('.table-responsive');
     const saveUrl = "/api/CommonTable/SaveTableChanges";
 
-    console.log('[DEBUG buildTable] 建立 makeEditableGrid, wrapper:', wrapper);
-    console.log('[DEBUG buildTable] table rows count:', table.querySelectorAll('tbody tr').length);
 
     tabState[tabKey].editor = window.makeEditableGrid({
       wrapper: wrapper,
@@ -1311,12 +1319,10 @@ document.addEventListener('DOMContentLoaded', () => {
       saveUrl: saveUrl
     });
 
-    console.log('[DEBUG buildTable] editor 建立完成:', tabState[tabKey].editor);
 
     // Show controls
     const controls = wrapper?.parentElement?.querySelector('.tab-local-controls');
     if (controls) controls.classList.remove('d-none');
-    console.log('[DEBUG buildTable] 完成 tabKey:', tabKey);
   }
 
   // 暴露 buildTable 給外部 script 使用
@@ -1520,8 +1526,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Tab local controls
   document.querySelectorAll('[data-btn="edit"]').forEach(btn => {
     btn.addEventListener('click', () => {
-      console.log('[DEBUG] 編輯按鈕被點擊');
-      console.log('[DEBUG] isViewOnly:', isViewOnly);
 
       // 查詢模式下不允許編輯
       if (isViewOnly) {
@@ -1530,30 +1534,19 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       // 先檢查權限
-      console.log('[DEBUG] 檢查編輯權限...');
       if (!checkEditPermission()) {
-        console.log('[DEBUG] 權限檢查失敗');
         return;
       }
-      console.log('[DEBUG] 權限檢查通過');
 
       const tabKey = btn.dataset.tab;
-      console.log('[DEBUG] tabKey:', tabKey);
-      console.log('[DEBUG] tabState:', tabState);
-      console.log('[DEBUG] tabState[tabKey]:', tabState[tabKey]);
 
       const editor = tabState[tabKey]?.editor;
-      console.log('[DEBUG] editor:', editor);
-      console.log('[DEBUG] editor.toggleEdit:', editor?.toggleEdit);
 
       if (editor && editor.toggleEdit) {
-        console.log('[DEBUG] 呼叫 editor.toggleEdit(true)');
         editor.toggleEdit(true);
         btn.classList.add('d-none');
         btn.parentElement?.querySelector('[data-btn="save"]')?.classList.remove('d-none');
-        console.log('[DEBUG] 編輯模式切換完成');
       } else {
-        console.log('[DEBUG] editor 或 toggleEdit 不存在，無法切換編輯模式');
       }
     });
   });
@@ -2239,7 +2232,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     overrideButton('btnPaperLog', async function() {
        const partNum = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "PartNum").Value ?? "")';
-       console.log("查詢紀錄: " + partNum);
        // (此處省略詳細 fetch 邏輯，請保留您原本的代碼)
     });
 
@@ -2276,7 +2268,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // btnViewEditToggle 修改按鈕邏輯
     // ============================
     overrideButton('btnViewEditToggle', async function() {
-      console.log('[DEBUG] btnViewEditToggle 被點擊');
 
       // 查詢模式下不允許修改
       if (isViewOnly) {
@@ -2286,7 +2277,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // 取得目前表單頁籤中正在顯示的頁籤
       let activeTabPane = document.querySelector('#form-content .tab-pane.show.active');
-      console.log('[DEBUG] activeTabPane:', activeTabPane);
 
       if (!activeTabPane) {
         // 如果表單頁籤未顯示，先切換到表單頁籤
@@ -2299,7 +2289,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const tabKey = activeTabPane.id.replace('tab-', '');
-      console.log('[DEBUG] tabKey:', tabKey);
 
       // 檢查是否為層別控制的頁籤（只有這三個頁籤需要透過左側層別載入）
       const layerControlledTabs = ['layerpress', 'pressmethod', 'layerroute'];
@@ -2307,13 +2296,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // 取得對應的 tabState
       let state = window.tabState ? window.tabState[tabKey] : null;
-      console.log('[DEBUG] tabState:', window.tabState);
-      console.log('[DEBUG] state:', state);
 
       // 如果頁籤尚未載入，先觸發載入
       if (!state || !state.editor) {
-        console.log('[DEBUG] 頁籤尚未載入，嘗試載入...');
-        console.log('[DEBUG] isLayerControlled:', isLayerControlled);
 
         // 如果是層別控制的頁籤，提示使用者先選擇層別
         if (isLayerControlled) {
@@ -2323,7 +2308,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 找到對應的 tab button 並觸發載入
         const tabBtn = document.querySelector(`[data-bs-target="#tab-${tabKey}"]`);
-        console.log('[DEBUG] tabBtn:', tabBtn);
 
         if (tabBtn && tabBtn.dataset.table && tabBtn.dataset.dict) {
           // 手動載入頁籤資料
@@ -2333,7 +2317,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const keyFields = keyFieldsStr.split(',').filter(k => k.trim());
           const extraKeys = tabBtn.dataset.extraKeys || '';
 
-          console.log('[DEBUG] 載入頁籤資料:', { tableName, dictName, keyFields });
 
           // 建立查詢參數
           const qs = new URLSearchParams();
@@ -2359,7 +2342,6 @@ document.addEventListener('DOMContentLoaded', () => {
           }
 
           const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&${qs.toString()}`;
-          console.log('[DEBUG] API URL:', url);
 
           try {
             Swal.fire({ title: '載入中...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
@@ -2369,7 +2351,6 @@ document.addEventListener('DOMContentLoaded', () => {
               fetch(url).then(r => r.json())
             ]);
 
-            console.log('[DEBUG] 資料載入完成, dict:', dictResp?.length, 'rows:', dataResp?.length);
 
             // 呼叫全域的 buildTable（需要透過 window 暴露）
             if (window.buildTableForEdit) {
@@ -2396,17 +2377,14 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const editor = state.editor;
-      console.log('[DEBUG] editor:', editor);
 
       // 取得該頁籤的編輯/儲存按鈕
       const editBtn = document.querySelector(`[data-btn="edit"][data-tab="${tabKey}"]`);
       const saveBtn = document.querySelector(`[data-btn="save"][data-tab="${tabKey}"]`);
-      console.log('[DEBUG] editBtn:', editBtn, 'saveBtn:', saveBtn);
 
       if (editor && editor.toggleEdit) {
         // 切換編輯模式
         const isCurrentlyEditing = editor.isEdit ? editor.isEdit() : false;
-        console.log('[DEBUG] isCurrentlyEditing:', isCurrentlyEditing);
 
         if (!isCurrentlyEditing) {
           editor.toggleEdit(true);
@@ -2422,10 +2400,15 @@ document.addEventListener('DOMContentLoaded', () => {
           Swal.fire({ icon: 'info', title: '已退出編輯模式', timer: 1000, showConfirmButton: false });
         }
       } else {
-        console.log('[DEBUG] editor.toggleEdit 不存在');
         Swal.fire({ icon: 'warning', title: '此頁籤不支援編輯功能' });
       }
     });
   });
 })();
 </script>
+
+<!-- jQuery UI（規格頁籤手拉排版用） -->
+<link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css" />
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+

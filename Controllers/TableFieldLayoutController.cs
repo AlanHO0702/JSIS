@@ -620,9 +620,15 @@ SELECT COLUMN_NAME, DATA_TYPE
 
         -- 標籤/欄位座標與尺寸
         f.iLayRow, f.iLayColumn,
-        f.iLabHeight,  f.iLabTop,   f.iLabLeft,   f.iLabWidth,
-        f.iFieldHeight,f.iFieldTop, f.iFieldLeft, f.iFieldWidth,
-        f.iShowWhere,
+        COALESCE(l.ILabHeight, f.iLabHeight)   AS iLabHeight,
+        COALESCE(l.ILabTop,    f.iLabTop)       AS iLabTop,
+        COALESCE(l.ILabLeft,   f.iLabLeft)      AS iLabLeft,
+        COALESCE(l.ILabWidth,  f.iLabWidth)     AS iLabWidth,
+        COALESCE(l.IFieldHeight,f.iFieldHeight) AS iFieldHeight,
+        COALESCE(l.IFieldTop,  f.iFieldTop)     AS iFieldTop,
+        COALESCE(l.IFieldLeft, f.iFieldLeft)    AS iFieldLeft,
+        COALESCE(l.IFieldWidth,f.iFieldWidth)   AS iFieldWidth,
+        COALESCE(l.IShowWhere, f.iShowWhere)    AS iShowWhere,
 
         -- 查詢/Lookup
         f.LookupTable, f.LookupKeyField, f.LookupResultField,

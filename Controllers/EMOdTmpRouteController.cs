@@ -348,7 +348,7 @@ public class EMOdTmpRouteController : ControllerBase
             uidCmd.CommandTimeout = 30;
             AddParam(uidCmd, "@TmpId", req.NewTmpId.Trim());
             AddParam(uidCmd, "@UserId", userId);
-            AddParam(uidCmd, "@TableName", "EMOdTmpRouteMas");
+            AddParam(uidCmd, "@SourceId", "EMOdTmpRouteMas");
             await uidCmd.ExecuteNonQueryAsync();
 
             return Ok(new { ok = true });
@@ -416,7 +416,7 @@ public class EMOdTmpRouteController : ControllerBase
             uidCmd.CommandTimeout = 30;
             AddParam(uidCmd, "@TmpId", req.TmpId.Trim());
             AddParam(uidCmd, "@UserId", userId);
-            AddParam(uidCmd, "@TableName", "EMOdTmpRouteMas");
+            AddParam(uidCmd, "@SourceId", "EMOdTmpRouteMas");
             await uidCmd.ExecuteNonQueryAsync();
         }
         catch (SqlException ex)

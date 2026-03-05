@@ -111,7 +111,11 @@ namespace PcbErpApi.Pages.EMOdProdInfo
                 }
 
                 ExtraTabs = BuildExtraTabs();
-                MasterTabs = BuildMasterTabs(masterDict);
+
+                var itemId = IsViewOnly ? "EMO00018" : "EMO00004";
+                var tabCaptions = await LoadMasterTabCaptionsAsync(itemId);
+                var fieldLangs = await LoadFieldLangsAsync(MasterDict);
+                MasterTabs = BuildMasterTabs(masterDict, tabCaptions, fieldLangs);
 
                 // 層別資料 API（EMOdProdLayer）- 用於左側層別清單
                 if (MasterKeyValues.Count > 0)
@@ -126,7 +130,6 @@ namespace PcbErpApi.Pages.EMOdProdInfo
                 // 加載自定义按钮（左侧 Action Rail）
                 try
                 {
-                    var itemId = IsViewOnly ? "EMO00018" : "EMO00004";
                     CustomButtons = await LoadCustomButtonsAsync(itemId);
                     ActionRailPartial = (CustomButtons?.Count ?? 0) > 0
                         ? "~/Pages/Shared/_ActionRail.DynamicButtons.cshtml"
@@ -300,90 +303,94 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             };
         }
 
-        private List<MasterTab> BuildMasterTabs(IEnumerable<CURdTableField> dict)
+        // 從 CURdOCXItemOtherRule 讀取規格頁籤名稱（PaperMasTb{N}Caption），Master1 從 CURdTableName 取
+        private async Task<Dictionary<int, string>> LoadMasterTabCaptionsAsync(string itemId)
         {
-            // 建立 DB 字典查詢表：FieldName -> (Visible, SerialNum)
+            var result = new Dictionary<int, string>();
+
+            // Master1 的名稱從 CURdTableName.DisplayLabel（TableName='EMOdProdInfo'）
+            var master1Label = _ctx.CurdTableNames
+                .Where(t => t.TableName == MasterTable)
+                .Select(t => t.DisplayLabel)
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(master1Label))
+                result[1] = master1Label;
+
+            // PaperMasTb2Caption ~ PaperMasTb11Caption 從 CURdOCXItemOtherRule
+            var cs = _ctx.Database.GetConnectionString();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+            var sql = @"
+SELECT RuleId, DLLValue
+FROM CURdOCXItemOtherRule WITH (NOLOCK)
+WHERE ItemId = @itemId
+  AND RuleId LIKE 'PaperMasTb%Caption'";
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@itemId", itemId);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var ruleId = rd["RuleId"]?.ToString() ?? "";
+                var caption = rd["DLLValue"]?.ToString() ?? "";
+                if (string.IsNullOrWhiteSpace(caption)) continue;
+                // RuleId 格式：PaperMasTb{N}Caption，解析出 N
+                var numStr = ruleId.Replace("PaperMasTb", "").Replace("Caption", "");
+                if (int.TryParse(numStr, out var n))
+                    result[n] = caption;
+            }
+            return result;
+        }
+
+        // 從 CURdTableFieldLang 讀取欄位的 IShowWhere 對應（TW 語系）
+        private Task<List<CurdTableFieldLang>> LoadFieldLangsAsync(string tableName)
+        {
+            var tname = tableName.ToLower();
+            var langs = _ctx.CurdTableFieldLangs
+                .Where(l => l.LanguageId == "TW"
+                    && l.TableName != null
+                    && (l.TableName.ToLower() == tname
+                        || l.TableName.ToLower().Replace("dbo.", "") == tname))
+                .ToList();
+            return Task.FromResult(langs);
+        }
+
+        // 依 IShowWhere 動態建立規格頁籤，頁籤名稱來自 DB
+        private List<MasterTab> BuildMasterTabs(
+            IEnumerable<CURdTableField> dict,
+            Dictionary<int, string> tabCaptions,
+            List<CurdTableFieldLang> fieldLangs)
+        {
+            // Visible 過濾用
             var dictMap = dict
                 .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
+                .ToDictionary(f => f.FieldName!, f => f, StringComparer.OrdinalIgnoreCase);
+
+            // IShowWhere -> 欄位清單（依 SerialNum 排序，過濾 Visible=0）
+            var grouped = fieldLangs
+                .Where(l => l.IShowWhere >= 1 && !string.IsNullOrWhiteSpace(l.FieldName))
+                .GroupBy(l => l.IShowWhere)
                 .ToDictionary(
-                    f => f.FieldName!,
-                    f => f,
-                    StringComparer.OrdinalIgnoreCase
+                    g => g.Key,
+                    g => g.OrderBy(l => l.SerialNum ?? 9999)
+                          .Select(l => l.FieldName)
+                          .Where(fn => !dictMap.TryGetValue(fn, out var d) || (d.Visible ?? 1) == 1)
+                          .ToList()
                 );
 
-            // 過濾並排序：只保留 Visible=1（或 DB 無記錄），並依 SerialNum 排序
-            IEnumerable<string> Filter(IEnumerable<string> fields) =>
-                fields
-                    .Where(fn => !dictMap.TryGetValue(fn, out var d) || (d.Visible ?? 1) == 1)
-                    .OrderBy(fn => dictMap.TryGetValue(fn, out var d) ? (d.SerialNum ?? 9999) : 9999);
-
-            return new List<MasterTab>
+            var tabs = new List<MasterTab>();
+            // 依 tabCaptions 中有設定的 IShowWhere 產生頁籤（有 Caption 才顯示）
+            foreach (var kv in tabCaptions.OrderBy(kv => kv.Key))
             {
-                new MasterTab("substrate", "基板/尺寸/板厚", Filter(new[]
-                {
-                    "TmpBomid", "DoType", "CustomerPartNum", "CustomerSname", "NumOfLayer",
-                    "Materialq", "ProDstyle", "Press", "PressP", "PressM",
-                    "NetThickLow", "NetThickUpp", "RftNetThick", "RftNetThickM", "RftNetThickP",
-                    "Usage", "UnitArea"
-                })),
-                new MasterTab("imaging", "影像轉移", Filter(new[]
-                {
-                    "PatternNum", "LineWid", "MinSmd",
-                    "AnnularRanMinIn", "AnnularWorkMinIn", "AnnularNonIn", "AnnularRanMinOut", "AnnularWorkMinOut", "AnnularNonOut",
-                    "NetOpticAvgC", "NetOpticMinC", "NetOpticMaxC", "NetOpticNonC",
-                    "NetOpticAvgS", "NetOpticMinS", "NetOpticMaxS", "NetOpticNonS"
-                })),
-                new MasterTab("plating", "電鍍", Filter(new[]
-                {
-                    "GoldArea", "GoldThick", "GoldMin", "GoldMax", "GoldAvg", "GoldRequest", "GoldRequestMin", "GoldRequestMax", "GoldRequestAvg",
-                    "NickelThick", "NickelMin", "NickelMax", "NickelAvg", "NiRequest", "NickelRequestMin", "NickelRequestMax", "NickelRequestAvg",
-                    "CuholeMin", "CuholeAvg", "CuviaMax", "CusurfaceMax", "ThickCuMin", "ThickCuMax", "ThickCuAvg",
-                    "TinThick", "NetTin", "NetTinMin", "NetTinMax", "NetTinAvg",
-                    "ChGoldThick", "ChSilverThick", "ChTinThick"
-                })),
-                new MasterTab("marking", "標記", Filter(new[]
-                {
-                    "ULMarkFace", "MarkCycle", "MarkCdate", "MarkBlue", "Ulmark94V", "Ullayer",
-                    "MarkPlace", "MadeIn"
-                })),
-                new MasterTab("surface", "表面處理", Filter(new[]
-                {
-                    "Osseal", "Entekdepth", "EntekdepthMax", "Entekchk",
-                    "Passivation", "PrintCarbon", "Strip", "Hardness", "OilThick"
-                })),
-                new MasterTab("solder", "防焊", Filter(new[]
-                {
-                    "LsmColor", "LsmFace", "LsmMaker", "LsmViahole", "LsmColorB", "LsmIsIn", "LsmModel", "MinLsm", "Film"
-                })),
-                new MasterTab("legend", "文印", Filter(new[]
-                {
-                    "CharColor", "CharFace", "CharColorB", "CharColorC", "CharMark", "LetterHl",
-                    "BarCodeColorT", "BarCodeColorB", "BarCodeThick", "BarCodeSize", "WordNum"
-                })),
-                new MasterTab("profile", "成型", Filter(new[]
-                {
-                    "MachWay", "DieType", "DieSeq", "Pinvcu", "VcutDist", "VcutCross", "VcutRip", "VcutDisM", "VcutWid",
-                    "Pinslash", "PinslashA", "PinslashB", "GfslashAngA", "GfslashAngB", "GfslashHa", "GfslashHb",
-                    "Cnc", "Cncrequest", "Cncmin", "Cncmax", "VcutAngleAvg", "VcutAngleMin", "VcutAngleMax",
-                    "VcutRelicAvg", "VcutRelicMin", "VcutRelicMax", "VcutSum"
-                })),
-                new MasterTab("test", "測試", Filter(new[]
-                {
-                    "TestManuFac", "HoleCheck", "SpecDemandCont",
-                    "TinChk", "NetTinChk", "GoldChk", "NickelChk", "GoldRequestChk", "NickelRequestChk",
-                    "SoftGoldReqChk", "SoftNickelReqChk", "ChsilverChk", "ChTinChk", "VcutDisMchk",
-                    "Entekchk", "HardGoldChk",
-                    "StatusChk1", "StatusChk2", "StatusChk3", "StatusChk4", "StatusChk5", "StatusChk6", "StatusChk7", "StatusChk8"
-                })),
-                new MasterTab("cam", "CAM注意事項", Filter(new[]
-                {
-                    "ProdNotes", "OssealNotes", "ProdHints", "CmapPath", "SmapPath", "SpecDemandCont", "Cam", "Designer", "HaltNotes"
-                }))
-            };
+                var n = kv.Key;
+                var caption = kv.Value;
+                grouped.TryGetValue(n, out var fields);
+                tabs.Add(new MasterTab($"spec{n}", caption, fields ?? new List<string>(), n));
+            }
+            return tabs;
         }
 
         public record DetailTab(string Key, string Title, string TableName, string DictName, IEnumerable<string> KeyFields, bool IsForm = false, Dictionary<string, string>? ExtraKeys = null);
-        public record MasterTab(string Key, string Title, IEnumerable<string> FieldNames);
+        public record MasterTab(string Key, string Title, IEnumerable<string> FieldNames, int ShowWhere = 0);
 
         public class ItemCustButtonRow
         {
