@@ -771,6 +771,41 @@
         return '';
       };
 
+      const updateToolbarCodeToWebMenuId = async () => {
+        const itemId = (window._itemId || window._singleItemId || getItemIdFromUrl() || '').toString().trim();
+        if (!itemId) return;
+
+        try {
+          const resp = await fetch(`/api/report/item-meta/${encodeURIComponent(itemId)}`);
+          if (!resp.ok) return;
+          const meta = await resp.json().catch(() => null);
+          const webMenuId = (meta?.sWebMenuId ?? meta?.SWebMenuId ?? '').toString().trim();
+          if (!webMenuId) return;
+          if (webMenuId.toUpperCase() === itemId.toUpperCase()) return;
+
+          const escaped = itemId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const codePattern = new RegExp(`\\b${escaped}\\b`, 'i');
+          const replaceCode = (el) => {
+            if (!el) return;
+            const txt = (el.textContent || '').toString();
+            if (!txt) return;
+            if (codePattern.test(txt)) {
+              el.textContent = txt.replace(codePattern, webMenuId);
+            }
+          };
+
+          replaceCode(document.querySelector('.toolbar-breadcrumb .breadcrumb-current'));
+          replaceCode(document.getElementById('toolbarTitle'));
+
+          if (typeof document.title === 'string' && codePattern.test(document.title)) {
+            document.title = document.title.replace(codePattern, webMenuId);
+          }
+        } catch {
+          // ignore title decoration failures
+        }
+      };
+      updateToolbarCodeToWebMenuId();
+
       const btnNotes = document.getElementById('__btnItemNotes');
       const btnSave = document.getElementById('itemNotesSave');
       const btnNotesUser = document.getElementById('__btnItemNotesUser');
