@@ -1607,7 +1607,11 @@
   };
 
   // 修改/檢視切換
-    editBtn.addEventListener("click", () => {
+    editBtn.addEventListener("click", async () => {
+      if (isEdit && isDirty) {
+        const ok = await saveTableChanges();
+        if (!ok) return;
+      }
       isEdit = !isEdit;
       editBtn.innerHTML = isEdit
         ? '<i class="bi bi-eye me-1"></i> 瀏覽'
@@ -1689,10 +1693,57 @@
   });
 
   // 儲存
+  const findDuplicateKeyConflict = (targetRows = null) => {
+    if (!Array.isArray(KEY_FIELDS) || KEY_FIELDS.length === 0) return null;
+    const rows = getBodyRows();
+    if (!rows.length) return null;
+    const targetSet = Array.isArray(targetRows) && targetRows.length ? new Set(targetRows) : null;
+    const signatures = new Map();
+    const pickKeyInput = (tr, keyName) =>
+      Array.from(tr.querySelectorAll(".cell-edit")).find(inp => (inp.name || "").toLowerCase() === keyName) || null;
+
+    for (const tr of rows) {
+      const keyValues = [];
+      const keyDisplay = [];
+      let missing = false;
+      for (const keyName of KEY_FIELDS) {
+        const inp = pickKeyInput(tr, keyName);
+        if (!inp) { missing = true; break; }
+        const raw = (inp.value ?? "").toString().trim();
+        if (raw === "") { missing = true; break; }
+        keyValues.push(raw.toLowerCase());
+        keyDisplay.push(`${inp.name || keyName}=${raw}`);
+      }
+      if (missing || keyValues.length === 0) continue;
+
+      const signature = keyValues.join("\u001f");
+      const prev = signatures.get(signature);
+      if (prev) {
+        if (targetSet && !targetSet.has(prev.tr) && !targetSet.has(tr)) continue;
+        return {
+          prevRowNo: rows.indexOf(prev.tr) + 1,
+          currRowNo: rows.indexOf(tr) + 1,
+          keyText: keyDisplay.join(", ")
+        };
+      }
+      signatures.set(signature, { tr });
+    }
+    return null;
+  };
+
     async function saveTableChanges(options = {}) {
       const opts = (options && typeof options === "object" && !(options instanceof Event)) ? options : {};
       const targetRows = Array.isArray(opts.targetRows) ? opts.targetRows.filter(Boolean) : null;
       const silentSuccess = !!opts.silentSuccess;
+      const duplicate = findDuplicateKeyConflict(targetRows);
+      if (duplicate) {
+        Swal.fire({
+          icon: 'warning',
+          title: '\u9375\u503c\u91cd\u8907',
+          text: `\u7b2c ${duplicate.prevRowNo} \u7b46\u8207\u7b2c ${duplicate.currRowNo} \u7b46\u4e3b\u9375\u91cd\u8907 (${duplicate.keyText})`
+        });
+        return false;
+      }
       const changes = collectChanges(targetRows);
       if (changes.length === 0) { return true; }
 
@@ -1706,7 +1757,14 @@
       })
     });
 
-      if (resp.ok) {
+      const raw = await resp.clone().text();
+      let payload = null;
+      try { payload = raw ? JSON.parse(raw) : null; } catch { }
+      const failedRows = Array.isArray(payload?.results)
+        ? payload.results.filter(r => r && r.ok === false)
+        : [];
+
+      if (resp.ok && payload?.success !== false && failedRows.length === 0) {
       if (!silentSuccess) {
         Swal.fire({ icon: 'success', title: '儲存成功', timer: 1000, showConfirmButton: false });
       }
@@ -1969,7 +2027,82 @@
       if (!td) return;
       setActiveCell(td, { focus: false });
     });
+    const copyCellValue = (targetTd, sourceTd) => {
+      if (!targetTd || !sourceTd) return false;
+      if (targetTd.dataset.checkbox) {
+        const targetChk = targetTd.querySelector(".sg-chk-edit");
+        if (!targetChk || targetChk.disabled || targetChk.dataset.readonly === "1") return false;
+        const sourceChk = sourceTd.querySelector(".sg-chk-edit");
+        const sourceHidden = sourceTd.querySelector(".cell-edit");
+        const nextChecked = sourceChk
+          ? !!sourceChk.checked
+          : String(sourceHidden?.value ?? "").trim() === "1";
+        if (targetChk.checked === nextChecked) return false;
+        targetChk.checked = nextChecked;
+        targetChk.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      }
+
+      const targetInput = targetTd.querySelector(".cell-edit");
+      const sourceInput = sourceTd.querySelector(".cell-edit");
+      if (!targetInput || !sourceInput) return false;
+      if (targetInput.readOnly || targetInput.disabled || targetInput.dataset.readonly === "1") return false;
+      const nextValue = sourceInput.value ?? "";
+      if ((targetInput.value ?? "") === nextValue) return false;
+      targetInput.value = nextValue;
+      targetInput.dispatchEvent(new Event("input", { bubbles: true }));
+      targetInput.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    };
+    const copyRowFromPrevRow = (targetTd) => {
+      if (!targetTd || !isEdit) return false;
+      const targetRow = targetTd.closest("tr");
+      if (!targetRow) return false;
+      const rows = getBodyRows();
+      const rowIndex = rows.indexOf(targetRow);
+      if (rowIndex <= 0) return false;
+      const sourceRow = rows[rowIndex - 1];
+      let changed = false;
+      targetRow.querySelectorAll("td[data-field]").forEach(td => {
+        const fieldName = td.dataset.field || "";
+        if (!fieldName) return;
+        const sourceTd = getCellByField(sourceRow, fieldName);
+        if (!sourceTd) return;
+        if (copyCellValue(td, sourceTd)) changed = true;
+      });
+      return changed;
+    };
+    const copyCellFromPrevRow = (targetTd) => {
+      if (!targetTd || !isEdit) return false;
+      const targetRow = targetTd.closest("tr");
+      if (!targetRow) return false;
+      const fieldName = targetTd.dataset.field || "";
+      if (!fieldName) return false;
+      const rows = getBodyRows();
+      const rowIndex = rows.indexOf(targetRow);
+      if (rowIndex <= 0) return false;
+      const sourceTd = getCellByField(rows[rowIndex - 1], fieldName);
+      if (!sourceTd) return false;
+      return copyCellValue(targetTd, sourceTd);
+    };
     table.addEventListener("keydown", (ev) => {
+      if (ev.key === "F7") {
+        if (!isEdit) return;
+        const fromTd = ev.target?.closest?.("td[data-field]") || activeCell;
+        if (!fromTd) return;
+        ev.preventDefault();
+        if (copyRowFromPrevRow(fromTd)) setDirty(true);
+        return;
+      }
+      if (ev.key === "F8") {
+        if (!isEdit) return;
+        const fromTd = ev.target?.closest?.("td[data-field]") || activeCell;
+        if (!fromTd) return;
+        ev.preventDefault();
+        if (copyCellFromPrevRow(fromTd)) setDirty(true);
+        return;
+      }
+
       if (ev.key === "ArrowUp" || ev.key === "ArrowDown" || ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
         if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
         const target = ev.target;
