@@ -55,22 +55,35 @@
   position: relative; left: 8px; margin: 4px 0 2px 0; width: calc(100% - 16px);
 }
 .emo-toolbar .btn-toolbar { flex: 1; min-width: 0; flex-wrap: nowrap; }
+:root { --emo-btn-h: 30px; }
+.emo-toolbar .btn-toolbar { align-items: center; }
 .emo-toolbar .toolbar-btn {
-  height: var(--top-toolbar-btn-height, 30px); min-height: var(--top-toolbar-btn-height, 30px);
+  height: var(--emo-btn-h); min-height: var(--emo-btn-h);
   box-sizing: border-box; padding-top: 0; padding-bottom: 0;
 }
 .emo-toolbar .toolbar-icon-row { display: flex; gap: 4px; align-items: center; }
 .emo-toolbar .toolbar-btn-icon {
   display: inline-flex; align-items: center; justify-content: center;
-  height: var(--top-toolbar-btn-height, 30px); min-height: var(--top-toolbar-btn-height, 30px);
-  width: 30px; padding: 0; border-radius: 8px; line-height: 1;
+  height: var(--emo-btn-h); min-height: var(--emo-btn-h);
+  width: var(--emo-btn-h); padding: 0; border-radius: 8px; line-height: 1;
   background: #f3f5f8; color: #5a6a82; border: 1px solid #c9d2df; box-shadow: none; cursor: pointer;
 }
-.emo-toolbar .toolbar-btn-icon i { font-size: 16px; }
+.emo-toolbar .toolbar-btn-icon i { font-size: 15px; }
 .emo-toolbar .toolbar-btn-icon:disabled { background: #f1f3f7; border-color: #c5ccd8; color: #9aa7bb; cursor: not-allowed; opacity: 0.8; }
 .emo-toolbar .toolbar-btn-icon.toolbar-btn-add:not(:disabled) { background: #f7fcf9; border-color: #7ccfa1; color: #1f7a45; }
 .emo-toolbar .toolbar-btn-icon.toolbar-btn-del:not(:disabled),
 .emo-toolbar .toolbar-btn-icon.toolbar-btn-cancel:not(:disabled) { background: #fff4f4; border-color: #e08a8a; color: #b33939; }
+/* 計數框：對齊 emo-toolbar 的 30px 高度 */
+.emo-toolbar .toolbar-count-box {
+  height: var(--emo-btn-h);
+  min-width: 56px;
+  padding: 0 8px;
+  font-size: 0.72rem;
+  border-radius: 7px;
+  line-height: 1;
+}
+/* modal 不參與 flex 排列（避免影響 toolbar 高度） */
+#topToolbar .modal { position: fixed; width: 0; height: 0; overflow: hidden; padding: 0; margin: 0; border: none; }
 
 #main-category-tabs { border-bottom: none; margin-bottom: 0; }
 #main-category-tabs .nav-link,
@@ -99,6 +112,34 @@
   width: 100%; height: 100%; min-height: 20px; padding: 2px 6px;
   font-size: var(--field-value-size); border: 1px solid #999; border-radius: 2px;
   box-sizing: border-box; background: #fff; color: #333; outline: none;
+}
+
+/* ── Detail 子頁籤 table：固定寬度 + 欄位分隔線 ── */
+.detail-tab-table {
+  table-layout: auto;
+  width: max-content;
+  border-collapse: collapse;
+}
+.detail-tab-table th,
+.detail-tab-table td {
+  white-space: nowrap;
+  border-right: 1px solid #d0d7e3 !important;
+  border-bottom: 1px solid #d0d7e3 !important;
+  padding: 2px 6px !important;
+  font-size: 12px !important;
+}
+.detail-tab-table thead th {
+  border-left: 1px solid #d0d7e3 !important;
+  border-top: 1px solid #d0d7e3 !important;
+  background: #f5f7fa !important;
+  font-weight: 600;
+  position: sticky; top: 0; z-index: 2;
+}
+.detail-tab-table tbody td:first-child {
+  border-left: 1px solid #d0d7e3 !important;
+}
+.route-split-pane.show.active {
+  display: flex !important;
 }
 </style>
 
@@ -242,9 +283,64 @@
           {
               var tab = Model.ExtraTabs[i];
               var active = i == 0 ? "show active" : "";
+              @if (i == 0)
+              {
+              <!-- 途程明細：左右分割（可拖拉） -->
+              <div class="tab-pane fade @active route-split-pane" id="tab-@tab.Key" role="tabpanel"
+                   style="flex-direction:row;height:100%;min-height:300px;overflow:hidden;position:relative;">
+                <!-- 左側：途程表 -->
+                <div id="route-left" style="width:65%;min-width:200px;overflow:auto;box-sizing:border-box;">
+                  <table class="table table-sm table-hover align-middle mb-0 detail-tab-table"
+                         id="grid-@tab.Key"
+                         data-table-name="@tab.TableName"
+                         data-dict-name="@tab.DictName"
+                         data-dict-table="@tab.DictName"
+                         data-key-fields="@string.Join(",", tab.KeyFields ?? Enumerable.Empty<string>())">
+                    <thead class="table-light sticky-top">
+                      <tr><th class="text-center text-muted">載入中...</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr><td class="text-center text-muted py-3">請點選上方主檔資料</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <!-- 分割線（可拖拉） -->
+                <div id="route-splitter"
+                     style="width:6px;cursor:col-resize;background:#dee2e6;flex-shrink:0;
+                            display:flex;align-items:center;justify-content:center;user-select:none;
+                            transition:background .15s;"
+                     title="拖拉調整寬度">
+                  <div style="width:2px;height:32px;background:#adb5bd;border-radius:2px;"></div>
+                </div>
+                <!-- 右側：BOM + 備註 -->
+                <div id="route-right" style="flex:1;min-width:160px;display:flex;flex-direction:column;overflow:hidden;">
+                  <!-- BOM 表 -->
+                  <div style="flex:1;overflow:auto;border-bottom:1px solid #dee2e6;">
+                    <table class="table table-sm table-hover align-middle mb-0 detail-tab-table" id="grid-route-bom">
+                      <thead class="table-light sticky-top">
+                        <tr><th colspan="3" class="text-muted" style="font-size:12px;">材料（選取途程列）</th></tr>
+                      </thead>
+                      <tbody id="bom-tbody">
+                        <tr><td class="text-center text-muted py-2" colspan="3">—</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <!-- 備註 -->
+                  <div style="padding:6px 8px;background:#f8f9fa;border-top:1px solid #dee2e6;">
+                    <div style="font-size:11px;color:#666;margin-bottom:2px;">備註</div>
+                    <textarea id="route-notes" readonly rows="4"
+                      style="width:100%;font-size:12px;border:1px solid #c8d0dc;border-radius:3px;
+                             padding:4px 6px;background:#fff;resize:none;box-sizing:border-box;"></textarea>
+                  </div>
+                </div>
+              </div>
+              }
+              else
+              {
+              <!-- 一般頁籤 -->
               <div class="tab-pane fade @active" id="tab-@tab.Key" role="tabpanel">
-                  <div class="table-responsive">
-                      <table class="table table-sm table-hover align-middle mb-0"
+                  <div style="overflow:auto;">
+                      <table class="table table-sm table-hover align-middle mb-0 detail-tab-table"
                              id="grid-@tab.Key"
                              data-table-name="@tab.TableName"
                              data-dict-name="@tab.DictName"
@@ -259,6 +355,7 @@
                       </table>
                   </div>
               </div>
+              }
           }
         </div>
       </div>
@@ -415,6 +512,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── 子頁籤表格建立 ────────────────────────────────────────
 
+  function renderRows(tbody, visibleFields, rows) {
+    if (!rows || rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="100" class="text-center text-muted py-3">無資料</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(row => {
+      const cells = visibleFields.map(f => {
+        const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+        let display = val;
+        const isDate = /^(date|datetime)/i.test(f.DataType ?? '');
+        if (isDate && val) {
+          const d = new Date(val);
+          if (!isNaN(d) && d.getFullYear() > 1899) display = d.toLocaleDateString('zh-TW');
+          else display = '';
+        }
+        return `<td data-field="${f.FieldName}">${display ?? ''}</td>`;
+      }).join('');
+      return `<tr data-row='${JSON.stringify(row).replace(/'/g,"&#39;")}'>${cells}</tr>`;
+    }).join('');
+  }
+
   async function buildTable(tabKey, dict, rows) {
     const table = document.getElementById(`grid-${tabKey}`);
     if (!table) return;
@@ -429,25 +547,93 @@ document.addEventListener('DOMContentLoaded', () => {
       return `<th style="width:${widthPx}px;min-width:${widthPx}px;" data-field="${f.FieldName}">${f.DisplayLabel || f.FieldName}</th>`;
     }).join('') + '</tr>';
 
-    if (!rows || rows.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="100" class="text-center text-muted py-3">無資料</td></tr>';
-      return;
-    }
+    renderRows(tbody, visibleFields, rows);
+    updateDetailCount(rows ? rows.length : 0);
+  }
 
-    tbody.innerHTML = rows.map(row => {
-      const cells = visibleFields.map(f => {
-        const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
-        let display = val;
-        const isDate = /^(date|datetime)/i.test(f.DataType ?? '');
-        if (isDate && val) {
-          const d = new Date(val);
-          if (!isNaN(d) && d.getFullYear() > 1899) display = d.toLocaleDateString('zh-TW');
-          else display = '';
-        }
-        return `<td data-field="${f.FieldName}">${display}</td>`;
+  // ── 途程明細右側：BOM + 備註 ─────────────────────────────
+
+  let bomDict = null;
+
+  async function loadRouteBomAndNotes(routeRow) {
+    const procCode = routeRow['ProcCode'] ?? routeRow['proccode'] ?? '';
+    const notes = routeRow['Notes'] ?? routeRow['notes'] ?? '';
+
+    // 備註
+    const notesEl = document.getElementById('route-notes');
+    if (notesEl) notesEl.value = notes;
+
+    // BOM
+    const bomTbody = document.getElementById('bom-tbody');
+    if (!bomTbody) return;
+    bomTbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-2">載入中...</td></tr>';
+
+    const keys = currentMasterKeys;
+    const qs = new URLSearchParams();
+    [['PartNum', keys['PartNum']], ['Revision', keys['Revision']], ['LayerId', keys['LayerId']], ['ProcCode', procCode]]
+      .forEach(([k, v]) => { if (v) { qs.append('keyNames', k); qs.append('keyValues', v); } });
+
+    try {
+      if (!bomDict) bomDict = await getDict('EMOdLayerBOM');
+      const rows = await fetch(`/api/CommonTable/ByKeys?table=EMOdLayerBOM&${qs}`).then(r => r.json());
+
+      const visFields = bomDict.filter(f => (f.Visible ?? 1) == 1).sort((a, b) => (a.SerialNum || 0) - (b.SerialNum || 0));
+      const bomTable = document.getElementById('grid-route-bom');
+      if (bomTable) {
+        bomTable.querySelector('thead').innerHTML = '<tr>' + visFields.map(f => {
+          const w = Number(f.DisplaySize || f.iFieldWidth || 0);
+          return `<th style="width:${w > 0 ? w*10 : 80}px;min-width:${w > 0 ? w*10 : 80}px;">${f.DisplayLabel || f.FieldName}</th>`;
+        }).join('') + '</tr>';
+      }
+
+      if (!rows || rows.length === 0) {
+        bomTbody.innerHTML = '<tr><td colspan="100" class="text-center text-muted py-2">無材料資料</td></tr>';
+        return;
+      }
+      bomTbody.innerHTML = rows.map(r => {
+        return '<tr>' + visFields.map(f => {
+          const v = r[f.FieldName] ?? r[f.FieldName?.toLowerCase()] ?? '';
+          return `<td>${v}</td>`;
+        }).join('') + '</tr>';
       }).join('');
-      return `<tr>${cells}</tr>`;
-    }).join('');
+    } catch (e) {
+      bomTbody.innerHTML = `<tr><td colspan="3" class="text-danger py-2">載入失敗: ${e.message}</td></tr>`;
+    }
+  }
+
+  async function buildRouteTable(tabKey, dict, rows) {
+    const table = document.getElementById(`grid-${tabKey}`);
+    if (!table) return;
+    const thead = table.querySelector('thead');
+    const tbody = table.querySelector('tbody');
+    if (!thead || !tbody) return;
+
+    const visibleFields = dict.filter(f => (f.Visible ?? 1) == 1).sort((a, b) => (a.SerialNum || 0) - (b.SerialNum || 0));
+    thead.innerHTML = '<tr>' + visibleFields.map(f => {
+      const width = Number(f.DisplaySize || f.iFieldWidth || 0);
+      const widthPx = width > 0 ? width * 10 : 100;
+      return `<th style="width:${widthPx}px;min-width:${widthPx}px;" data-field="${f.FieldName}">${f.DisplayLabel || f.FieldName}</th>`;
+    }).join('') + '</tr>';
+
+    renderRows(tbody, visibleFields, rows);
+    updateDetailCount(rows ? rows.length : 0);
+
+    // 點選途程列 → 載右側 BOM + 備註
+    tbody.querySelectorAll('tr').forEach(tr => {
+      tr.style.cursor = 'pointer';
+      tr.addEventListener('click', () => {
+        tbody.querySelectorAll('tr').forEach(r => r.classList.remove('table-primary'));
+        tr.classList.add('table-primary');
+        try {
+          const row = JSON.parse(tr.dataset.row.replace(/&#39;/g, "'"));
+          loadRouteBomAndNotes(row);
+        } catch {}
+      });
+    });
+
+    // 自動選第一列
+    const firstTr = tbody.querySelector('tr[data-row]');
+    if (firstTr) firstTr.click();
   }
 
   // ── 子頁籤載入 ────────────────────────────────────────────
@@ -467,8 +653,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&${qs.toString()}`;
+
+    // 途程明細（detail1）用左右分割版
+    const isRouteTab = tabKey === (window._extraTabs?.[0]?.key);
+    const builder = isRouteTab ? buildRouteTable : buildTable;
+
     Promise.all([getDict(dictName), fetch(url).then(r => r.json())])
-      .then(([dict, rows]) => buildTable(tabKey, dict, rows))
+      .then(([dict, rows]) => builder(tabKey, dict, rows))
       .catch(err => {
         const tbl = document.getElementById(`grid-${tabKey}`);
         if (tbl) {
@@ -533,5 +724,133 @@ document.addEventListener('DOMContentLoaded', () => {
   detailTabBtns.forEach(btn => {
     btn.addEventListener('shown.bs.tab', () => loadDetailTab(btn));
   });
+
+  // ── Toolbar 計數框 & 上一筆/下一筆導航 ───────────────────────
+
+  const NAV_BTN_FIRST = document.getElementById('btnFirst');
+  const NAV_BTN_PREV  = document.getElementById('btnPrev');
+  const NAV_BTN_NEXT  = document.getElementById('btnNext');
+  const NAV_BTN_LAST  = document.getElementById('btnLast');
+  let navKeys  = [];
+  let navIndex = -1;
+
+  const CURRENT_KEYS = {
+    PartNum:  (window._masterKeyValues?.PartNum  ?? '').trim(),
+    Revision: (window._masterKeyValues?.Revision ?? '').trim(),
+    LayerId:  (window._masterKeyValues?.LayerId  ?? '').trim()
+  };
+  const _tn = 'emodprodlayer';
+
+  function updateDetailCount(count) {
+    const el = document.getElementById('toolbarDetailCount');
+    if (!el) return;
+    el.textContent = count != null ? String(count) : '--';
+    el.style.display = '';
+  }
+
+  function updateHeaderCount() {
+    const el = document.getElementById('toolbarHeaderCount');
+    if (!el) return;
+    const total = navKeys.length;
+    if (total > 0 && navIndex >= 0) {
+      el.textContent = `${navIndex + 1} / ${total}`;
+    } else {
+      const si = parseInt(localStorage.getItem(`orderListQueryIndex:${_tn}`) || '0', 10);
+      const st = parseInt(localStorage.getItem(`orderListQueryTotal:${_tn}`) || '0', 10);
+      el.textContent = st > 0 ? `${si || '--'} / ${st}` : '-- / --';
+    }
+  }
+
+  function gotoRecord(key, targetIndex) {
+    if (!key) return;
+    if (targetIndex !== undefined && navKeys.length > 0) {
+      localStorage.setItem(`orderListQueryIndex:${_tn}`, targetIndex + 1);
+      localStorage.setItem(`orderListQueryTotal:${_tn}`, navKeys.length);
+    }
+    const url = `/EMOdProdLayer/Detail?PartNum=${encodeURIComponent(key.PartNum)}&Revision=${encodeURIComponent(key.Revision)}&LayerId=${encodeURIComponent(key.LayerId)}`;
+    window.location.href = url;
+  }
+
+  function updateNavButtons() {
+    const hasPrev  = navIndex > 0;
+    const hasNext  = navIndex >= 0 && navIndex < navKeys.length - 1;
+    if (NAV_BTN_FIRST) { NAV_BTN_FIRST.disabled = !hasPrev;  NAV_BTN_FIRST.onclick = () => hasPrev && gotoRecord(navKeys[0], 0); }
+    if (NAV_BTN_PREV)  { NAV_BTN_PREV.disabled  = !hasPrev;  NAV_BTN_PREV.onclick  = () => hasPrev && gotoRecord(navKeys[navIndex - 1], navIndex - 1); }
+    if (NAV_BTN_NEXT)  { NAV_BTN_NEXT.disabled  = !hasNext;  NAV_BTN_NEXT.onclick  = () => hasNext && gotoRecord(navKeys[navIndex + 1], navIndex + 1); }
+    if (NAV_BTN_LAST)  { NAV_BTN_LAST.disabled  = !hasNext;  NAV_BTN_LAST.onclick  = () => hasNext && gotoRecord(navKeys[navKeys.length - 1], navKeys.length - 1); }
+    updateHeaderCount();
+  }
+
+  async function initRowNavigation() {
+    // 立即用 localStorage 顯示（避免等待 API）
+    const si = localStorage.getItem(`orderListQueryIndex:${_tn}`);
+    const st = localStorage.getItem(`orderListQueryTotal:${_tn}`);
+    const el = document.getElementById('toolbarHeaderCount');
+    if (el) el.textContent = (si && st) ? `${si} / ${st}` : '載入中...';
+
+    try {
+      const res = await fetch('/EMOdProdLayer?handler=Data&pageIndex=1&pageSize=999999');
+      if (!res.ok) throw new Error('fetch failed');
+      const json = await res.json();
+      const rows = Array.isArray(json.items) ? json.items : (Array.isArray(json) ? json : []);
+      navKeys = rows.map(r => ({
+        PartNum:  (r.PartNum  || r.partNum  || '').toString().trim(),
+        Revision: (r.Revision || r.revision || '').toString().trim(),
+        LayerId:  (r.LayerId  || r.layerId  || '').toString().trim()
+      })).filter(k => k.PartNum || k.LayerId);
+
+      navIndex = navKeys.findIndex(k =>
+        k.PartNum.toLowerCase()  === CURRENT_KEYS.PartNum.toLowerCase()  &&
+        k.Revision.toLowerCase() === CURRENT_KEYS.Revision.toLowerCase() &&
+        k.LayerId.toLowerCase()  === CURRENT_KEYS.LayerId.toLowerCase()
+      );
+      updateNavButtons();
+    } catch {
+      if (NAV_BTN_PREV) NAV_BTN_PREV.disabled = true;
+      if (NAV_BTN_NEXT) NAV_BTN_NEXT.disabled = true;
+      updateHeaderCount();
+    }
+  }
+
+  initRowNavigation();
+
+  // ── 途程明細分割線拖拉 ────────────────────────────────────
+  (function () {
+    const splitter = document.getElementById('route-splitter');
+    if (!splitter) return;
+    let dragging = false, startX = 0, startLeftW = 0;
+
+    splitter.addEventListener('mousedown', e => {
+      dragging = true;
+      startX = e.clientX;
+      const left = document.getElementById('route-left');
+      startLeftW = left ? left.getBoundingClientRect().width : 0;
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      splitter.style.background = '#adb5bd';
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const left = document.getElementById('route-left');
+      const container = left?.parentElement;
+      if (!left || !container) return;
+      const delta = e.clientX - startX;
+      const containerW = container.getBoundingClientRect().width;
+      const splitterW = 6;
+      const newW = Math.max(150, Math.min(startLeftW + delta, containerW - splitterW - 150));
+      left.style.width = newW + 'px';
+      left.style.flex = 'none';
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      splitter.style.background = '#dee2e6';
+    });
+  })();
 });
 </script>
