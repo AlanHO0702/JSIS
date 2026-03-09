@@ -10,7 +10,6 @@ using Microsoft.Extensions.Logging;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
 using PcbErpApi.Services;
-using WebRazor.Models;
 
 namespace PcbErpApi.Pages.EMOdProdLayer
 {
@@ -37,13 +36,12 @@ namespace PcbErpApi.Pages.EMOdProdLayer
             _breadcrumbService = breadcrumbService;
         }
 
-        public MasterDetailConfig? Config { get; private set; }
         public List<KeyValuePair<string, string>> MasterKeyValues { get; private set; } = new();
         public List<DetailTab> ExtraTabs { get; private set; } = new();
         public List<MasterTab> MasterTabs { get; private set; } = new();
         public List<ItemCustButtonRow> CustomButtons { get; private set; } = new();
         public string? ActionRailPartial { get; private set; }
-        public string HeaderTableName => MasterTable;
+        public string? MasterApi { get; private set; }
 
         [FromQuery(Name = "mode")]
         public string? Mode { get; set; }
@@ -65,7 +63,7 @@ namespace PcbErpApi.Pages.EMOdProdLayer
             // 麵包屑
             try
             {
-                var currentItemId = ItemId ?? (IsViewOnly ? "EMO00020" : "EMO00019");
+                var currentItemId = ItemId ?? (IsViewOnly ? "EMO00060" : "EMO00059");
                 var sysItem = await _ctx.CurdSysItems.AsNoTracking()
                     .Where(x => x.ItemId == currentItemId)
                     .Select(x => new { x.SuperId })
@@ -93,22 +91,13 @@ namespace PcbErpApi.Pages.EMOdProdLayer
 
                 MasterKeyValues = CollectKeyValues(masterKeys);
 
-                Config = new MasterDetailConfig
-                {
-                    DomId       = "md_emodprodlayer",
-                    MasterTable = MasterTable,
-                    MasterDict  = MasterDict,
-                    MasterTitle = "層別資料主檔",
-                    MasterTop   = 1
-                };
-
                 if (MasterKeyValues.Count > 0)
-                    Config.MasterApi = BuildByKeysApi(MasterTable, MasterKeyValues);
+                    MasterApi = BuildByKeysApi(MasterTable, MasterKeyValues);
+
+                var itemId = IsViewOnly ? "EMO00060" : "EMO00059";
 
                 // Detail 頁籤（由 DB 動態產生）
-                ExtraTabs = BuildExtraTabs();
-
-                var itemId = IsViewOnly ? "EMO00020" : "EMO00019";
+                ExtraTabs = await BuildExtraTabsAsync(itemId);
                 var tabCaptions = await LoadMasterTabCaptionsAsync(itemId);
                 var fieldLangs  = await LoadFieldLangsAsync(MasterDict);
                 MasterTabs = BuildMasterTabs(masterDict, tabCaptions, fieldLangs);
@@ -137,52 +126,55 @@ namespace PcbErpApi.Pages.EMOdProdLayer
             return Page();
         }
 
-        // ── Detail 頁籤定義（與層別相關的明細表）────────────────────────────
-        private List<DetailTab> BuildExtraTabs()
+        // ── Detail 頁籤定義（從 DB CURdOCXTableSetUp 動態產生）─────────────
+        private async Task<List<DetailTab>> BuildExtraTabsAsync(string itemId)
         {
-            return new List<DetailTab>
+            var tabs = new List<DetailTab>();
+            var cs = _ctx.Database.GetConnectionString()!;
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            // 讀取 Detail1~N 的資料表設定
+            const string sql = @"
+SELECT s.TableName, s.TableKind, s.LocateKeys, s.OrderByField,
+       ISNULL(NULLIF(n.DisplayLabel,''), s.TableName) AS DisplayLabel
+  FROM CURdOCXTableSetUp s WITH (NOLOCK)
+  LEFT JOIN CURdTableName n WITH (NOLOCK) ON n.TableName = s.TableName
+ WHERE s.ItemId = @itemId
+   AND s.TableKind LIKE 'Detail%'
+ ORDER BY s.TableKind";
+
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@itemId", itemId);
+            await using var rd = await cmd.ExecuteReaderAsync();
+
+            var seq = 0;
+            while (await rd.ReadAsync())
             {
-                // 途程內容
-                new DetailTab(
-                    "layerroute",
-                    "途程內容",
-                    "EMOdLayerRoute",
-                    "EMOdLayerRoute",
-                    new[] { "PartNum", "Revision", "LayerId" }
-                ),
-                // 壓合疊構
-                new DetailTab(
-                    "layerpress",
-                    "壓合疊構",
-                    "EMOdLayerPress",
-                    "EMOdLayerPress",
-                    new[] { "PartNum", "Revision", "LayerId" }
-                ),
-                // 層別BOM
-                new DetailTab(
-                    "layerbom",
-                    "層別BOM",
-                    "EMOdLayerBOM",
-                    "EMOdLayerBOM",
-                    new[] { "PartNum", "Revision", "LayerId" }
-                ),
-                // 孔資料
-                new DetailTab(
-                    "layerhole",
-                    "孔資料",
-                    "EMOdLayerHole",
-                    "EMOdLayerHole",
-                    new[] { "PartNum", "Revision", "LayerId" }
-                ),
-                // 修改記錄
-                new DetailTab(
-                    "noteslog",
-                    "修改記錄",
-                    "EMOdNotesLog",
-                    "EMOdNotesLog",
-                    new[] { "PartNum", "Revision" }
-                )
-            };
+                var tableName   = rd["TableName"]?.ToString() ?? "";
+                var displayLabel = rd["DisplayLabel"]?.ToString() ?? tableName;
+                var locateKeys  = rd["LocateKeys"]?.ToString() ?? "";
+                if (string.IsNullOrWhiteSpace(tableName)) continue;
+
+                // 解析主鍵欄位（格式：PartNum;Revision;LayerId 或 PartNum;Revision;LayerId;...）
+                var keyFields = locateKeys
+                    .Split(new[] { ';', ',', '|' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(k => k.Trim())
+                    .Where(k => !string.IsNullOrWhiteSpace(k))
+                    .ToArray();
+                if (keyFields.Length == 0)
+                    keyFields = new[] { "PartNum", "Revision", "LayerId" };
+
+                tabs.Add(new DetailTab(
+                    $"detail{++seq}",
+                    displayLabel,
+                    tableName,
+                    tableName,
+                    keyFields
+                ));
+            }
+
+            return tabs;
         }
 
         // ── Master 頁籤（由 DB CURdOCXItemOtherRule 動態產生）───────────────

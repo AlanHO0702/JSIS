@@ -3,20 +3,18 @@
 @using System.Text.Json
 @{
     Layout = "_Layout";
-    var cfg = Model.Config;
-    ViewData["DictTableName"]    = cfg?.MasterDict;
-    ViewData["ActionRailPartial"] = Model.ActionRailPartial;
+    ViewData["Title"] = Model.PageTitle;
 }
 
 @await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", null, ViewData)
 <script src="~/js/editableGrid.js"></script>
 
 <script>
-    window._itemId          = '@(Model.IsViewOnly ? "EMO00020" : "EMO00019")';
-    window._headerTableName = '@Model.HeaderTableName';
+    window._itemId          = '@(Model.IsViewOnly ? "EMO00060" : "EMO00059")';
+    window._headerTableName = 'EMOdProdLayer';
 </script>
 
-@if ((Model.CustomButtons?.Count > 0))
+@if (Model.CustomButtons?.Count > 0)
 {
     <style>
     :root {
@@ -25,18 +23,17 @@
       --fab-gap: 14px;
       --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap));
     }
-    .content-wrapper { margin-left: var(--rail-reserve) !important; }
-    .d-flex.align-items-center.gap-2.mb-2.mt-1 {
-        margin-left: calc(-1 * var(--rail-reserve)) !important;
+    .content-wrapper { padding-left: var(--rail-reserve) !important; }
+    #topToolbar {
+        margin-left: calc(-1 * var(--rail-reserve) + var(--fab-left)) !important;
+        width: calc(100% + var(--rail-reserve) - var(--fab-left) * 2) !important;
+        position: sticky; top: 4px; z-index: 1200;
     }
     .action-rail {
       position: fixed; left: var(--fab-left); top: 80px;
       box-sizing: border-box; display: flex; flex-direction: column;
       gap: 2px; z-index: 900; overflow-y: auto; overflow-x: visible;
-      max-height: calc(100vh - 100px);
-    }
-    body.with-toolbar .action-rail {
-      top: calc(80px + var(--app-toolbar-height, 0px));
+      max-height: calc(100vh - 100px); background: transparent;
     }
     .fab {
       position: relative; width: var(--fab-width); min-width: 0;
@@ -50,6 +47,31 @@
 }
 
 <style>
+/* ========== 工具列樣式 ========== */
+.emo-toolbar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  background: #f6f7f9; border: 1px solid #d8dee8; border-radius: 10px;
+  padding: 6px 8px; box-sizing: border-box;
+  position: relative; left: 8px; margin: 4px 0 2px 0; width: calc(100% - 16px);
+}
+.emo-toolbar .btn-toolbar { flex: 1; min-width: 0; flex-wrap: nowrap; }
+.emo-toolbar .toolbar-btn {
+  height: var(--top-toolbar-btn-height, 30px); min-height: var(--top-toolbar-btn-height, 30px);
+  box-sizing: border-box; padding-top: 0; padding-bottom: 0;
+}
+.emo-toolbar .toolbar-icon-row { display: flex; gap: 4px; align-items: center; }
+.emo-toolbar .toolbar-btn-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: var(--top-toolbar-btn-height, 30px); min-height: var(--top-toolbar-btn-height, 30px);
+  width: 30px; padding: 0; border-radius: 8px; line-height: 1;
+  background: #f3f5f8; color: #5a6a82; border: 1px solid #c9d2df; box-shadow: none; cursor: pointer;
+}
+.emo-toolbar .toolbar-btn-icon i { font-size: 16px; }
+.emo-toolbar .toolbar-btn-icon:disabled { background: #f1f3f7; border-color: #c5ccd8; color: #9aa7bb; cursor: not-allowed; opacity: 0.8; }
+.emo-toolbar .toolbar-btn-icon.toolbar-btn-add:not(:disabled) { background: #f7fcf9; border-color: #7ccfa1; color: #1f7a45; }
+.emo-toolbar .toolbar-btn-icon.toolbar-btn-del:not(:disabled),
+.emo-toolbar .toolbar-btn-icon.toolbar-btn-cancel:not(:disabled) { background: #fff4f4; border-color: #e08a8a; color: #b33939; }
+
 #main-category-tabs { border-bottom: none; margin-bottom: 0; }
 #main-category-tabs .nav-link,
 #master-tabs .nav-link,
@@ -80,47 +102,436 @@
 }
 </style>
 
-@if (cfg != null)
+@if (!string.IsNullOrWhiteSpace(Model.ActionRailPartial))
 {
-    @await Html.PartialAsync("~/Pages/Shared/_MasterDetailPartial.cshtml", cfg, ViewData)
+    <div class="action-rail">
+        @await Html.PartialAsync(Model.ActionRailPartial, Model.CustomButtons, ViewData)
+    </div>
+    <script>
+    (function () {
+        function positionActionRail() {
+            var toolbar = document.getElementById('topToolbar');
+            var rail = document.querySelector('.action-rail');
+            if (!toolbar || !rail) return;
+            var bottom = toolbar.getBoundingClientRect().bottom;
+            rail.style.top = (bottom + 4) + 'px';
+            rail.style.maxHeight = 'calc(100vh - ' + (bottom + 8) + 'px)';
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', positionActionRail);
+        } else {
+            positionActionRail();
+        }
+        window.addEventListener('resize', positionActionRail);
+    })();
+    </script>
 }
 
+<div class="content-wrapper" style="display:flex; flex-direction:column; height:calc(100vh - 60px); overflow:visible;">
+
+<div id="topToolbar" class="emo-toolbar" data-dict-table="EMOdProdLayer">
+    <div class="toolbar-icon-row" role="group" aria-label="row-nav">
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnFirst" title="第一筆"><i class="bi bi-chevron-bar-left"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnPrev"  title="上一筆"><i class="bi bi-chevron-left"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnNext"  title="下一筆"><i class="bi bi-chevron-right"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnLast"  title="最後一筆"><i class="bi bi-chevron-bar-right"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add" id="btnAdd"    title="新增"    @(Model.IsViewOnly ? "disabled" : "")><span class="toolbar-icon">+</span></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-del" id="btnDelete" title="刪除"    @(Model.IsViewOnly ? "disabled" : "")><span class="toolbar-icon">-</span></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add toolbar-btn-check" id="btnSave"   title="儲存"    disabled><span class="toolbar-icon">✓</span></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-del toolbar-btn-check" id="btnCancel" title="取消變更" disabled><span class="toolbar-icon">&times;</span></button>
+    </div>
+    @await Html.PartialAsync("~/Pages/Shared/_TableToolbar.cshtml", new TableToolbarModel {
+        SearchBtnId  = "btnSearch",
+        AddBtnId     = "btnAddNew",
+        DeleteBtnId  = "btnBatchDelete",
+        SearchText   = "查詢",
+        AddText      = "新增",
+        DeleteText   = "刪除",
+        ModalId      = "searchModal",
+        ReportSpName = ""
+    })
+</div>
+
+<!-- 主檔資訊區 -->
+<div id="layer-header" style="display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px;
+     background:#f0f4fa; border:1px solid #d0d8e8; border-radius:8px;
+     padding:4px 12px; margin:4px 8px 2px 8px; font-size:12px; min-height:28px;">
+    <span class="text-muted">載入中...</span>
+</div>
+
+<!-- 規格/表單 主頁籤 -->
+<div class="card shadow-sm border-0 rounded mt-2" style="flex:1; overflow:hidden; display:flex; flex-direction:column;">
+  <div class="card-body p-2" style="display:flex; flex-direction:column; min-height:0;">
+
+    <ul class="nav nav-tabs border-bottom-0 mb-0" role="tablist" id="main-category-tabs">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active fw-bold" id="spec-tab"
+                    data-bs-toggle="tab" data-bs-target="#spec-content"
+                    type="button" role="tab" aria-selected="true">規格</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link fw-bold" id="form-tab"
+                    data-bs-toggle="tab" data-bs-target="#form-content"
+                    type="button" role="tab" aria-selected="false">表單</button>
+        </li>
+    </ul>
+
+    <div class="tab-content pt-0" style="flex:1; overflow:auto;">
+
+      <!-- 規格頁籤：動態 Master 頁籤 -->
+      <div class="tab-pane fade show active" id="spec-content" role="tabpanel">
+        <ul class="nav nav-tabs flex-wrap" role="tablist" id="master-tabs" style="gap:1px;">
+          @for (int i = 0; i < Model.MasterTabs.Count; i++)
+          {
+              var tab = Model.MasterTabs[i];
+              var active = i == 0 ? "active" : "";
+              <li class="nav-item" role="presentation">
+                  <button class="nav-link @active"
+                          id="master-tab-@tab.Key"
+                          data-bs-toggle="tab"
+                          data-bs-target="#master-content-@tab.Key"
+                          type="button" role="tab"
+                          data-tab-key="@tab.Key"
+                          data-tab-show-where="@tab.ShowWhere">
+                      @tab.Title
+                  </button>
+              </li>
+          }
+        </ul>
+        <div class="tab-content" style="overflow-x:auto;">
+          @for (int i = 0; i < Model.MasterTabs.Count; i++)
+          {
+              var tab = Model.MasterTabs[i];
+              var active = i == 0 ? "show active" : "";
+              <div class="tab-pane fade @active"
+                   id="master-content-@tab.Key"
+                   role="tabpanel" style="padding:12px;">
+                  <ul class="list-unstyled master-spec-tab"
+                      data-tab-key="@tab.Key"
+                      data-show-where="@tab.ShowWhere"
+                      style="position:relative; min-height:300px; margin:0; padding:0;"></ul>
+              </div>
+          }
+        </div>
+      </div>
+
+      <!-- 表單頁籤：Detail 子頁籤 -->
+      <div class="tab-pane fade" id="form-content" role="tabpanel">
+        <ul class="nav nav-tabs flex-wrap" role="tablist" id="extra-tabs">
+          @for (int i = 0; i < Model.ExtraTabs.Count; i++)
+          {
+              var tab = Model.ExtraTabs[i];
+              var active = i == 0 ? "active" : "";
+              <li class="nav-item" role="presentation">
+                  <button class="nav-link @active"
+                          id="tab-@tab.Key-tab"
+                          data-bs-toggle="tab"
+                          data-bs-target="#tab-@tab.Key"
+                          aria-controls="tab-@tab.Key"
+                          type="button" role="tab"
+                          data-table="@tab.TableName"
+                          data-dict="@tab.DictName"
+                          data-keyfields="@string.Join(",", tab.KeyFields ?? Enumerable.Empty<string>())">
+                      @tab.Title
+                  </button>
+              </li>
+          }
+        </ul>
+        <div class="tab-content">
+          @for (int i = 0; i < Model.ExtraTabs.Count; i++)
+          {
+              var tab = Model.ExtraTabs[i];
+              var active = i == 0 ? "show active" : "";
+              <div class="tab-pane fade @active" id="tab-@tab.Key" role="tabpanel">
+                  <div class="table-responsive">
+                      <table class="table table-sm table-hover align-middle mb-0"
+                             id="grid-@tab.Key"
+                             data-table-name="@tab.TableName"
+                             data-dict-name="@tab.DictName"
+                             data-dict-table="@tab.DictName"
+                             data-key-fields="@string.Join(",", tab.KeyFields ?? Enumerable.Empty<string>())">
+                          <thead class="table-light">
+                              <tr><th class="text-center text-muted">載入中...</th></tr>
+                          </thead>
+                          <tbody>
+                              <tr><td class="text-center text-muted py-3">請點選上方主檔資料</td></tr>
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
+          }
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</div>
+
 <script>
-// 主鍵（三個欄位）
 window._masterKeyValues = @Html.Raw(JsonSerializer.Serialize(
     Model.MasterKeyValues.ToDictionary(kv => kv.Key, kv => kv.Value)
 ));
-
-// Master 規格頁籤（動態產生）
 window._masterTabs = @Html.Raw(JsonSerializer.Serialize(
-    Model.MasterTabs.Select(t => new {
-        key       = t.Key,
-        title     = t.Title,
-        fieldNames = t.FieldNames,
-        showWhere  = t.ShowWhere
-    })
+    Model.MasterTabs.Select(t => new { key = t.Key, title = t.Title, fieldNames = t.FieldNames, showWhere = t.ShowWhere })
 ));
-
-// Detail 子頁籤
 window._extraTabs = @Html.Raw(JsonSerializer.Serialize(
-    Model.ExtraTabs.Select(t => new {
-        key       = t.Key,
-        title     = t.Title,
-        tableName = t.TableName,
-        dictName  = t.DictName,
-        keyFields = t.KeyFields,
-        isForm    = t.IsForm
-    })
+    Model.ExtraTabs.Select(t => new { key = t.Key, title = t.Title, tableName = t.TableName, dictName = t.DictName, keyFields = t.KeyFields, isForm = t.IsForm })
 ));
-
 window._isViewOnly    = @(Model.IsViewOnly ? "true" : "false");
-window._dictTableName = '@(cfg?.MasterDict ?? "EMOdProdLayer")';
-window._masterTable   = '@(cfg?.MasterTable ?? "EMOdProdLayer")';
-window._masterApi     = '@Html.Raw(cfg?.MasterApi ?? "")';
+window._dictTableName = 'EMOdProdLayer';
+window._masterTable   = 'EMOdProdLayer';
+window._masterApi     = '@Html.Raw(Model.MasterApi ?? "")';
 </script>
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
 
-@if (!string.IsNullOrWhiteSpace(Model.ActionRailPartial))
-{
-    @await Html.PartialAsync(Model.ActionRailPartial, Model.CustomButtons, ViewData)
-}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  let currentMasterKeys = window._masterKeyValues || {};
+  let masterDict = null;
+  let masterData = null;
+  const tabState = {};
+
+  // ── 工具函數 ──────────────────────────────────────────────
+
+  function getDict(dictName) {
+    return fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictName)}`)
+      .then(r => r.json());
+  }
+
+  function calcTabMinHeight(fields) {
+    let max = 300;
+    fields.forEach(f => {
+      const bottom = (f.iFieldTop || 0) + (f.iFieldHeight || 22) + 6;
+      if (bottom > max) max = bottom;
+    });
+    return max;
+  }
+
+  function calcTabMinWidth(fields) {
+    let max = 400;
+    fields.forEach(f => {
+      const right = (f.iFieldLeft || 0) + (f.iFieldWidth || 160);
+      if (right > max) max = right;
+    });
+    return max;
+  }
+
+  // ── 規格頁籤渲染 ──────────────────────────────────────────
+
+  function renderMasterTab(tabKey, dict, row) {
+    const tabBtn = document.querySelector(`[data-tab-key="${tabKey}"]`);
+    if (!tabBtn) return;
+    const showWhere = parseInt(tabBtn.dataset.tabShowWhere || '0', 10);
+    const container = document.querySelector(`#master-content-${tabKey} .master-spec-tab`);
+    if (!container) return;
+
+    const fields = (dict || [])
+      .filter(f => (f.IShowWhere ?? f.iShowWhere ?? 0) === showWhere)
+      .filter(f => (f.Visible ?? 1) != 0)
+      .sort((a, b) => (a.SerialNum ?? 9999) - (b.SerialNum ?? 9999));
+
+    if (fields.length === 0) {
+      container.innerHTML = '<li class="text-muted p-3">此頁籤暫無欄位資料</li>';
+      return;
+    }
+
+    const hasCoords = fields.some(f => (f.iFieldTop ?? 0) > 0 || (f.iFieldLeft ?? 0) > 0);
+    const headerTopPad = 6;
+    let html = '';
+
+    if (hasCoords) {
+      const minH = calcTabMinHeight(fields);
+      const minW = calcTabMinWidth(fields);
+      container.style.minHeight = minH + 'px';
+      const spacer = document.createElement('div');
+      spacer.style.cssText = `position:absolute;top:0;left:0;width:${minW}px;height:${minH}px;pointer-events:none;`;
+      container.appendChild(spacer);
+      container.parentElement.style.overflowX = 'auto';
+      let labelHtml = '';
+      let inputHtml2 = '';
+      fields.forEach(f => {
+        const fn = f.FieldName ?? '';
+        const hideInput = (f.iFieldWidth ?? -1) === 0;
+        let val = row[fn] ?? row[fn.toLowerCase()] ?? '';
+        const isDate = /^(date|datetime|smalldatetime)/i.test(f.DataType ?? '') || /^\d{4}-\d{2}-\d{2}T/.test(String(val));
+        if (isDate && val) {
+          const d = new Date(val);
+          if (!isNaN(d) && d.getFullYear() <= 1899) val = '';
+          else if (!isNaN(d)) val = d.toLocaleDateString('zh-TW');
+        }
+        const isReadOnly = (f.ReadOnly ?? 0) !== 0;
+        const isNumber = /^(number|int|smallint|tinyint|bigint|decimal|numeric|money|float|real)/i.test(f.DataType ?? '');
+        const isCheckbox = (f.ComboStyle ?? 0) === 1;
+        const top = (f.iFieldTop || 0) + headerTopPad;
+        const left = f.iFieldLeft || 0;
+        const width = f.iFieldWidth || 160;
+        const height = f.iFieldHeight || 22;
+        const labTop = (f.iLabTop || 0) + headerTopPad;
+        const labLeft = f.iLabLeft || 0;
+        const labWidth = f.iLabWidth || 80;
+        const labHeight = f.iLabHeight || 22;
+        const label = f.DisplayLabel || fn;
+        if ((f.iLabWidth ?? -1) !== 0) {
+          labelHtml += `<li class="spec-field-label" data-field="${fn}" data-show-where="${showWhere}"
+            style="top:${labTop}px; left:${labLeft}px; width:${labWidth}px; height:${labHeight}px;">${label}</li>`;
+        }
+        if (!hideInput) {
+          const fieldClass = `spec-draggable${isNumber ? ' field-number' : ' field-text'}`;
+          let inp = '';
+          if (isCheckbox) {
+            const checked = (val == 1 || val === true || val === 'true') ? 'checked' : '';
+            inp = `<input type="checkbox" class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" value="1" ${checked} data-original="${(val == 1 || val === true || val === 'true') ? '1' : '0'}" disabled>`;
+          } else {
+            inp = `<input type="text" class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" value="${val}" data-original="${val}" readonly>`;
+          }
+          inputHtml2 += `<li class="${fieldClass}" data-field="${fn}" data-show-where="${showWhere}"
+            style="top:${top}px; left:${left}px; width:${width}px; height:${height}px;">${inp}</li>`;
+        }
+      });
+      html = labelHtml + inputHtml2;
+    } else {
+      container.style.minHeight = '';
+      container.style.display = 'flex';
+      container.style.flexWrap = 'wrap';
+      container.style.gap = '8px';
+      container.style.padding = '8px';
+      fields.forEach(f => {
+        const fn = f.FieldName ?? '';
+        const val = row[fn] ?? row[fn.toLowerCase()] ?? '';
+        const isReadOnly = (f.ReadOnly ?? 0) !== 0;
+        const w = f.iFieldWidth ? `${f.iFieldWidth}px` : '150px';
+        const label = f.DisplayLabel || fn;
+        html += `<div class="d-flex align-items-center gap-1" style="white-space:nowrap;">
+          <label class="mb-0 me-1" style="font-size:12px;font-weight:600;color:#0066cc;">${label}</label>
+          <input type="text" class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" value="${val}" data-original="${val}"
+            style="width:${w};font-size:12px;border:1px solid #999;border-radius:2px;padding:2px 6px;background:#fff;box-sizing:border-box;" readonly>
+        </div>`;
+      });
+    }
+    container.innerHTML = html;
+  }
+
+  // ── 子頁籤表格建立 ────────────────────────────────────────
+
+  async function buildTable(tabKey, dict, rows) {
+    const table = document.getElementById(`grid-${tabKey}`);
+    if (!table) return;
+    const thead = table.querySelector('thead');
+    const tbody = table.querySelector('tbody');
+    if (!thead || !tbody) return;
+
+    const visibleFields = dict.filter(f => (f.Visible ?? 1) == 1).sort((a, b) => (a.SerialNum || 0) - (b.SerialNum || 0));
+    thead.innerHTML = '<tr>' + visibleFields.map(f => {
+      const width = Number(f.DisplaySize || f.iFieldWidth || 0);
+      const widthPx = width > 0 ? width * 10 : 100;
+      return `<th style="width:${widthPx}px;min-width:${widthPx}px;" data-field="${f.FieldName}">${f.DisplayLabel || f.FieldName}</th>`;
+    }).join('') + '</tr>';
+
+    if (!rows || rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="100" class="text-center text-muted py-3">無資料</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = rows.map(row => {
+      const cells = visibleFields.map(f => {
+        const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+        let display = val;
+        const isDate = /^(date|datetime)/i.test(f.DataType ?? '');
+        if (isDate && val) {
+          const d = new Date(val);
+          if (!isNaN(d) && d.getFullYear() > 1899) display = d.toLocaleDateString('zh-TW');
+          else display = '';
+        }
+        return `<td data-field="${f.FieldName}">${display}</td>`;
+      }).join('');
+      return `<tr>${cells}</tr>`;
+    }).join('');
+  }
+
+  // ── 子頁籤載入 ────────────────────────────────────────────
+
+  function loadDetailTab(tabBtn) {
+    const tabKey = tabBtn.getAttribute('aria-controls')?.replace('tab-', '');
+    if (!tabKey) return;
+    const tableName = tabBtn.dataset.table;
+    const dictName  = tabBtn.dataset.dict;
+    if (!tableName || !dictName) return;
+
+    const keyFields = (tabBtn.dataset.keyfields || '').split(',').filter(k => k.trim());
+    const qs = new URLSearchParams();
+    keyFields.forEach(k => {
+      const val = currentMasterKeys[k] ?? currentMasterKeys[k.toLowerCase()] ?? '';
+      if (val) { qs.append('keyNames', k); qs.append('keyValues', val); }
+    });
+
+    const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&${qs.toString()}`;
+    Promise.all([getDict(dictName), fetch(url).then(r => r.json())])
+      .then(([dict, rows]) => buildTable(tabKey, dict, rows))
+      .catch(err => {
+        const tbl = document.getElementById(`grid-${tabKey}`);
+        if (tbl) {
+          const tb = tbl.querySelector('tbody');
+          if (tb) tb.innerHTML = `<tr><td colspan="100" class="text-center text-danger py-3">載入失敗: ${err.message}</td></tr>`;
+        }
+      });
+  }
+
+  // ── 主檔資料載入 ──────────────────────────────────────────
+
+  const masterApiUrl = window._masterApi || '';
+  const dictName     = window._dictTableName || 'EMOdProdLayer';
+
+  // 渲染主檔資訊區（品號、版序、LayerId 等關鍵欄位）
+  function renderLayerHeader(dict, row) {
+    const header = document.getElementById('layer-header');
+    if (!header) return;
+    const showFields = ['PartNum', 'Revision', 'LayerId', 'LayerName'];
+    const dictMap = Object.fromEntries((dict || []).map(f => [f.FieldName, f]));
+    header.innerHTML = showFields.map(fn => {
+      const f = dictMap[fn] || {};
+      const label = f.DisplayLabel || fn;
+      const val = row[fn] ?? row[fn.toLowerCase()] ?? '';
+      return `<span style="display:inline-flex;align-items:center;gap:3px;white-space:nowrap;">
+        <span style="color:#0055aa;font-weight:600;">${label}</span>
+        <input type="text" value="${val}" readonly
+          style="border:1px solid #b0bcd0;border-radius:3px;padding:1px 5px;font-size:12px;
+                 background:#fff;color:#222;min-width:60px;max-width:180px;height:22px;">
+      </span>`;
+    }).join('');
+  }
+
+  if (masterApiUrl && dictName) {
+    Promise.all([
+      getDict(dictName),
+      fetch(masterApiUrl).then(r => r.json())
+    ]).then(([dict, rows]) => {
+      masterDict = dict;
+      masterData = (rows && rows.length > 0) ? rows[0] : {};
+      // 渲染主檔資訊區
+      renderLayerHeader(dict, masterData);
+      // 填入所有規格頁籤
+      document.querySelectorAll('#master-tabs [data-tab-key]').forEach(tab => {
+        renderMasterTab(tab.dataset.tabKey, dict, masterData);
+      });
+    }).catch(() => {});
+  }
+
+  // ── 表單頁籤：切換時載入子頁籤資料 ──────────────────────
+
+  let formTabLoaded = false;
+  const detailTabBtns = Array.from(document.querySelectorAll('#extra-tabs [data-table][data-dict]'));
+
+  document.getElementById('form-tab')?.addEventListener('shown.bs.tab', () => {
+    if (!formTabLoaded && detailTabBtns.length > 0) {
+      formTabLoaded = true;
+      setTimeout(() => loadDetailTab(detailTabBtns[0]), 100);
+    }
+  });
+
+  detailTabBtns.forEach(btn => {
+    btn.addEventListener('shown.bs.tab', () => loadDetailTab(btn));
+  });
+});
+</script>
