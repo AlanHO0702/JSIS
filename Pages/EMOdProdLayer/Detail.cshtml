@@ -1,0 +1,126 @@
+@page "/EMOdProdLayer/Detail"
+@model PcbErpApi.Pages.EMOdProdLayer.DetailModel
+@using System.Text.Json
+@{
+    Layout = "_Layout";
+    var cfg = Model.Config;
+    ViewData["DictTableName"]    = cfg?.MasterDict;
+    ViewData["ActionRailPartial"] = Model.ActionRailPartial;
+}
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", null, ViewData)
+<script src="~/js/editableGrid.js"></script>
+
+<script>
+    window._itemId          = '@(Model.IsViewOnly ? "EMO00020" : "EMO00019")';
+    window._headerTableName = '@Model.HeaderTableName';
+</script>
+
+@if ((Model.CustomButtons?.Count > 0))
+{
+    <style>
+    :root {
+      --fab-left: 12px;
+      --fab-width: 120px;
+      --fab-gap: 14px;
+      --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap));
+    }
+    .content-wrapper { margin-left: var(--rail-reserve) !important; }
+    .d-flex.align-items-center.gap-2.mb-2.mt-1 {
+        margin-left: calc(-1 * var(--rail-reserve)) !important;
+    }
+    .action-rail {
+      position: fixed; left: var(--fab-left); top: 80px;
+      box-sizing: border-box; display: flex; flex-direction: column;
+      gap: 2px; z-index: 900; overflow-y: auto; overflow-x: visible;
+      max-height: calc(100vh - 100px);
+    }
+    body.with-toolbar .action-rail {
+      top: calc(80px + var(--app-toolbar-height, 0px));
+    }
+    .fab {
+      position: relative; width: var(--fab-width); min-width: 0;
+      padding: 6px 8px; font-size: .92rem; white-space: normal;
+      word-break: break-word; background: #f8f9fb; color: #1f5fbf;
+      font-weight: 600; border-radius: 10px; cursor: pointer;
+      box-shadow: 0 2px 8px rgba(20,40,80,.12); border: 1px solid #cfd7e6;
+    }
+    .fab:hover { background: #e9f1ff; border-color: #9fbaf0; }
+    </style>
+}
+
+<style>
+#main-category-tabs { border-bottom: none; margin-bottom: 0; }
+#main-category-tabs .nav-link,
+#master-tabs .nav-link,
+#extra-tabs .nav-link {
+  --bs-nav-link-padding-y: 2px;
+  --bs-nav-link-padding-x: 8px;
+  font-size: 13px;
+  padding: 2px 8px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+:root { --field-label-size: 12px; --field-value-size: 12px; }
+.master-spec-tab { position: relative; box-sizing: border-box; padding-top: 6px; padding-bottom: 8px; }
+.spec-field-label {
+  position: absolute; display: flex; align-items: center; justify-content: flex-end;
+  text-align: right; font-size: var(--field-label-size); line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 0 4px 0 2px; pointer-events: none; color: #333;
+}
+.spec-draggable {
+  position: absolute; display: flex; flex-direction: row; align-items: center;
+  box-sizing: border-box; overflow: hidden; background: #fff;
+}
+.spec-draggable .master-field {
+  width: 100%; height: 100%; min-height: 20px; padding: 2px 6px;
+  font-size: var(--field-value-size); border: 1px solid #999; border-radius: 2px;
+  box-sizing: border-box; background: #fff; color: #333; outline: none;
+}
+</style>
+
+@if (cfg != null)
+{
+    @await Html.PartialAsync("~/Pages/Shared/_MasterDetailPartial.cshtml", cfg, ViewData)
+}
+
+<script>
+// 主鍵（三個欄位）
+window._masterKeyValues = @Html.Raw(JsonSerializer.Serialize(
+    Model.MasterKeyValues.ToDictionary(kv => kv.Key, kv => kv.Value)
+));
+
+// Master 規格頁籤（動態產生）
+window._masterTabs = @Html.Raw(JsonSerializer.Serialize(
+    Model.MasterTabs.Select(t => new {
+        key       = t.Key,
+        title     = t.Title,
+        fieldNames = t.FieldNames,
+        showWhere  = t.ShowWhere
+    })
+));
+
+// Detail 子頁籤
+window._extraTabs = @Html.Raw(JsonSerializer.Serialize(
+    Model.ExtraTabs.Select(t => new {
+        key       = t.Key,
+        title     = t.Title,
+        tableName = t.TableName,
+        dictName  = t.DictName,
+        keyFields = t.KeyFields,
+        isForm    = t.IsForm
+    })
+));
+
+window._isViewOnly    = @(Model.IsViewOnly ? "true" : "false");
+window._dictTableName = '@(cfg?.MasterDict ?? "EMOdProdLayer")';
+window._masterTable   = '@(cfg?.MasterTable ?? "EMOdProdLayer")';
+window._masterApi     = '@Html.Raw(cfg?.MasterApi ?? "")';
+</script>
+<script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
+@if (!string.IsNullOrWhiteSpace(Model.ActionRailPartial))
+{
+    @await Html.PartialAsync(Model.ActionRailPartial, Model.CustomButtons, ViewData)
+}
