@@ -125,16 +125,25 @@
 .spec-draggable.field-number .master-field { text-align: right; }
 .spec-draggable.md-selected { outline: 2px solid #5b8def; border-radius: 4px; background: rgba(91,141,239,0.08); }
 
-/* 規格頁籤編輯狀態 */
-#spec-content.spec-editing .master-field:not(.readonly-field) {
+/* 規格頁籤編輯狀態（排除 checkbox） */
+#spec-content.spec-editing .master-field:not(.readonly-field):not([type="checkbox"]) {
   border-color: #5b8def !important;
   background: #f0f6ff !important;
   cursor: text !important;
 }
-#spec-content.spec-editing .master-field:not(.readonly-field):focus {
+#spec-content.spec-editing .master-field:not(.readonly-field):not([type="checkbox"]):focus {
   border-color: #2564b3 !important;
   outline: 2px solid rgba(37,100,179,0.25) !important;
   background: #fff !important;
+}
+/* checkbox 編輯狀態：手型游標、無藍框 */
+#spec-content.spec-editing .master-field[type="checkbox"]:not(.readonly-field) {
+  cursor: pointer !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  border: none !important;
+  accent-color: #2564b3;
 }
 </style>
 
@@ -158,7 +167,7 @@
 }
 else
 {
-    <div class="content-wrapper">
+    <div class="content-wrapper" style="display: flex; flex-direction: column; height: calc(100vh - 60px); overflow: hidden;">
     <div id="topToolbar" class="emo-toolbar" data-dict-table="@cfg?.MasterTable">
         <div class="toolbar-icon-row" role="group" aria-label="row-nav-and-sub-detail">
             <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnFirst" title="第一筆" aria-label="第一筆"><i class="bi bi-chevron-bar-left"></i></button>
@@ -196,7 +205,7 @@ else
     </div>
 
     <!-- 主要內容區：左側層別+內部資料 + 右側規格/表單 -->
-    <div class="d-flex gap-2" style="align-items: stretch;">
+    <div class="d-flex gap-2" style="align-items: stretch; flex: 1; overflow-y: auto; min-height: 0;">
         <!-- 左側：層別面板 + 內部資料 -->
         <div style="width: 180px; flex-shrink: 0;">
             <!-- 層別面板 -->
@@ -512,8 +521,12 @@ document.addEventListener('DOMContentLoaded', () => {
     specContent.classList.toggle('spec-editing', enable);
 
     specContent.querySelectorAll('.master-field:not(.readonly-field)').forEach(inp => {
-      if (enable) inp.removeAttribute('readonly');
-      else inp.setAttribute('readonly', 'readonly');
+      if (inp.type === 'checkbox') {
+        inp.disabled = !enable;
+      } else {
+        if (enable) inp.removeAttribute('readonly');
+        else inp.setAttribute('readonly', 'readonly');
+      }
     });
 
     const btnSave   = document.getElementById('btnSaveHeader');
@@ -608,7 +621,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const targetId = btn.dataset.bsTarget;
         if (targetId) {
           document.querySelectorAll(`${targetId} .master-field:not(.readonly-field)`).forEach(inp => {
-            inp.removeAttribute('readonly');
+            if (inp.type === 'checkbox') inp.disabled = false;
+            else inp.removeAttribute('readonly');
           });
         }
       }
@@ -812,32 +826,45 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 載入左下角內部資料 (暫停記錄) - 使用與右側相同的表格渲染邏輯
+  // IOType + AftStatus → 中文作業名稱
+  function formatLogIOType(row) {
+    const ioType   = String(row.IOType   ?? row.ioType   ?? row.iotype   ?? '').trim();
+    const aftStatus = String(row.AftStatus ?? row.aftStatus ?? row.aftstatus ?? '').trim();
+    if (ioType === '12') return '料號產生';
+    if (ioType === '1') {
+      if (aftStatus === '2') return '審核';
+      return '送審';
+    }
+    if (ioType === '6') return '退審';
+    return ioType; // 未知就原樣顯示
+  }
+
+  // 載入左下角內部資料
   async function loadSidebarHaltLog() {
     const table = document.getElementById('grid-haltlog-sidebar');
     if (!table) return;
 
-    const tableName = 'EMOdProdLog';
-    const dictName = 'EMOdProdLog';
-
-    // 建立查詢參數
     const qs = new URLSearchParams();
     qs.append('keyNames', 'PartNum');
     qs.append('keyValues', currentMasterKeys.PartNum || currentMasterKeys.partnum || '');
     qs.append('keyNames', 'Revision');
     qs.append('keyValues', currentMasterKeys.Revision || currentMasterKeys.revision || '');
 
-    const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&${qs.toString()}`;
+    const url = `/api/CommonTable/ByKeys?table=EMOdProdLog&${qs.toString()}`;
 
     try {
-      // 同時載入字典和資料
       const [dict, rows] = await Promise.all([
-        getDict(dictName),
+        getDict('EMOdProdLog'),
         fetch(url).then(r => r.json())
       ]);
 
-      // 使用與右側相同的 buildTable 函數來建立表格（自動處理 lookup）
-      await buildTable('haltlog-sidebar', dict, rows);
+      // 將每筆的 IOType 轉成中文，存入虛擬欄位 _IOTypeLabel
+      const processedRows = (rows || []).map(r => ({
+        ...r,
+        IOType: formatLogIOType(r)
+      }));
+
+      await buildTable('haltlog-sidebar', dict, processedRows);
     } catch (err) {
       const tbody = table.querySelector('tbody');
       if (tbody) {
@@ -1081,13 +1108,14 @@ let html = '';
         const labHeight = f.iLabHeight || 22;
 
         const label = f.DisplayLabel || fn;
+        const titleAttr = window.__isAdmin ? `title="${fn}：${label}"` : '';
 
         // 所有 label 先收集（先渲染 = 在下層），iLabWidth=0 不顯示
         if ((f.iLabWidth ?? -1) !== 0) {
           labelHtml += `<li class="spec-field-label"
             data-field="${fn}" data-show-where="${showWhere}"
             style="top:${labTop}px; left:${labLeft}px; width:${labWidth}px; height:${labHeight}px;"
-            title="${fn}">${label}</li>`;
+            ${titleAttr}>${label}</li>`;
         }
 
         // input 後收集（後渲染 = 在上層，白色背景蓋住不相關的 label）
@@ -1096,7 +1124,7 @@ let html = '';
           let inputHtml = '';
           if (isCheckbox) {
             const checked = (val == 1 || val === true || val === 'true') ? 'checked' : '';
-            inputHtml = `<input type="checkbox" class="master-field" name="${fn}" value="1" ${checked} ${isReadOnly || isViewOnly ? 'disabled' : ''} style="width:16px;height:16px;cursor:default;accent-color:#0066cc;">`;
+            inputHtml = `<input type="checkbox" class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" value="1" ${checked} data-original="${(val == 1 || val === true || val === 'true') ? '1' : '0'}" disabled style="width:16px;height:16px;cursor:default;accent-color:#0066cc;">`;
           } else {
             inputHtml = `<input type="text"
               class="master-field${isReadOnly ? ' readonly-field' : ''}"
@@ -1105,7 +1133,7 @@ let html = '';
           inputHtml2 += `<li class="${fieldClass}"
             data-field="${fn}" data-show-where="${showWhere}"
             style="top:${top}px; left:${left}px; width:${width}px; height:${height}px;"
-            title="${fn}">${inputHtml}</li>`;
+            ${titleAttr}>${inputHtml}</li>`;
         }
       });
       // label 全部在前（下層），input 全部在後（上層蓋住不相關 label）
@@ -2005,9 +2033,14 @@ let html = '';
     }
   }
 
-  // 跳轉到指定的資料
-  function gotoRecord(key) {
+  // 跳轉到指定的資料（跳頁前先把目標 index 存入 localStorage，下一頁可立即顯示正確計數）
+  function gotoRecord(key, targetIndex) {
     if (!key || !key.PartNum) return;
+    const tn = (window._headerTableName || 'emodprodinfo').toLowerCase();
+    if (targetIndex !== undefined && navKeys.length > 0) {
+      localStorage.setItem(`orderListQueryIndex:${tn}`, targetIndex + 1); // 1-based
+      localStorage.setItem(`orderListQueryTotal:${tn}`, navKeys.length);
+    }
     const url = `/EMOdProdInfo/Detail?PartNum=${encodeURIComponent(key.PartNum)}&Revision=${encodeURIComponent(key.Revision || '0')}`;
     window.location.href = url;
   }
@@ -2021,19 +2054,19 @@ let html = '';
 
     if (NAV_BTN_FIRST) {
       NAV_BTN_FIRST.disabled = !hasFirst;
-      NAV_BTN_FIRST.onclick = () => hasFirst && gotoRecord(navKeys[0]);
+      NAV_BTN_FIRST.onclick = () => hasFirst && gotoRecord(navKeys[0], 0);
     }
     if (NAV_BTN_PREV) {
       NAV_BTN_PREV.disabled = !hasPrev;
-      NAV_BTN_PREV.onclick = () => hasPrev && gotoRecord(navKeys[navIndex - 1]);
+      NAV_BTN_PREV.onclick = () => hasPrev && gotoRecord(navKeys[navIndex - 1], navIndex - 1);
     }
     if (NAV_BTN_NEXT) {
       NAV_BTN_NEXT.disabled = !hasNext;
-      NAV_BTN_NEXT.onclick = () => hasNext && gotoRecord(navKeys[navIndex + 1]);
+      NAV_BTN_NEXT.onclick = () => hasNext && gotoRecord(navKeys[navIndex + 1], navIndex + 1);
     }
     if (NAV_BTN_LAST) {
       NAV_BTN_LAST.disabled = !hasLast;
-      NAV_BTN_LAST.onclick = () => hasLast && gotoRecord(navKeys[navKeys.length - 1]);
+      NAV_BTN_LAST.onclick = () => hasLast && gotoRecord(navKeys[navKeys.length - 1], navKeys.length - 1);
     }
 
     // 更新計數器顯示
