@@ -15,20 +15,20 @@ using PcbErpApi.Services;
 
 namespace PcbErpApi.Pages.MPH
 {
-    public class MPH00017Model : PageModel
+    public class MPH00015Model : PageModel
     {
         private readonly PcbErpContext _context;
         private readonly PaginationService _pagedService;
         private readonly ITableDictionaryService _dictService;
 
-        public MPH00017Model(PcbErpContext context, PaginationService pagedService, ITableDictionaryService dictService)
+        public MPH00015Model(PcbErpContext context, PaginationService pagedService, ITableDictionaryService dictService)
         {
             _context = context;
             _pagedService = pagedService;
             _dictService = dictService;
         }
 
-        public string PageTitle => "MPH00017 請購單查詢";
+        public string PageTitle => "MPH00015 採購單查詢";
         public string? DictTableName { get; set; }
         public string? ParamTableName { get; set; }
         [BindProperty(SupportsGet = true, Name = "spId")]
@@ -65,6 +65,7 @@ namespace PcbErpApi.Pages.MPH
         public List<(string Name, object? Value)> DebugParams { get; set; } = new();
         public string CurrentUserId { get; set; } = "";
         public string CurrentUseId { get; set; } = "";
+        public bool HideAmountFields { get; set; }
 
         public async Task OnGetAsync()
         {
@@ -73,14 +74,14 @@ namespace PcbErpApi.Pages.MPH
             if (opened) await _context.Database.OpenConnectionAsync();
             try
             {
-                const string itemId = "MPH00017";
+                const string itemId = "MPH00015";
 
                 var item = await _context.CurdSysItems.AsNoTracking()
                     .FirstOrDefaultAsync(x => x.ItemId == itemId);
 
                 var className = (item?.ClassName ?? "").Replace(".dll", "", StringComparison.OrdinalIgnoreCase);
                 if (string.IsNullOrWhiteSpace(className))
-                    className = "MPHdScribeInq";
+                    className = "MPHdOrderInq";
 
                 ParamTableName = ResolveParamTableName(className);
 
@@ -88,6 +89,7 @@ namespace PcbErpApi.Pages.MPH
                 DictTableName = className;
                 GridDictFields = LoadDictSafe(DictTableName);
                 (ParamNameByField, FieldNameByParam) = await LoadParamMapAsync(conn, ParamTableName);
+                HideAmountFields = await ShouldHideAmountFieldsAsync(conn);
 
                 PageNumber = 1;
                 PageSize = 0;
@@ -149,14 +151,14 @@ namespace PcbErpApi.Pages.MPH
             if (opened) await _context.Database.OpenConnectionAsync();
             try
             {
-                const string itemId = "MPH00017";
+                const string itemId = "MPH00015";
 
                 var item = await _context.CurdSysItems.AsNoTracking()
                     .FirstOrDefaultAsync(x => x.ItemId == itemId);
 
                 var className = (item?.ClassName ?? "").Replace(".dll", "", StringComparison.OrdinalIgnoreCase);
                 if (string.IsNullOrWhiteSpace(className))
-                    className = "MPHdScribeInq";
+                    className = "MPHdOrderInq";
 
                 ParamTableName = ResolveParamTableName(className);
                 QueryDictFields = LoadDictSafe(ParamTableName);
@@ -197,7 +199,7 @@ namespace PcbErpApi.Pages.MPH
                     .ToList();
 
                 using var wb = new XLWorkbook();
-                var ws = wb.AddWorksheet("MPH00017");
+                var ws = wb.AddWorksheet("MPH00015");
                 for (var c = 0; c < fields.Count; c++)
                 {
                     ws.Cell(1, c + 1).Value = fields[c].DisplayLabel ?? fields[c].FieldName;
@@ -244,7 +246,7 @@ namespace PcbErpApi.Pages.MPH
                     }
                 }
 
-                var fileName = $"MPH00017_{DateTime.Now:yyyyMMdd}.xlsx";
+                var fileName = $"MPH00015_{DateTime.Now:yyyyMMdd}.xlsx";
                 using var stream = new MemoryStream();
                 wb.SaveAs(stream);
                 stream.Position = 0;
@@ -270,6 +272,18 @@ namespace PcbErpApi.Pages.MPH
             {
                 return new List<CURdTableField>();
             }
+        }
+
+        private static async Task<bool> ShouldHideAmountFieldsAsync(DbConnection conn)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+select top 1 Value
+from CURdSysParams with (nolock)
+where SystemId='EMO' and ParamId='CusId'";
+            var raw = await cmd.ExecuteScalarAsync();
+            var value = raw?.ToString()?.Trim();
+            return string.Equals(value, "VIC", StringComparison.OrdinalIgnoreCase);
         }
 
         private string ResolveParamTableName(string className)
@@ -397,7 +411,7 @@ namespace PcbErpApi.Pages.MPH
             return raw;
         }
 
-        public async Task<IActionResult> OnGetScribeSubAsync(string? sourNum, int? sourItem)
+        public async Task<IActionResult> OnGetOrderSubAsync(string? sourNum, int? sourItem)
         {
             if (string.IsNullOrWhiteSpace(sourNum) || !sourItem.HasValue)
                 return new JsonResult(new { items = new List<Dictionary<string, object?>>(), fields = new List<object>() });
@@ -649,7 +663,7 @@ where t1.PaperNum=@SourNum and t1.Item=@SourItem";
 
         public async Task<IActionResult> OnPostResetParamsAsync()
         {
-            const string itemId = "MPH00017";
+            const string itemId = "MPH00015";
             var conn = _context.Database.GetDbConnection();
             var opened = conn.State != ConnectionState.Open;
             if (opened) await _context.Database.OpenConnectionAsync();
@@ -671,5 +685,6 @@ where t1.PaperNum=@SourNum and t1.Item=@SourItem";
         }
     }
 }
+
 
 

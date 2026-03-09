@@ -1,6 +1,6 @@
-﻿@page "/MPH/MPH00017"
+﻿@page "/MPH/MPH00015"
 @using PcbErpApi.Models
-@model PcbErpApi.Pages.MPH.MPH00017Model
+@model PcbErpApi.Pages.MPH.MPH00015Model
 @{
     Layout = "_InquiryTemplate";
     ViewData["Title"] = Model.PageTitle;
@@ -14,7 +14,6 @@
     <button type="submit" form="inqForm" class="inq-rail-btn">查詢</button>
     <button type="button" class="inq-rail-btn" id="btnExportExcel">匯出Excel</button>
     <button type="button" class="inq-rail-btn" id="btnPaperTrace">單據追蹤</button>
-    <button type="button" class="inq-rail-btn" id="btnPrintScribe">請購單列印</button>
     <button type="button" class="inq-rail-btn" id="btnSaveHeight">儲存高度設定</button>
     <button type="button" class="inq-rail-btn" id="btnEditDict">編輯辭典</button>
     <button type="button" class="inq-rail-btn" id="btnResetParams">重設參數</button>
@@ -81,10 +80,6 @@
       {
           return qs == "1" || qs.Equals("true", StringComparison.OrdinalIgnoreCase) || qs.Equals("y", StringComparison.OrdinalIgnoreCase);
       }
-      // For this inquiry, empty-search should mean full-query; don't auto-check these filters from defaults.
-      if (name.Equals("iPost", StringComparison.OrdinalIgnoreCase)
-          || name.Equals("notcheck", StringComparison.OrdinalIgnoreCase))
-          return false;
       var dv = QDefault(name);
       if (dv is bool b) return b;
       if (dv is int i) return i == 1;
@@ -227,7 +222,34 @@
         var paperNum = GVal(row, "PaperNum")?.ToString() ?? "";
         var sourNum = GVal(row, "SourNum")?.ToString() ?? "";
         var sourItem = GVal(row, "SourItem")?.ToString() ?? "";
-        <tr data-paper-id="@paperId" data-paper-num="@paperNum" data-sour-num="@sourNum" data-sour-item="@sourItem">
+        var shortName = GVal(row, "ShortName")?.ToString() ?? "";
+        var poTypeName = GVal(row, "POTypeName")?.ToString() ?? "";
+        var payWayName = GVal(row, "PayWayName")?.ToString() ?? "";
+        var invoiceTypeName = GVal(row, "InvoiceTypeName")?.ToString() ?? "";
+        var mpoCode = GVal(row, "MPOCode")?.ToString() ?? "";
+        var outAddr = GVal(row, "OutAddr")?.ToString() ?? "";
+        var transTypeName = GVal(row, "TransTypeName")?.ToString() ?? "";
+        var commerceName = GVal(row, "CommerceName")?.ToString() ?? "";
+        var poKindName = GVal(row, "POKindName")?.ToString() ?? "";
+        var unitPrice = GVal(row, "UnitPrice")?.ToString() ?? "";
+        var rateToNt = GVal(row, "RateToNT")?.ToString() ?? "";
+        var subTotal = GVal(row, "SubTotal")?.ToString() ?? "";
+        <tr data-paper-id="@paperId"
+            data-paper-num="@paperNum"
+            data-sour-num="@sourNum"
+            data-sour-item="@sourItem"
+            data-short-name="@shortName"
+            data-po-type-name="@poTypeName"
+            data-pay-way-name="@payWayName"
+            data-invoice-type-name="@invoiceTypeName"
+            data-mpo-code="@mpoCode"
+            data-out-addr="@outAddr"
+            data-trans-type-name="@transTypeName"
+            data-commerce-name="@commerceName"
+            data-po-kind-name="@poKindName"
+            data-unit-price="@unitPrice"
+            data-rate-to-nt="@rateToNt"
+            data-sub-total="@subTotal">
           @foreach (var f in gFields)
           {
             var val = GVal(row, f.FieldName);
@@ -427,7 +449,8 @@
   const posEl = document.getElementById("inqCurrentPos");
   if (totalEl) totalEl.textContent = String(totalCount);
 
-  const rows = Array.from(document.querySelectorAll(".inq-table tbody tr"));
+  const rows = Array.from(document.querySelectorAll(".inq-table tbody tr"))
+    .filter(r => !r.querySelector("td[colspan]"));
   let selectedRow = null;
 
   const setPos = (idx) => {
@@ -435,18 +458,25 @@
     posEl.textContent = totalCount === 0 ? "0" : String(idx);
   };
 
-  if (rows.length > 0 && totalCount > 0) setPos(1);
+  const setMainSelection = (tr, pos) => {
+    rows.forEach(r => r.classList.remove("table-active"));
+    tr.classList.add("table-active");
+    selectedRow = tr;
+    setPos(pos);
+  };
+
+  if (rows.length > 0 && totalCount > 0) {
+    setMainSelection(rows[0], 1);
+  }
+
   rows.forEach((tr, i) => {
     tr.addEventListener("click", () => {
-      rows.forEach(r => r.classList.remove("table-active"));
-      tr.classList.add("table-active");
-      selectedRow = tr;
-      setPos(i + 1);
+      setMainSelection(tr, i + 1);
     });
   });
 
   document.getElementById("btnClearInq")?.addEventListener("click", () => {
-    window.location.href = "/MPH/MPH00017";
+    window.location.href = "/MPH/MPH00015";
   });
 
   const parseSortValue = (text) => {
@@ -594,7 +624,7 @@
     }
     params.set("search", "1");
     const qs = params.toString();
-    window.location.href = qs ? (`/MPH/MPH00017?${qs}`) : "/MPH/MPH00017";
+    window.location.href = qs ? (`/MPH/MPH00015?${qs}`) : "/MPH/MPH00015";
   });
 
   document.getElementById("btnExportExcel")?.addEventListener("click", () => {
@@ -630,20 +660,13 @@
     window.open(`/DynamicTemplate/Paper/${encodeURIComponent(pid)}/${encodeURIComponent(pnum)}`, "_blank");
   });
 
-  document.getElementById("btnPrintScribe")?.addEventListener("click", () => {
-    if (!selectedRow) return alert("請先選擇一筆資料");
-    const pnum = selectedRow.dataset.paperNum || "";
-    if (!pnum) return alert("找不到單號");
-    window.open(`/DynamicTemplate/Paper/PO000036/${encodeURIComponent(pnum)}`, "_blank");
-  });
-
   document.getElementById("btnSaveHeight")?.addEventListener("click", async () => {
     const h = document.querySelector(".inq-body")?.clientHeight || 0;
     const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
     const res = await fetch("/api/MatInfoUtility/SaveBrowseHeight", {
       method: "POST",
       headers: { "Content-Type": "application/json", "RequestVerificationToken": token },
-      body: JSON.stringify({ itemId: "MPH00017", height: h })
+      body: JSON.stringify({ itemId: "MPH00015", height: h })
     });
     if (!res.ok) return alert("儲存失敗");
     alert("已儲存高度設定");
@@ -965,6 +988,7 @@
     </ul>
   </div>
 }
+
 
 
 
