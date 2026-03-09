@@ -73,12 +73,44 @@
     flex: 1 1 auto;
     max-height: 100%;
     min-height: 0;
+    overflow-x: auto;
     overflow-y: auto;
+  }
+  .inq-body .inq-table {
+    table-layout: fixed !important;
+    width: 1px !important;
+    max-width: none !important;
+  }
+  .inq-body .inq-table th,
+  .inq-body .inq-table td {
+    min-width: 0 !important;
+    overflow: hidden;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+  .inq-body .inq-table th .th-text {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: clip;
+    white-space: nowrap;
   }
   .inq-body .inq-table thead th {
     position: sticky !important;
     top: 0;
     z-index: 5;
+  }
+  .inq-body .inq-table thead th .col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 8px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+  }
+  .inq-body .inq-table tbody td.inq-active-cell {
+    box-shadow: inset 0 0 0 2px #2b6cb0 !important;
   }
   .inq-header {
     display: flex;
@@ -233,4 +265,121 @@
     </section>
   </main>
 </div>
+
+<script>
+  (function () {
+    const isTypingElement = (el) => {
+      if (!el) return false;
+      const tag = (el.tagName || "").toUpperCase();
+      if (tag === "TEXTAREA" || tag === "SELECT") return true;
+      if (tag === "INPUT") {
+        const type = (el.type || "text").toLowerCase();
+        return type !== "checkbox" && type !== "radio" && type !== "button";
+      }
+      return !!el.isContentEditable;
+    };
+
+    const bindCellNavigation = (table) => {
+      if (!(table instanceof HTMLTableElement)) return;
+      if (table.dataset.inqCellNav === "0") return;
+
+      const tbody = table.tBodies && table.tBodies.length ? table.tBodies[0] : null;
+      if (!tbody) return;
+
+      let activeCell = null;
+
+      const isDataRow = (tr) =>
+        !!tr && !tr.classList.contains("vs-spacer") && !tr.querySelector("td[colspan]");
+
+      const getDataRows = () =>
+        Array.from(tbody.querySelectorAll("tr")).filter(isDataRow);
+
+      const getVisibleCells = (tr) =>
+        Array.from(tr.querySelectorAll("td"))
+          .filter(td => td.colSpan <= 1 && td.offsetParent !== null && getComputedStyle(td).display !== "none");
+
+      const clearActiveCell = () => {
+        if (activeCell && activeCell.classList) activeCell.classList.remove("inq-active-cell");
+        activeCell = null;
+      };
+
+      const setActiveCell = (td, focus) => {
+        if (!td || td.tagName !== "TD" || td.colSpan > 1) {
+          clearActiveCell();
+          return;
+        }
+        if (activeCell && activeCell !== td) activeCell.classList.remove("inq-active-cell");
+        activeCell = td;
+        activeCell.classList.add("inq-active-cell");
+        if (!activeCell.hasAttribute("tabindex")) activeCell.tabIndex = -1;
+        if (focus) {
+          try { activeCell.focus({ preventScroll: true }); } catch { activeCell.focus(); }
+        }
+        try { activeCell.scrollIntoView({ block: "nearest", inline: "nearest" }); } catch { }
+      };
+
+      const resolveArrowTarget = (fromTd, key) => {
+        const fromTr = fromTd.closest("tr");
+        if (!isDataRow(fromTr)) return null;
+        const rows = getDataRows();
+        const rowIdx = rows.indexOf(fromTr);
+        if (rowIdx < 0) return null;
+
+        const rowCells = getVisibleCells(fromTr);
+        const cellIdx = rowCells.indexOf(fromTd);
+        if (cellIdx < 0) return null;
+
+        if (key === "ArrowLeft" || key === "ArrowRight") {
+          const nextIdx = cellIdx + (key === "ArrowLeft" ? -1 : 1);
+          if (nextIdx < 0 || nextIdx >= rowCells.length) return null;
+          return rowCells[nextIdx];
+        }
+
+        const nextRowIdx = rowIdx + (key === "ArrowUp" ? -1 : 1);
+        if (nextRowIdx < 0 || nextRowIdx >= rows.length) return null;
+        const targetCells = getVisibleCells(rows[nextRowIdx]);
+        if (!targetCells.length) return null;
+        return targetCells[Math.min(cellIdx, targetCells.length - 1)];
+      };
+
+      tbody.addEventListener("click", (ev) => {
+        const td = ev.target?.closest?.("td");
+        if (!td || !tbody.contains(td) || td.colSpan > 1) return;
+        if (!isDataRow(td.closest("tr"))) return;
+        setActiveCell(td, false);
+      });
+
+      table.addEventListener("focusin", (ev) => {
+        const td = ev.target?.closest?.("td");
+        if (!td || !tbody.contains(td) || td.colSpan > 1) return;
+        if (!isDataRow(td.closest("tr"))) return;
+        setActiveCell(td, false);
+      });
+
+      table.addEventListener("keydown", (ev) => {
+        if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(ev.key)) return;
+        if (isTypingElement(ev.target)) return;
+
+        let source = activeCell;
+        if (!source || !source.isConnected) {
+          const selected = tbody.querySelector("tr.table-active");
+          source = selected ? getVisibleCells(selected)[0] : null;
+        }
+        if (!source) return;
+
+        const target = resolveArrowTarget(source, ev.key);
+        if (!target) return;
+        ev.preventDefault();
+        setActiveCell(target, true);
+        target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      new MutationObserver(() => {
+        if (activeCell && !activeCell.isConnected) activeCell = null;
+      }).observe(tbody, { childList: true, subtree: true });
+    };
+
+    document.querySelectorAll(".inq-table").forEach(bindCellNavigation);
+  })();
+</script>
 
