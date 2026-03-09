@@ -19,9 +19,13 @@
       + `&result=${encodeURIComponent(f.LookupResultField)}`;
 
     const rows = await fetch(url).then(r => r.json());
-    const map = {};
-    rows.forEach(r => map[r.key] = r.result0);
-    return LOOKUP_CACHE[key] = map;
+    const cell = {}, dropdown = {};
+    rows.forEach(r => {
+      const k = String(r.key ?? "");
+      cell[k]     = (r.result0 ?? "").toString().trim();
+      dropdown[k] = combineResults(r);
+    });
+    return LOOKUP_CACHE[key] = { cell, dropdown };
   }
 
   async function loadOCXLookup(f) {
@@ -37,9 +41,156 @@
       + `&result=${encodeURIComponent(f.OCXLKResultName)}`;
 
     const rows = await fetch(url).then(r => r.json());
-    const map = {};
-    rows.forEach(r => map[r.key] = r.result0);
-    return OCX_CACHE[key] = map;
+    const cell = {}, dropdown = {};
+    rows.forEach(r => {
+      const k = String(r.key ?? "");
+      cell[k]     = (r.result0 ?? "").toString().trim();
+      dropdown[k] = combineResults(r);
+    });
+    return OCX_CACHE[key] = { cell, dropdown };
+  }
+
+  // 將 result0, result1, ... 合併成顯示字串
+  function combineResults(r) {
+    const parts = [];
+    let i = 0;
+    while (r[`result${i}`] !== undefined) {
+      const v = (r[`result${i}`] ?? "").toString().trim();
+      if (v !== "") parts.push(v);
+      i++;
+    }
+    return parts.join('　');
+  }
+
+  // ==============================================================================
+  //  Lookup Dropdown（雙擊下拉選單）
+  // ==============================================================================
+  function ensureLookupDropdownCss() {
+    if (document.getElementById('mmd-lookup-dd-css')) return;
+    const style = document.createElement('style');
+    style.id = 'mmd-lookup-dd-css';
+    style.textContent = `
+.mmd-lookup-dd{background:#fff;border:1px solid #b0c4de;border-radius:6px;box-shadow:0 4px 18px rgba(0,0,0,.18);max-height:300px;display:flex;flex-direction:column;overflow:hidden;font-size:.85rem}
+.mmd-lookup-search{border:none;border-bottom:1px solid #dde6f0;padding:5px 9px;outline:none;font-size:.85rem;min-width:120px}
+.mmd-lookup-list{overflow-y:auto;max-height:252px}
+.mmd-lookup-item{padding:4px 10px;cursor:pointer;white-space:nowrap}
+.mmd-lookup-item:hover,.mmd-lookup-item:focus{background:#e8f0ff;outline:none}
+.mmd-lookup-item.selected{background:#d0e4ff;font-weight:500}
+.mmd-lookup-dd[data-readonly="1"] .mmd-lookup-item{cursor:default;color:#555}
+.mmd-lookup-dd[data-readonly="1"] .mmd-lookup-item:hover,.mmd-lookup-dd[data-readonly="1"] .mmd-lookup-item:focus{background:#f5f5f5}
+`;
+    document.head.appendChild(style);
+  }
+
+  function showLookupDropdown(inp, td, lookupMap, readOnly) {
+    ensureLookupDropdownCss();
+    const existing = document.getElementById('mmd-lookup-dd');
+    if (existing) existing.remove();
+
+    const entries = Object.entries(lookupMap);
+    if (!entries.length) return;
+
+    // 取得目前的 raw key（瀏覽模式從 span data-raw 取，編輯模式從 inp）
+    const currentRaw = readOnly
+      ? (td.querySelector('.cell-view')?.dataset?.raw ?? inp.dataset.raw ?? "")
+      : (inp.dataset.raw ?? "");
+
+    const dd = document.createElement('div');
+    dd.id = 'mmd-lookup-dd';
+    dd.className = 'mmd-lookup-dd';
+    if (readOnly) dd.dataset.readonly = '1';
+
+    const search = document.createElement('input');
+    search.type = 'text';
+    search.placeholder = readOnly ? '搜尋（唯讀）…' : '搜尋…';
+    search.className = 'mmd-lookup-search';
+    dd.appendChild(search);
+
+    const list = document.createElement('div');
+    list.className = 'mmd-lookup-list';
+    dd.appendChild(list);
+
+    const renderItems = (filter) => {
+      list.innerHTML = '';
+      const q = (filter || '').toLowerCase();
+      entries.forEach(([key, label]) => {
+        const text = `${label}`;
+        if (q && !text.toLowerCase().includes(q) && !key.toLowerCase().includes(q)) return;
+        const item = document.createElement('div');
+        item.className = 'mmd-lookup-item';
+        item.tabIndex = -1;
+        item.textContent = text;
+        item.dataset.key = key;
+        if (String(currentRaw) === String(key)) item.classList.add('selected');
+        if (!readOnly) {
+          item.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            inp.value = key;
+            inp.dataset.raw = key;
+            const span = td.querySelector('.cell-view');
+            if (span) span.textContent = label;
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+            dd.remove();
+          });
+        }
+        list.appendChild(item);
+      });
+    };
+
+    renderItems('');
+    search.addEventListener('input', () => renderItems(search.value));
+
+    // 定位（避免超出視窗底部）
+    const rect = td.getBoundingClientRect();
+    dd.style.position = 'fixed';
+    dd.style.left = `${rect.left}px`;
+    dd.style.minWidth = `${Math.max(rect.width, 180)}px`;
+    dd.style.zIndex = '99999';
+    document.body.appendChild(dd);
+
+    const ddH = dd.offsetHeight || 300;
+    const below = window.innerHeight - rect.bottom;
+    dd.style.top = below >= ddH || below >= rect.top
+      ? `${rect.bottom + 1}px`
+      : `${rect.top - ddH - 1}px`;
+
+    requestAnimationFrame(() => search.focus());
+
+    const close = (e) => {
+      if (!dd.contains(e.target)) {
+        dd.remove();
+        document.removeEventListener('mousedown', close);
+      }
+    };
+    setTimeout(() => document.addEventListener('mousedown', close), 0);
+
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { dd.remove(); inp.focus(); }
+      if (e.key === 'ArrowDown') {
+        const first = list.querySelector('.mmd-lookup-item');
+        if (first) first.focus();
+        e.preventDefault();
+      }
+    });
+
+    list.addEventListener('keydown', (e) => {
+      const focused = document.activeElement;
+      if (e.key === 'ArrowDown') {
+        const next = focused?.nextElementSibling;
+        if (next) next.focus();
+        e.preventDefault();
+      } else if (e.key === 'ArrowUp') {
+        const prev = focused?.previousElementSibling;
+        if (prev) prev.focus(); else search.focus();
+        e.preventDefault();
+      } else if (e.key === 'Enter') {
+        focused?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        e.preventDefault();
+      } else if (e.key === 'Escape') {
+        dd.remove(); inp.focus();
+      }
+    });
   }
 
   // ==============================================================================
@@ -655,8 +806,8 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
       if (raw === "" && f.KeySelfName) raw = getRowValue(row, f.KeySelfName);
 
       let display = raw;
-      if (oc[f.FieldName]?.[raw] != null) display = oc[f.FieldName][raw];
-      else if (lk[f.FieldName]?.[raw] != null) display = lk[f.FieldName][raw];
+      if (oc[f.FieldName]?.cell?.[raw] != null) display = oc[f.FieldName].cell[raw];
+      else if (lk[f.FieldName]?.cell?.[raw] != null) display = lk[f.FieldName].cell[raw];
 
       // ★ 是否顯示為勾選框 (ComboStyle==1)
       const isCheckbox = String(f.ComboStyle ?? "").trim() === "1";
@@ -664,6 +815,7 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
 
       const span = document.createElement("span");
       span.className = "cell-view";
+      span.dataset.raw = raw == null ? "" : String(raw);
       if (isCheckbox) span.classList.add("d-inline-flex", "justify-content-center", "w-100");
 
       const inp = document.createElement("input");
@@ -699,6 +851,19 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
         span.textContent = fmtCell(display, DICT.fmt(f), DICT.type(f));
         inp.value = display == null ? "" : display;
         inp.dataset.raw = raw == null ? "" : raw;
+
+        // ★ 若有 lookup 對照表，記錄並綁定雙擊下拉（編輯模式可選取，瀏覽模式唯讀）
+        const fieldLookupMap = oc[f.FieldName]?.dropdown || lk[f.FieldName]?.dropdown;
+        const fieldCellMap   = oc[f.FieldName]?.cell    || lk[f.FieldName]?.cell;
+        if (fieldLookupMap && Object.keys(fieldLookupMap).length > 0) {
+          inp._lookupMap     = fieldLookupMap;  // 下拉用（含所有顯示欄位合併）
+          inp._lookupCellMap = fieldCellMap;    // 儲存格顯示用（只用 result0）
+          td.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            const isReadOnly = !window._mmdEditing || inp.readOnly || inp.disabled;
+            showLookupDropdown(inp, td, inp._lookupMap, isReadOnly);
+          });
+        }
       }
 
       // ★★★ 修正：如果該欄位是 PK (IsKey)，或者是唯讀，或者是關聯鍵,都必須鎖定不可編輯 ★★★

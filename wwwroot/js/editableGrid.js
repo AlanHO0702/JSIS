@@ -140,7 +140,13 @@
               viewChk.checked = !!inp.checked;
               inp.value = inp.checked ? "1" : "0";
             } else {
-              span.textContent = inp.value;
+              // ★ 若有 lookup 對照表，用 cell map（result0）顯示，而非 raw key
+              const cellMap = inp._lookupCellMap || inp._lookupMap;
+              if (cellMap && cellMap[inp.value] != null) {
+                span.textContent = cellMap[inp.value];
+              } else {
+                span.textContent = inp.value;
+              }
             }
             span.classList.remove("d-none");
             inp.classList.add("d-none");
