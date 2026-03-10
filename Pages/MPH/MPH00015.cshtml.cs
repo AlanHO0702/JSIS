@@ -13,22 +13,22 @@ using PcbErpApi.Data;
 using PcbErpApi.Models;
 using PcbErpApi.Services;
 
-namespace PcbErpApi.Pages.SPO
+namespace PcbErpApi.Pages.MPH
 {
-    public class SPO00009Model : PageModel
+    public class MPH00015Model : PageModel
     {
         private readonly PcbErpContext _context;
         private readonly PaginationService _pagedService;
         private readonly ITableDictionaryService _dictService;
 
-        public SPO00009Model(PcbErpContext context, PaginationService pagedService, ITableDictionaryService dictService)
+        public MPH00015Model(PcbErpContext context, PaginationService pagedService, ITableDictionaryService dictService)
         {
             _context = context;
             _pagedService = pagedService;
             _dictService = dictService;
         }
 
-        public string PageTitle => "SPO00009 銷貨單查詢";
+        public string PageTitle => "MPH00015 採購單查詢";
         public string? DictTableName { get; set; }
         public string? ParamTableName { get; set; }
         [BindProperty(SupportsGet = true, Name = "spId")]
@@ -65,6 +65,7 @@ namespace PcbErpApi.Pages.SPO
         public List<(string Name, object? Value)> DebugParams { get; set; } = new();
         public string CurrentUserId { get; set; } = "";
         public string CurrentUseId { get; set; } = "";
+        public bool HideAmountFields { get; set; }
 
         public async Task OnGetAsync()
         {
@@ -73,16 +74,14 @@ namespace PcbErpApi.Pages.SPO
             if (opened) await _context.Database.OpenConnectionAsync();
             try
             {
-                const string itemId = "SPO00009";
+                const string itemId = "MPH00015";
 
                 var item = await _context.CurdSysItems.AsNoTracking()
                     .FirstOrDefaultAsync(x => x.ItemId == itemId);
 
                 var className = (item?.ClassName ?? "").Replace(".dll", "", StringComparison.OrdinalIgnoreCase);
                 if (string.IsNullOrWhiteSpace(className))
-                    className = "SPOdMPSOutInq";
-                if (string.Equals(className, "SPOdOutInq", StringComparison.OrdinalIgnoreCase))
-                    className = "SPOdMPSOutInq";
+                    className = "MPHdOrderInq";
 
                 ParamTableName = ResolveParamTableName(className);
 
@@ -90,6 +89,7 @@ namespace PcbErpApi.Pages.SPO
                 DictTableName = className;
                 GridDictFields = LoadDictSafe(DictTableName);
                 (ParamNameByField, FieldNameByParam) = await LoadParamMapAsync(conn, ParamTableName);
+                HideAmountFields = await ShouldHideAmountFieldsAsync(conn);
 
                 PageNumber = 1;
                 PageSize = 0;
@@ -98,9 +98,7 @@ namespace PcbErpApi.Pages.SPO
                 if (SpId <= 0)
                 {
                     var start = await CallInqStartAsync(conn, itemId);
-                    paramStr = string.Equals(className, "SPOdMPSOutInq", StringComparison.OrdinalIgnoreCase)
-                        ? BuildParamStrFromDict(className, ParamTableName)
-                        : start.ParamStr;
+                    paramStr = start.ParamStr;
                     SpId = start.SpId;
                     if (!string.IsNullOrWhiteSpace(start.TableName))
                     {
@@ -153,16 +151,14 @@ namespace PcbErpApi.Pages.SPO
             if (opened) await _context.Database.OpenConnectionAsync();
             try
             {
-                const string itemId = "SPO00009";
+                const string itemId = "MPH00015";
 
                 var item = await _context.CurdSysItems.AsNoTracking()
                     .FirstOrDefaultAsync(x => x.ItemId == itemId);
 
                 var className = (item?.ClassName ?? "").Replace(".dll", "", StringComparison.OrdinalIgnoreCase);
                 if (string.IsNullOrWhiteSpace(className))
-                    className = "SPOdMPSOutInq";
-                if (string.Equals(className, "SPOdOutInq", StringComparison.OrdinalIgnoreCase))
-                    className = "SPOdMPSOutInq";
+                    className = "MPHdOrderInq";
 
                 ParamTableName = ResolveParamTableName(className);
                 QueryDictFields = LoadDictSafe(ParamTableName);
@@ -174,9 +170,7 @@ namespace PcbErpApi.Pages.SPO
                 if (SpId <= 0)
                 {
                     var start = await CallInqStartAsync(conn, itemId);
-                    paramStr = string.Equals(className, "SPOdMPSOutInq", StringComparison.OrdinalIgnoreCase)
-                        ? BuildParamStrFromDict(className, ParamTableName)
-                        : start.ParamStr;
+                    paramStr = start.ParamStr;
                     SpId = start.SpId;
                     if (!string.IsNullOrWhiteSpace(start.TableName))
                     {
@@ -205,7 +199,7 @@ namespace PcbErpApi.Pages.SPO
                     .ToList();
 
                 using var wb = new XLWorkbook();
-                var ws = wb.AddWorksheet("SPO00009");
+                var ws = wb.AddWorksheet("MPH00015");
                 for (var c = 0; c < fields.Count; c++)
                 {
                     ws.Cell(1, c + 1).Value = fields[c].DisplayLabel ?? fields[c].FieldName;
@@ -252,7 +246,7 @@ namespace PcbErpApi.Pages.SPO
                     }
                 }
 
-                var fileName = $"SPO00009_{DateTime.Now:yyyyMMdd}.xlsx";
+                var fileName = $"MPH00015_{DateTime.Now:yyyyMMdd}.xlsx";
                 using var stream = new MemoryStream();
                 wb.SaveAs(stream);
                 stream.Position = 0;
@@ -278,6 +272,18 @@ namespace PcbErpApi.Pages.SPO
             {
                 return new List<CURdTableField>();
             }
+        }
+
+        private static async Task<bool> ShouldHideAmountFieldsAsync(DbConnection conn)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+select top 1 Value
+from CURdSysParams with (nolock)
+where SystemId='EMO' and ParamId='CusId'";
+            var raw = await cmd.ExecuteScalarAsync();
+            var value = raw?.ToString()?.Trim();
+            return string.Equals(value, "VIC", StringComparison.OrdinalIgnoreCase);
         }
 
         private string ResolveParamTableName(string className)
@@ -376,6 +382,14 @@ namespace PcbErpApi.Pages.SPO
             return map;
         }
 
+        private static bool IsCheckboxField(CURdTableField? field)
+        {
+            if (field == null) return false;
+            if ((field.ComboStyle ?? 0) == 1) return true;
+            var dt = (field.DataType ?? "").ToLowerInvariant();
+            return dt.Contains("bit");
+        }
+
         private object? CoerceValue(string? raw, CURdTableField? field)
         {
             if (string.IsNullOrWhiteSpace(raw)) return null;
@@ -397,6 +411,72 @@ namespace PcbErpApi.Pages.SPO
             return raw;
         }
 
+        public async Task<IActionResult> OnGetOrderSubAsync(string? sourNum, int? sourItem)
+        {
+            if (string.IsNullOrWhiteSpace(sourNum) || !sourItem.HasValue)
+                return new JsonResult(new { items = new List<Dictionary<string, object?>>(), fields = new List<object>() });
+
+            var conn = _context.Database.GetDbConnection();
+            var opened = conn.State != ConnectionState.Open;
+            if (opened) await _context.Database.OpenConnectionAsync();
+            try
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+select t1.*, PaperId='MPHdScribeMain', POType2=t3.POType, t2.ItemName, t4.UserName
+from MPHdScribeSub t1 with (nolock)
+join MPHdScribeMain t3 with (nolock) on t1.PaperNum=t3.PaperNum
+join MINdPoType t2 with (nolock) on t3.PoType=t2.Item
+join CURdUsers t4 with (nolock) on t3.ScribeUserId=t4.UserId
+where t1.PaperNum=@SourNum and t1.Item=@SourItem";
+                var p1 = cmd.CreateParameter();
+                p1.ParameterName = "@SourNum";
+                p1.Value = sourNum!;
+                cmd.Parameters.Add(p1);
+                var p2 = cmd.CreateParameter();
+                p2.ParameterName = "@SourItem";
+                p2.Value = sourItem.Value;
+                cmd.Parameters.Add(p2);
+
+                var rows = new List<Dictionary<string, object?>>();
+                await using var rd = await cmd.ExecuteReaderAsync();
+                while (await rd.ReadAsync())
+                {
+                    var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                    for (int i = 0; i < rd.FieldCount; i++)
+                    {
+                        var key = rd.GetName(i);
+                        row[key] = rd.IsDBNull(i) ? null : rd.GetValue(i);
+                    }
+                    rows.Add(row);
+                }
+
+                var fields = LoadDictSafe("MPHdScribeSubInq")
+                    .Where(f => !string.IsNullOrWhiteSpace(f.FieldName) && (f.Visible ?? 1) != 0)
+                    .OrderBy(f => f.SerialNum ?? int.MaxValue)
+                    .Select(f => new
+                    {
+                        fieldName = f.FieldName ?? "",
+                        displayLabel = string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel
+                    })
+                    .Cast<object>()
+                    .ToList();
+
+                if (fields.Count == 0 && rows.Count > 0)
+                {
+                    fields = rows[0].Keys
+                        .Select(k => (object)new { fieldName = k, displayLabel = k })
+                        .ToList();
+                }
+
+                return new JsonResult(new { items = rows, fields });
+            }
+            finally
+            {
+                if (opened) await _context.Database.CloseConnectionAsync();
+            }
+        }
+
         private async Task<List<Dictionary<string, object?>>> ExecInqAsync(DbConnection conn, string paramStr, int spId, CurdSysItem? item, Dictionary<string, object?> defaults)
         {
             var paramNames = ParseParamNames(paramStr, out var procName);
@@ -415,17 +495,18 @@ namespace PcbErpApi.Pages.SPO
             foreach (var p in paramNames)
             {
                 object? val = null;
+                var hasExplicitQueryValue = Request.Query.ContainsKey(p);
                 var qsVal = Request.Query[p].ToString();
+                CURdTableField? qField = null;
+                if (!qFieldMap.TryGetValue(p, out qField) && FieldNameByParam.TryGetValue(p, out var fn))
+                    qFieldMap.TryGetValue(fn, out qField);
                 if (!string.IsNullOrWhiteSpace(qsVal) && qsVal.Contains(','))
                 {
                     qsVal = qsVal.Split(',').LastOrDefault()?.Trim() ?? qsVal;
                 }
                 if (!string.IsNullOrWhiteSpace(qsVal))
                 {
-                    CURdTableField? f = null;
-                    if (!qFieldMap.TryGetValue(p, out f) && FieldNameByParam.TryGetValue(p, out var fn))
-                        qFieldMap.TryGetValue(fn, out f);
-                    val = CoerceValue(qsVal, f);
+                    val = CoerceValue(qsVal, qField);
                 }
                 else if (string.Equals(p, "SpId", StringComparison.OrdinalIgnoreCase))
                 {
@@ -456,30 +537,29 @@ namespace PcbErpApi.Pages.SPO
                 if (val is string s && string.IsNullOrWhiteSpace(s))
                     val = null;
 
-                // Delphi default behaviors (critical for getting rows)
-                if (val == null)
-                {
-                    if (string.Equals(p, "iPost", StringComparison.OrdinalIgnoreCase)) val = 1;
-                    else if (string.Equals(p, "Charge", StringComparison.OrdinalIgnoreCase)) val = 1;
-                    else if (string.Equals(p, "OutNotIn", StringComparison.OrdinalIgnoreCase)) val = 255;
-                    else if (string.Equals(p, "iNotFinish", StringComparison.OrdinalIgnoreCase)) val = 0;
-                    else if (string.Equals(p, "iWaitAudit", StringComparison.OrdinalIgnoreCase)) val = 0;
-                    else if (string.Equals(p, "iAct", StringComparison.OrdinalIgnoreCase)) val = 0;
-                    else if (string.Equals(p, "iStop", StringComparison.OrdinalIgnoreCase)) val = 0;
-                }
+                // Empty-search should mean full-query: unchecked checkbox filters should not keep default 0/1.
+                if (!hasExplicitQueryValue && Request.Query.ContainsKey("search") && IsCheckboxField(qField))
+                    val = null;
 
-                // Always pass all parameters (Delphi does), allow NULL if no value/default.
+                // Keep resolved values; nullable entries may be omitted to preserve SP default behavior.
                 paramValues.Add((p, val));
             }
 
-            var execText = $"exec {procName} {string.Join(", ", paramValues.Select(p => "@" + p.Name + "=@" + p.Name))}";
+            var execParamValues = paramValues
+                .Where(p => p.Value != null)
+                .ToList();
+
+            var execText = execParamValues.Count == 0
+                ? $"exec {procName}"
+                : $"exec {procName} {string.Join(", ", execParamValues.Select(p => "@" + p.Name + "=@" + p.Name))}";
             DebugExecText = execText;
-            DebugParams = paramValues.ToList();
+            DebugParams = execParamValues.ToList();
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = execText;
             cmd.CommandType = CommandType.Text;
+            cmd.CommandTimeout = 180;
 
-            foreach (var p in paramValues)
+            foreach (var p in execParamValues)
             {
                 var pp = cmd.CreateParameter();
                 pp.ParameterName = "@" + p.Name;
@@ -528,6 +608,7 @@ namespace PcbErpApi.Pages.SPO
                 || key.Equals("pageSize", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("pageIndex", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("spId", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("sUseId", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("handler", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("__RequestVerificationToken", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("debug", StringComparison.OrdinalIgnoreCase);
@@ -535,6 +616,10 @@ namespace PcbErpApi.Pages.SPO
 
         private string ResolveUseId()
         {
+            var queryUseId = Request.Query["sUseId"].ToString();
+            if (!string.IsNullOrWhiteSpace(queryUseId))
+                return queryUseId.Trim();
+
             var claim = User?.Claims?.FirstOrDefault(c => string.Equals(c.Type, "UseId", StringComparison.OrdinalIgnoreCase))?.Value;
             var item = HttpContext.Items["UseId"]?.ToString();
             return string.IsNullOrWhiteSpace(claim)
@@ -578,7 +663,7 @@ namespace PcbErpApi.Pages.SPO
 
         public async Task<IActionResult> OnPostResetParamsAsync()
         {
-            const string itemId = "SPO00009";
+            const string itemId = "MPH00015";
             var conn = _context.Database.GetDbConnection();
             var opened = conn.State != ConnectionState.Open;
             if (opened) await _context.Database.OpenConnectionAsync();
@@ -600,3 +685,6 @@ namespace PcbErpApi.Pages.SPO
         }
     }
 }
+
+
+

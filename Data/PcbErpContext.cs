@@ -77,6 +77,12 @@ namespace PcbErpApi.Data
         public virtual DbSet<XFLdFUNC> XFLdFUNCs { get; set; }
         public virtual DbSet<CURdFlowMultiSignUser> CURdFlowMultiSignUsers { get; set; }
 
+        // 系統互動流程圖節點位置
+        public virtual DbSet<SysFlowNode> SysFlowNodes { get; set; }
+
+        // 系統互動流程圖連線彎折偏移
+        public virtual DbSet<SysFlowEdge> SysFlowEdges { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
 
@@ -2829,6 +2835,18 @@ namespace PcbErpApi.Data
             modelBuilder.Entity<CURdFlowMultiSignUser>(entity =>
             {
                 entity.HasKey(e => new { e.PRCID, e.ACTID, e.UserId });
+            });
+
+            // 配置 SysFlowNode 複合主鍵
+            modelBuilder.Entity<SysFlowNode>(entity =>
+            {
+                entity.HasKey(e => new { e.SystemId, e.NodeId });
+            });
+
+            // 配置 SysFlowEdge 複合主鍵
+            modelBuilder.Entity<SysFlowEdge>(entity =>
+            {
+                entity.HasKey(e => new { e.SystemId, e.EdgeKey });
             });
 
             OnModelCreatingPartial(modelBuilder);

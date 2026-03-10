@@ -3,7 +3,9 @@
 @{
     var level0 = Model.Level0Items;
     var level1Map = Model.Level1Map;
-    var level2List = Model.GetCurrentLevel2();
+    var isLevel0Selected = Model.IsLevel0Selected();
+    var displayItems = isLevel0Selected ? Model.GetCurrentLevel1() : Model.GetCurrentLevel2();
+    var level0SelectedItem = isLevel0Selected ? level0.FirstOrDefault(x => x.ItemId == Model.SelectedLevel1Id) : null;
     var requestPath = ViewContext.HttpContext.Request.Path;
     var isPaperInfo = requestPath.StartsWithSegments("/PaperInfo");
     var isSysParams = requestPath.StartsWithSegments("/SysParams");
@@ -50,13 +52,17 @@
       @foreach (var mod0 in level0)
       {
           var level1Id = $"level1-{mod0.ItemId}";
-          var shouldExpand = level1Map.ContainsKey(mod0.ItemId) && level1Map[mod0.ItemId].Any(x => x.ItemId == Model.SelectedLevel1Id);
+          var shouldExpand = level1Map.ContainsKey(mod0.ItemId) && (level1Map[mod0.ItemId].Any(x => x.ItemId == Model.SelectedLevel1Id) || mod0.ItemId == Model.SelectedLevel1Id);
           <li>
-            <a href="javascript:void(0)" onclick="toggleChildren('@level1Id', this)" style="font-weight:bold;" class="module-toggle" data-expanded="@(shouldExpand ? "true" : "false")">
-              <i class="bi bi-folder2 module-icon"></i>
-              <span class="module-name">@mod0.ItemName</span>
-              <i class="bi @(shouldExpand ? "bi-chevron-down" : "bi-chevron-right") chevron-icon"></i>
-            </a>
+            <div class="module-row">
+              <a href="/?level1Id=@mod0.ItemId" style="font-weight:bold; flex:1;" class="module-toggle module-link @(mod0.ItemId == Model.SelectedLevel1Id ? "active" : "")">
+                <i class="bi bi-folder2 module-icon"></i>
+                <span class="module-name">@mod0.ItemName</span>
+              </a>
+              <button type="button" onclick="toggleChildren('@level1Id', this)" class="module-expand-btn" data-expanded="@(shouldExpand ? "true" : "false")">
+                <i class="bi @(shouldExpand ? "bi-chevron-down" : "bi-chevron-right") chevron-icon"></i>
+              </button>
+            </div>
             @if (level1Map.ContainsKey(mod0.ItemId))
             {
               <ul id="@level1Id" style="display:@(shouldExpand ? "block" : "none"); margin-left:15px;">
@@ -100,11 +106,55 @@
       <button class="btn btn-primary btn-sm index-action-btn" onclick="openAddModal()" style="white-space:nowrap;">新增功能</button>
     </div>
   </div>
-  @if (level2List.Any())
+  @if (displayItems.Any() || level0SelectedItem != null)
   {
 
     <ul id="level2-list" class="list-group index-list">
-      @foreach (var item in level2List)
+      @if (level0SelectedItem != null)
+      {
+        var item = level0SelectedItem;
+        <li class="list-group-item selectable"
+            id="li-@item.ItemId"
+            data-item-id="@item.ItemId"
+            onclick="selectItem('@item.ItemId')"
+            ondblclick="openEditModal('@item.ItemId', '@item.ItemName', '@item.SuperId', '@item.SystemId', '@item.SerialNum', @((item.Enabled)), '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Notes ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.Ocxtemplete ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.SWebMenuId ?? ""))', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.SWebSuperMenuId ?? ""))', '@(item.IWebMenuOrderSeq?.ToString() ?? "")', '@(item.IWebMenuLevel?.ToString() ?? "")', '@(item.IWebEnable?.ToString() ?? "")', '@(item.ItemType)', '@(item.OutputType)', '@(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(item.ObjectName ?? ""))')"
+            style="cursor:pointer;">
+            <div class="item-row">
+              <div class="item-main">
+                <div class="item-line">
+                  <span class="item-code">@item.ItemId</span>
+                  <span class="item-dot">·</span>
+                  <span class="item-name">@item.ItemName</span>
+                  @if (!string.IsNullOrWhiteSpace(item.SWebMenuId))
+                  {
+                    <span class="item-dot">·</span>
+                    <span class="item-code">@item.SWebMenuId</span>
+                  }
+                </div>
+              </div>
+              <div class="item-status">
+                @if (item.Enabled == 1)
+                {
+                  <span class="badge bg-success">已啟用</span>
+                }
+                else
+                {
+                  <span class="badge badge-empty"></span>
+                }
+                @if (item.IWebEnable == 1)
+                {
+                  <span class="badge bg-primary">前台啟用</span>
+                }
+                else
+                {
+                  <span class="badge badge-empty"></span>
+                }
+              </div>
+            </div>
+        </li>
+        <li class="list-group-item p-0"><hr class="m-0" /></li>
+      }
+      @foreach (var item in displayItems)
       {
         if (item.ItemType == 4)
         {
@@ -2451,6 +2501,26 @@ function _saveSysButtons(){
   }
 
   /* 模組圖標樣式 */
+  .module-row {
+    display: flex;
+    align-items: center;
+  }
+
+  .module-expand-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 4px;
+    color: #94a3b8;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .module-expand-btn:hover {
+    color: #4f46e5;
+  }
+
   .module-toggle {
     position: relative;
     padding-left: 10px;

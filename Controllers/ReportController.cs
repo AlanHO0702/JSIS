@@ -189,7 +189,7 @@ SELECT SerialNum, ItemName, Enabled, ClassName, ObjectName
             var item = await _context.CurdSysItems
                 .AsNoTracking()
                 .Where(x => x.ItemId == itemId)
-                .Select(x => new { x.ItemId, x.ItemName, x.ItemType, x.OutputType, x.Ocxtemplete })
+                .Select(x => new { x.ItemId, x.SWebMenuId, x.ItemName, x.ItemType, x.OutputType, x.Ocxtemplete })
                 .SingleOrDefaultAsync();
 
             if (item is null) return NotFound();

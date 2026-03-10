@@ -300,7 +300,7 @@
     cursor: pointer;
   }
   .sort-icon {
-    display: inline-block;
+    display: none !important;
     margin-left: 4px;
     color: #0d6efd;
     font-size: 0.75em;
@@ -519,7 +519,7 @@
                       {
                           var isChecked = rawVal == "1" || string.Equals(rawVal, "true", StringComparison.OrdinalIgnoreCase);
                           var initVal = isChecked ? "1" : "0";
-                          <td class="text-nowrap text-center @(isReadOnly ? "readonly-td" : "")" data-field="@name" data-checkbox="1" style="@tdStyle">
+                          <td class="text-nowrap text-center @(isReadOnly ? "readonly-td" : "")" data-field="@name" data-checkbox="1" style="@tdStyle" tabindex="-1">
                             <input type="checkbox" class="sg-chk-view form-check-input" @(isChecked ? "checked" : "") disabled />
                             <input type="hidden" class="cell-edit" name="@name" value="@initVal" data-raw="@initVal" data-readonly="@(isReadOnly ? "1" : "0")" />
                             <input type="checkbox" class="sg-chk-edit form-check-input" @(isChecked ? "checked" : "") @(isReadOnly ? "disabled" : "") data-readonly="@(isReadOnly ? "1" : "0")" />
@@ -527,7 +527,7 @@
                       }
                       else
                       {
-                          <td class="text-nowrap @cellClass @(isReadOnly ? "readonly-td" : "")" data-field="@name" style="@tdStyle">
+                          <td class="text-nowrap @cellClass @(isReadOnly ? "readonly-td" : "")" data-field="@name" style="@tdStyle" tabindex="-1">
                             <span class="cell-view @(isReadOnly ? "readonly-cell" : "")" data-raw="@rawVal" data-lookupkey="@lookupKey">@displayValue</span>
                             <input class="form-control form-control-sm cell-edit d-none @(isReadOnly ? "readonly-cell" : "")"
                                    name="@name"
@@ -623,6 +623,7 @@
   #mainGrid tbody tr:hover {background-color: #f9fbff !important; cursor: pointer;}
   #mainGrid tbody tr.selected-row {background-color: #cfe8ff !important; transition: background-color .15s;}
   #mainGrid tbody tr.selected-row td {background-color: #cfe8ff !important; border-color: #9fc6e6 !important;}
+  #mainGrid tbody td.active-cell{box-shadow:inset 0 0 0 2px #2b6cb0!important}
   table th{position:relative;}
   .col-resizer{position:absolute;top:0;right:-3px;width:6px;cursor:col-resize;user-select:none;height:100%;}
   .top-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%;margin-bottom:0;border-radius:10px;background:#f6f7f9;border:1px solid #d8dee8;padding:4px 8px;box-shadow:0 1px 2px rgba(20,40,80,0.06)}
@@ -828,6 +829,108 @@
     let pendingSelect = "";
     let isDirty = false;
     let hasLoadedAllRows = false;
+    let isAutoSavingByRowSwitch = false;
+    let pendingRowAfterAutoSave = null;
+    let activeCell = null;
+
+    const getBodyRows = () =>
+      Array.from(table.querySelectorAll("tbody tr"))
+        .filter(tr => tr.querySelector("td[data-field]"));
+
+    const isCellVisible = (td) => {
+      if (!td || td.getAttribute("data-field") == null) return false;
+      return td.offsetParent !== null && getComputedStyle(td).display !== "none";
+    };
+
+    const clearActiveCell = () => {
+      if (activeCell && activeCell.classList) activeCell.classList.remove("active-cell");
+      activeCell = null;
+    };
+
+    const getCellByField = (tr, fieldName) => {
+      if (!tr || !fieldName) return null;
+      const field = String(fieldName);
+      const selector = (window.CSS && typeof window.CSS.escape === "function")
+        ? `td[data-field="${window.CSS.escape(field)}"]`
+        : `td[data-field="${field.replace(/"/g, '\\"')}"]`;
+      return tr.querySelector(selector);
+    };
+
+    const focusCellControl = (td) => {
+      if (!td) return;
+      if (isEdit) {
+        if (td.dataset.checkbox) {
+          const chk = td.querySelector(".sg-chk-edit:not([disabled])");
+          if (chk) { chk.focus(); return; }
+        } else {
+          const inp = td.querySelector(".cell-edit:not(.d-none):not([readonly]):not([disabled])");
+          if (inp) { inp.focus(); return; }
+        }
+      }
+      td.focus();
+    };
+
+    const setActiveCell = (td, opts = {}) => {
+      const options = opts && typeof opts === "object" ? opts : {};
+      if (!td || td.getAttribute("data-field") == null) {
+        clearActiveCell();
+        return;
+      }
+      if (activeCell && activeCell !== td) activeCell.classList.remove("active-cell");
+      activeCell = td;
+      activeCell.classList.add("active-cell");
+
+      const tr = td.closest("tr");
+      if (tr && tr !== window.SELECTED_ROW && !options.skipRowSelect) {
+        selectRow(tr);
+      }
+
+      if (options.focus !== false) {
+        focusCellControl(td);
+      }
+      if (options.scroll !== false) {
+        try { td.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" }); } catch { }
+      }
+    };
+
+    const resolveArrowTargetCell = (fromTd, key) => {
+      if (!fromTd) return null;
+      const fromTr = fromTd.closest("tr");
+      if (!fromTr) return null;
+      const rows = getBodyRows();
+      const rowIdx = rows.indexOf(fromTr);
+      if (rowIdx < 0) return null;
+
+      const visibleCells = Array.from(fromTr.querySelectorAll("td[data-field]")).filter(isCellVisible);
+      if (!visibleCells.length) return null;
+      const cellIdx = visibleCells.indexOf(fromTd);
+      if (cellIdx < 0) return null;
+
+      if (key === "ArrowLeft" || key === "ArrowRight") {
+        const nextIdx = cellIdx + (key === "ArrowLeft" ? -1 : 1);
+        if (nextIdx < 0 || nextIdx >= visibleCells.length) return null;
+        return visibleCells[nextIdx];
+      }
+
+      if (key === "ArrowUp" || key === "ArrowDown") {
+        const nextRowIdx = rowIdx + (key === "ArrowUp" ? -1 : 1);
+        if (nextRowIdx < 0 || nextRowIdx >= rows.length) return null;
+        const targetRow = rows[nextRowIdx];
+        const byField = getCellByField(targetRow, fromTd.dataset.field || "");
+        if (isCellVisible(byField)) return byField;
+        const targetVisibleCells = Array.from(targetRow.querySelectorAll("td[data-field]")).filter(isCellVisible);
+        if (!targetVisibleCells.length) return null;
+        const fallbackIdx = Math.min(cellIdx, targetVisibleCells.length - 1);
+        return targetVisibleCells[fallbackIdx];
+      }
+
+      return null;
+    };
+
+    const getFirstVisibleCell = (tr) => {
+      if (!tr) return null;
+      return Array.from(tr.querySelectorAll("td[data-field]")).find(isCellVisible) || null;
+    };
 
     // 清理舊版 fallback 殘留參數，避免後端把它當成查詢欄位。
     try {
@@ -866,16 +969,40 @@
 
     const setDirty = (dirty) => {
       isDirty = !!dirty;
+      window.__unsavedChanges = !!(isEdit && isDirty);
       if (!isEdit) return;
       if (sgSave) sgSave.disabled = !isDirty;
       if (sgCancel) sgCancel.disabled = !isDirty;
     };
 
-    const selectRow = (tr) => {
+    const selectRow = async (tr, opts = {}) => {
       if (!tr) return;
+      const prev = window.SELECTED_ROW || null;
+      const switchingRow = !!prev && prev !== tr;
+      if (!opts.skipAutoSave && switchingRow && isEdit && isDirty) {
+        if (isAutoSavingByRowSwitch) {
+          pendingRowAfterAutoSave = tr;
+          return;
+        }
+        isAutoSavingByRowSwitch = true;
+        try {
+          const ok = await saveTableChanges({ silentSuccess: true, targetRows: [prev] });
+          if (!ok) return;
+        } finally {
+          isAutoSavingByRowSwitch = false;
+        }
+        if (pendingRowAfterAutoSave && pendingRowAfterAutoSave !== tr) {
+          const nextRow = pendingRowAfterAutoSave;
+          pendingRowAfterAutoSave = null;
+          await selectRow(nextRow, opts);
+          return;
+        }
+        pendingRowAfterAutoSave = null;
+      }
       table.querySelectorAll("tbody tr").forEach(r => r.classList.remove("selected-row", "table-active"));
       tr.classList.add("selected-row", "table-active");
       window.SELECTED_ROW = tr;
+      if (activeCell && !tr.contains(activeCell)) clearActiveCell();
       ensureRowVisible(tr);
       updateCountPanel(getSelectedRowIndex());
     };
@@ -1417,7 +1544,7 @@
       }));
     };
 
-    const formatByDict = (fieldName, rawVal) => {
+  const formatByDict = (fieldName, rawVal) => {
     if (rawVal == null) return "";
     const meta = fieldFormatMap?.find?.(x => (x.FieldName || "").toLowerCase() === (fieldName || "").toLowerCase());
     const fmt = (meta?.FormatStr || "").toString();
@@ -1467,6 +1594,41 @@
     return `${y}/${m}/${d} ${hh}:${mm}:${ss}`;
   };
 
+  const getFieldMeta = (fieldName) =>
+    fieldFormatMap?.find?.(x => (x.FieldName || "").toLowerCase() === String(fieldName || "").toLowerCase()) || null;
+
+  const isPriceSingleTable = (() => {
+    const t = "@tableName".toString().toLowerCase();
+    return t === "spodpricetable" || t === "mphdpricetable";
+  })();
+
+  const isNumericField = (fieldName) => {
+    const meta = getFieldMeta(fieldName);
+    const dt = (meta?.DataType || "").toString().toLowerCase();
+    return dt.includes("decimal") || dt.includes("numeric") || dt.includes("money")
+      || dt.includes("float") || dt.includes("real") || dt.includes("int") || dt.includes("number");
+  };
+
+  const normalizeNumericText = (value) => {
+    const text = String(value ?? "");
+    if (text === "") return "";
+    const noComma = text.replace(/,/g, "");
+    if (!/^[+-]?\d+(\.\d+)?$/.test(noComma)) return noComma;
+    return noComma.replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.0+$/, "").replace(/\.$/, "");
+  };
+
+  const normalizeValueForCompare = (fieldName, value) => {
+    if (!isPriceSingleTable) return String(value ?? "");
+    if (isNumericField(fieldName)) return normalizeNumericText(value);
+    return String(value ?? "");
+  };
+
+  const normalizeValueForSubmit = (fieldName, value) => {
+    if (!isPriceSingleTable) return String(value ?? "");
+    if (isNumericField(fieldName)) return normalizeNumericText(value);
+    return String(value ?? "");
+  };
+
   const lookupFieldSet = new Set(
     Object.entries(lookupMaps || {})
       .filter(([, v]) => v && v.map && Object.keys(v.map).length > 0)
@@ -1476,7 +1638,7 @@
   const lookupDisplay = (fieldName, rawVal, fallback, lookupKey) => {
     const fieldKey = String(fieldName || "").toLowerCase();
     const map = lookupMaps[fieldKey]?.map;
-    if (!fieldName || !map) return rawVal ?? fallback ?? "";
+    if (!fieldName || !map) return fallback ?? rawVal ?? "";
     const key = String(lookupKey ?? rawVal ?? "").trim().toLowerCase(); // 去除固定長度字串尾端空白後再比對
     if (key === "") return fallback ?? "";
     if (Object.prototype.hasOwnProperty.call(map, key)) {
@@ -1485,17 +1647,21 @@
     return fallback ?? (rawVal ?? "");
   };
 
+  const renderCellDisplay = (fieldName, rawVal, lookupKey) => {
+    const formatted = formatByDict(fieldName, rawVal);
+    return lookupDisplay(fieldName, rawVal, formatted, lookupKey ?? rawVal);
+  };
+
   const applyLookupToTable = () => {
     table.querySelectorAll("tbody tr").forEach(tr => {
       tr.querySelectorAll("td").forEach(td => {
         const field = td.dataset.field || "";
-        if (!lookupFieldSet.has(String(field).toLowerCase())) return;
         const span = td.querySelector(".cell-view");
         const inp  = td.querySelector(".cell-edit");
         if (!span || !inp) return;
         const rawVal = inp.dataset.raw ?? inp.value;
         const lkVal  = inp.dataset.lookupkey ?? rawVal;
-        span.textContent = lookupDisplay(field, rawVal, span.textContent, lkVal);
+        span.textContent = renderCellDisplay(field, rawVal, lkVal);
       });
     });
   };
@@ -1588,7 +1754,11 @@
   };
 
   // 修改/檢視切換
-    editBtn.addEventListener("click", () => {
+    editBtn.addEventListener("click", async () => {
+      if (isEdit && isDirty) {
+        const ok = await saveTableChanges();
+        if (!ok) return;
+      }
       isEdit = !isEdit;
       editBtn.innerHTML = isEdit
         ? '<i class="bi bi-eye me-1"></i> 瀏覽'
@@ -1600,14 +1770,17 @@
       if (!isEdit) setDirty(false);
 
       if (isEdit) {
-        table.querySelectorAll(".cell-edit").forEach(inp => {
-          if (inp.type === "checkbox") {
-            // checkbox: 將當前值儲存到 data-raw
-            inp.dataset.raw = inp.checked ? "1" : "0";
-          } else {
-            // 一般 input: 使用 defaultValue
-            inp.defaultValue = inp.value;
+        table.querySelectorAll("tbody td").forEach(td => {
+          const inp = td.querySelector(".cell-edit");
+          if (!inp) return;
+          if (isPriceSingleTable && !td.dataset.checkbox && inp.dataset.readonly !== "1") {
+            const fieldName = td.dataset.field || inp.name || "";
+            if (isNumericField(fieldName)) {
+              const rawForEdit = inp.dataset.raw ?? inp.value;
+              inp.value = formatByDict(fieldName, rawForEdit);
+            }
           }
+          inp.defaultValue = inp.value;
         });
         setDirty(false);
       }
@@ -1648,21 +1821,10 @@
             inp.removeAttribute("tabindex");
           }
         } else {
-          // 切換到瀏覽模式
-          if (isCheckbox) {
-            // checkbox: 禁用並保持顯示
-            inp.disabled = true;
-            inp.dataset.raw = inp.checked ? "1" : "0";
-            // checkbox 在瀏覽模式也顯示 input（禁用狀態）
-            span.classList.add("d-none");
-            inp.classList.remove("d-none");
-          } else {
-            // 一般 input: 更新 textContent 並切換顯示
-            inp.dataset.raw = inp.value;
-            span.textContent = lookupDisplay(td.dataset.field, inp.value, span.textContent, inp.dataset.lookupkey);
-            span.classList.remove("d-none");
-            inp.classList.add("d-none");
-          }
+          inp.dataset.raw = inp.value;
+          span.textContent = renderCellDisplay(td.dataset.field, inp.value, inp.dataset.lookupkey);
+          span.classList.remove("d-none");
+          inp.classList.add("d-none");
         }
       });
     });
@@ -1694,22 +1856,81 @@
   });
 
   // 儲存
-    const saveTableChanges = async () => {
-      const changes = collectChanges();
-      if (changes.length === 0) { return; }
+  const findDuplicateKeyConflict = (targetRows = null) => {
+    if (!Array.isArray(KEY_FIELDS) || KEY_FIELDS.length === 0) return null;
+    const rows = getBodyRows();
+    if (!rows.length) return null;
+    const targetSet = Array.isArray(targetRows) && targetRows.length ? new Set(targetRows) : null;
+    const signatures = new Map();
+    const pickKeyInput = (tr, keyName) =>
+      Array.from(tr.querySelectorAll(".cell-edit")).find(inp => (inp.name || "").toLowerCase() === keyName) || null;
+
+    for (const tr of rows) {
+      const keyValues = [];
+      const keyDisplay = [];
+      let missing = false;
+      for (const keyName of KEY_FIELDS) {
+        const inp = pickKeyInput(tr, keyName);
+        if (!inp) { missing = true; break; }
+        const raw = (inp.value ?? "").toString().trim();
+        if (raw === "") { missing = true; break; }
+        keyValues.push(raw.toLowerCase());
+        keyDisplay.push(`${inp.name || keyName}=${raw}`);
+      }
+      if (missing || keyValues.length === 0) continue;
+
+      const signature = keyValues.join("\u001f");
+      const prev = signatures.get(signature);
+      if (prev) {
+        if (targetSet && !targetSet.has(prev.tr) && !targetSet.has(tr)) continue;
+        return {
+          prevRowNo: rows.indexOf(prev.tr) + 1,
+          currRowNo: rows.indexOf(tr) + 1,
+          keyText: keyDisplay.join(", ")
+        };
+      }
+      signatures.set(signature, { tr });
+    }
+    return null;
+  };
+
+    async function saveTableChanges(options = {}) {
+      const opts = (options && typeof options === "object" && !(options instanceof Event)) ? options : {};
+      const targetRows = Array.isArray(opts.targetRows) ? opts.targetRows.filter(Boolean) : null;
+      const silentSuccess = !!opts.silentSuccess;
+      const duplicate = findDuplicateKeyConflict(targetRows);
+      if (duplicate) {
+        Swal.fire({
+          icon: 'warning',
+          title: '\u9375\u503c\u91cd\u8907',
+          text: `\u7b2c ${duplicate.prevRowNo} \u7b46\u8207\u7b2c ${duplicate.currRowNo} \u7b46\u4e3b\u9375\u91cd\u8907 (${duplicate.keyText})`
+        });
+        return false;
+      }
+      const changes = collectChanges(targetRows);
+      if (changes.length === 0) { return true; }
 
     const resp = await fetch('/api/CommonTable/SaveTableChanges', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         TableName: "@tableName",
-        KeyFields: KEY_FIELDS,  // ★ 明確告知後端主鍵欄位
+        KeyFields: KEY_FIELDS,
         Data: changes
       })
     });
 
-      if (resp.ok) {
-      Swal.fire({ icon: 'success', title: '儲存成功', timer: 1000, showConfirmButton: false });
+      const raw = await resp.clone().text();
+      let payload = null;
+      try { payload = raw ? JSON.parse(raw) : null; } catch { }
+      const failedRows = Array.isArray(payload?.results)
+        ? payload.results.filter(r => r && r.ok === false)
+        : [];
+
+      if (resp.ok && payload?.success !== false && failedRows.length === 0) {
+      if (!silentSuccess) {
+        Swal.fire({ icon: 'success', title: '儲存成功', timer: 1000, showConfirmButton: false });
+      }
 
       changes.forEach(change => {
         const targetRow = findRowByKeys(change);
@@ -1727,13 +1948,15 @@
           if (cell.dataset.checkbox) {
             syncCheckboxVisible(cell, newVal);
           } else if (span) {
-            span.textContent = lookupDisplay(field, newVal, span.textContent, inp?.dataset.lookupkey ?? newVal);
+            span.textContent = renderCellDisplay(field, newVal, inp?.dataset.lookupkey ?? newVal);
           }
         }
       });
       setDirty(false);
+      return true;
       } else {
         Swal.fire({ icon: 'error', title: '儲存失敗', text: await resp.text() });
+        return false;
       }
     };
     if (saveBtn) {
@@ -1797,6 +2020,7 @@
       affected = json?.results?.[0]?.affected ?? null;
     } catch { }
 
+      if (activeCell && tr.contains(activeCell)) clearActiveCell();
       tr.remove();
       window.SELECTED_ROW = null;
       if (totalCountAll > 0) totalCountAll -= 1;
@@ -1901,10 +2125,13 @@
   }
 
   // 收集變更（只傳送鍵欄位 + 真正有變更的欄位）
-  function collectChanges() {
+  function collectChanges(targetRows = null) {
     const list = [];
     const tblName = "@tableName".toString().toLowerCase();
-    document.querySelectorAll("#mainGrid tbody tr").forEach(tr => {
+    const rows = Array.isArray(targetRows) && targetRows.length
+      ? targetRows
+      : Array.from(document.querySelectorAll("#mainGrid tbody tr"));
+    rows.forEach(tr => {
       const changed = {};
       const keys = {};
       let hasDiff = false;
@@ -1915,6 +2142,9 @@
 
         const oldVal = inp.dataset.raw ?? inp.defaultValue ?? "";
         const newVal = inp.value ?? "";
+        const oldCmpVal = normalizeValueForCompare(name, oldVal);
+        const newCmpVal = normalizeValueForCompare(name, newVal);
+        const submitVal = normalizeValueForSubmit(name, newVal);
         const isReadonly = inp.dataset.readonly === "1";
         const isKey = KEY_FIELDS.includes(name.toLowerCase());
 
@@ -1928,9 +2158,9 @@
         if (isReadonly) return;
 
         // 只收集有變更的欄位
-        if (newVal !== oldVal) {
+        if (newCmpVal !== oldCmpVal) {
           hasDiff = true;
-          changed[name] = newVal;
+          changed[name] = submitVal;
         }
       });
 
@@ -1948,12 +2178,121 @@
     return list;
   }
 
-    table.addEventListener("click", (ev) => {
+    table.addEventListener("click", async (ev) => {
       const tr = ev.target.closest("tbody tr");
       if (!tr) return;
-      selectRow(tr);
+      await selectRow(tr);
+      const td = ev.target.closest("td[data-field]");
+      if (td) setActiveCell(td, { skipRowSelect: true });
     });
+    table.addEventListener("focusin", (ev) => {
+      const td = ev.target?.closest?.("td[data-field]");
+      if (!td) return;
+      setActiveCell(td, { focus: false });
+    });
+    const copyCellValue = (targetTd, sourceTd) => {
+      if (!targetTd || !sourceTd) return false;
+      if (targetTd.dataset.checkbox) {
+        const targetChk = targetTd.querySelector(".sg-chk-edit");
+        if (!targetChk || targetChk.disabled || targetChk.dataset.readonly === "1") return false;
+        const sourceChk = sourceTd.querySelector(".sg-chk-edit");
+        const sourceHidden = sourceTd.querySelector(".cell-edit");
+        const nextChecked = sourceChk
+          ? !!sourceChk.checked
+          : String(sourceHidden?.value ?? "").trim() === "1";
+        if (targetChk.checked === nextChecked) return false;
+        targetChk.checked = nextChecked;
+        targetChk.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      }
+
+      const targetInput = targetTd.querySelector(".cell-edit");
+      const sourceInput = sourceTd.querySelector(".cell-edit");
+      if (!targetInput || !sourceInput) return false;
+      if (targetInput.readOnly || targetInput.disabled || targetInput.dataset.readonly === "1") return false;
+      const nextValue = sourceInput.value ?? "";
+      if ((targetInput.value ?? "") === nextValue) return false;
+      targetInput.value = nextValue;
+      targetInput.dispatchEvent(new Event("input", { bubbles: true }));
+      targetInput.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    };
+    const copyRowFromPrevRow = (targetTd) => {
+      if (!targetTd || !isEdit) return false;
+      const targetRow = targetTd.closest("tr");
+      if (!targetRow) return false;
+      const rows = getBodyRows();
+      const rowIndex = rows.indexOf(targetRow);
+      if (rowIndex <= 0) return false;
+      const sourceRow = rows[rowIndex - 1];
+      let changed = false;
+      targetRow.querySelectorAll("td[data-field]").forEach(td => {
+        const fieldName = td.dataset.field || "";
+        if (!fieldName) return;
+        const sourceTd = getCellByField(sourceRow, fieldName);
+        if (!sourceTd) return;
+        if (copyCellValue(td, sourceTd)) changed = true;
+      });
+      return changed;
+    };
+    const copyCellFromPrevRow = (targetTd) => {
+      if (!targetTd || !isEdit) return false;
+      const targetRow = targetTd.closest("tr");
+      if (!targetRow) return false;
+      const fieldName = targetTd.dataset.field || "";
+      if (!fieldName) return false;
+      const rows = getBodyRows();
+      const rowIndex = rows.indexOf(targetRow);
+      if (rowIndex <= 0) return false;
+      const sourceTd = getCellByField(rows[rowIndex - 1], fieldName);
+      if (!sourceTd) return false;
+      return copyCellValue(targetTd, sourceTd);
+    };
     table.addEventListener("keydown", (ev) => {
+      if (ev.key === "F7") {
+        if (!isEdit) return;
+        const fromTd = ev.target?.closest?.("td[data-field]") || activeCell;
+        if (!fromTd) return;
+        ev.preventDefault();
+        if (copyRowFromPrevRow(fromTd)) setDirty(true);
+        return;
+      }
+      if (ev.key === "F8") {
+        if (!isEdit) return;
+        const fromTd = ev.target?.closest?.("td[data-field]") || activeCell;
+        if (!fromTd) return;
+        ev.preventDefault();
+        if (copyCellFromPrevRow(fromTd)) setDirty(true);
+        return;
+      }
+
+      if (ev.key === "ArrowUp" || ev.key === "ArrowDown" || ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
+        if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
+        const target = ev.target;
+        const isTextEditor = target instanceof HTMLTextAreaElement
+          || (target instanceof HTMLInputElement && target.type !== "checkbox" && target.type !== "radio")
+          || target instanceof HTMLSelectElement;
+        if (!isEdit && isTextEditor) return;
+        const fromTd = target?.closest?.("td[data-field]") || activeCell;
+        if (!fromTd) return;
+        let nextTd = resolveArrowTargetCell(fromTd, ev.key);
+        if (!nextTd && isEdit && ev.key === "ArrowDown") {
+          const fromTr = fromTd.closest("tr");
+          const rows = getBodyRows();
+          const rowIdx = fromTr ? rows.indexOf(fromTr) : -1;
+          const isAtLastRow = rowIdx >= 0 && rowIdx === rows.length - 1;
+          if (isAtLastRow) {
+            const newRow = addRow({ append: true });
+            const sameFieldTd = getCellByField(newRow, fromTd.dataset.field || "");
+            nextTd = isCellVisible(sameFieldTd) ? sameFieldTd : getFirstVisibleCell(newRow);
+          }
+        }
+        if (!nextTd) return;
+        ev.preventDefault();
+        setActiveCell(nextTd);
+        return;
+      }
+
       if (ev.key !== "Delete") return;
       const el = ev.target;
       if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) return;
@@ -2234,6 +2573,7 @@
       const td = document.createElement("td");
       td.dataset.field = fieldName;
       td.setAttribute("style", tdStyle);
+      td.tabIndex = -1;
 
       if (isCheckboxCell) {
         td.className = "text-nowrap text-center" + (isReadOnly ? " readonly-td" : "");
@@ -2269,10 +2609,11 @@
     return tr;
   }
 
-  function addRow() {
+  function addRow(options = {}) {
     if (!isEdit) editBtn.click();
     const tbody = table.querySelector("tbody");
     if (!tbody) return;
+    const append = !!options.append;
     const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
     if (tbody.children.length === 1) {
       const only = tbody.children[0];
@@ -2280,10 +2621,12 @@
     }
       const tr = buildEmptyRow(fields);
       applyDefaultNewRowValues(tr);
-      tbody.insertBefore(tr, tbody.firstChild);
+      if (append) tbody.appendChild(tr);
+      else tbody.insertBefore(tr, tbody.firstChild);
       selectRow(tr);
       tr.scrollIntoView({ block: "center" });
       setDirty(true);
+      return tr;
     }
 
   function getLoginUserId() {
@@ -2303,7 +2646,7 @@
       syncCheckboxVisible(td, val);
     } else {
       const span = td?.querySelector(".cell-view");
-      if (span) span.textContent = val;
+      if (span) span.textContent = renderCellDisplay(fieldName, val, inp?.dataset?.lookupkey ?? val);
     }
   }
 
@@ -2336,7 +2679,7 @@
           syncCheckboxVisible(td, val);
         } else {
           const span = td?.querySelector(".cell-view");
-          if (span) span.textContent = val;
+          if (span) span.textContent = renderCellDisplay(inp.name, val, inp?.dataset?.lookupkey ?? val);
         }
       });
     });
@@ -2677,6 +3020,9 @@
     if (!items || items.length === 0) {
       const msg = emptyMessage || getEmptyMessage(openNoRecordInit, hasQueryParamsInit);
       tbody.innerHTML = '<tr><td colspan="' + fields.length + '" class="text-center text-muted py-3">' + msg + '</td></tr>';
+      window.SELECTED_ROW = null;
+      clearActiveCell();
+      updateCountPanel(0);
       return;
     }
 
@@ -2789,7 +3135,7 @@
           const initVal = checked ? '1' : '0';
           const chkAttr = checked ? 'checked' : '';
           const roAttr = isReadOnly ? 'disabled data-readonly="1"' : 'data-readonly="0"';
-          return '<td class="text-nowrap text-center' + (isReadOnly ? ' readonly-td' : '') + '" data-field="' + fieldName + '" data-checkbox="1" style="' + tdStyle + '">' +
+          return '<td class="text-nowrap text-center' + (isReadOnly ? ' readonly-td' : '') + '" data-field="' + fieldName + '" data-checkbox="1" style="' + tdStyle + '" tabindex="-1">' +
             '<input type="checkbox" class="sg-chk-view form-check-input" ' + chkAttr + ' disabled />' +
             '<input type="hidden" class="cell-edit" name="' + fieldName + '" value="' + initVal + '" data-raw="' + initVal + '" data-readonly="' + (isReadOnly ? '1' : '0') + '" />' +
             '<input type="checkbox" class="sg-chk-edit form-check-input" ' + chkAttr + ' ' + roAttr + ' />' +
@@ -2798,7 +3144,7 @@
 
         // 產生與初始渲染一致的結構，包含 data-field, cell-view, cell-edit
         const tdClass = 'text-nowrap ' + cellClass + (isReadOnly ? ' readonly-td' : '');
-        return '<td class="' + tdClass + '" data-field="' + fieldName + '" style="' + tdStyle + '">' +
+        return '<td class="' + tdClass + '" data-field="' + fieldName + '" style="' + tdStyle + '" tabindex="-1">' +
           '<span class="cell-view' + (isReadOnly ? ' readonly-cell' : '') + '" data-raw="' + safeRawVal + '" data-lookupkey="' + safeLookupKey + '">' + safeDisplayVal + '</span>' +
           '<input class="form-control form-control-sm cell-edit d-none ' + (isReadOnly ? 'readonly-cell' : '') + '" ' +
           'name="' + fieldName + '" ' +
@@ -2815,6 +3161,7 @@
     applyCheckboxCells();
 
     window.SELECTED_ROW = null;
+    clearActiveCell();
     updateCountPanel(0);
     if (pendingSelect) {
       const rows = Array.from(tbody.querySelectorAll("tr"));

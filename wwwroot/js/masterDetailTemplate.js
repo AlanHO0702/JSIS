@@ -21,15 +21,13 @@
       + `&result=${encodeURIComponent(f.LookupResultField)}`;
 
     const rows = await fetch(url).then(r => r.json());
-    const map = {};
-
+    const cell = {}, dropdown = {};
     rows.forEach(r => {
-      // /LookupData 會回傳 { key, result0, result1, ... }
-      map[r.key] = r.result0;
+      const k = String(r.key ?? "");
+      cell[k]     = (r.result0 ?? "").toString().trim();
+      dropdown[k] = combineResults(r);
     });
-
-    LOOKUP_CACHE[key] = map;
-    return map;
+    return (LOOKUP_CACHE[key] = { cell, dropdown });
   }
 
   // -----------------------------
@@ -42,28 +40,35 @@
 
     if (OCX_CACHE[key]) return OCX_CACHE[key];
 
-    // 只要這三個沒齊，就視為沒設定 OCX
     if (!f.OCXLKTableName || !f.KeyFieldName || !f.OCXLKResultName) {
       return (OCX_CACHE[key] = null);
     }
 
-    // 這裡的 key：用「Table Key 欄位」(KeyFieldName)
-    // 這個欄位會對應到主表的某個欄位（通常是 KeySelfName）
     const url = `/api/TableFieldLayout/LookupData`
       + `?table=${encodeURIComponent(f.OCXLKTableName)}`
       + `&key=${encodeURIComponent(f.KeyFieldName)}`
       + `&result=${encodeURIComponent(f.OCXLKResultName)}`;
 
     const rows = await fetch(url).then(r => r.json());
-    const map = {};
-
+    const cell = {}, dropdown = {};
     rows.forEach(r => {
-      // 一樣用 { key, result0 }
-      map[r.key] = r.result0;
+      const k = String(r.key ?? "");
+      cell[k]     = (r.result0 ?? "").toString().trim();
+      dropdown[k] = combineResults(r);
     });
+    return (OCX_CACHE[key] = { cell, dropdown });
+  }
 
-    OCX_CACHE[key] = map;
-    return map;
+  // 將 result0, result1, ... 合併成顯示字串
+  function combineResults(r) {
+    const parts = [];
+    let i = 0;
+    while (r[`result${i}`] !== undefined) {
+      const v = (r[`result${i}`] ?? "").toString().trim();
+      if (v !== "") parts.push(v);
+      i++;
+    }
+    return parts.join('　');
   }
 
   // -----------------------------
@@ -82,6 +87,127 @@
     dataType: f => f.DataType || null,
     readonly: f => (f.ReadOnly ?? 0) == 1
   };
+
+  // -----------------------------
+  // 🧩 Lookup Dropdown（雙擊下拉選單）
+  // -----------------------------
+  function ensureLookupDropdownCss() {
+    if (document.getElementById('md-lookup-dd-css')) return;
+    const style = document.createElement('style');
+    style.id = 'md-lookup-dd-css';
+    style.textContent = `
+.md-lookup-dd{background:#fff;border:1px solid #b0c4de;border-radius:6px;box-shadow:0 4px 18px rgba(0,0,0,.18);max-height:300px;display:flex;flex-direction:column;overflow:hidden;font-size:.85rem}
+.md-lookup-search{border:none;border-bottom:1px solid #dde6f0;padding:5px 9px;outline:none;font-size:.85rem;min-width:120px}
+.md-lookup-list{overflow-y:auto;max-height:252px}
+.md-lookup-item{padding:4px 10px;cursor:pointer;white-space:nowrap}
+.md-lookup-item:hover,.md-lookup-item:focus{background:#e8f0ff;outline:none}
+.md-lookup-item.selected{background:#d0e4ff;font-weight:500}
+.md-lookup-dd[data-readonly="1"] .md-lookup-item{cursor:default;color:#555}
+.md-lookup-dd[data-readonly="1"] .md-lookup-item:hover,.md-lookup-dd[data-readonly="1"] .md-lookup-item:focus{background:#f5f5f5}
+`;
+    document.head.appendChild(style);
+  }
+
+  function showLookupDropdown(inp, td, lookupMap, readOnly) {
+    ensureLookupDropdownCss();
+    const existing = document.getElementById('md-lookup-dd');
+    if (existing) existing.remove();
+
+    const entries = Object.entries(lookupMap);
+    if (!entries.length) return;
+
+    const currentRaw = readOnly
+      ? (td.querySelector('.cell-view')?.dataset?.raw ?? inp.dataset.raw ?? "")
+      : (inp.dataset.raw ?? "");
+
+    const dd = document.createElement('div');
+    dd.id = 'md-lookup-dd';
+    dd.className = 'md-lookup-dd';
+    if (readOnly) dd.dataset.readonly = '1';
+
+    const search = document.createElement('input');
+    search.type = 'text';
+    search.placeholder = readOnly ? '搜尋（唯讀）…' : '搜尋…';
+    search.className = 'md-lookup-search';
+    dd.appendChild(search);
+
+    const list = document.createElement('div');
+    list.className = 'md-lookup-list';
+    dd.appendChild(list);
+
+    const renderItems = (filter) => {
+      list.innerHTML = '';
+      const q = (filter || '').toLowerCase();
+      entries.forEach(([key, label]) => {
+        if (q && !label.toLowerCase().includes(q) && !key.toLowerCase().includes(q)) return;
+        const item = document.createElement('div');
+        item.className = 'md-lookup-item';
+        item.tabIndex = -1;
+        item.textContent = label;
+        item.dataset.key = key;
+        if (String(currentRaw) === String(key)) item.classList.add('selected');
+        if (!readOnly) {
+          item.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            inp.value = key;
+            inp.dataset.raw = key;
+            const span = td.querySelector('.cell-view');
+            if (span) {
+              span.dataset.raw = key;
+              span.textContent = inp._lookupCellMap?.[key] ?? label;
+            }
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+            dd.remove();
+          });
+        }
+        list.appendChild(item);
+      });
+    };
+
+    renderItems('');
+    search.addEventListener('input', () => renderItems(search.value));
+
+    const rect = td.getBoundingClientRect();
+    dd.style.position = 'fixed';
+    dd.style.left = `${rect.left}px`;
+    dd.style.minWidth = `${Math.max(rect.width, 180)}px`;
+    dd.style.zIndex = '99999';
+    document.body.appendChild(dd);
+
+    const ddH = dd.offsetHeight || 300;
+    const below = window.innerHeight - rect.bottom;
+    dd.style.top = below >= ddH || below >= rect.top
+      ? `${rect.bottom + 1}px`
+      : `${rect.top - ddH - 1}px`;
+
+    requestAnimationFrame(() => search.focus());
+
+    const close = (e) => {
+      if (!dd.contains(e.target)) {
+        dd.remove();
+        document.removeEventListener('mousedown', close);
+      }
+    };
+    setTimeout(() => document.addEventListener('mousedown', close), 0);
+
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { dd.remove(); inp.focus(); }
+      if (e.key === 'ArrowDown') {
+        const first = list.querySelector('.md-lookup-item');
+        if (first) first.focus();
+        e.preventDefault();
+      }
+    });
+
+    list.addEventListener('keydown', (e) => {
+      const focused = document.activeElement;
+      if (e.key === 'ArrowDown') { focused?.nextElementSibling?.focus(); e.preventDefault(); }
+      else if (e.key === 'ArrowUp') { (focused?.previousElementSibling ?? search).focus(); e.preventDefault(); }
+      else if (e.key === 'Enter') { focused?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); e.preventDefault(); }
+      else if (e.key === 'Escape') { dd.remove(); inp.focus(); }
+    });
+  }
 
   // -----------------------------
   // 🧩 欄寬存取（拖曳後寫回辭典 + localStorage）
@@ -353,12 +479,12 @@
           let display = raw;
 
           // OCX Lookup（優先）
-          if (ocxMaps[col] && ocxMaps[col][raw] != null) {
-              display = ocxMaps[col][raw];
+          if (ocxMaps[col]?.cell?.[raw] != null) {
+              display = ocxMaps[col].cell[raw];
           }
           // 一般 Lookup（次之）
-          else if (lookupMaps[col] && lookupMaps[col][raw] != null) {
-              display = lookupMaps[col][raw];
+          else if (lookupMaps[col]?.cell?.[raw] != null) {
+              display = lookupMaps[col].cell[raw];
           }
 
           // 建立 TD
@@ -372,6 +498,7 @@
           // 顯示欄位
           const span = document.createElement("span");
           span.className = "cell-view";
+          span.dataset.raw = raw == null ? "" : String(raw);
           if (isCheckbox) span.classList.add("d-inline-flex", "justify-content-center", "w-100");
 
           // 編輯欄位 input
@@ -403,6 +530,19 @@
               span.textContent = valText;
               inp.value = display == null ? "" : display;
               inp.dataset.raw = raw == null ? "" : raw;
+
+              // ★ 若有 lookup 對照表，記錄並綁定雙擊下拉（編輯模式可選取，瀏覽模式唯讀）
+              const fieldDropdownMap = ocxMaps[col]?.dropdown || lookupMaps[col]?.dropdown;
+              const fieldCellMap     = ocxMaps[col]?.cell    || lookupMaps[col]?.cell;
+              if (fieldDropdownMap && Object.keys(fieldDropdownMap).length > 0) {
+                inp._lookupMap     = fieldDropdownMap;
+                inp._lookupCellMap = fieldCellMap;
+                td.addEventListener('dblclick', (e) => {
+                  e.stopPropagation();
+                  const isReadOnly = !window._mdEditing || inp.readOnly || inp.disabled;
+                  showLookupDropdown(inp, td, inp._lookupMap, isReadOnly);
+                });
+              }
           }
 
           // Lookup 或 Readonly → 灰底且不可編輯

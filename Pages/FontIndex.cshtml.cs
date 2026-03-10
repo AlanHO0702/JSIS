@@ -45,6 +45,7 @@ namespace PcbErpApi.Pages
                 i.ItemId = i.ItemId.Trim();
                 i.SystemId = i.SystemId.Trim().ToUpper();
                 i.SuperId = i.SuperId?.Trim();
+                i.SWebMenuId = i.SWebMenuId?.Trim();
             }
 
             // 3. Level0Items 按 CurdSystemSelect.OrderNum 排序
