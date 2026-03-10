@@ -106,10 +106,8 @@
 
                 const html = `
                     <div class="special-ui-panel pay-recv-summary" style="
-                        border-top: 1px solid #ddd;
-                        padding: 10px 20px;
+                        padding: 0px 10px;
                         background-color: #f5f5f5;
-                        margin-top: 10px;
                     ">
                         <div style="text-align: right;">
                             <label style="font-weight: bold;">${debitLabel}：</label>
