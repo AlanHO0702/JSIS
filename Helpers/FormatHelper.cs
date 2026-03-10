@@ -77,6 +77,33 @@ public static class FormatHelper
             }
         }
 
+        // 未設定格式時，數值欄位也比照 Delphi 顯示：移除小數尾端 0。
+        if (normalizedType == "number")
+        {
+            try
+            {
+                decimal number;
+                if (rawValue is string s)
+                {
+                    if (!decimal.TryParse(s, NumberStyles.Any, CultureInfo.CurrentCulture, out number)
+                        && !decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out number))
+                    {
+                        return s;
+                    }
+                }
+                else
+                {
+                    number = Convert.ToDecimal(rawValue, CultureInfo.CurrentCulture);
+                }
+
+                return TrimZeroDecimal(number.ToString(CultureInfo.CurrentCulture));
+            }
+            catch
+            {
+                return rawValue?.ToString() ?? string.Empty;
+            }
+        }
+
         // 預設
         return rawValue?.ToString() ?? string.Empty;
     }
