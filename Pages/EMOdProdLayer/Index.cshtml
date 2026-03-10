@@ -61,8 +61,19 @@
 
             tr.setAttribute('data-paper-num', item.PartNum ?? item.partnum ?? "");
 
-            // 點擊儲存筆數位置供 Detail 頁使用
+            // 設定完整的 data-url（含三主鍵），供 partial 的 dblclick handler 使用
+            const _rowQs = keyFields
+                .map(kf => `${encodeURIComponent(kf)}=${encodeURIComponent(item[kf] ?? item[kf.toLowerCase()] ?? '')}`)
+                .join('&');
+            tr.setAttribute('data-url', `/EMOdProdLayer/Detail?${_rowQs}&itemId=${window._singleItemId}`);
+
+            // 點擊選取列 + 儲存筆數位置供 Detail 頁使用
             tr.addEventListener('click', function () {
+                // 高亮選取列
+                document.querySelectorAll("#dataTbody .row-link.selected").forEach(r => r.classList.remove("selected"));
+                tr.classList.add("selected");
+                window.selectedRow = tr;
+
                 try {
                     const tn = 'emodprodlayer';
                     const tbody2 = tr.parentNode;
@@ -109,6 +120,26 @@
             localStorage.setItem('orderListQueryPageStart:emodprodlayer', '1');
         } catch {}
     };
+
+    // 切換按鈕：跳轉到選取列的 Detail 頁
+    const _switchBtn = document.getElementById('btnSwitch');
+    if (_switchBtn) {
+        _switchBtn.addEventListener('click', function (e) {
+            e.stopImmediatePropagation();
+            const row = document.querySelector('#dataTbody .row-link.selected');
+            if (!row) {
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({ icon: 'warning', title: '請先選擇一筆層別資料' });
+                } else {
+                    alert('請先選擇一筆層別資料');
+                }
+                return;
+            }
+            const kf = window._emodProdLayerKeyFields || ['PartNum', 'Revision', 'LayerId'];
+            const qs = kf.map(k => `${encodeURIComponent(k)}=${encodeURIComponent(row.getAttribute('data-' + k.toLowerCase()) ?? '')}`).join('&');
+            window.location.href = `/EMOdProdLayer/Detail?${qs}&itemId=${window._singleItemId}`;
+        }, true);
+    }
 
     // 覆蓋完成後，用 server 端初始資料重新渲染
     const _initData = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Items));
