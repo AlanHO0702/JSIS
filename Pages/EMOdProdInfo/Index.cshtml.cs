@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using PcbErpApi.Data;
 using PcbErpApi.Models;
 using PcbErpApi.Helpers;
+using PcbErpApi.Services;
 
 namespace PcbErpApi.Pages.EMOdProdInfo
 {
@@ -21,15 +22,17 @@ namespace PcbErpApi.Pages.EMOdProdInfo
         private readonly PcbErpContext _ctx;
         private readonly ITableDictionaryService _dictService;
         private readonly ILogger<IndexModel> _logger;
+        private readonly IBreadcrumbService _breadcrumbService;
 
         private const string DictTable = "EMOdProdInfo";
         private const string DataTable = "EMOdProdInfo";
 
-        public IndexModel(PcbErpContext ctx, ITableDictionaryService dictService, ILogger<IndexModel> logger)
+        public IndexModel(PcbErpContext ctx, ITableDictionaryService dictService, ILogger<IndexModel> logger, IBreadcrumbService breadcrumbService)
         {
             _ctx = ctx;
             _dictService = dictService;
             _logger = logger;
+            _breadcrumbService = breadcrumbService;
         }
 
         [FromQuery(Name = "mode")]
@@ -114,6 +117,22 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             ViewData["SortBy"] = sortBy;
             ViewData["SortDir"] = sortDir;
             ViewData["IsViewOnly"] = IsViewOnly;
+
+            // 麵包屑
+            try
+            {
+                var currentItemId = IsViewOnly ? "EMO00018" : "EMO00004";
+                var sysItem = await _ctx.CurdSysItems.AsNoTracking()
+                    .Where(x => x.ItemId == currentItemId)
+                    .Select(x => new { x.SuperId })
+                    .FirstOrDefaultAsync();
+                if (!string.IsNullOrWhiteSpace(sysItem?.SuperId))
+                    ViewData["Breadcrumbs"] = await _breadcrumbService.BuildBreadcrumbsAsync(sysItem.SuperId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Build breadcrumbs failed for EMOdProdInfo Index");
+            }
 
             FieldDictList = await LoadFieldDictAsync(DictTableName);
             await ApplyLangDisplaySizeAsync(DictTableName, FieldDictList);

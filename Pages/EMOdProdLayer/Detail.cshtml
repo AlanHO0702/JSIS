@@ -160,6 +160,20 @@
   font-size: var(--field-value-size); border: 1px solid #999; border-radius: 2px;
   box-sizing: border-box; background: #fff; color: #333; outline: none;
 }
+#spec-content.spec-editing .master-field:not(.readonly-field):not([type="checkbox"]) {
+  border-color: #5b8def !important;
+  background: #f0f6ff !important;
+  cursor: text !important;
+}
+#spec-content.spec-editing .master-field:not(.readonly-field):not([type="checkbox"]):focus {
+  border-color: #2564b3 !important;
+  outline: 2px solid rgba(37,100,179,0.25) !important;
+  background: #fff !important;
+}
+#spec-content.spec-editing .master-field[type="checkbox"]:not(.readonly-field) {
+  cursor: pointer !important;
+  accent-color: #2564b3;
+}
 
 /* ── Detail 子頁籤 table：固定寬度 + 欄位分隔線 ── */
 .detail-tab-table {
@@ -879,6 +893,196 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     btnSwitch.parentNode.replaceChild(anchor, btnSwitch);
   }
+
+  // ── Q4: 父級 Status 檢查 + 編輯模式切換 ──────────────────────
+  const _STATUS_LABELS = { '0': '設計中', '1': '設計完成', '2': '已審核', '3': '已核准' };
+  let _parentStatus = null;
+  let _layerEditMode = false;
+
+  async function fetchParentStatus() {
+    const partNum  = (CURRENT_KEYS.PartNum  || '').trim();
+    const revision = (CURRENT_KEYS.Revision || '').trim();
+    if (!partNum) return null;
+    try {
+      const resp = await fetch(`/api/PaperAction/GetEMOdProdStatus?partNum=${encodeURIComponent(partNum)}&revision=${encodeURIComponent(revision)}`);
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      return data.success ? String(data.status) : null;
+    } catch { return null; }
+  }
+
+  // ── 儲存規格欄位變更 ──────────────────────────────────────
+  async function saveLayerChanges() {
+    const partNum  = (CURRENT_KEYS.PartNum  || '').trim();
+    const revision = (CURRENT_KEYS.Revision || '').trim();
+    const layerId  = (CURRENT_KEYS.LayerId  || '').trim();
+    const changes  = {};
+
+    document.querySelectorAll('#spec-content .master-field:not(.readonly-field)').forEach(inp => {
+      const orig = inp.dataset.original ?? '';
+      if (inp.type === 'checkbox') {
+        const val = inp.checked ? '1' : '0';
+        if (val !== orig) changes[inp.name] = val;
+      } else {
+        if (inp.value !== orig) changes[inp.name] = inp.value;
+      }
+    });
+
+    if (Object.keys(changes).length === 0) return { ok: true, skipped: true };
+
+    changes.PartNum  = partNum;
+    changes.Revision = revision;
+    changes.LayerId  = layerId;
+
+    try {
+      const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          TableName: 'EMOdProdLayer',
+          Data: [changes],
+          KeyFields: ['PartNum', 'Revision', 'LayerId']
+        })
+      });
+      const txt = await resp.text();
+      let result = null;
+      try { result = txt ? JSON.parse(txt) : null; } catch {}
+
+      if (resp.ok && result?.success !== false) {
+        // 更新 data-original，避免重複儲存
+        document.querySelectorAll('#spec-content .master-field:not(.readonly-field)').forEach(inp => {
+          inp.dataset.original = inp.type === 'checkbox' ? (inp.checked ? '1' : '0') : inp.value;
+        });
+        return { ok: true, skipped: false };
+      } else {
+        return { ok: false, text: result?.message || result?.error || txt || '儲存失敗' };
+      }
+    } catch (err) {
+      return { ok: false, text: err.message };
+    }
+  }
+
+  function setLayerEditMode(enable) {
+    _layerEditMode = enable;
+
+    // ── 規格欄位 readonly / 藍底切換 ──
+    const specContent = document.getElementById('spec-content');
+    if (specContent) {
+      specContent.classList.toggle('spec-editing', enable);
+      specContent.querySelectorAll('.master-field:not(.readonly-field)').forEach(inp => {
+        if (inp.type === 'checkbox') {
+          inp.disabled = !enable;
+        } else {
+          if (enable) inp.removeAttribute('readonly');
+          else {
+            if (inp.dataset.original !== undefined) inp.value = inp.dataset.original;
+            inp.setAttribute('readonly', 'readonly');
+          }
+        }
+      });
+    }
+
+    // ── 修改 ↔ 瀏覽 按鈕文字切換 ──
+    const btnToggle = document.getElementById('btnViewEditToggle');
+    if (btnToggle) {
+      btnToggle.innerHTML = enable
+        ? '<i class="bi bi-eye"></i>瀏覽'
+        : '<i class="bi bi-pencil-square"></i>修改';
+    }
+    const countBox = document.getElementById('toolbarCountBox');
+    if (countBox) {
+      countBox.classList.toggle('mode-edit', enable);
+      countBox.classList.toggle('mode-view', !enable);
+    }
+
+    // ── ✓ / × 按鈕 ──
+    const btnSave   = document.getElementById('btnSave');
+    const btnCancel = document.getElementById('btnCancel');
+    if (btnSave)   btnSave.disabled   = !enable;
+    if (btnCancel) btnCancel.disabled = !enable;
+
+    // ── + / - 按鈕 ──
+    if (!window._isViewOnly) {
+      const btnAdd = document.getElementById('btnAdd');
+      const btnDel = document.getElementById('btnDelete');
+      if (btnAdd) btnAdd.disabled = !enable;
+      if (btnDel) btnDel.disabled = !enable;
+    }
+  }
+
+  // ── ✓ 儲存 ────────────────────────────────────────────────
+  document.getElementById('btnSave')?.addEventListener('click', async function () {
+    const result = await saveLayerChanges();
+    if (result.skipped || result.ok) {
+      setLayerEditMode(false);
+      if (!result.skipped)
+        Swal.fire({ icon: 'success', title: '儲存成功', timer: 900, showConfirmButton: false });
+    } else {
+      Swal.fire({ icon: 'error', title: '儲存失敗', text: result.text || '' });
+    }
+  });
+
+  // ── × 取消 ────────────────────────────────────────────────
+  document.getElementById('btnCancel')?.addEventListener('click', function () {
+    setLayerEditMode(false);
+  });
+
+  // ── blur 自動儲存（離開欄位時） ──────────────────────────
+  document.getElementById('spec-content')?.addEventListener('focusout', async function (e) {
+    if (!_layerEditMode) return;
+    const inp = e.target;
+    if (!inp.matches('.master-field:not(.readonly-field)')) return;
+    // 只有值有變化才送
+    const orig = inp.dataset.original ?? '';
+    const cur  = inp.type === 'checkbox' ? (inp.checked ? '1' : '0') : inp.value;
+    if (cur === orig) return;
+    await saveLayerChanges();
+  });
+
+  // 切換子頁籤時繼承 spec-editing 狀態
+  document.querySelectorAll('#master-tabs [data-bs-toggle="tab"]').forEach(btn => {
+    btn.addEventListener('shown.bs.tab', () => {
+      if (!_layerEditMode) return;
+      const targetId = btn.dataset.bsTarget;
+      if (targetId) {
+        document.querySelectorAll(`${targetId} .master-field:not(.readonly-field)`).forEach(inp => {
+          if (inp.type === 'checkbox') inp.disabled = false;
+          else inp.removeAttribute('readonly');
+        });
+      }
+    });
+  });
+
+  if (!window._isViewOnly) {
+    // 預設禁用，等使用者點「修改」確認後才開放
+    setLayerEditMode(false);
+    // 預載父級狀態
+    fetchParentStatus().then(s => { _parentStatus = s; });
+  }
+
+  document.getElementById('btnViewEditToggle')?.addEventListener('click', async function () {
+    if (window._isViewOnly) {
+      Swal.fire({ icon: 'warning', title: '查詢模式下無法修改' });
+      return;
+    }
+    const s = _parentStatus ?? await fetchParentStatus();
+    _parentStatus = s;
+    if (s !== '0') {
+      Swal.fire({
+        icon: 'warning',
+        title: '無法修改',
+        text: `此料號/版序目前狀態為「${_STATUS_LABELS[s] || '未知'}」，只有「設計中」才能修改。`
+      });
+      return;
+    }
+    const entering = !_layerEditMode;
+    setLayerEditMode(entering);
+    if (entering) {
+      Swal.fire({ icon: 'success', title: '已進入編輯模式', timer: 800, showConfirmButton: false });
+    } else {
+      Swal.fire({ icon: 'info', title: '已退出編輯模式', timer: 800, showConfirmButton: false });
+    }
+  }, true);
 
   // ── 途程明細分割線拖拉 ────────────────────────────────────
   (function () {
