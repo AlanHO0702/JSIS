@@ -29,14 +29,30 @@ namespace PcbErpApi.Controllers
             if (string.IsNullOrWhiteSpace(req.SpName))
                 return BadRequest(new { error = "缺少 SpName" });
 
-            // 1) 如需先跑 SP
-            using (var conn = new SqlConnection(_config.GetConnectionString("DefaultConnection")))
+            // 1) 如需先跑 SP，同時建立已套用 255 轉換的參數字典供後續報表使用
+            var connStr = _config.GetConnectionString("DefaultConnection")!;
+            var resolvedParams = new Dictionary<string, object>();
+            using (var conn = new SqlConnection(connStr))
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandType = CommandType.StoredProcedure;
                 cmd.CommandText = req.SpName;
                 if (req.Params != null)
-                    foreach (var kv in req.Params) cmd.Parameters.Add(new SqlParameter("@" + kv.Key, ToDbValue(kv.Value)));
+                {
+                    var spParamTypes = GetSpParamTypes(connStr, req.SpName);
+                    foreach (var kv in req.Params)
+                    {
+                        var value = ToDbValue(kv.Value);
+                        if (value is string s && s == "" &&
+                            spParamTypes.TryGetValue("@" + kv.Key, out var typeName) &&
+                            IsIntegerType(typeName))
+                        {
+                            value = 255;
+                        }
+                        cmd.Parameters.Add(new SqlParameter("@" + kv.Key, value ?? DBNull.Value));
+                        resolvedParams[kv.Key] = value ?? DBNull.Value;
+                    }
+                }
                 else if (!string.IsNullOrWhiteSpace(req.PaperNum))
                     cmd.Parameters.Add(new SqlParameter("@PaperNum", ToDbValue(req.PaperNum)));
 
@@ -45,10 +61,12 @@ namespace PcbErpApi.Controllers
             }
 
             // 2) POST 到 CrystalReportsAPI，拿 PDF blob 回來
+            // 使用已套用 255 轉換的參數，確保報表與資料畫面條件一致
+            var reportParams = resolvedParams.Count > 0 ? resolvedParams : (req.Params ?? new Dictionary<string, object>());
             var renderPayload = new {
                 reportName = req.ReportName,
                 format = "pdf",
-                @params = req.Params ?? new Dictionary<string, object>()
+                @params = reportParams
             };
             if (!renderPayload.@params.ContainsKey("PaperNum") && !string.IsNullOrWhiteSpace(req.PaperNum))
                 renderPayload.@params["PaperNum"] = req.PaperNum;
@@ -153,9 +171,19 @@ SELECT SerialNum, ItemName, Enabled, ClassName, ObjectName
             // 將前端參數安全轉型後再加入（解決 JsonElement 無法對應問題）
             if (req.Params is not null)
             {
+                // 查詢 SP 參數型別，讓空字串的數值型別改用 255（與舊系統行為一致）
+                var spParamTypes = GetSpParamTypes(connStr!, req.SpName);
+
                 foreach (var kv in req.Params)
                 {
                     var value = ToDbValue(kv.Value);
+                    // 空字串 + 數值型別 → 255
+                    if (value is string s && s == "" &&
+                        spParamTypes.TryGetValue("@" + kv.Key, out var typeName) &&
+                        IsIntegerType(typeName))
+                    {
+                        value = 255;
+                    }
                     var p = new SqlParameter("@" + kv.Key, value ?? DBNull.Value);
                     cmd.Parameters.Add(p);
                 }
@@ -465,6 +493,29 @@ WHERE ItemId = @itemId AND UserId = @userId AND SubName = @subName;", itemId, us
                 list.Add(new { value, text });
             }
             return list;
+        }
+
+        // SqlDbType 整數型別名稱（DeriveParameters 回傳的是 enum 名稱）
+        private static readonly HashSet<string> _integerTypes = new(StringComparer.OrdinalIgnoreCase)
+            { "TinyInt", "SmallInt", "Int", "BigInt" };
+
+        private static bool IsIntegerType(string typeName) => _integerTypes.Contains(typeName);
+
+        private static Dictionary<string, string> GetSpParamTypes(string connStr, string spName)
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                using var conn = new SqlConnection(connStr);
+                conn.Open();
+                using var cmd = new SqlCommand(spName, conn) { CommandType = CommandType.StoredProcedure };
+                SqlCommandBuilder.DeriveParameters(cmd);
+                foreach (SqlParameter p in cmd.Parameters)
+                    if (p.Direction != ParameterDirection.ReturnValue)
+                        result[p.ParameterName] = p.SqlDbType.ToString();
+            }
+            catch { /* 查不到就回傳空字典，讓空字串維持原值 */ }
+            return result;
         }
 
         private static object? ToDbValue(object? v)
