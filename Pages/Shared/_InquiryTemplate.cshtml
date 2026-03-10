@@ -176,6 +176,30 @@
     width: 11px;
     height: 11px;
   }
+  .inq-query .inq-form.inq-form--auto-grid-active {
+    width: max-content;
+    min-width: 100%;
+    overflow-x: auto;
+  }
+  .inq-query .inq-form.inq-form--auto-grid-active .inq-row {
+    display: grid;
+    grid-template-columns: var(--inq-auto-cols, max-content);
+    column-gap: 2px;
+    align-items: center;
+    flex-wrap: nowrap;
+  }
+  .inq-query .inq-form.inq-form--auto-grid-active .inq-row > .inq-label {
+    min-width: 0;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .inq-query .inq-form.inq-form--auto-grid-active .inq-row > .inq-input,
+  .inq-query .inq-form.inq-form--auto-grid-active .inq-row > .inq-select,
+  .inq-query .inq-form.inq-form--auto-grid-active .inq-row > .compact-check {
+    min-width: 0;
+  }
   @@media (max-width: 992px) {
     .inq-shell {
       flex-direction: column;
@@ -379,7 +403,59 @@
       }).observe(tbody, { childList: true, subtree: true });
     };
 
+    const alignQueryRows = () => {
+      document.querySelectorAll(".inq-query .inq-form.inq-form--auto-grid-enabled").forEach((form) => {
+        if (!(form instanceof HTMLElement)) return;
+        form.classList.remove("inq-form--auto-grid-active");
+        form.style.removeProperty("--inq-auto-cols");
+        const rows = Array.from(form.querySelectorAll(":scope > .inq-row"));
+        if (!rows.length) return;
+        if (rows.length <= 1) return;
+
+        const labelWidths = [];
+        const fieldWidths = [];
+        let maxPairs = 0;
+
+        rows.forEach((row) => {
+          const cells = Array.from(row.children).filter((el) => el instanceof HTMLElement);
+          let pairIndex = 0;
+          for (let i = 0; i < cells.length; i++) {
+            const label = cells[i];
+            if (!(label instanceof HTMLElement) || !label.classList.contains("inq-label")) continue;
+            const field = cells[i + 1];
+            if (!(field instanceof HTMLElement)) break;
+
+            const lw = Math.ceil(label.getBoundingClientRect().width);
+            const check = field.classList.contains("compact-check");
+            const fw = check
+              ? 20
+              : Math.ceil(field.getBoundingClientRect().width);
+
+            labelWidths[pairIndex] = Math.max(labelWidths[pairIndex] || 0, lw);
+            fieldWidths[pairIndex] = Math.max(fieldWidths[pairIndex] || 0, fw);
+            pairIndex += 1;
+            i += 1;
+          }
+          maxPairs = Math.max(maxPairs, pairIndex);
+        });
+
+        if (!maxPairs) return;
+
+        const cols = [];
+        for (let i = 0; i < maxPairs; i++) {
+          cols.push(`${Math.max(52, labelWidths[i] || 52)}px`);
+          cols.push(`${Math.max(20, fieldWidths[i] || 20)}px`);
+        }
+        form.classList.add("inq-form--auto-grid-active");
+        form.style.setProperty("--inq-auto-cols", cols.join(" "));
+      });
+    };
+
+    const queueAlign = () => window.requestAnimationFrame(alignQueryRows);
+
     document.querySelectorAll(".inq-table").forEach(bindCellNavigation);
+    queueAlign();
+    window.addEventListener("resize", queueAlign);
   })();
 </script>
 
