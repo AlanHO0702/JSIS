@@ -1,0 +1,180 @@
+@page "/AJN/AJNdTransferAccData"
+@model PcbErpApi.Pages.AJN.AJNdTransferAccDataModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "年度結轉";
+}
+
+<style>
+    .aa16-backdrop {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: calc(100vh - var(--app-toolbar-height));
+    }
+    .aa16-card {
+        width: 400px;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 4px 24px rgba(0,0,0,.10);
+        padding: 32px 36px 28px;
+    }
+    .aa16-title {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #1d3b6b;
+        text-align: center;
+        margin-bottom: 24px;
+    }
+    .aa16-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 16px;
+    }
+    .aa16-label {
+        width: 130px;
+        flex-shrink: 0;
+        font-size: 0.9rem;
+        color: #374151;
+        text-align: right;
+        padding-right: 12px;
+    }
+    .aa16-input {
+        flex: 1;
+        height: 34px;
+        padding: 4px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        font-size: 0.9rem;
+        color: #1e293b;
+        outline: none;
+        transition: border-color .2s;
+    }
+    .aa16-input:focus {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59,130,246,.15);
+    }
+    .aa16-btn-row {
+        text-align: center;
+        margin-top: 28px;
+    }
+    .aa16-btn {
+        padding: 8px 36px;
+        font-size: 0.95rem;
+        font-weight: 500;
+        color: #fff;
+        background: #2563eb;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background .2s;
+    }
+    .aa16-btn:hover {
+        background: #1d4ed8;
+    }
+    .aa16-btn:disabled {
+        background: #94a3b8;
+        cursor: not-allowed;
+    }
+</style>
+
+<div class="aa16-backdrop">
+    <div class="aa16-card">
+        <div class="aa16-title">年度結轉</div>
+
+        <div class="aa16-row">
+            <label class="aa16-label" for="aa16FromDate">前年度啟始日期</label>
+            <input type="date" id="aa16FromDate" class="aa16-input" />
+        </div>
+        <div class="aa16-row">
+            <label class="aa16-label" for="aa16DueDate">新年度起始日期</label>
+            <input type="date" id="aa16DueDate" class="aa16-input" />
+        </div>
+
+        <div class="aa16-btn-row">
+            <button type="button" id="aa16ExecBtn" class="aa16-btn">執行</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const fromDateEl = document.getElementById('aa16FromDate');
+    const dueDateEl  = document.getElementById('aa16DueDate');
+    const execBtn    = document.getElementById('aa16ExecBtn');
+
+    // 預設值：前年度 = 去年1/1，新年度 = 今年1/1
+    const now = new Date();
+    const thisYear = now.getFullYear();
+    fromDateEl.value = (thisYear - 1) + '-01-01';
+    dueDateEl.value  = thisYear + '-01-01';
+
+    execBtn.addEventListener('click', async function () {
+        const fromDate = fromDateEl.value;
+        const dueDate  = dueDateEl.value;
+
+        if (!fromDate || !dueDate) {
+            Swal.fire({ icon: 'warning', title: '請選擇日期' });
+            return;
+        }
+
+        const confirm = await Swal.fire({
+            icon: 'question',
+            title: '確認執行年度結轉？',
+            text: `前年度：${fromDate}，新年度：${dueDate}`,
+            showCancelButton: true,
+            confirmButtonText: '確定',
+            cancelButtonText: '取消'
+        });
+        if (!confirm.isConfirmed) return;
+
+        execBtn.disabled = true;
+        execBtn.textContent = '執行中...';
+
+        try {
+            const jwtId  = localStorage.getItem('jwtId') || '';
+            const useId  = (window._useId || localStorage.getItem('erpUseId') || '').toString().trim();
+            const userId = (localStorage.getItem('erpLoginUserId') || '').toString().trim();
+
+            const resp = await fetch('/api/StoredProc/query', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-JWTID': jwtId
+                },
+                body: JSON.stringify({
+                    Key: 'AJNdTransferAccData',
+                    Args: {
+                        UseId:    useId,
+                        FromDate: fromDate,
+                        DueDate:  dueDate,
+                        SaveType: 1,
+                        UserId:   userId
+                    }
+                })
+            });
+
+            const data = await resp.json();
+            if (!resp.ok) {
+                Swal.fire({ icon: 'error', title: '執行失敗', text: data.error || '未知錯誤' });
+                return;
+            }
+
+            // SP 可能回傳多個結果集，從中找含 MSG 欄位的那筆
+            var msg = '年度結轉完成';
+            if (Array.isArray(data)) {
+                var msgRow = data.find(function(r) { return r.MSG; });
+                if (msgRow) msg = msgRow.MSG;
+            }
+
+            Swal.fire({ icon: 'success', title: msg });
+
+        } catch (err) {
+            Swal.fire({ icon: 'error', title: '執行失敗', text: err.message });
+        } finally {
+            execBtn.disabled = false;
+            execBtn.textContent = '執行';
+        }
+    });
+})();
+</script>
