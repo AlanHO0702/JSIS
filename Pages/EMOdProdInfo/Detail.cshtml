@@ -547,6 +547,10 @@ document.addEventListener('DOMContentLoaded', () => {
   let specEditMode = false;
   window.specEditMode = false;
 
+  // 全域修改狀態：整支作業（所有頁籤）統一切換
+  let isGlobalEditMode = false;
+  window.isGlobalEditMode = false;
+
   // 進入/退出規格編輯模式的統一函式（掛到 window 供外部 script 呼叫）
   // autoSave=true 時退出前自動儲存（切換頁籤用）；false 時還原值（×取消用）
   window.setSpecEditMode = async function setSpecEditMode(enable, autoSave = false) {
@@ -584,10 +588,17 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    const btnSave   = document.getElementById('btnSaveHeader');
-    const btnCancel = document.getElementById('btnCancelChanges');
-    if (btnSave)   btnSave.disabled   = !enable;
-    if (btnCancel) btnCancel.disabled = !enable;
+    // 進入編輯時：對規格欄位綁 input 偵測 dirty
+    if (enable) {
+      specContent.querySelectorAll('.master-field:not(.readonly-field)').forEach(inp => {
+        if (!inp._dirtyListenerAttached) {
+          inp._dirtyListenerAttached = true;
+          inp.addEventListener('input', () => {
+            if (window.updateSaveCancelButtons) window.updateSaveCancelButtons();
+          });
+        }
+      });
+    }
   };
 
   // 收集規格欄位變更並呼叫 API 儲存（回傳 {ok, skipped}）
@@ -646,16 +657,36 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnSaveHeader = document.getElementById('btnSaveHeader');
   if (btnSaveHeader) {
     btnSaveHeader.addEventListener('click', async () => {
-      const result = await window.saveSpecChanges();
-      if (result.skipped || result.ok) {
-        window.setSpecEditMode(false);
-        if (window.setToolbarEditMode) window.setToolbarEditMode(false);
-        if (!result.skipped && typeof Swal !== 'undefined')
-          Swal.fire({ icon: 'success', title: '儲存成功', timer: 1000, showConfirmButton: false });
-      } else {
-        if (typeof Swal !== 'undefined') Swal.fire({ icon: 'error', title: '儲存失敗', text: result.text || '' });
-        else alert('儲存失敗：' + (result.text || ''));
+      // 儲存規格頁籤
+      if (window.specEditMode && window.saveSpecChanges) {
+        const specResult = await window.saveSpecChanges();
+        if (!specResult.ok && !specResult.skipped) {
+          if (typeof Swal !== 'undefined')
+            Swal.fire({ icon: 'error', title: '規格儲存失敗', text: specResult.text || '' });
+          return;
+        }
       }
+      // 儲存所有表單 editors
+      const saveErrors = [];
+      if (window.tabState) {
+        for (const [key, state] of Object.entries(window.tabState)) {
+          const editor = state?.editor;
+          if (editor && editor.isEdit && editor.isEdit() && editor.saveChanges) {
+            const r = await editor.saveChanges();
+            if (!r.ok && !r.skipped) saveErrors.push(key);
+          }
+        }
+      }
+      if (saveErrors.length > 0) {
+        if (typeof Swal !== 'undefined')
+          Swal.fire({ icon: 'error', title: '部分頁籤儲存失敗', text: saveErrors.join(', ') });
+      }
+      // [儲存成功提示] 若需要顯示儲存成功訊息，取消下方註解（關鍵字：打勾儲存 成功提示 Swal）
+      // else {
+      //   if (typeof Swal !== 'undefined')
+      //     Swal.fire({ icon: 'success', title: '儲存成功', timer: 1000, showConfirmButton: false });
+      // }
+      if (window.updateSaveCancelButtons) window.updateSaveCancelButtons();
     });
   }
 
@@ -663,10 +694,82 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnCancelChanges = document.getElementById('btnCancelChanges');
   if (btnCancelChanges) {
     btnCancelChanges.addEventListener('click', () => {
-      window.setSpecEditMode(false);
-      if (window.setToolbarEditMode) window.setToolbarEditMode(false);
+      // 還原規格頁籤原始值（維持編輯模式）
+      document.querySelectorAll('#spec-content .master-field:not(.readonly-field)').forEach(inp => {
+        if (inp.dataset.original !== undefined) {
+          if (inp.type === 'checkbox') inp.checked = inp.dataset.original === '1';
+          else inp.value = inp.dataset.original;
+        }
+      });
+      // 還原所有表單 editors（維持編輯模式）
+      if (window.tabState) {
+        Object.values(window.tabState).forEach(state => {
+          if (!state?.editor?.isEdit?.()) return;
+          const wrapper = state.wrapper;
+          if (wrapper) {
+            wrapper.querySelectorAll('.cell-edit').forEach(inp => {
+              if (inp.type === 'checkbox') {
+                inp.checked = inp.defaultChecked;
+                inp.value   = inp.defaultChecked ? '1' : '0';
+              } else {
+                inp.value = inp.defaultValue ?? '';
+              }
+            });
+          }
+        });
+      }
+      if (window.updateSaveCancelButtons) window.updateSaveCancelButtons();
+      window.isCancellingChanges = false; // 還原完成，解除 auto-save 封鎖
+      // [取消還原提示] 若需要顯示已還原訊息，取消下方註解（關鍵字：叉叉取消 還原提示 Swal）
+      // if (typeof Swal !== 'undefined')
+      //   Swal.fire({ icon: 'info', title: '已還原變更', timer: 800, showConfirmButton: false });
+    });
+
+    // 在 mousedown（比 focusout 更早觸發）時設旗標，阻止 cell 失焦觸發的 auto-save
+    btnCancelChanges.addEventListener('mousedown', () => {
+      window.isCancellingChanges = true;
     });
   }
+
+  // ===== 全域 dirty 偵測：有變更才啟用 ✓/× =====
+  window.checkAnyDirty = function checkAnyDirty() {
+    if (!window.isGlobalEditMode) return false;
+    // 規格頁籤：比對 data-original
+    const specDirty = Array.from(
+      document.querySelectorAll('#spec-content .master-field:not(.readonly-field)')
+    ).some(inp => {
+      const orig = inp.dataset.original ?? '';
+      return inp.type === 'checkbox'
+        ? (inp.checked ? '1' : '0') !== orig
+        : inp.value !== orig;
+    });
+    if (specDirty) return true;
+    // 表單 editors：比對 defaultValue
+    if (window.tabState) {
+      for (const state of Object.values(window.tabState)) {
+        if (!state?.editor?.isEdit?.()) continue;
+        const wrapper = state.wrapper;
+        if (!wrapper) continue;
+        const hasDirty = Array.from(
+          wrapper.querySelectorAll('.cell-edit:not([data-readonly="1"])')
+        ).some(inp =>
+          inp.type === 'checkbox'
+            ? (inp.checked ? '1' : '0') !== (inp.defaultValue ?? '')
+            : inp.value !== (inp.defaultValue ?? '')
+        );
+        if (hasDirty) return true;
+      }
+    }
+    return false;
+  };
+
+  window.updateSaveCancelButtons = function updateSaveCancelButtons() {
+    const dirty = window.checkAnyDirty();
+    const btnSave   = document.getElementById('btnSaveHeader');
+    const btnCancel = document.getElementById('btnCancelChanges');
+    if (btnSave)   btnSave.disabled   = !dirty;
+    if (btnCancel) btnCancel.disabled = !dirty;
+  };
 
   // 規格子頁籤切換時繼承 specEditMode 狀態
   document.querySelectorAll('#master-tabs [data-bs-toggle="tab"]').forEach(btn => {
@@ -885,7 +988,7 @@ document.addEventListener('DOMContentLoaded', () => {
         getDict(tab.dict),
         fetch(url).then(r => r.json())
       ]).then(([dict, rows]) => {
-        buildTable(tab.key, dict, rows);
+        buildTable(tab.key, dict, rows, url);
       }).catch(err => {
         console.error('[DEBUG loadLayerPressDetail] 載入失敗, tab:', tab.key, 'err:', err);
         const table = document.getElementById(`grid-${tab.key}`);
@@ -1351,6 +1454,20 @@ let html = '';
     }
   }
 
+  // 解析 Delphi 風格格式字串（如 ##0.000）並格式化數字
+  function applyDelphiFormat(num, formatStr) {
+    if (!formatStr) return null;
+    const dotIdx = formatStr.indexOf('.');
+    if (dotIdx === -1) {
+      // 無小數點 → 整數顯示
+      return Math.round(num).toString();
+    }
+    // 小數位數 = 小數點後 '0'/'#' 字元數
+    const afterDot = formatStr.slice(dotIdx + 1);
+    const decimalPlaces = afterDot.replace(/[^0#]/g, '').length;
+    return num.toFixed(decimalPlaces);
+  }
+
   // 格式化顯示值
   function formatCellValue(value, field) {
     if (value == null || value === '') return '';
@@ -1371,10 +1488,17 @@ let html = '';
       } catch {}
     }
 
-    // 數字格式化
-    if (dataType.includes('int') || dataType.includes('decimal') || dataType.includes('numeric')) {
+    // 數字格式化（優先套用 FormatStr）
+    const isNumericType = dataType.includes('int') || dataType.includes('decimal')
+      || dataType.includes('numeric') || dataType.includes('real')
+      || dataType.includes('float') || dataType.includes('money');
+    if (isNumericType || field.FormatStr) {
       const num = Number(value);
       if (!isNaN(num)) {
+        if (field.FormatStr) {
+          const formatted = applyDelphiFormat(num, field.FormatStr);
+          if (formatted !== null) return formatted;
+        }
         return num.toLocaleString();
       }
     }
@@ -1383,12 +1507,17 @@ let html = '';
   }
 
   // 建立表格（支援自動 Lookup）
-  async function buildTable(tabKey, dict, rows) {
+  async function buildTable(tabKey, dict, rows, fetchUrl) {
     const table = document.getElementById(`grid-${tabKey}`);
     if (!table) return;
     const thead = table.querySelector('thead');
     const tbody = table.querySelector('tbody');
     if (!thead || !tbody) return;
+
+    // 儲存 fetchUrl 與 dict 供自動存檔後重新載入使用
+    if (!tabState[tabKey]) tabState[tabKey] = { editor: null };
+    if (fetchUrl) tabState[tabKey].lastFetchUrl = fetchUrl;
+    tabState[tabKey].lastDict = dict;
 
     // Build header - 使用宽松比较 (==) 而不是严格比较 (===)
     // 因为 API 可能返回字符串 "1" 或数字 1
@@ -1443,12 +1572,14 @@ let html = '';
       const cells = visibleFields.map(f => {
         let rawValue = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
         let displayValue = rawValue;
+        let lookupApplied = false; // 是否套用了 Lookup（Lookup 欄位的 input 需保留原始代碼，不能用格式化後的文字）
 
         // 優先使用 OCX Lookup（虛擬欄位）
         if (ocxMaps[f.FieldName] && rawValue) {
           const lookupResult = ocxMaps[f.FieldName][rawValue];
           if (lookupResult != null) {
             displayValue = lookupResult;
+            lookupApplied = true;
           }
         }
         // 其次使用一般 Lookup（實體欄位）
@@ -1456,11 +1587,15 @@ let html = '';
           const lookupResult = lookupMaps[f.FieldName][rawValue];
           if (lookupResult != null) {
             displayValue = lookupResult;
+            lookupApplied = true;
           }
         }
 
         // 格式化顯示
         displayValue = formatCellValue(displayValue, f);
+
+        // input 的值：Lookup 欄位用 rawValue（原始代碼），其餘用格式化後的值（讓 view/edit 顯示一致）
+        const inputValue = lookupApplied ? rawValue : displayValue;
 
         // 判斷欄位是否為唯讀
         const isReadonly = (f.ReadOnly ?? 0) !== 0 || keyFieldSet.has((f.FieldName || '').toLowerCase());
@@ -1471,7 +1606,7 @@ let html = '';
         // 生成包含 .cell-view 和 .cell-edit 的結構
         return `<td data-field="${f.FieldName}" data-raw="${rawValue}">
           <span class="cell-view">${displayValue}</span>
-          <input type="${inputType}" class="cell-edit form-control form-control-sm d-none" name="${f.FieldName}" value="${rawValue}" ${readonlyAttr} data-type="${dataType}">
+          <input type="${inputType}" class="cell-edit form-control form-control-sm d-none" name="${f.FieldName}" value="${inputValue}" ${readonlyAttr} data-type="${dataType}">
         </td>`;
       }).join('');
       return `<tr>${pkHiddenHtml}${cells}</tr>`;
@@ -1493,16 +1628,17 @@ let html = '';
 
     const saveUrl = "/api/CommonTable/SaveTableChanges";
 
-    tabState[tabKey].editor = window.makeEditableGrid({
+    tabState[tabKey].editor  = window.makeEditableGrid({
       wrapper: wrapper,
       table: table,
       tableName: tableName,
       keyFields: keyFields,
       saveUrl: saveUrl
     });
+    tabState[tabKey].wrapper = wrapper; // 供 dirty 偵測使用
 
-    // 若切換前在編輯模式，切換回來後恢復編輯狀態
-    if (wasEditing) {
+    // 若切換前在編輯模式，或全域修改狀態已開啟，自動套用
+    if (wasEditing || window.isGlobalEditMode) {
       tabState[tabKey].editor.toggleEdit(true);
     }
 
@@ -1512,6 +1648,51 @@ let html = '';
 
     // 啟用欄寬拖曳調整
     enableThResize(table);
+
+    // dirty 偵測 + 列 blur 自動存檔（Problem 2 + 3）
+    if (!wrapper._dirtyListenerAttached) {
+      wrapper._dirtyListenerAttached = true;
+
+      // ① 任何欄位變更時更新 ✓/× 狀態
+      wrapper.addEventListener('input', () => {
+        if (window.updateSaveCancelButtons) window.updateSaveCancelButtons();
+      });
+
+      // ② 列失焦時自動存檔（觸發 SQL trigger 計算）
+      wrapper.addEventListener('focusout', async function(e) {
+        if (!window.isGlobalEditMode) return;
+        if (window.isCancellingChanges) return; // 使用者點了 × 取消，不觸發 auto-save
+        const cell = e.target;
+        if (!cell.classList.contains('cell-edit') || cell.dataset.readonly === '1') return;
+        const currentRow = cell.closest('tr');
+        if (!currentRow) return;
+        // focus 仍在同一列 → 不存檔
+        if (e.relatedTarget && currentRow.contains(e.relatedTarget)) return;
+        // 檢查該列是否有變更
+        const rowDirty = Array.from(
+          currentRow.querySelectorAll('.cell-edit:not([data-readonly="1"])')
+        ).some(inp =>
+          inp.type === 'checkbox'
+            ? (inp.checked ? '1' : '0') !== (inp.defaultValue ?? '')
+            : inp.value !== (inp.defaultValue ?? '')
+        );
+        if (!rowDirty) return;
+        const editor = tabState[tabKey]?.editor;
+        if (!editor?.saveChanges) return;
+        try {
+          await editor.saveChanges();
+          // 重新載入資料，以顯示 SQL trigger 計算結果（例如 mm 自動換算）
+          const state = tabState[tabKey];
+          if (state?.lastFetchUrl && state?.lastDict) {
+            try {
+              const freshRows = await fetch(state.lastFetchUrl).then(r => r.json());
+              if (freshRows) await buildTable(tabKey, state.lastDict, freshRows, state.lastFetchUrl);
+            } catch (fetchErr) { console.warn('[auto-save refresh]', fetchErr); }
+          }
+          if (window.updateSaveCancelButtons) window.updateSaveCancelButtons();
+        } catch (err) { console.error('[auto-save row blur]', err); }
+      });
+    }
   }
 
   // 為表頭加上拖曳調整欄寬功能（含置中指示線特效）
@@ -1606,7 +1787,7 @@ let html = '';
       getDict(dictName),
       fetch(url).then(r => r.json())
     ]).then(([dict, rows]) => {
-      buildTable(tabKey, dict, rows);
+      buildTable(tabKey, dict, rows, url);
     }).catch(err => {
       const table = document.getElementById(`grid-${tabKey}`);
       if (table) {
@@ -2485,152 +2666,73 @@ let html = '';
         return;
       }
 
-      // ── 規格頁籤判斷：目前顯示的是規格（#spec-content）而非表單 ──
-      const specTabActive = document.querySelector('#spec-content.show.active');
-      if (specTabActive) {
-        const newMode = !window.specEditMode;
-        if (newMode) {
-          // 進入編輯模式前先檢查權限
-          if (window.checkEditPermission && !window.checkEditPermission()) return;
-          if (window.setSpecEditMode) window.setSpecEditMode(true);
-          setToolbarEditMode(true);
-          Swal.fire({ icon: 'success', title: '已進入編輯模式', timer: 800, showConfirmButton: false });
-        } else {
-          // 退出編輯模式：自動儲存
-          if (window.setSpecEditMode) await window.setSpecEditMode(false, true);
-          setToolbarEditMode(false);
-          Swal.fire({ icon: 'info', title: '已退出編輯模式', timer: 800, showConfirmButton: false });
-        }
-        return;
-      }
+      const enterEdit = !window.isGlobalEditMode;
 
-      // ── 表單頁籤判斷 ──
-      // 取得目前表單頁籤中正在顯示的頁籤
-      let activeTabPane = document.querySelector('#form-content .tab-pane.show.active');
+      if (enterEdit) {
+        // ── 進入全域修改模式 ──
+        if (window.checkEditPermission && !window.checkEditPermission()) return;
 
-      if (!activeTabPane) {
-        // 如果表單頁籤未顯示，先切換到表單頁籤
-        const formTab = document.getElementById('form-tab');
-        if (formTab) {
-          formTab.click();
-          Swal.fire({ icon: 'info', title: '請先選擇要編輯的表單頁籤', timer: 1500, showConfirmButton: false });
-        }
-        return;
-      }
+        window.isGlobalEditMode = true;
 
-      const tabKey = activeTabPane.id.replace('tab-', '');
+        // 規格頁籤進入編輯
+        if (window.setSpecEditMode) window.setSpecEditMode(true);
 
-      // 檢查是否為層別控制的頁籤（只有這三個頁籤需要透過左側層別載入）
-      const layerControlledTabs = ['layerpress', 'pressmethod', 'layerroute'];
-      const isLayerControlled = layerControlledTabs.includes(tabKey);
-
-      // 取得對應的 tabState
-      let state = window.tabState ? window.tabState[tabKey] : null;
-
-      // 如果頁籤尚未載入，先觸發載入
-      if (!state || !state.editor) {
-
-        // 如果是層別控制的頁籤，提示使用者先選擇層別
-        if (isLayerControlled) {
-          Swal.fire({ icon: 'warning', title: '此頁籤由左側層別控制', text: '請先點選左側層別以載入資料' });
-          return;
-        }
-
-        // 找到對應的 tab button 並觸發載入
-        const tabBtn = document.querySelector(`[data-bs-target="#tab-${tabKey}"]`);
-
-        if (tabBtn && tabBtn.dataset.table && tabBtn.dataset.dict) {
-          // 手動載入頁籤資料
-          const tableName = tabBtn.dataset.table;
-          const dictName = tabBtn.dataset.dict;
-          const keyFieldsStr = tabBtn.dataset.keyfields || '';
-          const keyFields = keyFieldsStr.split(',').filter(k => k.trim());
-          const extraKeys = tabBtn.dataset.extraKeys || '';
-
-
-          // 建立查詢參數
-          const qs = new URLSearchParams();
-          const masterKeys = @Html.Raw(JsonSerializer.Serialize(Model.MasterKeyValues.ToDictionary(kv => kv.Key, kv => kv.Value)));
-
-          keyFields.forEach(k => {
-            const val = masterKeys[k] ?? masterKeys[k.toLowerCase()] ?? '';
-            if (val) {
-              qs.append('keyNames', k);
-              qs.append('keyValues', val);
-            }
+        // 所有已載入的表格 editors 進入編輯
+        if (window.tabState) {
+          Object.values(window.tabState).forEach(state => {
+            if (state?.editor?.toggleEdit) state.editor.toggleEdit(true);
           });
-
-          // 加入額外的 keys
-          if (extraKeys) {
-            extraKeys.split(';').forEach(pair => {
-              const [k, v] = pair.split('=');
-              if (k && v) {
-                qs.append('keyNames', k.trim());
-                qs.append('keyValues', v.trim());
-              }
-            });
-          }
-
-          const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&${qs.toString()}`;
-
-          try {
-            Swal.fire({ title: '載入中...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-
-            const [dictResp, dataResp] = await Promise.all([
-              fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictName)}`).then(r => r.json()),
-              fetch(url).then(r => r.json())
-            ]);
-
-
-            // 呼叫全域的 buildTable（需要透過 window 暴露）
-            if (window.buildTableForEdit) {
-              await window.buildTableForEdit(tabKey, dictResp, dataResp);
-            }
-
-            Swal.close();
-
-            // 重新取得 state
-            state = window.tabState ? window.tabState[tabKey] : null;
-
-          } catch (err) {
-            console.error('[DEBUG] 載入失敗:', err);
-            Swal.fire({ icon: 'error', title: '載入失敗', text: err.message });
-            return;
-          }
         }
-      }
 
-      // 再次檢查 state
-      if (!state || !state.editor) {
-        Swal.fire({ icon: 'warning', title: '此頁籤尚未載入資料', text: '請先點選該頁籤載入資料後再進行編輯' });
-        return;
-      }
+        setToolbarEditMode(true);
+        // [進入修改模式提示] 若需要在進入修改狀態時顯示提示，取消下方註解（關鍵字：修改模式 跳出提示 Swal）
+        // Swal.fire({ icon: 'success', title: '已進入修改模式', timer: 800, showConfirmButton: false });
 
-      const editor = state.editor;
-
-      // 取得該頁籤的編輯/儲存按鈕
-      const editBtn = document.querySelector(`[data-btn="edit"][data-tab="${tabKey}"]`);
-      const saveBtn = document.querySelector(`[data-btn="save"][data-tab="${tabKey}"]`);
-
-      if (editor && editor.toggleEdit) {
-        // 切換編輯模式
-        const isCurrentlyEditing = editor.isEdit ? editor.isEdit() : false;
-
-        if (!isCurrentlyEditing) {
-          editor.toggleEdit(true);
-          if (editBtn) editBtn.classList.add('d-none');
-          if (saveBtn) saveBtn.classList.remove('d-none');
-          setToolbarEditMode(true);
-          Swal.fire({ icon: 'success', title: '已進入編輯模式', timer: 1000, showConfirmButton: false });
-        } else {
-          editor.toggleEdit(false);
-          if (editBtn) editBtn.classList.remove('d-none');
-          if (saveBtn) saveBtn.classList.add('d-none');
-          setToolbarEditMode(false);
-          Swal.fire({ icon: 'info', title: '已退出編輯模式', timer: 1000, showConfirmButton: false });
-        }
       } else {
-        Swal.fire({ icon: 'warning', title: '此頁籤不支援編輯功能' });
+        // ── 退出全域修改模式 ──
+        const dirty = window.checkAnyDirty ? window.checkAnyDirty() : false;
+        let shouldSave = false;
+
+        if (dirty) {
+          const confirmed = await Swal.fire({
+            icon: 'question',
+            title: '有未儲存的變更',
+            text: '是否在退出前儲存？',
+            showDenyButton: true,
+            showCancelButton: true,
+            confirmButtonText: '儲存並退出',
+            denyButtonText: '不儲存直接退出',
+            cancelButtonText: '取消（繼續編輯）'
+          });
+          if (confirmed.isDismissed) return; // 按 × 關閉視窗 → 繼續編輯
+          if (confirmed.isCancelled) return;  // 繼續編輯
+          shouldSave = confirmed.isConfirmed;
+        }
+
+        // 處理表格 editors
+        if (window.tabState) {
+          for (const state of Object.values(window.tabState)) {
+            const editor = state?.editor;
+            if (!editor?.isEdit?.()) continue;
+            if (shouldSave && editor.saveChanges) await editor.saveChanges();
+            else if (!shouldSave && editor.cancelChanges) editor.cancelChanges();
+            if (editor.toggleEdit) editor.toggleEdit(false);
+          }
+        }
+
+        // 規格頁籤退出（setSpecEditMode 內部會 save 或 restore）
+        window.isGlobalEditMode = false;
+        if (window.setSpecEditMode) await window.setSpecEditMode(false, shouldSave);
+
+        // 重置 ✓/× 按鈕
+        const btnSave   = document.getElementById('btnSaveHeader');
+        const btnCancel = document.getElementById('btnCancelChanges');
+        if (btnSave)   btnSave.disabled   = true;
+        if (btnCancel) btnCancel.disabled = true;
+
+        setToolbarEditMode(false);
+        // [退出修改模式提示] 若需要在退出修改狀態時顯示提示，取消下方註解（關鍵字：修改模式 跳出提示 Swal）
+        // Swal.fire({ icon: 'info', title: '已退出修改模式', timer: 800, showConfirmButton: false });
       }
     });
   });

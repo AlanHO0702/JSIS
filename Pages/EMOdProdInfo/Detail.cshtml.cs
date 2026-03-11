@@ -240,13 +240,13 @@ namespace PcbErpApi.Pages.EMOdProdInfo
                     "EMOdLayerPress",
                     new [] { "PartNum", "Revision" }
                 ),
-                // 板材尺寸明細圖
+                // 板材尺寸明細圖（POP 為各列識別碼，必須列入 key 否則 UPDATE 會更新全部列）
                 new DetailTab(
                     "boardsize",
                     "板材尺寸明細圖",
                     "EMOdProdPOP",
                     "EMOdProdPOP",
-                    new [] { "PartNum", "Revision" }
+                    new [] { "PartNum", "Revision", "POP" }
                 ),
                 // 裁板/排版圖
                 new DetailTab(
