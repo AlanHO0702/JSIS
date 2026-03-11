@@ -8,6 +8,7 @@
 
 <!-- SweetAlert2 引入 -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="/js/erpGridNav.js"></script>
 
 <!-- 多分頁容器 -->
 <div class="multi-tab-detail">
@@ -67,6 +68,8 @@
     window._multiTabTabs = tabsData;
     window._multiTabSelectedRows = window._multiTabSelectedRows || {};
     if (!window.__activeDetailGrid) window.__activeDetailGrid = 'multitab';
+
+    // 鍵盤導航輔助函數由 /js/erpGridNav.js 提供（window.mtSetActiveCell 等）
 
     function getHeaderEditState() {
         if (typeof window.__headerIsEdit === 'boolean') return window.__headerIsEdit;
@@ -1086,7 +1089,7 @@
                     const partNumBtn = isPartNum
                         ? '<button type="button" class="partnum-lookup-btn" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>'
                         : '';
-                    html += `<td${classAttr}${lookupAttr}${tdReadOnlyAttr}>
+                    html += `<td data-field="${escapeHtml(field)}"${classAttr}${lookupAttr}${tdReadOnlyAttr}>
                         <span class="${viewClass}${roClass}" data-init-view="${escapeHtml(viewText)}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span>
                         <input type="text"
                                class="${editClass}${roClass}${dateEditClass}"
@@ -1244,7 +1247,26 @@
                     const tr = inp.closest('tr');
                     if (!tr || !tbody.contains(tr)) return;
                     if (tr.dataset.state !== 'added') tr.dataset.state = 'modified';
+                    if (typeof window.__autoSaveDetail === 'function') {
+                        window.__autoSaveDetail();
+                    }
                 });
+                // 鍵盤導航（兩段式點擊、方向鍵、F7/F8、Enter/Escape）
+                if (typeof window.initErpGridNav === 'function') {
+                    window.initErpGridNav(tbody, {
+                        keyFields : ['papernum', 'item'],
+                        isEditMode: () => getHeaderEditState(),
+                        addRow    : async () => {
+                            if (typeof window.__addMultiTabBlankRow === 'function') {
+                                return await window.__addMultiTabBlankRow();
+                            }
+                            return null;
+                        },
+                        autoSave  : () => { if (typeof window.__autoSaveDetail === 'function') window.__autoSaveDetail(); },
+                        onRowSelect: (tr) => { selectRow(tr); },
+                        gridLabel : 'multitab',
+                    });
+                }
                 tbody.addEventListener('dblclick', async (e) => {
                     const td = e.target.closest('td');
                     if (!td || !tbody.contains(td)) return;
@@ -1289,6 +1311,7 @@
                     if (!map || map.size === 0) return;
                     openLookupDropdown(td, field, map, { resultField: lookupMetaMap[fieldLower]?.result || '' });
                 });
+
             }
 
             // 需要第三階聯動時：預設自動選取第一筆（例如 Paper3L）
@@ -1511,8 +1534,8 @@
 .multi-tab-detail .erp-table-wrapper {
     background: #fff;
     box-shadow: 0 4px 18px 0 #c3d4e6;
-    max-width: 100%;
     width: 100%;
+    max-width: 100%;
     overflow: auto;
     padding: 0 !important;
     border-radius: 0;
@@ -1526,8 +1549,10 @@
 }
 
 .multi-tab-detail .erp-table {
-    /* 欄位依辭典設定寬度，使用固定布局防止內容撐開 */
-    width: 100%;
+    /* 欄位依辭典設定寬度，不強制撐滿容器 */
+    width: auto;
+    width: max-content;
+    min-width: 0;
     border-collapse: separate;
     border-spacing: 0;
     font-size: var(--field-value-size);
@@ -1549,7 +1574,7 @@
     font-weight: 500;
     border-right: 1px solid #9fb1d0;
     height: auto;
-    max-width: 300px;
+    max-width: none;
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -1612,7 +1637,7 @@ body.resizing { cursor: col-resize !important; }
     position: relative;
     padding: 0;
     overflow: hidden;
-    max-width: 300px;
+    max-width: none;
 }
 
 /* ✅ 檢視模式的 span 樣式 */
@@ -1800,6 +1825,7 @@ body.resizing { cursor: col-resize !important; }
     border-left: 3px solid #0d6efd;
 }
 
+
 .multi-tab-detail .erp-table tbody tr.row-selected td {
     background-color: #d1e7ff !important;
 }
@@ -1822,5 +1848,4 @@ body.resizing { cursor: col-resize !important; }
     background-color: #e7f3ff !important;
 }
 </style>
-
 
