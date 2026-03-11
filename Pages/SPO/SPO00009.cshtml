@@ -118,7 +118,7 @@
 }
 
 @section InqQuery {
-  <form id="inqForm" method="get" class="inq-form">
+  <form id="inqForm" method="get" class="inq-form inq-form--auto-grid-enabled">
     @Html.AntiForgeryToken()
     @foreach (var row in qFields.GroupBy(f => f.iLayRow ?? int.MaxValue).OrderBy(g => g.Key))
     {
@@ -585,6 +585,7 @@
     const fd = new FormData(inqForm);
     const params = new URLSearchParams();
     for (const [k, v] of fd.entries()) {
+      if (k === "__RequestVerificationToken" || k === "spId") continue;
       const val = (v ?? "").toString().trim();
       if (!val) continue;
       params.append(k, val);
@@ -664,9 +665,34 @@
     if (!raw) return [];
     return raw.split(/[;,]/).map(p => p.trim()).filter(Boolean).map(p => {
       const kv = p.split(/=|:/);
-      if (kv.length >= 2) return { value: kv[0].trim(), label: kv.slice(1).join(":").trim() };
+      if (kv.length >= 2) {
+        const value = kv[0].trim();
+        const label = kv.slice(1).join(":").trim();
+        return { value, label };
+      }
       return { value: p, label: p };
     });
+  };
+
+  const escapeRegExp = (s) => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  const normalizeLookupLabel = (value, label) => {
+    const v = String(value ?? "").trim();
+    const l = String(label ?? "").trim();
+    if (!l) return v;
+    if (!v) return l;
+    const re = new RegExp(`^${escapeRegExp(v)}\\s*[-:]\\s*`, "i");
+    const normalized = l.replace(re, "").trim();
+    return normalized || l;
+  };
+
+  const formatLookupDisplay = (value, label) => {
+    const v = String(value ?? "").trim();
+    const l = String(label ?? "").trim();
+    if (!v) return l;
+    if (!l) return v;
+    if (v.toLowerCase() === l.toLowerCase()) return v;
+    return `${v} - ${l}`;
   };
 
   const buildCondKey = (el) => {
@@ -712,9 +738,10 @@
         const data = await res.json();
         if (Array.isArray(data)) {
           const lookups = data.map(row => {
-            const val = row?.key ?? "";
-            const label = Object.keys(row || {}).filter(k => k.startsWith("result")).map(k => row[k]).join(" - ");
-            return { value: String(val), label: label || String(val) };
+            const value = String(row?.key ?? "").trim();
+            const rawLabel = Object.keys(row || {}).filter(k => k.startsWith("result")).map(k => row[k]).join(" - ");
+            const label = normalizeLookupLabel(value, rawLabel);
+            return { value, label: label || value };
           });
           options = options.concat(lookups);
         }
@@ -723,8 +750,10 @@
 
     const map = new Map();
     options.forEach(o => {
-      if (!o.value) return;
-      if (!map.has(o.value)) map.set(o.value, o);
+      const value = String(o?.value ?? "").trim();
+      if (!value) return;
+      const label = normalizeLookupLabel(value, o?.label ?? o?.value ?? "");
+      if (!map.has(value)) map.set(value, { value, label: label || value });
     });
 
     if (selected && !map.has(selected)) map.set(selected, { value: selected, label: selected });
@@ -747,7 +776,7 @@
       return;
     }
     const hit = (options || []).find(o => String(o.value).trim() === codeVal);
-    displayEl.value = hit ? (hit.label || hit.value) : codeVal;
+    displayEl.value = hit ? formatLookupDisplay(hit.value, hit.label) : codeVal;
   };
 
   const suggest = document.createElement("div");
@@ -774,8 +803,8 @@
     suggestOptions = [];
   };
 
-  const renderSuggest = (el, list) => {
-    const q = (el.value || "").trim().toLowerCase();
+  const renderSuggest = (el, list, forceAll = false) => {
+    const q = forceAll ? "" : (el.value || "").trim().toLowerCase();
     const filtered = q
       ? list.filter(o => (o.value || "").toLowerCase().includes(q) || (o.label || "").toLowerCase().includes(q))
       : list;
@@ -794,7 +823,7 @@
         e.preventDefault();
         const codeInput = getCodeInput(el);
         if (codeInput) codeInput.value = o.value;
-        el.value = o.label || o.value;
+        el.value = formatLookupDisplay(o.value, o.label);
         hideSuggest();
       });
       suggest.appendChild(item);
@@ -806,7 +835,7 @@
 
   const lookupCache = new Map();
 
-  const showSuggest = async (el) => {
+  const showSuggest = async (el, forceAll = true) => {
     const key = buildCondKey(el);
     if (!lookupCache.has(key)) {
       const opts = await fetchLookupOptions(el);
@@ -815,7 +844,7 @@
     suggestTarget = el;
     suggestOptions = lookupCache.get(key) || [];
     syncDisplayValue(el, suggestOptions);
-    renderSuggest(el, suggestOptions);
+    renderSuggest(el, suggestOptions, forceAll);
   };
 
   document.querySelectorAll(".inq-select-btn").forEach(btn => {
@@ -837,10 +866,25 @@
   });
 
   document.querySelectorAll(".inq-lookup-display[data-lookup-table], .inq-lookup-display[data-items]").forEach(el => {
-    el.addEventListener("focus", () => showSuggest(el));
+    el.addEventListener("focus", () => showSuggest(el, true));
     el.addEventListener("input", () => {
-      if (suggestTarget !== el) return showSuggest(el);
-      renderSuggest(el, suggestOptions);
+      if (suggestTarget !== el) return showSuggest(el, false);
+      renderSuggest(el, suggestOptions, false);
+    });
+    el.addEventListener("keydown", (e) => {
+      if (e.key !== "Backspace" && e.key !== "Delete") return;
+      const value = String(el.value || "");
+      if (!value) return;
+      const start = typeof el.selectionStart === "number" ? el.selectionStart : -1;
+      const end = typeof el.selectionEnd === "number" ? el.selectionEnd : -1;
+      const allSelected = start === 0 && end === value.length;
+      if (!allSelected) return;
+      e.preventDefault();
+      el.value = "";
+      const codeInput = getCodeInput(el);
+      if (codeInput) codeInput.value = "";
+      if (suggestTarget === el) renderSuggest(el, suggestOptions, false);
+      else showSuggest(el);
     });
     el.addEventListener("blur", () => {
       setTimeout(() => {
@@ -858,11 +902,12 @@
       const hit = opts.find(o => {
         const v = String(o.value ?? "").trim();
         const l = String(o.label ?? "").trim();
-        return v === text || l === text;
+        const d = formatLookupDisplay(v, l);
+        return v === text || l === text || d === text;
       });
       if (hit) {
         codeInput.value = hit.value;
-        el.value = hit.label || hit.value;
+        el.value = formatLookupDisplay(hit.value, hit.label);
       } else {
         syncDisplayValue(el, opts);
       }
@@ -957,4 +1002,3 @@
     </ul>
   </div>
 }
-

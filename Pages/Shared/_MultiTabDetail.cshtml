@@ -172,7 +172,12 @@
                 const ocxKeyField = (r.keyFieldName || r.KeyFieldName || '').toString();
                 const ocxKeySelf = (r.keySelfName || r.KeySelfName || '').toString();
                 if (table && key && result) {
-                    map.set(field.toLowerCase(), { field, table, key, result, keySelf: '', source: 'lookup' });
+                    const cond1Field  = (r.lookupCond1Field  || r.LookupCond1Field  || '').toString().trim();
+                    const cond1Source = (r.lookupCond1ResultField || r.LookupCond1ResultField || '').toString().trim();
+                    const cond2Field  = (r.lookupCond2Field  || r.LookupCond2Field  || '').toString().trim();
+                    const cond2Source = (r.lookupCond2ResultField || r.LookupCond2ResultField || '').toString().trim();
+                    map.set(field.toLowerCase(), { field, table, key, result, keySelf: '', source: 'lookup',
+                        cond1Field, cond1Source, cond2Field, cond2Source });
                     return;
                 }
                 if (ocxTable && ocxKeyField && ocxResult) {
@@ -472,7 +477,7 @@
         list.style.maxHeight = `${maxHeight}px`;
     }
 
-    function openLookupDropdown(td, field, lookupMap) {
+    function openLookupDropdown(td, field, lookupMap, opts) {
         if (!td || !lookupMap || lookupMap.size === 0) return;
         const existing = document.querySelector('.lookup-dropdown-list');
         if (existing) existing.remove();
@@ -538,6 +543,13 @@
 
             updateRowCache(tr, field, keyValue);
             if (keyField) updateRowCache(tr, keyField, keyValue);
+
+            // 更新 lookup result 中文顯示欄位（例如 AccName、SubAccName）
+            const resultField = (opts?.resultField || '').toString().trim();
+            if (resultField && label != null && label !== keyValue) {
+                setRowFieldValue(tr, resultField, label, label);
+                updateRowCache(tr, resultField, label);
+            }
 
             if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
             window.__unsavedChanges = true;
@@ -1013,7 +1025,15 @@
                       && ((metaFieldLower && metaFieldLower === fieldLower) || (metaResult && metaResult === fieldLower)));
                   if (canDropdown) lookupFieldSet.add(field);
                   if (canDropdown) {
-                      lookupMetaMap[fieldLower] = { key: metaLookup?.key || '', result: metaLookup?.result || '' };
+                      lookupMetaMap[fieldLower] = {
+                          table: metaLookup?.table || '',
+                          key: metaLookup?.key || '',
+                          result: metaLookup?.result || '',
+                          cond1Field:  metaLookup?.cond1Field  || '',
+                          cond1Source: metaLookup?.cond1Source || '',
+                          cond2Field:  metaLookup?.cond2Field  || '',
+                          cond2Source: metaLookup?.cond2Source || ''
+                      };
                   }
                 let lookupKeyOverride = null;
                   if (allowLookup && metaLookup?.source === 'ocx') {
@@ -1217,15 +1237,57 @@
                         window.__updateToolbarCounts();
                     }
                 });
-                tbody.addEventListener('dblclick', (e) => {
+                tbody.addEventListener('change', (e) => {
+                    const inp = e.target;
+                    if (!inp.classList.contains('cell-edit') || inp.classList.contains('cell-date-input')) return;
+                    if (!tbody.contains(inp)) return;
+                    const tr = inp.closest('tr');
+                    if (!tr || !tbody.contains(tr)) return;
+                    if (tr.dataset.state !== 'added') tr.dataset.state = 'modified';
+                });
+                tbody.addEventListener('dblclick', async (e) => {
                     const td = e.target.closest('td');
                     if (!td || !tbody.contains(td)) return;
                     const field = td.dataset.lookupField;
                     if (!field) return;
                     const fieldLower = field.toLowerCase();
+                    const meta = lookupMetaMap[fieldLower];
+                    // 有篩選條件時，即時查詢 API
+                    if (meta && (meta.cond1Field || meta.cond2Field)) {
+                        const tr = td.closest('tr');
+                        const getVal = (sourceField) => {
+                            if (!sourceField || !tr) return '';
+                            const inp = Array.from(tr.querySelectorAll('input.cell-edit[data-field]'))
+                                .find(i => (i.dataset.field || '').toLowerCase() === sourceField.toLowerCase());
+                            return (inp?.value ?? '').trim();
+                        };
+                        const cond1Value = getVal(meta.cond1Source);
+                        const cond2Value = getVal(meta.cond2Source);
+                        let url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(meta.table)}&key=${encodeURIComponent(meta.key)}&result=${encodeURIComponent(meta.result)}`;
+                        if (meta.cond1Field && cond1Value) url += `&cond1Field=${encodeURIComponent(meta.cond1Field)}&cond1Value=${encodeURIComponent(cond1Value)}`;
+                        if (meta.cond2Field && cond2Value) url += `&cond2Field=${encodeURIComponent(meta.cond2Field)}&cond2Value=${encodeURIComponent(cond2Value)}`;
+                        try {
+                            const res = await fetch(url);
+                            if (!res.ok) return;
+                            const data = await res.json();
+                            const filteredMap = new Map();
+                            (data || []).forEach(row => {
+                                const k = row.key == null ? '' : String(row.key);
+                                if (!k) return;
+                                const label = Object.keys(row).filter(p => p.startsWith('result'))
+                                    .map(p => row[p]).filter(v => v != null && String(v).trim())
+                                    .map(v => String(v)).join(' - ');
+                                filteredMap.set(k, label || k);
+                                const trimmed = k.trim();
+                                if (trimmed && trimmed !== k) filteredMap.set(trimmed, label || trimmed);
+                            });
+                            if (filteredMap.size > 0) openLookupDropdown(td, field, filteredMap, { resultField: meta?.result || '' });
+                        } catch { }
+                        return;
+                    }
                     const map = lookupMaps.get(fieldLower);
                     if (!map || map.size === 0) return;
-                    openLookupDropdown(td, field, map);
+                    openLookupDropdown(td, field, map, { resultField: lookupMetaMap[fieldLower]?.result || '' });
                 });
             }
 
