@@ -687,8 +687,6 @@ public class OrderHeaderApiController : ControllerBase
         {
             ["AJNdJourSub"] = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
-                ["AccId"] = "1101",
-                ["SubAccId"] = "01",
                 ["IsD"] = "1"
             },
             ["SPOdOrderSub"] = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
@@ -752,10 +750,7 @@ public class OrderHeaderApiController : ControllerBase
             // 🔹 傳票明細
             ["AJNdJourSub"] = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
-                ["AccId"] = "1101",       // 預設借方科目
-                ["SubAccId"] = "01",       // 預設借方科目
-                ["IsD"] = "1"          // 借貸別：1=借方, 2=貸方
-
+                ["IsD"] = "0"          // 借貸別：1=借方, 2=貸方
             },
 
             // 🔹 銷貨單明細

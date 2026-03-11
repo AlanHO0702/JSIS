@@ -2493,16 +2493,26 @@ async function saveMultiTabChanges(options) {
           saveErrors.push(`${tableName}: ${reasons.join('; ')}`);
         }
 
+        // 有失敗列時不重設 data-state，讓使用者可以修正後重試
+        if (badRows.length) continue;
+
         // 儲存成功後，將所有已修改列的狀態改為 unchanged，並同步更新 view 顯示值
         const container = document.querySelector(`.table-container[data-dict-table="${tableName}"]`);
         if (container) {
           container.querySelectorAll('tr[data-state="modified"], tr[data-state="added"]').forEach(tr => {
             tr.dataset.state = 'unchanged';
 
-            // ? 同步更新 view 顯示值：將 input 的值複製到對應的 cell-view
+            // ? 同步更新 view 顯示值：將 input 的值複製到對應的 cell-view，並更新 init 基準值
             tr.querySelectorAll('.cell-edit').forEach(input => {
               const fieldName = input.dataset.field || input.name;
               if (!fieldName) return;
+
+              // 更新 init 基準值，讓下次比對正確判斷是否有異動
+              if (input.type === 'checkbox') {
+                input.dataset.init = input.checked ? '1' : '0';
+              } else {
+                input.dataset.init = (input.value ?? '').trim();
+              }
 
               // 找到同一個 td 內的 cell-view
               const td = input.closest('td');
@@ -2570,6 +2580,15 @@ async function saveHeaderForm() {
 
     const changeKeys = Object.keys(header).filter(k => k.toLowerCase() !== 'papernum');
     if (!changeKeys.length) {
+      if (detailSave.hasChanges) {
+        window.__unsavedChanges = false;
+        if (typeof window.updateSaveCheckButtons === 'function') window.updateSaveCheckButtons();
+        // 重新載入 detail grid，讓 lookup 中文顯示欄位同步更新
+        if (typeof window.__refreshMultiTab === 'function') {
+          try { await window.__refreshMultiTab(); } catch {}
+        }
+        await Swal.fire({ icon: 'success', title: '儲存成功', timer: 1200, showConfirmButton: false });
+      }
       return { ok: true, hasChanges: detailSave.hasChanges === true };
     }
 
@@ -4343,10 +4362,59 @@ window.__updateToolbarCounts = updateToolbarCounts;
 
     const dictTable = activePane?.querySelector?.('.table-container')?.dataset?.dictTable || '';
     const safeTable = (dictTable || '').toString().replace(/^dbo\./i, '').trim();
-    const defaults = safeTable ? await getDetailDefaults(safeTable) : {};
     const readOnlyMap = safeTable && window._detailFieldReadOnlyMap
       ? (window._detailFieldReadOnlyMap[safeTable.toLowerCase()] || {})
       : {};
+
+    const pn = (getPaperNum() || '').trim();
+    const isEditing = getHeaderEditState() || !!document.querySelector('.multi-tab-detail .cell-edit:not(.d-none)');
+    const viewClass = isEditing ? 'cell-view d-none' : 'cell-view';
+    const editClass = isEditing ? 'cell-edit' : 'cell-edit d-none';
+
+    // ★ 在 await 前先同步判斷是否有空白列可重用，避免非同步競爭
+    // data-state="empty" 是系統自動產生的佔位列，優先重用
+    // 也檢查「內容為空白」的列（不重用填了資料的 added 列）
+    const reusableRow = Array.from(tbody.querySelectorAll('tr')).find(tr =>
+      tr.dataset.state === 'empty' || isMultiTabBlankRow(tr, fields)
+    );
+    if (reusableRow) {
+      let maxItem = 0;
+      tbody.querySelectorAll('tr').forEach(tr => {
+        const n = parseInt(tr.dataset.item || '', 10);
+        if (!isNaN(n) && n > maxItem) maxItem = n;
+      });
+      tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+      reusableRow.classList.add('row-selected');
+      reusableRow.dataset.state = 'added';
+      if (!reusableRow.dataset.paperNum) reusableRow.dataset.paperNum = pn;
+      if (!reusableRow.dataset.item) reusableRow.dataset.item = String(maxItem + 1);
+      reusableRow.querySelectorAll('.cell-view').forEach(el => el.classList.add('d-none'));
+      reusableRow.querySelectorAll('.cell-edit').forEach(el => el.classList.remove('d-none'));
+      reusableRow.querySelector('.cell-edit')?.focus();
+      if (typeof window.__updateToolbarCounts === 'function') window.__updateToolbarCounts();
+      window.__unsavedChanges = true;
+      updateSaveCheckButtons();
+      return { ok: true, reused: true };
+    }
+
+    // 沒有可重用列，才 await defaults 建新列
+    const defaults = safeTable ? await getDetailDefaults(safeTable) : {};
+
+    // await 後再確認一次（防止競爭），同樣只重用空白列（含 data-state="empty" 佔位列）
+    const pendingAfterAwait = Array.from(tbody.querySelectorAll('tr')).find(tr =>
+      tr.dataset.state === 'empty' || isMultiTabBlankRow(tr, fields)
+    );
+    if (pendingAfterAwait) {
+      tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+      pendingAfterAwait.classList.add('row-selected');
+      pendingAfterAwait.querySelectorAll('.cell-view').forEach(el => el.classList.add('d-none'));
+      pendingAfterAwait.querySelectorAll('.cell-edit').forEach(el => el.classList.remove('d-none'));
+      pendingAfterAwait.querySelector('.cell-edit')?.focus();
+      if (typeof window.__updateToolbarCounts === 'function') window.__updateToolbarCounts();
+      window.__unsavedChanges = true;
+      updateSaveCheckButtons();
+      return { ok: true, reused: true };
+    }
 
     let maxItem = 0;
     tbody.querySelectorAll('tr').forEach(tr => {
@@ -4354,27 +4422,7 @@ window.__updateToolbarCounts = updateToolbarCounts;
       if (!isNaN(n) && n > maxItem) maxItem = n;
     });
     const newItem = maxItem + 1;
-    const pn = (getPaperNum() || '').trim();
 
-    const isEditing = !!document.querySelector('.multi-tab-detail .cell-edit:not(.d-none)');
-    const viewClass = isEditing ? 'cell-view d-none' : 'cell-view';
-    const editClass = isEditing ? 'cell-edit' : 'cell-edit d-none';
-
-    const pendingRow = tbody.querySelector('tr[data-state="added"]');
-    const blankRow = pendingRow || Array.from(tbody.querySelectorAll('tr')).find(tr => isMultiTabBlankRow(tr, fields));
-    if (blankRow) {
-      tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
-      blankRow.classList.add('row-selected');
-      blankRow.dataset.state = 'added';
-      if (!blankRow.dataset.paperNum) blankRow.dataset.paperNum = pn;
-      if (!blankRow.dataset.item) blankRow.dataset.item = String(newItem);
-      blankRow.querySelectorAll('.cell-view').forEach(el => el.classList.add('d-none'));
-      blankRow.querySelectorAll('.cell-edit').forEach(el => el.classList.remove('d-none'));
-      const first = blankRow.querySelector('.cell-edit');
-      first?.focus();
-      if (typeof window.__updateToolbarCounts === 'function') window.__updateToolbarCounts();
-      return { ok: true, reused: true };
-    }
     let html = `<tr data-paper-num="${pn}" data-item="${newItem}" data-state="added" class="row-selected">`;
       fields.forEach(field => {
         const fieldKey = (field || '').toString().toLowerCase();
@@ -4402,6 +4450,8 @@ window.__updateToolbarCounts = updateToolbarCounts;
       }
     }
     if (typeof window.__updateToolbarCounts === 'function') window.__updateToolbarCounts();
+    window.__unsavedChanges = true;
+    updateSaveCheckButtons();
     return { ok: true };
   };
 
@@ -4622,7 +4672,11 @@ function getHeaderValueByLabel(labelText) {
 
   // 更新勾叉按鈕狀態的函數
   function updateSaveCheckButtons() {
-    const isEditing = !!window.__headerIsEdit;
+    let isEditing = !!window.__headerIsEdit;
+    if (!isEditing) {
+      const toggleBtn = document.getElementById('btnViewEditToggle');
+      if (toggleBtn) isEditing = (toggleBtn.textContent || '').trim().includes('保留');
+    }
     const hasChanges = !!window.__unsavedChanges;
     const saveCheckIds = ['btnSaveHeader', 'btnCancelChanges'];
     saveCheckIds.forEach(id => {
@@ -4635,7 +4689,9 @@ function getHeaderValueByLabel(labelText) {
   window.updateSaveCheckButtons = updateSaveCheckButtons;
 
 document.addEventListener('input', (e) => {
-  if (e.target.closest('.erp-header-form')) {
+  const t = e.target;
+  if (t.closest('.erp-header-form') ||
+      (t.closest('.multi-tab-detail') && t.classList.contains('cell-edit'))) {
     window.__unsavedChanges = true;
     updateSaveCheckButtons();
   }
@@ -5201,6 +5257,11 @@ body.shift-resize .draggable-field.ui-resizable .ui-resizable-se{
   background: transparent;
   border-radius: 0;
   padding: 0;
+  pointer-events: none; /* 空白 action-rail 不攔截點擊事件 */
+}
+/* action-rail 內的實際按鈕才需要接收點擊 */
+.action-rail > * {
+  pointer-events: auto;
 }
 
 body.with-toolbar .action-rail{
