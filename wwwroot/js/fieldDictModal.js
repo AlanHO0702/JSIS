@@ -149,6 +149,7 @@
 
                 <input data-field="IsNotesField" value="${x.IsNotesField ?? ''}" />
                 <input data-field="ComboStyle" value="${x.ComboStyle ?? ''}" />
+                <input data-field="ComboTextSize" value="${x.ComboTextSize ?? ''}" />
 
                 <input data-field="OCXLKTableName" value="${x.OCXLKTableName ?? ''}" />
                 <input data-field="OCXLKResultName" value="${x.OCXLKResultName?? ''}" />
@@ -470,6 +471,7 @@
           LookupCond2ResultField: getVal("LookupCond2ResultField"),
           IsNotesField: getVal("IsNotesField"),
           ComboStyle: getChk("ComboStyle"),
+          ComboTextSize: getChangedInt("ComboTextSize"),
           OCXLKTableName: getVal("OCXLKTableName"),
           OCXLKResultName: getVal("OCXLKResultName")
         };
@@ -647,6 +649,7 @@
           'LookupCond1Field', 'LookupCond1ResultField',
           'LookupCond2Field', 'LookupCond2ResultField',
           'IsNotesField', 'IsMoneyField',
+          'ComboTextSize',
 
           'OCXLKTableName',
           'OCXLKResultName'

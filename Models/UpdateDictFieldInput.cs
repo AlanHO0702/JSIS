@@ -11,6 +11,7 @@ public class UpdateDictFieldInput
     public string FieldNote { get; set; }
     public int? ComboStyle { get; set; }
     public string? EditColor { get; set; }
+    public int? ComboTextSize { get; set; }
 
     public int? DisplaySize { get; set; }
     public int? iLayRow { get; set; }
