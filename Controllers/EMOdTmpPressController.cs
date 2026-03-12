@@ -957,4 +957,46 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
 
         return Ok(new { ok = true });
     }
+
+    // ==================== 套用壓合模型到料號 ====================
+
+    public class ApplyPressModelRequest
+    {
+        public string TmpId    { get; set; } = "";
+        public string PartNum  { get; set; } = "";
+        public string Revision { get; set; } = "";
+    }
+
+    /// <summary>
+    /// 套用壓合模型：呼叫 EMOdInsLayerPress，將模板資料寫入 EMOdLayerPress
+    /// 對應 Delphi 的 btnPressChangeClick → exec EMOdInsLayerPress @TmpId, @PartNum, @Revision
+    /// </summary>
+    [HttpPost("ApplyPressModel")]
+    public async Task<IActionResult> ApplyPressModel([FromBody] ApplyPressModelRequest req)
+    {
+        if (req == null
+            || string.IsNullOrWhiteSpace(req.TmpId)
+            || string.IsNullOrWhiteSpace(req.PartNum))
+            return BadRequest(new { ok = false, error = "TmpId 與 PartNum 為必填。" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        try
+        {
+            await using var cmd = new SqlCommand("EMOdInsLayerPress", conn);
+            cmd.CommandType = CommandType.StoredProcedure;
+            cmd.CommandTimeout = 60;
+            AddParam(cmd, "@TmpId",    req.TmpId.Trim());
+            AddParam(cmd, "@PartNum",  req.PartNum.Trim());
+            AddParam(cmd, "@Revision", req.Revision.Trim());
+            await cmd.ExecuteNonQueryAsync();
+            return Ok(new { ok = true });
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "ApplyPressModel failed TmpId={TmpId} PartNum={PartNum}", req.TmpId, req.PartNum);
+            return StatusCode(500, new { ok = false, error = ex.Message });
+        }
+    }
 }

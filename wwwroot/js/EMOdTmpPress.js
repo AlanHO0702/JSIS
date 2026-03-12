@@ -602,12 +602,24 @@
         const tbody = document.getElementById('msSourceList');
         if (!tbody) return;
         tbody.innerHTML = '';
+        tbody.style.userSelect = 'none';
+        tbody.style.webkitUserSelect = 'none';
+        let lastClickIdx = -1;
+        let lastClickTime = 0;
         msSourceItems.forEach((item, idx) => {
             const tr = document.createElement('tr');
             tr.innerHTML = `<td>${esc(item.caption)}</td><td></td><td>${esc(item.matClass)}</td><td></td>`;
             tr.addEventListener('click', () => {
                 msSelectedSource = idx;
                 tbody.querySelectorAll('tr').forEach((r, i) => r.classList.toggle('selected', i === idx));
+                const now = Date.now();
+                if (lastClickIdx === idx && now - lastClickTime < 400) {
+                    msAdd();
+                    lastClickIdx = -1;
+                } else {
+                    lastClickIdx = idx;
+                    lastClickTime = now;
+                }
             });
             tbody.appendChild(tr);
         });
@@ -617,12 +629,24 @@
         const tbody = document.getElementById('msTargetList');
         if (!tbody) return;
         tbody.innerHTML = '';
+        tbody.style.userSelect = 'none';
+        tbody.style.webkitUserSelect = 'none';
+        let lastClickIdx = -1;
+        let lastClickTime = 0;
         msTargetItems.forEach((item, idx) => {
             const tr = document.createElement('tr');
             tr.innerHTML = `<td>${esc(item.caption)}</td><td></td><td>${esc(item.matClass)}</td><td></td>`;
             tr.addEventListener('click', () => {
                 msSelectedTarget = idx;
                 tbody.querySelectorAll('tr').forEach((r, i) => r.classList.toggle('selected', i === idx));
+                const now = Date.now();
+                if (lastClickIdx === idx && now - lastClickTime < 400) {
+                    msRemove();
+                    lastClickIdx = -1;
+                } else {
+                    lastClickIdx = idx;
+                    lastClickTime = now;
+                }
             });
             tbody.appendChild(tr);
         });

@@ -408,6 +408,7 @@ else
                                     <!-- 壓合明細/替代料：上方操作按鈕 + 表格 -->
                                     <div class="d-flex gap-2 align-items-center px-2 py-1 border-bottom">
                                         <button type="button" id="btnSelectPressModel" class="btn btn-outline-primary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>選擇壓合模型</button>
+                                        <input type="text" id="selectedPressModelCode" class="form-control form-control-sm text-primary fw-semibold" style="width:120px" readonly placeholder="未選擇">
                                         <button type="button" id="btnLayerChange" class="btn btn-outline-primary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>疊構變更</button>
                                         <button type="button" id="btnMaterialSet" class="btn btn-outline-primary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>材料設定</button>
                                     </div>
@@ -533,10 +534,259 @@ else
     </div>
 }
 
+<!-- 選擇壓合模型 Modal CSS（同 EMOdTmpBOM_SC 樹狀風格） -->
+<style>
+  #pressModelLayerTree .pm-tree-node-item {
+    font-size: 13px; user-select: none; display: flex; align-items: center; gap: 2px;
+    padding: 2px 4px; border-radius: 3px; cursor: pointer;
+  }
+  #pressModelLayerTree .pm-tree-node-item:hover { background: #f0f8ff; }
+  #pressModelLayerTree .pm-tree-node-item.selected { background: #e6f2ff; border-left: 3px solid #2564b3; }
+  #pressModelLayerTree .pm-tree-children { margin-left: 16px; }
+  #pressModelLayerTree .pm-tree-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;
+    border: none; background: none; padding: 0;
+  }
+  #pressModelLayerTree .pm-tree-toggle::before {
+    content: ''; display: block; width: 0; height: 0;
+    border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+    border-left: 7px solid #555; transition: transform 0.15s;
+  }
+  #pressModelLayerTree .pm-tree-toggle.expanded::before { transform: rotate(90deg); }
+  #pressModelLayerTree .pm-tree-toggle:hover::before { border-left-color: #222; }
+  /* 材料設定 用料類別別 suggestion */
+  #matSetClassSuggest .ms-sug-item { display:flex; gap:8px; padding:4px 8px; cursor:pointer; }
+  #matSetClassSuggest .ms-sug-item:hover { background:#e8f0fe; }
+  #matSetClassSuggest .ms-sug-code { font-weight:600; min-width:40px; color:#1a56db; }
+  #matSetClassSuggest .ms-sug-name { color:#444; }
+</style>
+
+<!-- 選擇壓合模型 Modal -->
+<div class="modal fade" id="modalSelectPressModel" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog" style="max-width:880px">
+    <div class="modal-content d-flex flex-column" style="height:540px">
+
+      <!-- Header -->
+      <div class="modal-header py-2">
+        <h6 class="modal-title mb-0">選擇壓合模型</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <!-- Search bar -->
+      <div class="d-flex gap-2 align-items-center px-3 py-2 border-bottom flex-shrink-0">
+        <div class="input-group input-group-sm" style="width:210px">
+          <span class="input-group-text">模板代碼</span>
+          <input type="text" id="searchPressModelTmpId" class="form-control form-control-sm" placeholder="模糊搜尋">
+        </div>
+        <div class="input-group input-group-sm" style="width:230px">
+          <span class="input-group-text">備註</span>
+          <input type="text" id="searchPressModelNotes" class="form-control form-control-sm" placeholder="模糊搜尋">
+        </div>
+        <button type="button" id="btnSearchPressModel" class="btn btn-primary btn-sm">查詢</button>
+      </div>
+
+      <!-- 3-panel body -->
+      <div class="d-flex flex-grow-1" style="overflow:hidden; min-height:0">
+
+        <!-- 左欄：壓合模型列表 -->
+        <div style="width:290px; flex-shrink:0; overflow:auto; border-right:1px solid #dee2e6">
+          <table class="table table-sm table-hover mb-0" style="white-space:nowrap; width:auto; min-width:100%">
+            <thead class="table-light" style="position:sticky;top:0;z-index:1">
+              <tr>
+                <th>模板代碼</th>
+                <th>組合模型代碼</th>
+                <th>備註</th>
+              </tr>
+            </thead>
+            <tbody id="tblPressModelBody">
+              <tr><td colspan="3" class="text-center text-muted small py-3">查詢中…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 中欄：層別樹狀 -->
+        <div style="width:200px; flex-shrink:0; overflow-y:auto; border-right:1px solid #dee2e6; padding:6px 4px">
+          <div id="pressModelLayerTree" class="small text-muted">—</div>
+        </div>
+
+        <!-- 右欄：層材料明細 -->
+        <div style="flex:1; overflow-y:auto">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light" style="position:sticky;top:0;z-index:1">
+              <tr>
+                <th style="width:40px" class="text-center">序號</th>
+                <th style="width:80px">物料類別</th>
+                <th>備註</th>
+              </tr>
+            </thead>
+            <tbody id="tblPressModelDtl">
+              <tr><td colspan="3" class="text-center text-muted small py-3">請先選擇模型</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+
+      <!-- Footer -->
+      <div class="modal-footer py-2 flex-shrink-0">
+        <button type="button" id="btnConfirmPressModel" class="btn btn-success btn-sm">✓ 確定</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">✕ 取消</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- 疊構變更 Modal -->
+<div class="modal fade" id="modalLayerChange" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog" style="max-width:560px">
+    <div class="modal-content d-flex flex-column" style="height:480px">
+      <div class="modal-header py-2">
+        <h6 class="modal-title mb-0">疊構變更</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0 d-flex flex-column" style="overflow:hidden;min-height:0">
+        <div class="px-3 py-2 border-bottom d-flex align-items-center gap-2 flex-shrink-0">
+          <span class="small text-muted">層別：</span>
+          <span id="layerChangeLayerId" class="fw-semibold small text-primary"></span>
+          <div class="ms-auto d-flex gap-1">
+            <button type="button" id="btnLayerChangeUp" class="btn btn-outline-secondary btn-sm px-2" title="上移">↑ 上移</button>
+            <button type="button" id="btnLayerChangeDown" class="btn btn-outline-secondary btn-sm px-2" title="下移">↓ 下移</button>
+          </div>
+        </div>
+        <div style="flex:1;overflow-y:auto">
+          <table class="table table-sm table-hover table-bordered mb-0">
+            <thead class="table-light" style="position:sticky;top:0;z-index:1">
+              <tr>
+                <th style="width:50px" class="text-center">序號</th>
+                <th style="width:80px">物料分類</th>
+                <th style="width:100px">名稱</th>
+                <th>備註</th>
+              </tr>
+            </thead>
+            <tbody id="tblLayerChangeBody">
+              <tr><td colspan="4" class="text-center text-muted small py-3">載入中…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer py-2 flex-shrink-0">
+        <button type="button" id="btnLayerChangeSave" class="btn btn-success btn-sm">✓ 儲存</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">✕ 取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 材料設定 Modal -->
+<div class="modal fade" id="modalMaterialSet" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog" style="max-width:900px">
+    <div class="modal-content d-flex flex-column" style="height:640px">
+      <div class="modal-header py-2">
+        <h6 class="modal-title mb-0">材料設定</h6>
+        <button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button>
+      </div>
+      <!-- 用料類別別 bar（標題下方） -->
+      <div class="d-flex align-items-center gap-2 px-3 py-1 bg-light border-bottom" style="font-size:0.85rem;flex-shrink:0">
+        <span class="text-nowrap">用料類別別</span>
+        <div style="position:relative">
+          <input type="text" id="matSetClassFilter" autocomplete="off" class="form-control form-control-sm" style="width:200px" placeholder="選擇或輸入類別">
+          <div id="matSetClassSuggest" style="display:none;position:absolute;top:100%;left:0;z-index:1060;background:#fff;border:1px solid #ccc;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:260px;max-height:220px;overflow-y:auto;font-size:0.82rem"></div>
+        </div>
+        <button type="button" id="btnMatSetRefresh" class="btn btn-sm btn-outline-secondary ms-auto px-3">資料重取</button>
+      </div>
+      <div class="modal-body p-0 d-flex flex-column" style="overflow:hidden;min-height:0">
+
+        <!-- 上方區塊 -->
+        <div style="flex-shrink:0;border-bottom:1px solid #dee2e6">
+          <!-- 屬性格 + 層別結構 -->
+          <div class="d-flex" style="height:170px">
+            <!-- 左：屬性 grid（搜尋用） -->
+            <div class="d-flex flex-column" style="flex:6;overflow:hidden;border-right:1px solid #dee2e6">
+              <div style="flex:1;overflow-y:auto">
+                <table class="table table-sm table-bordered mb-0" style="font-size:0.78rem">
+                  <thead class="table-light" style="position:sticky;top:0">
+                    <tr><th style="width:32px">屬性</th><th style="width:90px">屬性名稱</th><th>選擇資料</th><th>名稱</th></tr>
+                  </thead>
+                  <tbody id="tblMatSetAttr">
+                    <tr><td class="text-muted">a</td><td>型號</td><td style="padding:1px 2px"><input type="text" class="ms-attr-input" data-attr="a" style="width:100%;border:none;outline:none;font-size:inherit;background:transparent"></td><td></td></tr>
+                    <tr><td class="text-muted">b</td><td>板厚</td><td style="padding:1px 2px"><input type="text" class="ms-attr-input" data-attr="b" style="width:100%;border:none;outline:none;font-size:inherit;background:transparent"></td><td></td></tr>
+                    <tr><td class="text-muted">c</td><td>銅厚</td><td style="padding:1px 2px"><input type="text" class="ms-attr-input" data-attr="c" style="width:100%;border:none;outline:none;font-size:inherit;background:transparent"></td><td></td></tr>
+                    <tr><td class="text-muted">d</td><td>寬</td><td style="padding:1px 2px"><input type="text" class="ms-attr-input" data-attr="d" style="width:100%;border:none;outline:none;font-size:inherit;background:transparent"></td><td></td></tr>
+                    <tr><td class="text-muted">e</td><td>長</td><td style="padding:1px 2px"><input type="text" class="ms-attr-input" data-attr="e" style="width:100%;border:none;outline:none;font-size:inherit;background:transparent"></td><td></td></tr>
+                    <tr><td class="text-muted">f</td><td>廠商</td><td style="padding:1px 2px"><input type="text" class="ms-attr-input" data-attr="f" style="width:100%;border:none;outline:none;font-size:inherit;background:transparent"></td><td></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <!-- 右：階段 + 壓合結構 -->
+            <div class="d-flex flex-column" style="flex:4;overflow:hidden">
+              <div class="d-flex align-items-center gap-2 px-2 py-1 bg-light border-bottom" style="font-size:0.78rem;flex-shrink:0">
+                <span class="text-muted text-nowrap">階段</span>
+                <span id="matSetLayerId" class="fw-semibold text-primary ms-1"></span>
+              </div>
+              <div style="flex:1;overflow-y:auto">
+                <table class="table table-sm table-bordered mb-0" style="font-size:0.78rem">
+                  <thead class="table-light" style="position:sticky;top:0">
+                    <tr><th style="width:30px">序號</th><th style="width:50px">內層</th><th style="width:50px">材料類別</th><th>類別名稱</th><th>層別名稱</th></tr>
+                  </thead>
+                  <tbody id="tblMatSetPress"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 雙欄選擇 -->
+        <div class="d-flex flex-grow-1" style="overflow:hidden;min-height:0">
+          <!-- 左：可選材料 -->
+          <div class="d-flex flex-column" style="flex:1;border-right:1px solid #dee2e6;overflow:hidden">
+            <div class="px-2 py-1 bg-light border-bottom small fw-semibold">目前廠內物料</div>
+            <div style="flex:1;overflow-y:auto">
+              <table class="table table-sm table-hover mb-0" style="table-layout:fixed">
+                <thead class="table-light" style="position:sticky;top:0;z-index:1">
+                  <tr><th style="width:110px">代碼</th><th>物料名稱</th><th style="width:110px">規格/機種</th></tr>
+                </thead>
+                <tbody id="tblMatSetSource"></tbody>
+              </table>
+            </div>
+          </div>
+          <!-- 中：→ ← 按鈕 -->
+          <div class="d-flex flex-column justify-content-center align-items-center gap-2 px-2" style="flex-shrink:0;width:60px">
+            <button type="button" id="btnMatSetAdd" class="btn btn-outline-primary btn-sm px-1" title="加入">→</button>
+            <button type="button" id="btnMatSetRemove" class="btn btn-outline-secondary btn-sm px-1" title="移除">←</button>
+          </div>
+          <!-- 右：已選材料 -->
+          <div class="d-flex flex-column" style="flex:1;overflow:hidden">
+            <div class="px-2 py-1 bg-light border-bottom small fw-semibold">已選壓合物料</div>
+            <div style="flex:1;overflow-y:auto">
+              <table class="table table-sm table-hover mb-0" style="table-layout:fixed">
+                <thead class="table-light" style="position:sticky;top:0;z-index:1">
+                  <tr><th style="width:110px">代碼</th><th>物料名稱</th></tr>
+                </thead>
+                <tbody id="tblMatSetTarget"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer py-2 flex-shrink-0">
+        <button type="button" id="btnMatSetUp" class="btn btn-outline-secondary btn-sm ms-auto">↑ 上移</button>
+        <button type="button" id="btnMatSetDown" class="btn btn-outline-secondary btn-sm">↓ 下移</button>
+        <button type="button" id="btnMatSetSave" class="btn btn-success btn-sm ms-2">✓ 確定</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">✕ 取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 document.addEventListener('DOMContentLoaded', () => {
   const detailTabs = Array.from(document.querySelectorAll('[data-table][data-dict]'));
   let currentMasterKeys = @Html.Raw(JsonSerializer.Serialize(Model.MasterKeyValues.ToDictionary(kv => kv.Key, kv => kv.Value)));
+  window.currentMasterKeys = currentMasterKeys; // 供其他 script 區塊使用
   const tabState = {};
   window.tabState = tabState; // 設為全域變數供其他 script 使用
   let masterData = null;
@@ -1823,6 +2073,16 @@ let html = '';
       masterTabs.forEach(tab => {
         renderMasterTab(tab.dataset.tabKey, dict, masterData);
       });
+
+      // 預填 選擇壓合模型 input（TmpPressId = 目前已使用的壓合疊構代碼）
+      const _pressModeInp = document.getElementById('selectedPressModelCode');
+      if (_pressModeInp) {
+        const _curTmpPressId = (masterData.TmpPressId ?? '').trim();
+        _pressModeInp.value = _curTmpPressId;
+        if (_curTmpPressId) window._selectedPressTmpId = _curTmpPressId;
+      }
+      // 暴露 TmpBOMId 供 選擇壓合模型 篩選（比命名規則更可靠）
+      window.currentMasterTmpBOMId = (masterData.TmpBOMId ?? masterData.TmpBomid ?? '').trim();
     }).catch(err => {
       // Load error handled silently
     });
@@ -2737,6 +2997,780 @@ let html = '';
     });
   });
 })();
+</script>
+
+<script>
+// ===== 選擇壓合模型 Modal =====
+document.addEventListener('DOMContentLoaded', function () {
+  const modalEl    = document.getElementById('modalSelectPressModel');
+  const btnOpen    = document.getElementById('btnSelectPressModel');
+  if (!btnOpen || !modalEl) return;
+
+  const bsModal    = new bootstrap.Modal(modalEl);
+  const btnSearch  = document.getElementById('btnSearchPressModel');
+  const btnConfirm = document.getElementById('btnConfirmPressModel');
+  const inpTmpId   = document.getElementById('searchPressModelTmpId');
+  const inpNotes   = document.getElementById('searchPressModelNotes');
+  const inpCode    = document.getElementById('selectedPressModelCode');
+  const tbody      = document.getElementById('tblPressModelBody');
+  const treeDiv    = document.getElementById('pressModelLayerTree');
+  const dtlBody    = document.getElementById('tblPressModelDtl');
+
+  let selectedTr   = null;
+  let matClassMap  = {};   // MatClass -> ClassName
+
+  // ── 開啟 ──
+  btnOpen.addEventListener('click', () => {
+    selectedTr = null;
+    inpTmpId.value = '';
+    inpNotes.value = '';
+    tbody.innerHTML  = '<tr><td colspan="3" class="text-center text-muted small py-3">查詢中…</td></tr>';
+    treeDiv.innerHTML = '—';
+    dtlBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted small py-3">請先選擇模型</td></tr>';
+    bsModal.show();
+    loadMatClassMap().then(doSearch);
+  });
+
+  // ── 搜尋 ──
+  btnSearch.addEventListener('click', doSearch);
+  [inpTmpId, inpNotes].forEach(inp =>
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); })
+  );
+
+  async function loadMatClassMap() {
+    try {
+      const r = await fetch('/api/CommonTable/Query?table=MINdMatClass&top=500&orderBy=MatClass');
+      if (!r.ok) return;
+      const arr = await r.json();
+      (Array.isArray(arr) ? arr : (arr.data ?? [])).forEach(row => {
+        matClassMap[row.MatClass?.trim()] = row.ClassName || row.MatClass;
+      });
+    } catch {}
+  }
+
+  async function doSearch() {
+    tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted small">查詢中…</td></tr>';
+    treeDiv.innerHTML = '—';
+    dtlBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted small py-3">請先選擇模型</td></tr>';
+    selectedTr = null;
+    try {
+      const p = new URLSearchParams({ table: 'EMOdTmpPressMas', top: 500, orderBy: 'TmpId' });
+      const t = inpTmpId.value.trim(), n = inpNotes.value.trim();
+      if (t) p.append('TmpId', t);
+      if (n) p.append('Notes', n);
+      const r = await fetch(`/api/CommonTable/Query?${p}`);
+      if (!r.ok) throw new Error('查詢失敗');
+      const data = await r.json();
+      const all  = Array.isArray(data) ? data : (data.data ?? []);
+      // 只顯示已審核（Status=1）的模型，同 Delphi iTmpActive=1 邏輯
+      let filtered = all.filter(row => Number(row.Status) === 1);
+      // 依料號的 TmpBOMId 篩選（同 Delphi 以 TmpBomId 預填搜尋欄位的邏輯）
+      // 只顯示 model.TmpBOMId == 料號的 TmpBOMId，不依賴命名規則
+      const _mTmpBOMId = (window.currentMasterTmpBOMId ?? '').trim();
+      if (_mTmpBOMId) filtered = filtered.filter(row => (row.TmpBOMId ?? '').trim() === _mTmpBOMId);
+      renderModels(filtered);
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="3" class="text-danger text-center small">${escHtml(err.message)}</td></tr>`;
+    }
+  }
+
+  // ── 左欄：模型列表 ──
+  function renderModels(rows) {
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted small py-3">查無資料</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(r => `
+      <tr style="cursor:pointer"
+          data-tmpid="${escHtml(r.TmpId?.trim() ?? '')}"
+          data-tmpbomid="${escHtml(r.TmpBOMId?.trim() ?? '')}">
+        <td>${escHtml(r.TmpId?.trim() ?? '')}</td>
+        <td>${escHtml(r.TmpBOMId?.trim() ?? '')}</td>
+        <td>${escHtml(r.Notes?.trim() ?? '')}</td>
+      </tr>`).join('');
+
+    tbody.querySelectorAll('tr').forEach(tr => {
+      tr.addEventListener('click',    () => onModelClick(tr));
+      tr.addEventListener('dblclick', () => { onModelClick(tr); confirmSelect(); });
+    });
+  }
+
+  // ── 左欄點擊 → 載入樹狀 ──
+  async function onModelClick(tr) {
+    tbody.querySelectorAll('tr').forEach(t => t.classList.remove('table-active'));
+    tr.classList.add('table-active');
+    selectedTr = tr;
+    treeDiv.innerHTML = '<span class="text-muted small">載入中…</span>';
+    dtlBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted small">載入中…</td></tr>';
+
+    const tmpBOMId = tr.dataset.tmpbomid;
+    const tmpId    = tr.dataset.tmpid;
+
+    try {
+      const r = await fetch(`/api/CommonTable/ByKeys?table=EMOdTmpBOMDtl&keyNames=TmpId&keyValues=${encodeURIComponent(tmpBOMId)}&orderBy=Degree`);
+      if (!r.ok) throw new Error();
+      const data = await r.json();
+      renderTree(Array.isArray(data) ? data : (data.data ?? []), tmpId);
+    } catch {
+      treeDiv.innerHTML = '<span class="text-danger small">載入失敗</span>';
+    }
+  }
+
+  // ── 中欄：層別樹狀 ──
+  function renderTree(nodes, tmpId) {
+    treeDiv.innerHTML = '';
+    if (!nodes.length) {
+      treeDiv.innerHTML = '<span class="text-muted small">無層別資料</span>';
+      loadLayerDetail(tmpId, 'L0~0');
+      return;
+    }
+    // Sort by Degree*100 + FL（同 Delphi 的 Sort 欄位算法）
+    nodes.sort((a, b) => ((a.Degree||0)*100+(a.FL||0)) - ((b.Degree||0)*100+(b.FL||0)));
+
+    // 建立樹狀結構
+    const map = {};
+    const roots = [];
+    nodes.forEach(n => { map[n.LayerId] = { ...n, children: [] }; });
+    nodes.forEach(n => {
+      if (n.AftLayerId && map[n.AftLayerId]) map[n.AftLayerId].children.push(map[n.LayerId]);
+      else roots.push(map[n.LayerId]);
+    });
+
+    roots.forEach(node => treeDiv.appendChild(buildTreeNode(node, tmpId)));
+
+    // 自動點選第一個節點
+    const first = treeDiv.querySelector('[data-layerid]');
+    if (first) first.click();
+  }
+
+  function buildTreeNode(node, tmpId) {
+    const wrap = document.createElement('div');
+
+    const nodeDiv = document.createElement('div');
+    nodeDiv.className = 'pm-tree-node-item';
+    nodeDiv.dataset.layerid = node.LayerId;
+
+    if ((node.children || []).length > 0) {
+      const toggle = document.createElement('span');
+      toggle.className = 'pm-tree-toggle expanded';
+      toggle.addEventListener('click', e => {
+        e.stopPropagation();
+        const childDiv = wrap.querySelector('.pm-tree-children');
+        if (childDiv) {
+          const hidden = childDiv.style.display === 'none';
+          childDiv.style.display = hidden ? 'block' : 'none';
+          toggle.classList.toggle('expanded', hidden);
+        }
+      });
+      nodeDiv.appendChild(toggle);
+    } else {
+      const spacer = document.createElement('span');
+      spacer.style.cssText = 'display:inline-block;width:18px;flex-shrink:0';
+      nodeDiv.appendChild(spacer);
+    }
+
+    const label = document.createElement('span');
+    const _id   = (node.LayerId   || '').trim();
+    const _name = (node.LayerName || '').trim();
+    label.innerHTML = `${escHtml(_id)}<span style="color:#999;font-size:0.88em;">（${escHtml(_name)}）</span>`;
+    nodeDiv.appendChild(label);
+
+    nodeDiv.addEventListener('click', () => {
+      treeDiv.querySelectorAll('.pm-tree-node-item').forEach(el => el.classList.remove('selected'));
+      nodeDiv.classList.add('selected');
+      loadLayerDetail(tmpId, node.LayerId);
+    });
+
+    wrap.appendChild(nodeDiv);
+
+    if ((node.children || []).length > 0) {
+      const childrenDiv = document.createElement('div');
+      childrenDiv.className = 'pm-tree-children';
+      node.children.forEach(child => childrenDiv.appendChild(buildTreeNode(child, tmpId)));
+      wrap.appendChild(childrenDiv);
+    }
+
+    return wrap;
+  }
+
+  // ── 右欄：層材料明細 ──
+  async function loadLayerDetail(tmpId, layerId) {
+    dtlBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted small">載入中…</td></tr>';
+    try {
+      const qs = new URLSearchParams();
+      qs.append('table',     'EMOdTmpPressDtl');
+      qs.append('keyNames',  'TmpId');
+      qs.append('keyNames',  'LayerId');
+      qs.append('keyValues', tmpId);
+      qs.append('keyValues', layerId);
+      qs.append('orderBy',   'SerialNum');
+      const r = await fetch(`/api/CommonTable/ByKeys?${qs}`);
+      if (!r.ok) throw new Error();
+      const data = await r.json();
+      renderLayerDetail(Array.isArray(data) ? data : (data.data ?? []));
+    } catch {
+      dtlBody.innerHTML = '<tr><td colspan="3" class="text-danger text-center small">載入失敗</td></tr>';
+    }
+  }
+
+  function renderLayerDetail(rows) {
+    if (!rows.length) {
+      dtlBody.innerHTML = '<tr><td colspan="3" class="text-muted text-center small py-3">無資料</td></tr>';
+      return;
+    }
+    dtlBody.innerHTML = rows.map(r => {
+      const cls     = r.MatClass?.trim() ?? '';
+      const clsName = matClassMap[cls] || cls;
+      return `<tr>
+        <td class="text-center">${escHtml(String(r.SerialNum ?? ''))}</td>
+        <td>${escHtml(clsName)}</td>
+        <td>${escHtml(r.Notes?.trim() ?? '')}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ── 確定 ──
+  async function confirmSelect() {
+    if (!selectedTr) return;
+    const tmpId   = selectedTr.dataset.tmpid;
+    const partNum  = (window.currentMasterKeys?.PartNum  || window.currentMasterKeys?.partnum  || '').trim();
+    const revision = (window.currentMasterKeys?.Revision || window.currentMasterKeys?.revision || '').trim();
+
+    btnConfirm.disabled = true;
+    btnConfirm.textContent = '套用中…';
+    try {
+      const resp = await fetch('/api/EMOdTmpPress/ApplyPressModel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ TmpId: tmpId, PartNum: partNum, Revision: revision })
+      });
+      const txt = await resp.text();
+      let result = null;
+      try { result = txt ? JSON.parse(txt) : null; } catch {}
+      if (!resp.ok || result?.ok === false) {
+        Swal.fire({ icon: 'error', title: '套用失敗', text: result?.error || txt || '未知錯誤' });
+        return;
+      }
+      // 更新 input 顯示並儲存選取值
+      inpCode.value = tmpId;
+      window._selectedPressTmpId    = tmpId;
+      window._selectedPressTmpBOMId = selectedTr.dataset.tmpbomid;
+      bsModal.hide();
+      // Reload 壓合明細 tab（layerpress）
+      const state = window.tabState?.['layerpress'];
+      if (state?.lastFetchUrl && state?.lastDict && typeof window.buildTableForEdit === 'function') {
+        try {
+          const freshRows = await fetch(state.lastFetchUrl).then(r => r.json());
+          await window.buildTableForEdit('layerpress', state.lastDict, freshRows, state.lastFetchUrl);
+        } catch (e) { console.warn('[pressModel] reload layerpress failed:', e); }
+      }
+    } catch (e) {
+      Swal.fire({ icon: 'error', title: '套用失敗', text: e.message });
+    } finally {
+      btnConfirm.disabled = false;
+      btnConfirm.textContent = '✓ 確定';
+    }
+  }
+  btnConfirm.addEventListener('click', confirmSelect);
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+});
+
+// ===== 疊構變更 Modal =====
+document.addEventListener('DOMContentLoaded', function () {
+  const btnOpen  = document.getElementById('btnLayerChange');
+  const modalEl  = document.getElementById('modalLayerChange');
+  if (!btnOpen || !modalEl) return;
+
+  const bsModal   = new bootstrap.Modal(modalEl);
+  const tbody     = document.getElementById('tblLayerChangeBody');
+  const spanLayer = document.getElementById('layerChangeLayerId');
+  const btnUp     = document.getElementById('btnLayerChangeUp');
+  const btnDown   = document.getElementById('btnLayerChangeDown');
+  const btnSave   = document.getElementById('btnLayerChangeSave');
+
+  let matClassMap = {};
+  let rows = [];          // 目前資料（使用者調整後的顯示順序）
+  let originalSerialNums = [];  // 載入時的 SerialNum 清單（固定，用作 UPDATE KEY）
+
+  function getActiveLayer() {
+    const el = document.querySelector('.layer-item.active');
+    return el ? { layerId: el.dataset.layerId || '', layerName: el.dataset.layerName || '' } : null;
+  }
+  function getMasterKeys() {
+    return {
+      partNum:  (window.currentMasterKeys?.PartNum  || window.currentMasterKeys?.partnum  || '').trim(),
+      revision: (window.currentMasterKeys?.Revision || window.currentMasterKeys?.revision || '').trim(),
+    };
+  }
+
+  btnOpen.addEventListener('click', async () => {
+    const layer = getActiveLayer();
+    if (!layer?.layerId) {
+      Swal.fire({ icon: 'warning', title: '請先選擇層別' }); return;
+    }
+    const { partNum, revision } = getMasterKeys();
+    spanLayer.textContent = `${layer.layerId}（${layer.layerName}）`;
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted small py-3">載入中…</td></tr>';
+    bsModal.show();
+
+    try {
+      // 載入 MatClass 名稱對照
+      if (!Object.keys(matClassMap).length) {
+        const mc = await fetch('/api/CommonTable/Query?table=MINdMatClass&top=500&orderBy=MatClass').then(r => r.json());
+        (Array.isArray(mc) ? mc : (mc.data ?? [])).forEach(r => { matClassMap[r.MatClass?.trim()] = r.ClassName || r.MatClass; });
+      }
+      // 載入 EMOdLayerPress
+      const qs = new URLSearchParams();
+      qs.append('table', 'EMOdLayerPress'); qs.append('keyNames', 'PartNum'); qs.append('keyNames', 'Revision'); qs.append('keyNames', 'LayerId');
+      qs.append('keyValues', partNum); qs.append('keyValues', revision); qs.append('keyValues', layer.layerId);
+      qs.append('orderBy', 'SerialNum');
+      const data = await fetch(`/api/CommonTable/ByKeys?${qs}`).then(r => r.json());
+      rows = Array.isArray(data) ? data : (data.data ?? []);
+      originalSerialNums = rows.map((r, i) => r.SerialNum ?? (i + 1));
+      renderRows();
+    } catch { tbody.innerHTML = '<tr><td colspan="4" class="text-danger text-center">載入失敗</td></tr>'; }
+  });
+
+  function escHtmlLC(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function syncFromDOM() {
+    tbody.querySelectorAll('td.lc-matclass select').forEach(sel => {
+      const idx = parseInt(sel.closest('td')?.dataset.idx);
+      if (!isNaN(idx)) rows[idx].MatClass = sel.value;
+    });
+    tbody.querySelectorAll('input.lc-notes').forEach(inp => {
+      const idx = parseInt(inp.dataset.idx);
+      if (!isNaN(idx)) rows[idx].Notes = inp.value;
+    });
+  }
+
+  function renderRows() {
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center small py-3">無資料</td></tr>'; return; }
+    tbody.innerHTML = rows.map((r, i) => {
+      const cls = r.MatClass?.trim() ?? '';
+      const clsName = matClassMap[cls] || '';
+      const notes = r.Notes?.trim() ?? '';
+      return `<tr data-idx="${i}">
+        <td class="text-center" style="background:#f0f0f0;color:#666;user-select:none">${i + 1}</td>
+        <td class="lc-matclass" data-idx="${i}" title="點擊修改" style="cursor:default">${escHtmlLC(cls)}</td>
+        <td style="background:#f0f0f0;color:#666">${escHtmlLC(clsName)}</td>
+        <td style="padding:2px 4px"><input type="text" class="lc-notes" data-idx="${i}" value="${escHtmlLC(notes)}" style="width:100%;border:none;outline:none;background:transparent;font-size:inherit;font-family:inherit;padding:0"></td>
+      </tr>`;
+    }).join('');
+
+    // MatClass: 單擊展開下拉選單
+    tbody.querySelectorAll('td.lc-matclass').forEach(td => {
+      td.addEventListener('click', () => {
+        if (td.querySelector('select')) return;  // 已開啟，忽略冒泡
+        const idx = parseInt(td.dataset.idx);
+        const currentVal = rows[idx].MatClass?.trim() ?? '';
+        const opts = Object.entries(matClassMap)
+          .map(([code, name]) => `<option value="${escHtmlLC(code)}"${code === currentVal ? ' selected' : ''}>${escHtmlLC(code)} - ${escHtmlLC(name)}</option>`)
+          .join('');
+        td.style.padding = '0';
+        td.style.position = 'relative';
+        td.innerHTML = `<select style="position:absolute;top:0;left:0;width:100%;height:100%;font-size:inherit;border:none;outline:none;padding:0 2px;box-sizing:border-box">${opts}</select>`;
+        const sel = td.querySelector('select');
+        sel.focus();
+        const commit = () => {
+          rows[idx].MatClass = sel.value;
+          renderRows();
+          tbody.querySelectorAll('tr')[idx]?.classList.add('table-active');
+        };
+        sel.addEventListener('change', commit);
+        sel.addEventListener('blur', commit);
+      });
+    });
+
+    // Notes: 即時同步回 rows[]
+    tbody.querySelectorAll('input.lc-notes').forEach(inp => {
+      inp.addEventListener('input', () => { rows[parseInt(inp.dataset.idx)].Notes = inp.value; });
+    });
+
+    // Row click 選取
+    tbody.querySelectorAll('tr').forEach(tr =>
+      tr.addEventListener('click', () => {
+        tbody.querySelectorAll('tr').forEach(t => t.classList.remove('table-active'));
+        tr.classList.add('table-active');
+      })
+    );
+  }
+
+  function getSelectedIdx() {
+    const tr = tbody.querySelector('tr.table-active');
+    return tr ? parseInt(tr.dataset.idx) : -1;
+  }
+
+  btnUp.addEventListener('click', () => {
+    syncFromDOM();
+    const i = getSelectedIdx();
+    if (i <= 0) return;
+    [rows[i - 1], rows[i]] = [rows[i], rows[i - 1]];
+    renderRows();
+    tbody.querySelectorAll('tr')[i - 1]?.classList.add('table-active');
+  });
+
+  btnDown.addEventListener('click', () => {
+    syncFromDOM();
+    const i = getSelectedIdx();
+    if (i < 0 || i >= rows.length - 1) return;
+    [rows[i], rows[i + 1]] = [rows[i + 1], rows[i]];
+    renderRows();
+    tbody.querySelectorAll('tr')[i + 1]?.classList.add('table-active');
+  });
+
+  btnSave.addEventListener('click', async () => {
+    syncFromDOM();
+    const { partNum, revision } = getMasterKeys();
+    const layer = getActiveLayer();
+    // 策略：SerialNum 是 PK，不能改。改為將 rows[i] 的內容填入第 i 個 SerialNum 槽位
+    // 這樣 UPDATE SET MatCode=? WHERE SerialNum=originalSerialNums[i] 不會觸發 PK 衝突
+    const payload = rows.map((r, i) => {
+      const sn = originalSerialNums[i];
+      const base = {
+        PartNum: r.PartNum || partNum,
+        Revision: r.Revision || revision,
+        LayerId: r.LayerId || layer.layerId,
+        SerialNum: sn,
+      };
+      // 把所有非 key 欄位都帶過去（MatCode, MatName, Thickness, MatClass, Notes 等）
+      const nonKey = Object.fromEntries(
+        Object.entries(r).filter(([k]) => !['PartNum','Revision','LayerId','SerialNum'].includes(k))
+      );
+      return { ...base, ...nonKey };
+    });
+    try {
+      const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ TableName: 'EMOdLayerPress', Data: payload, KeyFields: ['PartNum', 'Revision', 'LayerId', 'SerialNum'] })
+      });
+      const txt = await resp.text();
+      let result = null;
+      try { result = txt ? JSON.parse(txt) : null; } catch {}
+      if (resp.ok && result?.success !== false) {
+        bsModal.hide();
+        // Reload 壓合明細 tab
+        const state = window.tabState?.['layerpress'];
+        if (state?.lastFetchUrl && state?.lastDict && typeof window.buildTableForEdit === 'function') {
+          try {
+            const freshRows = await fetch(state.lastFetchUrl).then(r => r.json());
+            await window.buildTableForEdit('layerpress', state.lastDict, freshRows, state.lastFetchUrl);
+          } catch (e) { console.warn('[layerChange] reload layerpress failed:', e); }
+        }
+      } else {
+        Swal.fire({ icon: 'error', title: '儲存失敗', text: result?.error || txt || '未知錯誤' });
+      }
+    } catch (e) { Swal.fire({ icon: 'error', title: '儲存失敗', text: e.message }); }
+  });
+});
+
+// ===== 材料設定 Modal =====
+document.addEventListener('DOMContentLoaded', function () {
+  const btnOpen  = document.getElementById('btnMaterialSet');
+  const modalEl  = document.getElementById('modalMaterialSet');
+  if (!btnOpen || !modalEl) return;
+
+  const bsModal     = new bootstrap.Modal(modalEl);
+  const spanLayer   = document.getElementById('matSetLayerId');
+  const srcBody     = document.getElementById('tblMatSetSource');
+  const tgtBody     = document.getElementById('tblMatSetTarget');
+  const pressBody   = document.getElementById('tblMatSetPress');
+  const inputFilter = document.getElementById('matSetClassFilter');
+  const inputStage  = document.getElementById('matSetStageId');
+  const btnAdd      = document.getElementById('btnMatSetAdd');
+  const btnRemove   = document.getElementById('btnMatSetRemove');
+  const btnUp       = document.getElementById('btnMatSetUp');
+  const btnDown     = document.getElementById('btnMatSetDown');
+  const btnSave     = document.getElementById('btnMatSetSave');
+  const btnRefresh  = document.getElementById('btnMatSetRefresh');
+
+  let allSrcRows = [];        // 全部可選材料（快取）
+  let srcRows = [];           // 目前左欄（複製模式：永遠等於 allSrcRows 依篩選）
+  let displayedSrcRows = [];  // 篩選後顯示的左欄
+  let tgtRows = [];           // 已選（右）
+  let originalSerialNums = []; // 載入時各行的 SerialNum（UPDATE key）
+  let matClassList = [];       // P4：用料類別別選項快取
+
+  function getActiveLayer() {
+    const el = document.querySelector('.layer-item.active');
+    return el ? { layerId: el.dataset.layerId || '', layerName: el.dataset.layerName || '' } : null;
+  }
+  function getMasterKeys() {
+    return {
+      partNum:  (window.currentMasterKeys?.PartNum  || window.currentMasterKeys?.partnum  || '').trim(),
+      revision: (window.currentMasterKeys?.Revision || window.currentMasterKeys?.revision || '').trim(),
+    };
+  }
+
+  async function loadData(forceReload) {
+    const layer = getActiveLayer();
+    const { partNum, revision } = getMasterKeys();
+
+    // EMOdLayerPress：只取 MatCode 非空的行 → 已選列表（右欄）
+    const qsTgt = new URLSearchParams();
+    qsTgt.append('table', 'EMOdLayerPress'); qsTgt.append('keyNames', 'PartNum'); qsTgt.append('keyNames', 'Revision'); qsTgt.append('keyNames', 'LayerId');
+    qsTgt.append('keyValues', partNum); qsTgt.append('keyValues', revision); qsTgt.append('keyValues', layer.layerId);
+    qsTgt.append('orderBy', 'SerialNum');
+    const tgtData = await fetch(`/api/CommonTable/ByKeys?${qsTgt}`).then(r => r.json());
+    const tgtRaw = (Array.isArray(tgtData) ? tgtData : (tgtData.data ?? [])).filter(r => r.MatCode?.trim());
+
+    tgtRows = tgtRaw.map(r => ({ MatCode: r.MatCode?.trim() ?? '', MatName: r.MatName?.trim() ?? '', SerialNum: r.SerialNum }));
+    originalSerialNums = tgtRaw.map(r => r.SerialNum);
+
+    // EMOdVPressForDLL：有 BefLayer(內層)、MatClass、LayerName → 右上壓合結構顯示
+    if (pressBody) {
+      try {
+        const qsPress = new URLSearchParams();
+        qsPress.append('table', 'EMOdVPressForDLL'); qsPress.append('keyNames', 'PartNum'); qsPress.append('keyNames', 'Revision'); qsPress.append('keyNames', 'LayerId');
+        qsPress.append('keyValues', partNum); qsPress.append('keyValues', revision); qsPress.append('keyValues', layer.layerId);
+        qsPress.append('orderBy', 'SerialNum');
+        const pressData = await fetch(`/api/CommonTable/ByKeys?${qsPress}`).then(r => r.json());
+        const pressRaw = Array.isArray(pressData) ? pressData : (pressData.data ?? []);
+        pressBody.innerHTML = pressRaw.length
+          ? pressRaw.map(r => {
+              const cls = r.MatClass?.trim() ?? '';
+              const clsName = matClassList.find(c => c.code === cls)?.name ?? '';
+              return `<tr>
+                <td class="text-center">${r.SerialNum ?? ''}</td>
+                <td>${escHtmlMS(r.BefLayer?.trim() ?? '')}</td>
+                <td>${escHtmlMS(cls)}</td>
+                <td>${escHtmlMS(clsName)}</td>
+                <td>${escHtmlMS((r.LayerName ?? r.BefLayer)?.trim() ?? '')}</td>
+              </tr>`;
+            }).join('')
+          : '<tr><td colspan="5" class="text-muted text-center small">無資料</td></tr>';
+      } catch { pressBody.innerHTML = '<tr><td colspan="5" class="text-danger text-center small">載入失敗</td></tr>'; }
+    }
+
+    // 左欄：EMOdVPressMat（第一次或強制重取）
+    if (!allSrcRows.length || forceReload) {
+      const srcData = await fetch('/api/CommonTable/Query?table=EMOdVPressMat&top=1000&orderBy=matcode').then(r => r.json());
+      allSrcRows = (Array.isArray(srcData) ? srcData : (srcData.data ?? []))
+        .filter(r => (r.matcode ?? r.MatCode)?.trim())                                  // P2：過濾空代碼
+        .map(r => ({
+          MatCode:  (r.matcode ?? r.MatCode ?? '').trim(),                              // P2：相容大小寫
+          MatName:  r.MatName?.trim() ?? '',
+          EngGauge: (r.EngGauge ?? '').trim(),
+          MatClass: r.MatClass?.trim() ?? ''
+        }));
+    }
+
+    srcRows = allSrcRows;   // P1：複製模式，左欄不因 add/remove 而變動
+    applyFilter();
+  }
+
+  // P1+S4：篩選左欄
+  function applyFilter() {
+    const classKw = (inputFilter?.value ?? '').trim().toLowerCase();
+    const attrKws = Array.from(document.querySelectorAll('#tblMatSetAttr .ms-attr-input'))
+      .map(inp => inp.value.trim().toLowerCase()).filter(v => v);
+
+    displayedSrcRows = srcRows.filter(r => {
+      if (classKw && !r.MatClass.toLowerCase().includes(classKw)
+                  && !r.MatCode.toLowerCase().includes(classKw)
+                  && !r.MatName.toLowerCase().includes(classKw)) return false;
+      if (attrKws.length && !attrKws.every(kw => r.MatCode.toLowerCase().includes(kw) || r.MatName.toLowerCase().includes(kw))) return false;
+      return true;
+    });
+    renderSrc();
+    renderTgt();
+  }
+
+  // S4：B 區屬性 input 事件
+  document.querySelectorAll('#tblMatSetAttr .ms-attr-input').forEach(inp =>
+    inp.addEventListener('input', applyFilter)
+  );
+
+  // P4：用料類別別 suggestion dropdown
+  const suggestEl = document.getElementById('matSetClassSuggest');
+  async function ensureMatClassList() {
+    if (matClassList.length) return;
+    try {
+      const mc = await fetch('/api/CommonTable/Query?table=MINdMatClass&top=200&orderBy=MatClass').then(r => r.json());
+      matClassList = (Array.isArray(mc) ? mc : (mc.data ?? []))
+        .map(r => ({ code: r.MatClass?.trim() ?? '', name: r.ClassName?.trim() ?? '' }));
+    } catch {}
+  }
+  function showSuggest(kw) {
+    if (!suggestEl) return;
+    const filtered = kw
+      ? matClassList.filter(r => r.code.toLowerCase().includes(kw) || r.name.toLowerCase().includes(kw))
+      : matClassList;
+    if (!filtered.length) { suggestEl.style.display = 'none'; return; }
+    suggestEl.innerHTML = filtered.slice(0, 60).map((r, i) =>
+      `<div class="ms-sug-item" data-idx="${i}">
+        <span class="ms-sug-code">${escHtmlMS(r.code)}</span>
+        <span class="ms-sug-name">${escHtmlMS(r.name)}</span>
+      </div>`).join('');
+    suggestEl._filtered = filtered;
+    suggestEl.style.display = 'block';
+    suggestEl.querySelectorAll('.ms-sug-item').forEach(item => {
+      item.addEventListener('mousedown', e => {
+        e.preventDefault();
+        inputFilter.value = filtered[parseInt(item.dataset.idx)].code;
+        suggestEl.style.display = 'none';
+        applyFilter();
+      });
+    });
+  }
+  inputFilter?.addEventListener('focus', async () => {
+    await ensureMatClassList();
+    showSuggest(inputFilter.value.trim().toLowerCase());
+  });
+  inputFilter?.addEventListener('input', () => {
+    showSuggest(inputFilter.value.trim().toLowerCase());
+    applyFilter();
+  });
+  inputFilter?.addEventListener('blur', () => setTimeout(() => { if (suggestEl) suggestEl.style.display = 'none'; }, 150));
+
+  btnOpen.addEventListener('click', async () => {
+    const layer = getActiveLayer();
+    if (!layer?.layerId) { Swal.fire({ icon: 'warning', title: '請先選擇層別' }); return; }
+    spanLayer.textContent = `${layer.layerId}（${layer.layerName}）`;
+    if (inputStage) inputStage.value = layer.layerId;
+    document.querySelectorAll('#tblMatSetAttr .ms-attr-input').forEach(inp => inp.value = '');
+    if (inputFilter) inputFilter.value = '';
+    srcBody.innerHTML = '<tr><td colspan="3" class="text-muted text-center small">載入中…</td></tr>';
+    tgtBody.innerHTML = '<tr><td colspan="2" class="text-muted text-center small">載入中…</td></tr>';
+    bsModal.show();
+    await ensureMatClassList();
+    try { await loadData(false); }
+    catch { srcBody.innerHTML = '<tr><td colspan="3" class="text-danger text-center">載入失敗</td></tr>'; }
+  });
+
+  btnRefresh?.addEventListener('click', async () => {
+    srcBody.innerHTML = '<tr><td colspan="3" class="text-muted text-center small">載入中…</td></tr>';
+    try { await loadData(true); }
+    catch { srcBody.innerHTML = '<tr><td colspan="3" class="text-danger text-center">載入失敗</td></tr>'; }
+  });
+
+  // P1：加入目標（複製模式，不移除左欄；防重複）
+  function addToTarget(row) {
+    if (!row) return;
+    tgtRows.push(row);
+    renderTgt();
+  }
+
+  function renderSrc() {
+    if (!displayedSrcRows.length) { srcBody.innerHTML = '<tr><td colspan="3" class="text-muted text-center small">無資料</td></tr>'; return; }
+    srcBody.innerHTML = displayedSrcRows.map((r, i) => `
+      <tr style="cursor:pointer;user-select:none" data-idx="${i}">
+        <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtmlMS(r.MatCode)}</td>
+        <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtmlMS(r.MatName)}</td>
+        <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtmlMS(r.EngGauge)}</td>
+      </tr>`).join('');
+    let lastClickIdx = -1;
+    let lastClickTime = 0;
+    srcBody.querySelectorAll('tr').forEach(tr => {
+      tr.addEventListener('click', () => {
+        srcBody.querySelectorAll('tr').forEach(t => t.classList.remove('table-active'));
+        tr.classList.add('table-active');
+        const idx = parseInt(tr.dataset.idx);
+        const now = Date.now();
+        if (lastClickIdx === idx && now - lastClickTime < 400) {
+          addToTarget(displayedSrcRows[idx]);
+          lastClickIdx = -1;
+        } else {
+          lastClickIdx = idx;
+          lastClickTime = now;
+        }
+      });
+    });
+  }
+
+  function renderTgt() {
+    if (!tgtRows.length) { tgtBody.innerHTML = '<tr><td colspan="2" class="text-muted text-center small">尚未選擇</td></tr>'; return; }
+    tgtBody.innerHTML = tgtRows.map((r, i) => `
+      <tr style="cursor:pointer;user-select:none" data-idx="${i}">
+        <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtmlMS(r.MatCode)}</td>
+        <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtmlMS(r.MatName)}</td>
+      </tr>`).join('');
+    let lastClickIdx = -1;
+    let lastClickTime = 0;
+    tgtBody.querySelectorAll('tr').forEach(tr => {
+      tr.addEventListener('click', () => {
+        tgtBody.querySelectorAll('tr').forEach(t => t.classList.remove('table-active'));
+        tr.classList.add('table-active');
+        const idx = parseInt(tr.dataset.idx);
+        const now = Date.now();
+        if (lastClickIdx === idx && now - lastClickTime < 400) {
+          tgtRows.splice(idx, 1);
+          renderTgt();
+          lastClickIdx = -1;
+        } else {
+          lastClickIdx = idx;
+          lastClickTime = now;
+        }
+      });
+    });
+  }
+
+  btnAdd.addEventListener('click', () => {
+    const tr = srcBody.querySelector('tr.table-active');
+    if (!tr) return;
+    addToTarget(displayedSrcRows[parseInt(tr.dataset.idx)]);
+  });
+
+  btnRemove.addEventListener('click', () => {
+    const tr = tgtBody.querySelector('tr.table-active');
+    if (!tr) return;
+    tgtRows.splice(parseInt(tr.dataset.idx), 1); // P1：只從右欄移除，不影響左欄
+    renderTgt();
+  });
+
+  btnUp.addEventListener('click', () => {
+    const tr = tgtBody.querySelector('tr.table-active');
+    if (!tr) return;
+    const i = parseInt(tr.dataset.idx);
+    if (i <= 0) return;
+    [tgtRows[i - 1], tgtRows[i]] = [tgtRows[i], tgtRows[i - 1]];
+    renderTgt();
+    tgtBody.querySelectorAll('tr')[i - 1]?.classList.add('table-active');
+  });
+
+  btnDown.addEventListener('click', () => {
+    const tr = tgtBody.querySelector('tr.table-active');
+    if (!tr) return;
+    const i = parseInt(tr.dataset.idx);
+    if (i >= tgtRows.length - 1) return;
+    [tgtRows[i], tgtRows[i + 1]] = [tgtRows[i + 1], tgtRows[i]];
+    renderTgt();
+    tgtBody.querySelectorAll('tr')[i + 1]?.classList.add('table-active');
+  });
+
+  btnSave.addEventListener('click', async () => {
+    const layer = getActiveLayer();
+    const { partNum, revision } = getMasterKeys();
+    // SerialNum 是 PK：用 originalSerialNums[i] 對應 tgtRows[i]（同 疊構變更 策略）
+    const payload = tgtRows.map((r, i) => ({
+      PartNum: partNum, Revision: revision, LayerId: layer.layerId,
+      SerialNum: originalSerialNums[i] ?? (i + 1),
+      MatCode: r.MatCode, MatName: r.MatName
+    }));
+    try {
+      const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ TableName: 'EMOdLayerPress', Data: payload, KeyFields: ['PartNum', 'Revision', 'LayerId', 'SerialNum'] })
+      });
+      const txt = await resp.text();
+      let result = null;
+      try { result = txt ? JSON.parse(txt) : null; } catch {}
+      if (resp.ok && result?.success !== false) { bsModal.hide(); }
+      else { Swal.fire({ icon: 'error', title: '儲存失敗', text: result?.error || txt || '未知錯誤' }); }
+    } catch (e) { Swal.fire({ icon: 'error', title: '儲存失敗', text: e.message }); }
+  });
+
+  function escHtmlMS(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+});
 </script>
 
 

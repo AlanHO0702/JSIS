@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using PcbErpApi.Data;
 using PcbErpApi.Helpers;
 using PcbErpApi.Models;
+using PcbErpApi.Services;
 
 namespace PcbErpApi.Pages.EMOdProdLayer
 {
@@ -21,16 +22,18 @@ namespace PcbErpApi.Pages.EMOdProdLayer
         private readonly PcbErpContext _ctx;
         private readonly ITableDictionaryService _dictService;
         private readonly ILogger<IndexModel> _logger;
+        private readonly IBreadcrumbService _breadcrumbService;
 
         private const string DictTable = "EMOdProdLayer";
         private const string DataTable = "EMOdProdLayer";
 
         public IndexModel(PcbErpContext ctx, ITableDictionaryService dictService,
-            ILogger<IndexModel> logger)
+            ILogger<IndexModel> logger, IBreadcrumbService breadcrumbService)
         {
             _ctx = ctx;
             _dictService = dictService;
             _logger = logger;
+            _breadcrumbService = breadcrumbService;
         }
 
         [FromQuery(Name = "mode")]
@@ -44,8 +47,8 @@ namespace PcbErpApi.Pages.EMOdProdLayer
                 ? string.Equals(Mode, "view", StringComparison.OrdinalIgnoreCase)
                 : false;
 
-        public string ItemId => IsViewOnly ? "EMO00020" : "EMO00019";
-        public string PageTitle => IsViewOnly ? "層別資料查詢" : "層別資料維護";
+        public string ItemId => IsViewOnly ? "EMO00060" : "EMO00059";
+        public string PageTitle => IsViewOnly ? "層別資料查詢" : "EMO00059 層別資料維護";
         public string TableName { get; private set; } = DataTable;
         public string DictTableName { get; private set; } = DictTable;
         public int PageNumber { get; private set; } = 1;
@@ -100,6 +103,14 @@ namespace PcbErpApi.Pages.EMOdProdLayer
             ViewData["SortBy"] = sortBy;
             ViewData["SortDir"] = sortDir;
             ViewData["IsViewOnly"] = IsViewOnly;
+
+            // 麵包屑
+            var currentItemId = IsViewOnly ? "EMO00060" : "EMO00059";
+            var sysItem = await _ctx.CurdSysItems
+                .Where(x => x.ItemId == currentItemId)
+                .FirstOrDefaultAsync();
+            if (sysItem != null)
+                ViewData["Breadcrumbs"] = await _breadcrumbService.BuildBreadcrumbsAsync(sysItem.SuperId);
 
             FieldDictList = await LoadFieldDictAsync(DictTableName);
             await ApplyLangDisplaySizeAsync(DictTableName, FieldDictList);

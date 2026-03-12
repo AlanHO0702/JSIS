@@ -54,7 +54,7 @@ namespace PcbErpApi.Pages.EMOdProdLayer
                 ? string.Equals(Mode, "view", StringComparison.OrdinalIgnoreCase)
                 : false;
 
-        public string PageTitle => IsViewOnly ? "層別資料查詢" : "層別資料維護";
+        public string PageTitle => IsViewOnly ? "層別資料查詢" : "EMO00059 層別資料維護";
 
         public async Task<IActionResult> OnGetAsync()
         {
