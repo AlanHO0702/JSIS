@@ -31,6 +31,29 @@ namespace PcbErpApi.Controllers
         }
 
         /// <summary>
+        /// 取得 AA000015.cshtml 的內容 (用於動態載入)
+        /// GET /api/AA000015/GetViewContent
+        /// </summary>
+        [HttpGet("GetViewContent")]
+        public async Task<IActionResult> GetViewContent()
+        {
+            try
+            {
+                var filePath = Path.Combine(Directory.GetCurrentDirectory(), "Pages", "CustomButton", "AA000015.cshtml");
+
+                if (!System.IO.File.Exists(filePath))
+                    return NotFound(new { ok = false, error = "找不到 AA000015.cshtml 文件" });
+
+                var content = await System.IO.File.ReadAllTextAsync(filePath);
+                return Content(content, "text/html");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { ok = false, error = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// 關閉作業 (對應 Delphi HsaInsJourDLL.pas btnGetParamsClick → DLLSetPowerType)
         /// 檢查項目設定、使用者權限、單據設定
         /// </summary>
@@ -361,16 +384,61 @@ namespace PcbErpApi.Controllers
             if (lastRowIndex <= headerRowIndex)
                 return BadRequest(new { ok = false, error = "無資料行可匯入" });
 
-            // 6. 執行插入
+            // 6. 取得目標資料表的 PK 欄位，用於匯入前刪除舊資料
+            var pkColumns = await GetPrimaryKeyColumnsAsync(conn, realTableName);
+
+            // 從 Excel 收集各 PK 欄位的唯一值組合
+            var pkMapEntries = new List<ColumnMap>();
+            foreach (var pk in pkColumns)
+            {
+                var entry = columnMap.FirstOrDefault(cm =>
+                    cm.FieldName.Equals(pk, StringComparison.OrdinalIgnoreCase));
+                if (entry != null) pkMapEntries.Add(entry);
+            }
+
+            // 收集 Excel 中第一個 PK 欄位（單據號碼）的所有不重複值
+            var uniquePkValues = new HashSet<string>();
+            if (pkMapEntries.Count > 0)
+            {
+                var firstPkEntry = pkMapEntries[0];
+                var pkFormatter = new DataFormatter(CultureInfo.InvariantCulture);
+                for (var r = headerRowIndex + 1; r <= lastRowIndex; r++)
+                {
+                    var row = sheet.GetRow(r);
+                    if (row == null) continue;
+                    var cell = row.GetCell(firstPkEntry.ColumnIndex);
+                    var val = cell == null ? "" : pkFormatter.FormatCellValue(cell).Trim();
+                    if (!string.IsNullOrEmpty(val)) uniquePkValues.Add(val);
+                }
+            }
+
+            // 7. 執行刪除 + 插入
             var insertColumns = columnMap.Select(m => m.FieldName).ToList();
             var colList = string.Join(", ", insertColumns.Select(QuoteIdentifier));
             var paramList = string.Join(", ", insertColumns.Select((_, i) => $"@p{i}"));
             var insertSql = $"INSERT INTO {QuoteIdentifier(realTableName)} ({colList}) VALUES ({paramList})";
 
+            var deleted = 0;
             var inserted = 0;
             await using var tx = await conn.BeginTransactionAsync();
             try
             {
+                // 先根據 Excel 中的單據號碼刪除舊資料
+                if (pkMapEntries.Count > 0 && uniquePkValues.Count > 0)
+                {
+                    var firstPkFieldName = pkMapEntries[0].FieldName;
+                    var deleteParams = uniquePkValues.Select((_, i) => $"@dk{i}").ToList();
+                    var deleteSql = $"DELETE FROM {QuoteIdentifier(realTableName)} WHERE {QuoteIdentifier(firstPkFieldName)} IN ({string.Join(",", deleteParams)})";
+
+                    await using var delCmd = new SqlCommand(deleteSql, conn, (SqlTransaction)tx);
+                    var idx = 0;
+                    foreach (var key in uniquePkValues)
+                        delCmd.Parameters.AddWithValue($"@dk{idx++}", key);
+
+                    deleted = await delCmd.ExecuteNonQueryAsync();
+                }
+
+                // 再插入新資料
                 for (var r = headerRowIndex + 1; r <= lastRowIndex; r++)
                 {
                     var row = sheet.GetRow(r);
@@ -406,7 +474,7 @@ namespace PcbErpApi.Controllers
                 return BadRequest(new { ok = false, error = ex.Message });
             }
 
-            return Ok(new { ok = true, inserted });
+            return Ok(new { ok = true, deleted, inserted });
         }
 
         /// <summary>
@@ -561,6 +629,25 @@ SELECT TOP 1 TableName
             cmd.Parameters.AddWithValue("@itemId", itemId ?? string.Empty);
             var obj = await cmd.ExecuteScalarAsync();
             return obj == null || obj == DBNull.Value ? null : obj.ToString();
+        }
+
+        private static async Task<List<string>> GetPrimaryKeyColumnsAsync(SqlConnection conn, string tableName)
+        {
+            var columns = new List<string>();
+            const string sql = @"
+SELECT col.name
+  FROM sys.indexes idx
+  JOIN sys.index_columns ic ON idx.object_id = ic.object_id AND idx.index_id = ic.index_id
+  JOIN sys.columns col ON ic.object_id = col.object_id AND ic.column_id = col.column_id
+ WHERE idx.is_primary_key = 1
+   AND idx.object_id = OBJECT_ID(@tbl)
+ ORDER BY ic.key_ordinal;";
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@tbl", tableName ?? string.Empty);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+                columns.Add(rd.GetString(0));
+            return columns;
         }
 
         private static async Task<string?> LoadRealTableNameAsync(SqlConnection conn, string dictTableName)

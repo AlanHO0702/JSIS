@@ -576,9 +576,17 @@
           tr.appendChild(td);
       });
 
+      const renderedInputNames = new Set(
+        Array.from(tr.querySelectorAll("input[name]"))
+          .map(i => (i.name || "").toLowerCase())
+          .filter(Boolean)
+      );
+
       // 附加隱藏 PK（就算辭典未顯示也要能存檔）
       (keyFields || []).forEach(k => {
         if (!k) return;
+        const key = String(k).toLowerCase();
+        if (renderedInputNames.has(key)) return;
         const pk = document.createElement("input");
         pk.type = "hidden";
         pk.name = k;
@@ -586,7 +594,32 @@
         const val = row[k] ?? row[k.toLowerCase()] ?? "";
         pk.value = val == null ? "" : val;
         tr.appendChild(pk);
+        renderedInputNames.add(key);
       });
+
+      // 新增明細列：補齊 KeyMap 對應的 FK（辭典未開欄位時也能存檔）
+      if (isDetail && isNewRow) {
+        (cfg?.KeyMap || []).forEach(km => {
+          const fkName = km?.Detail;
+          if (!fkName) return;
+          const fkKey = String(fkName).toLowerCase();
+          if (renderedInputNames.has(fkKey)) return;
+
+          let fkVal = row[fkName];
+          if (fkVal == null || fkVal === "") {
+            const actualKey = Object.keys(row || {}).find(x => x.toLowerCase() === fkKey);
+            if (actualKey) fkVal = row[actualKey];
+          }
+
+          const fk = document.createElement("input");
+          fk.type = "hidden";
+          fk.name = fkName;
+          fk.className = "mmd-fk-hidden";
+          fk.value = fkVal == null ? "" : fkVal;
+          tr.appendChild(fk);
+          renderedInputNames.add(fkKey);
+        });
+      }
 
 
       if (onRowClick) tr.addEventListener("click", () => onRowClick(tr, row));
@@ -833,9 +866,10 @@
           if (isMaster) {
             masterData = sortRowsByField(masterData, field, dict, nextOrder);
             currentMasterRow = null;
-            renderMaster();
-            const first = mBody.querySelector("tr");
-            first?.click();
+            renderMaster().then(() => {
+              const first = mBody.querySelector("tr");
+              first?.click();
+            });
           } else {
             detailData = sortRowsByField(detailData, field, dict, nextOrder);
             renderDetail();
@@ -877,9 +911,9 @@
       });
     };
 
-    const renderMaster = () => {
+    const renderMaster = async () => {
       mBody.innerHTML = "";
-      buildBody(
+      await buildBody(
         mBody,
         mDict,
         masterData,
@@ -912,16 +946,21 @@
       document.dispatchEvent(evt);
     };
 
-    const renderDetail = () => {
+    const renderDetail = async () => {
       dBody.innerHTML = "";
-      buildBody(
+      // ★ 合併 DetailKeyFields 與 KeyMap Detail 欄位，確保複合 PK 的所有欄位都有 hidden input
+      const detailPkFields = [...new Set([
+        ...(cfg.DetailKeyFields || []),
+        ...(cfg.KeyMap || []).map(k => k.Detail).filter(Boolean)
+      ])].filter(Boolean);
+      await buildBody(
         dBody,
         dDict,
         detailData,
         false,
         onDetailClick,
         cfg,
-        cfg.DetailKeyFields || [],
+        detailPkFields,
         window._mdEditing || addMode,
         true
       );
@@ -958,7 +997,7 @@
       firstEditable?.focus();
     };
 
-    const addMasterRow = () => {
+    const addMasterRow = async () => {
       if (!ensureEditMode()) { alert("請先點『編輯』再新增"); return; }
       window._mdEditing = true;
       const row = { __state: "added" };
@@ -966,17 +1005,17 @@
       mDict.filter(f => (f.IsKey ?? 0) === 1).forEach(f => { row[f.FieldName] = ""; });
       masterData.unshift(row);
       currentMasterRow = row;
-      renderMaster();
+      await renderMaster();
       const firstRow = mBody.querySelector("tr");
       firstRow?.click();
       setAddMode(true);
       detailData = [];
-      renderDetail();
+      await renderDetail();
       window._masterEditor?.toggleEdit(true);
       window._detailEditor?.toggleEdit(true);
     };
 
-    const addDetailRow = () => {
+    const addDetailRow = async () => {
       if (!currentMasterRow) {
         const firstTr = mBody.querySelector("tr");
         if (firstTr) {
@@ -995,20 +1034,24 @@
       (cfg.DetailKeyFields || []).forEach(k => {
         if (row[k] == null) row[k] = "";
       });
-      detailData.unshift(row);
-      renderDetail();
-      const first = dBody.querySelector("tr");
-      first?.classList.add("selected");
+      detailData.push(row);
+      await renderDetail();
+      const allTrs = Array.from(dBody.querySelectorAll("tr"));
+      const last = allTrs[allTrs.length - 1];
+      if (last) {
+        last.classList.add("selected");
+        try { last.scrollIntoView({ block: "nearest", behavior: "auto" }); } catch {}
+      }
       setAddMode(true);
       window._masterEditor?.toggleEdit(true);
       window._detailEditor?.toggleEdit(true);
     };
 
-    const cancelAdd = () => {
+    const cancelAdd = async () => {
       masterData = masterData.filter(r => r.__state !== "added");
       detailData = detailData.filter(r => r.__state !== "added");
       currentMasterRow = masterData[0] || null;
-      renderMaster();
+      await renderMaster();
       if (currentMasterRow) {
         const tr = mBody.querySelector("tr");
         tr?.click();
@@ -1047,6 +1090,25 @@
         });
       }
 
+      const normKey = (v) => String(v ?? "").trim();
+      if (addedDetailTr && (cfg.DetailKeyFields || []).length) {
+        const hasDuplicateDetailKey = detailData.some(r => {
+          if (!r || r.__state === "added" || r.__state === "deleted") return false;
+          return cfg.DetailKeyFields.every(k => normKey(getRowValue(r, k)) === normKey(addedDetailKeys[k]));
+        });
+
+        if (hasDuplicateDetailKey) {
+          const dupKeyText = cfg.DetailKeyFields.map(k => normKey(addedDetailKeys[k])).join(", ");
+          Swal.fire({
+            icon: "warning",
+            title: "鍵值重複",
+            text: `此鍵值已存在（${dupKeyText}），請改用其他鍵值。`
+          });
+          savingAdd = false;
+          return;
+        }
+      }
+
       const me = window._masterEditor;
       const de = window._detailEditor;
       const r1 = me ? await me.saveChanges() : { ok: true, skipped: true };
@@ -1063,7 +1125,7 @@
       // 重新載入主檔，確保鍵值與資料同步
       const freshMasterRows = await fetch(masterUrl).then(r => r.json());
       masterData = Array.isArray(freshMasterRows) ? freshMasterRows : [];
-      renderMaster();
+      await renderMaster();
 
       // ★ 儲存後找到剛剛新增的那一筆並選中
       const findRowByKeys = (rows, keyFields, keyValues) => {
@@ -1190,7 +1252,7 @@
         if (!cfg.MasterOrderBy) {
           masterData = sortByKeys(masterData, mDict, masterKeyFields);
         }
-        renderMaster();
+        await renderMaster();
 
         const matched = pickMasterRowByKeys(masterData, currentMasterRow);
         const targetRow = matched || masterData[0] || null;
@@ -1215,6 +1277,26 @@
       masterData = sortByKeys(masterData, mDict, masterKeyFields);
     }
     renderMaster();
+
+    // 掛載 GRID 鍵盤導航（兩段式點擊、方向鍵、F7/F8、Enter/Escape）
+    if (typeof window.initErpGridNav === 'function') {
+      window.initErpGridNav(mBody, {
+        keyFields : masterKeyFields.map(k => k.toLowerCase()),
+        isEditMode: () => !!window._mdEditing,
+        addRow    : null,
+        autoSave  : null,
+        onRowSelect: (tr) => { if (tr && tr.__rowData) onMasterClick(tr, tr.__rowData); },
+        gridLabel : `${cfg.DomId}-master`,
+      });
+      window.initErpGridNav(dBody, {
+        keyFields : (cfg.DetailKeyFields || []).map(k => k.toLowerCase()),
+        isEditMode: () => !!window._mdEditing,
+        addRow    : async () => { await addDetailRow(); return { ok: true }; },
+        autoSave  : null,
+        onRowSelect: (tr) => { if (tr && tr.__rowData) onDetailClick(tr, tr.__rowData); },
+        gridLabel : `${cfg.DomId}-detail`,
+      });
+    }
 
     // ★ 檢查 sessionStorage 是否有儲存前記住的選中列
     let targetTr = null;

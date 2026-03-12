@@ -690,6 +690,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="~/js/gridToolbarTemplate.js"></script>
+<script src="~/js/erpGridNav.js" asp-append-version="true"></script>
 <script>
   document.addEventListener("DOMContentLoaded", () => {
     const editBtn = document.getElementById("btnEditToggle");
@@ -783,7 +784,7 @@
     };
 
     const clearActiveCell = () => {
-      if (activeCell && activeCell.classList) activeCell.classList.remove("active-cell");
+      document.querySelectorAll('td.active-cell').forEach(el => el.classList.remove('active-cell'));
       activeCell = null;
     };
 
@@ -816,7 +817,7 @@
         clearActiveCell();
         return;
       }
-      if (activeCell && activeCell !== td) activeCell.classList.remove("active-cell");
+      document.querySelectorAll('td.active-cell').forEach(el => { if (el !== td) el.classList.remove('active-cell'); });
       activeCell = td;
       activeCell.classList.add("active-cell");
 
@@ -833,44 +834,6 @@
       }
     };
 
-    const resolveArrowTargetCell = (fromTd, key) => {
-      if (!fromTd) return null;
-      const fromTr = fromTd.closest("tr");
-      if (!fromTr) return null;
-      const rows = getBodyRows();
-      const rowIdx = rows.indexOf(fromTr);
-      if (rowIdx < 0) return null;
-
-      const visibleCells = Array.from(fromTr.querySelectorAll("td[data-field]")).filter(isCellVisible);
-      if (!visibleCells.length) return null;
-      const cellIdx = visibleCells.indexOf(fromTd);
-      if (cellIdx < 0) return null;
-
-      if (key === "ArrowLeft" || key === "ArrowRight") {
-        const nextIdx = cellIdx + (key === "ArrowLeft" ? -1 : 1);
-        if (nextIdx < 0 || nextIdx >= visibleCells.length) return null;
-        return visibleCells[nextIdx];
-      }
-
-      if (key === "ArrowUp" || key === "ArrowDown") {
-        const nextRowIdx = rowIdx + (key === "ArrowUp" ? -1 : 1);
-        if (nextRowIdx < 0 || nextRowIdx >= rows.length) return null;
-        const targetRow = rows[nextRowIdx];
-        const byField = getCellByField(targetRow, fromTd.dataset.field || "");
-        if (isCellVisible(byField)) return byField;
-        const targetVisibleCells = Array.from(targetRow.querySelectorAll("td[data-field]")).filter(isCellVisible);
-        if (!targetVisibleCells.length) return null;
-        const fallbackIdx = Math.min(cellIdx, targetVisibleCells.length - 1);
-        return targetVisibleCells[fallbackIdx];
-      }
-
-      return null;
-    };
-
-    const getFirstVisibleCell = (tr) => {
-      if (!tr) return null;
-      return Array.from(tr.querySelectorAll("td[data-field]")).find(isCellVisible) || null;
-    };
 
     // 清理舊版 fallback 殘留參數，避免後端把它當成查詢欄位。
     try {
@@ -2015,10 +1978,26 @@
     return list;
   }
 
+    // 在 erpGridNav 的 pointerdown (bubble) 之前（capture 階段）記錄切換前的列，
+    // 供 click handler 做 auto-save 判斷（erpGridNav 的 pointerdown 會先更新 SELECTED_ROW）
+    let _clickPrevRow = null;
+    table.addEventListener("pointerdown", (ev) => {
+      const tr = ev.target.closest("tbody tr");
+      if (tr) _clickPrevRow = window.SELECTED_ROW || null;
+    }, { capture: true });
+
     table.addEventListener("click", async (ev) => {
       const tr = ev.target.closest("tbody tr");
       if (!tr) return;
-      await selectRow(tr);
+      const prevRow = _clickPrevRow;
+      _clickPrevRow = null;
+      // erpGridNav 的 pointerdown 可能已透過 onRowSelect 更新 SELECTED_ROW，
+      // 此處用 prevRow 偵測真正的列切換，自行執行 auto-save
+      if (prevRow && prevRow !== tr && isEdit && isDirty) {
+        const ok = await saveTableChanges({ silentSuccess: true, targetRows: [prevRow] });
+        if (!ok) return;
+      }
+      await selectRow(tr, { skipAutoSave: true });
       const td = ev.target.closest("td[data-field]");
       if (td) setActiveCell(td, { skipRowSelect: true });
     });
@@ -2085,51 +2064,8 @@
       if (!sourceTd) return false;
       return copyCellValue(targetTd, sourceTd);
     };
+    // F7/F8/方向鍵/Enter/Escape 由 erpGridNav 統一處理；此處只保留 Delete 清空格子
     table.addEventListener("keydown", (ev) => {
-      if (ev.key === "F7") {
-        if (!isEdit) return;
-        const fromTd = ev.target?.closest?.("td[data-field]") || activeCell;
-        if (!fromTd) return;
-        ev.preventDefault();
-        if (copyRowFromPrevRow(fromTd)) setDirty(true);
-        return;
-      }
-      if (ev.key === "F8") {
-        if (!isEdit) return;
-        const fromTd = ev.target?.closest?.("td[data-field]") || activeCell;
-        if (!fromTd) return;
-        ev.preventDefault();
-        if (copyCellFromPrevRow(fromTd)) setDirty(true);
-        return;
-      }
-
-      if (ev.key === "ArrowUp" || ev.key === "ArrowDown" || ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
-        if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
-        const target = ev.target;
-        const isTextEditor = target instanceof HTMLTextAreaElement
-          || (target instanceof HTMLInputElement && target.type !== "checkbox" && target.type !== "radio")
-          || target instanceof HTMLSelectElement;
-        if (!isEdit && isTextEditor) return;
-        const fromTd = target?.closest?.("td[data-field]") || activeCell;
-        if (!fromTd) return;
-        let nextTd = resolveArrowTargetCell(fromTd, ev.key);
-        if (!nextTd && isEdit && ev.key === "ArrowDown") {
-          const fromTr = fromTd.closest("tr");
-          const rows = getBodyRows();
-          const rowIdx = fromTr ? rows.indexOf(fromTr) : -1;
-          const isAtLastRow = rowIdx >= 0 && rowIdx === rows.length - 1;
-          if (isAtLastRow) {
-            const newRow = addRow({ append: true });
-            const sameFieldTd = getCellByField(newRow, fromTd.dataset.field || "");
-            nextTd = isCellVisible(sameFieldTd) ? sameFieldTd : getFirstVisibleCell(newRow);
-          }
-        }
-        if (!nextTd) return;
-        ev.preventDefault();
-        setActiveCell(nextTd);
-        return;
-      }
-
       if (ev.key !== "Delete") return;
       const el = ev.target;
       if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) return;
@@ -2186,6 +2122,28 @@
     updateCountPanel(getSelectedRowIndex());
     buildCustomButtonsFromMeta();
     wireCustomButtons();
+
+    // ── erpGridNav：鍵盤導航（F7/F8/Enter/Escape/方向鍵） ──
+    if (typeof window.initErpGridNav === 'function') {
+      const _navTbody = table.querySelector('tbody');
+      if (_navTbody) {
+        window.initErpGridNav(_navTbody, {
+          keyFields : KEY_FIELDS,
+          isEditMode: () => isEdit,
+          addRow    : async () => {
+            const tr = addRow({ append: true });
+            return tr ? { ok: true } : { ok: false };
+          },
+          // Enter / F7 / F8 後自動存檔（列切換的 auto-save 由 click handler 的 selectRow 負責）
+          autoSave  : async () => {
+            if (!isDirty) return;
+            await saveTableChanges({ silentSuccess: true, targetRows: [window.SELECTED_ROW].filter(Boolean) });
+          },
+          onRowSelect: (tr) => { if (tr) selectRow(tr, { skipAutoSave: true }); },
+          gridLabel : 'singlegrid',
+        });
+      }
+    }
 
   // 共用狀態變數
   let isSorting = false; // 防止重複請求（排序、分頁共用）
