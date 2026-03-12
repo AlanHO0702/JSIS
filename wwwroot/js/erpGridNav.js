@@ -279,6 +279,12 @@
 
       if (!nextTd) return;
       e.preventDefault();
+      // 上下換列時呼叫 autoSave
+      if (autoSave && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        const fromTr = fromTd.closest('tr');
+        const nextTr = nextTd.closest('tr');
+        if (fromTr !== nextTr) autoSave();
+      }
       if (onRowSelect) onRowSelect(nextTd.closest('tr'));
       mtSetActiveCell(nextTd, false);
       if (typeof window.__activeDetailGrid !== 'undefined') {

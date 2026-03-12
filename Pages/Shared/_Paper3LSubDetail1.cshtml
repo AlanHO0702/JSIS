@@ -843,7 +843,7 @@
           ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
              <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
           : '';
-        html += `<td${classAttr}${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}>${dateAddon}${partNumBtn}</td>`;
+        html += `<td${classAttr}${lookupAttr} data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}>${dateAddon}${partNumBtn}</td>`;
       });
       html += '</tr></tbody></table></div>';
       container.innerHTML = html;
@@ -906,6 +906,45 @@
           if (!map || map.size === 0) return;
           openLookupDropdown(td, field, map);
         });
+        if (typeof window.initErpGridNav === 'function') {
+          const keyCandidates = ['papernum', 'item', 'seqnum', 'seq', 'serialnum', 'linenum', 'lineid', 'rowno'];
+          window.initErpGridNav(tbody, {
+            keyFields : keyCandidates,
+            isEditMode: () => !!window.__headerIsEdit,
+            addRow    : async () => {
+              if (typeof window.__paper3lSubDetailAddRow === 'function') {
+                const r = window.__paper3lSubDetailAddRow();
+                return r?.ok ? { ok: true } : { ok: false };
+              }
+              return { ok: false };
+            },
+            autoSave  : async () => {
+              if (typeof window.__paper3lSubDetailCollectChanges !== 'function') return;
+              const collected = window.__paper3lSubDetailCollectChanges();
+              if (!collected || !collected.changes.length) return;
+              try {
+                const payload = { TableName: collected.tableName, Data: collected.changes };
+                if (collected.keyFields?.length) payload.KeyFields = collected.keyFields;
+                const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(payload)
+                });
+                if (resp.ok) {
+                  container?.querySelectorAll('tbody tr[data-state="modified"], tbody tr[data-state="added"]').forEach(tr => {
+                    tr.querySelectorAll('input.cell-edit[data-field]').forEach(inp => { inp.dataset.init = inp.value ?? ''; });
+                    delete tr.dataset.state;
+                  });
+                }
+              } catch (err) { console.warn('paper3l autoSave failed', err); }
+            },
+            onRowSelect: (tr) => {
+              if (!tr || !tbody.contains(tr)) return;
+              tbody.querySelectorAll('tr.row-selected').forEach(x => x.classList.remove('row-selected'));
+              tr.classList.add('row-selected');
+            },
+            gridLabel : 'paper3l-sub',
+          });
+        }
       }
 
       applyEditMode(!!window.__headerIsEdit);
@@ -944,7 +983,7 @@
             ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
                <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
             : '';
-          html += `<td class="${alignClass}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}"></span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" value=""${roAttr}>${dateAddon}${partNumBtn}</td>`;
+          html += `<td class="${alignClass}" data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}"></span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" value=""${roAttr}>${dateAddon}${partNumBtn}</td>`;
           return;
         }
         const fieldLower = fn.toLowerCase();
@@ -1030,7 +1069,7 @@
           ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
              <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
           : '';
-        html += `<td${classAttr}${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" data-init="${escapeHtml(editText)}" value="${escapeHtml(editText)}"${roAttr}>${dateAddon}${partNumBtn}</td>`;
+        html += `<td${classAttr}${lookupAttr} data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" data-init="${escapeHtml(editText)}" value="${escapeHtml(editText)}"${roAttr}>${dateAddon}${partNumBtn}</td>`;
       });
       html += '</tr>';
     });
@@ -1100,6 +1139,49 @@
         if (!map || map.size === 0) return;
         openLookupDropdown(td, field, map);
       });
+      if (typeof window.initErpGridNav === 'function') {
+        const keyCandidates = ['papernum', 'item', 'seqnum', 'seq', 'serialnum', 'linenum', 'lineid', 'rowno'];
+        window.initErpGridNav(tbody, {
+          keyFields : keyCandidates,
+          isEditMode: () => !!window.__headerIsEdit,
+          addRow    : async () => {
+            if (typeof window.__paper3lSubDetailAddRow === 'function') {
+              const r = window.__paper3lSubDetailAddRow();
+              return r?.ok ? { ok: true } : { ok: false };
+            }
+            return { ok: false };
+          },
+          autoSave  : async () => {
+            if (typeof window.__paper3lSubDetailCollectChanges !== 'function') return;
+            const collected = window.__paper3lSubDetailCollectChanges();
+            if (!collected || !collected.changes.length) return;
+            try {
+              const payload = { TableName: collected.tableName, Data: collected.changes };
+              if (collected.keyFields?.length) payload.KeyFields = collected.keyFields;
+              const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+              });
+              if (resp.ok) {
+                container?.querySelectorAll('tbody tr[data-state="modified"], tbody tr[data-state="added"]').forEach(tr => {
+                  tr.querySelectorAll('input.cell-edit[data-field]').forEach(inp => { inp.dataset.init = inp.value ?? ''; });
+                  delete tr.dataset.state;
+                });
+              }
+            } catch (err) { console.warn('paper3l autoSave failed', err); }
+          },
+          onRowSelect: (tr) => {
+            if (!tr || !tbody.contains(tr)) return;
+            tbody.querySelectorAll('tr.row-selected').forEach(x => x.classList.remove('row-selected'));
+            tr.classList.add('row-selected');
+            const idx = parseInt(tr.dataset.idx || '-1', 10);
+            if (!isNaN(idx) && rows[idx]) {
+              window._paper3lSubDetailSelectedRows["1"] = rows[idx];
+            }
+          },
+          gridLabel : 'paper3l-sub',
+        });
+      }
     }
 
     applyEditMode(!!window.__headerIsEdit);
@@ -1189,7 +1271,7 @@
         const lookupAttr = canDropdown
           ? ` data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
           : "";
-        html += `<td${classAttr}${lookupAttr} data-readonly="${isReadOnly ? '1' : '0'}"><span class="${viewClass}${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="${editClass}${roClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}>${partNumBtn}</td>`;
+        html += `<td${classAttr}${lookupAttr} data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="${viewClass}${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="${editClass}${roClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}>${partNumBtn}</td>`;
       });
       html += '</tr>';
 

@@ -948,6 +948,11 @@
 
     const renderDetail = async () => {
       dBody.innerHTML = "";
+      // ★ 合併 DetailKeyFields 與 KeyMap Detail 欄位，確保複合 PK 的所有欄位都有 hidden input
+      const detailPkFields = [...new Set([
+        ...(cfg.DetailKeyFields || []),
+        ...(cfg.KeyMap || []).map(k => k.Detail).filter(Boolean)
+      ])].filter(Boolean);
       await buildBody(
         dBody,
         dDict,
@@ -955,7 +960,7 @@
         false,
         onDetailClick,
         cfg,
-        cfg.DetailKeyFields || [],
+        detailPkFields,
         window._mdEditing || addMode,
         true
       );

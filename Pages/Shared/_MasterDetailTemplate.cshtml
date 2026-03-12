@@ -176,7 +176,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // 建立 Master / Detail 兩個 editor
   // KeyMap 是物件陣列 [{Master, Detail}]，需要提取 Master 欄位名稱
   const masterKeyFields = (cfg.KeyMap || []).map(k => k.Master).filter(Boolean);
-  const detailKeyFields = cfg.DetailKeyFields || (cfg.KeyMap || []).map(k => k.Detail).filter(Boolean);
+  // ★ 合併 DetailKeyFields 與 KeyMap Detail 欄位，確保複合 PK 的所有欄位都包含在 WHERE 條件中
+  const detailKeyFields = [...new Set([
+    ...(cfg.DetailKeyFields || []),
+    ...(cfg.KeyMap || []).map(k => k.Detail).filter(Boolean)
+  ])].filter(Boolean);
 
   const masterEditor = window.makeEditableGrid({
     wrapper: mWrapper,
@@ -362,7 +366,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (r && r.ok === false) {
         Swal.fire({ icon: 'error', title: '刪除失敗', text: r.text || '刪除失敗' });
       } else {
-        setDirty(true);
+        // deleteRows() 已直接呼叫 API 完成刪除，不需要再標記 dirty
+        Swal.fire({ icon: 'success', title: '刪除完成', timer: 800, showConfirmButton: false });
+        updateCountPanel();
       }
     } catch (err) {
       console.error(err);
