@@ -1,0 +1,523 @@
+@*
+    AJN00060 - 日記帳 (相關頁)
+    自訂按鈕功能:
+      - btnC3: 常用傳票搜尋 (對應 Delphi: JourItemSelectDLL)
+      - btnC9: 匯入 (調用 AA000015 的 openImportModal)
+*@
+@model dynamic
+
+<style>
+  #ajn60-joursel-modal .modal-dialog { max-width: 860px; margin-top: 8vh; }
+  #ajn60-joursel-modal .modal-header { padding: 6px 12px; cursor: move; user-select: none; }
+  #ajn60-joursel-modal .modal-header :is(button, input, select) { cursor: default; }
+  #ajn60-joursel-modal .modal-title { font-size: 16px; line-height: 1.2; }
+  #ajn60-joursel-modal .modal-body { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+  #ajn60-joursel-modal .modal-footer { padding: 6px 12px; }
+  #ajn60-joursel-modal .ajn60-filter { padding: 6px 12px; border-bottom: 1px solid #dee2e6; display: flex; align-items: center; gap: 8px; }
+  #ajn60-joursel-modal .ajn60-filter label { font-size: 13px; white-space: nowrap; }
+  #ajn60-joursel-modal .ajn60-filter select { max-width: 200px; font-size: 13px; }
+  #ajn60-joursel-modal .ajn60-grid-wrap { overflow: auto; flex: 1 1 0; min-height: 0; }
+  #ajn60-joursel-modal .ajn60-master-wrap { max-height: 180px; overflow: auto; border-bottom: 2px solid #adb5bd; }
+  #ajn60-joursel-modal .ajn60-detail-wrap { flex: 1 1 0; min-height: 120px; overflow: auto; }
+  #ajn60-joursel-modal table { border-collapse: collapse; width: 100%; }
+  #ajn60-joursel-modal th,
+  #ajn60-joursel-modal td {
+    border: 1px solid #dee2e6; vertical-align: middle;
+    white-space: nowrap; font-size: var(--field-value-size, 13px);
+    padding: 2px 8px; line-height: 1.4;
+  }
+  #ajn60-joursel-modal thead th {
+    position: sticky; top: 0; background: #f8fafc; z-index: 2;
+    font-size: var(--field-label-size, 12px); font-weight: 600;
+  }
+  #ajn60-joursel-modal tr.selected { background: #cfe2ff; }
+  #ajn60-joursel-modal tr:hover { background: #e9ecef; cursor: pointer; }
+  #ajn60-joursel-modal tr.selected:hover { background: #b6d4fe; }
+  #ajn60-joursel-modal .text-end { text-align: right; }
+</style>
+
+<div class="modal" id="ajn60-joursel-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content" style="height: calc(75vh);">
+      <div class="modal-header">
+        <h5 class="modal-title">常用傳票</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <!-- 篩選列 -->
+        <div class="ajn60-filter">
+          <label>公司別</label>
+          <select id="ajn60-cboAccUse" class="form-select form-select-sm"></select>
+          <button id="ajn60-btnFind" class="btn btn-sm btn-outline-primary" type="button">資料重取</button>
+        </div>
+        <!-- 主表 (常用傳票清單) -->
+        <div class="ajn60-master-wrap">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>傳票名稱</th>
+                <th>備抵</th>
+                <th>建立者</th>
+                <th>公司別</th>
+                <th>單據編號</th>
+                <th>單據日期</th>
+                <th>建立日期</th>
+                <th>備註</th>
+              </tr>
+            </thead>
+            <tbody id="ajn60-master-body"></tbody>
+          </table>
+        </div>
+        <!-- 明細表 (傳票分錄) -->
+        <div class="ajn60-detail-wrap">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>項目</th>
+                <th>借</th>
+                <th>會計科目</th>
+                <th>會計科目名稱</th>
+                <th>子會計科目</th>
+                <th class="text-end">金額</th>
+                <th>部門編號</th>
+                <th>部門名稱</th>
+                <th>計畫科目</th>
+                <th>備註</th>
+              </tr>
+            </thead>
+            <tbody id="ajn60-detail-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="ajn60-btnOK" type="button" class="btn btn-primary btn-sm">確定</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+    window._AA000015_Loading = window._AA000015_Loading || false;
+
+    /**
+     * 動態載入 AA000015.cshtml 的功能
+     * returns {Promise<boolean>} 載入成功返回 true
+     */
+    const ensureAA000015Loaded = async () => {
+        if (typeof window.ActionRailCustomHandlers?.['AA000015']?.btnC12 === 'function') {
+            return true;
+        }
+
+        if (window._AA000015_Loading) {
+            for (let i = 0; i < 100; i++) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                if (typeof window.ActionRailCustomHandlers?.['AA000015']?.btnC12 === 'function') {
+                    return true;
+                }
+            }
+            console.error('等待 AA000015 載入超時');
+            return false;
+        }
+
+        window._AA000015_Loading = true;
+
+        try {
+            const response = await fetch('/api/AA000015/GetViewContent');
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const html = await response.text();
+
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+
+            // 1. 注入 style 標籤
+            const styles = tempDiv.querySelectorAll('style');
+            styles.forEach(style => {
+                document.head.appendChild(style.cloneNode(true));
+            });
+
+            // 2. 注入所有 modal HTML
+            const modals = tempDiv.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                document.body.appendChild(modal.cloneNode(true));
+            });
+
+            // 3. 手動執行 script 內容
+            const scripts = tempDiv.querySelectorAll('script');
+            for (const script of scripts) {
+                const scriptContent = script.textContent || script.innerText;
+                if (scriptContent) {
+                    try {
+                        (new Function(scriptContent))();
+                    } catch (err) {
+                        console.error('執行 script 失敗:', err);
+                        throw err;
+                    }
+                }
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            if (typeof window.ActionRailCustomHandlers?.['AA000015']?.btnC12 === 'function') {
+                return true;
+            } else {
+                console.error('AA000015.cshtml 載入後功能仍不可用');
+                return false;
+            }
+        } catch (error) {
+            console.error('載入 AA000015.cshtml 失敗:', error);
+            return false;
+        } finally {
+            window._AA000015_Loading = false;
+        }
+    };
+
+    const showLoadError = async () => {
+        console.error('AA000015 功能載入失敗');
+        if (window.Swal) {
+            await window.Swal.fire({
+                icon: 'error',
+                title: '功能載入失敗',
+                text: '無法載入匯入功能，請重新整理頁面或聯繫系統管理員'
+            });
+        } else {
+            alert('功能載入失敗，請重新整理頁面或聯繫系統管理員');
+        }
+    };
+
+    // ==================== btnC3: 常用傳票搜尋 ====================
+
+    const DOM_PREFIX = 'ajn60';
+    let bsModal = null;
+    let eventsBound = false;
+    let selectedMasterRow = null;
+    let masterData = [];
+    let currentCtx = null;
+
+    const withJwtHeaders = (init = {}) => {
+        const jwt = localStorage.getItem('jwtId');
+        const headers = Object.assign({}, init.headers || {});
+        if (jwt) headers['X-JWTID'] = jwt;
+        return { ...init, headers };
+    };
+
+    const formatDate = (val) => {
+        if (!val) return '';
+        const d = new Date(val);
+        if (isNaN(d.getTime())) return '';
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    const formatAmount = (val) => {
+        if (val == null || val === '') return '';
+        const n = Number(val);
+        if (isNaN(n)) return val;
+        return n.toLocaleString('zh-TW', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    };
+
+    const showJourSelModal = () => {
+        const el = document.getElementById(`${DOM_PREFIX}-joursel-modal`);
+        if (!el) return;
+        if (window.bootstrap?.Modal) {
+            if (!bsModal) bsModal = new bootstrap.Modal(el, { backdrop: 'static' });
+            bsModal.show();
+        } else {
+            el.classList.add('show');
+            el.style.display = 'block';
+            el.removeAttribute('aria-hidden');
+            el.setAttribute('aria-modal', 'true');
+        }
+    };
+
+    const hideJourSelModal = () => {
+        const el = document.getElementById(`${DOM_PREFIX}-joursel-modal`);
+        if (!el) return;
+        if (bsModal) {
+            bsModal.hide();
+        } else {
+            el.classList.remove('show');
+            el.style.display = 'none';
+        }
+    };
+
+    /** 載入公司別下拉 */
+    const loadAccUse = async () => {
+        const cbo = document.getElementById(`${DOM_PREFIX}-cboAccUse`);
+        if (!cbo || cbo.options.length > 1) return;
+        try {
+            const resp = await fetch('/api/AJN00060/GetAccUse', withJwtHeaders());
+            const data = await resp.json();
+            if (data.ok && data.rows) {
+                cbo.innerHTML = '<option value="">-- 全部 --</option>';
+                data.rows.forEach(r => {
+                    const opt = document.createElement('option');
+                    opt.value = r.useId;
+                    opt.textContent = `${r.useId} ${r.useName}`;
+                    cbo.appendChild(opt);
+                });
+            }
+        } catch (err) {
+            console.error('loadAccUse error:', err);
+        }
+    };
+
+    /** 載入常用傳票主表 */
+    const loadMasterData = async () => {
+        const cbo = document.getElementById(`${DOM_PREFIX}-cboAccUse`);
+        const useId = cbo?.value || '';
+        const body = document.getElementById(`${DOM_PREFIX}-master-body`);
+        if (body) body.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-2">載入中...</td></tr>';
+
+        // 清空明細
+        const dtlBody = document.getElementById(`${DOM_PREFIX}-detail-body`);
+        if (dtlBody) dtlBody.innerHTML = '';
+        selectedMasterRow = null;
+
+        try {
+            const url = `/api/AJN00060/GetJourItems${useId ? '?useId=' + encodeURIComponent(useId) : ''}`;
+            const resp = await fetch(url, withJwtHeaders());
+            const data = await resp.json();
+
+            if (!data.ok) {
+                if (body) body.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-2">${data.error || '查詢失敗'}</td></tr>`;
+                masterData = [];
+                return;
+            }
+
+            masterData = data.rows || [];
+            renderMaster();
+        } catch (err) {
+            console.error('loadMasterData error:', err);
+            if (body) body.innerHTML = '<tr><td colspan="8" class="text-center text-danger py-2">載入失敗</td></tr>';
+            masterData = [];
+        }
+    };
+
+    /** 渲染主表 */
+    const renderMaster = () => {
+        const body = document.getElementById(`${DOM_PREFIX}-master-body`);
+        if (!body) return;
+
+        if (masterData.length === 0) {
+            body.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-2">無資料</td></tr>';
+            return;
+        }
+
+        body.innerHTML = masterData.map((r, i) => `
+            <tr data-idx="${i}" class="${selectedMasterRow === i ? 'selected' : ''}">
+                <td>${r.cjourName || ''}</td>
+                <td>${r.isRemark === 1 ? 'V' : ''}</td>
+                <td>${r.userId || ''}</td>
+                <td>${r.useId || ''}</td>
+                <td>${r.paperNum || ''}</td>
+                <td>${formatDate(r.paperDate)}</td>
+                <td>${formatDate(r.buildDate)}</td>
+                <td>${r.notes || ''}</td>
+            </tr>
+        `).join('');
+    };
+
+    /** 載入明細資料 */
+    const loadDetailData = async (paperNum) => {
+        const body = document.getElementById(`${DOM_PREFIX}-detail-body`);
+        if (!body) return;
+
+        if (!paperNum) {
+            body.innerHTML = '';
+            return;
+        }
+
+        body.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-2">載入中...</td></tr>';
+
+        try {
+            const resp = await fetch(`/api/AJN00060/GetCJourSub?paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
+            const data = await resp.json();
+
+            if (!data.ok || !data.rows || data.rows.length === 0) {
+                body.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-2">無明細資料</td></tr>';
+                return;
+            }
+
+            body.innerHTML = data.rows.map(r => `
+                <tr>
+                    <td>${r.item}</td>
+                    <td>${r.isD === 1 ? 'V' : ''}</td>
+                    <td>${r.accId || ''}</td>
+                    <td>${r.accIdName || ''}</td>
+                    <td>${r.subAccId || ''}</td>
+                    <td class="text-end">${formatAmount(r.amount)}</td>
+                    <td>${r.departId || ''}</td>
+                    <td>${r.departName || ''}</td>
+                    <td>${r.projectId || ''}</td>
+                    <td>${r.notes || ''}</td>
+                </tr>
+            `).join('');
+        } catch (err) {
+            console.error('loadDetailData error:', err);
+            body.innerHTML = '<tr><td colspan="10" class="text-center text-danger py-2">載入失敗</td></tr>';
+        }
+    };
+
+    /** 初始化事件 */
+    const initJourSelEvents = () => {
+        if (eventsBound) return;
+        const el = document.getElementById(`${DOM_PREFIX}-joursel-modal`);
+        if (!el) return;
+        eventsBound = true;
+
+        // 主表點擊選取
+        const masterBody = document.getElementById(`${DOM_PREFIX}-master-body`);
+        if (masterBody) {
+            masterBody.addEventListener('click', (e) => {
+                const tr = e.target.closest('tr[data-idx]');
+                if (!tr) return;
+                const idx = parseInt(tr.dataset.idx, 10);
+                selectedMasterRow = idx;
+                renderMaster();
+                const row = masterData[idx];
+                if (row) loadDetailData(row.paperNum);
+            });
+        }
+
+        // 資料重取
+        const btnFind = document.getElementById(`${DOM_PREFIX}-btnFind`);
+        if (btnFind) {
+            btnFind.addEventListener('click', () => loadMasterData());
+        }
+
+        // 確定按鈕
+        const btnOK = document.getElementById(`${DOM_PREFIX}-btnOK`);
+        if (btnOK) {
+            btnOK.addEventListener('click', async () => {
+                if (selectedMasterRow == null || !masterData[selectedMasterRow]) {
+                    if (window.Swal) {
+                        await Swal.fire({ icon: 'info', title: '請先選取一筆常用傳票' });
+                    } else {
+                        alert('請先選取一筆常用傳票');
+                    }
+                    return;
+                }
+
+                const row = masterData[selectedMasterRow];
+                const paperNum = (currentCtx?.paperNum || window._paperNum || '').toString().trim();
+
+                if (!paperNum) {
+                    if (window.Swal) {
+                        await Swal.fire({ icon: 'warning', title: '無法取得目前單據編號' });
+                    } else {
+                        alert('無法取得目前單據編號');
+                    }
+                    return;
+                }
+
+                try {
+                    const resp = await fetch('/api/AJN00060/InsertJourSub', withJwtHeaders({
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            paperNum: paperNum,
+                            sourNum: row.paperNum
+                        })
+                    }));
+                    const data = await resp.json();
+
+                    if (data.ok) {
+                        hideJourSelModal();
+                        if (window.Swal) {
+                            await Swal.fire({ icon: 'success', title: '套用成功', timer: 1500, showConfirmButton: false });
+                        }
+                        // 重新整理頁面
+                        location.reload();
+                    } else {
+                        if (window.Swal) {
+                            await Swal.fire({ icon: 'error', title: '套用失敗', text: data.error || '未知錯誤' });
+                        } else {
+                            alert('套用失敗: ' + (data.error || '未知錯誤'));
+                        }
+                    }
+                } catch (err) {
+                    console.error('InsertJourSub error:', err);
+                    if (window.Swal) {
+                        await Swal.fire({ icon: 'error', title: '執行錯誤', text: err.message });
+                    } else {
+                        alert('執行錯誤: ' + err.message);
+                    }
+                }
+            });
+        }
+
+        // 拖曳功能
+        const headerEl = el.querySelector('.modal-header');
+        const dialogEl = el.querySelector('.modal-dialog');
+        if (headerEl && dialogEl) {
+            let dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
+            headerEl.addEventListener('mousedown', (e) => {
+                if (e.target.closest('button, input, select')) return;
+                dragging = true;
+                const rect = dialogEl.getBoundingClientRect();
+                startX = e.clientX; startY = e.clientY;
+                origX = rect.left; origY = rect.top;
+                dialogEl.style.position = 'fixed';
+                dialogEl.style.left = `${origX}px`;
+                dialogEl.style.top = `${origY}px`;
+                dialogEl.style.transform = 'none';
+                dialogEl.style.margin = '0';
+                e.preventDefault();
+            });
+            document.addEventListener('mousemove', (e) => {
+                if (!dragging) return;
+                dialogEl.style.left = `${origX + e.clientX - startX}px`;
+                dialogEl.style.top = `${origY + e.clientY - startY}px`;
+            });
+            document.addEventListener('mouseup', () => { dragging = false; });
+        }
+    };
+
+    /** btnC3: 常用傳票搜尋 */
+    const openJourItemSelect = async (ctx) => {
+        currentCtx = ctx;
+        if (!eventsBound) initJourSelEvents();
+
+        // 載入公司別下拉
+        await loadAccUse();
+
+        // 預設選取目前公司別
+        const cbo = document.getElementById(`${DOM_PREFIX}-cboAccUse`);
+        if (cbo && ctx?.useId) {
+            cbo.value = ctx.useId;
+        }
+
+        showJourSelModal();
+
+        // 自動載入資料
+        await loadMasterData();
+    };
+
+    // DOM 載入後初始化
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initJourSelEvents);
+    } else {
+        initJourSelEvents();
+    }
+
+    // 註冊按鈕處理函式
+    window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+    window.ActionRailCustomHandlers['AJN00060'] = {
+        // 常用傳票搜尋
+        btnC3: openJourItemSelect,
+        // 匯入
+        btnC9: async (ctx) => {
+            const loaded = await ensureAA000015Loaded();
+            if (loaded) {
+                await window.ActionRailCustomHandlers['AA000015'].btnC12(ctx);
+            } else {
+                await showLoadError();
+            }
+        }
+    };
+})();
+</script>
