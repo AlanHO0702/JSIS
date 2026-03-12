@@ -614,6 +614,7 @@ SELECT COLUMN_NAME, DATA_TYPE
         Visible   = CASE WHEN ISNULL(f.Visible,1)=1 THEN 1 ELSE 0 END,
         ReadOnly  = CASE WHEN ISNULL(f.ReadOnly,0)=1 THEN 1 ELSE 0 END,
         f.ComboStyle,
+        f.ComboTextSize,
         f.Items,
         f.FieldNote,
         f.EditColor,
@@ -686,6 +687,7 @@ SELECT COLUMN_NAME, DATA_TYPE
                 ReadOnly        = (rd["ReadOnly"]?.ToString() ?? "0") == "1" ? 1 : 0,
                 FieldNote       = rd["FieldNote"]?.ToString() ?? "",
                 ComboStyle      = rd["ComboStyle"] as int?,
+                ComboTextSize   = rd["ComboTextSize"] as int?,
                 Items           = rd["Items"]?.ToString() ?? "",
                 EditColor       = rd["EditColor"]?.ToString() ?? "",
 

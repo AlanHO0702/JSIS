@@ -128,6 +128,7 @@ public class DictApiController : ControllerBase
                 }
 
                 AddInt("DisplaySize", input.DisplaySize);
+                AddInt("ComboTextSize", input.ComboTextSize);
                 AddInt("iLayRow", input.iLayRow);
                 AddInt("iLayColumn", input.iLayColumn);
                 AddInt("iLabHeight", input.iLabHeight);

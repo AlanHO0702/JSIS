@@ -140,7 +140,8 @@ public class FMEdIssueSubModel : TableDetailModel<FmedIssuePo>
                 LookupCond1ResultField = x.LookupCond1ResultField,
                 LookupCond2Field = x.LookupCond2Field,
                 LookupCond2ResultField = x.LookupCond2ResultField,
-                EditColor = x.EditColor
+                EditColor = x.EditColor,
+                ComboTextSize = x.ComboTextSize
             }).ToList();
 
         // Step 3：呼叫樣板方法 FetchDataAsync 載入單身資料與 lookup map

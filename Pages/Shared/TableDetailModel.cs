@@ -170,7 +170,8 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
                 LookupCond2ResultField = x.LookupCond2ResultField,
                 ComboStyle = x.ComboStyle,
                 ReadOnly = x.ReadOnly,
-                EditColor = x.EditColor
+                EditColor = x.EditColor,
+                ComboTextSize = x.ComboTextSize
             }).ToList();
 
         // Lookup Map 資料 (單身 + 單頭)

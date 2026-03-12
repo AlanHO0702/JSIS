@@ -388,7 +388,12 @@
       const keyToLabel = input._lookupKeyToLabel || {};
       const label = getLookupLabel(value, keyToLabel);
       if (label) {
-        input.value = formatLookupDisplay(value, label);
+        if (input.classList.contains('lookup-code-input')) {
+          input.value = value;
+          updateLookupNameBtn(input, label);
+        } else {
+          input.value = formatLookupDisplay(value, label);
+        }
         syncLookupLabel(input);
       } else {
         delete input.dataset.lookupLoaded;
@@ -1926,8 +1931,23 @@
                                 !string.IsNullOrWhiteSpace(field.LookupKeyField) &&
                                 !string.IsNullOrWhiteSpace(field.LookupResultField))
                             {
-                                // 下拉選單元件（可輸入）
-                                <li class="@liClass @(alignRight ? "field-number" : "field-text")"
+                                // 代碼+名稱分離的下拉選單元件
+                                // 去除 "代碼 - " 前綴，名稱按鈕只顯示名稱
+                                var rawCode = rawValue?.ToString() ?? "";
+                                var nameBtnRaw = hasLookupDisplay ? displayText : "";
+                                var nameBtnText = nameBtnRaw;
+                                if (!string.IsNullOrEmpty(rawCode) && !string.IsNullOrEmpty(nameBtnRaw))
+                                {
+                                    var prefix = rawCode + " - ";
+                                    if (nameBtnRaw.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                                        nameBtnText = nameBtnRaw.Substring(prefix.Length);
+                                }
+                                // ComboTextSize：指定代碼格像素寬，否則自動
+                                var comboTextSize = field.ComboTextSize;
+                                var codeWrapStyle = comboTextSize.HasValue && comboTextSize.Value > 0
+                                    ? $"width:{comboTextSize.Value}px; max-width:{comboTextSize.Value}px;"
+                                    : "";
+                                <li class="@liClass @(alignRight ? "field-number" : "field-text") lookup-split-field"
                                     data-field="@field.FieldName"
                                     data-tab="@tab.Key"
                                     title="@field.FieldName"
@@ -1938,22 +1958,25 @@
                                            value="@rawValue"
                                            class="lookup-key"
                                            data-field="@field.FieldName" />
-                                    <input type="text"
-                                           class="form-control lookup-dropdown @(readOnlyClass)"
-                                           value="@rawValue"
-                                           data-field="@field.FieldName"
-                                           data-table="@field.LookupTable"
-                                           data-key="@field.LookupKeyField"
-                                           data-result="@field.LookupResultField.Replace(" ", "")"
-                                           data-cond1-field="@field.LookupCond1Field"
-                                           data-cond1-source="@field.LookupCond1ResultField"
-                                           data-cond2-field="@field.LookupCond2Field"
-                                           data-cond2-source="@field.LookupCond2ResultField"
-                                           data-selected="@rawValue"
-                                           autocomplete="off"
-                                           style="@editStyleForSelect"
-                                           @Html.Raw(readOnlyAttr) />
-                                    <button type="button" class="lookup-toggle" aria-label="展開下拉" tabindex="-1"></button>
+                                    <div class="lookup-code-wrap" style="@codeWrapStyle">
+                                        <input type="text"
+                                               class="form-control lookup-dropdown lookup-code-input @(readOnlyClass)"
+                                               value="@rawValue"
+                                               data-field="@field.FieldName"
+                                               data-table="@field.LookupTable"
+                                               data-key="@field.LookupKeyField"
+                                               data-result="@field.LookupResultField.Replace(" ", "")"
+                                               data-cond1-field="@field.LookupCond1Field"
+                                               data-cond1-source="@field.LookupCond1ResultField"
+                                               data-cond2-field="@field.LookupCond2Field"
+                                               data-cond2-source="@field.LookupCond2ResultField"
+                                               data-selected="@rawValue"
+                                               autocomplete="off"
+                                               style="@editStyleForSelect"
+                                               @Html.Raw(readOnlyAttr) />
+                                        <button type="button" class="lookup-toggle" aria-label="展開下拉" tabindex="-1"></button>
+                                    </div>
+                                    <button type="button" class="lookup-name-btn @(readOnlyClass)" tabindex="-1" title="點擊搜尋">@nameBtnText</button>
                                 </li>
                             }
                             else if (isDateType)
@@ -2008,6 +2031,39 @@
         </div>
     </div>
 </form>
+
+<!-- Lookup 名稱查詢 Modal -->
+<div class="modal fade" id="lookupSearchModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="false" style="pointer-events:none;">
+  <div class="modal-dialog modal-dialog-scrollable" style="max-width:400px; pointer-events:all;">
+    <div class="modal-content" style="font-size:0.78rem;">
+      <div class="modal-header py-1 px-2">
+        <span class="modal-title fw-bold" style="font-size:0.8rem;">名稱查詢</span>
+        <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal" style="font-size:0.6rem;"></button>
+      </div>
+      <div class="modal-body p-1">
+        <div class="d-flex gap-1 mb-1">
+          <input type="text" class="form-control form-control-sm" id="lookupSearchCode" placeholder="代碼篩選" style="font-size:0.75rem;">
+          <input type="text" class="form-control form-control-sm" id="lookupSearchName" placeholder="名稱篩選" style="font-size:0.75rem;">
+        </div>
+        <div style="max-height:260px; overflow-y:auto">
+          <table class="table table-sm table-hover mb-0" id="lookupSearchTable" style="font-size:0.75rem;">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th id="lookupSearchColCode" style="width:35%; padding:2px 4px;">代碼</th>
+                <th style="padding:2px 4px;">名稱</th>
+              </tr>
+            </thead>
+            <tbody id="lookupSearchBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer py-1 px-2">
+        <button type="button" class="btn btn-primary btn-sm py-0 px-2" id="lookupSearchConfirm" style="font-size:0.75rem;">確定</button>
+        <button type="button" class="btn btn-secondary btn-sm py-0 px-2" data-bs-dismiss="modal" style="font-size:0.75rem;">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>window._dictTableName = "@(ViewData["DictTableName"] ?? Model.TableName)";</script>
 
@@ -2610,8 +2666,9 @@ async function saveHeaderForm() {
         if (typeof window.__paper3lSubDetailRefresh === 'function') {
           try { await window.__paper3lSubDetailRefresh(); } catch {}
         }
+        Swal.fire({ icon: 'success', title: '已儲存', timer: 800, showConfirmButton: false, toast: true, position: 'top-end' });
       } else {
-        Swal.fire({ icon: 'info', title: '沒有資料異動' });
+        Swal.fire({ icon: 'info', title: '沒有資料異動', timer: 1500, showConfirmButton: false, toast: true, position: 'top-end' });
       }
       return { ok: true };
     }
@@ -2641,7 +2698,11 @@ window.__autoSaveHeader = () => {
   if (!getHeaderEditState()) return;
   if (autoSaveHeaderTimer) clearTimeout(autoSaveHeaderTimer);
   autoSaveHeaderTimer = setTimeout(async () => {
-    if (autoSaveHeaderInFlight) return;
+    if (autoSaveHeaderInFlight) {
+      // 前一次存檔進行中，等待完成後再執行一次
+      window.__autoSaveHeader();
+      return;
+    }
     autoSaveHeaderInFlight = true;
     try { await saveHeaderForm(); } finally { autoSaveHeaderInFlight = false; }
   }, 200);
@@ -3594,7 +3655,15 @@ $(function () {
     const initMapped = mapLookupKey(initRaw, labelToKey);
     const initFallback = initRaw.split(' - ')[0] || initRaw;
     const initKey = (initMapped && initMapped !== initRaw) ? initMapped : initFallback;
-    if (initKey !== '') inputEl.value = formatLookupDisplay(initKey, getLookupLabel(initKey, keyToLabel));
+    if (initKey !== '') {
+      const initLabel = getLookupLabel(initKey, keyToLabel);
+      if (inputEl.classList.contains('lookup-code-input')) {
+        inputEl.value = initKey;
+        updateLookupNameBtn(inputEl, initLabel);
+      } else {
+        inputEl.value = formatLookupDisplay(initKey, initLabel);
+      }
+    }
     const hidden = inputEl.closest('li')?.querySelector('input.lookup-key[name]');
     if (hidden) hidden.value = initKey;
     syncLookupLabel(inputEl);
@@ -3788,7 +3857,12 @@ $(function () {
       if (!allowApply) { closeLookupDropdown(); return; }
       const key = item.dataset.key ?? '';
       const label = getLookupLabel(key, input._lookupKeyToLabel || {});
-      input.value = key ? formatLookupDisplay(key, label) : '';
+      if (input.classList.contains('lookup-code-input')) {
+        input.value = key || '';
+        updateLookupNameBtn(input, label);
+      } else {
+        input.value = key ? formatLookupDisplay(key, label) : '';
+      }
       const hidden = input.closest('li')?.querySelector('input.lookup-key[name]');
       if (hidden) hidden.value = key;
       input.dataset.selected = key ?? '';
@@ -3797,8 +3871,9 @@ $(function () {
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
       } catch {}
-      if (input.closest('.erp-header-form') && typeof window.__autoSaveHeader === 'function') {
-        window.__autoSaveHeader();
+      if (input.closest('.erp-header-form')) {
+        window.__unsavedChanges = true;
+        if (typeof saveHeaderForm === 'function') saveHeaderForm().catch(() => {});
       }
       closeLookupDropdown();
     };
@@ -3816,6 +3891,121 @@ $(function () {
     document.addEventListener('keydown', onLookupKeydown, true);
     window.addEventListener('resize', onLookupResize, true);
   }
+
+  // 輔助：更新 lookup-split-field 的名稱按鈕文字（自動去除 "代碼 - " 前綴）
+  function updateLookupNameBtn(inputEl, labelText) {
+    const nameBtn = inputEl.closest('li')?.querySelector('.lookup-name-btn');
+    if (!nameBtn) return;
+    const code = (inputEl.value || inputEl.dataset.selected || '').trim();
+    let display = String(labelText || '');
+    if (code) {
+      const prefix = code.toLowerCase() + ' - ';
+      if (display.toLowerCase().startsWith(prefix)) display = display.substring(prefix.length);
+    }
+    nameBtn.textContent = display;
+  }
+  window.updateLookupNameBtn = updateLookupNameBtn;
+
+  // 名稱按鈕點擊 → 開啟名稱查詢 Modal
+  let _lookupSearchTargetInput = null;
+  let _lookupSearchSelectedKey = null;
+  let _lookupSearchModalInstance = null;
+
+  function renderLookupSearchRows(items, filterCode, filterName, currentKey) {
+    const tbody = document.getElementById('lookupSearchBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    items.forEach(item => {
+      if (filterCode && !String(item.key).toLowerCase().includes(filterCode)) return;
+      if (filterName && !String(item.label).toLowerCase().includes(filterName)) return;
+      const tr = document.createElement('tr');
+      tr.dataset.key = item.key;
+      tr.style.cursor = 'pointer';
+      const tdCode = document.createElement('td');
+      tdCode.textContent = item.key;
+      const tdName = document.createElement('td');
+      // 去除 "代碼 - " 前綴，名稱欄只顯示名稱
+      const _namePrefix = String(item.key || '').toLowerCase() + ' - ';
+      const _nameRaw = String(item.label || '');
+      tdName.textContent = _nameRaw.toLowerCase().startsWith(_namePrefix) ? _nameRaw.substring(_namePrefix.length) : _nameRaw;
+      tr.appendChild(tdCode);
+      tr.appendChild(tdName);
+      if (item.key === currentKey) {
+        tr.classList.add('table-primary');
+        _lookupSearchSelectedKey = item.key;
+      }
+      tr.addEventListener('click', () => {
+        tbody.querySelectorAll('tr').forEach(r => r.classList.remove('table-primary'));
+        tr.classList.add('table-primary');
+        _lookupSearchSelectedKey = item.key;
+        applyLookupSearchSelection();
+      });
+      tbody.appendChild(tr);
+    });
+  }
+
+  function openLookupSearchModal(inputEl) {
+    _lookupSearchTargetInput = inputEl;
+    _lookupSearchSelectedKey = null;
+    const items = inputEl._lookupItems || [];
+    const currentKey = inputEl.dataset.selected || inputEl.value || '';
+    const codeFilterEl = document.getElementById('lookupSearchCode');
+    const nameFilterEl = document.getElementById('lookupSearchName');
+    if (codeFilterEl) codeFilterEl.value = '';
+    if (nameFilterEl) nameFilterEl.value = '';
+    renderLookupSearchRows(items, '', '', currentKey);
+    if (codeFilterEl) codeFilterEl.oninput = () =>
+      renderLookupSearchRows(items, codeFilterEl.value.toLowerCase(), nameFilterEl?.value.toLowerCase() || '', currentKey);
+    if (nameFilterEl) nameFilterEl.oninput = () =>
+      renderLookupSearchRows(items, codeFilterEl?.value.toLowerCase() || '', nameFilterEl.value.toLowerCase(), currentKey);
+    _lookupSearchModalInstance = bootstrap.Modal.getOrCreateInstance(document.getElementById('lookupSearchModal'), { backdrop: false, keyboard: true });
+    _lookupSearchModalInstance.show();
+    setTimeout(() => { if (codeFilterEl) codeFilterEl.focus(); }, 300);
+  }
+
+  function applyLookupSearchSelection() {
+    if (!_lookupSearchTargetInput || !_lookupSearchSelectedKey) return;
+    const input = _lookupSearchTargetInput;
+    const keyToLabel = input._lookupKeyToLabel || {};
+    const key = _lookupSearchSelectedKey;
+    const label = getLookupLabel(key, keyToLabel);
+    input.value = key;
+    updateLookupNameBtn(input, label);
+    const hidden = input.closest('li')?.querySelector('input.lookup-key[name]');
+    if (hidden) hidden.value = key;
+    input.dataset.selected = key;
+    syncLookupLabel(input);
+    try {
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch {}
+    _lookupSearchModalInstance?.hide();
+    if (input.closest('.erp-header-form')) {
+      window.__unsavedChanges = true;
+      if (typeof saveHeaderForm === 'function') saveHeaderForm().catch(() => {});
+    }
+  }
+
+  document.addEventListener('click', function(e) {
+    const nameBtn = e.target.closest('.lookup-name-btn');
+    if (!nameBtn) return;
+    const li = nameBtn.closest('li');
+    if (!li) return;
+    const codeInput = li.querySelector('input.lookup-code-input');
+    if (!codeInput) return;
+    if (codeInput.dataset.lookupLoaded !== '1') {
+      if (typeof loadLookupOptions === 'function') loadLookupOptions(codeInput);
+      const waitOpen = () => {
+        if (codeInput.dataset.lookupLoading === '1') { setTimeout(waitOpen, 60); return; }
+        openLookupSearchModal(codeInput);
+      };
+      setTimeout(waitOpen, 60);
+    } else {
+      openLookupSearchModal(codeInput);
+    }
+  });
+
+  document.getElementById('lookupSearchConfirm')?.addEventListener('click', applyLookupSearchSelection);
 
   $('.lookup-dropdown').each(function() {
     const el = this;
@@ -3853,7 +4043,12 @@ $(function () {
         const key = window.safeMapLookupKey(raw, this._lookupLabelToKey || {});
         const label = getLookupLabel(key, keyToLabel);
         if (label) {
-          this.value = formatLookupDisplay(key, label);
+          if (this.classList.contains('lookup-code-input')) {
+            this.value = key || raw;
+            updateLookupNameBtn(this, label);
+          } else {
+            this.value = formatLookupDisplay(key, label);
+          }
           syncLookupLabel(this);
         }
         setTimeout(() => {
@@ -4677,12 +4872,18 @@ function getHeaderValueByLabel(labelText) {
     const fallback = raw.split(' - ')[0] || raw;
     const key = (mapped && mapped !== raw) ? mapped : fallback;
     const labelText = getLookupLabel(key, keyToLabel);
-    const display = formatLookupDisplay(key, labelText);
-    if (labelText && raw !== display) {
-      selectEl.value = display;
-    }
-    if (label && label.classList.contains('lookup-label')) {
-      label.textContent = display || raw;
+    if (selectEl.classList.contains('lookup-code-input')) {
+      // 代碼+名稱分離模式：input 只顯示代碼，名稱顯示在 name btn
+      if (key && selectEl.value !== key) selectEl.value = key;
+      updateLookupNameBtn(selectEl, labelText);
+    } else {
+      const display = formatLookupDisplay(key, labelText);
+      if (labelText && raw !== display) {
+        selectEl.value = display;
+      }
+      if (label && label.classList.contains('lookup-label')) {
+        label.textContent = display || raw;
+      }
     }
     const hidden = selectEl.closest('li')?.querySelector('input.lookup-key[name]');
     if (hidden) hidden.value = raw === '' ? '' : key;
@@ -5168,6 +5369,63 @@ body.modal-open #topToolbar{
 .erp-header-form .lookup-dropdown{
   padding-right: 24px !important;
 }
+/* 代碼+名稱分離 lookup 欄位 */
+.lookup-split-field .lookup-code-wrap{
+  position: relative;
+  flex: 0 0 auto;
+  max-width: 42%;
+  min-width: 50px;
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+}
+/* input 填滿 wrapper，padding-right 為 toggle 留空間 */
+.lookup-split-field .lookup-code-wrap input.lookup-code-input{
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  padding-right: 24px !important;
+}
+/* toggle 定位在 wrapper 右端（覆蓋 code input 右側） */
+.lookup-split-field .lookup-code-wrap .lookup-toggle{
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.lookup-split-field .lookup-name-btn{
+  flex: 1 1 auto;
+  align-self: stretch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  justify-content: center;
+  padding: 2px 8px;
+  background: var(--bs-body-bg, #fff);
+  border: 1px solid #ced4da;
+  border-left: none;
+  font-size: var(--field-value-size);
+  line-height: 1.2;
+  cursor: pointer;
+  min-width: 0;
+  color: var(--bs-body-color, #495057);
+  border-radius: 0 !important;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+}
+.lookup-split-field .lookup-name-btn:hover{
+  background: #f8f9fa;
+}
+.lookup-split-field .lookup-name-btn.dict-readonly{
+  background-color: var(--bs-secondary-bg, #e9ecef) !important;
+  color: var(--bs-secondary-color, #6c757d) !important;
+  cursor: default;
+}
+#lookupSearchModal .modal-dialog{ margin: 4rem auto; }
+#lookupSearchModal #lookupSearchBody td{ padding: 2px 4px; }
+#lookupSearchModal #lookupSearchBody tr:hover{ cursor:pointer; }
 .erp-header-form .date-dropdown{
   padding-right: 24px !important;
 }
@@ -5215,11 +5473,18 @@ body.modal-open #topToolbar{
   display: block;
   width: 100%;
   border: 0;
+  margin: 0;
   background: transparent;
   text-align: left;
-  padding: 6px 10px;
-  font-size: var(--field-value-size);
+  padding: 1px 8px;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  height: auto;
+  box-sizing: border-box;
   cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .lookup-dropdown-item:hover,
 .lookup-dropdown-item:focus{
