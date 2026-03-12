@@ -890,6 +890,22 @@ function enableFormLayoutEditing(container, dictName) {
   const formState = {}; // { [tabKey]: { tableName, dictName, extras, keyFields, editable } }
   let currentFormKey = 'master';
   let formEditMode = false;
+  window.ccsPrompt = window.ccsPrompt || function(message, type = 'info') {
+    const text = (message ?? '').toString();
+    if (window.Swal?.fire) {
+      const icon = type === 'error' ? 'error'
+        : type === 'warning' ? 'warning'
+        : type === 'success' ? 'success'
+        : 'info';
+      const opts = { icon, title: text, confirmButtonText: '確定' };
+      if (icon === 'success') {
+        opts.timer = 1200;
+        opts.showConfirmButton = false;
+      }
+      return window.Swal.fire(opts);
+    }
+    window.alert(text);
+  };
 
   document.addEventListener('DOMContentLoaded', () => {
   const tabs = Array.from(document.querySelectorAll('[data-table][data-dict]'));
@@ -1013,13 +1029,14 @@ function enableFormLayoutEditing(container, dictName) {
       addShortName.value = String(data.shortName || '');
       if (emptyShortName !== '1' && !addCompanyName.value.trim()) addCompanyName.value = addShortName.value.trim();
     };
-    const addCompany = async (companyId, companyName, overwrite, allowOtherSubSystem) => {
+    const addCompany = async (companyId, companyName, overwrite, overwriteChecked, allowOtherSubSystem) => {
       const body = {
         itemId: ('@Model.ItemId' || 'CC000054').toString(),
         systemId: detailSystemId || 1,
         companyId,
         companyName,
         overwrite,
+        overwriteChecked,
         allowOtherSubSystem
       };
       const resp = await fetch('/api/CCSCompanyAdd/add', {
@@ -1044,29 +1061,23 @@ function enableFormLayoutEditing(container, dictName) {
         modal.show();
         addCompanyId.focus();
       } catch (err) {
-        alert('讀取新增清單失敗：' + err);
+        window.ccsPrompt('讀取新增清單失敗：' + err);
       }
     };
 
-    addCompanyId.addEventListener('change', () => syncShortName().catch(err => alert('讀取客廠簡稱失敗：' + err)));
+    addCompanyId.addEventListener('change', () => syncShortName().catch(err => window.ccsPrompt('讀取客廠簡稱失敗：' + err)));
     addCompanyId.addEventListener('blur', () => syncShortName().catch(() => { }));
 
     btnConfirm.addEventListener('click', async () => {
       const cid = (addCompanyId.value || '').trim();
       const cname = (addCompanyName.value || '').trim();
-      if (!cid || !cname) { alert('客戶/廠商編號與簡稱不可空白'); return; }
-      try {
-        const warnResp = await fetch(`/api/CCSCompanyAdd/check-shortname?shortName=${encodeURIComponent(cname)}`);
-        const warnData = await warnResp.json().catch(() => ({}));
-        if (warnResp.ok && warnData?.success && !!warnData.exists) {
-          alert('提示：系統內已有此簡稱的客廠資料。');
-        }
-      } catch { }
+      if (!cid || !cname) { window.ccsPrompt('客戶/廠商編號與簡稱不可空白'); return; }
       let overwrite = false;
+      let overwriteChecked = false;
       let allowOther = false;
       try {
         while (true) {
-          const result = await addCompany(cid, cname, overwrite, allowOther);
+          const result = await addCompany(cid, cname, overwrite, overwriteChecked, allowOther);
           if (result?.success) {
             modal.hide();
             const sysId = result.systemId || detailSystemId || 1;
@@ -1078,9 +1089,9 @@ function enableFormLayoutEditing(container, dictName) {
             window.location.href = u.toString();
             return;
           }
-          if (result?.needOverwriteConfirm && !overwrite) {
-            if (!confirm('查詢到有舊資料,是否覆蓋客戶舊資料?')) return;
-            overwrite = true;
+          if (result?.needOverwriteConfirm && !overwriteChecked) {
+            overwrite = confirm('查詢到有舊資料,是否覆蓋客戶舊資料?');
+            overwriteChecked = true;
             continue;
           }
           if (result?.needOtherSubSystemConfirm && !allowOther) {
@@ -1088,12 +1099,12 @@ function enableFormLayoutEditing(container, dictName) {
             allowOther = true;
             continue;
           }
-          if ((result?.code || '') === 'DUPLICATE_CODE') { alert('代碼重複!!'); return; }
-          alert((result?.message || '新增失敗').toString());
+          if ((result?.code || '') === 'DUPLICATE_CODE') { window.ccsPrompt('代碼重複!!'); return; }
+          window.ccsPrompt((result?.message || '新增失敗').toString());
           return;
         }
       } catch (err) {
-        alert('新增失敗：' + err);
+        window.ccsPrompt('新增失敗：' + err);
       }
     });
   };
@@ -1237,7 +1248,7 @@ function enableFormLayoutEditing(container, dictName) {
         modal.show();
         getInput('dqCompanyLike')?.focus();
       } catch (err) {
-        alert('讀取查詢條件失敗：' + err);
+        window.ccsPrompt('讀取查詢條件失敗：' + err);
       }
     };
     ['dqCompanyLike','dqCompanyStart','dqCompanyEnd','dqShortName','dqPhone','dqFax','dqUniFormId','dqCompanyName','dqCompanyAddr','dqBnsItem']
@@ -1281,10 +1292,10 @@ function enableFormLayoutEditing(container, dictName) {
         const json = await resp.json().catch(() => ({}));
         if (!resp.ok || !json?.success) throw new Error(json?.error || json?.message || resp.statusText || 'query failed');
         const first = Array.isArray(json.items) ? json.items[0] : null;
-        if (!first) { alert('查無資料'); return; }
+        if (!first) { window.ccsPrompt('查無資料'); return; }
         const cidKey = Object.keys(first).find(k => String(k).toLowerCase() === 'companyid');
         const cid = cidKey ? String(first[cidKey] || '').trim() : '';
-        if (!cid) { alert('查無公司代碼'); return; }
+        if (!cid) { window.ccsPrompt('查無公司代碼'); return; }
         modal.hide();
         const u = new URL('@Url.Page("CC000054Detail", new { itemId = Model.ItemId, systemId = Model.SystemId })', window.location.origin);
         u.searchParams.set('CompanyId', cid);
@@ -1292,7 +1303,7 @@ function enableFormLayoutEditing(container, dictName) {
         if (returnUrlRaw) u.searchParams.set('returnUrl', returnUrlRaw);
         window.location.href = u.toString();
       } catch (err) {
-        alert('查詢失敗：' + err);
+        window.ccsPrompt('查詢失敗：' + err);
       }
     });
     // Preload once so first open equals second open.
@@ -2052,11 +2063,11 @@ function enableFormLayoutEditing(container, dictName) {
     if (!editor) return;
     const res = await editor.saveChanges();
     if (res.ok) {
-      alert('儲存成功');
+      window.ccsPrompt('儲存成功');
       toggleGridEdit(tabKey, false);
       if (currentCompany) loadTabData(tabKey, currentCompany);
     } else {
-      alert('儲存失敗: ' + (res.text || ''));
+      window.ccsPrompt('儲存失敗: ' + (res.text || ''));
     }
   };
 
@@ -2405,11 +2416,11 @@ function enableFormLayoutEditing(container, dictName) {
         } else if (btnType === 'save' || btnType === 'confirm') {
           const res = await saveFormChanges(tabKey);
           if (res?.ok) {
-            alert('儲存成功');
+            window.ccsPrompt('儲存成功');
             applyFormEditMode(false);
             if (currentCompany) loadTabData(tabKey, currentCompany);
           } else {
-            alert('儲存失敗: ' + (res?.text || ''));
+            window.ccsPrompt('儲存失敗: ' + (res?.text || ''));
           }
         }
         return;
@@ -2469,7 +2480,7 @@ function enableFormLayoutEditing(container, dictName) {
       const ensureSelectedAttachRow = () => {
         const row = getSelectedAttachRow();
         if (!row) {
-          alert('請先選取一筆附件資料');
+          window.ccsPrompt('請先選取一筆附件資料');
           return null;
         }
         return row;
@@ -2554,7 +2565,7 @@ function enableFormLayoutEditing(container, dictName) {
         const img = modalEl?.querySelector('#ccsAttachPreviewImage');
         const frame = modalEl?.querySelector('#ccsAttachPreviewFrame');
         if (!modalEl || !frame || !img) {
-          alert('預覽視窗初始化失敗');
+          window.ccsPrompt('預覽視窗初始化失敗');
           return;
         }
         if (isImagePath(rawPath)) {
@@ -2607,7 +2618,7 @@ function enableFormLayoutEditing(container, dictName) {
         if (!editor) return;
         if (!editor.isEdit?.()) toggleGridEdit(tabKey, true);
         const selectedRow = table?.querySelector('tbody tr.selected, tbody tr.table-active');
-        if (!selectedRow) { alert('請先選擇要刪除的資料列'); return; }
+        if (!selectedRow) { window.ccsPrompt('請先選擇要刪除的資料列'); return; }
 
         // New unsaved row: remove directly. Existing row: stage delete only.
         if (selectedRow.dataset.state === 'added') {
@@ -2630,8 +2641,8 @@ function enableFormLayoutEditing(container, dictName) {
         selectGridRow(table, row);
         if (!tabState[tabKey]?.isEdit?.()) toggleGridEdit(tabKey, true);
         const input = getAttachInput(row);
-        if (!input) { alert('找不到夾檔路徑欄位'); return; }
-        if (input.readOnly || input.disabled) { alert('夾檔路徑欄位目前為唯讀，請先確認資料辭典設定。'); return; }
+        if (!input) { window.ccsPrompt('找不到夾檔路徑欄位'); return; }
+        if (input.readOnly || input.disabled) { window.ccsPrompt('夾檔路徑欄位目前為唯讀，請先確認資料辭典設定。'); return; }
         const picker = document.createElement('input');
         picker.type = 'file';
         picker.style.display = 'none';
@@ -2644,18 +2655,18 @@ function enableFormLayoutEditing(container, dictName) {
               formData.append('file', file);
               const resp = await fetch('/api/CompanyAttachFile/Upload', { method: 'POST', body: formData });
               if (!resp.ok) {
-                alert(await resp.text());
+                window.ccsPrompt(await resp.text());
                 return;
               }
               const result = await resp.json();
               const savedPath = String(result?.fullPath || result?.fileName || '').trim();
               if (!savedPath) {
-                alert('上傳成功但未取得檔案路徑');
+                window.ccsPrompt('上傳成功但未取得檔案路徑');
                 return;
               }
               setAttachPath(row, savedPath);
             } catch (err) {
-              alert('上傳失敗：' + err);
+              window.ccsPrompt('上傳失敗：' + err);
               return;
             }
           }
@@ -2673,9 +2684,9 @@ function enableFormLayoutEditing(container, dictName) {
         const row = ensureSelectedAttachRow();
         if (!row) return;
         const rawPath = getAttachPath(row);
-        if (!rawPath) { alert('目前附件路徑為空白'); return; }
+        if (!rawPath) { window.ccsPrompt('目前附件路徑為空白'); return; }
         const openUrl = toPreviewUrl(rawPath);
-        if (!openUrl) { alert('目前附件路徑為空白'); return; }
+        if (!openUrl) { window.ccsPrompt('目前附件路徑為空白'); return; }
         openAttachPreview(openUrl, rawPath);
       }
     });
@@ -2877,7 +2888,7 @@ function enableFormLayoutEditing(container, dictName) {
         if (gridEditor?.isEdit?.()) {
           const gridRes = await gridEditor.saveChanges();
           if (!gridRes?.ok) {
-            alert(`儲存失敗(${activeTabKey}): ${gridRes?.text || ''}`);
+            window.ccsPrompt(`儲存失敗(${activeTabKey}): ${gridRes?.text || ''}`);
             return;
           }
           if (currentCompany) loadTabData(activeTabKey, currentCompany);
@@ -2889,11 +2900,11 @@ function enableFormLayoutEditing(container, dictName) {
       for (const key of toSave) {
         const res = await saveFormChanges(key);
         if (!res.ok) {
-          alert(`儲存失敗(${key}): ${res.text || ''}`);
+          window.ccsPrompt(`儲存失敗(${key}): ${res.text || ''}`);
           return;
         }
       }
-      alert('儲存成功');
+      window.ccsPrompt('儲存成功');
       applyFormEditMode(false);
       if (currentCompany && targetFormKey && targetFormKey !== 'master') loadTabData(targetFormKey, currentCompany);
       return;
@@ -2909,11 +2920,11 @@ function enableFormLayoutEditing(container, dictName) {
           for (const key of toSave) {
             const res = await saveFormChanges(key);
             if (!res.ok) {
-              alert(`儲存失敗(${key}): ${res.text || ''}`);
+              window.ccsPrompt(`儲存失敗(${key}): ${res.text || ''}`);
               return;
             }
           }
-          alert('儲存成功');
+          window.ccsPrompt('儲存成功');
           applyFormEditMode(false);
           if (currentCompany && activeFormKey && activeFormKey !== 'master') loadTabData(activeFormKey, currentCompany);
         })();
@@ -2921,7 +2932,7 @@ function enableFormLayoutEditing(container, dictName) {
         if (typeof window.openCcsDetailAddDialog === 'function') {
           await window.openCcsDetailAddDialog();
         } else {
-          alert('新增視窗尚未初始化');
+          window.ccsPrompt('新增視窗尚未初始化');
         }
       } else if (action === 'cancel') {
         applyFormEditMode(false);
@@ -2956,7 +2967,7 @@ function enableFormLayoutEditing(container, dictName) {
   topAdd?.addEventListener('click', async () => { await triggerTabAction('add'); });
   topDelete?.addEventListener('click', async () => {
     const paperNum = String(currentCompany || '').trim();
-    if (!paperNum) { alert('尚未選取公司代碼'); return; }
+    if (!paperNum) { window.ccsPrompt('尚未選取公司代碼'); return; }
     if (!confirm(`確定要刪除：${paperNum} ?`)) return;
     try {
       const json = await window.CcsCompanyActions.deleteSystemLink({
@@ -2964,12 +2975,12 @@ function enableFormLayoutEditing(container, dictName) {
         itemId: (window._singleItemId || 'CC000054').toString(),
         systemId: Number(window._cc000054SystemId || '@Model.SystemId' || 0)
       });
-      alert(json?.message || '刪除完成');
+      window.ccsPrompt(json?.message || '刪除完成');
       const backUrl = getBackListUrl();
       backUrl.searchParams.delete('selectedCompanyId');
       location.href = backUrl.toString();
     } catch (err) {
-      alert('刪除失敗：' + err);
+      window.ccsPrompt('刪除失敗：' + err);
     }
   });
   topQuery?.addEventListener('click', () => {
@@ -2991,7 +3002,7 @@ function enableFormLayoutEditing(container, dictName) {
   };
   topLog?.addEventListener('click', async () => {
     const paperNum = String(currentCompany || '').trim();
-    if (!paperNum) { alert('尚未選取公司代碼'); return; }
+    if (!paperNum) { window.ccsPrompt('尚未選取公司代碼'); return; }
     if (typeof window.openSharedUpdateLog === 'function') {
       await window.openSharedUpdateLog({
         paperId: (window._singleRealTable || 'AJNdCompany').toString(),
@@ -3000,12 +3011,12 @@ function enableFormLayoutEditing(container, dictName) {
       });
       return;
     }
-    alert('記錄視窗尚未載入');
+    window.ccsPrompt('記錄視窗尚未載入');
   });
   topShowSys?.addEventListener('click', async () => {
     const cid = String(currentCompany || '').trim();
     if (!cid) {
-      alert('尚未選取公司代碼');
+      window.ccsPrompt('尚未選取公司代碼');
       return;
     }
     const modalEl = document.getElementById('showSystemModal');
@@ -3051,7 +3062,7 @@ function enableFormLayoutEditing(container, dictName) {
       sys8Row?.classList.toggle('d-none', !showSys8);
       sys9Row?.classList.toggle('d-none', !showSys9);
     } catch (err) {
-      alert('讀取檢視身分失敗：' + err);
+      window.ccsPrompt('讀取檢視身分失敗：' + err);
     }
 
     modal.show();
@@ -3900,5 +3911,6 @@ function enableFormLayoutEditing(container, dictName) {
 <script src="~/js/ccsUpdateLog.js" asp-append-version="true"></script>
 
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
 
 

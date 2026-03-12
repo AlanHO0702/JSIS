@@ -500,7 +500,7 @@ where SystemId = 9;", conn))
             await conn.OpenAsync();
 
             var companyExists = await GetCompanyExistsAsync(conn, companyId);
-            if (companyExists && !req.Overwrite)
+            if (companyExists && !req.Overwrite && !req.OverwriteChecked)
             {
                 return Ok(new
                 {
@@ -895,6 +895,7 @@ where o.type in ('P','PC') and o.name = @procName;", conn))
         public string? CompanyId { get; set; }
         public string? CompanyName { get; set; }
         public bool Overwrite { get; set; }
+        public bool OverwriteChecked { get; set; }
         public bool AllowOtherSubSystem { get; set; }
     }
 

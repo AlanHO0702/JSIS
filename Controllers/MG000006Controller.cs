@@ -94,12 +94,20 @@ public class MG000006Controller : ControllerBase
         if (string.IsNullOrWhiteSpace(matClass))
             return BadRequest(new { ok = false, error = "蝻箏? MatClass" });
 
-        await using var conn = new SqlConnection(_connStr);
-        await conn.OpenAsync();
-        await using var cmd = new SqlCommand("DELETE FROM dbo.MINdMatClass WHERE MatClass = @matClass", conn);
-        cmd.Parameters.Add(new SqlParameter("@matClass", SqlDbType.VarChar, 8) { Value = matClass.Trim() });
-        var affected = await cmd.ExecuteNonQueryAsync();
-        return Ok(new { ok = affected > 0, affected });
+        try
+        {
+            await using var conn = new SqlConnection(_connStr);
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand("DELETE FROM dbo.MINdMatClass WHERE MatClass = @matClass", conn);
+            cmd.Parameters.Add(new SqlParameter("@matClass", SqlDbType.VarChar, 8) { Value = matClass.Trim() });
+            var affected = await cmd.ExecuteNonQueryAsync();
+            return Ok(new { ok = affected > 0, affected });
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogWarning(ex, "MG000006 delete mat-class failed, MatClass={MatClass}", matClass);
+            return ErrorText(StatusCodes.Status400BadRequest, FirstLine(ex.Message));
+        }
     }
 
     [HttpGet("setnum-main")]
@@ -122,12 +130,20 @@ SELECT m.*,
         if (string.IsNullOrWhiteSpace(setClass))
             return BadRequest(new { ok = false, error = "蝻箏? SetClass" });
 
-        await using var conn = new SqlConnection(_connStr);
-        await conn.OpenAsync();
-        await using var cmd = new SqlCommand("DELETE FROM dbo.MGNdSetNumMain WHERE SetClass = @setClass", conn);
-        cmd.Parameters.Add(new SqlParameter("@setClass", SqlDbType.VarChar, 12) { Value = setClass.Trim() });
-        var affected = await cmd.ExecuteNonQueryAsync();
-        return Ok(new { ok = affected > 0, affected });
+        try
+        {
+            await using var conn = new SqlConnection(_connStr);
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand("DELETE FROM dbo.MGNdSetNumMain WHERE SetClass = @setClass", conn);
+            cmd.Parameters.Add(new SqlParameter("@setClass", SqlDbType.VarChar, 12) { Value = setClass.Trim() });
+            var affected = await cmd.ExecuteNonQueryAsync();
+            return Ok(new { ok = affected > 0, affected });
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogWarning(ex, "MG000006 delete setnum-main failed, SetClass={SetClass}", setClass);
+            return ErrorText(StatusCodes.Status400BadRequest, FirstLine(ex.Message));
+        }
     }
 
     [HttpGet("setnum-sub")]
@@ -147,13 +163,21 @@ SELECT m.*,
         if (string.IsNullOrWhiteSpace(setClass) || string.IsNullOrWhiteSpace(numId))
             return BadRequest(new { ok = false, error = "蝻箏? SetClass ??NumId" });
 
-        await using var conn = new SqlConnection(_connStr);
-        await conn.OpenAsync();
-        await using var cmd = new SqlCommand("DELETE FROM dbo.MGNdSetNumSub WHERE SetClass = @setClass AND NumId = @numId", conn);
-        cmd.Parameters.Add(new SqlParameter("@setClass", SqlDbType.VarChar, 12) { Value = setClass.Trim() });
-        cmd.Parameters.Add(new SqlParameter("@numId", SqlDbType.Char, 1) { Value = numId.Trim() });
-        var affected = await cmd.ExecuteNonQueryAsync();
-        return Ok(new { ok = affected > 0, affected });
+        try
+        {
+            await using var conn = new SqlConnection(_connStr);
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand("DELETE FROM dbo.MGNdSetNumSub WHERE SetClass = @setClass AND NumId = @numId", conn);
+            cmd.Parameters.Add(new SqlParameter("@setClass", SqlDbType.VarChar, 12) { Value = setClass.Trim() });
+            cmd.Parameters.Add(new SqlParameter("@numId", SqlDbType.Char, 1) { Value = numId.Trim() });
+            var affected = await cmd.ExecuteNonQueryAsync();
+            return Ok(new { ok = affected > 0, affected });
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogWarning(ex, "MG000006 delete setnum-sub failed, SetClass={SetClass}, NumId={NumId}", setClass, numId);
+            return ErrorText(StatusCodes.Status400BadRequest, FirstLine(ex.Message));
+        }
     }
 
     [HttpGet("setnum-subdtl")]
@@ -176,14 +200,22 @@ SELECT m.*,
         if (string.IsNullOrWhiteSpace(setClass) || string.IsNullOrWhiteSpace(numId) || string.IsNullOrWhiteSpace(encode))
             return BadRequest(new { ok = false, error = "蝻箏? SetClass / NumId / EnCode" });
 
-        await using var conn = new SqlConnection(_connStr);
-        await conn.OpenAsync();
-        await using var cmd = new SqlCommand("DELETE FROM dbo.MGNdSetNumSubDtl WHERE SetClass = @setClass AND NumId = @numId AND EnCode = @encode", conn);
-        cmd.Parameters.Add(new SqlParameter("@setClass", SqlDbType.VarChar, 12) { Value = setClass.Trim() });
-        cmd.Parameters.Add(new SqlParameter("@numId", SqlDbType.Char, 1) { Value = numId.Trim() });
-        cmd.Parameters.Add(new SqlParameter("@encode", SqlDbType.VarChar, 24) { Value = encode.Trim() });
-        var affected = await cmd.ExecuteNonQueryAsync();
-        return Ok(new { ok = affected > 0, affected });
+        try
+        {
+            await using var conn = new SqlConnection(_connStr);
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand("DELETE FROM dbo.MGNdSetNumSubDtl WHERE SetClass = @setClass AND NumId = @numId AND EnCode = @encode", conn);
+            cmd.Parameters.Add(new SqlParameter("@setClass", SqlDbType.VarChar, 12) { Value = setClass.Trim() });
+            cmd.Parameters.Add(new SqlParameter("@numId", SqlDbType.Char, 1) { Value = numId.Trim() });
+            cmd.Parameters.Add(new SqlParameter("@encode", SqlDbType.VarChar, 24) { Value = encode.Trim() });
+            var affected = await cmd.ExecuteNonQueryAsync();
+            return Ok(new { ok = affected > 0, affected });
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogWarning(ex, "MG000006 delete setnum-subdtl failed, SetClass={SetClass}, NumId={NumId}, EnCode={EnCode}", setClass, numId, encode);
+            return ErrorText(StatusCodes.Status400BadRequest, FirstLine(ex.Message));
+        }
     }
 
     [HttpPost("test-number")]
@@ -448,6 +480,26 @@ SELECT TableName, FieldName, ISNULL(iFieldWidth, 0) AS W, ISNULL(DisplaySize, 0)
         if (parts.Count == 0) return null;
         if (parts.Any(p => !Regex.IsMatch(p, @"^[A-Za-z0-9_]+$"))) return null;
         return string.Join(".", parts.Select(p => $"[{p}]"));
+    }
+
+    private static string FirstLine(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return "資料庫作業失敗";
+        var line = message
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => x.Trim())
+            .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+        return string.IsNullOrWhiteSpace(line) ? message.Trim() : line;
+    }
+
+    private static ContentResult ErrorText(int statusCode, string message)
+    {
+        return new ContentResult
+        {
+            StatusCode = statusCode,
+            ContentType = "text/plain; charset=utf-8",
+            Content = message
+        };
     }
 
     private async Task<List<IDictionary<string, object?>>> QueryListAsync(string sql, params SqlParameter[] parameters)
