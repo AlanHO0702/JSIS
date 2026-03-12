@@ -2653,7 +2653,13 @@ window.__autoSaveDetail = () => {
   autoSaveDetailTimer = setTimeout(async () => {
     if (autoSaveDetailInFlight) return;
     autoSaveDetailInFlight = true;
-    try { await saveMultiTabChanges({ silentSuccess: true }); } finally { autoSaveDetailInFlight = false; }
+    try {
+      const result = await saveMultiTabChanges({ silentSuccess: true });
+      if (result?.ok && result?.hasChanges) {
+        window.__unsavedChanges = false;
+        if (typeof window.updateSaveCheckButtons === 'function') window.updateSaveCheckButtons();
+      }
+    } finally { autoSaveDetailInFlight = false; }
   }, 200);
 };
 
@@ -2962,6 +2968,8 @@ if (editBtn) {
       const detailSave = await saveMultiTabChanges();
       if (!detailSave.ok) return;
       setHeaderEditMode(false);
+      // 存檔後重新載入單身，補齊 LOOKUP 欄位顯示值
+      if (typeof window.__refreshMultiTab === 'function') await window.__refreshMultiTab();
       return;
     }
 
@@ -4345,6 +4353,7 @@ window.__updateToolbarCounts = updateToolbarCounts;
   }
 
   const addMultiTabBlankRow = async () => {
+    if (!getHeaderEditState()) return { ok: false, reason: 'not-editing' };
     const ctx = getActiveMultiTabCtx();
     if (!ctx || !ctx.tbody) return { ok: false, reason: 'no-multitab' };
     const { activePane, tbody } = ctx;
@@ -4354,9 +4363,17 @@ window.__updateToolbarCounts = updateToolbarCounts;
       .map(th => (th.dataset.field || '').toString())
       .filter(Boolean);
     if (!fields.length) return { ok: false, reason: 'no-fields' };
+    // 從現有 td 讀對齊（th 永遠是 align-left，對齊是由 td 的 getAlignClass 決定）
+    const refRow = Array.from(tbody.querySelectorAll('tr')).find(tr =>
+      tr.dataset.state !== 'added' && tr.dataset.state !== 'empty'
+    ) || tbody.querySelector('tr');
     const alignMap = new Map(headerCells.map(th => {
       const key = (th.dataset.field || '').toString().toLowerCase();
-      const alignClass = th.classList.contains('align-right') ? 'align-right' : 'align-left';
+      const f = th.dataset.field || '';
+      const refTd = refRow?.querySelector(`td[data-field="${CSS.escape(f)}"]`);
+      const alignClass = refTd
+        ? (refTd.classList.contains('align-right') ? 'align-right' : 'align-left')
+        : 'align-left';
       return [key, alignClass];
     }));
 
@@ -4383,11 +4400,17 @@ window.__updateToolbarCounts = updateToolbarCounts;
         const n = parseInt(tr.dataset.item || '', 10);
         if (!isNaN(n) && n > maxItem) maxItem = n;
       });
+      const reusedItem = maxItem + 1;
       tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
       reusableRow.classList.add('row-selected');
       reusableRow.dataset.state = 'added';
       if (!reusableRow.dataset.paperNum) reusableRow.dataset.paperNum = pn;
-      if (!reusableRow.dataset.item) reusableRow.dataset.item = String(maxItem + 1);
+      reusableRow.dataset.item = String(reusedItem);
+      // 填入項次欄位值
+      const reusedItemInp = reusableRow.querySelector('input.cell-edit[data-field="Item"], input.cell-edit[data-field="item"]');
+      if (reusedItemInp) { reusedItemInp.value = String(reusedItem); reusedItemInp.dataset.init = String(reusedItem); }
+      const reusedItemView = reusableRow.querySelector('td[data-field="Item"] .cell-view, td[data-field="item"] .cell-view');
+      if (reusedItemView) reusedItemView.textContent = String(reusedItem);
       reusableRow.querySelectorAll('.cell-view').forEach(el => el.classList.add('d-none'));
       reusableRow.querySelectorAll('.cell-edit').forEach(el => el.classList.remove('d-none'));
       reusableRow.querySelector('.cell-edit')?.focus();
@@ -4405,8 +4428,21 @@ window.__updateToolbarCounts = updateToolbarCounts;
       tr.dataset.state === 'empty' || isMultiTabBlankRow(tr, fields)
     );
     if (pendingAfterAwait) {
+      let maxItem2 = 0;
+      tbody.querySelectorAll('tr').forEach(tr => {
+        const n = parseInt(tr.dataset.item || '', 10);
+        if (!isNaN(n) && n > maxItem2) maxItem2 = n;
+      });
+      const pendingItem = maxItem2 + 1;
+      pendingAfterAwait.dataset.item = String(pendingItem);
+      if (!pendingAfterAwait.dataset.paperNum) pendingAfterAwait.dataset.paperNum = pn;
+      const pendingItemInp = pendingAfterAwait.querySelector('input.cell-edit[data-field="Item"], input.cell-edit[data-field="item"]');
+      if (pendingItemInp) { pendingItemInp.value = String(pendingItem); pendingItemInp.dataset.init = String(pendingItem); }
+      const pendingItemView = pendingAfterAwait.querySelector('td[data-field="Item"] .cell-view, td[data-field="item"] .cell-view');
+      if (pendingItemView) pendingItemView.textContent = String(pendingItem);
       tbody.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
       pendingAfterAwait.classList.add('row-selected');
+      pendingAfterAwait.dataset.state = 'added';
       pendingAfterAwait.querySelectorAll('.cell-view').forEach(el => el.classList.add('d-none'));
       pendingAfterAwait.querySelectorAll('.cell-edit').forEach(el => el.classList.remove('d-none'));
       pendingAfterAwait.querySelector('.cell-edit')?.focus();
@@ -4429,11 +4465,13 @@ window.__updateToolbarCounts = updateToolbarCounts;
         const isReadOnly = !!readOnlyMap[fieldKey];
         const roClass = isReadOnly ? ' readonly-cell' : '';
         const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
-        const defVal = (defaults && Object.prototype.hasOwnProperty.call(defaults, field)) ? defaults[field] : '';
+        const defVal = fieldKey === 'item'
+          ? newItem
+          : (defaults && Object.prototype.hasOwnProperty.call(defaults, field)) ? defaults[field] : '';
         const value = defVal == null ? '' : String(defVal);
         const safeValue = escAttr(value);
         const alignClass = alignMap.get(fieldKey) || 'align-left';
-        html += `<td class="${alignClass}" data-readonly="${isReadOnly ? '1' : '0'}">
+        html += `<td data-field="${escAttr(field)}" class="${alignClass}" data-readonly="${isReadOnly ? '1' : '0'}">
           <span class="${viewClass}${roClass}" data-init-view="${safeValue}" data-readonly="${isReadOnly ? '1' : '0'}">${safeValue}</span>
           <input type="text" class="${editClass}${roClass}" data-field="${field}" data-init="${safeValue}" value="${safeValue}"${roAttr}>
         </td>`;
@@ -4481,6 +4519,8 @@ window.__updateToolbarCounts = updateToolbarCounts;
       selectedRow.remove();
       if (next) next.classList.add('row-selected');
       if (typeof window.__updateToolbarCounts === 'function') window.__updateToolbarCounts();
+      window.__unsavedChanges = false;
+      if (typeof window.updateSaveCheckButtons === 'function') window.updateSaveCheckButtons();
       return { ok: true };
     }
 
@@ -4508,6 +4548,8 @@ window.__updateToolbarCounts = updateToolbarCounts;
     selectedRow.remove();
     if (next) next.classList.add('row-selected');
     if (typeof window.__updateToolbarCounts === 'function') window.__updateToolbarCounts();
+    window.__unsavedChanges = false;
+    if (typeof window.updateSaveCheckButtons === 'function') window.updateSaveCheckButtons();
     return { ok: true };
   };
 
@@ -4521,6 +4563,8 @@ window.__updateToolbarCounts = updateToolbarCounts;
       return { handled: true, ok: false, reason: 'add-failed', error: err?.message || String(err) };
     }
   };
+
+  window.__addMultiTabBlankRow = addMultiTabBlankRow;
 
   btnAdd?.addEventListener('click', async () => {
     const api = pickApi();
@@ -4559,7 +4603,12 @@ window.__updateToolbarCounts = updateToolbarCounts;
     }
     const r3 = await tryDeletePaper3L();
     if (r3?.handled) {
-      if (r3?.ok || r3?.canceled) return;
+      if (r3?.canceled) return;
+      if (r3?.ok) {
+        window.__unsavedChanges = false;
+        if (typeof window.updateSaveCheckButtons === 'function') window.updateSaveCheckButtons();
+        return;
+      }
       if (r3?.reason === 'no-row') return warn('請先選取列再刪除');
       if (r3?.reason === 'no-keys') return warn('找不到第三階鍵欄位');
       if (r3?.reason === 'delete-failed') return warn(`刪除失敗：${r3.error || ''}`.trim());
