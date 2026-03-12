@@ -8,6 +8,19 @@
     return Object.assign({}, init || {}, { headers: headers });
   }
 
+  function showPrompt(message, type) {
+    var text = message == null ? '' : String(message);
+    if (typeof window.ccsPrompt === 'function') return window.ccsPrompt(text, type || 'info');
+    if (window.Swal && typeof window.Swal.fire === 'function') {
+      var icon = type === 'error' ? 'error'
+        : type === 'warning' ? 'warning'
+        : type === 'success' ? 'success'
+        : 'info';
+      return window.Swal.fire({ icon: icon, title: text, confirmButtonText: '確定' });
+    }
+    window.alert(text);
+  }
+
   function ensureModal() {
     var modalEl = document.getElementById('updateLogModal');
     if (modalEl) return modalEl;
@@ -196,7 +209,7 @@
     var paperId = (opt && opt.paperId) ? String(opt.paperId).trim() : '';
 
     if (!paperNum) {
-      alert('請先選取一筆資料');
+      showPrompt('請先選取一筆資料', 'warning');
       return;
     }
 
@@ -211,7 +224,7 @@
     var historyRows = a.history.length ? a.history : ((b && b.history) || []);
 
     if (!a.ok && !(b && b.ok)) {
-      alert('讀取記錄失敗：' + (a.error || (b && b.error) || 'unknown'));
+      showPrompt('讀取記錄失敗：' + (a.error || (b && b.error) || 'unknown'), 'error');
       return;
     }
 

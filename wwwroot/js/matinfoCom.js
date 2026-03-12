@@ -260,6 +260,9 @@
   const dictTypeMap = new Map();
   const formDictCache = { fields: null };
   const formDictTypeMap = new Map();
+  const formLookupFields = new Map();
+  const formLookupOptionsCache = new Map();
+  const formLookupControlMap = new Map();
   const numericTypes = new Set(['int', 'smallint', 'tinyint', 'bigint', 'decimal', 'numeric', 'float', 'real', 'money', 'smallmoney']);
   const dateTypes = new Set(['date', 'datetime', 'smalldatetime', 'datetime2', 'datetimeoffset', 'time']);
   const forcedNumericFields = new Set([
@@ -1535,6 +1538,26 @@
       el.checked = value === true || value === 1 || value === '1';
       return;
     }
+    if ((el.dataset.lookupEnabled || '') === '1') {
+      const code = value == null ? '' : String(value).trim();
+      el.dataset.lookupValue = code;
+      const field = (el.getAttribute('data-field') || '').toString().trim().toLowerCase();
+      const ctrl = formLookupControlMap.get(field);
+      if (!code) {
+        el.value = '';
+        return;
+      }
+      if (ctrl?.options?.length) {
+        const hit = ctrl.options.find((o) => String(o.value).trim() === code);
+        if (hit) {
+          const label = (hit.label || '').trim();
+          el.value = label ? `${code} ${label}` : code;
+          return;
+        }
+      }
+      el.value = code;
+      return;
+    }
     el.value = value ?? '';
   }
 
@@ -1554,6 +1577,9 @@
         el.checked = false;
       } else {
         el.value = '';
+        if ((el.dataset.lookupEnabled || '') === '1') {
+          el.dataset.lookupValue = '';
+        }
       }
     });
     syncSpecTypeName();
@@ -1564,9 +1590,14 @@
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
         if (el.readOnly || el.hasAttribute('readonly')) return;
         el.disabled = !enabled;
+        if ((el.dataset.lookupEnabled || '') === '1') {
+          const btn = el.closest('.matinfo-lookup')?.querySelector('.matinfo-lookup-btn');
+          if (btn) btn.disabled = !enabled || (el.dataset.readonly || '') === '1';
+        }
         return;
       }
       if (el instanceof HTMLSelectElement) {
+        if ((el.dataset.readonly || '') === '1') return;
         el.disabled = !enabled;
       }
     });
@@ -1634,7 +1665,10 @@
         data[field] = coerceFormValue(field, el.checked, true, recordValue);
         return;
       }
-      data[field] = coerceFormValue(field, el.value ?? '', false, recordValue);
+      const rawValue = (el.dataset.lookupEnabled || '') === '1'
+        ? (el.dataset.lookupValue ?? '')
+        : (el.value ?? '');
+      data[field] = coerceFormValue(field, rawValue, false, recordValue);
     });
     return data;
   }
@@ -1772,6 +1806,7 @@
         if (key) formDictTypeMap.set(key, type);
       });
       renderBasic2Fields(formDictCache.fields);
+      await applyFormLookupControls(formDictCache.fields);
       applyPanelDict(formDictCache.fields);
       return formDictCache.fields;
     } catch (err) {
@@ -1790,6 +1825,7 @@
         label: (f.DisplayLabel || f.displayLabel || key).toString(),
         visible: Number(f.Visible ?? f.visible ?? 1) === 1,
         readOnly: Number(f.ReadOnly ?? f.readOnly ?? 0) === 1,
+        editColor: (f.EditColor ?? f.editColor ?? '').toString().trim(),
         serial: Number(f.SerialNum ?? f.serialNum ?? 9999),
         layRow: Number(f.iLayRow ?? f.iLayrow ?? f.iLayRow ?? 0),
         layCol: Number(f.iLayColumn ?? f.iLaycolumn ?? f.iLayCol ?? 0),
@@ -1799,12 +1835,346 @@
     return map;
   }
 
+  function getFieldLookupMeta(row) {
+    const table = (getRowValue(row, 'LookupTable') ?? '').toString().trim();
+    const key = (getRowValue(row, 'LookupKeyField') ?? '').toString().trim();
+    const result = (getRowValue(row, 'LookupResultField') ?? '').toString().trim();
+    if (!table || !key || !result) return null;
+    return { table, key, result };
+  }
+
+  function getLookupCacheKey(meta) {
+    return `${meta.table}|${meta.key}|${meta.result}`.toLowerCase();
+  }
+
+  async function getLookupOptions(meta) {
+    const cacheKey = getLookupCacheKey(meta);
+    if (formLookupOptionsCache.has(cacheKey)) return formLookupOptionsCache.get(cacheKey);
+    const map = await buildLookupMapFromApi(meta.table, meta.key, meta.result);
+    const list = Array.from(map.entries()).map(([value, label]) => ({
+      value: value == null ? '' : String(value),
+      label: label == null ? '' : String(label)
+    }));
+    list.forEach((opt) => {
+      const code = (opt.value || '').trim();
+      let name = (opt.label || '').trim();
+      if (code && name.toLowerCase().startsWith(code.toLowerCase())) {
+        name = name.substring(code.length).trim();
+        if (name.startsWith('-')) name = name.substring(1).trim();
+      }
+      opt.label = name;
+    });
+    list.sort((a, b) => a.value.localeCompare(b.value, 'zh-Hant', { numeric: true, sensitivity: 'base' }));
+    formLookupOptionsCache.set(cacheKey, list);
+    return list;
+  }
+
+  const formLookupSuggest = document.createElement('div');
+  formLookupSuggest.className = 'matinfo-lookup-suggest';
+  formLookupSuggest.style.display = 'none';
+  document.body.appendChild(formLookupSuggest);
+  let formLookupSuggestTarget = null;
+  let formLookupSuggestOptions = [];
+  let formLookupSuggestFiltered = [];
+  let formLookupSuggestActiveIndex = -1;
+  let keepLookupSuggestUntil = 0;
+
+  function hideFormLookupSuggest() {
+    if (Date.now() < keepLookupSuggestUntil) return;
+    formLookupSuggest.style.display = 'none';
+    formLookupSuggest.innerHTML = '';
+    formLookupSuggestTarget = null;
+    formLookupSuggestOptions = [];
+    formLookupSuggestFiltered = [];
+    formLookupSuggestActiveIndex = -1;
+  }
+
+  function positionFormLookupSuggest(input) {
+    if (!input) return;
+    const rect = input.getBoundingClientRect();
+    const w = Math.max(rect.width, 280);
+    formLookupSuggest.style.left = `${rect.left + window.scrollX}px`;
+    formLookupSuggest.style.top = `${rect.bottom + window.scrollY}px`;
+    formLookupSuggest.style.width = `${w}px`;
+  }
+
+  function formatLookupDisplayText(code, name) {
+    const c = (code || '').toString().trim();
+    const n = (name || '').toString().trim();
+    if (!c) return '';
+    return n ? `${c} ${n}` : c;
+  }
+
+  function applyLookupValue(input, code, options) {
+    const c = (code || '').toString().trim();
+    input.dataset.lookupValue = c;
+    if (!c) {
+      input.value = '';
+      return;
+    }
+    const hit = (options || []).find((o) => String(o.value || '').trim() === c);
+    input.value = hit ? formatLookupDisplayText(hit.value, hit.label) : c;
+  }
+
+  function getLookupOptionFromText(text, options) {
+    const t = (text || '').toString().trim();
+    if (!t) return null;
+    return (options || []).find((o) => {
+      const c = (o.value || '').toString().trim();
+      const n = (o.label || '').toString().trim();
+      const d = formatLookupDisplayText(c, n);
+      return c === t || n === t || d === t;
+    }) || null;
+  }
+
+  function moveLookupActive(step) {
+    if (!formLookupSuggestFiltered.length) return;
+    if (formLookupSuggestActiveIndex < 0) formLookupSuggestActiveIndex = step > 0 ? 0 : formLookupSuggestFiltered.length - 1;
+    else formLookupSuggestActiveIndex = (formLookupSuggestActiveIndex + step + formLookupSuggestFiltered.length) % formLookupSuggestFiltered.length;
+    const items = Array.from(formLookupSuggest.querySelectorAll('.matinfo-lookup-item'));
+    items.forEach((el, idx) => el.classList.toggle('active', idx === formLookupSuggestActiveIndex));
+    const active = items[formLookupSuggestActiveIndex];
+    if (active && typeof active.scrollIntoView === 'function') {
+      active.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function renderFormLookupSuggest(input, options, forceAll = false) {
+    const q = forceAll ? '' : String(input.value || '').trim().toLowerCase();
+    const filtered = q
+      ? (options || []).filter((o) => {
+          const c = (o.value || '').toString().toLowerCase();
+          const n = (o.label || '').toString().toLowerCase();
+          return c.includes(q) || n.includes(q);
+        })
+      : (options || []);
+    formLookupSuggestFiltered = filtered.slice(0, 200);
+    formLookupSuggest.innerHTML = '';
+    formLookupSuggestActiveIndex = -1;
+    if (!formLookupSuggestFiltered.length) {
+      hideFormLookupSuggest();
+      return;
+    }
+
+    formLookupSuggestFiltered.forEach((o, idx) => {
+      const item = document.createElement('div');
+      item.className = 'matinfo-lookup-item';
+      const code = (o.value || '').toString().trim();
+      const name = (o.label || '').toString().trim();
+      item.innerHTML = `<div class="matinfo-lookup-code">${code}</div><div class="matinfo-lookup-name">${name}</div>`;
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        applyLookupValue(input, code, options);
+        hideFormLookupSuggest();
+      });
+      if (idx === 0) item.classList.add('active');
+      formLookupSuggest.appendChild(item);
+    });
+    formLookupSuggestActiveIndex = 0;
+    positionFormLookupSuggest(input);
+    formLookupSuggest.style.display = 'block';
+  }
+
+  function ensureLookupInputControl(el) {
+    let input = el;
+    if (el instanceof HTMLSelectElement) {
+      const next = document.createElement('input');
+      const attrs = Array.from(el.attributes);
+      attrs.forEach((attr) => {
+        const name = attr.name.toLowerCase();
+        if (name === 'readonly') return;
+        next.setAttribute(attr.name, attr.value);
+      });
+      next.className = el.className;
+      next.value = el.value ?? '';
+      el.replaceWith(next);
+      input = next;
+    }
+    if (!(input instanceof HTMLInputElement)) return null;
+    if ((input.dataset.lookupEnabled || '') === '1') return input;
+
+    const wrapper = document.createElement('span');
+    wrapper.className = 'matinfo-lookup';
+    const styleText = input.getAttribute('style');
+    if (styleText) {
+      wrapper.setAttribute('style', styleText);
+      input.removeAttribute('style');
+    }
+    if (input.classList.contains('abs-item')) {
+      wrapper.classList.add('abs-item');
+      input.classList.remove('abs-item');
+    }
+    input.parentNode?.insertBefore(wrapper, input);
+    wrapper.appendChild(input);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'matinfo-lookup-btn';
+    btn.setAttribute('aria-label', '開啟清單');
+    btn.textContent = '▾';
+    wrapper.appendChild(btn);
+
+    input.classList.add('matinfo-lookup-display');
+    input.dataset.lookupEnabled = '1';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    return input;
+  }
+
+  async function showFormLookupSuggest(input, forceAll = true) {
+    const fieldName = (input.getAttribute('data-field') || '').toString().trim().toLowerCase();
+    const ctrl = formLookupControlMap.get(fieldName);
+    if (!ctrl) return;
+    if (!ctrl.optionsLoaded) {
+      ctrl.options = await getLookupOptions(ctrl.meta);
+      ctrl.optionsLoaded = true;
+    }
+    formLookupSuggestTarget = input;
+    formLookupSuggestOptions = ctrl.options || [];
+    const code = (input.dataset.lookupValue || '').trim();
+    if (code && (!input.value || input.value === code)) {
+      applyLookupValue(input, code, formLookupSuggestOptions);
+    }
+    renderFormLookupSuggest(input, formLookupSuggestOptions, forceAll);
+  }
+
+  async function applyFormLookupControls(rows) {
+    if (!form) return;
+    formLookupFields.clear();
+    (rows || []).forEach((row) => {
+      const fieldName = (getRowValue(row, 'FieldName') ?? '').toString().trim().toLowerCase();
+      if (!fieldName) return;
+      const meta = getFieldLookupMeta(row);
+      if (!meta) return;
+      formLookupFields.set(fieldName, {
+        meta,
+        readOnly: Number(getRowValue(row, 'ReadOnly') ?? 0) === 1
+      });
+    });
+    if (formLookupFields.size === 0) return;
+
+    const controls = Array.from(form.querySelectorAll('[data-field]'));
+    for (const el of controls) {
+      const fieldName = (el.getAttribute('data-field') || '').toString().trim().toLowerCase();
+      if (!fieldName) continue;
+      const cfg = formLookupFields.get(fieldName);
+      if (!cfg) continue;
+      if (el instanceof HTMLTextAreaElement) continue;
+      if (el instanceof HTMLInputElement && el.type === 'checkbox') continue;
+      const target = ensureLookupInputControl(el);
+      if (!(target instanceof HTMLInputElement)) continue;
+
+      let ctrl = formLookupControlMap.get(fieldName);
+      if (!ctrl) {
+        const btn = target.closest('.matinfo-lookup')?.querySelector('.matinfo-lookup-btn');
+        ctrl = { input: target, button: btn, meta: cfg.meta, options: [], optionsLoaded: false };
+        formLookupControlMap.set(fieldName, ctrl);
+
+        target.addEventListener('focus', () => showFormLookupSuggest(target, true));
+        target.addEventListener('input', () => {
+          if (formLookupSuggestTarget !== target) {
+            showFormLookupSuggest(target, false);
+            return;
+          }
+          renderFormLookupSuggest(target, formLookupSuggestOptions, false);
+        });
+        target.addEventListener('keydown', async (e) => {
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (formLookupSuggestTarget !== target || formLookupSuggest.style.display === 'none') {
+              await showFormLookupSuggest(target, true);
+            }
+            moveLookupActive(e.key === 'ArrowDown' ? 1 : -1);
+            return;
+          }
+          if (e.key === 'Enter') {
+            if (formLookupSuggestTarget !== target || formLookupSuggest.style.display === 'none') return;
+            e.preventDefault();
+            const pick = formLookupSuggestFiltered[formLookupSuggestActiveIndex];
+            if (!pick) return;
+            applyLookupValue(target, pick.value, formLookupSuggestOptions);
+            hideFormLookupSuggest();
+            return;
+          }
+          if (e.key === 'Escape') {
+            hideFormLookupSuggest();
+            return;
+          }
+        });
+        target.addEventListener('blur', () => {
+          setTimeout(() => {
+            if (!formLookupSuggest.matches(':hover')) hideFormLookupSuggest();
+          }, 120);
+          const options = ctrl.options || [];
+          const text = (target.value || '').trim();
+          if (!text) {
+            target.dataset.lookupValue = '';
+            return;
+          }
+          const hit = getLookupOptionFromText(text, options);
+          if (hit) {
+            applyLookupValue(target, hit.value, options);
+          } else {
+            applyLookupValue(target, target.dataset.lookupValue || '', options);
+          }
+        });
+
+        if (btn) {
+          const openLookup = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            keepLookupSuggestUntil = Date.now() + 250;
+            target.focus();
+            showFormLookupSuggest(target, true);
+          };
+          btn.addEventListener('pointerdown', openLookup);
+          btn.addEventListener('mousedown', openLookup);
+          btn.addEventListener('click', openLookup);
+        }
+      } else {
+        ctrl.meta = cfg.meta;
+      }
+
+      ctrl.options = await getLookupOptions(cfg.meta);
+      ctrl.optionsLoaded = true;
+      applyLookupValue(target, target.dataset.lookupValue || target.value || '', ctrl.options);
+      if (cfg.readOnly || target.readOnly || target.hasAttribute('readonly')) {
+        target.dataset.readonly = '1';
+        target.readOnly = true;
+        if (ctrl.button) ctrl.button.disabled = true;
+      } else {
+        target.dataset.readonly = '0';
+        target.readOnly = false;
+        if (ctrl.button) ctrl.button.disabled = false;
+      }
+    }
+  }
+
+  formLookupSuggest.addEventListener('mousedown', () => {
+    keepLookupSuggestUntil = Date.now() + 250;
+  });
+  document.addEventListener('click', (e) => {
+    if (!formLookupSuggestTarget) return;
+    if (e.target === formLookupSuggestTarget || formLookupSuggest.contains(e.target)) return;
+    const wrap = formLookupSuggestTarget.closest('.matinfo-lookup');
+    if (wrap && wrap.contains(e.target)) return;
+    hideFormLookupSuggest();
+  });
+  window.addEventListener('resize', () => {
+    if (formLookupSuggestTarget && formLookupSuggest.style.display !== 'none') {
+      positionFormLookupSuggest(formLookupSuggestTarget);
+    }
+  });
+
   function findLabelForField(input) {
     if (!input) return null;
     const parent = input.parentElement;
     if (!parent) return null;
     const prev = input.previousElementSibling;
     if (prev && prev.tagName === 'LABEL') return prev;
+    const host = input.closest('.matinfo-lookup') || parent;
+    const hostPrev = host?.previousElementSibling;
+    if (hostPrev && hostPrev.tagName === 'LABEL') return hostPrev;
     return null;
   }
 
@@ -1814,6 +2184,28 @@
     labelEl.textContent = '';
     if (inputEl) labelEl.appendChild(inputEl);
     labelEl.appendChild(document.createTextNode(` ${text}`));
+  }
+
+  function normalizeEditColor(raw) {
+    if (raw == null) return '';
+    let s = String(raw).trim();
+    if (!s) return '';
+    if (s.toLowerCase().startsWith('cl')) s = s.substring(2);
+    return s;
+  }
+
+  function applyEditColor(el, raw) {
+    if (!el) return;
+    const color = normalizeEditColor(raw);
+    if (!color) {
+      el.style.removeProperty('background-color');
+      return;
+    }
+    if (typeof el.style?.setProperty === 'function') {
+      el.style.setProperty('background-color', color, 'important');
+    } else {
+      el.style.backgroundColor = color;
+    }
   }
 
   function getRowValue(row, key) {
@@ -1860,7 +2252,7 @@
 
   const panelLayoutTweaks = {
     MGN_MINdMatInfo2PNL: {
-      rowGap: 10,
+      rowGap: 12,
       fieldLeftPad: 8,
       fieldWidthPad: 10,
       labelWidthPad: 8,
@@ -1878,7 +2270,12 @@
       showWhere: layout.showWhere
     };
     const rowIndex = readNum(row, 'iLayRow');
-    if (rowIndex && rowIndex > 0 && tweaks.rowGap) {
+    // Delphi behavior: when absolute top coordinates exist, do not also add iLayRow offset.
+    // Otherwise fields with both settings get shifted twice.
+    const hasAbsoluteTop =
+      ((adjusted.field.top ?? 0) > 0) ||
+      ((adjusted.label.top ?? 0) > 0);
+    if (!hasAbsoluteTop && rowIndex && rowIndex > 0 && tweaks.rowGap) {
       const rowOffset = (rowIndex - 1) * tweaks.rowGap;
       if (adjusted.field.top != null) adjusted.field.top += rowOffset;
       if (adjusted.label.top != null) adjusted.label.top += rowOffset;
@@ -2146,17 +2543,28 @@
       if (el.type === 'checkbox') {
         const checkboxLabel = el.closest('label') || label;
         if (checkboxLabel) setCheckboxLabelText(checkboxLabel, cfg.label);
+        applyEditColor(checkboxLabel, cfg.editColor);
+      } else {
+        applyEditColor(el, cfg.editColor);
       }
       if (cfg.readOnly) {
-        if (el instanceof HTMLSelectElement) el.disabled = true;
+        if (el instanceof HTMLSelectElement) {
+          el.dataset.readonly = '1';
+          el.disabled = true;
+        }
         else if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) el.readOnly = true;
+      } else if (el instanceof HTMLSelectElement) {
+        el.dataset.readonly = '0';
       }
+      const lookupWrap = el.closest('.matinfo-lookup');
       if (!cfg.visible) {
         if (label) label.style.display = 'none';
-        el.style.display = 'none';
+        if (lookupWrap) lookupWrap.style.display = 'none';
+        else el.style.display = 'none';
       } else {
         if (label) label.style.display = '';
-        el.style.display = '';
+        if (lookupWrap) lookupWrap.style.display = '';
+        else el.style.display = '';
       }
     });
 
@@ -2692,6 +3100,49 @@
     currentRecord = row;
   }
 
+  function sameRecordKey(row, partnum, revision) {
+    if (!row) return false;
+    const rp = String(getValue(row, 'Partnum') ?? '').trim();
+    const rr = String(getValue(row, 'Revision') ?? '').trim();
+    return rp === String(partnum ?? '').trim() && rr === String(revision ?? '').trim();
+  }
+
+  function findRecordIndex(partnum, revision, preferredIndex = null) {
+    if (Number.isFinite(preferredIndex) && preferredIndex >= 0 && preferredIndex < dataCache.length) {
+      if (sameRecordKey(dataCache[preferredIndex], partnum, revision)) return preferredIndex;
+    }
+    return dataCache.findIndex((row) => sameRecordKey(row, partnum, revision));
+  }
+
+  function upsertRecordToCache(record, preferredIndex = null) {
+    const partnum = String(getValue(record, 'Partnum') ?? '').trim();
+    const revision = String(getValue(record, 'Revision') ?? '').trim();
+    let idx = findRecordIndex(partnum, revision, preferredIndex);
+    if (idx >= 0) {
+      dataCache[idx] = { ...(dataCache[idx] || {}), ...(record || {}) };
+      return idx;
+    }
+    dataCache.push(record);
+    totalCount = dataCache.length;
+    updateCount();
+    return dataCache.length - 1;
+  }
+
+  async function stayOnSavedRecord(data, partnum, revision, preferredIndex = null) {
+    let saved = null;
+    if (useCommonTable) {
+      saved = await fetchCommonRecord(partnum, revision);
+    }
+    const merged = saved || {
+      ...(currentRecord || {}),
+      ...(data || {}),
+      Partnum: partnum,
+      Revision: revision
+    };
+    const idx = upsertRecordToCache(merged, preferredIndex);
+    selectRecord(dataCache[idx], idx);
+  }
+
   function selectRecord(item, index) {
     if (!item) return;
     fillForm(item);
@@ -3012,7 +3463,8 @@
         return false;
       }
       notify('success', isNew ? '新增完成' : '儲存完成');
-      await loadData();
+      const preferredIndex = isNew ? null : Math.max(0, currentIndex - 1);
+      await stayOnSavedRecord(data, partnum, revision, preferredIndex);
       return true;
     }
 
@@ -3027,7 +3479,7 @@
         return false;
       }
       notify('success', '新增完成');
-      await loadData();
+      await stayOnSavedRecord(data, partnum, revision, null);
       return true;
     }
 
@@ -3047,7 +3499,7 @@
       return false;
     }
     notify('success', '儲存完成');
-    await loadData();
+    await stayOnSavedRecord(data, partnum, revision, Math.max(0, currentIndex - 1));
     return true;
   }
 
