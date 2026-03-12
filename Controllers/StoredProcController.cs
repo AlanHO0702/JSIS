@@ -122,7 +122,23 @@ public class StoredProcController : ControllerBase
         ["SPOdDebitExamTotalAmount"] = new StoredProcDef(
             ProcName: "dbo.SPOdDebitExamTotalAmount",
             RequiredParams: new[] { "PaperId", "PaperNum", "UserId" }
-        )
+        ),
+
+            // AA000033 物資轉傳票
+            ["AJNdMTL2AAMConfirm"] = new StoredProcDef(
+                ProcName: "dbo.AJNdMTL2AAMConfirm",
+                RequiredParams: new[] { "HisId", "UseId", "UserId", "Type" }
+            ),
+            ["AJNdMTL2AAMScrap"] = new StoredProcDef(
+                ProcName: "dbo.AJNdMTL2AAMScrap",
+                RequiredParams: new[] { "HisId", "UseId", "UserId", "Type", "Scrap" }
+            ),
+
+            // AA000016 年度結轉
+            ["AJNdTransferAccData"] = new StoredProcDef(
+                ProcName: "dbo.AJNdTransferAccData",
+                RequiredParams: new[] { "UseId", "FromDate", "DueDate", "SaveType", "UserId" }
+            )
 
         };
 
@@ -283,31 +299,26 @@ public class StoredProcController : ControllerBase
                     if (args.TryGetValue(p, out var v))
                         cmd.Parameters.AddWithValue("@" + p, ToClr(v) ?? DBNull.Value);
 
-            // 使用 ExecuteReaderAsync 讀取結果集
+            // 使用 ExecuteReaderAsync 讀取所有結果集
             var results = new List<Dictionary<string, object?>>();
 
             // 使用 using 塊確保 reader 在提交事務前完全釋放
             await using (var reader = await cmd.ExecuteReaderAsync())
             {
-                // 讀取第一個結果集的所有行
-                while (await reader.ReadAsync())
+                do
                 {
-                    var row = new Dictionary<string, object?>();
-                    for (int i = 0; i < reader.FieldCount; i++)
+                    while (await reader.ReadAsync())
                     {
-                        var name = reader.GetName(i);
-                        var value = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                        row[name] = value;
+                        var row = new Dictionary<string, object?>();
+                        for (int i = 0; i < reader.FieldCount; i++)
+                        {
+                            var name = reader.GetName(i);
+                            var value = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                            row[name] = value;
+                        }
+                        results.Add(row);
                     }
-                    results.Add(row);
-                }
-
-                // 確保讀取完所有結果集，避免 DataReader 保持打開狀態
-                while (await reader.NextResultAsync())
-                {
-                    // 消耗其他結果集，但不處理它們
-                    while (await reader.ReadAsync()) { }
-                }
+                } while (await reader.NextResultAsync());
             }  // reader 在此處被釋放
 
             await tx.CommitAsync();

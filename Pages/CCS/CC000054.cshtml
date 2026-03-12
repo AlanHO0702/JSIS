@@ -97,8 +97,7 @@
         <datalist id="qCompanyList"></datalist>
       </div>
       <div class="modal-footer py-2">
-        <button type="button" class="btn btn-light btn-sm border" id="btnCompanySelectSearch">查詢</button>
-        <button type="button" class="btn btn-light btn-sm border" id="btnCompanySelectClear">清除</button>
+        <button type="button" class="btn btn-light btn-sm border" id="btnCompanySelectSearch">確認</button>
         <button type="button" class="btn btn-light btn-sm border" data-bs-dismiss="modal">取消</button>
       </div>
     </div>
@@ -467,6 +466,20 @@ document.addEventListener('DOMContentLoaded', () => {
       initLoaded = true;
     };
 
+    const loadNextCompanyId = async () => {
+      const q = new URLSearchParams();
+      q.set('itemId', (window._singleItemId || 'CC000054').toString());
+      q.set('systemId', (window._cc000054SystemId || '1').toString());
+      const resp = await fetch(`/api/CCSCompanyAdd/next-company-id?${q.toString()}`);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.success) return '';
+      const nextCode = (data.companyId || '').toString().trim();
+      if (nextCode && addCompanyId && !addCompanyId.value.trim()) {
+        addCompanyId.value = nextCode;
+      }
+      return nextCode;
+    };
+
     const addCompany = async (companyId, companyName, overwrite, allowOtherSubSystem) => {
       const body = {
         itemId: (window._singleItemId || 'CC000054').toString(),
@@ -491,6 +504,10 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCodeLabel();
         if (!initLoaded) await loadAddInit();
         resetAddForm();
+        await loadNextCompanyId();
+        if ((addCompanyId?.value || '').trim()) {
+          await syncShortName();
+        }
         modal?.show();
         addCompanyId?.focus();
       } catch (err) {
@@ -528,7 +545,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (result?.success) {
             modal?.hide();
             const systemId = result.systemId || window._cc000054SystemId || 1;
-            const detailUrl = `${window._cc000054DetailUrl}?CompanyId=${encodeURIComponent(cid)}&systemId=${encodeURIComponent(systemId)}`;
+            const detailUrl = `${window._cc000054DetailUrl}?CompanyId=${encodeURIComponent(cid)}&systemId=${encodeURIComponent(systemId)}&edit=1`;
             window.location.href = detailUrl;
             return;
           }
@@ -602,11 +619,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+  const initOuterIconButtons = () => {
+    const sgAdd = document.getElementById('sgAdd');
+    const sgDelete = document.getElementById('sgDelete');
+    const sgSave = document.getElementById('sgSave');
+    const sgCancel = document.getElementById('sgCancel');
+    if (sgAdd) sgAdd.classList.add('d-none');
+    if (sgDelete) sgDelete.classList.add('d-none');
+    if (sgSave) {
+      sgSave.disabled = true;
+      sgSave.classList.add('toolbar-btn-check');
+    }
+    if (sgCancel) {
+      sgCancel.disabled = true;
+      sgCancel.classList.add('toolbar-btn-cancel');
+    }
+  };
+
   const initCompanySelectQuery = () => {
     const queryModalEl = document.getElementById('cc000054QueryModal');
     const queryModal = queryModalEl && window.bootstrap ? bootstrap.Modal.getOrCreateInstance(queryModalEl) : null;
     const btnCompanySelectSearch = document.getElementById('btnCompanySelectSearch');
-    const btnCompanySelectClear = document.getElementById('btnCompanySelectClear');
     const qCompanyList = document.getElementById('qCompanyList');
     const qSubClass = document.getElementById('qSubClass');
     const qSalesId = document.getElementById('qSalesId');
@@ -769,7 +802,17 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }, true);
 
-    btnCompanySelectClear?.addEventListener('click', clearQueryForm);
+    ['qCompanyLike','qCompanyStart','qCompanyEnd','qShortName','qPhone','qFax','qUniFormId','qCompanyName','qCompanyAddr','qBnsItem']
+      .forEach(id => {
+        const el = getInput(id);
+        if (!el) return;
+        el.addEventListener('keydown', (ev) => {
+          if (ev.key !== 'Enter') return;
+          ev.preventDefault();
+          btnCompanySelectSearch?.click();
+        });
+      });
+
     btnCompanySelectSearch?.addEventListener('click', () => {
       const url = new URL(window.location.origin + window.location.pathname);
       const setParam = (key, id) => {
@@ -803,6 +846,7 @@ document.addEventListener('DOMContentLoaded', () => {
   restoreSelectedRowFromQuery();
   rememberSelectedRow();
   initAddButton();
+  initOuterIconButtons();
   initOuterToolbarButtons();
   initCompanySelectQuery();
 });
@@ -1022,18 +1066,19 @@ document.addEventListener('DOMContentLoaded', () => {
 }
 
 #cc000054QueryModal .modal-dialog {
-  max-width: 620px;
+  max-width: 560px;
 }
 
 .ccs-query-modal-body {
-  padding: 10px 12px 6px;
+  padding: 8px 10px 4px;
 }
 
 .ccs-query-grid {
   display: grid;
-  grid-template-columns: 170px 1fr;
-  gap: 8px 10px;
+  grid-template-columns: 145px 1fr;
+  gap: 6px 8px;
   align-items: center;
+  font-size: 12px;
 }
 
 .ccs-query-label {
@@ -1042,22 +1087,37 @@ document.addEventListener('DOMContentLoaded', () => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.2;
+  line-height: 1.1;
+  font-size: 12px;
 }
 
 .ccs-query-inline3 {
   display: grid;
-  grid-template-columns: 110px minmax(0, 1fr);
-  gap: 6px;
+  grid-template-columns: 95px minmax(0, 1fr);
+  gap: 5px;
 }
 
 #cc000054QueryModal .form-control-sm,
 #cc000054QueryModal .form-select-sm {
-  height: 32px;
+  height: 27px;
+  min-height: 27px;
+  font-size: 12px;
+  padding: 2px 6px;
+}
+#cc000054QueryModal .form-select-sm {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 20px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath fill='%236b7280' d='M0 0l4 5 4-5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  background-size: 8px 5px;
 }
 
 #cc000054QueryModal .modal-footer .btn {
-  min-width: 72px;
+  min-width: 64px;
+  font-size: 12px;
+  padding: 2px 10px;
 }
 
 #customButtonBarBottom {
