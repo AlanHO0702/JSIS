@@ -127,6 +127,7 @@ public class DictApiController : ControllerBase
                     }
                 }
 
+                AddInt("bFooter", input.bFooter);
                 AddInt("DisplaySize", input.DisplaySize);
                 AddInt("ComboTextSize", input.ComboTextSize);
                 AddInt("iLayRow", input.iLayRow);

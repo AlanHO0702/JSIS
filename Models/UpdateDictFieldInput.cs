@@ -10,6 +10,7 @@ public class UpdateDictFieldInput
     public string FormatStr { get; set; }
     public string FieldNote { get; set; }
     public int? ComboStyle { get; set; }
+    public int? bFooter { get; set; }
     public string? EditColor { get; set; }
     public int? ComboTextSize { get; set; }
 

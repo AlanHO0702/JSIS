@@ -915,6 +915,49 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
 };
 
   // ==============================================================================
+  //  建立合計列 (bFooter)
+  // ==============================================================================
+  const buildFooter = (tableEl, dict, rows) => {
+    if (!tableEl) return;
+
+    const old = tableEl.querySelector('tfoot.md-grid-footer');
+    if (old) old.remove();
+
+    const visibleFields = dict
+      .filter(f => DICT.visible(f))
+      .sort((a, b) => DICT.order(a) - DICT.order(b));
+
+    const hasFooter = visibleFields.some(f => +f.bFooter === 1);
+    if (!hasFooter) return;
+
+    const tfoot = document.createElement('tfoot');
+    tfoot.className = 'md-grid-footer';
+    const tr = document.createElement('tr');
+
+    visibleFields.forEach(f => {
+      const td = document.createElement('td');
+      if (+f.bFooter === 1) {
+        let sum = 0;
+        rows.forEach(row => {
+          if (!row || row.__state === 'deleted') return;
+          const raw = row[f.FieldName];
+          if (raw == null || raw === '') return;
+          const num = parseFloat(String(raw).replace(/,/g, ''));
+          if (Number.isFinite(num)) sum += num;
+        });
+        td.textContent = fmtCell(sum, DICT.fmt(f), DICT.type(f));
+        td.style.textAlign = 'right';
+        td.style.fontWeight = '600';
+        td.style.background = '#f0f4ff';
+      }
+      tr.appendChild(td);
+    });
+
+    tfoot.appendChild(tr);
+    tableEl.appendChild(tfoot);
+  };
+
+  // ==============================================================================
   //  初始化主從頁（initOne）
   // ==============================================================================
   const initOne = async (cfg) => {
@@ -1071,6 +1114,9 @@ const loadAllDetails = async (row) => {
         }
       }
     }, true);
+
+    const detailGridEl = document.getElementById(`${cfg.DomId}-detail-${i}-grid`);
+    buildFooter(detailGridEl, detailDicts[i], rows);
 
     // ★ 當 detail 沒有資料時，放一列空白佔位列，讓使用者可以點擊聚焦到單身區塊
     if (rows.length === 0 && tbody.querySelectorAll("tr").length === 0) {
