@@ -503,9 +503,17 @@ else
                                         </div>
                                     </div>
                                 }
-                                else
+                                else if (tab.Key == "layerroute")
                                 {
-                                    <!-- 其他頁籤：顯示表格 -->
+                                    <!-- 途程內容頁籤：操作按鈕 + 表格 -->
+                                    <div class="d-flex gap-2 align-items-center px-2 py-1 border-bottom flex-wrap" id="layerroute-toolbar">
+                                        <button type="button" id="btnChangeProcRoute" class="btn btn-outline-primary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>C途程異動</button>
+                                        <input type="text" id="currentTmpRouteId" class="form-control form-control-sm text-primary fw-semibold" style="width:120px" readonly placeholder="未設定">
+                                        <button type="button" id="btnNotesStyleTree" class="btn btn-outline-primary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>C途程備註</button>
+                                        <button type="button" id="btnBackupNotes" class="btn btn-outline-secondary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>複製備註</button>
+                                        <button type="button" id="btnPasteNotes" class="btn btn-outline-secondary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>貼上備註</button>
+                                        <button type="button" id="btnRouteChange" class="btn btn-outline-primary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>途程內容變更</button>
+                                    </div>
                                     <div class="table-responsive" data-tab-key="@tab.Key">
                                         <table class="table table-sm table-hover align-middle mb-0"
                                                id="grid-@tab.Key"
@@ -679,6 +687,156 @@ else
   </div>
 </div>
 
+<!-- 生產途程選擇 Modal（C途程異動 / C途程備註 共用） -->
+<div class="modal fade" id="modalRouteSelect" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog" style="max-width:760px">
+    <div class="modal-content d-flex flex-column" style="height:520px">
+      <div class="modal-header py-2">
+        <h6 class="modal-title mb-0" id="modalRouteSelectTitle">生產途程選擇</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <!-- 途程模型 tab（C途程異動使用） -->
+      <div id="routeSelectModelTab" class="flex-grow-1" style="display:flex;overflow:hidden;min-height:0">
+        <!-- 左：範本清單 + 搜尋 -->
+        <div style="width:300px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid #dee2e6">
+          <div class="d-flex gap-1 align-items-center px-2 py-1 border-bottom flex-shrink-0">
+            <input type="text" id="routeSelectSearchTmpId" class="form-control form-control-sm" placeholder="途程代碼" style="width:100px">
+            <input type="text" id="routeSelectSearchNotes" class="form-control form-control-sm" placeholder="備註" style="flex:1">
+            <button type="button" id="btnRouteSelectSearch" class="btn btn-primary btn-sm">查詢</button>
+          </div>
+          <div style="overflow-y:auto;flex:1">
+            <table class="table table-sm table-hover mb-0" style="white-space:nowrap">
+              <thead class="table-light" style="position:sticky;top:0;z-index:1">
+                <tr><th>途程代碼</th><th>備註</th></tr>
+              </thead>
+              <tbody id="routeSelectTmpBody">
+                <tr><td colspan="2" class="text-center text-muted py-3">請查詢</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <!-- 右：所選範本的製程明細 -->
+        <div style="flex:1;overflow-y:auto">
+          <table class="table table-sm mb-0" style="white-space:nowrap">
+            <thead class="table-light" style="position:sticky;top:0;z-index:1">
+              <tr><th>序號</th><th>製程代碼</th><th>製程名稱</th><th>完工比率</th></tr>
+            </thead>
+            <tbody id="routeSelectDtlBody">
+              <tr><td colspan="4" class="text-center text-muted py-3">請選擇範本</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 條件查詢 tab（C途程備註使用） -->
+      <div id="routeSelectQueryTab" class="d-none flex-grow-1 flex-column" style="overflow:hidden;min-height:0">
+        <div class="d-flex gap-2 align-items-center px-3 py-2 border-bottom flex-shrink-0 flex-wrap">
+          <div class="input-group input-group-sm" style="width:200px">
+            <span class="input-group-text">途程代碼</span>
+            <input type="text" id="routeNoteSearchTmpId" class="form-control form-control-sm" placeholder="模糊搜尋">
+          </div>
+          <div class="input-group input-group-sm" style="width:200px">
+            <span class="input-group-text">備　　　註</span>
+            <input type="text" id="routeNoteSearchNotes" class="form-control form-control-sm" placeholder="模糊搜尋">
+          </div>
+          <button type="button" id="btnRouteNoteSearch" class="btn btn-primary btn-sm">查詢</button>
+        </div>
+        <div style="overflow-y:auto;flex:1">
+          <table class="table table-sm table-hover mb-0" style="white-space:nowrap">
+            <thead class="table-light" style="position:sticky;top:0;z-index:1">
+              <tr><th>途程代碼</th><th>備註</th></tr>
+            </thead>
+            <tbody id="routeNoteQueryBody">
+              <tr><td colspan="2" class="text-center text-muted py-3">請查詢</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-footer py-2">
+        <button type="button" id="btnRouteSelectConfirm" class="btn btn-primary btn-sm">確定</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 途程內容變更 Modal（生産途程設定） -->
+<div class="modal fade" id="modalRouteChange" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog" style="max-width:700px">
+    <div class="modal-content d-flex flex-column" style="height:540px">
+      <div class="modal-header py-2">
+        <h6 class="modal-title mb-0">途程內容變更</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <!-- 搜尋列 -->
+      <div class="d-flex gap-1 align-items-center px-3 py-2 border-bottom flex-shrink-0 flex-wrap">
+        <div class="input-group input-group-sm" style="width:160px">
+          <span class="input-group-text">起始製程</span>
+          <input type="text" id="rcBProc" class="form-control form-control-sm">
+        </div>
+        <div class="input-group input-group-sm" style="width:160px">
+          <span class="input-group-text">結束製程</span>
+          <input type="text" id="rcEProc" class="form-control form-control-sm">
+        </div>
+        <div class="input-group input-group-sm" style="width:140px">
+          <span class="input-group-text">代碼</span>
+          <input type="text" id="rcProcLike" class="form-control form-control-sm" placeholder="模糊">
+        </div>
+        <div class="input-group input-group-sm" style="width:160px">
+          <span class="input-group-text">名稱</span>
+          <input type="text" id="rcProcNameLike" class="form-control form-control-sm" placeholder="模糊">
+        </div>
+        <button type="button" id="btnRcSearch" class="btn btn-primary btn-sm">查詢</button>
+      </div>
+      <!-- 雙欄選擇區 -->
+      <div class="d-flex flex-grow-1" style="overflow:hidden;min-height:0">
+        <!-- 左：可用製程 -->
+        <div style="flex:1;display:flex;flex-direction:column;border-right:1px solid #dee2e6">
+          <div class="px-2 py-1 border-bottom bg-light fw-semibold small">可用製程</div>
+          <div style="overflow-y:auto;flex:1">
+            <table class="table table-sm table-hover mb-0" style="white-space:nowrap">
+              <thead class="table-light" style="position:sticky;top:0;z-index:1">
+                <tr><th>製程代碼</th><th>製程名稱</th></tr>
+              </thead>
+              <tbody id="rcSourceBody">
+                <tr><td colspan="2" class="text-center text-muted py-2">請查詢</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <!-- 中：移動按鈕 -->
+        <div style="width:52px;flex-shrink:0;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4px">
+          <button type="button" id="btnRcMoveRight" class="btn btn-outline-primary btn-sm" style="width:40px" title="加入">→</button>
+          <button type="button" id="btnRcMoveLeft" class="btn btn-outline-secondary btn-sm" style="width:40px" title="移除">←</button>
+          <hr style="width:30px;margin:4px 0">
+          <button type="button" id="btnRcMoveUp" class="btn btn-outline-secondary btn-sm" style="width:40px" title="上移">↑</button>
+          <button type="button" id="btnRcMoveDown" class="btn btn-outline-secondary btn-sm" style="width:40px" title="下移">↓</button>
+        </div>
+        <!-- 右：已選製程 -->
+        <div style="flex:1;display:flex;flex-direction:column">
+          <div class="px-2 py-1 border-bottom bg-light fw-semibold small">已選製程</div>
+          <div style="overflow-y:auto;flex:1">
+            <table class="table table-sm table-hover mb-0" style="white-space:nowrap">
+              <thead class="table-light" style="position:sticky;top:0;z-index:1">
+                <tr><th>製程代碼</th><th>製程名稱</th></tr>
+              </thead>
+              <tbody id="rcTargetBody">
+                <tr><td colspan="2" class="text-center text-muted py-2">尚未選擇</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" id="btnRcConfirm" class="btn btn-primary btn-sm">確定</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- 材料設定 Modal -->
 <div class="modal fade" id="modalMaterialSet" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog" style="max-width:900px">
@@ -695,9 +853,10 @@ else
           <div class="d-flex flex-column" style="flex:6;overflow:hidden;border-right:1px solid #dee2e6">
             <div class="d-flex align-items-center gap-2 px-3 py-1 bg-light border-bottom" style="font-size:0.85rem;flex-shrink:0">
               <span class="text-nowrap">用料類別別</span>
-              <div style="position:relative">
-                <input type="text" id="matSetClassFilter" autocomplete="off" class="form-control form-control-sm" style="width:200px" placeholder="選擇或輸入類別">
-                <div id="matSetClassSuggest" style="display:none;position:absolute;top:100%;left:0;z-index:1060;background:#fff;border:1px solid #ccc;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:260px;max-height:220px;overflow-y:auto;font-size:0.82rem"></div>
+              <div style="position:relative;display:flex;align-items:center">
+                <input type="text" id="matSetClassFilter" autocomplete="off" class="form-control form-control-sm" style="width:200px;padding-right:22px" placeholder="選擇或輸入類別">
+                <button type="button" id="btnMatSetClassClear" tabindex="-1" style="position:absolute;right:2px;top:50%;transform:translateY(-50%);background:none;border:none;padding:0 2px;line-height:1;color:#999;font-size:0.8rem;cursor:pointer" title="清除">✕</button>
+                <div id="matSetClassSuggest" style="display:none;position:absolute;top:100%;left:0;z-index:1060;background:#fff;border:1px solid #ccc;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:200px;max-height:220px;overflow-y:auto;font-size:0.82rem"></div>
               </div>
               <button type="button" id="btnMatSetRefresh" class="btn btn-sm btn-outline-secondary ms-auto px-3">資料重取</button>
             </div>
@@ -1245,6 +1404,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
   }
+  window.loadLayerPressDetail = loadLayerPressDetail; // 供其他 script 區塊呼叫
 
   // IOType + AftStatus → 中文作業名稱
   function formatLogIOType(row) {
@@ -3492,6 +3652,9 @@ document.addEventListener('DOMContentLoaded', function () {
   let tgtRows = [];           // 已選（右）
   let originalSerialNums = []; // 載入時各行的 SerialNum（UPDATE key）
   let matClassList = [];       // P4：用料類別別選項快取
+  let pressRows = [];          // 壓合結構各列（含 MatClass），用於防呆驗證
+  let _savedLayer = null;      // 開啟 modal 時鎖定的 layer（避免 save 時 active 消失）
+  let _savedMasterKeys = null;
 
   function getActiveLayer() {
     const el = document.querySelector('.layer-item.active');
@@ -3514,10 +3677,16 @@ document.addEventListener('DOMContentLoaded', function () {
     qsTgt.append('keyValues', partNum); qsTgt.append('keyValues', revision); qsTgt.append('keyValues', layer.layerId);
     qsTgt.append('orderBy', 'SerialNum');
     const tgtData = await fetch(`/api/CommonTable/ByKeys?${qsTgt}`).then(r => r.json());
-    const tgtRaw = (Array.isArray(tgtData) ? tgtData : (tgtData.data ?? [])).filter(r => r.MatCode?.trim());
+    const tgtRaw = (Array.isArray(tgtData) ? tgtData : (tgtData.data ?? []))
+      .filter(r => (r.MatCode ?? r.matcode)?.trim());
 
-    tgtRows = tgtRaw.map(r => ({ MatCode: r.MatCode?.trim() ?? '', MatName: r.MatName?.trim() ?? '', SerialNum: r.SerialNum }));
-    originalSerialNums = tgtRaw.map(r => r.SerialNum);
+    tgtRows = tgtRaw.map(r => ({
+      MatCode:  (r.MatCode  ?? r.matcode  ?? '').trim(),
+      MatName:  (r.MatName  ?? r.matname  ?? '').trim(),
+      MatClass: (r.MatClass ?? r.matclass ?? '').trim(),
+      SerialNum: r.SerialNum ?? r.serialnum
+    }));
+    originalSerialNums = tgtRaw.map(r => r.SerialNum ?? r.serialnum);
 
     // EMOdVPressForDLL：有 BefLayer(內層)、MatClass、LayerName → 右上壓合結構顯示
     if (pressBody) {
@@ -3528,6 +3697,7 @@ document.addEventListener('DOMContentLoaded', function () {
         qsPress.append('orderBy', 'SerialNum');
         const pressData = await fetch(`/api/CommonTable/ByKeys?${qsPress}`).then(r => r.json());
         const pressRaw = Array.isArray(pressData) ? pressData : (pressData.data ?? []);
+        pressRows = pressRaw.map(r => ({ SerialNum: r.SerialNum, MatClass: (r.MatClass ?? '').trim() }));
         pressBody.innerHTML = pressRaw.length
           ? pressRaw.map(r => {
               const cls = r.MatClass?.trim() ?? '';
@@ -3544,31 +3714,67 @@ document.addEventListener('DOMContentLoaded', function () {
       } catch { pressBody.innerHTML = '<tr><td colspan="5" class="text-danger text-center small">載入失敗</td></tr>'; }
     }
 
-    // 左欄：EMOdVPressMat（第一次或強制重取）
-    if (!allSrcRows.length || forceReload) {
-      const srcData = await fetch('/api/CommonTable/Query?table=EMOdVPressMat&top=1000&orderBy=matcode').then(r => r.json());
+    renderTgt();
+  }
+
+  // 依 MatClass 從 server 取左欄料 + 更新屬性 grid
+  async function loadSrcByClass(classCode) {
+    const attrBody = document.getElementById('tblMatSetAttr');
+    if (!classCode) {
+      srcBody.innerHTML = '<tr><td colspan="3" class="text-muted text-center small">請選擇用料類別別</td></tr>';
+      allSrcRows = []; srcRows = []; displayedSrcRows = [];
+      if (attrBody) attrBody.innerHTML = '';
+      return;
+    }
+    srcBody.innerHTML = '<tr><td colspan="3" class="text-muted text-center small">載入中…</td></tr>';
+    try {
+      // 屬性 grid：依 MatClass 載入屬性清單
+      const attrData = await fetch(`/api/MG000006/setnum-sub?setClass=${encodeURIComponent(classCode)}`).then(r => r.json());
+      const attrs = Array.isArray(attrData) ? attrData : [];
+      if (attrBody) {
+        attrBody.innerHTML = attrs.map(a => {
+          const numId = (a.NumId ?? '').trim();
+          const numName = (a.NumName ?? a.iShowName ?? '').trim();
+          return `<tr>
+            <td class="text-muted">${escHtmlMS(numId)}</td>
+            <td>${escHtmlMS(numName)}</td>
+            <td style="padding:1px 2px"><input type="text" class="ms-attr-input" data-attr="${escHtmlMS(numId)}" style="width:100%;border:none;outline:none;font-size:inherit;background:transparent"></td>
+            <td></td>
+          </tr>`;
+        }).join('');
+        // 重新綁定屬性 input 事件
+        attrBody.querySelectorAll('.ms-attr-input').forEach(inp =>
+          inp.addEventListener('input', applyFilter)
+        );
+      }
+
+      // 左欄材料清單
+      const qs = new URLSearchParams();
+      qs.append('table', 'EMOdVPressMat');
+      qs.append('keyNames', 'MatClass'); qs.append('keyValues', classCode);
+      qs.append('orderBy', 'matcode');
+      const srcData = await fetch(`/api/CommonTable/ByKeys?${qs}`).then(r => r.json());
       allSrcRows = (Array.isArray(srcData) ? srcData : (srcData.data ?? []))
-        .filter(r => (r.matcode ?? r.MatCode)?.trim())                                  // P2：過濾空代碼
+        .filter(r => (r.matcode ?? r.MatCode)?.trim())
         .map(r => ({
-          MatCode:  (r.matcode ?? r.MatCode ?? '').trim(),                              // P2：相容大小寫
+          MatCode:  (r.matcode ?? r.MatCode ?? '').trim(),
           MatName:  r.MatName?.trim() ?? '',
           EngGauge: (r.EngGauge ?? '').trim(),
           MatClass: r.MatClass?.trim() ?? ''
         }));
+      srcRows = allSrcRows;
+      applyFilter();
+    } catch {
+      srcBody.innerHTML = '<tr><td colspan="3" class="text-danger text-center small">載入失敗</td></tr>';
     }
-
-    srcRows = allSrcRows;   // P1：複製模式，左欄不因 add/remove 而變動
-    applyFilter();
   }
 
   // P1+S4：篩選左欄
   function applyFilter() {
-    const classKw = (inputFilter?.value ?? '').trim().toLowerCase();
     const attrKws = Array.from(document.querySelectorAll('#tblMatSetAttr .ms-attr-input'))
       .map(inp => inp.value.trim().toLowerCase()).filter(v => v);
 
     displayedSrcRows = srcRows.filter(r => {
-      if (classKw && !r.MatClass.toLowerCase().includes(classKw)) return false;
       if (attrKws.length && !attrKws.every(kw => r.MatCode.toLowerCase().includes(kw) || r.MatName.toLowerCase().includes(kw))) return false;
       return true;
     });
@@ -3607,9 +3813,10 @@ document.addEventListener('DOMContentLoaded', function () {
     suggestEl.querySelectorAll('.ms-sug-item').forEach(item => {
       item.addEventListener('mousedown', e => {
         e.preventDefault();
-        inputFilter.value = filtered[parseInt(item.dataset.idx)].code;
+        const code = filtered[parseInt(item.dataset.idx)].code;
+        inputFilter.value = code;
         suggestEl.style.display = 'none';
-        applyFilter();
+        loadSrcByClass(code);
       });
     });
   }
@@ -3619,29 +3826,41 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   inputFilter?.addEventListener('input', () => {
     showSuggest(inputFilter.value.trim().toLowerCase());
-    applyFilter();
+    if (!inputFilter.value.trim()) loadSrcByClass('');
+  });
+  inputFilter?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { suggestEl.style.display = 'none'; loadSrcByClass(inputFilter.value.trim()); }
   });
   inputFilter?.addEventListener('blur', () => setTimeout(() => { if (suggestEl) suggestEl.style.display = 'none'; }, 150));
+
+  document.getElementById('btnMatSetClassClear')?.addEventListener('click', async () => {
+    if (inputFilter) { inputFilter.value = ''; inputFilter.focus(); }
+    await ensureMatClassList();
+    showSuggest('');
+  });
 
   btnOpen.addEventListener('click', async () => {
     const layer = getActiveLayer();
     if (!layer?.layerId) { Swal.fire({ icon: 'warning', title: '請先選擇層別' }); return; }
+    _savedLayer = layer;
+    _savedMasterKeys = getMasterKeys();
     spanLayer.textContent = `${layer.layerId}（${layer.layerName}）`;
     if (inputStage) inputStage.value = layer.layerId;
     document.querySelectorAll('#tblMatSetAttr .ms-attr-input').forEach(inp => inp.value = '');
     if (inputFilter) inputFilter.value = '';
-    srcBody.innerHTML = '<tr><td colspan="3" class="text-muted text-center small">載入中…</td></tr>';
+    allSrcRows = []; srcRows = []; displayedSrcRows = [];
+    srcBody.innerHTML = '<tr><td colspan="3" class="text-muted text-center small">請選擇用料類別別</td></tr>';
     tgtBody.innerHTML = '<tr><td colspan="2" class="text-muted text-center small">載入中…</td></tr>';
     bsModal.show();
     await ensureMatClassList();
     try { await loadData(false); }
-    catch { srcBody.innerHTML = '<tr><td colspan="3" class="text-danger text-center">載入失敗</td></tr>'; }
+    catch { tgtBody.innerHTML = '<tr><td colspan="2" class="text-danger text-center">載入失敗</td></tr>'; }
   });
 
   btnRefresh?.addEventListener('click', async () => {
-    srcBody.innerHTML = '<tr><td colspan="3" class="text-muted text-center small">載入中…</td></tr>';
     try { await loadData(true); }
-    catch { srcBody.innerHTML = '<tr><td colspan="3" class="text-danger text-center">載入失敗</td></tr>'; }
+    catch { tgtBody.innerHTML = '<tr><td colspan="2" class="text-danger text-center">載入失敗</td></tr>'; }
+    await loadSrcByClass(inputFilter?.value.trim() ?? '');
   });
 
   // P1：加入目標（複製模式，不移除左欄；防重複）
@@ -3739,8 +3958,24 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   btnSave.addEventListener('click', async () => {
-    const layer = getActiveLayer();
-    const { partNum, revision } = getMasterKeys();
+    const layer = _savedLayer ?? getActiveLayer();
+    const { partNum, revision } = _savedMasterKeys ?? getMasterKeys();
+    if (!layer?.layerId) { Swal.fire({ icon: 'warning', title: '請先重新開啟材料設定' }); return; }
+
+    // 防呆：物料類別必須符合壓合結構該列的類別（依 SerialNum 對應，非 index）
+    for (let i = 0; i < tgtRows.length; i++) {
+      const sn = originalSerialNums[i] ?? (i + 1);
+      const pressRow = pressRows.find(p => p.SerialNum === sn);
+      const expected = pressRow?.MatClass ?? '';
+      const actual   = tgtRows[i].MatClass ?? '';
+      if (expected && actual && actual !== expected) {
+        const expName = matClassList.find(c => c.code === expected)?.name ?? expected;
+        const actName = matClassList.find(c => c.code === actual)?.name ?? actual;
+        Swal.fire({ icon: 'warning', title: '物料類別不符', text: `第 ${i + 1} 筆：選擇的是「${actual} ${actName}」，此層應為「${expected} ${expName}」` });
+        return;
+      }
+    }
+
     // SerialNum 是 PK：用 originalSerialNums[i] 對應 tgtRows[i]（同 疊構變更 策略）
     const payload = tgtRows.map((r, i) => ({
       PartNum: partNum, Revision: revision, LayerId: layer.layerId,
@@ -3756,7 +3991,11 @@ document.addEventListener('DOMContentLoaded', function () {
       const txt = await resp.text();
       let result = null;
       try { result = txt ? JSON.parse(txt) : null; } catch {}
-      if (resp.ok && result?.success !== false) { bsModal.hide(); loadLayerPress(); }
+      if (resp.ok && result?.success !== false) {
+        bsModal.hide();
+        if (typeof window.loadLayerPressDetail === 'function')
+          window.loadLayerPressDetail(layer.layerId, layer.layerName);
+      }
       else { Swal.fire({ icon: 'error', title: '儲存失敗', text: result?.error || txt || '未知錯誤' }); }
     } catch (e) { Swal.fire({ icon: 'error', title: '儲存失敗', text: e.message }); }
   });
@@ -3764,6 +4003,426 @@ document.addEventListener('DOMContentLoaded', function () {
   function escHtmlMS(s) {
     return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
+});
+</script>
+
+<script>
+// ============================================================
+// 途程內容頁籤（layerroute）5 顆按鈕邏輯
+// ============================================================
+document.addEventListener('DOMContentLoaded', function () {
+  'use strict';
+
+  // ── 共用 helper ──────────────────────────────────────────
+
+  function getActiveLayer() {
+    const el = document.querySelector('.layer-item.active');
+    return el ? { layerId: el.dataset.layerId || '', layerName: el.dataset.layerName || '' } : null;
+  }
+
+  function getMasterKeys() {
+    return {
+      partNum:  (window.currentMasterKeys?.PartNum  || window.currentMasterKeys?.partnum  || '').trim(),
+      revision: (window.currentMasterKeys?.Revision || window.currentMasterKeys?.revision || '').trim(),
+    };
+  }
+
+  function escH(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function requireLayer() {
+    const layer = getActiveLayer();
+    if (!layer?.layerId) { Swal.fire({ icon: 'warning', title: '請先選擇層別' }); return null; }
+    return layer;
+  }
+
+  // 更新途程代號 input 顯示
+  async function updateTmpRouteId(layerId) {
+    const input = document.getElementById('currentTmpRouteId');
+    if (!input) return;
+    const mk = getMasterKeys();
+    if (!mk.partNum || !mk.revision || !layerId) { input.value = ''; return; }
+    try {
+      const r = await apiGet(
+        `/api/EMOdLayerRoute/GetTmpRouteId?partNum=${encodeURIComponent(mk.partNum)}` +
+        `&revision=${encodeURIComponent(mk.revision)}&layerId=${encodeURIComponent(layerId)}`
+      );
+      input.value = r?.tmpRouteId ?? '';
+    } catch { input.value = ''; }
+  }
+
+  // wrap window.loadLayerPressDetail，讓切換層別時同步更新途程代號
+  if (typeof window.loadLayerPressDetail === 'function') {
+    const _orig = window.loadLayerPressDetail;
+    window.loadLayerPressDetail = function (layerId, layerName) {
+      _orig(layerId, layerName);
+      updateTmpRouteId(layerId);
+    };
+  }
+
+  async function apiPost(url, body) {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    return resp.json();
+  }
+
+  async function apiGet(url) {
+    const resp = await fetch(url);
+    return resp.json();
+  }
+
+  // 重新載入 layerroute 表格
+  function reloadLayerRoute() {
+    const layer = getActiveLayer();
+    if (!layer?.layerId) return;
+    if (typeof window.loadLayerPressDetail === 'function') {
+      window.loadLayerPressDetail(layer.layerId, layer.layerName);
+    }
+  }
+
+  // ── 複製備註（直接呼叫 API，無對話框）─────────────────────
+
+  document.getElementById('btnBackupNotes')?.addEventListener('click', async () => {
+    const layer = requireLayer(); if (!layer) return;
+    const mk = getMasterKeys();
+    try {
+      const r = await apiPost('/api/EMOdLayerRoute/BackupNotes',
+        { PartNum: mk.partNum, Revision: mk.revision, LayerId: layer.layerId });
+      if (!r?.ok) Swal.fire({ icon: 'error', title: '複製備註失敗', text: r?.error || '未知錯誤' });
+    } catch (e) { Swal.fire({ icon: 'error', title: '複製備註失敗', text: e.message }); }
+  });
+
+  // ── 貼上備註（直接呼叫 API，無對話框）─────────────────────
+
+  document.getElementById('btnPasteNotes')?.addEventListener('click', async () => {
+    const layer = requireLayer(); if (!layer) return;
+    const mk = getMasterKeys();
+    try {
+      const r = await apiPost('/api/EMOdLayerRoute/PasteNotes',
+        { PartNum: mk.partNum, Revision: mk.revision, LayerId: layer.layerId });
+      if (r?.ok) {
+        reloadLayerRoute();
+      } else Swal.fire({ icon: 'error', title: '貼上備註失敗', text: r?.error || '未知錯誤' });
+    } catch (e) { Swal.fire({ icon: 'error', title: '貼上備註失敗', text: e.message }); }
+  });
+
+  // ── 生產途程選擇 Modal（C途程異動 / C途程備註 共用）────────
+
+  const rsModalEl = document.getElementById('modalRouteSelect');
+  if (!rsModalEl) return;
+  const rsModal = new bootstrap.Modal(rsModalEl);
+
+  let _rsMode = 'change';   // 'change' = C途程異動, 'notes' = C途程備註
+  let _rsSelectedTmpId = '';
+
+  // 渲染範本清單（左側）
+  function renderTmpList(rows) {
+    const tbody = document.getElementById('routeSelectTmpBody');
+    if (!rows?.length) { tbody.innerHTML = '<tr><td colspan="2" class="text-center text-muted py-2">無資料</td></tr>'; return; }
+    tbody.innerHTML = rows.map(r =>
+      `<tr class="rs-tmp-row" data-tmp-id="${escH(r.TmpId)}" style="cursor:pointer">
+         <td>${escH(r.TmpId)}</td><td>${escH(r.Notes ?? '')}</td>
+       </tr>`
+    ).join('');
+  }
+
+  // 渲染範本製程明細（右側）
+  function renderTmpDetail(rows) {
+    const tbody = document.getElementById('routeSelectDtlBody');
+    if (!rows?.length) { tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-2">無製程</td></tr>'; return; }
+    tbody.innerHTML = rows.map(r =>
+      `<tr>
+         <td>${escH(r.SerialNum)}</td>
+         <td>${escH(r.ProcCode)}</td>
+         <td>${escH(r.ProcName ?? '')}</td>
+         <td>${escH(r.FinishRate ?? '')}</td>
+       </tr>`
+    ).join('');
+  }
+
+  // 範本清單 click → 載入右側明細
+  document.getElementById('routeSelectTmpBody')?.addEventListener('click', async (e) => {
+    const row = e.target.closest('.rs-tmp-row');
+    if (!row) return;
+    document.querySelectorAll('.rs-tmp-row').forEach(r => r.classList.remove('table-active'));
+    row.classList.add('table-active');
+    _rsSelectedTmpId = row.dataset.tmpId;
+    const dtlR = await apiGet(`/api/EMOdLayerRoute/GetTmpDetail?tmpId=${encodeURIComponent(_rsSelectedTmpId)}`);
+    renderTmpDetail(dtlR?.data ?? []);
+  });
+
+  // 查詢按鈕（途程模型 tab）
+  document.getElementById('btnRouteSelectSearch')?.addEventListener('click', async () => {
+    const tmpId = document.getElementById('routeSelectSearchTmpId')?.value.trim() ?? '';
+    const notes = document.getElementById('routeSelectSearchNotes')?.value.trim() ?? '';
+    const r = await apiGet(`/api/EMOdLayerRoute/GetTmpList?tmpId=${encodeURIComponent(tmpId)}&notes=${encodeURIComponent(notes)}`);
+    renderTmpList(r?.data ?? []);
+    _rsSelectedTmpId = '';
+    document.getElementById('routeSelectDtlBody').innerHTML =
+      '<tr><td colspan="4" class="text-center text-muted py-2">請選擇範本</td></tr>';
+  });
+
+  // 查詢按鈕（條件查詢 tab for C途程備註）
+  document.getElementById('btnRouteNoteSearch')?.addEventListener('click', async () => {
+    const tmpId = document.getElementById('routeNoteSearchTmpId')?.value.trim() ?? '';
+    const notes = document.getElementById('routeNoteSearchNotes')?.value.trim() ?? '';
+    const r = await apiGet(`/api/EMOdLayerRoute/GetTmpList?tmpId=${encodeURIComponent(tmpId)}&notes=${encodeURIComponent(notes)}`);
+    const tbody = document.getElementById('routeNoteQueryBody');
+    if (!r?.data?.length) {
+      tbody.innerHTML = '<tr><td colspan="2" class="text-center text-muted py-2">無資料</td></tr>'; return;
+    }
+    tbody.innerHTML = r.data.map(row =>
+      `<tr class="rs-note-row" data-tmp-id="${escH(row.TmpId)}" style="cursor:pointer">
+         <td>${escH(row.TmpId)}</td><td>${escH(row.Notes ?? '')}</td>
+       </tr>`
+    ).join('');
+  });
+
+  document.getElementById('routeNoteQueryBody')?.addEventListener('click', (e) => {
+    const row = e.target.closest('.rs-note-row');
+    if (!row) return;
+    document.querySelectorAll('.rs-note-row').forEach(r => r.classList.remove('table-active'));
+    row.classList.add('table-active');
+    _rsSelectedTmpId = row.dataset.tmpId;
+  });
+
+  // 確定按鈕
+  document.getElementById('btnRouteSelectConfirm')?.addEventListener('click', async () => {
+    const layer = getActiveLayer();
+    if (!layer?.layerId) { Swal.fire({ icon: 'warning', title: '請先選擇層別' }); return; }
+    if (!_rsSelectedTmpId) { Swal.fire({ icon: 'warning', title: '請先選擇途程範本' }); return; }
+    const mk = getMasterKeys();
+
+    try {
+      let r;
+      if (_rsMode === 'change') {
+        r = await apiPost('/api/EMOdLayerRoute/InsLayerRoute', {
+          PartNum: mk.partNum, Revision: mk.revision,
+          LayerId: layer.layerId, TmpId: _rsSelectedTmpId
+        });
+      } else {
+        r = await apiPost('/api/EMOdLayerRoute/InsertNotes', {
+          PartNum: mk.partNum, Revision: mk.revision, LayerId: layer.layerId
+        });
+      }
+      if (r?.ok) {
+        rsModal.hide();
+        reloadLayerRoute();
+      } else {
+        Swal.fire({ icon: 'error', title: '操作失敗', text: r?.error || '未知錯誤' });
+      }
+    } catch (e) {
+      Swal.fire({ icon: 'error', title: '操作失敗', text: e.message });
+    }
+  });
+
+  // C途程異動 → 開 Modal（途程模型 tab）
+  document.getElementById('btnChangeProcRoute')?.addEventListener('click', async () => {
+    if (!requireLayer()) return;
+    _rsMode = 'change';
+    _rsSelectedTmpId = '';
+    document.getElementById('modalRouteSelectTitle').textContent = '生產途程選擇（C途程異動）';
+    // 顯示途程模型 tab，隱藏條件查詢 tab
+    document.getElementById('routeSelectModelTab').style.display = 'flex';
+    document.getElementById('routeSelectQueryTab').style.display = 'none';
+    // 清空並預設查詢
+    document.getElementById('routeSelectSearchTmpId').value = '';
+    document.getElementById('routeSelectSearchNotes').value = '';
+    document.getElementById('routeSelectTmpBody').innerHTML =
+      '<tr><td colspan="2" class="text-center text-muted py-2">請查詢</td></tr>';
+    document.getElementById('routeSelectDtlBody').innerHTML =
+      '<tr><td colspan="4" class="text-center text-muted py-2">請選擇範本</td></tr>';
+    // 預先載入清單
+    const r = await apiGet('/api/EMOdLayerRoute/GetTmpList');
+    renderTmpList(r?.data ?? []);
+    rsModal.show();
+  });
+
+  // C途程備註 → 開 Modal（條件查詢 tab）
+  document.getElementById('btnNotesStyleTree')?.addEventListener('click', async () => {
+    if (!requireLayer()) return;
+    _rsMode = 'notes';
+    _rsSelectedTmpId = '';
+    document.getElementById('modalRouteSelectTitle').textContent = '生產途程選擇（C途程備註）';
+    // 隱藏途程模型 tab，顯示條件查詢 tab
+    document.getElementById('routeSelectModelTab').style.display = 'none';
+    document.getElementById('routeSelectQueryTab').style.display = 'flex';
+    document.getElementById('routeNoteSearchTmpId').value = '';
+    document.getElementById('routeNoteSearchNotes').value = '';
+    document.getElementById('routeNoteQueryBody').innerHTML =
+      '<tr><td colspan="2" class="text-center text-muted py-2">請查詢</td></tr>';
+    rsModal.show();
+  });
+
+  // ── 途程內容變更 Modal ──────────────────────────────────
+
+  const rcModalEl = document.getElementById('modalRouteChange');
+  if (!rcModalEl) return;
+  const rcModal = new bootstrap.Modal(rcModalEl);
+
+  // 左側可用製程
+  let rcSourceList = [];  // [{ProcCode, ProcName}]
+  // 右側已選製程
+  let rcTargetList = [];  // [{ProcCode, ProcName}]
+
+  function renderRcSource() {
+    const tbody = document.getElementById('rcSourceBody');
+    if (!rcSourceList.length) {
+      tbody.innerHTML = '<tr><td colspan="2" class="text-center text-muted py-2">無資料</td></tr>'; return;
+    }
+    tbody.innerHTML = rcSourceList.map((r, i) =>
+      `<tr class="rc-src-row" data-idx="${i}" style="cursor:pointer">
+         <td>${escH(r.ProcCode)}</td><td>${escH(r.ProcName ?? '')}</td>
+       </tr>`
+    ).join('');
+  }
+
+  function renderRcTarget() {
+    const tbody = document.getElementById('rcTargetBody');
+    if (!rcTargetList.length) {
+      tbody.innerHTML = '<tr><td colspan="2" class="text-center text-muted py-2">尚未選擇</td></tr>'; return;
+    }
+    tbody.innerHTML = rcTargetList.map((r, i) =>
+      `<tr class="rc-tgt-row" data-idx="${i}" style="cursor:pointer">
+         <td>${escH(r.ProcCode)}</td><td>${escH(r.ProcName ?? '')}</td>
+       </tr>`
+    ).join('');
+  }
+
+  function getRcSelectedSrcIdx() {
+    const el = document.querySelector('.rc-src-row.table-active');
+    return el ? parseInt(el.dataset.idx) : -1;
+  }
+
+  function getRcSelectedTgtIdx() {
+    const el = document.querySelector('.rc-tgt-row.table-active');
+    return el ? parseInt(el.dataset.idx) : -1;
+  }
+
+  document.getElementById('rcSourceBody')?.addEventListener('click', (e) => {
+    const row = e.target.closest('.rc-src-row'); if (!row) return;
+    document.querySelectorAll('.rc-src-row').forEach(r => r.classList.remove('table-active'));
+    row.classList.add('table-active');
+  });
+
+  document.getElementById('rcTargetBody')?.addEventListener('click', (e) => {
+    const row = e.target.closest('.rc-tgt-row'); if (!row) return;
+    document.querySelectorAll('.rc-tgt-row').forEach(r => r.classList.remove('table-active'));
+    row.classList.add('table-active');
+  });
+
+  // 雙擊左側 → 加入右側
+  document.getElementById('rcSourceBody')?.addEventListener('dblclick', (e) => {
+    const row = e.target.closest('.rc-src-row'); if (!row) return;
+    document.getElementById('btnRcMoveRight')?.click();
+  });
+
+  // 查詢可用製程
+  document.getElementById('btnRcSearch')?.addEventListener('click', async () => {
+    const r = await apiGet(
+      `/api/EMOdLayerRoute/GetProcChoice?bProc=${encodeURIComponent(document.getElementById('rcBProc')?.value ?? '')}` +
+      `&eProc=${encodeURIComponent(document.getElementById('rcEProc')?.value ?? '')}` +
+      `&procLike=${encodeURIComponent(document.getElementById('rcProcLike')?.value ?? '')}` +
+      `&procNameLike=${encodeURIComponent(document.getElementById('rcProcNameLike')?.value ?? '')}`
+    );
+    rcSourceList = (r?.data ?? []).map(d => ({ ProcCode: d.ProcCode ?? d.procCode, ProcName: d.ProcName ?? d.procName ?? '' }));
+    renderRcSource();
+  });
+
+  // → 加入
+  document.getElementById('btnRcMoveRight')?.addEventListener('click', () => {
+    const idx = getRcSelectedSrcIdx(); if (idx < 0) return;
+    const item = rcSourceList[idx];
+    if (!rcTargetList.find(t => t.ProcCode === item.ProcCode)) {
+      rcTargetList.push({ ...item });
+      renderRcTarget();
+    }
+  });
+
+  // ← 移除
+  document.getElementById('btnRcMoveLeft')?.addEventListener('click', () => {
+    const idx = getRcSelectedTgtIdx(); if (idx < 0) return;
+    rcTargetList.splice(idx, 1);
+    renderRcTarget();
+  });
+
+  // ↑ 上移
+  document.getElementById('btnRcMoveUp')?.addEventListener('click', () => {
+    const idx = getRcSelectedTgtIdx(); if (idx <= 0) return;
+    [rcTargetList[idx - 1], rcTargetList[idx]] = [rcTargetList[idx], rcTargetList[idx - 1]];
+    renderRcTarget();
+    const newRow = document.querySelector(`.rc-tgt-row[data-idx="${idx - 1}"]`);
+    newRow?.classList.add('table-active');
+  });
+
+  // ↓ 下移
+  document.getElementById('btnRcMoveDown')?.addEventListener('click', () => {
+    const idx = getRcSelectedTgtIdx();
+    if (idx < 0 || idx >= rcTargetList.length - 1) return;
+    [rcTargetList[idx], rcTargetList[idx + 1]] = [rcTargetList[idx + 1], rcTargetList[idx]];
+    renderRcTarget();
+    const newRow = document.querySelector(`.rc-tgt-row[data-idx="${idx + 1}"]`);
+    newRow?.classList.add('table-active');
+  });
+
+  // 確定（途程內容變更）
+  document.getElementById('btnRcConfirm')?.addEventListener('click', async () => {
+    const layer = getActiveLayer();
+    if (!layer?.layerId) { Swal.fire({ icon: 'warning', title: '請先選擇層別' }); return; }
+    const mk = getMasterKeys();
+    try {
+      const r = await apiPost('/api/EMOdLayerRoute/RouteChange', {
+        PartNum: mk.partNum,
+        Revision: mk.revision,
+        LayerId: layer.layerId,
+        ProcCodes: rcTargetList.map(t => t.ProcCode)
+      });
+      if (r?.ok) {
+        rcModal.hide();
+        reloadLayerRoute();
+      } else {
+        Swal.fire({ icon: 'error', title: '更新失敗', text: r?.error || '未知錯誤' });
+      }
+    } catch (e) {
+      Swal.fire({ icon: 'error', title: '更新失敗', text: e.message });
+    }
+  });
+
+  // 途程內容變更 → 開 Modal，並載入右側現有途程
+  document.getElementById('btnRouteChange')?.addEventListener('click', async () => {
+    const layer = requireLayer(); if (!layer) return;
+    const mk = getMasterKeys();
+    // 清空並重置
+    rcSourceList = [];
+    rcTargetList = [];
+    renderRcSource();
+    renderRcTarget();
+    document.getElementById('rcBProc').value = '';
+    document.getElementById('rcEProc').value = '';
+    document.getElementById('rcProcLike').value = '';
+    document.getElementById('rcProcNameLike').value = '';
+    // 載入右側現有途程
+    try {
+      const r = await apiGet(
+        `/api/EMOdLayerRoute/GetCurrentRoute?partNum=${encodeURIComponent(mk.partNum)}` +
+        `&revision=${encodeURIComponent(mk.revision)}&layerId=${encodeURIComponent(layer.layerId)}`
+      );
+      rcTargetList = (r?.data ?? []).map(d => ({ ProcCode: d.ProcCode ?? d.procCode, ProcName: d.ProcName ?? d.procName ?? '' }));
+      renderRcTarget();
+    } catch {}
+    // 預先載入左側製程清單
+    try {
+      const r2 = await apiGet('/api/EMOdLayerRoute/GetProcChoice?bProc=&eProc=&procLike=&procNameLike=');
+      rcSourceList = (r2?.data ?? []).map(d => ({ ProcCode: d.ProcCode ?? d.procCode, ProcName: d.ProcName ?? d.procName ?? '' }));
+      renderRcSource();
+    } catch {}
+    rcModal.show();
+  });
+
 });
 </script>
 
