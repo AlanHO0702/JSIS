@@ -23,6 +23,8 @@ builder.Services.AddSwaggerGen(options =>
     var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
     // 告訴 Swagger 使用 XML 文件來生成更完整的 API 註解說明
     options.IncludeXmlComments(xmlPath);
+    // 避免多個 Controller 內有同名巢狀 DTO 類別時產生 schema ID 衝突
+    options.CustomSchemaIds(type => type.FullName?.Replace("+", ".") ?? type.Name);
 });
 
 builder.Services.AddControllers().AddJsonOptions(options =>
