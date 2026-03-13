@@ -614,17 +614,12 @@ SELECT COLUMN_NAME, DATA_TYPE
         Visible   = CASE WHEN ISNULL(f.Visible,1)=1 THEN 1 ELSE 0 END,
         ReadOnly  = CASE WHEN ISNULL(f.ReadOnly,0)=1 THEN 1 ELSE 0 END,
         f.ComboStyle,
-<<<<<<< HEAD
-=======
-        f.ComboTextSize,
->>>>>>> master
         f.Items,
         f.FieldNote,
         f.EditColor,
 
         -- 標籤/欄位座標與尺寸
         f.iLayRow, f.iLayColumn,
-<<<<<<< HEAD
         COALESCE(l.ILabHeight, f.iLabHeight)   AS iLabHeight,
         COALESCE(l.ILabTop,    f.iLabTop)       AS iLabTop,
         COALESCE(l.ILabLeft,   f.iLabLeft)      AS iLabLeft,
@@ -634,11 +629,6 @@ SELECT COLUMN_NAME, DATA_TYPE
         COALESCE(l.IFieldLeft, f.iFieldLeft)    AS iFieldLeft,
         COALESCE(l.IFieldWidth,f.iFieldWidth)   AS iFieldWidth,
         COALESCE(l.IShowWhere, f.iShowWhere)    AS iShowWhere,
-=======
-        f.iLabHeight,  f.iLabTop,   f.iLabLeft,   f.iLabWidth,
-        f.iFieldHeight,f.iFieldTop, f.iFieldLeft, f.iFieldWidth,
-        f.iShowWhere,
->>>>>>> master
 
         -- 查詢/Lookup
         f.LookupTable, f.LookupKeyField, f.LookupResultField,
@@ -702,10 +692,6 @@ SELECT COLUMN_NAME, DATA_TYPE
                 ReadOnly        = (rd["ReadOnly"]?.ToString() ?? "0") == "1" ? 1 : 0,
                 FieldNote       = rd["FieldNote"]?.ToString() ?? "",
                 ComboStyle      = rd["ComboStyle"] as int?,
-<<<<<<< HEAD
-=======
-                ComboTextSize   = rd["ComboTextSize"] as int?,
->>>>>>> master
                 Items           = rd["Items"]?.ToString() ?? "",
                 EditColor       = rd["EditColor"]?.ToString() ?? "",
 
