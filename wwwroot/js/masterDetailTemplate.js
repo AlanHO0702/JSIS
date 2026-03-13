@@ -627,6 +627,50 @@
     });
   };
 
+  // -----------------------------
+  // 🧩 建立合計列 (bFooter)
+  // -----------------------------
+  const buildFooter = (tableEl, dict, rows) => {
+    if (!tableEl) return;
+
+    // 移除舊的 tfoot
+    const old = tableEl.querySelector('tfoot.md-grid-footer');
+    if (old) old.remove();
+
+    const visibleFields = dict
+      .filter(f => DICT_MAP.visible(f))
+      .sort((a, b) => DICT_MAP.order(a) - DICT_MAP.order(b));
+
+    const hasFooter = visibleFields.some(f => +f.bFooter === 1);
+    if (!hasFooter) return;
+
+    const tfoot = document.createElement('tfoot');
+    tfoot.className = 'md-grid-footer';
+    const tr = document.createElement('tr');
+
+    visibleFields.forEach(f => {
+      const td = document.createElement('td');
+      if (+f.bFooter === 1) {
+        let sum = 0;
+        rows.forEach(row => {
+          if (!row || row.__state === 'deleted') return;
+          const raw = row[f.FieldName];
+          if (raw == null || raw === '') return;
+          const num = parseFloat(String(raw).replace(/,/g, ''));
+          if (Number.isFinite(num)) sum += num;
+        });
+        td.textContent = fmtCell(sum, DICT_MAP.fmt(f), DICT_MAP.dataType(f));
+        td.style.textAlign = 'right';
+        td.style.fontWeight = '600';
+        td.style.background = '#f0f4ff';
+      }
+      tr.appendChild(td);
+    });
+
+    tfoot.appendChild(tr);
+    tableEl.appendChild(tfoot);
+  };
+
   // ------------------------------
   // 🧩 取得明細 Key
   // ------------------------------
@@ -964,6 +1008,8 @@
         window._mdEditing || addMode,
         true
       );
+
+      buildFooter(detailTbl, dDict, detailData);
 
       // ★ 當 detail 沒有資料時，放一列空白佔位列，讓使用者可以點擊聚焦到單身區塊
       if (detailData.length === 0 && dBody.querySelectorAll("tr").length === 0) {
