@@ -124,10 +124,27 @@
     }
 
     // Dict meta cache (datatype/format/width...)
-    const DICT_META_CACHE = new Map(); // tn -> Map(fieldLower -> { dataType, formatStr, comboStyle })
+    const DICT_META_CACHE = new Map(); // tn -> Map(fieldLower -> { dataType, formatStr, comboStyle, bFooter })
     const LOOKUP_META_CACHE = new Map(); // tn -> Map(fieldLower -> { table, key, result })
     const LOOKUP_DATA_CACHE = new Map(); // tn -> Map(fieldLower -> Map(key -> label))
     const READONLY_META_CACHE = new Map(); // tn -> Map(fieldLower -> boolean)
+    // ★ 共用 cache：避免 fetchLookupMeta / fetchReadOnlyMeta 各打一次相同 API
+    const FULL_DICT_ROWS_CACHE = new Map(); // tn -> raw rows[]
+
+    async function fetchFullDictRows(dictTable) {
+        const tn = cleanTableName(dictTable);
+        if (!tn) return [];
+        if (FULL_DICT_ROWS_CACHE.has(tn)) return FULL_DICT_ROWS_CACHE.get(tn);
+        try {
+            const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(tn)}&lang=TW`);
+            const rows = res.ok ? await res.json() : [];
+            FULL_DICT_ROWS_CACHE.set(tn, rows || []);
+            return rows || [];
+        } catch {
+            FULL_DICT_ROWS_CACHE.set(tn, []);
+            return [];
+        }
+    }
 
     async function fetchDictMeta(dictTable) {
         const tn = cleanTableName(dictTable);
@@ -148,7 +165,8 @@
                 map.set(field.toLowerCase(), {
                     dataType: (r.dataType || r.DataType || '').toString(),
                     formatStr: (r.formatStr || r.FormatStr || '').toString(),
-                    comboStyle: Number(r.comboStyle ?? r.ComboStyle ?? 0)
+                    comboStyle: Number(r.comboStyle ?? r.ComboStyle ?? 0),
+                    bFooter: Number(r.bFooter ?? 0)
                 });
             });
             DICT_META_CACHE.set(tn, map);
@@ -164,73 +182,49 @@
         const tn = cleanTableName(dictTable);
         if (!tn) return new Map();
         if (LOOKUP_META_CACHE.has(tn)) return LOOKUP_META_CACHE.get(tn);
-        try {
-            const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(tn)}&lang=TW`);
-            if (!res.ok) {
-                const empty = new Map();
-                LOOKUP_META_CACHE.set(tn, empty);
-                return empty;
+        const fullRows = await fetchFullDictRows(dictTable);
+        const map = new Map();
+        (fullRows || []).forEach(r => {
+            const field = (r.fieldName || r.FieldName || '').toString();
+            if (!field) return;
+            const table = (r.lookupTable || r.LookupTable || '').toString();
+            const key = (r.lookupKeyField || r.LookupKeyField || '').toString();
+            const result = (r.lookupResultField || r.LookupResultField || '').toString();
+            const ocxTable = (r.ocxLKTableName || r.OCXLKTableName || '').toString();
+            const ocxResult = (r.ocxLKResultName || r.OCXLKResultName || '').toString();
+            const ocxKeyField = (r.keyFieldName || r.KeyFieldName || '').toString();
+            const ocxKeySelf = (r.keySelfName || r.KeySelfName || '').toString();
+            if (table && key && result) {
+                const cond1Field  = (r.lookupCond1Field  || r.LookupCond1Field  || '').toString().trim();
+                const cond1Source = (r.lookupCond1ResultField || r.LookupCond1ResultField || '').toString().trim();
+                const cond2Field  = (r.lookupCond2Field  || r.LookupCond2Field  || '').toString().trim();
+                const cond2Source = (r.lookupCond2ResultField || r.LookupCond2ResultField || '').toString().trim();
+                map.set(field.toLowerCase(), { field, table, key, result, keySelf: '', source: 'lookup',
+                    cond1Field, cond1Source, cond2Field, cond2Source });
+                return;
             }
-            const rows = await res.json();
-            const map = new Map();
-            (rows || []).forEach(r => {
-                const field = (r.fieldName || r.FieldName || '').toString();
-                if (!field) return;
-                const table = (r.lookupTable || r.LookupTable || '').toString();
-                const key = (r.lookupKeyField || r.LookupKeyField || '').toString();
-                const result = (r.lookupResultField || r.LookupResultField || '').toString();
-                const ocxTable = (r.ocxLKTableName || r.OCXLKTableName || '').toString();
-                const ocxResult = (r.ocxLKResultName || r.OCXLKResultName || '').toString();
-                const ocxKeyField = (r.keyFieldName || r.KeyFieldName || '').toString();
-                const ocxKeySelf = (r.keySelfName || r.KeySelfName || '').toString();
-                if (table && key && result) {
-                    const cond1Field  = (r.lookupCond1Field  || r.LookupCond1Field  || '').toString().trim();
-                    const cond1Source = (r.lookupCond1ResultField || r.LookupCond1ResultField || '').toString().trim();
-                    const cond2Field  = (r.lookupCond2Field  || r.LookupCond2Field  || '').toString().trim();
-                    const cond2Source = (r.lookupCond2ResultField || r.LookupCond2ResultField || '').toString().trim();
-                    map.set(field.toLowerCase(), { field, table, key, result, keySelf: '', source: 'lookup',
-                        cond1Field, cond1Source, cond2Field, cond2Source });
-                    return;
-                }
-                if (ocxTable && ocxKeyField && ocxResult) {
-                    map.set(field.toLowerCase(), { field, table: ocxTable, key: ocxKeyField, result: ocxResult, keySelf: ocxKeySelf, source: 'ocx' });
-                }
-            });
-            LOOKUP_META_CACHE.set(tn, map);
-            return map;
-        } catch {
-            const empty = new Map();
-            LOOKUP_META_CACHE.set(tn, empty);
-            return empty;
-        }
+            if (ocxTable && ocxKeyField && ocxResult) {
+                map.set(field.toLowerCase(), { field, table: ocxTable, key: ocxKeyField, result: ocxResult, keySelf: ocxKeySelf, source: 'ocx' });
+            }
+        });
+        LOOKUP_META_CACHE.set(tn, map);
+        return map;
     }
 
     async function fetchReadOnlyMeta(dictTable) {
         const tn = cleanTableName(dictTable);
         if (!tn) return new Map();
         if (READONLY_META_CACHE.has(tn)) return READONLY_META_CACHE.get(tn);
-        try {
-            const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(tn)}&lang=TW`);
-            if (!res.ok) {
-                const empty = new Map();
-                READONLY_META_CACHE.set(tn, empty);
-                return empty;
-            }
-            const rows = await res.json();
-            const map = new Map();
-            (rows || []).forEach(r => {
-                const field = (r.fieldName || r.FieldName || '').toString();
-                if (!field) return;
-                const ro = Number(r.readOnly ?? r.ReadOnly ?? 0) === 1;
-                map.set(field.toLowerCase(), ro);
-            });
-            READONLY_META_CACHE.set(tn, map);
-            return map;
-        } catch {
-            const empty = new Map();
-            READONLY_META_CACHE.set(tn, empty);
-            return empty;
-        }
+        const fullRows = await fetchFullDictRows(dictTable);
+        const map = new Map();
+        (fullRows || []).forEach(r => {
+            const field = (r.fieldName || r.FieldName || '').toString();
+            if (!field) return;
+            const ro = Number(r.readOnly ?? r.ReadOnly ?? 0) === 1;
+            map.set(field.toLowerCase(), ro);
+        });
+        READONLY_META_CACHE.set(tn, map);
+        return map;
     }
 
     async function fetchLookupMaps(dictTable) {
@@ -686,6 +680,8 @@
         if (!th) return;
         th.style.width = `${w}px`;
         Array.from(table.querySelectorAll(`tbody tr td:nth-child(${index + 1})`)).forEach(td => td.style.width = `${w}px`);
+        const footerTd = table.closest('.erp-table-wrapper')?.querySelector(`.erp-footer-bar td:nth-child(${index + 1})`);
+        if (footerTd) { footerTd.style.width = `${w}px`; footerTd.style.minWidth = `${w}px`; }
     }
 
     function applySavedWidths(table, dictTable, fields) {
@@ -834,7 +830,7 @@
             loadingTabs.add(tabId);
 
             // 清除舊的表格（保留按鈕）
-            container.querySelectorAll('.erp-table-wrapper').forEach(t => t.remove());
+            container.querySelectorAll('.erp-table-outer, .erp-table-wrapper').forEach(t => t.remove());
             const existingAlert = container.querySelector('.alert');
             if (existingAlert) existingAlert.remove();
 
@@ -892,7 +888,7 @@
         if (loading) loading.style.display = 'block';
         loadingTabs.add(tabId);
 
-        container.querySelectorAll('.erp-table-wrapper').forEach(t => t.remove());
+        container.querySelectorAll('.erp-table-outer, .erp-table-wrapper').forEach(t => t.remove());
         const existingAlert = container.querySelector('.alert');
         if (existingAlert) existingAlert.remove();
 
@@ -937,7 +933,7 @@
         // ✅ 先清除舊的 alert，避免重複顯示「無資料」
         const existingAlerts = container.querySelectorAll('.alert');
         existingAlerts.forEach(a => a.remove());
-        container.querySelectorAll('.erp-table-wrapper').forEach(t => t.remove());
+        container.querySelectorAll('.erp-table-outer, .erp-table-wrapper').forEach(t => t.remove());
 
         const rows = Array.isArray(data) ? data : [];
 
@@ -986,7 +982,7 @@
         const lookupMetaMap = {};
 
         // 建立表格 - 使用 erp-table 樣式
-        let html = '<div class="erp-table-wrapper">';
+        let html = '<div class="erp-table-wrapper"><div class="erp-table-scroll-body">';
 
         html += '<table class="erp-table"><thead><tr>';
 
@@ -1125,9 +1121,59 @@
             } catch { }
         }
 
-        html += '</tbody></table></div>';
+        html += '</tbody>';
+
+        html += '</table></div>';  // close erp-table + erp-table-scroll-body
+
+        // ★ 合計列 (bFooter) — flex spacer + footer 固定在 wrapper 底部（捲動條上方）
+        const footerFields = fields.filter(f => {
+            const m = metaMap.get(f.toLowerCase());
+            return m && m.bFooter === 1;
+        });
+        if (footerFields.length > 0 && rows.length > 0) {
+            html += '<div class="erp-flex-spacer"></div>';
+            html += '<div class="erp-footer-bar"><table class="erp-footer-table"><tbody><tr>';
+            fields.forEach((f, idx) => {
+                if (footerFields.includes(f)) {
+                    let sum = 0;
+                    rows.forEach(row => {
+                        const v = parseFloat(String(row[f] ?? '').replace(/,/g, ''));
+                        if (Number.isFinite(v)) sum += v;
+                    });
+                    const meta = metaMap.get(f.toLowerCase());
+                    const fmt = meta?.formatStr || '';
+                    let display = sum;
+                    if (fmt.includes('.000')) display = sum.toFixed(3);
+                    else if (fmt.includes('.00')) display = sum.toFixed(2);
+                    else if (fmt.includes('#')) display = sum.toLocaleString();
+                    html += `<td class="footer-sum">${display}</td>`;
+                } else {
+                    html += idx === 0 ? '<td class="footer-label">合計</td>' : '<td></td>';
+                }
+            });
+            html += '</tr></tbody></table></div>';
+        }
+
+        html += '</div>';  // close erp-table-wrapper
         container.insertAdjacentHTML('beforeend', html);
         const wrapper = container.querySelector('.erp-table-wrapper');
+
+        // 同步合計列欄寬（footer 為獨立 table，需對齊主表 th 寬度）
+        (function syncFooterBar() {
+            const footerBar = wrapper?.querySelector('.erp-footer-bar');
+            if (!footerBar) return;
+            const mainThs = Array.from(wrapper.querySelectorAll('table.erp-table thead th'));
+            const footerTds = Array.from(footerBar.querySelectorAll('td'));
+            requestAnimationFrame(() => {
+                mainThs.forEach((th, i) => {
+                    if (!footerTds[i]) return;
+                    const w = th.getBoundingClientRect().width;
+                    footerTds[i].style.width = w + 'px';
+                    footerTds[i].style.minWidth = w + 'px';
+                });
+            });
+        })();
+
         initDatePickers(wrapper, tabId);
         window._multiTabLookupFields = window._multiTabLookupFields || {};
         window._multiTabLookupFields[tabId] = Array.from(lookupFieldSet);
@@ -1539,8 +1585,10 @@
     padding-left: 2px; /* 與 tabs 左側對齊 */
 }
 
-/* erp-table 完整樣式 */
+/* erp-table 完整樣式 — flex 容器，固定高度，footer 固定在底部 */
 .multi-tab-detail .erp-table-wrapper {
+    display: flex;
+    flex-direction: column;
     background: #fff;
     box-shadow: 0 4px 18px 0 #c3d4e6;
     width: 100%;
@@ -1549,7 +1597,48 @@
     padding: 0 !important;
     border-radius: 0;
     border: 1px solid #d6dbe5;
-    max-height: 600px;
+    height: 350px;
+}
+
+/* 主表容器（flex 子項，不壓縮） */
+.multi-tab-detail .erp-table-scroll-body {
+    flex: 0 0 auto;
+}
+
+/* 彈性空白，把 footer 推到底部 */
+.multi-tab-detail .erp-flex-spacer {
+    flex: 1 1 0;
+    min-height: 0;
+}
+
+/* 合計列：sticky 固定在 wrapper 底部（捲動條上方） */
+.multi-tab-detail .erp-footer-bar {
+    flex: 0 0 auto;
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    background: #f0f4ff;
+    border-top: 2px solid #7a9fd4;
+    min-width: max-content;  /* 與主表等寬，水平捲動時對齊 */
+}
+.multi-tab-detail .erp-footer-bar .erp-footer-table {
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 0;
+    width: max-content;
+    font-size: var(--field-value-size);
+}
+.multi-tab-detail .erp-footer-bar td {
+    padding: 2px 6px;
+    font-weight: 600;
+    white-space: nowrap;
+    border-right: 1px solid #9fb1d0;
+}
+.multi-tab-detail .erp-footer-bar td.footer-sum {
+    text-align: right;
+}
+.multi-tab-detail .erp-footer-bar td.footer-label {
+    color: #003366;
 }
 
 /* 表格容器 */
@@ -1587,6 +1676,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
 
 .multi-tab-detail .erp-table th.align-left,
 .multi-tab-detail .erp-table td.align-left {

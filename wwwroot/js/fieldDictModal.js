@@ -156,6 +156,7 @@
                 <input data-field="KeyFieldName" value="${x.KeyFieldName ?? ''}" />
                 <input data-field="KeySelfName" value="${x.KeySelfName ?? ''}" />
                 <input data-field="KeyMapsJson" value="${encodeURIComponent(x.KeyMapsJson ?? '')}" />
+                <input data-field="EditColor" value="${x.EditColor ?? ''}" />
 
               </span>
             </td>
@@ -181,6 +182,11 @@
                     ${(+x.ComboStyle === 1 ? 'checked' : '')} />
             </td>
 
+            <td class="text-center" style="width:40px">
+              <input type="checkbox" class="checkbox-dark" data-field="bFooter"
+                    ${(+x.bFooter === 1 ? 'checked' : '')} />
+            </td>
+
             <td style="width:120px">
               <input data-field="DataType" value="${x.DataType ?? ''}"
                     class="form-control form-control-sm"
@@ -199,10 +205,6 @@
                     class="form-control form-control-sm" />
             </td>
 
-            <td style="width:120px">
-              <input data-field="EditColor" value="${x.EditColor ?? ''}"
-                    class="form-control form-control-sm" placeholder="clYellow / Yellow" />
-            </td>
             <td style="width:60px" class="text-center">
               <button type="button" class="btn btn-sm btn-outline-secondary"
                       aria-label="設�?"
@@ -471,6 +473,7 @@
           LookupCond2ResultField: getVal("LookupCond2ResultField"),
           IsNotesField: getVal("IsNotesField"),
           ComboStyle: getChk("ComboStyle"),
+          bFooter: getChk("bFooter"),
           ComboTextSize: getChangedInt("ComboTextSize"),
           OCXLKTableName: getVal("OCXLKTableName"),
           OCXLKResultName: getVal("OCXLKResultName")
@@ -652,7 +655,9 @@
           'ComboTextSize',
 
           'OCXLKTableName',
-          'OCXLKResultName'
+          'OCXLKResultName',
+
+          'EditColor'
       ];
 
       let currentTr = null;
