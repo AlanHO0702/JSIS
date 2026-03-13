@@ -98,6 +98,13 @@
   const btnSaveHeight = document.getElementById('btnMatInfoSaveHeight');
   const btnCopyPN4YX = document.getElementById('btnMatInfoCopyPN4YX');
   const btnUpdateCustPn = document.getElementById('btnMatInfoUpdateCustPn');
+  const updateCustPnModalEl = document.getElementById('matinfo-update-custpn-modal');
+  const updateCustPnInputEl = document.getElementById('matinfo-update-custpn-input');
+  const updateCustEgInputEl = document.getElementById('matinfo-update-custeg-input');
+  const btnUpdateCustPnOk = document.getElementById('btnMatInfoUpdateCustPnOk');
+  const updateCustPnModal = window.bootstrap?.Modal && updateCustPnModalEl
+    ? window.bootstrap.Modal.getOrCreateInstance(updateCustPnModalEl, { backdrop: 'static', keyboard: true })
+    : null;
   const glyphImage = document.getElementById('matinfo-glyph-image');
   const glyphFrame = document.getElementById('matinfo-glyph-frame');
   const glyphEmpty = document.getElementById('matinfo-glyph-empty');
@@ -279,6 +286,10 @@
     'allowxoutrate', 'allowxoutqnty', 'boardarea', 'dheight', 'dvolume',
     'dlengthmax', 'dwidthmax', 'dheightmax', 'dvolumemax', 'dpackqntymax',
     'dvolumeaddon'
+  ]);
+  // Keep this field rendered as checkbox even if dict ComboStyle is toggled accidentally.
+  const forcedPanelCheckboxFields = new Set([
+    'ineedbatchnum'
   ]);
 
   const layoutFieldKeys = [
@@ -619,9 +630,19 @@
       if (!tbodyEl) return;
       tbodyEl.innerHTML = '';
       if (!state.rows.length) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td colspan="${cfg.columns.length}">沒有資料</td>`;
-        tbodyEl.appendChild(tr);
+        const availHeight = Math.max(120, Number(cfg.wrap?.clientHeight || cfg.table?.parentElement?.clientHeight || 220));
+        const rowCount = Math.max(8, Math.floor((availHeight - 28) / 24));
+        const colCount = Math.max(1, Number(cfg.columns?.length || 1));
+        for (let r = 0; r < rowCount; r += 1) {
+          const tr = document.createElement('tr');
+          tr.classList.add('matinfo-empty-row');
+          for (let c = 0; c < colCount; c += 1) {
+            const td = document.createElement('td');
+            td.innerHTML = '&nbsp;';
+            tr.appendChild(td);
+          }
+          tbodyEl.appendChild(tr);
+        }
         applyDetailTableWidths(cfg.table);
         attachDetailTableResizers(cfg.table);
         state.selectedIndex = -1;
@@ -1532,6 +1553,65 @@
     }
   };
 
+  const openUpdateCustPnDialog = (defaultCustPn, defaultCustEg) => {
+    const fallbackPrompt = () => {
+      const newCustPn = window.prompt('輸入新的客戶料號', defaultCustPn || '');
+      if (newCustPn == null) return null;
+      const newCustEg = window.prompt('輸入客戶機種(可空白)', defaultCustEg || '') ?? '';
+      return {
+        newCustPn: String(newCustPn).trim(),
+        newCustEg: String(newCustEg).trim()
+      };
+    };
+
+    if (!updateCustPnModal || !updateCustPnModalEl || !updateCustPnInputEl || !updateCustEgInputEl || !btnUpdateCustPnOk) {
+      return Promise.resolve(fallbackPrompt());
+    }
+
+    updateCustPnInputEl.value = defaultCustPn || '';
+    updateCustEgInputEl.value = defaultCustEg || '';
+
+    return new Promise((resolve) => {
+      let submitted = false;
+
+      const cleanup = () => {
+        btnUpdateCustPnOk.removeEventListener('click', onOk);
+        updateCustPnInputEl.removeEventListener('keydown', onEnter);
+        updateCustEgInputEl.removeEventListener('keydown', onEnter);
+      };
+
+      const onHidden = () => {
+        cleanup();
+        if (!submitted) {
+          resolve(null);
+          return;
+        }
+        resolve({
+          newCustPn: String(updateCustPnInputEl.value || '').trim(),
+          newCustEg: String(updateCustEgInputEl.value || '').trim()
+        });
+      };
+
+      const onOk = (e) => {
+        e?.preventDefault();
+        submitted = true;
+        updateCustPnModal.hide();
+      };
+
+      const onEnter = (e) => {
+        if (e.key !== 'Enter') return;
+        onOk(e);
+      };
+
+      btnUpdateCustPnOk.addEventListener('click', onOk);
+      updateCustPnInputEl.addEventListener('keydown', onEnter);
+      updateCustEgInputEl.addEventListener('keydown', onEnter);
+      updateCustPnModalEl.addEventListener('hidden.bs.modal', onHidden, { once: true });
+      updateCustPnModal.show();
+      setTimeout(() => updateCustPnInputEl.focus(), 60);
+    });
+  };
+
   function setValue(el, value) {
     if (!el) return;
     if (el.type === 'checkbox') {
@@ -1948,7 +2028,17 @@
           return c.includes(q) || n.includes(q);
         })
       : (options || []);
-    formLookupSuggestFiltered = filtered.slice(0, 200);
+    const seen = new Set();
+    const deduped = [];
+    filtered.forEach((o) => {
+      const key = String(o?.value || '').trim().toLowerCase();
+      const name = String(o?.label || '').trim().toLowerCase();
+      const dedupKey = key || `__label__${name}`;
+      if (!dedupKey || seen.has(dedupKey)) return;
+      seen.add(dedupKey);
+      deduped.push(o);
+    });
+    formLookupSuggestFiltered = deduped.slice(0, 200);
     formLookupSuggest.innerHTML = '';
     formLookupSuggestActiveIndex = -1;
     if (!formLookupSuggestFiltered.length) {
@@ -2317,8 +2407,9 @@
 
   function buildFieldElements(row) {
     const fieldName = (row.FieldName || row.fieldName || '').toString().trim();
+    const fieldKey = fieldName.toLowerCase();
     const labelText = (row.DisplayLabel || row.displayLabel || fieldName).toString();
-    const isCheck = Number(row.ComboStyle ?? row.comboStyle ?? 0) === 1;
+    const isCheck = forcedPanelCheckboxFields.has(fieldKey) || Number(row.ComboStyle ?? row.comboStyle ?? 0) === 1;
     const readOnly = Number(row.ReadOnly ?? row.readOnly ?? 0) === 1;
     const label = document.createElement('label');
     label.textContent = labelText;
@@ -2382,13 +2473,14 @@
     }
   }
 
-  function applyBasic1AbsLayout(rows) {
+  function applyBasic1AbsLayout(rows, allRows = rows) {
     if (!basic1Grid || !basic1Abs) return;
     resetBasic1Abs();
     basic1Abs.innerHTML = '';
     basic1Abs.style.minHeight = '';
     basic1Grid.style.display = '';
     const map = new Map();
+    const allMap = new Map();
     const existing = new Set();
     basic1Grid.querySelectorAll('[data-field]').forEach((el) => {
       const field = (el.getAttribute('data-field') || '').toLowerCase();
@@ -2398,33 +2490,59 @@
       const name = (row.FieldName || row.fieldName || '').toString().trim().toLowerCase();
       if (name) map.set(name, row);
     });
+    (allRows || []).forEach((row) => {
+      const name = (row.FieldName || row.fieldName || '').toString().trim().toLowerCase();
+      if (name) allMap.set(name, row);
+    });
 
     let maxBottom = 0;
     let movedControls = 0;
     let gridAdded = 0;
     const moved = new Set();
     basic1Grid.querySelectorAll('[data-field]').forEach((el) => {
-      const field = (el.getAttribute('data-field') || '').toLowerCase();
+      let ctrl = el;
+      const field = (ctrl.getAttribute('data-field') || '').toLowerCase();
       if (!field) return;
+      if (forcedPanelCheckboxFields.has(field) && ctrl.type !== 'checkbox') {
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.setAttribute('data-field', ctrl.getAttribute('data-field') || field);
+        checkbox.checked = ctrl.value === '1' || ctrl.value === 'true';
+        checkbox.disabled = ctrl.disabled || ctrl.readOnly;
+        ctrl.replaceWith(checkbox);
+        ctrl = checkbox;
+      }
+      const allRow = allMap.get(field);
+      const labelForVisibility = ctrl.type === 'checkbox' ? ctrl.closest('label') : findLabelForField(ctrl);
+      if (allRow) {
+        const isVisible = Number(allRow.Visible ?? allRow.visible ?? 1) === 1;
+        if (!isVisible) {
+          if (labelForVisibility) labelForVisibility.style.display = 'none';
+          ctrl.style.display = 'none';
+          return;
+        }
+      }
+      if (labelForVisibility) labelForVisibility.style.display = '';
+      ctrl.style.display = '';
       const row = map.get(field);
       if (!row) return;
-      const layout = adjustPanelLayout(row, getLayoutPair(row), el.type === 'checkbox');
+      const layout = adjustPanelLayout(row, getLayoutPair(row), ctrl.type === 'checkbox');
       if (isLayoutBlank(layout)) return;
-      const isCheckbox = el.type === 'checkbox';
-      const labelEl = isCheckbox ? el.closest('label') : findLabelForField(el);
+      const isCheckbox = ctrl.type === 'checkbox';
+      const labelEl = isCheckbox ? ctrl.closest('label') : findLabelForField(ctrl);
       if (labelEl && !moved.has(labelEl)) {
-        if (isCheckbox && !labelEl.contains(el)) labelEl.appendChild(el);
+        if (isCheckbox && !labelEl.contains(ctrl)) labelEl.appendChild(ctrl);
         const usePos = isCheckbox ? layout.field : layout.label;
         const bottom = applyAbsStyle(labelEl, usePos);
         if (bottom) maxBottom = Math.max(maxBottom, bottom);
         basic1Abs.appendChild(labelEl);
         moved.add(labelEl);
       }
-      if (!isCheckbox && !moved.has(el)) {
-        const bottom = applyAbsStyle(el, layout.field);
+      if (!isCheckbox && !moved.has(ctrl)) {
+        const bottom = applyAbsStyle(ctrl, layout.field);
         if (bottom) maxBottom = Math.max(maxBottom, bottom);
-        basic1Abs.appendChild(el);
-        moved.add(el);
+        basic1Abs.appendChild(ctrl);
+        moved.add(ctrl);
         movedControls += 1;
       } else if (isCheckbox && labelEl) {
         labelEl.classList.add('abs-checkbox-label');
@@ -2484,7 +2602,7 @@
     basic2Abs.style.minHeight = '';
 
     const { basic1, basic2 } = splitPanelFields(rows);
-    applyBasic1AbsLayout(basic1);
+    applyBasic1AbsLayout(basic1, rows);
 
     let maxBottom = 0;
     let absAdded = 0;
@@ -3143,6 +3261,59 @@
     selectRecord(dataCache[idx], idx);
   }
 
+  async function refreshCurrentRecordInPlace() {
+    const partnum = String(currentKey?.partnum || '').trim();
+    const revision = String(currentKey?.revision || '').trim();
+    if (!partnum || !revision) return false;
+
+    if (useCommonTable) {
+      const row = await fetchCommonRecord(partnum, revision);
+      if (!row) return false;
+      const idx = upsertRecordToCache(row, Math.max(0, (currentIndex || 1) - 1));
+      selectRecord(dataCache[idx], idx);
+      return true;
+    }
+
+    try {
+      const url = `/api/MindMatInfo/${encodeURIComponent(partnum)}/${encodeURIComponent(revision)}`;
+      const resp = await fetch(url);
+      if (!resp.ok) return false;
+      const row = await resp.json();
+      if (!row) return false;
+      const idx = upsertRecordToCache(row, Math.max(0, (currentIndex || 1) - 1));
+      selectRecord(dataCache[idx], idx);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function removeRecordFromCache(partnum, revision) {
+    const idx = findRecordIndex(partnum, revision, Math.max(0, (currentIndex || 1) - 1));
+    if (idx < 0) return false;
+
+    dataCache.splice(idx, 1);
+    totalCount = dataCache.length;
+    currentIndex = totalCount > 0 ? Math.min(idx + 1, totalCount) : 0;
+    updateCount();
+
+    if (totalCount <= 0) {
+      clearForm();
+      currentRecord = null;
+      currentKey = null;
+      isNew = false;
+      setKeyFieldsEditable(false);
+      setEditMode(false);
+      detailGrids.forEach((grid) => grid.loadRows());
+      scheduleRender();
+      return true;
+    }
+
+    const nextIdx = Math.max(0, Math.min(idx, totalCount - 1));
+    selectRecord(dataCache[nextIdx], nextIdx);
+    return true;
+  }
+
   function selectRecord(item, index) {
     if (!item) return;
     fillForm(item);
@@ -3214,7 +3385,7 @@
     if (!tbody || !theadRow || !browseScrollBody) return;
     if (!columns.length || totalCount <= 0) {
       theadRow.innerHTML = '';
-      tbody.innerHTML = '<tr><td colspan="1">沒有資料</td></tr>';
+      tbody.innerHTML = '<tr class="matinfo-empty-row"><td colspan="1">&nbsp;</td></tr>';
       return;
     }
 
@@ -3508,6 +3679,8 @@
       notify('error', '請先選擇一筆資料');
       return;
     }
+    const deletingPartnum = currentKey.partnum;
+    const deletingRevision = currentKey.revision;
     const ok = window.Swal
       ? (await window.Swal.fire({ icon: 'warning', title: '確定要刪除?', showCancelButton: true })).isConfirmed
       : confirm('確定要刪除?');
@@ -3538,7 +3711,7 @@
         return;
       }
       notify('success', '刪除完成');
-      await loadData();
+      removeRecordFromCache(deletingPartnum, deletingRevision);
       return;
     }
 
@@ -3549,7 +3722,7 @@
       return;
     }
     notify('success', '刪除完成');
-    await loadData();
+    removeRecordFromCache(deletingPartnum, deletingRevision);
   }
 
   btnQuery?.addEventListener('click', () => {
@@ -3587,10 +3760,6 @@
   });
 
   btnAdd?.addEventListener('click', () => {
-    if (window.MatInfoAddHandler?.open) {
-      window.MatInfoAddHandler.open({ itemId, dictTableName });
-      return;
-    }
     cancelSnapshot = getFormData();
     preserveCancelSnapshot = true;
     clearForm();
@@ -3736,7 +3905,7 @@
       return;
     }
     notify('success', '轉工程資料成功');
-    await loadData();
+    await refreshCurrentRecordInPlace();
   });
 
   btnDelete?.addEventListener('click', () => {
@@ -3949,16 +4118,25 @@
       notify('error', '請先進入編輯模式');
       return;
     }
-    const newCustPn = window.prompt('輸入新的客戶料號');
-    if (newCustPn == null) return;
-    const newCustEg = window.prompt('輸入客戶機種(可空白)') ?? '';
+    const defaultCustPn = String(
+      getValue(currentRecord, 'CustomerPartNum') ||
+      getValue(currentRecord, 'CustPartNum') ||
+      ''
+    ).trim();
+    const defaultCustEg = String(
+      getValue(currentRecord, 'CustEg') ||
+      getValue(currentRecord, 'CustomerType') ||
+      ''
+    ).trim();
+    const input = await openUpdateCustPnDialog(defaultCustPn, defaultCustEg);
+    if (!input) return;
     const resp = await fetch('/api/MatInfoUtility/UpdateCustPn', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         partNum: currentKey.partnum,
-        newCustPn: String(newCustPn).trim(),
-        newCustEg: String(newCustEg).trim(),
+        newCustPn: input.newCustPn,
+        newCustEg: input.newCustEg,
         userId: getUserId()
       })
     });
@@ -3967,7 +4145,7 @@
       return;
     }
     notify('success', '已完成修改');
-    await loadData();
+    await refreshCurrentRecordInPlace();
   });
   btnCopyPN4YX?.addEventListener('click', async () => {
     if (!currentKey?.partnum) {
@@ -3986,8 +4164,16 @@
       notify('error', await resp.text());
       return;
     }
+    let result = null;
+    try {
+      result = await resp.json();
+    } catch {
+      result = null;
+    }
+    const copiedPartNum = String(result?.partNum || result?.PartNum || '').trim();
     notify('success', '已完成');
-    await loadData();
+    if (copiedPartNum && await searchByAddedPartnum(copiedPartNum)) return;
+    await refreshCurrentRecordInPlace();
   });
 
   syncScroll(browseScrollTop, browseScrollBody);
@@ -4096,7 +4282,7 @@
   document.addEventListener('matinfo:add:done', async (e) => {
     const partnum = e.detail?.partnum;
     if (await searchByAddedPartnum(partnum)) return;
-    loadData();
+    await refreshCurrentRecordInPlace();
   });
   document.addEventListener('matinfo:search:done', (e) => {
     const rows = e.detail?.rows;
