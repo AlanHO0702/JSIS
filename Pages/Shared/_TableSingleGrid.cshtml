@@ -686,6 +686,64 @@
   #condRunSpModal .crs-field { display: flex; align-items: center; gap: 8px; }
   #condRunSpModal .crs-label { white-space: nowrap; margin: 0; flex: 0 0 90px; text-align: right; font-size: var(--field-label-size); }
   #condRunSpModal .crs-control { flex: 1 1 auto; min-width: 0; font-size: var(--field-value-size); }
+
+  /* Checkbox 樣式 - 完全模仿 Bootstrap form-check-input */
+  #mainGrid td input[type="checkbox"].cell-edit {
+    display: inline-block;
+    width: 18px !important;
+    height: 18px !important;
+    min-height: 18px !important;
+    max-height: 18px !important;
+    line-height: 18px !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    vertical-align: middle;
+    cursor: pointer;
+    /* Bootstrap 樣式 */
+    border-radius: 0.25em;
+    border: 1px solid #dee2e6;
+    background-color: #fff;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+  }
+
+  /* Checked 狀態 - 藍色背景 + 深灰色邊框 + 白色勾選圖示 */
+  #mainGrid td input[type="checkbox"].cell-edit:checked {
+    background-color: #0d6efd;
+    border-color: #8f98a1 !important;  /* 深灰色邊框，讓框框明顯 */
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3e%3cpath fill='none' stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='m6 10 3 3 6-6'/%3e%3c/svg%3e");
+  }
+
+  /* Focus 狀態 */
+  #mainGrid td input[type="checkbox"].cell-edit:focus {
+    outline: 0;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+  }
+
+  /* 瀏覽模式（禁用狀態）- 保持清晰可見，不改變顏色 */
+  #mainGrid td input[type="checkbox"].cell-edit:disabled {
+    cursor: not-allowed;
+    opacity: 1;
+    pointer-events: none;  /* 禁止點擊 */
+  }
+
+  /* 瀏覽模式且已勾選 - 保持藍色背景、深灰色邊框和勾勾 */
+  #mainGrid td input[type="checkbox"].cell-edit:disabled:checked {
+    background-color: #0d6efd;
+    border-color: #8f98a1 !important;  /* 深灰色邊框，讓框框明顯 */
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3e%3cpath fill='none' stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='m6 10 3 3 6-6'/%3e%3c/svg%3e");
+  }
+
+  /* 包含 checkbox 的儲存格置中對齊 */
+  #mainGrid td:has(input[type="checkbox"].cell-edit) {
+    text-align: center;
+    vertical-align: middle;
+    padding: 0 !important;
+  }
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -709,7 +767,9 @@
     const modeEl = document.getElementById("singleGridMode");
     const countEl = document.getElementById("singleGridCount");
     const countBox = document.getElementById("singleGridCountBox");
+  console.log('[DEBUG] 開始載入變數');
   const table   = document.getElementById("mainGrid");
+  console.log('[DEBUG] table loaded');
   const ocxLookupMaps = @Html.Raw(JsonSerializer.Serialize(ocxLookupPayload));
 
   function normalizeEditColor(raw) {
@@ -1569,6 +1629,93 @@
     });
   };
 
+  // Checkbox 轉換相關函數
+  const getFieldMeta = (fieldName) => {
+    if (!fieldName || !Array.isArray(fieldFormatMap)) return null;
+    return fieldFormatMap.find(f =>
+      (f.FieldName || "").toLowerCase() === fieldName.toLowerCase()
+    );
+  };
+
+  const isCheckboxField = (fieldName) => {
+    const meta = getFieldMeta(fieldName);
+    const result = meta && Number(meta.ComboStyle ?? 0) === 1;
+    if (result) {
+      console.log(`[isCheckboxField] ${fieldName} 是 checkbox 欄位，ComboStyle =`, meta?.ComboStyle);
+    }
+    return result;
+  };
+
+  const applyCheckboxCells = () => {
+    console.log('[applyCheckboxCells] 開始執行，fieldFormatMap 長度:', fieldFormatMap?.length);
+    let convertCount = 0;
+    table.querySelectorAll("tbody tr").forEach(tr => {
+      tr.querySelectorAll("td").forEach(td => {
+        const fieldName = td.dataset.field;
+        if (!fieldName) return;
+
+        if (!isCheckboxField(fieldName)) return;
+
+        const inp = td.querySelector(".cell-edit");
+        if (!inp) {
+          console.log(`[applyCheckboxCells] ${fieldName}: 找不到 input`);
+          return;
+        }
+
+        // 如果已經是 checkbox，就跳過
+        if (inp.type === "checkbox") {
+          console.log(`[applyCheckboxCells] ${fieldName}: 已經是 checkbox`);
+          return;
+        }
+
+        console.log(`[applyCheckboxCells] ${fieldName}: 準備轉換，value =`, inp.value);
+        convertCount++;
+
+        // 以下是將 text input 轉換為 checkbox 的邏輯
+        const isReadOnly = inp.dataset.readonly === "1";
+        const rawValue = inp.value ?? "";
+        const checked = rawValue === "1" || rawValue === "true" || rawValue.toLowerCase() === "y";
+
+        // 建立 checkbox
+        const chk = document.createElement("input");
+        chk.type = "checkbox";
+        // 使用最基本的 class，不加任何 Bootstrap 樣式
+        chk.className = "cell-edit";
+        if (isReadOnly) chk.classList.add("readonly-cell");
+        chk.name = inp.name;
+        chk.checked = checked;
+        chk.value = checked ? "1" : "0";
+        chk.dataset.raw = inp.dataset.raw || (checked ? "1" : "0");
+        chk.dataset.readonly = inp.dataset.readonly || "0";
+        chk.dataset.lookupkey = inp.dataset.lookupkey || "";
+
+        // 初始狀態根據當前模式設定
+        if (isReadOnly || !isEdit) {
+          chk.disabled = true;
+        }
+
+        // 確保 checkbox 顯示（瀏覽模式時也要顯示）
+        chk.classList.remove('d-none');
+
+        // 監聽變更事件
+        chk.addEventListener("change", () => {
+          chk.value = chk.checked ? "1" : "0";
+          if (isEdit && !isReadOnly) setDirty(true);
+        });
+
+        // 替換原本的 input
+        inp.replaceWith(chk);
+
+        // 確保 span 隱藏（checkbox 欄位不使用 span）
+        const span = td.querySelector(".cell-view");
+        if (span) span.classList.add('d-none');
+
+        console.log(`[applyCheckboxCells] ${fieldName}: 轉換完成，checkbox 顯示狀態:`, !chk.classList.contains('d-none'));
+      });
+    });
+    console.log(`[applyCheckboxCells] 執行完成，共轉換 ${convertCount} 個欄位`);
+  };
+
   // 修改/檢視切換
     editBtn.addEventListener("click", async () => {
       if (isEdit && isDirty) {
@@ -1607,16 +1754,29 @@
         const inp  = td.querySelector(".cell-edit");
         if (!span || !inp) return;
 
+        const isCheckbox = inp.type === "checkbox";
+        const isReadonly = inp.dataset.readonly === "1";
+
         if (isEdit) {
-          if (inp.dataset.readonly === "1") {
-            // readonly 欄位：維持顯示 span（lookup 值），隱藏 input
+          if (isCheckbox) {
+            // checkbox: 不切換顯示/隱藏，直接啟用/禁用
+            if (isReadonly) {
+              inp.disabled = true;
+            } else {
+              inp.disabled = false;
+            }
+            // checkbox 始終顯示 input，隱藏 span
+            span.classList.add("d-none");
+            inp.classList.remove("d-none");
+          } else if (isReadonly) {
+            // 一般欄位且 readonly：維持顯示 span，隱藏 input
             span.classList.remove("d-none");
             inp.classList.add("d-none");
             inp.classList.add("readonly-cell");
             inp.setAttribute("readonly", "readonly");
             inp.setAttribute("tabindex", "-1");
           } else {
-            // 可編輯欄位：顯示 input，隱藏 span
+            // 一般欄位且可編輯：顯示 input，隱藏 span
             span.classList.add("d-none");
             inp.classList.remove("d-none");
             inp.classList.remove("readonly-cell");
@@ -1631,6 +1791,9 @@
         }
       });
     });
+
+    // 套用 checkbox 轉換（根據 ComboStyle）
+    applyCheckboxCells();
 
     table.addEventListener("input", (e) => {
       if (!isEdit) return;
@@ -2118,6 +2281,7 @@
     });
 
     applyLookupToTable();
+    applyCheckboxCells(); // 頁面載入時套用 checkbox 轉換
     setModePanel(isEdit);
     updateCountPanel(getSelectedRowIndex());
     buildCustomButtonsFromMeta();
@@ -2950,6 +3114,9 @@
           '</td>';
       }).join('') + '</tr>';
     }).join('');
+
+    // 套用 checkbox 轉換（根據 ComboStyle）
+    applyCheckboxCells();
 
     window.SELECTED_ROW = null;
     clearActiveCell();

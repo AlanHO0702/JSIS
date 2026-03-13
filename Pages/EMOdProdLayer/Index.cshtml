@@ -1,0 +1,150 @@
+@page "/EMOdProdLayer"
+@model PcbErpApi.Pages.EMOdProdLayer.IndexModel
+@using System.Text.Json
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = Model.PageTitle;
+    ViewData["TableTitle"] = "";
+    ViewData["SubRouteTemplate"] = "/EMOdProdLayer/Detail";
+    ViewData["KeyFieldName"] = "PartNum";
+}
+
+<partial name="~/Pages/Shared/_TableListPartial.cshtml" model="Model" view-data="ViewData" />
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", Model.FieldDictList, ViewData)
+@if (ViewData["LoadError"] is string loadErr && !string.IsNullOrWhiteSpace(loadErr))
+{
+    <div class="alert alert-danger mt-2">資料載入錯誤：@loadErr</div>
+}
+
+<script>
+  window._tableName         = "@Model.DictTableName";
+  window._dictTableName     = "@Model.DictTableName";
+  window._tableFields       = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+  window._lookupMapData     = @Html.Raw(JsonSerializer.Serialize(ViewData["LookupDisplayMap"] ?? new Dictionary<string, Dictionary<string, string>>()));
+  window._keyFieldName      = "PartNum";
+  window._detailRouteTemplate = "/EMOdProdLayer/Detail";
+  window._isViewOnlyMode    = @(Model.IsViewOnly ? "true" : "false");
+  window._singleItemId      = '@Model.ItemId';
+  window._singleRealTable   = '@Model.TableName';
+  // 三個主鍵欄位
+  window._emodProdLayerKeyFields = @Html.Raw(JsonSerializer.Serialize(
+      (Model.KeyFields != null && Model.KeyFields.Count > 0)
+          ? Model.KeyFields
+          : new List<string> { "PartNum", "Revision", "LayerId" }
+  ));
+</script>
+<script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
+<script>
+(function () {
+    window.renderTable = function (data) {
+        const tbody = document.getElementById('dataTbody');
+        if (!tbody) return;
+        tbody.innerHTML = "";
+
+        const fields = window._tableFields;
+        const lookupMapData = window._lookupMapData;
+        const keyFields = window._emodProdLayerKeyFields || ['PartNum', 'Revision', 'LayerId'];
+
+        if (!fields || !Array.isArray(data)) return;
+
+        data.forEach(item => {
+            const tr = document.createElement('tr');
+            tr.className = "row-link";
+
+            // 儲存三主鍵欄位供跳轉用（trim 避免 char 欄位補空格變成 %20）
+            keyFields.forEach(kf => {
+                const val = (item[kf] ?? item[kf.toLowerCase()] ?? "").toString().trim();
+                tr.setAttribute(`data-${kf.toLowerCase()}`, val);
+            });
+
+            tr.setAttribute('data-paper-num', item.PartNum ?? item.partnum ?? "");
+
+            // 設定完整的 data-url（含三主鍵），供 partial 的 dblclick handler 使用
+            const _rowQs = keyFields
+                .map(kf => `${encodeURIComponent(kf)}=${encodeURIComponent((item[kf] ?? item[kf.toLowerCase()] ?? '').toString().trim())}`)
+                .join('&');
+            tr.setAttribute('data-url', `/EMOdProdLayer/Detail?${_rowQs}&itemId=${window._singleItemId}`);
+
+            // 點擊選取列 + 儲存筆數位置供 Detail 頁使用
+            tr.addEventListener('click', function () {
+                // 高亮選取列
+                document.querySelectorAll("#dataTbody .row-link.selected").forEach(r => r.classList.remove("selected"));
+                tr.classList.add("selected");
+                window.selectedRow = tr;
+
+                try {
+                    const tn = 'emodprodlayer';
+                    const tbody2 = tr.parentNode;
+                    const rowIndex = Array.from(tbody2.children).indexOf(tr);
+                    const savedStart = parseInt(localStorage.getItem(`orderListQueryPageStart:${tn}`) || '1', 10);
+                    const absIndex = savedStart + rowIndex;
+                    localStorage.setItem(`orderListQueryIndex:${tn}`, String(absIndex));
+                } catch {}
+            });
+
+            // 點擊跳轉 Detail
+            tr.addEventListener('dblclick', function () {
+                const qs = keyFields
+                    .map(kf => `${encodeURIComponent(kf)}=${encodeURIComponent(tr.getAttribute('data-' + kf.toLowerCase()) ?? '')}`)
+                    .join('&');
+                window.location.href = `/EMOdProdLayer/Detail?${qs}&itemId=${window._singleItemId}`;
+            });
+
+            // 欄位渲染
+            fields.filter(f => f.Visible).forEach(f => {
+                const td = document.createElement('td');
+                const raw = item[f.FieldName] ?? item[f.FieldName?.toLowerCase()] ?? "";
+
+                // Lookup 欄位顯示
+                if (f.LookupResultField && lookupMapData) {
+                    const map = lookupMapData[f.FieldName];
+                    td.textContent = (map && map[raw]) ? map[raw] : raw;
+                } else {
+                    td.textContent = raw ?? "";
+                }
+                tr.appendChild(td);
+            });
+
+            tbody.appendChild(tr);
+        });
+
+        // 更新計數
+        const counter = document.getElementById('recordCount');
+        if (counter) counter.textContent = data.length;
+
+        // 儲存總筆數供 Detail 頁導航使用
+        try {
+            localStorage.setItem('orderListQueryTotal:emodprodlayer', String(data.length));
+            localStorage.setItem('orderListQueryPageStart:emodprodlayer', '1');
+        } catch {}
+    };
+
+    // 切換按鈕：跳轉到選取列的 Detail 頁
+    const _switchBtn = document.getElementById('btnSwitch');
+    if (_switchBtn) {
+        _switchBtn.addEventListener('click', function (e) {
+            e.stopImmediatePropagation();
+            const row = document.querySelector('#dataTbody .row-link.selected');
+            if (!row) {
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({ icon: 'warning', title: '請先選擇一筆層別資料' });
+                } else {
+                    alert('請先選擇一筆層別資料');
+                }
+                return;
+            }
+            const kf = window._emodProdLayerKeyFields || ['PartNum', 'Revision', 'LayerId'];
+            const qs = kf.map(k => `${encodeURIComponent(k)}=${encodeURIComponent(row.getAttribute('data-' + k.toLowerCase()) ?? '')}`).join('&');
+            window.location.href = `/EMOdProdLayer/Detail?${qs}&itemId=${window._singleItemId}`;
+        }, true);
+    }
+
+    // 覆蓋完成後，用 server 端初始資料重新渲染
+    const _initData = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Items));
+    if (Array.isArray(_initData) && _initData.length > 0) {
+        window.renderTable(_initData);
+    }
+})();
+</script>

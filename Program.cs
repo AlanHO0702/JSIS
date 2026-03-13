@@ -57,6 +57,18 @@ builder.Services.AddHttpClient("CrystalReport", (sp, client) =>
 // 註冊 HttpClient，讓服務可注入 HttpClient 用於發送 HTTP 請求
 builder.Services.AddHttpClient();
 
+// 註冊 MemoryCache，用於分頁 TotalCount 快取
+builder.Services.AddMemoryCache();
+
+// 註冊 Session 服務
+builder.Services.AddDistributedMemoryCache();
+builder.Services.AddSession(options =>
+{
+    options.IdleTimeout = TimeSpan.FromMinutes(30);
+    options.Cookie.HttpOnly = true;
+    options.Cookie.IsEssential = true;
+});
+
 // 註冊 EF Core 的 PcbErpContext 資料庫上下文，並使用 appsettings.json 中的 DefaultConnection 連線字串
 builder.Services.AddDbContext<PcbErpContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -107,6 +119,9 @@ app.UseStaticFiles(new StaticFileOptions
 
 // 啟用路由中介軟體，讓路由功能生效
 app.UseRouting();
+
+// 啟用 Session 中介軟體
+app.UseSession();
 
 app.UseMiddleware<UserOnlineMiddleware>();
 // 啟用授權中介軟體（若使用授權/認證機制）

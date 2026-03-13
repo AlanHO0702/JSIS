@@ -1,0 +1,568 @@
+@page "/FME/FME00014"
+@using PcbErpApi.Models
+@model PcbErpApi.Pages.FME.FME00014Model
+@{
+    Layout = "_InquiryTemplate";
+    ViewData["Title"] = Model.PageTitle;
+    ViewData["ShowInqHeader"] = false;
+    ViewData["ShowInqRail"] = true;
+    ViewData["InqRailTitle"] = "查詢";
+    ViewData["InqRailWidth"] = "120px";
+}
+
+@section InqRail {
+    <button type="submit" form="inqForm" class="inq-rail-btn">查詢</button>
+    <button type="button" class="inq-rail-btn" id="btnExportExcel">匯出Excel</button>
+    <button type="button" class="inq-rail-btn" id="btnSaveHeight">儲存高度設定</button>
+    <div class="inq-rail-status">
+        <div>資料筆數：<span id="inqTotalCount">0</span></div>
+        <div>目前位置：<span id="inqCurrentPos">0</span></div>
+    </div>
+}
+
+@section InqQuery {
+    @{
+        var qMB = Request.Query["MB"].ToString();
+        var qMatClass = Request.Query["MatClass"].ToString();
+        var qInqType = Request.Query["InqType"].ToString();
+        var qPartNum = Request.Query["PartNum"].ToString();
+        var qMatName = Request.Query["MatName"].ToString();
+        var qInqDateFrom = Request.Query["InqDateFrom"].ToString();
+        var qInqDateTo = Request.Query["InqDateTo"].ToString();
+    }
+    <form id="inqForm" method="get" class="inq-form">
+        <div class="inq-row">
+            <label class="inq-label">購入件</label>
+            <select name="MB" class="form-select form-select-sm inq-input">
+                <option value="0" selected="@(qMB == "0")">0 否</option>
+                <option value="1" selected="@(qMB == "1" || string.IsNullOrEmpty(qMB))">1 是</option>
+                <option value="255" selected="@(qMB == "255")">255 不限</option>
+            </select>
+            <label class="inq-label">料號</label>
+            <input type="text" name="PartNum" class="form-control form-control-sm inq-input inq-input-wide"
+                   value="@qPartNum" placeholder="模糊" />
+            <label class="inq-label">需求日&gt;=</label>
+            <input type="date" name="InqDateFrom" class="form-control form-control-sm inq-input"
+                   value="@qInqDateFrom" />
+        </div>
+        <div class="inq-row">
+            <label class="inq-label">主分類</label>
+            <span class="inq-select">
+                <input type="hidden" id="inq_MatClass" name="MatClass" value="@qMatClass" />
+                <input type="text" class="form-control form-control-sm inq-input inq-lookup-display"
+                       id="inq_MatClass_display"
+                       autocomplete="off"
+                       data-code-target="inq_MatClass"
+                       placeholder="代碼或名稱" />
+                <button type="button" class="inq-select-btn" aria-label="開啟清單">▾</button>
+            </span>
+            <label class="inq-label">品名</label>
+            <input type="text" name="MatName" class="form-control form-control-sm inq-input inq-input-wide"
+                   value="@qMatName" placeholder="模糊" />
+            <label class="inq-label">需求日&lt;=</label>
+            <input type="date" name="InqDateTo" class="form-control form-control-sm inq-input"
+                   value="@qInqDateTo" />
+        </div>
+        <div class="inq-row">
+            <label class="inq-label">缺料條件</label>
+            <select name="InqType" class="form-select form-select-sm inq-input">
+                <option value="0" selected="@(qInqType == "0" || string.IsNullOrEmpty(qInqType))">0 只秀缺料</option>
+                <option value="1" selected="@(qInqType == "1")">1 只秀超額供給</option>
+                <option value="2" selected="@(qInqType == "2")">2 不限</option>
+            </select>
+        </div>
+        <input type="hidden" name="page" value="1" />
+        <input type="hidden" name="pageSize" value="@Model.PageSize" />
+    </form>
+}
+
+@{
+    var gDict = Model.GridDictFields ?? new List<CURdTableField>();
+    var gFields = gDict
+        .Where(f => f.Visible == 1)
+        .OrderBy(f => f.SerialNum ?? int.MaxValue)
+        .ToList();
+
+    string GLabel(CURdTableField f) => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel!;
+
+    object? GVal(object? row, string? name)
+    {
+        if (row == null || string.IsNullOrWhiteSpace(name)) return null;
+        if (row is IDictionary<string, object?> dict)
+        {
+            if (dict.TryGetValue(name, out var v)) return v;
+            var key = dict.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
+            return key != null ? dict[key] : null;
+        }
+        var prop = row.GetType().GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
+        return prop?.GetValue(row);
+    }
+
+    string GFormat(object? v, CURdTableField f)
+    {
+        return FormatHelper.FormatValue(v, f.DataType, f.FormatStr);
+    }
+}
+
+<div class="inq-table-wrap">
+    <table class="table table-sm table-hover align-middle inq-table">
+        <thead>
+            <tr>
+                @foreach (var f in gFields)
+                {
+                    <th class="inq-sortable" data-field="@f.FieldName">
+                        <span class="th-text">@GLabel(f)</span>
+                        <span class="col-resizer" draggable="false"></span>
+                    </th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model.Items.Count == 0)
+            {
+                <tr>
+                    <td colspan="@(Math.Max(1, gFields.Count))" class="text-center text-muted py-2">沒有資料</td>
+                </tr>
+            }
+            else
+            {
+                foreach (var row in Model.Items)
+                {
+                    <tr>
+                        @foreach (var f in gFields)
+                        {
+                            var val = GVal(row, f.FieldName);
+                            <td>@GFormat(val, f)</td>
+                        }
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+@if (Model.TotalPages > 1)
+{
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-1">
+        <div class="d-flex align-items-center gap-1">
+            <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber <= 1 ? "disabled" : "")"
+               href="@(Model.PageNumber <= 1 ? "#" : Model.BuildPageUrl(Model.PageNumber - 1))">上一頁</a>
+            <span>Page: <strong>@Model.PageNumber</strong> / <span>@Model.TotalPages</span></span>
+            <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber >= Model.TotalPages ? "disabled" : "")"
+               href="@(Model.PageNumber >= Model.TotalPages ? "#" : Model.BuildPageUrl(Model.PageNumber + 1))">下一頁</a>
+        </div>
+        <div class="text-muted">Total: @Model.TotalCount</div>
+    </div>
+}
+
+<style>
+    .inq-rail-status {
+        margin-top: 4px;
+        padding: 6px 6px;
+        border: 1px solid #d8dee8;
+        border-radius: 8px;
+        background: #f8fafc;
+        color: #1f3a8a;
+        font-size: 0.8rem;
+        line-height: 1.4;
+    }
+    .inq-rail-btn {
+        padding: 4px 6px;
+        font-size: 0.82rem;
+        border-radius: 8px;
+    }
+    .inq-form {
+        display: grid;
+        gap: 6px;
+    }
+    .inq-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+    .inq-label {
+        min-width: 68px;
+        text-align: right;
+        color: #1d3b6b;
+        font-size: 0.82rem;
+    }
+    .inq-input {
+        width: 160px;
+        font-size: 0.82rem;
+        height: 26px;
+        padding: 2px 6px;
+    }
+    .inq-input-wide {
+        width: 240px;
+    }
+    .inq-select {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+    }
+    .inq-select-btn {
+        position: absolute;
+        right: 4px;
+        top: 50%;
+        transform: translateY(-50%);
+        border: 0;
+        background: transparent;
+        font-size: 0.75rem;
+        color: #4b5563;
+        line-height: 1;
+        padding: 0;
+        cursor: pointer;
+    }
+    .inq-lookup-display {
+        padding-right: 18px;
+        background: #fff;
+        color: #374151;
+    }
+    .inq-suggest {
+        position: absolute;
+        background: #fff;
+        border: 1px solid #c9d2e3;
+        border-radius: 6px;
+        box-shadow: 0 6px 12px rgba(0,0,0,0.12);
+        max-height: 220px;
+        overflow-y: auto;
+        z-index: 2000;
+    }
+    .inq-suggest-item {
+        display: flex;
+        gap: 6px;
+        padding: 4px 6px;
+        cursor: pointer;
+        font-size: 0.82rem;
+    }
+    .inq-suggest-item:hover { background: #eef3ff; }
+    .inq-suggest-code { min-width: 40px; font-weight: 600; color: #1d3b6b; }
+    .inq-suggest-label { color: #4b5563; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .inq-table-wrap {
+        border: 1px solid #d8dee8;
+        border-radius: 8px;
+        background: #fff;
+        padding: 0;
+        overflow-x: auto;
+    }
+    .inq-table {
+        border-collapse: separate;
+        border-spacing: 0;
+        table-layout: fixed;
+        width: max-content;
+        min-width: 100%;
+    }
+    .inq-table th,
+    .inq-table td {
+        white-space: nowrap;
+        font-size: 0.82rem;
+        padding: 4px 6px;
+        border: 1px solid #e1e7f0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 300px;
+    }
+    .inq-table th {
+        background: #f3f7ff;
+        color: #2056ac;
+        font-weight: 600;
+        cursor: pointer;
+        user-select: none;
+        position: relative;
+    }
+    .inq-table th .th-text {
+        display: inline-block;
+        padding-right: 8px;
+    }
+    .inq-table th .col-resizer {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 6px;
+        height: 100%;
+        cursor: col-resize;
+        user-select: none;
+        z-index: 2;
+    }
+    .inq-table th.inq-sort-asc::after { content: " ▲"; font-size: 0.7rem; color: #1d3b6b; }
+    .inq-table th.inq-sort-desc::after { content: " ▼"; font-size: 0.7rem; color: #1d3b6b; }
+</style>
+
+<script>
+    const totalCount = @Model.TotalCount;
+    const totalEl = document.getElementById("inqTotalCount");
+    const posEl = document.getElementById("inqCurrentPos");
+    if (totalEl) totalEl.textContent = String(totalCount);
+
+    const rows = Array.from(document.querySelectorAll(".inq-table tbody tr"));
+    let selectedRow = null;
+    const setPos = (idx) => { if (posEl) posEl.textContent = totalCount === 0 ? "0" : String(idx); };
+    if (rows.length > 0 && totalCount > 0) setPos(1);
+    rows.forEach((tr, i) => {
+        tr.addEventListener("click", () => {
+            rows.forEach(r => r.classList.remove("table-active"));
+            tr.classList.add("table-active");
+            selectedRow = tr;
+            setPos(i + 1);
+        });
+    });
+
+    document.getElementById("btnClearInq")?.addEventListener("click", () => {
+        window.location.href = "/FME/FME00014";
+    });
+
+    const inqForm = document.getElementById("inqForm");
+    inqForm?.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const fd = new FormData(inqForm);
+        const params = new URLSearchParams();
+        for (const [k, v] of fd.entries()) {
+            const val = (v ?? "").toString().trim();
+            if (k === "InqType" || val) params.append(k, val);
+        }
+        const qs = params.toString();
+        window.location.href = qs ? `/FME/FME00014?${qs}` : "/FME/FME00014";
+    });
+
+    document.getElementById("btnExportExcel")?.addEventListener("click", () => {
+        const url = new URL(window.location.href);
+        url.searchParams.set("handler", "Export");
+        window.location.href = url.toString();
+    });
+
+    document.getElementById("btnSaveHeight")?.addEventListener("click", async () => {
+        const h = document.querySelector(".inq-body")?.clientHeight || 0;
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
+        const res = await fetch("/api/MatInfoUtility/SaveBrowseHeight", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "RequestVerificationToken": token },
+            body: JSON.stringify({ itemId: "FME00014", height: h })
+        });
+        if (!res.ok) return alert("儲存失敗");
+        alert("已儲存高度設定");
+    });
+
+    const parseSortValue = (text) => {
+        if (text == null) return "";
+        const t = String(text).trim();
+        if (!t) return "";
+        const d = t.match(/^(\d{4})[\/-](\d{2})[\/-](\d{2})$/);
+        if (d) return new Date(`${d[1]}-${d[2]}-${d[3]}`).getTime();
+        const n = t.replace(/,/g, "");
+        if (!isNaN(n) && n !== "") return parseFloat(n);
+        return t.toLowerCase();
+    };
+
+    const table = document.querySelector(".inq-table");
+    if (table) {
+        const headers = Array.from(table.querySelectorAll("thead th"));
+        headers.forEach((th, idx) => {
+            th.addEventListener("click", (e) => {
+                if (e.target?.classList?.contains("col-resizer")) return;
+                const isAsc = !th.classList.contains("inq-sort-asc");
+                headers.forEach(h => h.classList.remove("inq-sort-asc", "inq-sort-desc"));
+                th.classList.add(isAsc ? "inq-sort-asc" : "inq-sort-desc");
+                const tbody = table.querySelector("tbody");
+                const trs = Array.from(tbody.querySelectorAll("tr")).filter(r => !r.querySelector("td[colspan]"));
+                const dir = isAsc ? 1 : -1;
+                trs.sort((a, b) => {
+                    const av = parseSortValue(a.children[idx]?.textContent ?? "");
+                    const bv = parseSortValue(b.children[idx]?.textContent ?? "");
+                    return av < bv ? -dir : av > bv ? dir : 0;
+                });
+                trs.forEach(r => tbody.appendChild(r));
+            });
+        });
+    }
+
+    const dictTableName = "@(Model.DictTableName ?? "")";
+    const fieldNames = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(gFields.Select(f => f.FieldName ?? "")));
+
+    function applyColumnWidth(table, ths, index, width) {
+        const w = Math.max(20, Math.round(width));
+        const th = ths[index];
+        if (!th) return;
+        th.style.width = `${w}px`;
+        th.style.minWidth = `${w}px`;
+        Array.from(table.querySelectorAll(`tbody tr td:nth-child(${index + 1})`))
+            .forEach(td => { td.style.width = `${w}px`; td.style.minWidth = `${w}px`; });
+    }
+
+    function applySavedWidths(table, dictTable, fields) {
+        const tn = (dictTable || "").trim();
+        if (!tn) return;
+        try {
+            const raw = localStorage.getItem(`colwidth:${tn}`);
+            if (!raw) return;
+            const cols = JSON.parse(raw) || [];
+            const ths = Array.from(table.querySelectorAll('thead th'));
+            cols.forEach(c => {
+                const idx = fields.findIndex(x => x.toLowerCase() === (c.fieldName || '').toLowerCase());
+                if (idx >= 0 && Number.isFinite(Number(c.width))) applyColumnWidth(table, ths, idx, Number(c.width));
+            });
+        } catch { }
+    }
+
+    function initColumnResize(tableEl, dictTable, fields) {
+        if (!tableEl) return;
+        const ths = Array.from(tableEl.querySelectorAll('thead th'));
+        applySavedWidths(tableEl, dictTable, fields);
+        let isResizing = false, startX = 0, startWidth = 0, thIndex = -1;
+        ths.forEach((th, idx) => {
+            const handle = th.querySelector('.col-resizer');
+            if (!handle) return;
+            handle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                isResizing = true; startX = e.pageX;
+                startWidth = th.getBoundingClientRect().width; thIndex = idx;
+                document.body.classList.add('resizing');
+            });
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing || thIndex < 0) return;
+            applyColumnWidth(tableEl, ths, thIndex, Math.max(20, startWidth + e.pageX - startX));
+        });
+        document.addEventListener('mouseup', () => {
+            if (!isResizing) return;
+            isResizing = false;
+            document.body.classList.remove('resizing');
+            const tn = (dictTable || "").trim();
+            if (tn) {
+                const payload = ths.map(th => ({ fieldName: th.dataset.field, width: Math.round(th.getBoundingClientRect().width) }));
+                try { localStorage.setItem(`colwidth:${tn}`, JSON.stringify(payload)); } catch { }
+            }
+            thIndex = -1;
+        });
+    }
+
+    initColumnResize(table, dictTableName, fieldNames);
+
+    // MatClass lookup
+    const matClassAllOptions = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+        Model.MatClassOptions.Select(x => new { value = x.Value, label = x.Value + " - " + x.Label, mb = x.MB })
+    ));
+
+    const getMbFilter = () => {
+        const v = document.querySelector("select[name='MB']")?.value ?? "";
+        if (v === "0" || v === "1") return parseInt(v);
+        return 255; // 不限
+    };
+
+    const getFilteredMatClass = () => {
+        const mb = getMbFilter();
+        return mb === 255 ? matClassAllOptions : matClassAllOptions.filter(o => o.mb === mb);
+    };
+
+    let matClassOptions = getFilteredMatClass();
+
+    // 購入件切換時更新分類清單
+    document.querySelector("select[name='MB']")?.addEventListener("change", () => {
+        matClassOptions = getFilteredMatClass();
+        // 若目前已選的分類不在新清單裡，清空
+        const curCode = mcCodeEl?.value || "";
+        if (curCode && !matClassOptions.find(o => o.value === curCode)) {
+            if (mcCodeEl) mcCodeEl.value = "";
+            if (mcDisplayEl) mcDisplayEl.value = "";
+        }
+        closeMcSuggest();
+    });
+
+    const mcSuggest = document.createElement("div");
+    mcSuggest.className = "inq-suggest";
+    mcSuggest.style.display = "none";
+    document.body.appendChild(mcSuggest);
+
+    const mcDisplayEl = document.getElementById("inq_MatClass_display");
+    const mcCodeEl = document.getElementById("inq_MatClass");
+
+    let keepMcSuggestUntil = 0;
+
+    // 初始化：若有已選值則顯示對應 label
+    if (mcCodeEl && mcDisplayEl) {
+        const initVal = (mcCodeEl.value || "").trim();
+        if (initVal) {
+            const hit = matClassOptions.find(o => o.value === initVal);
+            mcDisplayEl.value = hit ? hit.label : initVal;
+        }
+    }
+
+    const positionMcSuggest = (el) => {
+        const rect = el.getBoundingClientRect();
+        mcSuggest.style.left = `${rect.left + window.scrollX}px`;
+        mcSuggest.style.top = `${rect.bottom + window.scrollY}px`;
+        mcSuggest.style.width = `${Math.max(rect.width, 240)}px`;
+    };
+
+    const hideMcSuggest = () => {
+        if (Date.now() < keepMcSuggestUntil) return;
+        mcSuggest.style.display = "none";
+        mcSuggest.innerHTML = "";
+    };
+
+    const renderMcSuggest = (el, q) => {
+        const filtered = q
+            ? matClassOptions.filter(o => o.value.toLowerCase().includes(q) || o.label.toLowerCase().includes(q))
+            : matClassOptions;
+        mcSuggest.innerHTML = "";
+        if (filtered.length === 0) { hideMcSuggest(); return; }
+        filtered.slice(0, 200).forEach(o => {
+            const item = document.createElement("div");
+            item.className = "inq-suggest-item";
+            item.innerHTML = `<div class="inq-suggest-code">${o.value}</div><div class="inq-suggest-label">${o.label}</div>`;
+            item.addEventListener("mousedown", (e) => {
+                e.preventDefault();
+                mcCodeEl.value = o.value;
+                mcDisplayEl.value = o.label;
+                hideMcSuggest();
+            });
+            mcSuggest.appendChild(item);
+        });
+        positionMcSuggest(el);
+        mcSuggest.style.display = "block";
+    };
+
+    const showMcSuggest = (el) => {
+        renderMcSuggest(el, (el.value || "").trim().toLowerCase());
+    };
+
+    // ▾ 按鈕：mousedown 設保護時間，讓 blur 不會搶先關掉
+    document.querySelector(".inq-select .inq-select-btn")?.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        keepMcSuggestUntil = Date.now() + 250;
+        mcDisplayEl?.focus();
+        showMcSuggest(mcDisplayEl);
+    });
+
+    // 下拉清單本身被點擊時也延長保護
+    mcSuggest.addEventListener("mousedown", () => {
+        keepMcSuggestUntil = Date.now() + 250;
+    });
+
+    mcDisplayEl?.addEventListener("focus", () => showMcSuggest(mcDisplayEl));
+    mcDisplayEl?.addEventListener("input", () => renderMcSuggest(mcDisplayEl, (mcDisplayEl.value || "").trim().toLowerCase()));
+    mcDisplayEl?.addEventListener("blur", () => {
+        setTimeout(() => {
+            if (!mcSuggest.matches(":hover")) hideMcSuggest();
+        }, 120);
+        const text = (mcDisplayEl.value || "").trim();
+        if (!text) { mcCodeEl.value = ""; return; }
+        const hit = matClassOptions.find(o => o.value === text || o.label === text);
+        if (hit) { mcCodeEl.value = hit.value; mcDisplayEl.value = hit.label; }
+        else if (!matClassOptions.find(o => o.value === mcCodeEl.value)) { mcCodeEl.value = ""; mcDisplayEl.value = ""; }
+    });
+
+    document.addEventListener("click", (e) => {
+        if (!mcSuggest.style.display || mcSuggest.style.display === "none") return;
+        if (e.target === mcDisplayEl || mcSuggest.contains(e.target)) return;
+        hideMcSuggest();
+    });
+</script>
+
+@if (Request.Query.ContainsKey("debug"))
+{
+    <div class="mt-3 p-2 border rounded bg-light">
+        <div class="fw-bold mb-1">Debug SQL</div>
+        <div class="small text-muted">@Model.DebugExecText</div>
+    </div>
+}

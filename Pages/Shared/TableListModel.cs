@@ -82,7 +82,15 @@ public abstract class TableListModel<T> : PageModel where T : class, new() // æ³
         if (!string.IsNullOrWhiteSpace(queryStr))
             apiUrl += "&" + queryStr;
 
-        var resp = await _httpClient.GetFromJsonAsync<ApiResult>(apiUrl);
+        ApiResult? resp = null;
+        try
+        {
+            resp = await _httpClient.GetFromJsonAsync<ApiResult>(apiUrl);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "TableListModel: server-side API call failed: {Url}", apiUrl);
+        }
 
         Items = resp?.data ?? new List<T>();
         TotalCount = resp?.totalCount ?? 0;
