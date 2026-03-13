@@ -91,8 +91,12 @@ namespace PcbErpApi.Pages.CCS
                 var masterDict = await LoadFieldDictAsync(masterDictName);
                 if (!HasLayoutCoordinates(masterDict) && string.Equals(masterDictName, DefaultMasterDict, StringComparison.OrdinalIgnoreCase))
                 {
-                    masterDictName = LegacyMasterDict;
-                    masterDict = await LoadFieldDictAsync(masterDictName);
+                    var hasLangLayout = await HasLayoutCoordinatesInLangAsync(masterDictName);
+                    if (!hasLangLayout)
+                    {
+                        masterDictName = LegacyMasterDict;
+                        masterDict = await LoadFieldDictAsync(masterDictName);
+                    }
                 }
                 if (masterDict.Count == 0 && !string.Equals(masterDictName, DefaultMasterDict, StringComparison.OrdinalIgnoreCase))
                 {
@@ -408,6 +412,26 @@ namespace PcbErpApi.Pages.CCS
             return false;
         }
 
+        private async Task<bool> HasLayoutCoordinatesInLangAsync(string dictTableName, string languageId = "TW")
+        {
+            var tname = (dictTableName ?? string.Empty)
+                .Trim()
+                .Trim('[', ']')
+                .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase)
+                .ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(tname)) return false;
+
+            return await _ctx.CurdTableFieldLangs.AsNoTracking()
+                .Where(x => x.LanguageId == languageId
+                            && x.TableName != null
+                            && (x.TableName.ToLower() == tname
+                                || x.TableName.ToLower().Replace("dbo.", "") == tname))
+                .AnyAsync(x =>
+                    x.IFieldTop > 0 || x.IFieldLeft > 0
+                    || x.ILabTop > 0 || x.ILabLeft > 0);
+        }
+
         private static int ResolveSystemIdByPowerType(int? powerType)
         {
             if (!powerType.HasValue) return 1;
@@ -449,5 +473,3 @@ namespace PcbErpApi.Pages.CCS
         }
     }
 }
-
-
