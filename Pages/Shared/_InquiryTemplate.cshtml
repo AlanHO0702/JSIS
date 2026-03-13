@@ -142,6 +142,30 @@
     width: 11px;
     height: 11px;
   }
+  .inq-query .inq-form.inq-form--auto-grid-active {
+    width: max-content;
+    min-width: 100%;
+    overflow-x: auto;
+  }
+  .inq-query .inq-form.inq-form--auto-grid-active .inq-row {
+    display: grid;
+    grid-template-columns: var(--inq-auto-cols, max-content);
+    column-gap: 2px;
+    align-items: center;
+    flex-wrap: nowrap;
+  }
+  .inq-query .inq-form.inq-form--auto-grid-active .inq-row > .inq-label {
+    min-width: 0;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .inq-query .inq-form.inq-form--auto-grid-active .inq-row > .inq-input,
+  .inq-query .inq-form.inq-form--auto-grid-active .inq-row > .inq-select,
+  .inq-query .inq-form.inq-form--auto-grid-active .inq-row > .compact-check {
+    min-width: 0;
+  }
   @@media (max-width: 992px) {
     .inq-shell {
       flex-direction: column;
@@ -223,4 +247,173 @@
     </section>
   </main>
 </div>
+
+<script>
+  (function () {
+    const isTypingElement = (el) => {
+      if (!el) return false;
+      const tag = (el.tagName || "").toUpperCase();
+      if (tag === "TEXTAREA" || tag === "SELECT") return true;
+      if (tag === "INPUT") {
+        const type = (el.type || "text").toLowerCase();
+        return type !== "checkbox" && type !== "radio" && type !== "button";
+      }
+      return !!el.isContentEditable;
+    };
+
+    const bindCellNavigation = (table) => {
+      if (!(table instanceof HTMLTableElement)) return;
+      if (table.dataset.inqCellNav === "0") return;
+
+      const tbody = table.tBodies && table.tBodies.length ? table.tBodies[0] : null;
+      if (!tbody) return;
+
+      let activeCell = null;
+
+      const isDataRow = (tr) =>
+        !!tr && !tr.classList.contains("vs-spacer") && !tr.querySelector("td[colspan]");
+
+      const getDataRows = () =>
+        Array.from(tbody.querySelectorAll("tr")).filter(isDataRow);
+
+      const getVisibleCells = (tr) =>
+        Array.from(tr.querySelectorAll("td"))
+          .filter(td => td.colSpan <= 1 && td.offsetParent !== null && getComputedStyle(td).display !== "none");
+
+      const clearActiveCell = () => {
+        if (activeCell && activeCell.classList) activeCell.classList.remove("inq-active-cell");
+        activeCell = null;
+      };
+
+      const setActiveCell = (td, focus) => {
+        if (!td || td.tagName !== "TD" || td.colSpan > 1) {
+          clearActiveCell();
+          return;
+        }
+        if (activeCell && activeCell !== td) activeCell.classList.remove("inq-active-cell");
+        activeCell = td;
+        activeCell.classList.add("inq-active-cell");
+        if (!activeCell.hasAttribute("tabindex")) activeCell.tabIndex = -1;
+        if (focus) {
+          try { activeCell.focus({ preventScroll: true }); } catch { activeCell.focus(); }
+        }
+        try { activeCell.scrollIntoView({ block: "nearest", inline: "nearest" }); } catch { }
+      };
+
+      const resolveArrowTarget = (fromTd, key) => {
+        const fromTr = fromTd.closest("tr");
+        if (!isDataRow(fromTr)) return null;
+        const rows = getDataRows();
+        const rowIdx = rows.indexOf(fromTr);
+        if (rowIdx < 0) return null;
+
+        const rowCells = getVisibleCells(fromTr);
+        const cellIdx = rowCells.indexOf(fromTd);
+        if (cellIdx < 0) return null;
+
+        if (key === "ArrowLeft" || key === "ArrowRight") {
+          const nextIdx = cellIdx + (key === "ArrowLeft" ? -1 : 1);
+          if (nextIdx < 0 || nextIdx >= rowCells.length) return null;
+          return rowCells[nextIdx];
+        }
+
+        const nextRowIdx = rowIdx + (key === "ArrowUp" ? -1 : 1);
+        if (nextRowIdx < 0 || nextRowIdx >= rows.length) return null;
+        const targetCells = getVisibleCells(rows[nextRowIdx]);
+        if (!targetCells.length) return null;
+        return targetCells[Math.min(cellIdx, targetCells.length - 1)];
+      };
+
+      tbody.addEventListener("click", (ev) => {
+        const td = ev.target?.closest?.("td");
+        if (!td || !tbody.contains(td) || td.colSpan > 1) return;
+        if (!isDataRow(td.closest("tr"))) return;
+        setActiveCell(td, false);
+      });
+
+      table.addEventListener("focusin", (ev) => {
+        const td = ev.target?.closest?.("td");
+        if (!td || !tbody.contains(td) || td.colSpan > 1) return;
+        if (!isDataRow(td.closest("tr"))) return;
+        setActiveCell(td, false);
+      });
+
+      table.addEventListener("keydown", (ev) => {
+        if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(ev.key)) return;
+        if (isTypingElement(ev.target)) return;
+
+        let source = activeCell;
+        if (!source || !source.isConnected) {
+          const selected = tbody.querySelector("tr.table-active");
+          source = selected ? getVisibleCells(selected)[0] : null;
+        }
+        if (!source) return;
+
+        const target = resolveArrowTarget(source, ev.key);
+        if (!target) return;
+        ev.preventDefault();
+        setActiveCell(target, true);
+        target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      new MutationObserver(() => {
+        if (activeCell && !activeCell.isConnected) activeCell = null;
+      }).observe(tbody, { childList: true, subtree: true });
+    };
+
+    const alignQueryRows = () => {
+      document.querySelectorAll(".inq-query .inq-form.inq-form--auto-grid-enabled").forEach((form) => {
+        if (!(form instanceof HTMLElement)) return;
+        form.classList.remove("inq-form--auto-grid-active");
+        form.style.removeProperty("--inq-auto-cols");
+        const rows = Array.from(form.querySelectorAll(":scope > .inq-row"));
+        if (!rows.length) return;
+        if (rows.length <= 1) return;
+
+        const labelWidths = [];
+        const fieldWidths = [];
+        let maxPairs = 0;
+
+        rows.forEach((row) => {
+          const cells = Array.from(row.children).filter((el) => el instanceof HTMLElement);
+          let pairIndex = 0;
+          for (let i = 0; i < cells.length; i++) {
+            const label = cells[i];
+            if (!(label instanceof HTMLElement) || !label.classList.contains("inq-label")) continue;
+            const field = cells[i + 1];
+            if (!(field instanceof HTMLElement)) break;
+
+            const lw = Math.ceil(label.getBoundingClientRect().width);
+            const check = field.classList.contains("compact-check");
+            const fw = check
+              ? 20
+              : Math.ceil(field.getBoundingClientRect().width);
+
+            labelWidths[pairIndex] = Math.max(labelWidths[pairIndex] || 0, lw);
+            fieldWidths[pairIndex] = Math.max(fieldWidths[pairIndex] || 0, fw);
+            pairIndex += 1;
+            i += 1;
+          }
+          maxPairs = Math.max(maxPairs, pairIndex);
+        });
+
+        if (!maxPairs) return;
+
+        const cols = [];
+        for (let i = 0; i < maxPairs; i++) {
+          cols.push(`${Math.max(52, labelWidths[i] || 52)}px`);
+          cols.push(`${Math.max(20, fieldWidths[i] || 20)}px`);
+        }
+        form.classList.add("inq-form--auto-grid-active");
+        form.style.setProperty("--inq-auto-cols", cols.join(" "));
+      });
+    };
+
+    const queueAlign = () => window.requestAnimationFrame(alignQueryRows);
+
+    document.querySelectorAll(".inq-table").forEach(bindCellNavigation);
+    queueAlign();
+    window.addEventListener("resize", queueAlign);
+  })();
+</script>
 

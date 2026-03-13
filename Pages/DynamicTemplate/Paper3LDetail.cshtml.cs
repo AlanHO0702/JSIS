@@ -200,7 +200,8 @@ namespace PcbErpApi.Pages.DynamicTemplate
                     LookupCond2ResultField = x.LookupCond2ResultField,
                     ComboStyle = x.ComboStyle,
                     ReadOnly = x.ReadOnly,
-                    EditColor = x.EditColor
+                    EditColor = x.EditColor,
+                    ComboTextSize = x.ComboTextSize
                 }).ToList();
 
             // 4) Header lookup maps（MultiTab 明細採前端即時載入，這裡只保留單頭 lookup）

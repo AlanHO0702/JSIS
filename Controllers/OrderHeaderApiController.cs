@@ -687,8 +687,6 @@ public class OrderHeaderApiController : ControllerBase
         {
             ["AJNdJourSub"] = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
-                ["AccId"] = "1101",
-                ["SubAccId"] = "01",
                 ["IsD"] = "1"
             },
             ["SPOdOrderSub"] = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
@@ -752,10 +750,7 @@ public class OrderHeaderApiController : ControllerBase
             // 🔹 傳票明細
             ["AJNdJourSub"] = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
-                ["AccId"] = "1101",       // 預設借方科目
-                ["SubAccId"] = "01",       // 預設借方科目
-                ["IsD"] = "1"          // 借貸別：1=借方, 2=貸方
-
+                ["IsD"] = "0"          // 借貸別：1=借方, 2=貸方
             },
 
             // 🔹 銷貨單明細
@@ -862,9 +857,11 @@ public class OrderHeaderApiController : ControllerBase
         if (string.IsNullOrWhiteSpace(table) || string.IsNullOrWhiteSpace(paperNum))
             return BadRequest("table/paperNum 不可為空");
 
+        table = await ResolveRealTableNameAsync(table);
+
         using var conn = new SqlConnection(_connStr);
         await conn.OpenAsync();
-        var sql = $"DELETE FROM {table} WHERE PaperNum=@PaperNum AND Item=@Item";
+        var sql = $"DELETE FROM {EscTableName(table)} WHERE [PaperNum]=@PaperNum AND [Item]=@Item";
         using var cmd = new SqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("@PaperNum", paperNum);
         cmd.Parameters.AddWithValue("@Item", item);

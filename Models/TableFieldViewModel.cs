@@ -28,4 +28,5 @@ public class TableFieldViewModel
     public int? DisplaySize { get; set; }
     public int? ComboStyle { get; set; } // 辭典「勾選框」(CURdTableField.ComboStyle)
     public string? EditColor { get; set; }
+    public int? ComboTextSize { get; set; } // 代碼欄寬（px），控制 lookup-split-field 中代碼輸入框的寬度
 }

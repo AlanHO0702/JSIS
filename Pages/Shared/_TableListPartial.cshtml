@@ -618,18 +618,28 @@ function doQuery(page = 1, direction = null) {
   // 檢查 sessionStorage 是否已有 lookup 快取（關閉分頁才會消失）
   // 但如果查詢條件改變，需要清除快取以重新載入 lookup 資料
   const lookupCacheKey = `lookupCache:${tableName}`;
+  const lookupDataKey = `lookupData:${tableName}`;
   const lookupFiltersKey = `lookupFilters:${tableName}`;
   const currentFiltersHash = JSON.stringify(filters.filter(f => f.Field !== 'page' && f.Field !== 'pageSize').sort((a, b) => a.Field.localeCompare(b.Field)));
   const cachedFiltersHash = sessionStorage.getItem(lookupFiltersKey);
 
   let skipLookup = false;
   if (cachedFiltersHash === currentFiltersHash) {
-    // 查詢條件相同，可以使用快取
-    const cachedLookup = sessionStorage.getItem(lookupCacheKey);
-    skipLookup = !!cachedLookup && !!window._lookupMapData;
+    // 查詢條件相同，嘗試從 sessionStorage 還原完整 lookup 資料
+    const cachedLookupJson = sessionStorage.getItem(lookupDataKey);
+    if (cachedLookupJson) {
+      try {
+        const restored = JSON.parse(cachedLookupJson);
+        if (restored && Object.keys(restored).length > 0) {
+          window._lookupMapData = restored;
+          skipLookup = true;
+        }
+      } catch (_) { /* JSON 解析失敗，重新取得 */ }
+    }
   } else {
     // 查詢條件改變，清除舊快取
     sessionStorage.removeItem(lookupCacheKey);
+    sessionStorage.removeItem(lookupDataKey);
     sessionStorage.removeItem(lookupFiltersKey);
   }
 
@@ -657,14 +667,18 @@ function doQuery(page = 1, direction = null) {
   }, '讀取資料中…')
     .then(r => r.json())
     .then(result => {
-      // Lookup Cache 處理
+      // 如果後端有回傳 lookup 資料，存入快取（含完整資料）
       if (result.lookupMapData && Object.keys(result.lookupMapData).length > 0) {
         window._lookupMapData = result.lookupMapData;
-        sessionStorage.setItem(lookupCacheKey, '1');
-        sessionStorage.setItem(lookupFiltersKey, currentFiltersHash);
+        try {
+          sessionStorage.setItem(lookupDataKey, JSON.stringify(result.lookupMapData));
+          sessionStorage.setItem(lookupCacheKey, '1');
+          sessionStorage.setItem(lookupFiltersKey, currentFiltersHash);
+        } catch (_) { /* sessionStorage 滿了則忽略 */ }
       }
       if (skipLookup && (!window._lookupMapData || Object.keys(window._lookupMapData).length === 0)) {
         sessionStorage.removeItem(lookupCacheKey);
+        sessionStorage.removeItem(lookupDataKey);
         sessionStorage.removeItem(lookupFiltersKey);
       }
 

@@ -194,7 +194,8 @@ namespace PcbErpApi.Pages.DynamicTemplate
                     LookupCond2ResultField = x.LookupCond2ResultField,
                     ComboStyle = x.ComboStyle,
                     ReadOnly = x.ReadOnly,
-                    EditColor = x.EditColor
+                    EditColor = x.EditColor,
+                    ComboTextSize = x.ComboTextSize
                 }).ToList();
 
             TableFields = FieldDictList

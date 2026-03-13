@@ -1,0 +1,484 @@
+@*
+    AA000015 - 總帳傳票
+    對應 Delphi: HsaInsJourDLL.pas
+    自訂按鈕功能:
+      - btnC12: 匯入 (Import)
+*@
+@model dynamic
+
+<style>
+#aa15ImportModal .modal-dialog { max-width: 720px; }
+#aa15ImportModal .import-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+}
+#aa15ImportModal .import-row label {
+  min-width: 72px; text-align: right; font-size: 0.85rem; white-space: nowrap;
+}
+#aa15ImportModal .import-row input,
+#aa15ImportModal .import-row select {
+  flex: 1; font-size: 0.85rem;
+}
+#aa15ImportModal .import-row .btn { white-space: nowrap; }
+#aa15ImportModal .preview-wrapper {
+  max-height: 340px; overflow: auto; border: 1px solid #dee2e6;
+  border-radius: .25rem; margin-top: 8px;
+}
+#aa15ImportModal .preview-wrapper table {
+  font-size: 0.8rem; margin-bottom: 0;
+}
+#aa15ImportModal .preview-wrapper thead th {
+  position: sticky; top: 0; background: #f1f3f5; z-index: 1;
+}
+#aa15ImportModal .bu-name-display {
+  font-size: 0.82rem; color: #555; white-space: nowrap; min-width: 80px;
+}
+</style>
+
+<div class="modal" id="aa15ImportModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="false">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" style="font-size:0.95rem;">匯入薪資傳票</h5>
+        <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <!-- 傳票日期 / 公司別 -->
+        <div class="import-row">
+          <label>傳票日期</label>
+          <input type="date" id="aa15PaperDate" class="form-control form-control-sm" style="max-width:160px;">
+          <label style="min-width:50px;">公司別</label>
+          <select id="aa15CompanyId" class="form-select form-select-sm" style="max-width:100px;"></select>
+          <span id="aa15BuNameDisplay" class="bu-name-display"></span>
+          <label class="form-check-label ms-1" style="min-width:auto;">
+          </label>
+        </div>
+        <!-- Excel 檔名 -->
+        <div class="import-row">
+          <label>Excel檔名</label>
+          <input type="text" id="aa15FileName" class="form-control form-control-sm" readonly placeholder="">
+          <input type="file" id="aa15FileInput" accept=".xls,.xlsx" class="d-none">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="aa15BtnPickFile">選擇檔案</button>
+          <button type="button" class="btn btn-primary btn-sm" id="aa15BtnImport">匯　入</button>
+        </div>
+        <!-- Sheet 選擇 -->
+        <div class="import-row">
+          <label>sheet</label>
+          <select id="aa15SheetSelect" class="form-select form-select-sm"></select>
+          <button type="button" class="btn btn-outline-info btn-sm" id="aa15BtnEditFormat">編修格式</button>
+          <button type="button" class="btn btn-outline-success btn-sm" id="aa15BtnExportSample">匯出範例</button>
+        </div>
+        <!-- 預覽 Grid -->
+        <div class="preview-wrapper" id="aa15PreviewWrapper">
+          <div class="text-muted small text-center py-3">請選擇 Excel 檔案</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+    window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+    const readCtxVal = (ctx, key, fallbackKey) => {
+        const v = (ctx?.[key] || window[fallbackKey] || '').toString().trim();
+        if (v) return v;
+        const lsMap = { '_userId': 'erpLoginUserId', '_useId': 'erpLoginBUId' };
+        const lsKey = lsMap[fallbackKey];
+        return lsKey ? (localStorage.getItem(lsKey) || '').trim() : '';
+    };
+
+    const withJwtHeaders = (init = {}) => {
+        const jwt = localStorage.getItem('jwtId');
+        const headers = Object.assign({}, init.headers || {});
+        if (jwt) headers['X-JWTID'] = jwt;
+        return { ...init, headers };
+    };
+
+    /* ---------- state ---------- */
+    let workbookSheets = [];   // [{name, rows, matched, matchError}]
+    let selectedFile = null;
+    let buList = [];           // [{buId, buName}]
+
+    /* ---------- DOM refs ---------- */
+    const $ = (id) => document.getElementById(id);
+
+    /* ---------- helpers ---------- */
+    const escHtml = (v) => String(v ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    const buildPreviewTable = (rows) => {
+        if (!rows || !rows.length) return '<div class="text-muted small text-center py-3">無資料</div>';
+        const maxCols = Math.max(...rows.map(r => r.length));
+        const headerRow = rows[0] || [];
+        const thead = '<tr>' + Array.from({ length: maxCols }, (_, i) =>
+            `<th class="text-nowrap px-2">${escHtml(headerRow[i] ?? '')}</th>`
+        ).join('') + '</tr>';
+        const tbody = rows.slice(1).map(r =>
+            '<tr>' + Array.from({ length: maxCols }, (_, i) =>
+                `<td class="text-nowrap px-2">${escHtml(r[i] ?? '')}</td>`
+            ).join('') + '</tr>'
+        ).join('');
+        return `<table class="table table-sm table-bordered table-striped mb-0">
+            <thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+    };
+
+    /* ---------- load paper date ---------- */
+    const loadPaperDate = () => {
+        const el = $('aa15PaperDate');
+        if (!el) return;
+        // 嘗試從頁面上取得日期
+        const candidates = document.querySelectorAll(
+            'input[name="PaperDate"], input[name="JourDate"], input[data-field="PaperDate"], input[data-field="JourDate"]'
+        );
+        let dateVal = (window._paperDate || '').toString().trim();
+        if (!dateVal) {
+            for (const inp of candidates) {
+                const v = (inp.value || '').trim();
+                if (v) { dateVal = v; break; }
+            }
+        }
+        // 轉換為 yyyy-MM-dd 格式 (date input 需要)
+        if (dateVal) {
+            const m = dateVal.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+            if (m) dateVal = `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+        }
+        el.value = dateVal || new Date().toISOString().slice(0, 10);
+    };
+
+    /* ---------- load company options from /api/Login/BuList ---------- */
+    const loadCompanyOptions = async () => {
+        const sel = $('aa15CompanyId');
+        const nameDisplay = $('aa15BuNameDisplay');
+        if (!sel) return;
+
+        const currentBuId = localStorage.getItem('erpLoginBUId') || '';
+
+        try {
+            if (buList.length === 0) {
+                const res = await fetch('/api/Login/BuList', withJwtHeaders());
+                if (res.ok) buList = await res.json();
+            }
+        } catch { /* ignore */ }
+
+        if (buList.length > 0) {
+            sel.innerHTML = buList.map(b =>
+                `<option value="${escHtml(b.buId)}" ${b.buId === currentBuId ? 'selected' : ''}>${escHtml(b.buId)}</option>`
+            ).join('');
+        } else {
+            sel.innerHTML = currentBuId
+                ? `<option value="${escHtml(currentBuId)}">${escHtml(currentBuId)}</option>`
+                : '<option value="">--</option>';
+        }
+
+        // 顯示中文名稱
+        const updateBuName = () => {
+            const selectedId = sel.value;
+            const found = buList.find(b => b.buId === selectedId);
+            if (nameDisplay) nameDisplay.textContent = found?.buName || '';
+        };
+        updateBuName();
+        sel.onchange = updateBuName;
+    };
+
+    /* ---------- parse Excel via API (含格式比對) ---------- */
+    const parseExcelFile = async (file) => {
+        const itemId = readCtxVal({}, 'itemId', '_itemId') || 'AA000015';
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('itemId', itemId);
+
+        const res = await fetch('/api/AA000015/ParseExcel', withJwtHeaders({
+            method: 'POST',
+            body: formData
+        }));
+        const data = await res.json();
+        if (!res.ok || data.ok === false) {
+            throw new Error(data.error || data.message || `HTTP ${res.status}`);
+        }
+        return data.sheets; // [{name, rows, matched, matchError}]
+    };
+
+    /* ---------- refresh preview ---------- */
+    const refreshPreview = () => {
+        const sel = $('aa15SheetSelect');
+        const wrapper = $('aa15PreviewWrapper');
+        if (!sel || !wrapper) return;
+        const idx = parseInt(sel.value, 10);
+        if (isNaN(idx) || !workbookSheets[idx]) {
+            wrapper.innerHTML = '<div class="text-muted small text-center py-3">無資料</div>';
+            return;
+        }
+        const sheetData = workbookSheets[idx];
+        if (sheetData.matchError) {
+            wrapper.innerHTML = `<div class="text-danger small text-center py-3">${escHtml(sheetData.matchError)}</div>`;
+            return;
+        }
+        wrapper.innerHTML = buildPreviewTable(sheetData.rows);
+    };
+
+    /* ---------- file pick ---------- */
+    const onFilePicked = async (file) => {
+        if (!file) return;
+        selectedFile = file;
+        const fileNameEl = $('aa15FileName');
+        if (fileNameEl) fileNameEl.value = file.name;
+
+        const sel = $('aa15SheetSelect');
+        const wrapper = $('aa15PreviewWrapper');
+
+        try {
+            if (wrapper) wrapper.innerHTML = '<div class="text-muted small text-center py-3">讀取中...</div>';
+            workbookSheets = await parseExcelFile(file);
+
+            if (sel) {
+                sel.innerHTML = workbookSheets.map((s, i) => {
+                    const icon = s.matchError ? '\u26a0 ' : (s.matched ? '\u2713 ' : '');
+                    return `<option value="${i}">${escHtml(icon + s.name)}</option>`;
+                }).join('');
+            }
+            refreshPreview();
+        } catch (err) {
+            workbookSheets = [];
+            if (sel) sel.innerHTML = '';
+            if (wrapper) wrapper.innerHTML = `<div class="text-danger small text-center py-3">${escHtml(err.message)}</div>`;
+        }
+    };
+
+    /* ---------- do import ---------- */
+    const doImport = async (ctx) => {
+        if (!selectedFile) {
+            return Swal.fire({ icon: 'info', title: '請先選擇 Excel 檔案' });
+        }
+        const sheetSel = $('aa15SheetSelect');
+        const sheetIndex = sheetSel ? parseInt(sheetSel.value, 10) : 0;
+
+        // 檢查格式是否匹配
+        const sheetData = workbookSheets[sheetIndex];
+        if (sheetData?.matchError) {
+            return Swal.fire({ icon: 'warning', title: '欄位不符', text: sheetData.matchError });
+        }
+
+        const paperDate = $('aa15PaperDate')?.value || '';
+        const companyId = $('aa15CompanyId')?.value || '';
+        const stdFormat = $('aa15StdFormat')?.checked ? 1 : 0;
+        const itemId = readCtxVal(ctx, 'itemId', '_itemId') || 'AA000015';
+        const userId = readCtxVal(ctx, 'userId', '_userId');
+        const useId = readCtxVal(ctx, 'useId', '_useId');
+
+        const confirm = await Swal.fire({
+            icon: 'question',
+            title: '確定匯入?',
+            text: `將匯入 sheet: ${sheetData?.name || sheetIndex}`,
+            showCancelButton: true,
+            confirmButtonText: '確定',
+            cancelButtonText: '取消'
+        });
+        if (!confirm.isConfirmed) return;
+
+        Swal.fire({
+            title: '匯入中...',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            didOpen: () => Swal.showLoading()
+        });
+
+        try {
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            formData.append('sheetIndex', sheetIndex);
+            formData.append('paperDate', paperDate);
+            formData.append('companyId', companyId);
+            formData.append('stdFormat', stdFormat);
+            formData.append('itemId', itemId);
+            formData.append('userId', userId);
+            formData.append('useId', useId);
+
+            const res = await fetch('/api/AA000015/Import', withJwtHeaders({
+                method: 'POST',
+                body: formData
+            }));
+            const raw = await res.text();
+            let data;
+            try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
+
+            if (!res.ok || data.ok === false) {
+                throw new Error(data.error || data.message || `HTTP ${res.status}`);
+            }
+
+            await Swal.fire({
+                icon: 'success',
+                title: `匯入完成`
+            });
+
+            // 關閉匯入 Modal
+            const modalEl = $('aa15ImportModal');
+            if (modalEl && window.bootstrap) {
+                bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+            }
+
+            // 重新整理畫面
+            if (typeof window.prcDoReOpen === 'function') {
+                window.prcDoReOpen();
+            } else {
+                location.reload();
+            }
+        } catch (err) {
+            await Swal.fire({
+                icon: 'error',
+                title: '匯入失敗',
+                text: err.message || '發生未知錯誤'
+            });
+        }
+    };
+
+    /* ---------- edit format ---------- */
+    const editFormat = (ctx) => {
+        const itemId = readCtxVal(ctx, 'itemId', '_itemId') || 'AA000015';
+        const fetchDictTable = async () => {
+            try {
+                const res = await fetch(`/api/AA000015/GetDictTableName?itemId=${encodeURIComponent(itemId)}`, withJwtHeaders());
+                const data = await res.json();
+                if (data.ok && data.dictTableName) {
+                    const importDictTable = `${data.dictTableName}_4IMP`;
+                    if (typeof window.initFieldDictModal === 'function') {
+                        window._dictTableName = importDictTable;
+                        const dictNameSpan = document.getElementById('dictTableNameDisplay');
+                        if (dictNameSpan) dictNameSpan.textContent = `- ${importDictTable}`;
+                        window.initFieldDictModal(importDictTable, 'fieldDictModal');
+                        const el = document.getElementById('fieldDictModal');
+                        if (el && window.bootstrap) {
+                            bootstrap.Modal.getOrCreateInstance(el).show();
+                        }
+                    } else {
+                        Swal.fire({ icon: 'info', title: '欄位編修功能未載入' });
+                    }
+                } else {
+                    Swal.fire({ icon: 'info', title: '尚未設定匯入格式', text: data.error || '' });
+                }
+            } catch (err) {
+                Swal.fire({ icon: 'error', title: '載入失敗', text: err.message });
+            }
+        };
+        fetchDictTable();
+    };
+
+    /* ---------- export sample ---------- */
+    const exportSample = async (ctx) => {
+        const itemId = readCtxVal(ctx, 'itemId', '_itemId') || 'AA000015';
+        try {
+            const res = await fetch(`/api/AA000015/ExportSample?itemId=${encodeURIComponent(itemId)}`, withJwtHeaders());
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+                return Swal.fire({ icon: 'warning', title: '匯出失敗', text: data.error || data.message || '' });
+            }
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${itemId}_匯入範例.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            Swal.fire({ icon: 'error', title: '匯出失敗', text: err.message });
+        }
+    };
+
+    /* ---------- open import modal ---------- */
+    const openImportModal = async (ctx) => {
+        const itemId = readCtxVal(ctx, 'itemId', '_itemId') || 'AA000015';
+        const userId = readCtxVal(ctx, 'userId', '_userId');
+        const useId = readCtxVal(ctx, 'useId', '_useId');
+
+        // 權限檢查
+        try {
+            const res = await fetch('/api/AA000015/CheckImportPower', withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ItemId: itemId, UserId: userId, UseId: useId })
+            }));
+            const data = await res.json();
+            if (!res.ok || data.ok === false) {
+                return Swal.fire({
+                    icon: 'warning',
+                    title: '無權限',
+                    text: data.message || '您沒有匯入的使用權限'
+                });
+            }
+        } catch (err) {
+            return Swal.fire({
+                icon: 'error',
+                title: '權限檢查失敗',
+                text: err.message || '發生錯誤'
+            });
+        }
+
+        // 重置狀態
+        workbookSheets = [];
+        selectedFile = null;
+        const fileNameEl = $('aa15FileName');
+        const sheetSel = $('aa15SheetSelect');
+        const wrapper = $('aa15PreviewWrapper');
+        const fileInput = $('aa15FileInput');
+        if (fileNameEl) fileNameEl.value = '';
+        if (sheetSel) sheetSel.innerHTML = '';
+        if (wrapper) wrapper.innerHTML = '<div class="text-muted small text-center py-3">請選擇 Excel 檔案</div>';
+        if (fileInput) fileInput.value = '';
+
+        loadPaperDate();
+        await loadCompanyOptions();
+
+        // 開啟 modal
+        const modalEl = $('aa15ImportModal');
+        if (modalEl && window.bootstrap) {
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        }
+    };
+
+    /* ---------- bind events ---------- */
+    const bindEvents = () => {
+        const btnPickFile = $('aa15BtnPickFile');
+        const fileInput = $('aa15FileInput');
+        const btnImport = $('aa15BtnImport');
+        const btnEditFormat = $('aa15BtnEditFormat');
+        const sheetSel = $('aa15SheetSelect');
+
+        if (btnPickFile && fileInput) {
+            btnPickFile.addEventListener('click', () => fileInput.click());
+        }
+        if (fileInput) {
+            fileInput.addEventListener('change', (e) => {
+                const file = e.target.files?.[0];
+                if (file) onFilePicked(file);
+            });
+        }
+        if (btnImport) {
+            btnImport.addEventListener('click', () => doImport({}));
+        }
+        if (btnEditFormat) {
+            btnEditFormat.addEventListener('click', () => editFormat({}));
+        }
+        const btnExportSample = $('aa15BtnExportSample');
+        if (btnExportSample) {
+            btnExportSample.addEventListener('click', () => exportSample({}));
+        }
+        if (sheetSel) {
+            sheetSel.addEventListener('change', refreshPreview);
+        }
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bindEvents);
+    } else {
+        bindEvents();
+    }
+
+    // 註冊按鈕處理函式
+    window.ActionRailCustomHandlers['AA000015'] = {
+        btnC12: openImportModal   // 匯入
+    };
+})();
+</script>

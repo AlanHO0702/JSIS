@@ -229,6 +229,194 @@ order by SubSystemId;", conn))
         }
     }
 
+    [HttpGet("next-company-id")]
+    public async Task<IActionResult> NextCompanyId([FromQuery] string itemId, [FromQuery] int? systemId = null)
+    {
+        itemId = (itemId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(itemId))
+            return BadRequest(new { success = false, message = "itemId is required." });
+
+        var context = await LoadContextAsync(itemId, systemId);
+        if (context == null)
+            return NotFound(new { success = false, message = $"Item {itemId} not found." });
+
+        try
+        {
+            await using var conn = new SqlConnection(GetConnStr());
+            await conn.OpenAsync();
+
+            var numberSystemId = (context.SystemId == 103 || context.SystemId == 104) ? 1 : context.SystemId;
+            var enCode = await GetSystemEnCodeAsync(conn, numberSystemId);
+            if (string.IsNullOrWhiteSpace(enCode))
+            {
+                return Ok(new
+                {
+                    success = true,
+                    companyId = string.Empty,
+                    systemId = context.SystemId
+                });
+            }
+
+            var nextByProcedure = await TryGetNextCompanyIdByProcedureAsync(conn, numberSystemId);
+            if (!string.IsNullOrWhiteSpace(nextByProcedure)
+                && !await GetCompanyExistsAsync(conn, nextByProcedure))
+            {
+                return Ok(new
+                {
+                    success = true,
+                    companyId = nextByProcedure,
+                    systemId = context.SystemId
+                });
+            }
+
+            var codePattern = ResolveCodePattern(enCode, numberSystemId);
+            if (string.IsNullOrWhiteSpace(codePattern.Prefix) || codePattern.DigitWidth <= 0)
+            {
+                return Ok(new
+                {
+                    success = true,
+                    companyId = string.Empty,
+                    systemId = context.SystemId
+                });
+            }
+
+            var prefix = codePattern.Prefix;
+            var maxNum = 0;
+            var digitWidth = codePattern.DigitWidth;
+
+            await using (var listCmd = new SqlCommand("exec AJNdCompanySystemSearch @SystemId", conn))
+            {
+                listCmd.Parameters.Add(new SqlParameter("@SystemId", SqlDbType.Int) { Value = numberSystemId });
+                await using var rd = await listCmd.ExecuteReaderAsync();
+                while (await rd.ReadAsync())
+                {
+                    var cid = (rd["CompanyId"]?.ToString() ?? string.Empty).Trim();
+                    if (!cid.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || cid.Length <= prefix.Length)
+                        continue;
+
+                    var digits = cid.Substring(prefix.Length);
+                    if (!int.TryParse(digits, out var n))
+                        continue;
+
+                    if (n > maxNum)
+                        maxNum = n;
+
+                    if (digits.Length > digitWidth)
+                        digitWidth = digits.Length;
+                }
+            }
+
+            if (digitWidth <= 0)
+            {
+                digitWidth = string.Equals(prefix, "C", StringComparison.OrdinalIgnoreCase) ? 3 : 4;
+            }
+
+            var nextNum = maxNum + 1;
+            var nextCompanyId = prefix + nextNum.ToString("D" + digitWidth);
+
+            while (await GetCompanyExistsAsync(conn, nextCompanyId))
+            {
+                nextNum++;
+                nextCompanyId = prefix + nextNum.ToString("D" + digitWidth);
+            }
+
+            return Ok(new
+            {
+                success = true,
+                companyId = nextCompanyId,
+                systemId = context.SystemId
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "CCSCompanyAdd next-company-id failed for {ItemId}", itemId);
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
+    private async Task<string?> TryGetNextCompanyIdByProcedureAsync(SqlConnection conn, int systemId)
+    {
+        var procName = await ResolveExistingProcedureAsync(conn, "CCSdGenSetNum");
+        if (string.IsNullOrWhiteSpace(procName))
+            return null;
+
+        try
+        {
+            await using var cmd = new SqlCommand(procName, conn)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+            cmd.Parameters.Add(new SqlParameter("@SystemId", SqlDbType.Int) { Value = systemId });
+
+            await using var rd = await cmd.ExecuteReaderAsync();
+            do
+            {
+                while (await rd.ReadAsync())
+                {
+                    for (var i = 0; i < rd.FieldCount; i++)
+                    {
+                        if (rd.IsDBNull(i))
+                            continue;
+
+                        var val = (rd.GetValue(i)?.ToString() ?? string.Empty).Trim();
+                        if (!string.IsNullOrWhiteSpace(val))
+                            return val;
+                    }
+                }
+            }
+            while (await rd.NextResultAsync());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "CCSdGenSetNum failed for SystemId={SystemId}, fallback to local numbering.", systemId);
+        }
+
+        return null;
+    }
+
+    private static async Task<string?> GetSystemEnCodeAsync(SqlConnection conn, int systemId)
+    {
+        await using var cmd = new SqlCommand(@"
+select top 1 EnCode
+from AJNdCompanySystemTable with(nolock)
+where SystemId = @SystemId
+  and IsNull(EnCode,'') <> '';", conn);
+        cmd.Parameters.Add(new SqlParameter("@SystemId", SqlDbType.Int) { Value = systemId });
+        var value = await cmd.ExecuteScalarAsync();
+        return value == null || value == DBNull.Value ? null : value.ToString()?.Trim();
+    }
+
+    private static CodePattern ResolveCodePattern(string? enCode, int systemId)
+    {
+        var pattern = (enCode ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(pattern))
+        {
+            var firstTilde = pattern.IndexOf('~');
+            var lastTilde = pattern.LastIndexOf('~');
+            if (firstTilde >= 0 && lastTilde >= firstTilde)
+            {
+                var prefix = pattern.Substring(0, firstTilde);
+                var width = (lastTilde - firstTilde) + 1;
+                if (!string.IsNullOrWhiteSpace(prefix) && width > 0)
+                    return new CodePattern(prefix, width);
+            }
+        }
+
+        return new CodePattern(string.Empty, 0);
+    }
+
+    private sealed class CodePattern
+    {
+        public CodePattern(string prefix, int digitWidth)
+        {
+            Prefix = prefix;
+            DigitWidth = digitWidth;
+        }
+
+        public string Prefix { get; }
+        public int DigitWidth { get; }
+    }
+
     [HttpGet("show-system")]
     public async Task<IActionResult> ShowSystem([FromQuery] string companyId)
     {
@@ -312,7 +500,7 @@ where SystemId = 9;", conn))
             await conn.OpenAsync();
 
             var companyExists = await GetCompanyExistsAsync(conn, companyId);
-            if (companyExists && !req.Overwrite)
+            if (companyExists && !req.Overwrite && !req.OverwriteChecked)
             {
                 return Ok(new
                 {
@@ -323,7 +511,10 @@ where SystemId = 9;", conn))
                 });
             }
 
-            if (await ExistsInSystemAsync(conn, companyId, context.SystemId, context.SubSystemId))
+            var systemId = context.SystemId.ToString();
+            var subSystemId = context.SubSystemId.ToString();
+
+            if (await ExistsInSystemAsync(conn, companyId, systemId, subSystemId))
             {
                 return Ok(new
                 {
@@ -334,7 +525,7 @@ where SystemId = 9;", conn))
             }
 
             if (!req.AllowOtherSubSystem
-                && await ExistsInOtherSubSystemAsync(conn, companyId, context.SystemId, context.SubSystemId))
+                && await ExistsInOtherSubSystemAsync(conn, companyId, systemId, subSystemId))
             {
                 return Ok(new
                 {
@@ -532,7 +723,7 @@ delete AJNdCompanySystem
         return string.Equals(val, "1", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static async Task<bool> ExistsInSystemAsync(SqlConnection conn, string companyId, int systemId, int subSystemId)
+    private static async Task<bool> ExistsInSystemAsync(SqlConnection conn, string companyId, string systemId, string subSystemId)
     {
         await using var cmd = new SqlCommand(@"
 select top 1 1
@@ -541,12 +732,12 @@ where CompanyId = @CompanyId
   and SystemId = @SystemId
   and SubSystemId = @SubSystemId;", conn);
         cmd.Parameters.Add(new SqlParameter("@CompanyId", SqlDbType.VarChar, 16) { Value = companyId });
-        cmd.Parameters.Add(new SqlParameter("@SystemId", SqlDbType.Int) { Value = systemId });
-        cmd.Parameters.Add(new SqlParameter("@SubSystemId", SqlDbType.Int) { Value = subSystemId });
+        cmd.Parameters.Add(new SqlParameter("@SystemId", SqlDbType.VarChar, 16) { Value = systemId });
+        cmd.Parameters.Add(new SqlParameter("@SubSystemId", SqlDbType.VarChar, 16) { Value = subSystemId });
         return (await cmd.ExecuteScalarAsync()) != null;
     }
 
-    private static async Task<bool> ExistsInOtherSubSystemAsync(SqlConnection conn, string companyId, int systemId, int subSystemId)
+    private static async Task<bool> ExistsInOtherSubSystemAsync(SqlConnection conn, string companyId, string systemId, string subSystemId)
     {
         await using var cmd = new SqlCommand(@"
 select top 1 1
@@ -555,8 +746,8 @@ where CompanyId = @CompanyId
   and SystemId = @SystemId
   and SubSystemId <> @SubSystemId;", conn);
         cmd.Parameters.Add(new SqlParameter("@CompanyId", SqlDbType.VarChar, 16) { Value = companyId });
-        cmd.Parameters.Add(new SqlParameter("@SystemId", SqlDbType.Int) { Value = systemId });
-        cmd.Parameters.Add(new SqlParameter("@SubSystemId", SqlDbType.Int) { Value = subSystemId });
+        cmd.Parameters.Add(new SqlParameter("@SystemId", SqlDbType.VarChar, 16) { Value = systemId });
+        cmd.Parameters.Add(new SqlParameter("@SubSystemId", SqlDbType.VarChar, 16) { Value = subSystemId });
         return (await cmd.ExecuteScalarAsync()) != null;
     }
 
@@ -704,6 +895,7 @@ where o.type in ('P','PC') and o.name = @procName;", conn))
         public string? CompanyId { get; set; }
         public string? CompanyName { get; set; }
         public bool Overwrite { get; set; }
+        public bool OverwriteChecked { get; set; }
         public bool AllowOtherSubSystem { get; set; }
     }
 

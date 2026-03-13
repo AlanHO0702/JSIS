@@ -1,6 +1,6 @@
-﻿@page "/MPH/MPH00017"
+@page "/ABE/ABEdBillInq"
 @using PcbErpApi.Models
-@model PcbErpApi.Pages.MPH.MPH00017Model
+@model PcbErpApi.Pages.ABE.ABEdBillInqModel
 @{
     Layout = "_InquiryTemplate";
     ViewData["Title"] = Model.PageTitle;
@@ -8,250 +8,6 @@
     ViewData["ShowInqRail"] = true;
     ViewData["InqRailTitle"] = "查詢";
     ViewData["InqRailWidth"] = "120px";
-}
-
-@section InqRail {
-    <button type="submit" form="inqForm" class="inq-rail-btn">查詢</button>
-    <button type="button" class="inq-rail-btn" id="btnExportExcel">匯出Excel</button>
-    <button type="button" class="inq-rail-btn" id="btnPaperTrace">單據追蹤</button>
-    <button type="button" class="inq-rail-btn" id="btnPrintScribe">請購單列印</button>
-    <button type="button" class="inq-rail-btn" id="btnSaveHeight">儲存高度設定</button>
-    <button type="button" class="inq-rail-btn" id="btnEditDict">編輯辭典</button>
-    <button type="button" class="inq-rail-btn" id="btnResetParams">重設參數</button>
-    <button type="button" class="inq-rail-btn" id="btnClearInq">清除</button>
-    <div class="inq-rail-status">
-      <div>資料筆數：<span id="inqTotalCount">0</span></div>
-      <div>目前位置：<span id="inqCurrentPos">0</span></div>
-    </div>
-}
-
-@{
-  var qDict = Model.QueryDictFields ?? new List<CURdTableField>();
-  var qFields = qDict
-      .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
-      .Where(f => f.FieldName!.StartsWith("@"))
-      .Where(f => (f.Visible ?? 1) != 0)
-      .OrderBy(f => f.iLayRow ?? int.MaxValue)
-      .ThenBy(f => f.iLayColumn ?? int.MaxValue)
-      .ThenBy(f => f.SerialNum ?? int.MaxValue)
-      .ToList();
-
-  string QLabel(CURdTableField f)
-      => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName!.TrimStart('@') : f.DisplayLabel!;
-
-  string QInputName(CURdTableField f)
-  {
-      return f.FieldName?.TrimStart('@') ?? "";
-  }
-
-
-  string QInputType(CURdTableField f)
-  {
-      var dt = (f.DataType ?? "").ToLowerInvariant();
-      if (dt.Contains("date")) return "date";
-      var fname = (f.FieldName ?? "").ToLowerInvariant();
-      if (fname.Contains("date")) return "date";
-      var label = (f.DisplayLabel ?? "");
-      if (label.Contains("日期")) return "date";
-      return "text";
-  }
-
-  object? QDefault(string fieldName)
-  {
-      if (Model.DefaultQueryValues.TryGetValue(fieldName, out var v)) return v;
-      if (Model.ParamNameByField.TryGetValue(fieldName, out var p)
-          && Model.DefaultQueryValues.TryGetValue(p, out var v2)) return v2;
-      return null;
-  }
-
-  string QValue(string name, string type)
-  {
-      var qs = Request.Query[name].ToString();
-      if (!string.IsNullOrWhiteSpace(qs)) return qs;
-      var dv = QDefault(name);
-      if (dv == null) return "";
-      if (dv is DateTime dt) return type == "date" ? dt.ToString("yyyy-MM-dd") : dt.ToString("yyyy/MM/dd");
-      return dv.ToString() ?? "";
-  }
-
-  bool QChecked(string name)
-  {
-      var qs = Request.Query[name].ToString();
-      if (!string.IsNullOrWhiteSpace(qs))
-      {
-          return qs == "1" || qs.Equals("true", StringComparison.OrdinalIgnoreCase) || qs.Equals("y", StringComparison.OrdinalIgnoreCase);
-      }
-      // For this inquiry, empty-search should mean full-query; don't auto-check these filters from defaults.
-      if (name.Equals("iPost", StringComparison.OrdinalIgnoreCase)
-          || name.Equals("notcheck", StringComparison.OrdinalIgnoreCase))
-          return false;
-      var dv = QDefault(name);
-      if (dv is bool b) return b;
-      if (dv is int i) return i == 1;
-      if (dv is short s) return s == 1;
-      if (dv is byte by) return by == 1;
-      var str = dv?.ToString();
-      return str == "1" || string.Equals(str, "true", StringComparison.OrdinalIgnoreCase) || string.Equals(str, "y", StringComparison.OrdinalIgnoreCase);
-  }
-
-  bool IsCheckbox(CURdTableField f)
-  {
-      if ((f.ComboStyle ?? 0) == 1) return true;
-      var dt = (f.DataType ?? "").ToLowerInvariant();
-      if (dt.Contains("bit")) return true;
-      return false;
-  }
-
-  bool IsSelect(CURdTableField f)
-  {
-      return !string.IsNullOrWhiteSpace(f.Items) || !string.IsNullOrWhiteSpace(f.LookupTable);
-  }
-
-  bool DisableLookup(CURdTableField f)
-  {
-      var n = (f.FieldName ?? "").TrimStart('@');
-      return n.Equals("sPartNum", StringComparison.OrdinalIgnoreCase)
-          || n.Equals("sEPartNum", StringComparison.OrdinalIgnoreCase);
-  }
-
-}
-
-@section InqQuery {
-  <form id="inqForm" method="get" class="inq-form inq-form--auto-grid-enabled">
-    @Html.AntiForgeryToken()
-    @foreach (var row in qFields.GroupBy(f => f.iLayRow ?? int.MaxValue).OrderBy(g => g.Key))
-    {
-      <div class="inq-row">
-        @foreach (var f in row)
-        {
-          var name = QInputName(f);
-          var type = QInputType(f);
-          var cur = QValue(name, type);
-          var codeId = $"inq_{name}";
-          <label class="inq-label">@QLabel(f)</label>
-          @if (IsCheckbox(f))
-          {
-            <div class="form-check form-check-inline compact-check">
-              <input class="form-check-input" type="checkbox" name="@name" value="1" @(QChecked(name) ? "checked" : "") />
-            </div>
-          }
-          else if (IsSelect(f) && !DisableLookup(f))
-          {
-            <span class="inq-select">
-              <input type="hidden" id="@codeId" name="@name" class="inq-select-code-hidden" value="@cur" />
-              <input type="text" class="form-control form-control-sm inq-input inq-lookup-display"
-                     value=""
-                     autocomplete="off"
-                     data-code-target="@codeId"
-                     data-items="@f.Items"
-                     data-lookup-table="@f.LookupTable"
-                     data-lookup-key="@((f.LookupKeyField ?? "").Replace(" ", ""))"
-                     data-lookup-result="@((f.LookupResultField ?? "").Replace(" ", ""))"
-                     data-cond1-field="@f.LookupCond1Field"
-                     data-cond1-source="@f.LookupCond1ResultField"
-                     data-cond2-field="@f.LookupCond2Field"
-                     data-cond2-source="@f.LookupCond2ResultField"
-                     data-selected="@cur" />
-              <button type="button" class="inq-select-btn" aria-label="開啟清單">▾</button>
-            </span>
-          }
-          else
-          {
-            <input type="@type" name="@name" class="form-control form-control-sm inq-input"
-                   value="@cur" />
-          }
-        }
-      </div>
-    }
-
-    <input type="hidden" name="page" value="1" />
-    <input type="hidden" name="pageSize" value="@Model.PageSize" />
-    <input type="hidden" name="spId" value="@Model.SpId" />
-  </form>
-}
-
-@{
-  var gDict = Model.GridDictFields ?? new List<CURdTableField>();
-  var gFields = gDict
-      .Where(f => (f.Visible ?? 1) != 0)
-      .OrderBy(f => f.SerialNum ?? int.MaxValue)
-      .ToList();
-
-  string GLabel(CURdTableField f) => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel!;
-
-  object? GVal(object? row, string? name)
-  {
-      if (row == null || string.IsNullOrWhiteSpace(name)) return null;
-      if (row is IDictionary<string, object?> dict)
-      {
-          if (dict.TryGetValue(name, out var v)) return v;
-          var key = dict.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
-          return key != null ? dict[key] : null;
-      }
-      var prop = row.GetType().GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-      return prop?.GetValue(row);
-  }
-
-  string GFormat(object? v, CURdTableField f)
-  {
-      return FormatHelper.FormatValue(v, f.DataType, f.FormatStr);
-  }
-
-}
-
-<div class="inq-table-wrap">
-  <table class="table table-sm table-hover align-middle inq-table">
-    <thead>
-      <tr>
-        @foreach (var f in gFields)
-        {
-          <th class="inq-sortable" data-field="@f.FieldName">
-            <span class="th-text">@GLabel(f)</span>
-            <span class="col-resizer" draggable="false"></span>
-          </th>
-        }
-      </tr>
-    </thead>
-    <tbody>
-    @if (Model.Items.Count == 0)
-    {
-      <tr>
-        <td colspan="@(Math.Max(1, gFields.Count))" class="text-center text-muted py-2">沒有資料</td>
-      </tr>
-    }
-    else
-    {
-      foreach (var row in Model.Items)
-      {
-        var paperId = GVal(row, "PaperId")?.ToString() ?? "";
-        var paperNum = GVal(row, "PaperNum")?.ToString() ?? "";
-        var sourNum = GVal(row, "SourNum")?.ToString() ?? "";
-        var sourItem = GVal(row, "SourItem")?.ToString() ?? "";
-        <tr data-paper-id="@paperId" data-paper-num="@paperNum" data-sour-num="@sourNum" data-sour-item="@sourItem">
-          @foreach (var f in gFields)
-          {
-            var val = GVal(row, f.FieldName);
-            <td>@GFormat(val, f)</td>
-          }
-        </tr>
-      }
-    }
-    </tbody>
-  </table>
-</div>
-
-@if (Model.TotalPages > 1)
-{
-  <div class="d-flex justify-content-between align-items-center flex-wrap gap-1">
-    <div class="d-flex align-items-center gap-1">
-      <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber <= 1 ? "disabled" : "")"
-         href="@(Model.PageNumber <= 1 ? "#" : Model.BuildPageUrl(Model.PageNumber - 1))">上一頁</a>
-      <span>Page: <strong>@Model.PageNumber</strong> / <span>@Model.TotalPages</span></span>
-      <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber >= Model.TotalPages ? "disabled" : "")"
-         href="@(Model.PageNumber >= Model.TotalPages ? "#" : Model.BuildPageUrl(Model.PageNumber + 1))">下一頁</a>
-    </div>
-    <div class="text-muted">Total: @Model.TotalCount</div>
-  </div>
 }
 
 <style>
@@ -284,7 +40,8 @@
     flex-wrap: wrap;
   }
   .inq-label {
-    min-width: 68px;
+    width: 90px;
+    flex-shrink: 0;
     text-align: right;
     color: #1d3b6b;
     font-size: 0.82rem;
@@ -359,8 +116,8 @@
     height: 18px;
   }
   .compact-check {
-    width: auto;
-    min-width: 0;
+    width: 160px;
+    min-width: 160px;
     display: inline-flex;
     align-items: center;
     margin: 0;
@@ -415,38 +172,399 @@
     user-select: none;
     z-index: 2;
   }
-  .inq-table th.inq-sort-asc::after,
+  .inq-table th.inq-sort-asc::after {
+    content: " ▲";
+    font-size: 0.7rem;
+    color: #1d3b6b;
+  }
   .inq-table th.inq-sort-desc::after {
-    content: none;
+    content: " ▼";
+    font-size: 0.7rem;
+    color: #1d3b6b;
+  }
+  /* 單據資料明細面板 */
+  .bill-detail-panel {
+    border: 1px solid #d8dee8;
+    border-radius: 8px;
+    background: #fff;
+    margin-top: 6px;
+    padding: 0;
+    font-size: 0.82rem;
+  }
+  .bill-detail-title {
+    background: #f3f7ff;
+    color: #2056ac;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-bottom: 1px solid #d8dee8;
+    border-radius: 8px 8px 0 0;
+  }
+  .bill-detail-body {
+    padding: 6px 10px;
+  }
+  .bill-detail-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+  }
+  .bill-detail-label {
+    min-width: 60px;
+    text-align: right;
+    color: #1d3b6b;
+    font-weight: 600;
+    font-size: 0.8rem;
+  }
+  .bill-detail-value {
+    min-width: 140px;
+    padding: 2px 6px;
+    background: #f8fafc;
+    border: 1px solid #e1e7f0;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #374151;
+    min-height: 22px;
+    display: inline-block;
+  }
+  .bill-detail-check {
+    font-size: 0.8rem;
+    color: #374151;
   }
 </style>
+
+@section InqRail {
+    <button type="submit" form="inqForm" class="inq-rail-btn">查詢</button>
+    <button type="button" class="inq-rail-btn" id="btnExportExcel">匯出Excel</button>
+    <button type="button" class="inq-rail-btn" id="btnPaperTrace">單據追蹤</button>
+    <button type="button" class="inq-rail-btn" id="btnSaveHeight">儲存高度設定</button>
+    <button type="button" class="inq-rail-btn" id="btnEditDict">編輯辭典</button>
+    <button type="button" class="inq-rail-btn" id="btnResetParams">重設參數</button>
+    <button type="button" class="inq-rail-btn" id="btnClearInq">清除</button>
+    <div class="inq-rail-status">
+      <div>資料筆數：<span id="inqTotalCount">0</span></div>
+      <div>目前位置：<span id="inqCurrentPos">0</span></div>
+    </div>
+}
+
+@{
+  var qDict = Model.QueryDictFields ?? new List<CURdTableField>();
+  var qFields = qDict
+      .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
+      .Where(f => f.FieldName!.StartsWith("@"))
+      .Where(f => (f.Visible ?? 1) != 0)
+      .OrderBy(f => f.iLayRow ?? int.MaxValue)
+      .ThenBy(f => f.iLayColumn ?? int.MaxValue)
+      .ThenBy(f => f.SerialNum ?? int.MaxValue)
+      .ToList();
+
+  string QLabel(CURdTableField f)
+      => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName!.TrimStart('@') : f.DisplayLabel!;
+
+  string QInputName(CURdTableField f)
+  {
+      return f.FieldName?.TrimStart('@') ?? "";
+  }
+
+  string QInputType(CURdTableField f)
+  {
+      var dt = (f.DataType ?? "").ToLowerInvariant();
+      if (dt.Contains("date")) return "date";
+      var fname = (f.FieldName ?? "").ToLowerInvariant();
+      if (fname.Contains("date")) return "date";
+      var label = (f.DisplayLabel ?? "");
+      if (label.Contains("日期")) return "date";
+      return "text";
+  }
+
+  object? QDefault(string fieldName)
+  {
+      if (Model.DefaultQueryValues.TryGetValue(fieldName, out var v)) return v;
+      if (Model.ParamNameByField.TryGetValue(fieldName, out var p)
+          && Model.DefaultQueryValues.TryGetValue(p, out var v2)) return v2;
+      return null;
+  }
+
+  string QValue(string name, string type)
+  {
+      var qs = Request.Query[name].ToString();
+      if (!string.IsNullOrWhiteSpace(qs)) return qs;
+      var dv = QDefault(name);
+      if (dv == null) return "";
+      if (dv is DateTime dt) return type == "date" ? dt.ToString("yyyy-MM-dd") : dt.ToString("yyyy/MM/dd");
+      return dv.ToString() ?? "";
+  }
+
+  bool QChecked(string name)
+  {
+      var qs = Request.Query[name].ToString();
+      if (!string.IsNullOrWhiteSpace(qs))
+      {
+          return qs == "1" || qs.Equals("true", StringComparison.OrdinalIgnoreCase) || qs.Equals("y", StringComparison.OrdinalIgnoreCase);
+      }
+      var dv = QDefault(name);
+      if (dv is bool b) return b;
+      if (dv is int i) return i == 1;
+      if (dv is short s) return s == 1;
+      if (dv is byte by) return by == 1;
+      var str = dv?.ToString();
+      return str == "1" || string.Equals(str, "true", StringComparison.OrdinalIgnoreCase) || string.Equals(str, "y", StringComparison.OrdinalIgnoreCase);
+  }
+
+  bool IsCheckbox(CURdTableField f)
+  {
+      if ((f.ComboStyle ?? 0) == 1) return true;
+      var dt = (f.DataType ?? "").ToLowerInvariant();
+      if (dt.Contains("bit")) return true;
+      if (dt.Contains("tinyint") || dt.Contains("int"))
+      {
+          var n = f.FieldName?.TrimStart('@') ?? "";
+          if (n.StartsWith("i", StringComparison.OrdinalIgnoreCase) || n.StartsWith("b", StringComparison.OrdinalIgnoreCase))
+              return true;
+      }
+      return false;
+  }
+
+  bool IsSelect(CURdTableField f)
+  {
+      return !string.IsNullOrWhiteSpace(f.Items) || !string.IsNullOrWhiteSpace(f.LookupTable);
+  }
+
+  bool DisableLookup(CURdTableField f)
+  {
+      var n = (f.FieldName ?? "").TrimStart('@');
+      return n.Equals("sPartNum", StringComparison.OrdinalIgnoreCase)
+          || n.Equals("sEPartNum", StringComparison.OrdinalIgnoreCase);
+  }
+}
+
+@section InqQuery {
+  <form id="inqForm" method="get" class="inq-form">
+    @Html.AntiForgeryToken()
+    @foreach (var row in qFields.GroupBy(f => f.iLayRow ?? int.MaxValue).OrderBy(g => g.Key))
+    {
+      <div class="inq-row">
+        @foreach (var f in row)
+        {
+          var name = QInputName(f);
+          var type = QInputType(f);
+          var cur = QValue(name, type);
+          var codeId = $"inq_{name}";
+          <label class="inq-label">@QLabel(f)</label>
+          if (IsCheckbox(f))
+          {
+            <div class="form-check form-check-inline compact-check">
+              <input class="form-check-input" type="checkbox" name="@name" value="1" @(QChecked(name) ? "checked" : "") />
+            </div>
+          }
+          else if (IsSelect(f) && !DisableLookup(f))
+          {
+            <span class="inq-select">
+              <input type="hidden" id="@codeId" name="@name" class="inq-select-code-hidden" value="@cur" />
+              <input type="text" class="form-control form-control-sm inq-input inq-lookup-display"
+                     value=""
+                     autocomplete="off"
+                     data-code-target="@codeId"
+                     data-items="@f.Items"
+                     data-lookup-table="@f.LookupTable"
+                     data-lookup-key="@((f.LookupKeyField ?? "").Replace(" ", ""))"
+                     data-lookup-result="@((f.LookupResultField ?? "").Replace(" ", ""))"
+                     data-cond1-field="@f.LookupCond1Field"
+                     data-cond1-source="@f.LookupCond1ResultField"
+                     data-cond2-field="@f.LookupCond2Field"
+                     data-cond2-source="@f.LookupCond2ResultField"
+                     data-selected="@cur" />
+              <button type="button" class="inq-select-btn" aria-label="開啟清單">▾</button>
+            </span>
+          }
+          else
+          {
+            <input type="@type" name="@name" class="form-control form-control-sm inq-input"
+                   value="@cur" />
+          }
+        }
+      </div>
+    }
+
+    <input type="hidden" name="page" value="1" />
+    <input type="hidden" name="pageSize" value="@Model.PageSize" />
+    <input type="hidden" name="spId" value="@Model.SpId" />
+  </form>
+}
+
+@{
+  var gDict = Model.GridDictFields ?? new List<CURdTableField>();
+  var gFields = gDict
+      .Where(f => (f.Visible ?? 1) != 0)
+      .OrderBy(f => f.SerialNum ?? int.MaxValue)
+      .ToList();
+
+  string GLabel(CURdTableField f) => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel!;
+
+  object? GVal(object? row, string? name)
+  {
+      if (row == null || string.IsNullOrWhiteSpace(name)) return null;
+      if (row is IDictionary<string, object?> dict)
+      {
+          if (dict.TryGetValue(name, out var v)) return v;
+          var key = dict.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
+          return key != null ? dict[key] : null;
+      }
+      var prop = row.GetType().GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
+      return prop?.GetValue(row);
+  }
+
+  string GFormat(object? v, CURdTableField f)
+  {
+      return FormatHelper.FormatValue(v, f.DataType, f.FormatStr);
+  }
+}
+
+<div class="inq-table-wrap">
+  <table class="table table-sm table-hover align-middle inq-table">
+    <thead>
+      <tr>
+        @foreach (var f in gFields)
+        {
+          <th class="inq-sortable" data-field="@f.FieldName">
+            <span class="th-text">@GLabel(f)</span>
+            <span class="col-resizer" draggable="false"></span>
+          </th>
+        }
+      </tr>
+    </thead>
+    <tbody>
+    @if (Model.Items.Count == 0)
+    {
+      <tr>
+        <td colspan="@(Math.Max(1, gFields.Count))" class="text-center text-muted py-2">沒有資料</td>
+      </tr>
+    }
+    else
+    {
+      foreach (var row in Model.Items)
+      {
+        var paperId = GVal(row, "PaperId")?.ToString() ?? "";
+        var paperNum = GVal(row, "PaperNum")?.ToString() ?? "";
+        <tr data-paper-id="@paperId" data-paper-num="@paperNum"
+            data-short-name="@(GVal(row, "ShortName"))"
+            data-para-line="@(GVal(row, "ParaLine"))"
+            data-title="@(GVal(row, "Title"))"
+            data-inhibit="@(GVal(row, "Inhibit"))"
+            data-pay-bank-name="@(GVal(row, "PayBankName"))"
+            data-pay-account-id="@(GVal(row, "PayAccountId"))"
+            data-recv-bank-name="@(GVal(row, "RecvBankName"))"
+            data-recv-account-id="@(GVal(row, "RecvAccountId"))">
+          @foreach (var f in gFields)
+          {
+            var val = GVal(row, f.FieldName);
+            <td>@GFormat(val, f)</td>
+          }
+        </tr>
+      }
+    }
+    </tbody>
+  </table>
+</div>
+
+<!-- 單據資料明細面板 (對應 Delphi TabSheet1: 單據資料) -->
+<div id="billDetailPanel" class="bill-detail-panel" style="display:none;">
+  <div class="bill-detail-title">單據資料</div>
+  <div class="bill-detail-body">
+    <div class="bill-detail-row">
+      <label class="bill-detail-label">客戶名稱</label>
+      <span class="bill-detail-value" id="detShortName"></span>
+    </div>
+    <div class="bill-detail-row">
+      <label class="bill-detail-label">劃線</label>
+      <span class="bill-detail-value" id="detParaLine"></span>
+      <label class="bill-detail-label" style="margin-left:24px;">開票銀行</label>
+      <span class="bill-detail-value" id="detPayBankName"></span>
+    </div>
+    <div class="bill-detail-row">
+      <label class="bill-detail-label">抬頭</label>
+      <span class="bill-detail-value" id="detTitle"></span>
+      <label class="bill-detail-label" style="margin-left:24px;">開票帳戶</label>
+      <span class="bill-detail-value" id="detPayAccountId"></span>
+    </div>
+    <div class="bill-detail-row">
+      <label class="bill-detail-label">禁背</label>
+      <span class="bill-detail-value" id="detInhibit"></span>
+      <label class="bill-detail-label" style="margin-left:24px;">收票銀行</label>
+      <span class="bill-detail-value" id="detRecvBankName"></span>
+    </div>
+    <div class="bill-detail-row">
+      <label class="bill-detail-label"></label>
+      <span class="bill-detail-value"></span>
+      <label class="bill-detail-label" style="margin-left:24px;">收票帳戶</label>
+      <span class="bill-detail-value" id="detRecvAccountId"></span>
+    </div>
+  </div>
+</div>
+
+@if (Model.TotalPages > 1)
+{
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-1">
+    <div class="d-flex align-items-center gap-1">
+      <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber <= 1 ? "disabled" : "")"
+         href="@(Model.PageNumber <= 1 ? "#" : Model.BuildPageUrl(Model.PageNumber - 1))">上一頁</a>
+      <span>Page: <strong>@Model.PageNumber</strong> / <span>@Model.TotalPages</span></span>
+      <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber >= Model.TotalPages ? "disabled" : "")"
+         href="@(Model.PageNumber >= Model.TotalPages ? "#" : Model.BuildPageUrl(Model.PageNumber + 1))">下一頁</a>
+    </div>
+    <div class="text-muted">Total: @Model.TotalCount</div>
+  </div>
+}
 
 <script>
   const totalCount = @Model.TotalCount;
   const totalEl = document.getElementById("inqTotalCount");
   const posEl = document.getElementById("inqCurrentPos");
   if (totalEl) totalEl.textContent = String(totalCount);
-
   const rows = Array.from(document.querySelectorAll(".inq-table tbody tr"));
   let selectedRow = null;
-
   const setPos = (idx) => {
     if (!posEl) return;
     posEl.textContent = totalCount === 0 ? "0" : String(idx);
   };
-
   if (rows.length > 0 && totalCount > 0) setPos(1);
+
+  const formatCheckVal = (v) => {
+    if (v === "1" || v === "True" || v === "true") return "✓ 是";
+    return "✗ 否";
+  };
+
+  const showDetail = (tr) => {
+    const panel = document.getElementById("billDetailPanel");
+    if (!panel) return;
+    panel.style.display = "block";
+    document.getElementById("detShortName").textContent = tr.dataset.shortName || "";
+    document.getElementById("detParaLine").textContent = formatCheckVal(tr.dataset.paraLine);
+    document.getElementById("detTitle").textContent = formatCheckVal(tr.dataset.title);
+    document.getElementById("detInhibit").textContent = formatCheckVal(tr.dataset.inhibit);
+    document.getElementById("detPayBankName").textContent = tr.dataset.payBankName || "";
+    document.getElementById("detPayAccountId").textContent = tr.dataset.payAccountId || "";
+    document.getElementById("detRecvBankName").textContent = tr.dataset.recvBankName || "";
+    document.getElementById("detRecvAccountId").textContent = tr.dataset.recvAccountId || "";
+  };
+
+  if (rows.length > 0 && totalCount > 0) {
+    selectedRow = rows[0];
+    rows[0].classList.add("table-active");
+    showDetail(rows[0]);
+  }
+
   rows.forEach((tr, i) => {
     tr.addEventListener("click", () => {
       rows.forEach(r => r.classList.remove("table-active"));
       tr.classList.add("table-active");
       selectedRow = tr;
       setPos(i + 1);
+      showDetail(tr);
     });
   });
 
   document.getElementById("btnClearInq")?.addEventListener("click", () => {
-    window.location.href = "/MPH/MPH00017";
+    window.location.href = "/ABE/ABEdBillInq";
   });
 
   const parseSortValue = (text) => {
@@ -580,7 +698,6 @@
     const fd = new FormData(inqForm);
     const params = new URLSearchParams();
     for (const [k, v] of fd.entries()) {
-      if (!k || k === "__RequestVerificationToken" || k === "spId") continue;
       const val = (v ?? "").toString().trim();
       if (!val) continue;
       params.append(k, val);
@@ -588,13 +705,8 @@
     if (new URLSearchParams(window.location.search).has("debug")) {
       params.set("debug", "1");
     }
-    const useId = (localStorage.getItem("erpLoginBUId") || currentUseId || "").toString().trim();
-    if (useId) {
-      params.set("sUseId", useId);
-    }
-    params.set("search", "1");
     const qs = params.toString();
-    window.location.href = qs ? (`/MPH/MPH00017?${qs}`) : "/MPH/MPH00017";
+    window.location.href = qs ? (`/ABE/ABEdBillInq?${qs}`) : "/ABE/ABEdBillInq";
   });
 
   document.getElementById("btnExportExcel")?.addEventListener("click", () => {
@@ -607,13 +719,10 @@
   const currentUseId = "@Model.CurrentUseId";
 
   document.getElementById("btnPaperTrace")?.addEventListener("click", async () => {
-    const traceRow = selectedRow;
-    if (!traceRow) return alert("請先選擇一筆資料");
-
-    const pid = traceRow.dataset.paperId || "";
-    const pnum = traceRow.dataset.paperNum || "";
+    if (!selectedRow) return alert("請先選擇一筆資料");
+    const pid = selectedRow.getAttribute("data-paper-id");
+    const pnum = selectedRow.getAttribute("data-paper-num");
     if (!pid || !pnum) return alert("找不到單據資訊");
-
     try {
       const res = await fetch("/api/Flow/ResolveItemIdByFromType", {
         method: "POST",
@@ -630,20 +739,13 @@
     window.open(`/DynamicTemplate/Paper/${encodeURIComponent(pid)}/${encodeURIComponent(pnum)}`, "_blank");
   });
 
-  document.getElementById("btnPrintScribe")?.addEventListener("click", () => {
-    if (!selectedRow) return alert("請先選擇一筆資料");
-    const pnum = selectedRow.dataset.paperNum || "";
-    if (!pnum) return alert("找不到單號");
-    window.open(`/DynamicTemplate/Paper/PO000036/${encodeURIComponent(pnum)}`, "_blank");
-  });
-
   document.getElementById("btnSaveHeight")?.addEventListener("click", async () => {
     const h = document.querySelector(".inq-body")?.clientHeight || 0;
     const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
     const res = await fetch("/api/MatInfoUtility/SaveBrowseHeight", {
       method: "POST",
       headers: { "Content-Type": "application/json", "RequestVerificationToken": token },
-      body: JSON.stringify({ itemId: "MPH00017", height: h })
+      body: JSON.stringify({ itemId: "ABE00004", height: h })
     });
     if (!res.ok) return alert("儲存失敗");
     alert("已儲存高度設定");
@@ -672,34 +774,9 @@
     if (!raw) return [];
     return raw.split(/[;,]/).map(p => p.trim()).filter(Boolean).map(p => {
       const kv = p.split(/=|:/);
-      if (kv.length >= 2) {
-        const value = kv[0].trim();
-        const label = kv.slice(1).join(":").trim();
-        return { value, label };
-      }
+      if (kv.length >= 2) return { value: kv[0].trim(), label: kv.slice(1).join(":").trim() };
       return { value: p, label: p };
     });
-  };
-
-  const escapeRegExp = (s) => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-  const normalizeLookupLabel = (value, label) => {
-    const v = String(value ?? "").trim();
-    const l = String(label ?? "").trim();
-    if (!l) return v;
-    if (!v) return l;
-    const re = new RegExp(`^${escapeRegExp(v)}\\s*[-:]\\s*`, "i");
-    const normalized = l.replace(re, "").trim();
-    return normalized || l;
-  };
-
-  const formatLookupDisplay = (value, label) => {
-    const v = String(value ?? "").trim();
-    const l = String(label ?? "").trim();
-    if (!v) return l;
-    if (!l) return v;
-    if (v.toLowerCase() === l.toLowerCase()) return v;
-    return `${v} - ${l}`;
   };
 
   const buildCondKey = (el) => {
@@ -745,10 +822,9 @@
         const data = await res.json();
         if (Array.isArray(data)) {
           const lookups = data.map(row => {
-            const value = String(row?.key ?? "").trim();
-            const rawLabel = Object.keys(row || {}).filter(k => k.startsWith("result")).map(k => row[k]).join(" - ");
-            const label = normalizeLookupLabel(value, rawLabel);
-            return { value, label: label || value };
+            const val = row?.key ?? "";
+            const label = Object.keys(row || {}).filter(k => k.startsWith("result")).map(k => row[k]).join(" - ");
+            return { value: String(val), label: label || String(val) };
           });
           options = options.concat(lookups);
         }
@@ -757,10 +833,8 @@
 
     const map = new Map();
     options.forEach(o => {
-      const value = String(o?.value ?? "").trim();
-      if (!value) return;
-      const label = normalizeLookupLabel(value, o?.label ?? o?.value ?? "");
-      if (!map.has(value)) map.set(value, { value, label: label || value });
+      if (!o.value) return;
+      if (!map.has(o.value)) map.set(o.value, o);
     });
 
     if (selected && !map.has(selected)) map.set(selected, { value: selected, label: selected });
@@ -783,7 +857,7 @@
       return;
     }
     const hit = (options || []).find(o => String(o.value).trim() === codeVal);
-    displayEl.value = hit ? formatLookupDisplay(hit.value, hit.label) : codeVal;
+    displayEl.value = hit ? (hit.label || hit.value) : codeVal;
   };
 
   const suggest = document.createElement("div");
@@ -810,8 +884,8 @@
     suggestOptions = [];
   };
 
-  const renderSuggest = (el, list, forceAll = false) => {
-    const q = forceAll ? "" : (el.value || "").trim().toLowerCase();
+  const renderSuggest = (el, list) => {
+    const q = (el.value || "").trim().toLowerCase();
     const filtered = q
       ? list.filter(o => (o.value || "").toLowerCase().includes(q) || (o.label || "").toLowerCase().includes(q))
       : list;
@@ -830,7 +904,7 @@
         e.preventDefault();
         const codeInput = getCodeInput(el);
         if (codeInput) codeInput.value = o.value;
-        el.value = formatLookupDisplay(o.value, o.label);
+        el.value = o.label || o.value;
         hideSuggest();
       });
       suggest.appendChild(item);
@@ -842,7 +916,7 @@
 
   const lookupCache = new Map();
 
-  const showSuggest = async (el, forceAll = true) => {
+  const showSuggest = async (el) => {
     const key = buildCondKey(el);
     if (!lookupCache.has(key)) {
       const opts = await fetchLookupOptions(el);
@@ -851,7 +925,7 @@
     suggestTarget = el;
     suggestOptions = lookupCache.get(key) || [];
     syncDisplayValue(el, suggestOptions);
-    renderSuggest(el, suggestOptions, forceAll);
+    renderSuggest(el, suggestOptions);
   };
 
   document.querySelectorAll(".inq-select-btn").forEach(btn => {
@@ -873,25 +947,10 @@
   });
 
   document.querySelectorAll(".inq-lookup-display[data-lookup-table], .inq-lookup-display[data-items]").forEach(el => {
-    el.addEventListener("focus", () => showSuggest(el, true));
+    el.addEventListener("focus", () => showSuggest(el));
     el.addEventListener("input", () => {
-      if (suggestTarget !== el) return showSuggest(el, false);
-      renderSuggest(el, suggestOptions, false);
-    });
-    el.addEventListener("keydown", (e) => {
-      if (e.key !== "Backspace" && e.key !== "Delete") return;
-      const value = String(el.value || "");
-      if (!value) return;
-      const start = typeof el.selectionStart === "number" ? el.selectionStart : -1;
-      const end = typeof el.selectionEnd === "number" ? el.selectionEnd : -1;
-      const allSelected = start === 0 && end === value.length;
-      if (!allSelected) return;
-      e.preventDefault();
-      el.value = "";
-      const codeInput = getCodeInput(el);
-      if (codeInput) codeInput.value = "";
-      if (suggestTarget === el) renderSuggest(el, suggestOptions, false);
-      else showSuggest(el);
+      if (suggestTarget !== el) return showSuggest(el);
+      renderSuggest(el, suggestOptions);
     });
     el.addEventListener("blur", () => {
       setTimeout(() => {
@@ -909,12 +968,11 @@
       const hit = opts.find(o => {
         const v = String(o.value ?? "").trim();
         const l = String(o.label ?? "").trim();
-        const d = formatLookupDisplay(v, l);
-        return v === text || l === text || d === text;
+        return v === text || l === text;
       });
       if (hit) {
         codeInput.value = hit.value;
-        el.value = formatLookupDisplay(hit.value, hit.label);
+        el.value = hit.label || hit.value;
       } else {
         syncDisplayValue(el, opts);
       }
@@ -988,7 +1046,6 @@
   })();
 </script>
 
-
 @if (Request.Query.ContainsKey("debug"))
 {
   <div class="mt-3 p-2 border rounded bg-light">
@@ -1009,6 +1066,3 @@
     </ul>
   </div>
 }
-
-
-
