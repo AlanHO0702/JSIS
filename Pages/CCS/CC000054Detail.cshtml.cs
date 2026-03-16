@@ -299,7 +299,7 @@ namespace PcbErpApi.Pages.CCS
             }
 
             tabs.Add(new DetailTab("assistant", "聯絡人", "AJNdCompanyAssistant", "AJNdCompanyAssistant", new[] { "CompanyId", "SerialNum" }));
-            tabs.Add(new DetailTab("outaddr", "出貨地址", "AJNdCompanyOutAddr", "AJNdCompanyOutAddr", new[] { "CompanyId", "SerialNum" }));
+            tabs.Add(new DetailTab("outaddr", "貨運地址", "AJNdCompanyOutAddr", "AJNdCompanyOutAddr", new[] { "CompanyId", "SerialNum" }));
 
             if (showCustomerTabs)
             {
@@ -318,10 +318,6 @@ namespace PcbErpApi.Pages.CCS
                 tabs.Add(new DetailTab("ship", "銷貨資料", "AJNdCompanyShip", "AJNdCompanyShip", new[] { "CompanyId" }, true));
                 tabs.Add(new DetailTab("forwarder", "Forwarder", "AJNdCompanyForwarder", "AJNdCompanyForwarder", new[] { "CompanyId", "SerialNum" }));
             }
-
-            if (!string.Equals(ItemId, "CC000054", StringComparison.OrdinalIgnoreCase)
-                && TryGetAvlTable(pt, SystemId, showCustomerTabs, out var avlTable, out var avlTitle))
-                tabs.Add(new DetailTab("avl", avlTitle, avlTable, avlTable, new[] { "CompanyId" }));
 
             if (SystemId == 1 && showCustomerTabs)
                 tabs.Add(new DetailTab("quota", "客戶要求", "AJNdCompanyQuota", "AJNdCompanyQuota", new[] { "CompanyId", "NumId" }));
