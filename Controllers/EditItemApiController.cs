@@ -17,6 +17,7 @@ namespace PcbErpApi.Controllers
         public class EditItemDto
         {
             public string ItemId { get; set; } = "";
+            public string OriginalItemId { get; set; } = "";
             public string ItemName { get; set; } = "";
             public string SuperId { get; set; } = "";
             public int? ItemType { get; set; }
@@ -140,11 +141,20 @@ namespace PcbErpApi.Controllers
             if (string.IsNullOrWhiteSpace(dto.ItemId))
                 return BadRequest(new { success = false, message = "ItemId 不可空白" });
 
+            var lookupId = string.IsNullOrWhiteSpace(dto.OriginalItemId) ? dto.ItemId : dto.OriginalItemId;
             var item = await _context.CurdSysItems
-                .FirstOrDefaultAsync(x => x.ItemId == dto.ItemId);
+                .FirstOrDefaultAsync(x => x.ItemId == lookupId);
 
             if (item == null)
                 return NotFound(new { success = false, message = "找不到項目" });
+
+            var newItemId = dto.ItemId.Trim();
+            if (!string.Equals(item.ItemId, newItemId, StringComparison.Ordinal))
+            {
+                if (await _context.CurdSysItems.AnyAsync(x => x.ItemId == newItemId))
+                    return BadRequest(new { success = false, message = $"功能代碼 {newItemId} 已存在" });
+                item.ItemId = newItemId;
+            }
 
             item.ItemName  = dto.ItemName?.Trim();
             item.SuperId   = dto.SuperId?.Trim();
