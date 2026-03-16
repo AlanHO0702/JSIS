@@ -507,6 +507,16 @@
                               lookupKey = !string.IsNullOrWhiteSpace(keyFieldVal) ? keyFieldVal : keySelfVal;
                       }
 
+                      // 標準 Lookup key（非實體欄位用）：若 lookupKey 仍為空，從 LookupKeyField 取同列值
+                      if (string.IsNullOrWhiteSpace(lookupKey) && dictField != null
+                          && !string.IsNullOrWhiteSpace(dictField.LookupTable)
+                          && !string.IsNullOrWhiteSpace(dictField.LookupKeyField))
+                      {
+                          var stdKeyVal = GetValue(item, dictField.LookupKeyField);
+                          if (stdKeyVal != null)
+                              lookupKey = stdKeyVal.ToString() ?? "";
+                      }
+
                       var cellClass = IsNumberDataType(dictField ?? f) ? "cell-number" : "cell-text";
                       var comboStyleStr = GetFieldProp(dictField ?? (object)f, "ComboStyle");
                       int.TryParse(comboStyleStr, out int comboStyleVal);
@@ -750,7 +760,7 @@
 <script src="~/js/gridToolbarTemplate.js"></script>
 <script src="~/js/erpGridNav.js" asp-append-version="true"></script>
 <script>
-  document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("DOMContentLoaded", async () => {
     const editBtn = document.getElementById("btnEditToggle");
     const saveBtn = document.getElementById("btnSaveTable");
     const delBtn  = document.getElementById("btnDeleteRow");
@@ -767,9 +777,7 @@
     const modeEl = document.getElementById("singleGridMode");
     const countEl = document.getElementById("singleGridCount");
     const countBox = document.getElementById("singleGridCountBox");
-  console.log('[DEBUG] 開始載入變數');
   const table   = document.getElementById("mainGrid");
-  console.log('[DEBUG] table loaded');
   const ocxLookupMaps = @Html.Raw(JsonSerializer.Serialize(ocxLookupPayload));
 
   function normalizeEditColor(raw) {
@@ -796,7 +804,10 @@
       DataType = f.DataType,
       FormatStr = f.FormatStr,
       ComboStyle = f.ComboStyle,
-      EditColor = f.EditColor
+      EditColor = f.EditColor,
+      LookupTable = f.LookupTable,
+      LookupKeyField = f.LookupKeyField,
+      LookupResultField = f.LookupResultField
     })
   ));
     const customButtonBar = null;
@@ -820,6 +831,34 @@
       }
       return out;
     })();
+    // 標準 Lookup 對照表快取（LookupTable/LookupKeyField/LookupResultField）
+    const _stdLookupCache = {};
+    async function loadStandardLookups() {
+      const fields = (Array.isArray(fieldFormatMap) ? fieldFormatMap : [])
+        .filter(f => f.LookupTable && f.LookupKeyField && f.LookupResultField);
+      for (const f of fields) {
+        const fkey = (f.FieldName || '').toLowerCase();
+        if (lookupMaps[fkey]) continue; // OCX lookup 優先，已存在則跳過
+        const cacheKey = `${f.LookupTable}|${f.LookupKeyField}|${f.LookupResultField}`;
+        if (!_stdLookupCache[cacheKey]) {
+          try {
+            const url = `/api/TableFieldLayout/LookupData`
+              + `?table=${encodeURIComponent(f.LookupTable)}`
+              + `&key=${encodeURIComponent(f.LookupKeyField)}`
+              + `&result=${encodeURIComponent(f.LookupResultField)}`;
+            const rows = await fetch(url).then(r => r.json()).catch(() => []);
+            const map = {};
+            (Array.isArray(rows) ? rows : []).forEach(r => {
+              const k = String(r.key ?? '').trim().toLowerCase();
+              map[k] = (r.result0 ?? '').toString().trim();
+            });
+            _stdLookupCache[cacheKey] = map;
+          } catch { _stdLookupCache[cacheKey] = {}; }
+        }
+        lookupMaps[fkey] = { map: _stdLookupCache[cacheKey], keySelf: (f.LookupKeyField || '').toLowerCase(), keyField: (f.LookupKeyField || '').toLowerCase() };
+      }
+    }
+
     let isEdit = false;
     let totalCountAll = @totalCount;
     let currentPage = @pageNumber;
@@ -1623,7 +1662,18 @@
         const inp  = td.querySelector(".cell-edit");
         if (!span || !inp) return;
         const rawVal = inp.dataset.raw ?? inp.value;
-        const lkVal  = inp.dataset.lookupkey ?? rawVal;
+        let lkVal  = inp.dataset.lookupkey ?? rawVal;
+        // 若 lkVal 為空，嘗試從 lookupMaps 的 keySelf 欄位取同列的值（非實體欄位用）
+        if (!lkVal) {
+          const fieldKey = field.toLowerCase();
+          const cfg = lookupMaps[fieldKey];
+          if (cfg?.keySelf && cfg.keySelf !== fieldKey) {
+            const keyTd = Array.from(tr.querySelectorAll('td[data-field]')).find(t =>
+              (t.dataset.field || '').toLowerCase() === cfg.keySelf);
+            const keyInp = keyTd?.querySelector('.cell-edit');
+            if (keyInp) lkVal = keyInp.dataset.raw ?? keyInp.value ?? '';
+          }
+        }
         span.textContent = renderCellDisplay(field, rawVal, lkVal);
       });
     });
@@ -1632,36 +1682,27 @@
   // Checkbox 轉換相關函數
   const isCheckboxField = (fieldName) => {
     const meta = getFieldMeta(fieldName);
-    const result = meta && Number(meta.ComboStyle ?? 0) === 1;
-    if (result) {
-      console.log(`[isCheckboxField] ${fieldName} 是 checkbox 欄位，ComboStyle =`, meta?.ComboStyle);
-    }
-    return result;
+    return meta != null && Number(meta.ComboStyle ?? 0) === 1;
   };
 
   const applyCheckboxCells = () => {
-    console.log('[applyCheckboxCells] 開始執行，fieldFormatMap 長度:', fieldFormatMap?.length);
     let convertCount = 0;
     table.querySelectorAll("tbody tr").forEach(tr => {
       tr.querySelectorAll("td").forEach(td => {
         const fieldName = td.dataset.field;
         if (!fieldName) return;
 
+        // server-side 已渲染為 checkbox 格式（data-checkbox="1"），跳過避免重複
+        if (td.dataset.checkbox) return;
+
         if (!isCheckboxField(fieldName)) return;
 
         const inp = td.querySelector(".cell-edit");
-        if (!inp) {
-          console.log(`[applyCheckboxCells] ${fieldName}: 找不到 input`);
-          return;
-        }
+        if (!inp) return;
 
         // 如果已經是 checkbox，就跳過
-        if (inp.type === "checkbox") {
-          console.log(`[applyCheckboxCells] ${fieldName}: 已經是 checkbox`);
-          return;
-        }
+        if (inp.type === "checkbox") return;
 
-        console.log(`[applyCheckboxCells] ${fieldName}: 準備轉換，value =`, inp.value);
         convertCount++;
 
         // 以下是將 text input 轉換為 checkbox 的邏輯
@@ -1702,11 +1743,8 @@
         // 確保 span 隱藏（checkbox 欄位不使用 span）
         const span = td.querySelector(".cell-view");
         if (span) span.classList.add('d-none');
-
-        console.log(`[applyCheckboxCells] ${fieldName}: 轉換完成，checkbox 顯示狀態:`, !chk.classList.contains('d-none'));
       });
     });
-    console.log(`[applyCheckboxCells] 執行完成，共轉換 ${convertCount} 個欄位`);
   };
 
   // 修改/檢視切換
@@ -2273,6 +2311,7 @@
       }
     });
 
+    await loadStandardLookups();
     applyLookupToTable();
     applyCheckboxCells(); // 頁面載入時套用 checkbox 轉換
     setModePanel(isEdit);
@@ -2403,6 +2442,7 @@
       const emptyMessage = getEmptyMessage(!!data.openNoRecord, !!data.hasQueryParams);
       updateTableBody(data.items, fields, emptyMessage);
       loadSavedColumnOrder();
+      await loadStandardLookups();
       applyLookupToTable(); // 套用 lookup 顯示
 
       // 更新分頁資訊
@@ -3022,6 +3062,16 @@
           }
         }
 
+        // 標準 Lookup key（非實體欄位用）：若 lookupKey 仍為空，從 LookupKeyField 取同列值
+        if (!lookupKey) {
+          const fmeta = (Array.isArray(fieldFormatMap) ? fieldFormatMap : [])
+            .find(x => (x.FieldName || '').toLowerCase() === (fieldName || '').toLowerCase());
+          if (fmeta?.LookupKeyField) {
+            const kfVal = item[fmeta.LookupKeyField] ?? item[(fmeta.LookupKeyField || '').toLowerCase()];
+            if (kfVal !== null && kfVal !== undefined) lookupKey = String(kfVal);
+          }
+        }
+
         // 簡單格式化
         let displayVal = rawVal;
         const dateFormatMode = window._singleGridDateFormat || '';
@@ -3385,6 +3435,7 @@
       const emptyMessage = getEmptyMessage(!!data.openNoRecord, !!data.hasQueryParams);
       updateTableBody(data.items, fields, emptyMessage);
       loadSavedColumnOrder();
+      await loadStandardLookups();
       applyLookupToTable(); // 套用 lookup 顯示
 
       // 更新排序狀態（使用實際傳送的欄位名稱）
