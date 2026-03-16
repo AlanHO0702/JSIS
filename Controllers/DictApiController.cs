@@ -168,62 +168,60 @@ public class DictApiController : ControllerBase
                 await cmd.ExecuteNonQueryAsync();
 
                 // === ⭐ 同步：寫入語系表 CURdTableFieldLang (只有 TW) ===
-                var langCmd = new SqlCommand(@"
-    IF EXISTS (
-        SELECT 1 FROM CURdTableFieldLang 
-        WHERE TableName=@TableName AND FieldName=@FieldName AND LanguageId=@Lang
-    )
-    BEGIN
-        UPDATE CURdTableFieldLang
-        SET 
-            DisplayLabel = COALESCE(@DisplayLabel, DisplayLabel),
-            DisplaySize  = COALESCE(@DisplaySize, DisplaySize),
-            iLabHeight   = COALESCE(@iLabHeight, iLabHeight),
-            iLabTop      = COALESCE(@iLabTop, iLabTop),
-            iLabLeft     = COALESCE(@iLabLeft, iLabLeft),
-            iLabWidth    = COALESCE(@iLabWidth, iLabWidth),
-            iFieldHeight = COALESCE(@iFieldHeight, iFieldHeight),
-            iFieldTop    = COALESCE(@iFieldTop, iFieldTop),
-            iFieldLeft   = COALESCE(@iFieldLeft, iFieldLeft),
-            iFieldWidth  = COALESCE(@iFieldWidth, iFieldWidth),
-            iShowWhere   = COALESCE(@iShowWhere, iShowWhere)
-        WHERE TableName=@TableName AND FieldName=@FieldName AND LanguageId=@Lang
-    END
-    ELSE
-    BEGIN
-        INSERT INTO CURdTableFieldLang
-        (LanguageId, TableName, FieldName, DisplayLabel, DisplaySize,
-        iLabHeight, iLabTop, iLabLeft, iLabWidth,
-        iFieldHeight, iFieldTop, iFieldLeft, iFieldWidth, iShowWhere)
-        VALUES (
-            @Lang, @TableName, @FieldName,
-            @DisplayLabel, @DisplaySize,
-            @iLabHeight, @iLabTop, @iLabLeft, @iLabWidth,
-            @iFieldHeight, @iFieldTop, @iFieldLeft, @iFieldWidth, @iShowWhere
-        )
-    END
-    ", conn);
+                var langSetList = new List<string>();
+                var langInsertCols = new List<string>();
+                var langInsertVals = new List<string>();
+                var langParams = new List<SqlParameter>();
 
-                langCmd.Parameters.AddWithValue("@Lang", DefaultLang);
-                langCmd.Parameters.AddWithValue("@TableName", input.TableName ?? "");
-                langCmd.Parameters.AddWithValue("@FieldName", input.FieldName ?? "");
+                void AddLangValue(string col, object value)
+                {
+                    var pname = "@" + col;
+                    langSetList.Add($"{col} = {pname}");
+                    langInsertCols.Add(col);
+                    langInsertVals.Add(pname);
+                    langParams.Add(new SqlParameter(pname, value));
+                }
 
-                langCmd.Parameters.AddWithValue("@DisplayLabel", (object?)input.DisplayLabel ?? DBNull.Value);
-                langCmd.Parameters.AddWithValue("@DisplaySize", (object?)input.DisplaySize ?? DBNull.Value);
+                if (input.DisplayLabel != null) AddLangValue("DisplayLabel", input.DisplayLabel);
+                if (input.DisplaySize.HasValue) AddLangValue("DisplaySize", input.DisplaySize.Value);
+                if (input.iLabHeight.HasValue) AddLangValue("iLabHeight", input.iLabHeight.Value);
+                if (input.iLabTop.HasValue) AddLangValue("iLabTop", input.iLabTop.Value);
+                if (input.iLabLeft.HasValue) AddLangValue("iLabLeft", input.iLabLeft.Value);
+                if (input.iLabWidth.HasValue) AddLangValue("iLabWidth", input.iLabWidth.Value);
+                if (input.iFieldHeight.HasValue) AddLangValue("iFieldHeight", input.iFieldHeight.Value);
+                if (input.iFieldTop.HasValue) AddLangValue("iFieldTop", input.iFieldTop.Value);
+                if (input.iFieldLeft.HasValue) AddLangValue("iFieldLeft", input.iFieldLeft.Value);
+                if (input.iFieldWidth.HasValue) AddLangValue("iFieldWidth", input.iFieldWidth.Value);
+                if (input.iShowWhere.HasValue) AddLangValue("iShowWhere", input.iShowWhere.Value);
 
-                langCmd.Parameters.AddWithValue("@iLabHeight", (object?)input.iLabHeight ?? DBNull.Value);
-                langCmd.Parameters.AddWithValue("@iLabTop", (object?)input.iLabTop ?? DBNull.Value);
-                langCmd.Parameters.AddWithValue("@iLabLeft", (object?)input.iLabLeft ?? DBNull.Value);
-                langCmd.Parameters.AddWithValue("@iLabWidth", (object?)input.iLabWidth ?? DBNull.Value);
+                if (langSetList.Count > 0)
+                {
+                    var langSql = $@"
+IF EXISTS (
+    SELECT 1 FROM CURdTableFieldLang 
+    WHERE TableName=@TableName AND FieldName=@FieldName AND LanguageId=@Lang
+)
+BEGIN
+    UPDATE CURdTableFieldLang
+       SET {string.Join(", ", langSetList)}
+     WHERE TableName=@TableName AND FieldName=@FieldName AND LanguageId=@Lang
+END
+ELSE
+BEGIN
+    INSERT INTO CURdTableFieldLang
+    (LanguageId, TableName, FieldName{(langInsertCols.Count > 0 ? ", " + string.Join(", ", langInsertCols) : "")})
+    VALUES
+    (@Lang, @TableName, @FieldName{(langInsertVals.Count > 0 ? ", " + string.Join(", ", langInsertVals) : "")})
+END";
 
-                langCmd.Parameters.AddWithValue("@iFieldHeight", (object?)input.iFieldHeight ?? DBNull.Value);
-                langCmd.Parameters.AddWithValue("@iFieldTop", (object?)input.iFieldTop ?? DBNull.Value);
-                langCmd.Parameters.AddWithValue("@iFieldLeft", (object?)input.iFieldLeft ?? DBNull.Value);
-                langCmd.Parameters.AddWithValue("@iFieldWidth", (object?)input.iFieldWidth ?? DBNull.Value);
+                    var langCmd = new SqlCommand(langSql, conn);
+                    langCmd.Parameters.AddWithValue("@Lang", DefaultLang);
+                    langCmd.Parameters.AddWithValue("@TableName", input.TableName ?? "");
+                    langCmd.Parameters.AddWithValue("@FieldName", input.FieldName ?? "");
+                    foreach (var p in langParams) langCmd.Parameters.Add(p);
 
-                langCmd.Parameters.AddWithValue("@iShowWhere", (object?)input.iShowWhere ?? DBNull.Value);
-
-                await langCmd.ExecuteNonQueryAsync();
+                    await langCmd.ExecuteNonQueryAsync();
+                }
             }
         }
 

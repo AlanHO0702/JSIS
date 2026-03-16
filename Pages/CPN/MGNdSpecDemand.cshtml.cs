@@ -9,7 +9,7 @@ namespace PcbErpApi.Pages.CPN
 
         public void OnGet()
         {
-            ViewData["Title"] = $"{ItemId} {PageTitle}";
+            ViewData["Title"] = PageTitle;
         }
     }
 }
