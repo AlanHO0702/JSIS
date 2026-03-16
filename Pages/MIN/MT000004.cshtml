@@ -1,0 +1,481 @@
+﻿@page "/MIN/MT000004"
+@model PcbErpApi.Pages.MIN.MT000004Model
+@using System.Text.Json
+@using System.Text.Json.Serialization
+@{
+    Layout = "_Layout";
+    var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    var deptJson = JsonSerializer.Serialize(Model?.Departments ?? new List<PcbErpApi.Pages.MIN.MT000004Model.LookupItem>(), jsonOptions);
+    var hidePartTab = Model?.HidePartTab ?? false;
+}
+
+<div class="mds-page">
+  <div class="mds-shell card border-0 shadow-sm mt-2">
+    <div class="card-body p-0">
+      @if (!string.IsNullOrWhiteSpace(Model?.LoadError))
+      {
+        <div class="alert alert-danger m-2 mb-0">資料載入失敗：@Model.LoadError</div>
+      }
+
+      <div class="mds-tabs-wrap px-2 pt-2">
+        <ul class="nav nav-tabs mds-tabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-dept-mat" type="button" role="tab">部門領料設定</button>
+          </li>
+          @if (!hidePartTab)
+          {
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-part-dept" type="button" role="tab">料號領用設定</button>
+            </li>
+          }
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-mat-dept" type="button" role="tab">物料分類設定</button>
+          </li>
+        </ul>
+      </div>
+
+      <div class="tab-content mds-content px-2 pb-2">
+        <div class="tab-pane fade show active" id="tab-dept-mat" role="tabpanel">
+          <div class="mds-pane card border-0">
+            <div class="card-body">
+              <div class="row g-1 align-items-end mb-2 mds-filter-row">
+                <div class="col-auto mds-filter-col mds-field-dept">
+                  <label class="form-label mb-1">部門代碼</label>
+                  <select id="deptSelect" class="form-select form-select-sm mds-select">
+                    <option value="">請選擇部門</option>
+                    @foreach (var d in Model?.Departments ?? Enumerable.Empty<PcbErpApi.Pages.MIN.MT000004Model.LookupItem>())
+                    {
+                      <option value="@d.Id">@d.Id - @d.Name</option>
+                    }
+                  </select>
+                </div>
+                <div class="col-auto mds-filter-col mds-field-mat">
+                  <label class="form-label mb-1">物料分類</label>
+                  <select id="matClassFilter" class="form-select form-select-sm mds-select">
+                    <option value="">請選擇</option>
+                    @foreach (var m in Model?.MatClasses ?? Enumerable.Empty<PcbErpApi.Pages.MIN.MT000004Model.LookupItem>())
+                    {
+                      <option value="@m.Id">@m.Id - @m.Name</option>
+                    }
+                  </select>
+                </div>
+                <div class="col-auto mds-filter-col mds-field-part">
+                  <label class="form-label mb-1">物料編碼(模糊)</label>
+                  <select id="partFilter" class="form-select form-select-sm mds-select">
+                    <option value="">請選擇</option>
+                    @foreach (var p in Model?.Parts ?? Enumerable.Empty<PcbErpApi.Pages.MIN.MT000004Model.LookupItem>())
+                    {
+                      <option value="@p.Id">@p.Id - @p.Name</option>
+                    }
+                  </select>
+                </div>
+                <div class="col-auto d-grid mds-filter-action">
+                  <button type="button" class="btn btn-outline-secondary btn-sm mds-reload-btn" id="btnReloadDept">資料重取</button>
+                </div>
+              </div>
+
+              <div class="mds-dual-row">
+                <div class="mds-col mds-col-list">
+                  <div class="mds-box">
+                    <div class="mds-box-head">
+                      <span>廠內料號</span>
+                      <span class="badge bg-secondary-subtle text-secondary-emphasis" id="dept-avail-count">0</span>
+                    </div>
+                    <select multiple class="form-select dual-select" id="dept-avail"></select>
+                  </div>
+                </div>
+                <div class="mds-col mds-col-move d-flex align-items-center">
+                  <div class="move-stack w-100">
+                    <button type="button" class="btn btn-outline-primary btn-sm w-100 mds-move-btn" data-scope="dept" data-dir="to-right">&gt;</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm w-100 mds-move-btn" data-scope="dept" data-dir="all-right">&gt;&gt;</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm w-100 mds-move-btn" data-scope="dept" data-dir="to-left">&lt;</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm w-100 mds-move-btn" data-scope="dept" data-dir="all-left">&lt;&lt;</button>
+                  </div>
+                </div>
+                <div class="mds-col mds-col-list">
+                  <div class="mds-box">
+                    <div class="mds-box-head">
+                      <span>選取之料號</span>
+                      <span class="badge bg-primary-subtle text-primary-emphasis" id="dept-chosen-count">0</span>
+                    </div>
+                    <select multiple class="form-select dual-select" id="dept-chosen"></select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-end mt-2">
+                <button id="btnSaveDept" class="btn btn-success btn-sm px-3">儲存部門設定</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        @if (!hidePartTab)
+        {
+          <div class="tab-pane fade" id="tab-part-dept" role="tabpanel">
+            <div class="mds-pane card border-0">
+              <div class="card-body">
+                <div class="row g-1 align-items-end mb-2 mds-filter-row">
+                  <div class="col-auto mds-filter-col mds-field-part-only">
+                    <label class="form-label mb-1">料號</label>
+                    <select id="partSelect" class="form-select form-select-sm mds-select">
+                      <option value="">請選擇料號</option>
+                      @foreach (var p in Model?.Parts ?? Enumerable.Empty<PcbErpApi.Pages.MIN.MT000004Model.LookupItem>())
+                      {
+                        <option value="@p.Id">@p.Id - @p.Name</option>
+                      }
+                    </select>
+                  </div>
+                  <div class="col-auto d-grid mds-filter-action">
+                    <button type="button" class="btn btn-outline-secondary btn-sm mds-reload-btn" id="btnReloadPart">資料重取</button>
+                  </div>
+                </div>
+
+                <div class="mds-dual-row">
+                  <div class="mds-col mds-col-list">
+                    <div class="mds-box">
+                      <div class="mds-box-head">
+                        <span>廠內部門</span>
+                        <span class="badge bg-secondary-subtle text-secondary-emphasis" id="part-avail-count">0</span>
+                      </div>
+                      <select multiple class="form-select dual-select" id="part-avail"></select>
+                    </div>
+                  </div>
+                  <div class="mds-col mds-col-move d-flex align-items-center">
+                    <div class="move-stack w-100">
+                      <button type="button" class="btn btn-outline-primary btn-sm w-100 mds-move-btn" data-scope="part" data-dir="to-right">&gt;</button>
+                      <button type="button" class="btn btn-outline-primary btn-sm w-100 mds-move-btn" data-scope="part" data-dir="all-right">&gt;&gt;</button>
+                      <button type="button" class="btn btn-outline-secondary btn-sm w-100 mds-move-btn" data-scope="part" data-dir="to-left">&lt;</button>
+                      <button type="button" class="btn btn-outline-secondary btn-sm w-100 mds-move-btn" data-scope="part" data-dir="all-left">&lt;&lt;</button>
+                    </div>
+                  </div>
+                  <div class="mds-col mds-col-list">
+                    <div class="mds-box">
+                      <div class="mds-box-head">
+                        <span>選取之部門</span>
+                        <span class="badge bg-primary-subtle text-primary-emphasis" id="part-chosen-count">0</span>
+                      </div>
+                      <select multiple class="form-select dual-select" id="part-chosen"></select>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="d-flex justify-content-end mt-2">
+                  <button id="btnSavePart" class="btn btn-success btn-sm px-3">儲存料號設定</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        }
+
+        <div class="tab-pane fade" id="tab-mat-dept" role="tabpanel">
+          <div class="mds-pane card border-0">
+            <div class="card-body">
+              <div class="row g-1 align-items-end mb-2 mds-filter-row">
+                <div class="col-auto mds-filter-col mds-field-mat-only">
+                  <label class="form-label mb-1">物料分類</label>
+                  <select id="matClassSelect" class="form-select form-select-sm mds-select">
+                    <option value="">請選擇物料分類</option>
+                    @foreach (var m in Model?.MatClasses ?? Enumerable.Empty<PcbErpApi.Pages.MIN.MT000004Model.LookupItem>())
+                    {
+                      <option value="@m.Id">@m.Id - @m.Name</option>
+                    }
+                  </select>
+                </div>
+                <div class="col-auto d-grid mds-filter-action">
+                  <button type="button" class="btn btn-outline-secondary btn-sm mds-reload-btn" id="btnReloadMat">資料重取</button>
+                </div>
+              </div>
+
+              <div class="mds-dual-row">
+                <div class="mds-col mds-col-list">
+                  <div class="mds-box">
+                    <div class="mds-box-head">
+                      <span>廠內部門</span>
+                      <span class="badge bg-secondary-subtle text-secondary-emphasis" id="mat-avail-count">0</span>
+                    </div>
+                    <select multiple class="form-select dual-select" id="mat-avail"></select>
+                  </div>
+                </div>
+                <div class="mds-col mds-col-move d-flex align-items-center">
+                  <div class="move-stack w-100">
+                    <button type="button" class="btn btn-outline-primary btn-sm w-100 mds-move-btn" data-scope="mat" data-dir="to-right">&gt;</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm w-100 mds-move-btn" data-scope="mat" data-dir="all-right">&gt;&gt;</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm w-100 mds-move-btn" data-scope="mat" data-dir="to-left">&lt;</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm w-100 mds-move-btn" data-scope="mat" data-dir="all-left">&lt;&lt;</button>
+                  </div>
+                </div>
+                <div class="mds-col mds-col-list">
+                  <div class="mds-box">
+                    <div class="mds-box-head">
+                      <span>選取之部門</span>
+                      <span class="badge bg-primary-subtle text-primary-emphasis" id="mat-chosen-count">0</span>
+                    </div>
+                    <select multiple class="form-select dual-select" id="mat-chosen"></select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-end mt-2">
+                <button id="btnSaveMat" class="btn btn-success btn-sm px-3">儲存分類設定</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.mds-page {
+  height: calc(100vh - var(--app-toolbar-height, 56px) - 8px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mds-shell { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.mds-shell .card-body { display: flex; flex-direction: column; min-height: 0; }
+.mds-tabs.nav-tabs { border-bottom: 1px solid #9cb3d9; }
+.mds-tabs .nav-link { color: #3e5b88; border: 0; border-radius: 0; padding: 5px 11px; font-size: .92rem; }
+.mds-tabs .nav-link.active { color: #1f4e9f; border: 0; border-bottom: 2px solid #2f64c8; background: #fff; font-weight: 700; }
+.mds-content { background: #fff; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.mds-content .tab-pane { height: 100%; }
+.mds-pane { height: 100%; display: flex; flex-direction: column; min-height: 0; border: 1px solid #b1c4e3; border-radius: 6px; background: #fff; }
+.mds-pane .card-body { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; padding: 10px; }
+.mds-select { border-color: #b8c8e3; font-size: .92rem; height: 32px; }
+.mds-filter-col { flex: 0 0 auto; }
+.mds-filter-col .mds-select { max-width: 100%; }
+.mds-field-dept .mds-select { width: 300px; }
+.mds-field-mat .mds-select { width: 220px; }
+.mds-field-part .mds-select { width: 330px; }
+.mds-field-part-only .mds-select { width: 360px; }
+.mds-field-mat-only .mds-select { width: 280px; }
+.mds-filter-action { flex: 0 0 auto; width: 90px; }
+.mds-reload-btn {
+  height: 32px;
+  padding: 0 .75rem;
+  font-size: .82rem;
+  border: 1px solid #b7c8e6;
+  background: #f8fbff;
+  color: #2f4c76;
+  border-radius: 6px;
+  font-weight: 600;
+}
+.mds-reload-btn:hover { background: #eef4ff; border-color: #8fb1e6; color: #1f4e9f; }
+.mds-dual-row { display: grid; grid-template-columns: minmax(0,1fr) 64px minmax(0,1fr); gap: 6px; align-items: stretch; flex: 1 1 auto; min-height: 0; }
+.mds-col { min-width: 0; }
+.mds-box { border: 1px solid #9cb3d9; border-radius: 4px; background: #fff; padding: 0; height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.mds-box-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #c5d3e7; color: #2f4c76; font-size: .85rem; font-weight: 700; background: #f6f9ff; }
+.dual-select { flex: 1 1 auto; min-height: 0; height: auto; border: 0; font-size: .93rem; line-height: 1.35; box-shadow: none; border-radius: 0; }
+.dual-select option { padding: 4px 9px; }
+.move-stack { display: grid; grid-template-columns: 1fr; gap: 4px; }
+.mds-move-btn { height: 28px; padding: 0 4px; font-size: .78rem; border-color: #9cb3d9; }
+@@media (max-width: 767.98px) {
+  .mds-dual-row { grid-template-columns: 1fr; gap: 5px; }
+  .mds-col-move { order: 2; }
+  .move-stack { grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .dual-select { min-height: 160px; }
+}
+</style>
+
+@section Scripts {
+<script>
+(() => {
+  const departments = @Html.Raw(deptJson ?? "[]");
+  const hasPartTab = @((!hidePartTab).ToString().ToLowerInvariant());
+
+  const q = (id) => document.getElementById(id);
+  const showMsg = (text, type = "info") => {
+    const icon = type === "error" ? "error" : (type === "success" ? "success" : (type === "warning" ? "warning" : "info"));
+    if (window.Swal?.fire) {
+      const opts = { icon, title: text, confirmButtonText: "確定" };
+      if (icon === "success") { opts.timer = 1200; opts.showConfirmButton = false; }
+      return window.Swal.fire(opts);
+    }
+    window.alert(text);
+  };
+
+  const scopeEls = {
+    dept: { avail: q("dept-avail"), chosen: q("dept-chosen"), ac: q("dept-avail-count"), cc: q("dept-chosen-count") },
+    part: { avail: q("part-avail"), chosen: q("part-chosen"), ac: q("part-avail-count"), cc: q("part-chosen-count") },
+    mat:  { avail: q("mat-avail"),  chosen: q("mat-chosen"),  ac: q("mat-avail-count"),  cc: q("mat-chosen-count") }
+  };
+
+  const fetchJson = async (url, options) => {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      const text = await res.text();
+      let msg = text || res.statusText;
+      try {
+        const obj = JSON.parse(text);
+        msg = obj?.error || obj?.message || msg;
+      } catch { }
+      throw new Error(msg);
+    }
+    return await res.json();
+  };
+
+  const renderOptions = (selectEl, items) => {
+    if (!selectEl) return;
+    selectEl.innerHTML = "";
+    (Array.isArray(items) ? items : []).forEach((it) => {
+      const id = String(it?.id ?? it?.Id ?? "").trim();
+      if (!id) return;
+      const name = String(it?.name ?? it?.Name ?? "").trim();
+      const opt = document.createElement("option");
+      opt.value = id;
+      opt.textContent = name ? `${id} - ${name}` : id;
+      selectEl.appendChild(opt);
+    });
+  };
+
+  const refreshCount = (scope) => {
+    const s = scopeEls[scope];
+    if (!s) return;
+    if (s.ac) s.ac.textContent = String(s.avail?.options?.length || 0);
+    if (s.cc) s.cc.textContent = String(s.chosen?.options?.length || 0);
+  };
+
+  const moveSelected = (scope, dir) => {
+    const s = scopeEls[scope];
+    if (!s || !s.avail || !s.chosen) return;
+    const moveAll = dir === "all-right" || dir === "all-left";
+    const toRight = dir === "to-right" || dir === "all-right";
+    const from = toRight ? s.avail : s.chosen;
+    const to = toRight ? s.chosen : s.avail;
+    Array.from(from.options).forEach((opt) => {
+      if (moveAll || opt.selected) {
+        opt.selected = false;
+        to.appendChild(opt);
+      }
+    });
+    refreshCount(scope);
+  };
+
+  const getChosenValues = (scope) => Array.from(scopeEls[scope]?.chosen?.options || []).map(o => o.value).filter(Boolean);
+  const pickList = (data, lowerKey, upperKey) => data?.[lowerKey] ?? data?.[upperKey] ?? [];
+
+  const loadDeptTab = async () => {
+    const departId = (q("deptSelect")?.value || "").trim();
+    if (!departId) {
+      showMsg("請先選擇要設定的部門", "warning");
+      return;
+    }
+    const matClass = (q("matClassFilter")?.value || "").trim();
+    const partNum = (q("partFilter")?.value || "").trim();
+    if (!matClass && !partNum) {
+      showMsg("請先輸入物料分類或編碼", "warning");
+      return;
+    }
+    const url = `/api/MINdDepartSet/depart/${encodeURIComponent(departId)}/parts?matClass=${encodeURIComponent(matClass)}&partNum=${encodeURIComponent(partNum)}`;
+    const data = await fetchJson(url);
+    renderOptions(scopeEls.dept.avail, pickList(data, "available", "Available"));
+    renderOptions(scopeEls.dept.chosen, pickList(data, "chosen", "Chosen"));
+    refreshCount("dept");
+  };
+
+  const loadPartTab = async () => {
+    if (!hasPartTab) return;
+    const partNum = (q("partSelect")?.value || "").trim();
+    if (!partNum) {
+      showMsg("請先選擇要設定的料號", "warning");
+      return;
+    }
+    const data = await fetchJson(`/api/MINdDepartSet/part/${encodeURIComponent(partNum)}/departments`);
+    renderOptions(scopeEls.part.avail, pickList(data, "available", "Available"));
+    renderOptions(scopeEls.part.chosen, pickList(data, "chosen", "Chosen"));
+    refreshCount("part");
+  };
+
+  const loadMatTab = async () => {
+    const matClass = (q("matClassSelect")?.value || "").trim();
+    if (!matClass) {
+      showMsg("請先選擇要設定的物料分類", "warning");
+      return;
+    }
+    const data = await fetchJson(`/api/MINdDepartSet/mat-class/${encodeURIComponent(matClass)}/departments`);
+    renderOptions(scopeEls.mat.avail, pickList(data, "available", "Available"));
+    renderOptions(scopeEls.mat.chosen, pickList(data, "chosen", "Chosen"));
+    refreshCount("mat");
+  };
+
+  const saveDeptTab = async () => {
+    const departId = (q("deptSelect")?.value || "").trim();
+    if (!departId) return showMsg("請先選擇要設定的部門", "warning");
+    const partNums = getChosenValues("dept");
+    const res = await fetchJson("/api/MINdDepartSet/depart/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ departId, partNums })
+    });
+    showMsg(`作業完成，共儲存 ${res?.count ?? partNums.length} 筆。`, "success");
+  };
+
+  const savePartTab = async () => {
+    const partNum = (q("partSelect")?.value || "").trim();
+    if (!partNum) return showMsg("請先選擇要設定的料號", "warning");
+    const departIds = getChosenValues("part");
+    const res = await fetchJson("/api/MINdDepartSet/part/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ partNum, departIds })
+    });
+    showMsg(`作業完成，共儲存 ${res?.count ?? departIds.length} 筆。`, "success");
+  };
+
+  const saveMatTab = async () => {
+    const matClass = (q("matClassSelect")?.value || "").trim();
+    if (!matClass) return showMsg("請先選擇要設定的物料分類", "warning");
+    const departIds = getChosenValues("mat");
+    const res = await fetchJson("/api/MINdDepartSet/mat-class/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ matClass, departIds })
+    });
+    showMsg(`作業完成，共儲存 ${res?.count ?? departIds.length} 筆。`, "success");
+  };
+
+  const bindMoveButtons = () => {
+    document.querySelectorAll("button[data-scope][data-dir]").forEach((btn) => {
+      btn.addEventListener("click", () => moveSelected(btn.dataset.scope, btn.dataset.dir));
+    });
+    [["dept","avail","to-right"],["dept","chosen","to-left"],["part","avail","to-right"],["part","chosen","to-left"],["mat","avail","to-right"],["mat","chosen","to-left"]]
+      .forEach(([scope, side, dir]) => {
+        const el = scopeEls[scope]?.[side];
+        if (!el) return;
+        el.addEventListener("dblclick", () => moveSelected(scope, dir));
+      });
+  };
+
+  const init = () => {
+    renderOptions(scopeEls.dept.avail, []);
+    renderOptions(scopeEls.dept.chosen, []);
+    refreshCount("dept");
+    if (hasPartTab) {
+      renderOptions(scopeEls.part.avail, []);
+      renderOptions(scopeEls.part.chosen, []);
+      refreshCount("part");
+    }
+    renderOptions(scopeEls.mat.avail, []);
+    renderOptions(scopeEls.mat.chosen, []);
+    refreshCount("mat");
+
+    bindMoveButtons();
+    q("btnReloadDept")?.addEventListener("click", () => loadDeptTab().catch(e => showMsg(e.message || "資料讀取失敗", "error")));
+    q("btnSaveDept")?.addEventListener("click", () => saveDeptTab().catch(e => showMsg(e.message || "儲存失敗", "error")));
+
+    if (hasPartTab) {
+      q("btnReloadPart")?.addEventListener("click", () => loadPartTab().catch(e => showMsg(e.message || "資料讀取失敗", "error")));
+      q("btnSavePart")?.addEventListener("click", () => savePartTab().catch(e => showMsg(e.message || "儲存失敗", "error")));
+    }
+    q("btnReloadMat")?.addEventListener("click", () => loadMatTab().catch(e => showMsg(e.message || "資料讀取失敗", "error")));
+    q("btnSaveMat")?.addEventListener("click", () => saveMatTab().catch(e => showMsg(e.message || "儲存失敗", "error")));
+  };
+
+  document.addEventListener("DOMContentLoaded", init);
+})();
+</script>
+}
+
+
