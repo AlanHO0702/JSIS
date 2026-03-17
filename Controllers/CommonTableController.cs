@@ -710,7 +710,7 @@ ORDER BY idx.index_id, ic.key_ordinal";
             var col = keyNames[i];
             var val = keyValues[i];
 
-            var colOk = await ColumnExistsAsync(table, col);
+            var colOk = await ColumnExistsAsync(actualTable, col);
             if (!colOk) return BadRequest($"Column '{col}' not found in '{table}'.");
 
             var p = new SqlParameter($"@p{i}", (object?)val ?? DBNull.Value);

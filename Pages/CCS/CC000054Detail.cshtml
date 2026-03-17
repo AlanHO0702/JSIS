@@ -208,12 +208,18 @@ else
                     <div class="tab-pane fade @active" id="tab-@tab.Key" role="tabpanel" aria-labelledby="tab-@tab.Key-tab" data-form="@((tab.IsForm ? "1" : "0"))">
                         @if (tab.IsForm)
                         {
-                            
-                          <div id="form-@tab.Key"
-                                class="position-relative mf-container"
-                                data-dict="@tab.DictName"
-                                data-dict-table="@tab.DictName"
-                                style="min-height:170px;"></div>
+                            @if (string.Equals(tab.Key, "creditctl", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <div id="form-@tab.Key" class="ccs-credit-legacy" data-dict="@tab.DictName" data-dict-table="@tab.DictName"></div>
+                            }
+                            else
+                            {
+                                <div id="form-@tab.Key"
+                                     class="position-relative mf-container"
+                                     data-dict="@tab.DictName"
+                                     data-dict-table="@tab.DictName"
+                                     style="min-height:170px;"></div>
+                            }
                            
                         }
                         else
@@ -922,7 +928,7 @@ function enableFormLayoutEditing(container, dictName) {
   }
   const tabState = {};
   const tabMeta = {}; // grid metadata
-  const iconToolbarTabs = new Set(['assistant', 'outaddr', 'bank', 'bankcredit', 'creditline', 'bankassure', 'forwarder', 'quota', 'xout', 'attach']);
+  const iconToolbarTabs = new Set(['assistant', 'outaddr', 'bank', 'bankcredit', 'creditline', 'bankassure', 'forwarder', 'quota', 'xout', 'attach', 'custpart']);
   let hasGridPendingAdd = false;
   const detailBaseUrl = '@Url.Page("CC000054Detail", new { itemId = Model.ItemId, systemId = Model.SystemId })';
   const detailSystemId = Number('@Model.SystemId');
@@ -1887,6 +1893,7 @@ function enableFormLayoutEditing(container, dictName) {
       || tabTitle.includes('貨運地址')
       || tabTitle.includes('出貨地址')
       || tabTitle.includes('銀行資料')
+      || tabTitle.includes('客戶品號')
       || tabTitle.includes('銀行授信')
       || tabTitle.includes('銀行保證')
       || tabTitle.toUpperCase().includes('FORWARDER')
@@ -2327,6 +2334,215 @@ function enableFormLayoutEditing(container, dictName) {
     }
   }
 
+  const toCheckVal = (v) => {
+    const s = String(v ?? '').trim().toLowerCase();
+    return s === '1' || s === 'true' || s === 'y';
+  };
+
+  const escHtml = (v) => String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  const creditFieldBlock = (cfg) => {
+    const {
+      type = 'text',
+      name = '',
+      value = '',
+      label = '',
+      readOnly = false,
+      classes = ''
+    } = cfg || {};
+    if (type === 'checkbox') {
+      const checked = toCheckVal(value) ? 'checked' : '';
+      const original = toCheckVal(value) ? '1' : '0';
+      return `<div class="mf-field ccs-credit-check" data-field="${escHtml(name)}">
+  <span class="mf-view d-none"></span>
+  <label class="form-check m-0">
+    <input type="checkbox" class="form-check-input mf-edit ${escHtml(classes)}" name="${escHtml(name)}" data-original="${original}" ${checked} ${(readOnly ? 'disabled data-readonly="1"' : '')}>
+    <span class="form-check-label">${escHtml(label || name)}</span>
+  </label>
+</div>`;
+    }
+    const val = (value == null ? '' : String(value));
+    return `<div class="ccs-credit-row mf-field" data-field="${escHtml(name)}">
+  <label class="ccs-credit-label">${escHtml(label || name)}</label>
+  <span class="mf-view d-none"></span>
+  <input type="text" class="form-control form-control-sm mf-edit ccs-credit-input ${escHtml(classes)}" name="${escHtml(name)}" value="${escHtml(val)}" data-original="${escHtml(val)}" ${(readOnly ? 'readonly data-readonly="1"' : '')}>
+</div>`;
+  };
+
+  const renderCreditGroupList = async (creditGroupId) => {
+    const tbody = document.querySelector('#creditctl-group-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td class="text-muted text-center py-2" colspan="3">載入中...</td></tr>';
+    const gid = String(creditGroupId || '').trim();
+    if (!gid) {
+      tbody.innerHTML = '<tr><td class="text-muted text-center py-2" colspan="3">尚未設定授信額度群組</td></tr>';
+      return;
+    }
+    try {
+      const url = `/api/CommonTable/Paged?table=AJNdCompany&page=1&pageSize=2000`;
+      const resp = await fetch(url);
+      const json = await resp.json().catch(() => ({}));
+      const rows = Array.isArray(json?.data) ? json.data : [];
+      const matched = rows.filter(r => String(r?.CreditGroupId || '').trim() === gid);
+      if (!matched.length) {
+        tbody.innerHTML = '<tr><td class="text-muted text-center py-2" colspan="3">無群組資料</td></tr>';
+        return;
+      }
+      tbody.innerHTML = matched.map(r => `<tr>
+  <td>${escHtml(r?.CreditGroupId || '')}</td>
+  <td>${escHtml(r?.CompanyId || '')}</td>
+  <td>${escHtml(r?.ShortName || '')}</td>
+</tr>`).join('');
+    } catch {
+      tbody.innerHTML = '<tr><td class="text-danger text-center py-2" colspan="3">授信額度群組載入失敗</td></tr>';
+    }
+  };
+
+  async function renderCreditControlForm(companyId) {
+    const host = document.getElementById('form-creditctl');
+    if (!host || !companyId) return;
+    const rows = await fetch(`/api/CommonTable/ByKeys?table=AJNdCompany&keyNames=CompanyId&keyValues=${encodeURIComponent(companyId)}`).then(r => r.json());
+    const data = Array.isArray(rows) ? (rows[0] || {}) : {};
+    const creditAmountVal = data.CreditAmount == null || data.CreditAmount === '' ? '' : Number(data.CreditAmount).toLocaleString('en-US');
+    host.innerHTML = `
+<div class="ccs-credit-wrap">
+  <div class="ccs-credit-left">
+    <div class="ccs-credit-group">
+      <div class="ccs-credit-group-title">訂單檢查</div>
+      <div class="ccs-credit-order-grid">
+        <div class="ccs-credit-order-left">
+          ${creditFieldBlock({ type: 'checkbox', name: 'CheckMoney', value: data.CheckMoney, label: '檢查授信額度' })}
+          ${creditFieldBlock({ type: 'checkbox', name: 'CreditOg', value: data.CreditOg, label: '以原幣計算' })}
+          ${creditFieldBlock({ type: 'checkbox', name: 'CheckDate', value: data.CheckDate, label: '檢查帳款逾期' })}
+          ${creditFieldBlock({ type: 'checkbox', name: 'CheckBankAssure', value: data.CheckBankAssure, label: '檢查銀行保證函' })}
+        </div>
+        <div class="ccs-credit-order-right">
+          ${creditFieldBlock({ type: 'text', name: 'CreditGroupId', value: data.CreditGroupId, label: '授信額度群組', classes: 'ccs-credit-narrow' })}
+          ${creditFieldBlock({ type: 'text', name: 'CreditAmount', value: creditAmountVal, label: '額度', classes: 'ccs-credit-narrow' })}
+          ${creditFieldBlock({ type: 'text', name: 'consignment', value: data.consignment, label: '帳款容忍天數', classes: 'ccs-credit-narrow' })}
+        </div>
+      </div>
+    </div>
+    <div class="ccs-credit-group">
+      <div class="ccs-credit-group-title">授信額度群組</div>
+      <div class="table-responsive ccs-credit-group-grid">
+        <table id="creditctl-group-table" class="table table-sm table-hover ccs-credit-group-table mb-0">
+          <thead><tr><th>群組名稱</th><th>代碼</th><th>簡稱</th></tr></thead>
+          <tbody><tr><td class="text-muted text-center py-2" colspan="3">載入中...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="ccs-credit-group">
+      <div class="ccs-credit-group-title">出貨檢查</div>
+      <div class="ccs-credit-due-row">
+        ${creditFieldBlock({ type: 'checkbox', name: 'CheckDueDate', value: data.CheckDueDate, label: '檢查出貨逾期' })}
+        ${creditFieldBlock({ type: 'text', name: 'consignmentMonth', value: data.consignmentMonth, label: '應出未出天數', classes: 'ccs-credit-narrow' })}
+      </div>
+    </div>
+    <div class="mf-field d-none">
+      <span class="mf-view d-none"></span>
+      <input type="text" class="mf-edit" name="CompanyId" value="${escHtml(data.CompanyId || companyId)}" data-original="${escHtml(data.CompanyId || companyId)}" readonly data-readonly="1">
+    </div>
+  </div>
+  <div class="ccs-credit-right">
+    <div class="ccs-credit-group">
+      <div class="ccs-credit-group-head">
+        <div class="ccs-credit-group-title mb-0">授信額度放行</div>
+        <div class="tab-icon-toolbar" data-tab-icon-toolbar="creditline">
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-add" data-creditline-tool="add" title="新增" aria-label="新增"><i class="bi bi-plus-lg"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-del" data-creditline-tool="delete" title="刪除" aria-label="刪除"><i class="bi bi-dash-lg"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-save" data-creditline-tool="save" title="儲存" aria-label="儲存"><i class="bi bi-check-lg"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-cancel" data-creditline-tool="cancel" title="取消" aria-label="取消"><i class="bi bi-x-lg"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-refresh" data-creditline-tool="edit" title="重新整理" aria-label="重新整理"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+      </div>
+      <div class="table-responsive ccs-subgrid-wrap" data-tab-key="creditline">
+        <table class="table table-sm table-hover align-middle mb-0 ccs-subgrid-table"
+               id="grid-creditline"
+               data-table-name="AJNdCompanyCreditLine"
+               data-dict-name="AJNdCompanyCreditLine"
+               data-dict-table="AJNdCompanyCreditLine"
+               data-key-fields="CompanyId,SerialNum">
+          <thead class="table-light">
+            <tr><th class="text-center text-muted">載入中...</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="text-center text-muted py-3">請點選上方主檔資料</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>`;
+
+    formState.creditctl = {
+      tableName: 'AJNdCompany',
+      dictName: 'AJNdCompany',
+      extras: [],
+      keyFields: ['CompanyId'],
+      lastRowData: data || {},
+      editable: formEditMode
+    };
+    host.querySelectorAll('[data-creditline-tool]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const action = btn.getAttribute('data-creditline-tool');
+        if (action === 'add') {
+          addBlankGridRow('creditline');
+          return;
+        }
+        if (action === 'delete') {
+          const table = document.getElementById('grid-creditline');
+          const tr = table?.querySelector('tbody tr.row-selected');
+          if (tr) {
+            tr.dataset.state = 'deleted';
+            tr.classList.add('table-danger');
+            hasGridPendingAdd = true;
+            syncGridButtons('creditline');
+          }
+          return;
+        }
+        if (action === 'save') {
+          await saveGridChanges('creditline');
+          return;
+        }
+        if (action === 'cancel') {
+          cancelGridAdd('creditline');
+          toggleGridEdit('creditline', false);
+          return;
+        }
+        if (action === 'edit') {
+          if (currentCompany) await renderCreditLineEmbedded(currentCompany);
+        }
+      });
+    });
+    await renderCreditGroupList(data.CreditGroupId);
+    await renderCreditLineEmbedded(companyId);
+    setTimeout(() => {
+      const t = document.getElementById('grid-creditline');
+      if (t) {
+        applySubGridWidths(t);
+        attachSubGridResizers(t);
+        syncGridButtons('creditline');
+      }
+    }, 0);
+  }
+
+  async function renderCreditLineEmbedded(companyId) {
+    if (!companyId) return;
+    const tableName = 'AJNdCompanyCreditLine';
+    const dictName = 'AJNdCompanyCreditLine';
+    const [dict, rows] = await Promise.all([
+      getDict(dictName),
+      fetch(`/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&keyNames=CompanyId&keyValues=${encodeURIComponent(companyId)}`).then(r => r.json())
+    ]);
+    await buildTable('creditline', dict || [], Array.isArray(rows) ? rows : [], [], tableName);
+  }
+
   async function loadTabData(tabKey, companyId) {
     const btn = document.getElementById(`tab-${tabKey}-tab`);
     if (!btn) return;
@@ -2339,6 +2555,11 @@ function enableFormLayoutEditing(container, dictName) {
 
     try {
       if (isForm) {
+        if (tabKey === 'creditctl') {
+          await renderCreditControlForm(companyId);
+          setFormMode(tabKey, !!formEditMode);
+          return;
+        }
         await renderForm(tabKey, dictName, tableName, companyId, extras);
         setFormMode(tabKey, !!formEditMode);
         return;
@@ -2821,8 +3042,14 @@ function enableFormLayoutEditing(container, dictName) {
       const isKeyField = keySet.has(lower);
       // Readonly non-key fields should not be posted back to avoid wrong type writes.
       if (el.dataset.readonly === '1' && !isKeyField) return;
-      const currentVal = el.type === 'checkbox' ? (el.checked ? '1' : '0') : (el.value ?? '');
-      const originalVal = el.dataset.original ?? '';
+      let currentVal = el.type === 'checkbox' ? (el.checked ? '1' : '0') : (el.value ?? '');
+      if (lower === 'creditamount' && typeof currentVal === 'string') {
+        currentVal = currentVal.replace(/,/g, '').trim();
+      }
+      let originalVal = el.dataset.original ?? '';
+      if (lower === 'creditamount' && typeof originalVal === 'string') {
+        originalVal = originalVal.replace(/,/g, '').trim();
+      }
       // Follow other modules: only submit key fields + changed values.
       if (!isKeyField && String(currentVal) === String(originalVal)) return;
       if (!isKeyField) changedNonKeyCount += 1;
@@ -3906,6 +4133,142 @@ function enableFormLayoutEditing(container, dictName) {
   display: grid;
   grid-template-columns: 95px minmax(0, 1fr);
   gap: 5px;
+}
+.ccs-credit-legacy {
+  min-height: 248px;
+  border: 1px solid #d8e0ee;
+  background: #fff;
+  padding: 6px;
+  font-size: 12px;
+}
+.ccs-credit-wrap {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+.ccs-credit-left,
+.ccs-credit-right {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ccs-credit-group {
+  border: 1px solid #c9d5ea;
+  background: #f8fbff;
+}
+.ccs-credit-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  border-bottom: 1px solid #c9d5ea;
+  background: #eef4ff;
+  padding-right: 3px;
+}
+.ccs-credit-group-title {
+  padding: 3px 6px;
+  color: #1f3d78;
+  font-weight: 600;
+  font-size: 12px;
+}
+.ccs-credit-group-head .tab-icon-toolbar .btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  line-height: 1;
+}
+.ccs-credit-group .ccs-credit-check,
+.ccs-credit-group .ccs-credit-row {
+  padding: 2px 6px;
+}
+.ccs-credit-order-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  align-items: start;
+}
+.ccs-credit-order-left .ccs-credit-check {
+  padding: 2px 6px;
+}
+.ccs-credit-order-right .ccs-credit-row {
+  grid-template-columns: 86px 120px;
+  justify-content: start;
+}
+.ccs-credit-order-right .ccs-credit-label {
+  text-align: right;
+}
+.ccs-credit-due-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px;
+}
+.ccs-credit-due-row .ccs-credit-row {
+  grid-template-columns: 86px 120px;
+  margin-right: 6px;
+}
+.ccs-credit-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-items: center;
+  gap: 4px;
+}
+.ccs-credit-label {
+  margin: 0;
+  text-align: right;
+  color: #2a3a58;
+  font-size: 12px;
+}
+.ccs-credit-input {
+  height: 24px;
+  min-height: 24px;
+  padding: 1px 4px;
+  font-size: 12px;
+}
+.ccs-credit-narrow {
+  max-width: 120px;
+}
+.ccs-credit-check .form-check-label {
+  font-size: 12px;
+}
+.ccs-credit-check .form-check-input {
+  margin-top: 0.15rem;
+}
+.ccs-credit-group-table thead th,
+.ccs-credit-group-table tbody td {
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 2px 5px !important;
+}
+.ccs-credit-group-grid {
+  max-height: 220px;
+}
+.ccs-credit-right .ccs-subgrid-wrap {
+  max-height: 290px;
+}
+.ccs-credit-right .ccs-subgrid-table thead th {
+  height: 24px;
+}
+.ccs-credit-right .ccs-subgrid-table tbody td {
+  height: 22px;
+}
+@@media (max-width: 1200px) {
+  .ccs-credit-wrap {
+    grid-template-columns: 1fr;
+  }
+  .ccs-credit-order-grid,
+  .ccs-credit-due-row {
+    grid-template-columns: 1fr;
+  }
+  .ccs-credit-order-right .ccs-credit-row,
+  .ccs-credit-due-row .ccs-credit-row {
+    grid-template-columns: 86px minmax(90px, 130px);
+  }
+  .ccs-credit-group-grid,
+  .ccs-credit-right .ccs-subgrid-wrap {
+    max-height: none;
+  }
 }
 </style>
 <script src="~/js/ccsUpdateLog.js" asp-append-version="true"></script>
