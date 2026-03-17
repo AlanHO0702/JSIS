@@ -721,13 +721,10 @@ SELECT ItemId, SerialNum, ButtonName,
 
             var hasCapE = cols.Contains("CustCaptionE");
             var hasHintE = cols.Contains("CustHintE");
-            var hasSearchTemplate = cols.Contains("SearchTemplate");
-            var hasDialogCaption = cols.Contains("DialogCaption");
-            var hasNeedInEdit = cols.Contains("bNeedInEdit");
             var chkCol = cols.Contains("ChkCanUpdate") ? "ChkCanUpdate"
                        : cols.Contains("ChkCanbUpdate") ? "ChkCanbUpdate"
                        : "ChkCanUpdate";
-            return (hasCapE, hasHintE, hasSearchTemplate, hasDialogCaption, hasNeedInEdit, chkCol);
+            return (hasCapE, hasHintE, chkCol, cols);
         }
 
         private static HtmlString BuildCustomButtonsHtml(IEnumerable<CustomButtonRow> rows)
