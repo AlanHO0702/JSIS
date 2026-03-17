@@ -25,13 +25,15 @@ namespace PcbErpApi.Pages.CUR
         private readonly ITableDictionaryService _dictService;
         private readonly ILogger<SingleGridModel> _logger;
         private readonly IBreadcrumbService _breadcrumbService;
+        private readonly IWebHostEnvironment _env;
 
-        public SingleGridModel(PcbErpContext ctx, ITableDictionaryService dictService, ILogger<SingleGridModel> logger, IBreadcrumbService breadcrumbService)
+        public SingleGridModel(PcbErpContext ctx, ITableDictionaryService dictService, ILogger<SingleGridModel> logger, IBreadcrumbService breadcrumbService, IWebHostEnvironment env)
         {
             _ctx = ctx;
             _dictService = dictService;
             _logger = logger;
             _breadcrumbService = breadcrumbService;
+            _env = env;
         }
 
         public string TableName { get; private set; } = string.Empty;
@@ -194,6 +196,11 @@ namespace PcbErpApi.Pages.CUR
             var keyFields = BuildKeyFields(setup.Mdkey, setup.LocateKeys);
             if (keyFields.Count > 0)
                 ViewData["KeyFields"] = keyFields;
+
+            // 載入 CustomButton partial (如 BT000011.cshtml)
+            var logicPartial = ResolveCustomButtonPartial(ItemId);
+            if (!string.IsNullOrWhiteSpace(logicPartial))
+                ViewData["CustomButtonPartial"] = logicPartial;
 
             return Page();
         }
@@ -878,6 +885,14 @@ SELECT FieldName, DisplaySize
                        : cols.Contains("ChkCanbUpdate") ? "ChkCanbUpdate"
                        : "ChkCanUpdate";
             return (hasCapE, hasHintE, chkCol);
+        }
+
+        private string? ResolveCustomButtonPartial(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId)) return null;
+            var fileName = $"{itemId.Trim()}.cshtml";
+            var fullPath = Path.Combine(_env.ContentRootPath, "Pages", "CustomButton", fileName);
+            return System.IO.File.Exists(fullPath) ? $"~/Pages/CustomButton/{fileName}" : null;
         }
 
         private async Task<List<CustomButtonRow>> LoadCustomButtonsAsync(string itemId)

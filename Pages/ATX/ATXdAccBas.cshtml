@@ -1,0 +1,284 @@
+@page "/ATX/ATXdAccBas"
+@model PcbErpApi.Pages.ATX.ATXdAccBasModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "申報基本資料";
+}
+
+<style>
+    .atx03-backdrop {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: calc(100vh - var(--app-toolbar-height));
+    }
+    .atx03-card {
+        width: 600px;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 4px 24px rgba(0,0,0,.10);
+        padding: 32px 36px 28px;
+    }
+    .atx03-title {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #1d3b6b;
+        text-align: center;
+        margin-bottom: 24px;
+    }
+    .atx03-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 14px;
+    }
+    .atx03-label {
+        width: 260px;
+        flex-shrink: 0;
+        font-size: 0.9rem;
+        color: #374151;
+        text-align: right;
+        padding-right: 12px;
+    }
+    .atx03-input {
+        flex: 1;
+        height: 34px;
+        padding: 4px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        font-size: 0.9rem;
+        color: #1e293b;
+        outline: none;
+        transition: border-color .2s;
+    }
+    .atx03-input:focus {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59,130,246,.15);
+    }
+    .atx03-btn-row {
+        display: flex;
+        justify-content: center;
+        gap: 16px;
+        margin-top: 28px;
+    }
+    .atx03-btn {
+        padding: 8px 36px;
+        font-size: 0.95rem;
+        font-weight: 500;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background .2s;
+    }
+    .atx03-btn-save {
+        background: #2563eb;
+    }
+    .atx03-btn-save:hover {
+        background: #1d4ed8;
+    }
+    .atx03-btn-save:disabled {
+        background: #94a3b8;
+        cursor: not-allowed;
+    }
+    .atx03-btn-cancel {
+        background: #6b7280;
+    }
+    .atx03-btn-cancel:hover {
+        background: #4b5563;
+    }
+</style>
+
+<div class="atx03-backdrop">
+    <div class="atx03-card">
+        <div class="atx03-title">申報基本資料設定</div>
+
+        <div class="atx03-row">
+            <label class="atx03-label" for="atx03UniformId">統一編號</label>
+            <input type="text" id="atx03UniformId" class="atx03-input" />
+        </div>
+        <div class="atx03-row">
+            <label class="atx03-label" for="atx03CompanyName">營業人名稱</label>
+            <input type="text" id="atx03CompanyName" class="atx03-input" />
+        </div>
+        <div class="atx03-row">
+            <label class="atx03-label" for="atx03TaxNum">稅籍編號</label>
+            <input type="text" id="atx03TaxNum" class="atx03-input" />
+        </div>
+        <div class="atx03-row">
+            <label class="atx03-label" for="atx03BossName">負責人姓名</label>
+            <input type="text" id="atx03BossName" class="atx03-input" />
+        </div>
+        <div class="atx03-row">
+            <label class="atx03-label" for="atx03CompanyAddr">營業地址</label>
+            <input type="text" id="atx03CompanyAddr" class="atx03-input" />
+        </div>
+        <div class="atx03-row">
+            <label class="atx03-label" for="atx03PayerName">扣繳義務人</label>
+            <input type="text" id="atx03PayerName" class="atx03-input" />
+        </div>
+        <div class="atx03-row">
+            <label class="atx03-label" for="atx03DeclareTaxDay">每月所得申報薪水給付日(外國人)</label>
+            <input type="text" id="atx03DeclareTaxDay" class="atx03-input" />
+        </div>
+
+        <div class="atx03-btn-row">
+            <button type="button" id="atx03SaveBtn" class="atx03-btn atx03-btn-save">存檔</button>
+            <button type="button" id="atx03CancelBtn" class="atx03-btn atx03-btn-cancel">取消</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const fields = {
+        UniformId:      document.getElementById('atx03UniformId'),
+        CompanyName:    document.getElementById('atx03CompanyName'),
+        TaxNum:         document.getElementById('atx03TaxNum'),
+        BossName:       document.getElementById('atx03BossName'),
+        CompanyAddr:    document.getElementById('atx03CompanyAddr'),
+        PayerName:      document.getElementById('atx03PayerName'),
+        DeclareTaxDay:  document.getElementById('atx03DeclareTaxDay')
+    };
+
+    const saveBtn   = document.getElementById('atx03SaveBtn');
+    const cancelBtn = document.getElementById('atx03CancelBtn');
+
+    // 原始資料快照，用於取消還原
+    let originalCompany = {};
+    let originalTaxNum  = '';
+
+    const jwtId = () => localStorage.getItem('jwtId') || '';
+
+    // 不分大小寫取值
+    function getField(row, name) {
+        if (row[name] !== undefined) return row[name];
+        var lc = name.toLowerCase();
+        for (var k in row) {
+            if (k.toLowerCase() === lc) return row[k];
+        }
+        return '';
+    }
+
+    // ── 載入資料 ──
+    async function loadData() {
+        try {
+            // 從 AJNdCompany 取得公司資料 (CompanyId='A001')，使用 ByKeys 精確查詢
+            const compResp = await fetch(
+                '/api/CommonTable/ByKeys?table=AJNdCompany&keyNames=CompanyId&keyValues=A001',
+                { headers: { 'X-JWTID': jwtId() } }
+            );
+            const compData = await compResp.json();
+            if (Array.isArray(compData) && compData.length > 0) {
+                const row = compData[0];
+                fields.UniformId.value     = getField(row, 'UniformId')     || '';
+                fields.CompanyName.value   = getField(row, 'CompanyName')   || '';
+                fields.BossName.value      = getField(row, 'BossName')      || '';
+                fields.CompanyAddr.value   = getField(row, 'CompanyAddr')   || '';
+                fields.PayerName.value     = getField(row, 'PayerName')     || '';
+                fields.DeclareTaxDay.value = getField(row, 'DeclareTaxDay') || '';
+                originalCompany = { ...row };
+            }
+
+            // 從 CURdSysParams 取得稅籍編號，使用 ByKeys 精確查詢
+            const taxResp = await fetch(
+                '/api/CommonTable/ByKeys?table=CURdSysParams&keyNames=SystemId&keyNames=ParamId&keyValues=ATX&keyValues=TaxNum',
+                { headers: { 'X-JWTID': jwtId() } }
+            );
+            const taxData = await taxResp.json();
+            if (Array.isArray(taxData) && taxData.length > 0) {
+                fields.TaxNum.value = getField(taxData[0], 'Value') || '';
+                originalTaxNum = fields.TaxNum.value;
+            }
+        } catch (err) {
+            console.error('載入申報基本資料失敗', err);
+            if (typeof Swal !== 'undefined') {
+                Swal.fire({ icon: 'error', title: '載入失敗', text: err.message });
+            }
+        }
+    }
+
+    // ── 存檔 ──
+    saveBtn.addEventListener('click', async function () {
+        saveBtn.disabled = true;
+        saveBtn.textContent = '儲存中...';
+
+        try {
+            const headers = {
+                'Content-Type': 'application/json',
+                'X-JWTID': jwtId()
+            };
+
+            // 1) 儲存 AJNdCompany
+            const compPayload = {
+                TableName: 'AJNdCompany',
+                KeyFields: ['CompanyId'],
+                Data: [{
+                    CompanyId:      'A001',
+                    UniformId:      fields.UniformId.value,
+                    CompanyName:    fields.CompanyName.value,
+                    BossName:       fields.BossName.value,
+                    CompanyAddr:    fields.CompanyAddr.value,
+                    PayerName:      fields.PayerName.value,
+                    DeclareTaxDay:  fields.DeclareTaxDay.value
+                }]
+            };
+            const compResp = await fetch('/api/CommonTable/SaveTableChanges', {
+                method: 'POST', headers, body: JSON.stringify(compPayload)
+            });
+            if (!compResp.ok) {
+                const err = await compResp.json();
+                throw new Error(err.error || '儲存公司資料失敗');
+            }
+
+            // 2) 儲存 CURdSysParams (稅籍編號)
+            const taxPayload = {
+                TableName: 'CURdSysParams',
+                KeyFields: ['SystemId', 'ParamId'],
+                Data: [{
+                    SystemId: 'ATX',
+                    ParamId:  'TaxNum',
+                    Value:    fields.TaxNum.value
+                }]
+            };
+            const taxResp = await fetch('/api/CommonTable/SaveTableChanges', {
+                method: 'POST', headers, body: JSON.stringify(taxPayload)
+            });
+            if (!taxResp.ok) {
+                const err = await taxResp.json();
+                throw new Error(err.error || '儲存稅籍編號失敗');
+            }
+
+            // 更新快照
+            originalCompany.UniformId     = fields.UniformId.value;
+            originalCompany.CompanyName   = fields.CompanyName.value;
+            originalCompany.BossName      = fields.BossName.value;
+            originalCompany.CompanyAddr   = fields.CompanyAddr.value;
+            originalCompany.PayerName     = fields.PayerName.value;
+            originalCompany.DeclareTaxDay = fields.DeclareTaxDay.value;
+            originalTaxNum = fields.TaxNum.value;
+
+            Swal.fire({ icon: 'success', title: '儲存成功' });
+
+        } catch (err) {
+            Swal.fire({ icon: 'error', title: '儲存失敗', text: err.message });
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.textContent = '存檔';
+        }
+    });
+
+    // ── 取消（還原為載入時的值）──
+    cancelBtn.addEventListener('click', function () {
+        fields.UniformId.value     = originalCompany.UniformId     || '';
+        fields.CompanyName.value   = originalCompany.CompanyName   || '';
+        fields.BossName.value      = originalCompany.BossName      || '';
+        fields.CompanyAddr.value   = originalCompany.CompanyAddr   || '';
+        fields.PayerName.value     = originalCompany.PayerName     || '';
+        fields.DeclareTaxDay.value = originalCompany.DeclareTaxDay || '';
+        fields.TaxNum.value        = originalTaxNum;
+    });
+
+    // 頁面載入時自動讀取資料
+    loadData();
+})();
+</script>
