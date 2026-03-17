@@ -17,6 +17,16 @@ namespace PcbErpApi.Controllers
             _config = config;
         }
 
+        // ====== 共用 helper ======
+        private async Task<string?> GetSysParamValue(SqlConnection conn, string paramId)
+        {
+            await using var cmd = new SqlCommand(
+                "SELECT Value FROM CURdSysParams(NOLOCK) WHERE SystemId='SPO' AND ParamId=@p AND ISNULL(Value,'') <> ''", conn);
+            cmd.Parameters.AddWithValue("@p", paramId);
+            var r = await cmd.ExecuteScalarAsync();
+            return r != null && !string.IsNullOrWhiteSpace(r.ToString()) ? r.ToString() : null;
+        }
+
         public class SendEInvRequest
         {
             public string TableName { get; set; } = "";
@@ -726,5 +736,156 @@ namespace PcbErpApi.Controllers
                 return StatusCode(500, new { ok = false, error = $"錯誤: {ex.Message}" });
             }
         }
+        // ====== 空白字軌上傳 (對應 Delphi SendEInvDLL.pas) ======
+
+        public class SendEInvDLLRequest
+        {
+            public string HisId { get; set; } = "";
+        }
+
+        /// <summary>
+        /// 空白字軌上傳 — 主入口
+        /// 對應 Delphi btnOKClick: 檢查 EInvXMLRev / EInvTradeVan，分別執行對應邏輯
+        /// TradeVan 模式回傳 CSV 下載；XML 模式存檔至伺服器
+        /// </summary>
+        [HttpPost("SendEInvDLL")]
+        public async Task<IActionResult> SendEInvDLL([FromBody] SendEInvDLLRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.HisId))
+                return BadRequest(new { ok = false, error = "申報期別為必填" });
+
+            var connStr = _config.GetConnectionString("DefaultConnection");
+            await using var conn = new SqlConnection(connStr);
+            await conn.OpenAsync();
+
+            try
+            {
+                var hasXmlRev = await GetSysParamValue(conn, "EInvXMLRev") != null;
+                var hasTradeVan = await GetSysParamValue(conn, "EInvTradeVan") != null;
+
+                if (!hasXmlRev && !hasTradeVan)
+                    return Ok(new { ok = false, error = "未啟用電子發票功能 (EInvXMLRev / EInvTradeVan 皆未設定)" });
+
+                // TradeVan 模式 → 產生 CSV 回傳下載
+                if (hasTradeVan)
+                {
+                    return await SendEInvDLL_TradeVan(conn, req.HisId);
+                }
+
+                // XML 模式 → 存檔至伺服器
+                return await SendEInvDLL_Xml(conn, req.HisId);
+            }
+            catch (SqlException sqlEx)
+            {
+                return StatusCode(500, new { ok = false, error = sqlEx.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { ok = false, error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// TradeVan CSV：呼叫 ATXdEInvGetXML → 逐筆讀 SpodEinvgetxmltrack → 回傳 CSV
+        /// </summary>
+        private async Task<IActionResult> SendEInvDLL_TradeVan(SqlConnection conn, string hisIdParam)
+        {
+            int itemCount;
+            string hisId;
+
+            await using (var cmd = new SqlCommand("ATXdEInvGetXML", conn))
+            {
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@HisId", hisIdParam);
+                cmd.Parameters.AddWithValue("@XMLType", 1);
+
+                await using var reader = await cmd.ExecuteReaderAsync();
+                if (!await reader.ReadAsync())
+                    return Ok(new { ok = false, error = "查無資料" });
+
+                itemCount = Convert.ToInt32(reader["item"]);
+                hisId = reader["HisId"]?.ToString() ?? "";
+            }
+
+            if (itemCount <= 0)
+                return Ok(new { ok = false, error = "查無資料" });
+
+            var csvLines = new List<string>();
+            for (int j = 1; j <= itemCount; j++)
+            {
+                await using var cmd = new SqlCommand(
+                    "SELECT xmlcode FROM SpodEinvgetxmltrack(NOLOCK) WHERE item=@item AND hisid=@hisid", conn);
+                cmd.Parameters.AddWithValue("@item", j);
+                cmd.Parameters.AddWithValue("@hisid", hisId);
+
+                await using var reader = await cmd.ExecuteReaderAsync();
+                if (await reader.ReadAsync())
+                    csvLines.Add(reader["xmlcode"]?.ToString() ?? "");
+            }
+
+            var bytes = Encoding.UTF8.GetBytes(string.Join("\r\n", csvLines));
+            return File(bytes, "text/csv", $"{hisId}.csv");
+        }
+
+        /// <summary>
+        /// XML 模式：呼叫 ATXdEInvGetXML → 逐筆存 XML 至 EInvPath
+        /// </summary>
+        private async Task<IActionResult> SendEInvDLL_Xml(SqlConnection conn, string hisIdParam)
+        {
+            var savePath = await GetSysParamValue(conn, "EInvPath");
+            if (string.IsNullOrWhiteSpace(savePath))
+                return BadRequest(new { ok = false, error = "找不到電子發票路徑設定 (EInvPath)" });
+
+            var xmlResults = new List<(string UploadPath, string HisId, string XMLCode)>();
+
+            await using (var cmd = new SqlCommand("ATXdEInvGetXML", conn))
+            {
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@HisId", hisIdParam);
+                cmd.Parameters.AddWithValue("@XMLType", 1);
+
+                await using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    xmlResults.Add((
+                        reader["UploadPath"]?.ToString() ?? "",
+                        reader["HisId"]?.ToString() ?? "",
+                        reader["XMLCode"]?.ToString() ?? ""
+                    ));
+                }
+            }
+
+            if (xmlResults.Count == 0)
+                return Ok(new { ok = false, error = "查無資料" });
+
+            bool isMulti = xmlResults.Count > 1;
+            int i = 1;
+            int savedCount = 0;
+
+            foreach (var (uploadPath, hisId, xmlCode) in xmlResults)
+            {
+                if (!string.IsNullOrWhiteSpace(uploadPath))
+                {
+                    string fileName = isMulti ? $"{hisId}_{i}.XML" : $"{hisId}.XML";
+                    string fullPath = Path.Combine(savePath, uploadPath, fileName);
+
+                    var dir = Path.GetDirectoryName(fullPath);
+                    if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                        Directory.CreateDirectory(dir);
+
+                    if (System.IO.File.Exists(fullPath))
+                        System.IO.File.Delete(fullPath);
+
+                    var xmlDoc = new XmlDocument();
+                    xmlDoc.LoadXml(xmlCode);
+                    xmlDoc.Save(fullPath);
+                    savedCount++;
+                }
+                i++;
+            }
+
+            return Ok(new { ok = true, message = "傳送完成", fileCount = savedCount });
+        }
     }
 }
+
