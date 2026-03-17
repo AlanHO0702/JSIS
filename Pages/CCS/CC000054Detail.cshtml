@@ -208,12 +208,18 @@ else
                     <div class="tab-pane fade @active" id="tab-@tab.Key" role="tabpanel" aria-labelledby="tab-@tab.Key-tab" data-form="@((tab.IsForm ? "1" : "0"))">
                         @if (tab.IsForm)
                         {
-                            
-                          <div id="form-@tab.Key"
-                                class="position-relative mf-container"
-                                data-dict="@tab.DictName"
-                                data-dict-table="@tab.DictName"
-                                style="min-height:170px;"></div>
+                            @if (string.Equals(tab.Key, "creditctl", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <div id="form-@tab.Key" class="ccs-credit-legacy" data-dict="@tab.DictName" data-dict-table="@tab.DictName"></div>
+                            }
+                            else
+                            {
+                                <div id="form-@tab.Key"
+                                     class="position-relative mf-container"
+                                     data-dict="@tab.DictName"
+                                     data-dict-table="@tab.DictName"
+                                     style="min-height:170px;"></div>
+                            }
                            
                         }
                         else
@@ -890,6 +896,22 @@ function enableFormLayoutEditing(container, dictName) {
   const formState = {}; // { [tabKey]: { tableName, dictName, extras, keyFields, editable } }
   let currentFormKey = 'master';
   let formEditMode = false;
+  window.ccsPrompt = window.ccsPrompt || function(message, type = 'info') {
+    const text = (message ?? '').toString();
+    if (window.Swal?.fire) {
+      const icon = type === 'error' ? 'error'
+        : type === 'warning' ? 'warning'
+        : type === 'success' ? 'success'
+        : 'info';
+      const opts = { icon, title: text, confirmButtonText: '確定' };
+      if (icon === 'success') {
+        opts.timer = 1200;
+        opts.showConfirmButton = false;
+      }
+      return window.Swal.fire(opts);
+    }
+    window.alert(text);
+  };
 
   document.addEventListener('DOMContentLoaded', () => {
   const tabs = Array.from(document.querySelectorAll('[data-table][data-dict]'));
@@ -906,7 +928,7 @@ function enableFormLayoutEditing(container, dictName) {
   }
   const tabState = {};
   const tabMeta = {}; // grid metadata
-  const iconToolbarTabs = new Set(['assistant', 'outaddr', 'bank', 'bankcredit', 'creditline', 'bankassure', 'forwarder', 'quota', 'xout', 'attach']);
+  const iconToolbarTabs = new Set(['assistant', 'outaddr', 'bank', 'bankcredit', 'creditline', 'bankassure', 'forwarder', 'quota', 'xout', 'attach', 'custpart']);
   let hasGridPendingAdd = false;
   const detailBaseUrl = '@Url.Page("CC000054Detail", new { itemId = Model.ItemId, systemId = Model.SystemId })';
   const detailSystemId = Number('@Model.SystemId');
@@ -1013,13 +1035,14 @@ function enableFormLayoutEditing(container, dictName) {
       addShortName.value = String(data.shortName || '');
       if (emptyShortName !== '1' && !addCompanyName.value.trim()) addCompanyName.value = addShortName.value.trim();
     };
-    const addCompany = async (companyId, companyName, overwrite, allowOtherSubSystem) => {
+    const addCompany = async (companyId, companyName, overwrite, overwriteChecked, allowOtherSubSystem) => {
       const body = {
         itemId: ('@Model.ItemId' || 'CC000054').toString(),
         systemId: detailSystemId || 1,
         companyId,
         companyName,
         overwrite,
+        overwriteChecked,
         allowOtherSubSystem
       };
       const resp = await fetch('/api/CCSCompanyAdd/add', {
@@ -1044,29 +1067,23 @@ function enableFormLayoutEditing(container, dictName) {
         modal.show();
         addCompanyId.focus();
       } catch (err) {
-        alert('讀取新增清單失敗：' + err);
+        window.ccsPrompt('讀取新增清單失敗：' + err);
       }
     };
 
-    addCompanyId.addEventListener('change', () => syncShortName().catch(err => alert('讀取客廠簡稱失敗：' + err)));
+    addCompanyId.addEventListener('change', () => syncShortName().catch(err => window.ccsPrompt('讀取客廠簡稱失敗：' + err)));
     addCompanyId.addEventListener('blur', () => syncShortName().catch(() => { }));
 
     btnConfirm.addEventListener('click', async () => {
       const cid = (addCompanyId.value || '').trim();
       const cname = (addCompanyName.value || '').trim();
-      if (!cid || !cname) { alert('客戶/廠商編號與簡稱不可空白'); return; }
-      try {
-        const warnResp = await fetch(`/api/CCSCompanyAdd/check-shortname?shortName=${encodeURIComponent(cname)}`);
-        const warnData = await warnResp.json().catch(() => ({}));
-        if (warnResp.ok && warnData?.success && !!warnData.exists) {
-          alert('提示：系統內已有此簡稱的客廠資料。');
-        }
-      } catch { }
+      if (!cid || !cname) { window.ccsPrompt('客戶/廠商編號與簡稱不可空白'); return; }
       let overwrite = false;
+      let overwriteChecked = false;
       let allowOther = false;
       try {
         while (true) {
-          const result = await addCompany(cid, cname, overwrite, allowOther);
+          const result = await addCompany(cid, cname, overwrite, overwriteChecked, allowOther);
           if (result?.success) {
             modal.hide();
             const sysId = result.systemId || detailSystemId || 1;
@@ -1078,9 +1095,9 @@ function enableFormLayoutEditing(container, dictName) {
             window.location.href = u.toString();
             return;
           }
-          if (result?.needOverwriteConfirm && !overwrite) {
-            if (!confirm('查詢到有舊資料,是否覆蓋客戶舊資料?')) return;
-            overwrite = true;
+          if (result?.needOverwriteConfirm && !overwriteChecked) {
+            overwrite = confirm('查詢到有舊資料,是否覆蓋客戶舊資料?');
+            overwriteChecked = true;
             continue;
           }
           if (result?.needOtherSubSystemConfirm && !allowOther) {
@@ -1088,12 +1105,12 @@ function enableFormLayoutEditing(container, dictName) {
             allowOther = true;
             continue;
           }
-          if ((result?.code || '') === 'DUPLICATE_CODE') { alert('代碼重複!!'); return; }
-          alert((result?.message || '新增失敗').toString());
+          if ((result?.code || '') === 'DUPLICATE_CODE') { window.ccsPrompt('代碼重複!!'); return; }
+          window.ccsPrompt((result?.message || '新增失敗').toString());
           return;
         }
       } catch (err) {
-        alert('新增失敗：' + err);
+        window.ccsPrompt('新增失敗：' + err);
       }
     });
   };
@@ -1237,7 +1254,7 @@ function enableFormLayoutEditing(container, dictName) {
         modal.show();
         getInput('dqCompanyLike')?.focus();
       } catch (err) {
-        alert('讀取查詢條件失敗：' + err);
+        window.ccsPrompt('讀取查詢條件失敗：' + err);
       }
     };
     ['dqCompanyLike','dqCompanyStart','dqCompanyEnd','dqShortName','dqPhone','dqFax','dqUniFormId','dqCompanyName','dqCompanyAddr','dqBnsItem']
@@ -1281,10 +1298,10 @@ function enableFormLayoutEditing(container, dictName) {
         const json = await resp.json().catch(() => ({}));
         if (!resp.ok || !json?.success) throw new Error(json?.error || json?.message || resp.statusText || 'query failed');
         const first = Array.isArray(json.items) ? json.items[0] : null;
-        if (!first) { alert('查無資料'); return; }
+        if (!first) { window.ccsPrompt('查無資料'); return; }
         const cidKey = Object.keys(first).find(k => String(k).toLowerCase() === 'companyid');
         const cid = cidKey ? String(first[cidKey] || '').trim() : '';
-        if (!cid) { alert('查無公司代碼'); return; }
+        if (!cid) { window.ccsPrompt('查無公司代碼'); return; }
         modal.hide();
         const u = new URL('@Url.Page("CC000054Detail", new { itemId = Model.ItemId, systemId = Model.SystemId })', window.location.origin);
         u.searchParams.set('CompanyId', cid);
@@ -1292,7 +1309,7 @@ function enableFormLayoutEditing(container, dictName) {
         if (returnUrlRaw) u.searchParams.set('returnUrl', returnUrlRaw);
         window.location.href = u.toString();
       } catch (err) {
-        alert('查詢失敗：' + err);
+        window.ccsPrompt('查詢失敗：' + err);
       }
     });
     // Preload once so first open equals second open.
@@ -1876,6 +1893,7 @@ function enableFormLayoutEditing(container, dictName) {
       || tabTitle.includes('貨運地址')
       || tabTitle.includes('出貨地址')
       || tabTitle.includes('銀行資料')
+      || tabTitle.includes('客戶品號')
       || tabTitle.includes('銀行授信')
       || tabTitle.includes('銀行保證')
       || tabTitle.toUpperCase().includes('FORWARDER')
@@ -2052,11 +2070,11 @@ function enableFormLayoutEditing(container, dictName) {
     if (!editor) return;
     const res = await editor.saveChanges();
     if (res.ok) {
-      alert('儲存成功');
+      window.ccsPrompt('儲存成功');
       toggleGridEdit(tabKey, false);
       if (currentCompany) loadTabData(tabKey, currentCompany);
     } else {
-      alert('儲存失敗: ' + (res.text || ''));
+      window.ccsPrompt('儲存失敗: ' + (res.text || ''));
     }
   };
 
@@ -2316,6 +2334,215 @@ function enableFormLayoutEditing(container, dictName) {
     }
   }
 
+  const toCheckVal = (v) => {
+    const s = String(v ?? '').trim().toLowerCase();
+    return s === '1' || s === 'true' || s === 'y';
+  };
+
+  const escHtml = (v) => String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  const creditFieldBlock = (cfg) => {
+    const {
+      type = 'text',
+      name = '',
+      value = '',
+      label = '',
+      readOnly = false,
+      classes = ''
+    } = cfg || {};
+    if (type === 'checkbox') {
+      const checked = toCheckVal(value) ? 'checked' : '';
+      const original = toCheckVal(value) ? '1' : '0';
+      return `<div class="mf-field ccs-credit-check" data-field="${escHtml(name)}">
+  <span class="mf-view d-none"></span>
+  <label class="form-check m-0">
+    <input type="checkbox" class="form-check-input mf-edit ${escHtml(classes)}" name="${escHtml(name)}" data-original="${original}" ${checked} ${(readOnly ? 'disabled data-readonly="1"' : '')}>
+    <span class="form-check-label">${escHtml(label || name)}</span>
+  </label>
+</div>`;
+    }
+    const val = (value == null ? '' : String(value));
+    return `<div class="ccs-credit-row mf-field" data-field="${escHtml(name)}">
+  <label class="ccs-credit-label">${escHtml(label || name)}</label>
+  <span class="mf-view d-none"></span>
+  <input type="text" class="form-control form-control-sm mf-edit ccs-credit-input ${escHtml(classes)}" name="${escHtml(name)}" value="${escHtml(val)}" data-original="${escHtml(val)}" ${(readOnly ? 'readonly data-readonly="1"' : '')}>
+</div>`;
+  };
+
+  const renderCreditGroupList = async (creditGroupId) => {
+    const tbody = document.querySelector('#creditctl-group-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td class="text-muted text-center py-2" colspan="3">載入中...</td></tr>';
+    const gid = String(creditGroupId || '').trim();
+    if (!gid) {
+      tbody.innerHTML = '<tr><td class="text-muted text-center py-2" colspan="3">尚未設定授信額度群組</td></tr>';
+      return;
+    }
+    try {
+      const url = `/api/CommonTable/Paged?table=AJNdCompany&page=1&pageSize=2000`;
+      const resp = await fetch(url);
+      const json = await resp.json().catch(() => ({}));
+      const rows = Array.isArray(json?.data) ? json.data : [];
+      const matched = rows.filter(r => String(r?.CreditGroupId || '').trim() === gid);
+      if (!matched.length) {
+        tbody.innerHTML = '<tr><td class="text-muted text-center py-2" colspan="3">無群組資料</td></tr>';
+        return;
+      }
+      tbody.innerHTML = matched.map(r => `<tr>
+  <td>${escHtml(r?.CreditGroupId || '')}</td>
+  <td>${escHtml(r?.CompanyId || '')}</td>
+  <td>${escHtml(r?.ShortName || '')}</td>
+</tr>`).join('');
+    } catch {
+      tbody.innerHTML = '<tr><td class="text-danger text-center py-2" colspan="3">授信額度群組載入失敗</td></tr>';
+    }
+  };
+
+  async function renderCreditControlForm(companyId) {
+    const host = document.getElementById('form-creditctl');
+    if (!host || !companyId) return;
+    const rows = await fetch(`/api/CommonTable/ByKeys?table=AJNdCompany&keyNames=CompanyId&keyValues=${encodeURIComponent(companyId)}`).then(r => r.json());
+    const data = Array.isArray(rows) ? (rows[0] || {}) : {};
+    const creditAmountVal = data.CreditAmount == null || data.CreditAmount === '' ? '' : Number(data.CreditAmount).toLocaleString('en-US');
+    host.innerHTML = `
+<div class="ccs-credit-wrap">
+  <div class="ccs-credit-left">
+    <div class="ccs-credit-group">
+      <div class="ccs-credit-group-title">訂單檢查</div>
+      <div class="ccs-credit-order-grid">
+        <div class="ccs-credit-order-left">
+          ${creditFieldBlock({ type: 'checkbox', name: 'CheckMoney', value: data.CheckMoney, label: '檢查授信額度' })}
+          ${creditFieldBlock({ type: 'checkbox', name: 'CreditOg', value: data.CreditOg, label: '以原幣計算' })}
+          ${creditFieldBlock({ type: 'checkbox', name: 'CheckDate', value: data.CheckDate, label: '檢查帳款逾期' })}
+          ${creditFieldBlock({ type: 'checkbox', name: 'CheckBankAssure', value: data.CheckBankAssure, label: '檢查銀行保證函' })}
+        </div>
+        <div class="ccs-credit-order-right">
+          ${creditFieldBlock({ type: 'text', name: 'CreditGroupId', value: data.CreditGroupId, label: '授信額度群組', classes: 'ccs-credit-narrow' })}
+          ${creditFieldBlock({ type: 'text', name: 'CreditAmount', value: creditAmountVal, label: '額度', classes: 'ccs-credit-narrow' })}
+          ${creditFieldBlock({ type: 'text', name: 'consignment', value: data.consignment, label: '帳款容忍天數', classes: 'ccs-credit-narrow' })}
+        </div>
+      </div>
+    </div>
+    <div class="ccs-credit-group">
+      <div class="ccs-credit-group-title">授信額度群組</div>
+      <div class="table-responsive ccs-credit-group-grid">
+        <table id="creditctl-group-table" class="table table-sm table-hover ccs-credit-group-table mb-0">
+          <thead><tr><th>群組名稱</th><th>代碼</th><th>簡稱</th></tr></thead>
+          <tbody><tr><td class="text-muted text-center py-2" colspan="3">載入中...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="ccs-credit-group">
+      <div class="ccs-credit-group-title">出貨檢查</div>
+      <div class="ccs-credit-due-row">
+        ${creditFieldBlock({ type: 'checkbox', name: 'CheckDueDate', value: data.CheckDueDate, label: '檢查出貨逾期' })}
+        ${creditFieldBlock({ type: 'text', name: 'consignmentMonth', value: data.consignmentMonth, label: '應出未出天數', classes: 'ccs-credit-narrow' })}
+      </div>
+    </div>
+    <div class="mf-field d-none">
+      <span class="mf-view d-none"></span>
+      <input type="text" class="mf-edit" name="CompanyId" value="${escHtml(data.CompanyId || companyId)}" data-original="${escHtml(data.CompanyId || companyId)}" readonly data-readonly="1">
+    </div>
+  </div>
+  <div class="ccs-credit-right">
+    <div class="ccs-credit-group">
+      <div class="ccs-credit-group-head">
+        <div class="ccs-credit-group-title mb-0">授信額度放行</div>
+        <div class="tab-icon-toolbar" data-tab-icon-toolbar="creditline">
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-add" data-creditline-tool="add" title="新增" aria-label="新增"><i class="bi bi-plus-lg"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-del" data-creditline-tool="delete" title="刪除" aria-label="刪除"><i class="bi bi-dash-lg"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-save" data-creditline-tool="save" title="儲存" aria-label="儲存"><i class="bi bi-check-lg"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-cancel" data-creditline-tool="cancel" title="取消" aria-label="取消"><i class="bi bi-x-lg"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-refresh" data-creditline-tool="edit" title="重新整理" aria-label="重新整理"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+      </div>
+      <div class="table-responsive ccs-subgrid-wrap" data-tab-key="creditline">
+        <table class="table table-sm table-hover align-middle mb-0 ccs-subgrid-table"
+               id="grid-creditline"
+               data-table-name="AJNdCompanyCreditLine"
+               data-dict-name="AJNdCompanyCreditLine"
+               data-dict-table="AJNdCompanyCreditLine"
+               data-key-fields="CompanyId,SerialNum">
+          <thead class="table-light">
+            <tr><th class="text-center text-muted">載入中...</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="text-center text-muted py-3">請點選上方主檔資料</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>`;
+
+    formState.creditctl = {
+      tableName: 'AJNdCompany',
+      dictName: 'AJNdCompany',
+      extras: [],
+      keyFields: ['CompanyId'],
+      lastRowData: data || {},
+      editable: formEditMode
+    };
+    host.querySelectorAll('[data-creditline-tool]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const action = btn.getAttribute('data-creditline-tool');
+        if (action === 'add') {
+          addBlankGridRow('creditline');
+          return;
+        }
+        if (action === 'delete') {
+          const table = document.getElementById('grid-creditline');
+          const tr = table?.querySelector('tbody tr.row-selected');
+          if (tr) {
+            tr.dataset.state = 'deleted';
+            tr.classList.add('table-danger');
+            hasGridPendingAdd = true;
+            syncGridButtons('creditline');
+          }
+          return;
+        }
+        if (action === 'save') {
+          await saveGridChanges('creditline');
+          return;
+        }
+        if (action === 'cancel') {
+          cancelGridAdd('creditline');
+          toggleGridEdit('creditline', false);
+          return;
+        }
+        if (action === 'edit') {
+          if (currentCompany) await renderCreditLineEmbedded(currentCompany);
+        }
+      });
+    });
+    await renderCreditGroupList(data.CreditGroupId);
+    await renderCreditLineEmbedded(companyId);
+    setTimeout(() => {
+      const t = document.getElementById('grid-creditline');
+      if (t) {
+        applySubGridWidths(t);
+        attachSubGridResizers(t);
+        syncGridButtons('creditline');
+      }
+    }, 0);
+  }
+
+  async function renderCreditLineEmbedded(companyId) {
+    if (!companyId) return;
+    const tableName = 'AJNdCompanyCreditLine';
+    const dictName = 'AJNdCompanyCreditLine';
+    const [dict, rows] = await Promise.all([
+      getDict(dictName),
+      fetch(`/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&keyNames=CompanyId&keyValues=${encodeURIComponent(companyId)}`).then(r => r.json())
+    ]);
+    await buildTable('creditline', dict || [], Array.isArray(rows) ? rows : [], [], tableName);
+  }
+
   async function loadTabData(tabKey, companyId) {
     const btn = document.getElementById(`tab-${tabKey}-tab`);
     if (!btn) return;
@@ -2328,6 +2555,11 @@ function enableFormLayoutEditing(container, dictName) {
 
     try {
       if (isForm) {
+        if (tabKey === 'creditctl') {
+          await renderCreditControlForm(companyId);
+          setFormMode(tabKey, !!formEditMode);
+          return;
+        }
         await renderForm(tabKey, dictName, tableName, companyId, extras);
         setFormMode(tabKey, !!formEditMode);
         return;
@@ -2405,11 +2637,11 @@ function enableFormLayoutEditing(container, dictName) {
         } else if (btnType === 'save' || btnType === 'confirm') {
           const res = await saveFormChanges(tabKey);
           if (res?.ok) {
-            alert('儲存成功');
+            window.ccsPrompt('儲存成功');
             applyFormEditMode(false);
             if (currentCompany) loadTabData(tabKey, currentCompany);
           } else {
-            alert('儲存失敗: ' + (res?.text || ''));
+            window.ccsPrompt('儲存失敗: ' + (res?.text || ''));
           }
         }
         return;
@@ -2469,7 +2701,7 @@ function enableFormLayoutEditing(container, dictName) {
       const ensureSelectedAttachRow = () => {
         const row = getSelectedAttachRow();
         if (!row) {
-          alert('請先選取一筆附件資料');
+          window.ccsPrompt('請先選取一筆附件資料');
           return null;
         }
         return row;
@@ -2554,7 +2786,7 @@ function enableFormLayoutEditing(container, dictName) {
         const img = modalEl?.querySelector('#ccsAttachPreviewImage');
         const frame = modalEl?.querySelector('#ccsAttachPreviewFrame');
         if (!modalEl || !frame || !img) {
-          alert('預覽視窗初始化失敗');
+          window.ccsPrompt('預覽視窗初始化失敗');
           return;
         }
         if (isImagePath(rawPath)) {
@@ -2607,7 +2839,7 @@ function enableFormLayoutEditing(container, dictName) {
         if (!editor) return;
         if (!editor.isEdit?.()) toggleGridEdit(tabKey, true);
         const selectedRow = table?.querySelector('tbody tr.selected, tbody tr.table-active');
-        if (!selectedRow) { alert('請先選擇要刪除的資料列'); return; }
+        if (!selectedRow) { window.ccsPrompt('請先選擇要刪除的資料列'); return; }
 
         // New unsaved row: remove directly. Existing row: stage delete only.
         if (selectedRow.dataset.state === 'added') {
@@ -2630,8 +2862,8 @@ function enableFormLayoutEditing(container, dictName) {
         selectGridRow(table, row);
         if (!tabState[tabKey]?.isEdit?.()) toggleGridEdit(tabKey, true);
         const input = getAttachInput(row);
-        if (!input) { alert('找不到夾檔路徑欄位'); return; }
-        if (input.readOnly || input.disabled) { alert('夾檔路徑欄位目前為唯讀，請先確認資料辭典設定。'); return; }
+        if (!input) { window.ccsPrompt('找不到夾檔路徑欄位'); return; }
+        if (input.readOnly || input.disabled) { window.ccsPrompt('夾檔路徑欄位目前為唯讀，請先確認資料辭典設定。'); return; }
         const picker = document.createElement('input');
         picker.type = 'file';
         picker.style.display = 'none';
@@ -2644,18 +2876,18 @@ function enableFormLayoutEditing(container, dictName) {
               formData.append('file', file);
               const resp = await fetch('/api/CompanyAttachFile/Upload', { method: 'POST', body: formData });
               if (!resp.ok) {
-                alert(await resp.text());
+                window.ccsPrompt(await resp.text());
                 return;
               }
               const result = await resp.json();
               const savedPath = String(result?.fullPath || result?.fileName || '').trim();
               if (!savedPath) {
-                alert('上傳成功但未取得檔案路徑');
+                window.ccsPrompt('上傳成功但未取得檔案路徑');
                 return;
               }
               setAttachPath(row, savedPath);
             } catch (err) {
-              alert('上傳失敗：' + err);
+              window.ccsPrompt('上傳失敗：' + err);
               return;
             }
           }
@@ -2673,9 +2905,9 @@ function enableFormLayoutEditing(container, dictName) {
         const row = ensureSelectedAttachRow();
         if (!row) return;
         const rawPath = getAttachPath(row);
-        if (!rawPath) { alert('目前附件路徑為空白'); return; }
+        if (!rawPath) { window.ccsPrompt('目前附件路徑為空白'); return; }
         const openUrl = toPreviewUrl(rawPath);
-        if (!openUrl) { alert('目前附件路徑為空白'); return; }
+        if (!openUrl) { window.ccsPrompt('目前附件路徑為空白'); return; }
         openAttachPreview(openUrl, rawPath);
       }
     });
@@ -2810,8 +3042,14 @@ function enableFormLayoutEditing(container, dictName) {
       const isKeyField = keySet.has(lower);
       // Readonly non-key fields should not be posted back to avoid wrong type writes.
       if (el.dataset.readonly === '1' && !isKeyField) return;
-      const currentVal = el.type === 'checkbox' ? (el.checked ? '1' : '0') : (el.value ?? '');
-      const originalVal = el.dataset.original ?? '';
+      let currentVal = el.type === 'checkbox' ? (el.checked ? '1' : '0') : (el.value ?? '');
+      if (lower === 'creditamount' && typeof currentVal === 'string') {
+        currentVal = currentVal.replace(/,/g, '').trim();
+      }
+      let originalVal = el.dataset.original ?? '';
+      if (lower === 'creditamount' && typeof originalVal === 'string') {
+        originalVal = originalVal.replace(/,/g, '').trim();
+      }
       // Follow other modules: only submit key fields + changed values.
       if (!isKeyField && String(currentVal) === String(originalVal)) return;
       if (!isKeyField) changedNonKeyCount += 1;
@@ -2877,7 +3115,7 @@ function enableFormLayoutEditing(container, dictName) {
         if (gridEditor?.isEdit?.()) {
           const gridRes = await gridEditor.saveChanges();
           if (!gridRes?.ok) {
-            alert(`儲存失敗(${activeTabKey}): ${gridRes?.text || ''}`);
+            window.ccsPrompt(`儲存失敗(${activeTabKey}): ${gridRes?.text || ''}`);
             return;
           }
           if (currentCompany) loadTabData(activeTabKey, currentCompany);
@@ -2889,11 +3127,11 @@ function enableFormLayoutEditing(container, dictName) {
       for (const key of toSave) {
         const res = await saveFormChanges(key);
         if (!res.ok) {
-          alert(`儲存失敗(${key}): ${res.text || ''}`);
+          window.ccsPrompt(`儲存失敗(${key}): ${res.text || ''}`);
           return;
         }
       }
-      alert('儲存成功');
+      window.ccsPrompt('儲存成功');
       applyFormEditMode(false);
       if (currentCompany && targetFormKey && targetFormKey !== 'master') loadTabData(targetFormKey, currentCompany);
       return;
@@ -2909,11 +3147,11 @@ function enableFormLayoutEditing(container, dictName) {
           for (const key of toSave) {
             const res = await saveFormChanges(key);
             if (!res.ok) {
-              alert(`儲存失敗(${key}): ${res.text || ''}`);
+              window.ccsPrompt(`儲存失敗(${key}): ${res.text || ''}`);
               return;
             }
           }
-          alert('儲存成功');
+          window.ccsPrompt('儲存成功');
           applyFormEditMode(false);
           if (currentCompany && activeFormKey && activeFormKey !== 'master') loadTabData(activeFormKey, currentCompany);
         })();
@@ -2921,7 +3159,7 @@ function enableFormLayoutEditing(container, dictName) {
         if (typeof window.openCcsDetailAddDialog === 'function') {
           await window.openCcsDetailAddDialog();
         } else {
-          alert('新增視窗尚未初始化');
+          window.ccsPrompt('新增視窗尚未初始化');
         }
       } else if (action === 'cancel') {
         applyFormEditMode(false);
@@ -2956,7 +3194,7 @@ function enableFormLayoutEditing(container, dictName) {
   topAdd?.addEventListener('click', async () => { await triggerTabAction('add'); });
   topDelete?.addEventListener('click', async () => {
     const paperNum = String(currentCompany || '').trim();
-    if (!paperNum) { alert('尚未選取公司代碼'); return; }
+    if (!paperNum) { window.ccsPrompt('尚未選取公司代碼'); return; }
     if (!confirm(`確定要刪除：${paperNum} ?`)) return;
     try {
       const json = await window.CcsCompanyActions.deleteSystemLink({
@@ -2964,12 +3202,12 @@ function enableFormLayoutEditing(container, dictName) {
         itemId: (window._singleItemId || 'CC000054').toString(),
         systemId: Number(window._cc000054SystemId || '@Model.SystemId' || 0)
       });
-      alert(json?.message || '刪除完成');
+      window.ccsPrompt(json?.message || '刪除完成');
       const backUrl = getBackListUrl();
       backUrl.searchParams.delete('selectedCompanyId');
       location.href = backUrl.toString();
     } catch (err) {
-      alert('刪除失敗：' + err);
+      window.ccsPrompt('刪除失敗：' + err);
     }
   });
   topQuery?.addEventListener('click', () => {
@@ -2991,7 +3229,7 @@ function enableFormLayoutEditing(container, dictName) {
   };
   topLog?.addEventListener('click', async () => {
     const paperNum = String(currentCompany || '').trim();
-    if (!paperNum) { alert('尚未選取公司代碼'); return; }
+    if (!paperNum) { window.ccsPrompt('尚未選取公司代碼'); return; }
     if (typeof window.openSharedUpdateLog === 'function') {
       await window.openSharedUpdateLog({
         paperId: (window._singleRealTable || 'AJNdCompany').toString(),
@@ -3000,12 +3238,12 @@ function enableFormLayoutEditing(container, dictName) {
       });
       return;
     }
-    alert('記錄視窗尚未載入');
+    window.ccsPrompt('記錄視窗尚未載入');
   });
   topShowSys?.addEventListener('click', async () => {
     const cid = String(currentCompany || '').trim();
     if (!cid) {
-      alert('尚未選取公司代碼');
+      window.ccsPrompt('尚未選取公司代碼');
       return;
     }
     const modalEl = document.getElementById('showSystemModal');
@@ -3051,7 +3289,7 @@ function enableFormLayoutEditing(container, dictName) {
       sys8Row?.classList.toggle('d-none', !showSys8);
       sys9Row?.classList.toggle('d-none', !showSys9);
     } catch (err) {
-      alert('讀取檢視身分失敗：' + err);
+      window.ccsPrompt('讀取檢視身分失敗：' + err);
     }
 
     modal.show();
@@ -3896,9 +4134,146 @@ function enableFormLayoutEditing(container, dictName) {
   grid-template-columns: 95px minmax(0, 1fr);
   gap: 5px;
 }
+.ccs-credit-legacy {
+  min-height: 248px;
+  border: 1px solid #d8e0ee;
+  background: #fff;
+  padding: 6px;
+  font-size: 12px;
+}
+.ccs-credit-wrap {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+.ccs-credit-left,
+.ccs-credit-right {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ccs-credit-group {
+  border: 1px solid #c9d5ea;
+  background: #f8fbff;
+}
+.ccs-credit-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  border-bottom: 1px solid #c9d5ea;
+  background: #eef4ff;
+  padding-right: 3px;
+}
+.ccs-credit-group-title {
+  padding: 3px 6px;
+  color: #1f3d78;
+  font-weight: 600;
+  font-size: 12px;
+}
+.ccs-credit-group-head .tab-icon-toolbar .btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  line-height: 1;
+}
+.ccs-credit-group .ccs-credit-check,
+.ccs-credit-group .ccs-credit-row {
+  padding: 2px 6px;
+}
+.ccs-credit-order-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  align-items: start;
+}
+.ccs-credit-order-left .ccs-credit-check {
+  padding: 2px 6px;
+}
+.ccs-credit-order-right .ccs-credit-row {
+  grid-template-columns: 86px 120px;
+  justify-content: start;
+}
+.ccs-credit-order-right .ccs-credit-label {
+  text-align: right;
+}
+.ccs-credit-due-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px;
+}
+.ccs-credit-due-row .ccs-credit-row {
+  grid-template-columns: 86px 120px;
+  margin-right: 6px;
+}
+.ccs-credit-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-items: center;
+  gap: 4px;
+}
+.ccs-credit-label {
+  margin: 0;
+  text-align: right;
+  color: #2a3a58;
+  font-size: 12px;
+}
+.ccs-credit-input {
+  height: 24px;
+  min-height: 24px;
+  padding: 1px 4px;
+  font-size: 12px;
+}
+.ccs-credit-narrow {
+  max-width: 120px;
+}
+.ccs-credit-check .form-check-label {
+  font-size: 12px;
+}
+.ccs-credit-check .form-check-input {
+  margin-top: 0.15rem;
+}
+.ccs-credit-group-table thead th,
+.ccs-credit-group-table tbody td {
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 2px 5px !important;
+}
+.ccs-credit-group-grid {
+  max-height: 220px;
+}
+.ccs-credit-right .ccs-subgrid-wrap {
+  max-height: 290px;
+}
+.ccs-credit-right .ccs-subgrid-table thead th {
+  height: 24px;
+}
+.ccs-credit-right .ccs-subgrid-table tbody td {
+  height: 22px;
+}
+@@media (max-width: 1200px) {
+  .ccs-credit-wrap {
+    grid-template-columns: 1fr;
+  }
+  .ccs-credit-order-grid,
+  .ccs-credit-due-row {
+    grid-template-columns: 1fr;
+  }
+  .ccs-credit-order-right .ccs-credit-row,
+  .ccs-credit-due-row .ccs-credit-row {
+    grid-template-columns: 86px minmax(90px, 130px);
+  }
+  .ccs-credit-group-grid,
+  .ccs-credit-right .ccs-subgrid-wrap {
+    max-height: none;
+  }
+}
 </style>
 <script src="~/js/ccsUpdateLog.js" asp-append-version="true"></script>
 
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
 
 

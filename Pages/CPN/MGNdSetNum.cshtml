@@ -187,7 +187,7 @@
   .grid-table thead th.col-drag-over-left { box-shadow: inset 3px 0 0 #3b82f6; }
   .grid-table thead th.col-drag-over-right { box-shadow: inset -3px 0 0 #3b82f6; }
 
-  .setnum-page .tab-content { padding-top: 6px !important; }
+  .setnum-page .tab-content { padding-top: 6px !important; flex: 1 1 auto; min-height: 0; }
   .setnum-page .card-body[data-page-mode="main"] .tab-content { padding-top: 0 !important; }
   .setnum-page .card-body[data-page-mode="main"] .top-toolbar { margin-bottom: 4px; }
   .setnum-page .card-body[data-page-mode="main"] #mainWrapper.grid-scroll {
@@ -203,6 +203,14 @@
   .setnum-page {
     --top-toolbar-btn-height: 31px;
     --top-toolbar-font-size: 13px;
+    height: calc(100vh - var(--app-toolbar-height, 56px) - 8px);
+    overflow: hidden;
+  }
+  .setnum-page > .card-body {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
   .setnum-page .top-toolbar {
     display:flex; align-items:center; gap:6px; flex-wrap:wrap;
@@ -294,7 +302,7 @@
     padding: .45rem .65rem;
   }
   #tab-encode {
-    height: calc(100vh - 124px);
+    height: 100%;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -321,6 +329,27 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+  }
+  /* 編碼設定頁籤：簡化多餘框線，只保留主要外框 */
+  #tab-encode .encode-left > .card,
+  #tab-encode .encode-right > .card {
+    border: 0 !important;
+    box-shadow: none !important;
+    background: transparent;
+  }
+  #tab-encode .grid-scroll {
+    border: 2px solid #9fb5d8 !important;
+    border-radius: 8px;
+    background: #fff;
+  }
+  #tab-encode .grid-table thead th {
+    border-right: 0 !important;
+    border-bottom: 1px solid #b7c2d4 !important;
+  }
+  #tab-encode .grid-table tbody td {
+    border-top: 0 !important;
+    border-right: 0 !important;
+    border-bottom: 1px solid #d5deec !important;
   }
   .section-action-group { display: none !important; }
   .sortable-header { cursor: pointer; position: relative; }
@@ -1046,31 +1075,29 @@
 
   function showMsg(text, type = 'info') {
     if (type === 'success') return;
-    if (!alertBox) return;
-    const cls = type === 'error' ? 'alert-danger' :
-                type === 'success' ? 'alert-success' :
-                type === 'warning' ? 'alert-warning' : 'alert-info';
-    if (msgTimer) {
-      clearTimeout(msgTimer);
-      msgTimer = null;
+    const message = (text ?? '').toString();
+    if (window.Swal?.fire) {
+      const icon = type === 'error' ? 'error'
+        : type === 'warning' ? 'warning'
+        : type === 'success' ? 'success'
+        : 'info';
+      const opts = { icon, title: message, confirmButtonText: '確定' };
+      if (icon === 'info') {
+        opts.timer = 1200;
+        opts.showConfirmButton = false;
+      }
+      return window.Swal.fire(opts);
     }
-    alertBox.className = `alert ${cls}`;
-    alertBox.textContent = text;
-    alertBox.classList.remove('d-none');
-    const autoMs = (type === 'error' || type === 'warning') ? 3000 : 1200;
-    msgTimer = setTimeout(() => {
-      alertBox.classList.add('d-none');
-      msgTimer = null;
-    }, autoMs);
+    window.alert(message);
   }
 
   function clearMsg() {
-    if (!alertBox) return;
     if (msgTimer) {
       clearTimeout(msgTimer);
       msgTimer = null;
     }
-    alertBox.classList.add('d-none');
+    if (window.Swal?.isVisible?.()) window.Swal.close();
+    alertBox?.classList.add('d-none');
   }
 
   function buildHead(headEl, cols, withActions = false) {
@@ -1757,8 +1784,14 @@
     tr.classList.add('table-warning');
     addHiddenKeys(tr, data, keyFields);
     cols.forEach(col => tr.appendChild(createCell(col, data[col.key])));
-    if (tbody.firstChild) tbody.insertBefore(tr, tbody.firstChild);
-    else tbody.appendChild(tr);
+    const selectedRow = tbody.querySelector('tr.table-primary');
+    if (selectedRow && selectedRow.parentElement === tbody) {
+      tbody.insertBefore(tr, selectedRow);
+    } else if (tbody.firstChild) {
+      tbody.insertBefore(tr, tbody.firstChild);
+    } else {
+      tbody.appendChild(tr);
+    }
     syncRowsToHeaderOrder(tbody.closest('table'));
     return tr;
   }

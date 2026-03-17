@@ -800,6 +800,7 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
     // ===== 表格 UI 欄位產生 =====
     fields.forEach(f => {
       const td = document.createElement("td");
+      if (DICT.visible(f)) td.dataset.field = f.FieldName;
 
       // ★ 修正：使用 getRowValue 處理大小寫，且只有 undefined 時才取 KeySelfName（避免 0 被當成 falsy）
       let raw = getRowValue(row, f.FieldName);
@@ -912,6 +913,49 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
     }
   }
 };
+
+  // ==============================================================================
+  //  建立合計列 (bFooter)
+  // ==============================================================================
+  const buildFooter = (tableEl, dict, rows) => {
+    if (!tableEl) return;
+
+    const old = tableEl.querySelector('tfoot.md-grid-footer');
+    if (old) old.remove();
+
+    const visibleFields = dict
+      .filter(f => DICT.visible(f))
+      .sort((a, b) => DICT.order(a) - DICT.order(b));
+
+    const hasFooter = visibleFields.some(f => +f.bFooter === 1);
+    if (!hasFooter) return;
+
+    const tfoot = document.createElement('tfoot');
+    tfoot.className = 'md-grid-footer';
+    const tr = document.createElement('tr');
+
+    visibleFields.forEach(f => {
+      const td = document.createElement('td');
+      if (+f.bFooter === 1) {
+        let sum = 0;
+        rows.forEach(row => {
+          if (!row || row.__state === 'deleted') return;
+          const raw = row[f.FieldName];
+          if (raw == null || raw === '') return;
+          const num = parseFloat(String(raw).replace(/,/g, ''));
+          if (Number.isFinite(num)) sum += num;
+        });
+        td.textContent = fmtCell(sum, DICT.fmt(f), DICT.type(f));
+        td.style.textAlign = 'right';
+        td.style.fontWeight = '600';
+        td.style.background = '#f0f4ff';
+      }
+      tr.appendChild(td);
+    });
+
+    tfoot.appendChild(tr);
+    tableEl.appendChild(tfoot);
+  };
 
   // ==============================================================================
   //  初始化主從頁（initOne）
@@ -1070,6 +1114,9 @@ const loadAllDetails = async (row) => {
         }
       }
     }, true);
+
+    const detailGridEl = document.getElementById(`${cfg.DomId}-detail-${i}-grid`);
+    buildFooter(detailGridEl, detailDicts[i], rows);
 
     // ★ 當 detail 沒有資料時，放一列空白佔位列，讓使用者可以點擊聚焦到單身區塊
     if (rows.length === 0 && tbody.querySelectorAll("tr").length === 0) {
@@ -1698,8 +1745,7 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
 
       clearSelected(tbody);
       tr.classList.add("selected");
-      if (tbody.firstChild) tbody.insertBefore(tr, tbody.firstChild);
-      else tbody.appendChild(tr);
+      tbody.appendChild(tr);
       updateCountPanel();
       pendingAddedRow = tr;
       pendingAddedTarget = { type: target.type, index: target.index };
@@ -1713,6 +1759,40 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       }
       return tr;
     };
+
+    // 掛載 GRID 鍵盤導航（兩段式點擊、方向鍵、F7/F8、Enter/Escape）
+    if (typeof window.initErpGridNav === 'function') {
+      window.initErpGridNav(mBody, {
+        keyFields : masterPK.map(k => k.toLowerCase()),
+        isEditMode: () => !!window._mmdEditing,
+        addRow    : null,
+        autoSave  : async () => {
+          const r = await masterEditor.saveChanges();
+          if (r?.ok && !r?.skipped) setDirty(false);
+        },
+        onRowSelect: (tr) => { if (tr) tr.click(); },
+        gridLabel : `${cfg.DomId}-master`,
+      });
+      for (let _i = 0; _i < (cfg.Details || []).length; _i++) {
+        const _dBody = root.querySelector(`#${cfg.DomId}-detail-${_i}-body`);
+        if (!_dBody) continue;
+        window.initErpGridNav(_dBody, {
+          keyFields : (detailKeyFields[_i] || []).map(k => k.toLowerCase()),
+          isEditMode: () => !!window._mmdEditing,
+          addRow    : async () => {
+            const t = { type: 'detail', index: _i, tbody: _dBody, editor: detailEditors[_i], keyFields: detailKeyFields[_i], dict: detailDicts[_i] };
+            const row = addRowTo(t);
+            return row ? { ok: true } : { ok: false };
+          },
+          autoSave  : async () => {
+            const r = await detailEditors[_i].saveChanges();
+            if (r?.ok && !r?.skipped) setDirty(false);
+          },
+          onRowSelect: (tr) => { if (tr) tr.click(); },
+          gridLabel : `${cfg.DomId}-detail-${_i}`,
+        });
+      }
+    }
 
     const saveAll = async () => {
       const focusTarget = pendingAddedRow && pendingAddedTarget
@@ -1849,6 +1929,9 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
 
       if (tr.dataset.state === "added") {
         tr.remove();
+        updateCountPanel();
+        // 若已無其他待儲存列，則重設 dirty
+        if (!root.querySelector('tbody tr[data-state]')) setDirty(false);
         return;
       }
 
@@ -1868,6 +1951,8 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       }
 
       await notify("success", "刪除完成");
+      setDirty(false);
+      updateCountPanel();
       if (target.type === "master") location.reload();
     };
 

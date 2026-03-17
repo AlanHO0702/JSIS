@@ -433,6 +433,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
      COALESCE(l.DisplaySize, f.DisplaySize) AS DisplaySize,
      COALESCE(l.IFieldWidth, f.iFieldWidth) AS FieldWidth,
      f.ComboStyle,
+     f.bFooter,
      f.DataType,
      f.FormatStr,
      f.SerialNum,
@@ -461,6 +462,7 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
                 DisplaySize  = rd["DisplaySize"] == DBNull.Value ? null : Convert.ToInt32(rd["DisplaySize"]),
                 FieldWidth   = rd["FieldWidth"] == DBNull.Value ? null : Convert.ToInt32(rd["FieldWidth"]),
                 ComboStyle   = rd["ComboStyle"] == DBNull.Value ? null : Convert.ToInt32(rd["ComboStyle"]),
+                bFooter      = rd["bFooter"] == DBNull.Value ? null : Convert.ToInt32(rd["bFooter"]),
                 DataType     = rd["DataType"]?.ToString() ?? "",
                 FormatStr    = rd["FormatStr"]?.ToString() ?? "",
                 SerialNum    = rd["SerialNum"] == DBNull.Value ? null : Convert.ToInt32(rd["SerialNum"]),
@@ -568,6 +570,7 @@ SELECT COLUMN_NAME, DATA_TYPE
         public int? DisplaySize { get; set; }
         public int? FieldWidth { get; set; }
         public int? ComboStyle { get; set; }
+        public int? bFooter { get; set; }
         public string DataType { get; set; } = "";
         public string FormatStr { get; set; } = "";
         public int? SerialNum { get; set; }
@@ -614,15 +617,22 @@ SELECT COLUMN_NAME, DATA_TYPE
         Visible   = CASE WHEN ISNULL(f.Visible,1)=1 THEN 1 ELSE 0 END,
         ReadOnly  = CASE WHEN ISNULL(f.ReadOnly,0)=1 THEN 1 ELSE 0 END,
         f.ComboStyle,
+        f.ComboTextSize,
         f.Items,
         f.FieldNote,
         f.EditColor,
 
         -- 標籤/欄位座標與尺寸
         f.iLayRow, f.iLayColumn,
-        f.iLabHeight,  f.iLabTop,   f.iLabLeft,   f.iLabWidth,
-        f.iFieldHeight,f.iFieldTop, f.iFieldLeft, f.iFieldWidth,
-        f.iShowWhere,
+        COALESCE(l.ILabHeight, f.iLabHeight)   AS iLabHeight,
+        COALESCE(l.ILabTop,    f.iLabTop)       AS iLabTop,
+        COALESCE(l.ILabLeft,   f.iLabLeft)      AS iLabLeft,
+        COALESCE(l.ILabWidth,  f.iLabWidth)     AS iLabWidth,
+        COALESCE(l.IFieldHeight,f.iFieldHeight) AS iFieldHeight,
+        COALESCE(l.IFieldTop,  f.iFieldTop)     AS iFieldTop,
+        COALESCE(l.IFieldLeft, f.iFieldLeft)    AS iFieldLeft,
+        COALESCE(l.IFieldWidth,f.iFieldWidth)   AS iFieldWidth,
+        COALESCE(l.IShowWhere, f.iShowWhere)    AS iShowWhere,
 
         -- 查詢/Lookup
         f.LookupTable, f.LookupKeyField, f.LookupResultField,
@@ -632,6 +642,7 @@ SELECT COLUMN_NAME, DATA_TYPE
         -- 其他（若你的表裡有）
         f.IsNotesField,
         f.IsMoneyField,
+        f.bFooter,
 
         -- ★ 第二層 OCX Lookup（新增）
         f.OCXLKTableName,
@@ -686,6 +697,7 @@ SELECT COLUMN_NAME, DATA_TYPE
                 ReadOnly        = (rd["ReadOnly"]?.ToString() ?? "0") == "1" ? 1 : 0,
                 FieldNote       = rd["FieldNote"]?.ToString() ?? "",
                 ComboStyle      = rd["ComboStyle"] as int?,
+                ComboTextSize   = rd["ComboTextSize"] as int?,
                 Items           = rd["Items"]?.ToString() ?? "",
                 EditColor       = rd["EditColor"]?.ToString() ?? "",
 
@@ -712,6 +724,7 @@ SELECT COLUMN_NAME, DATA_TYPE
                 LookupCond2ResultField = rd["LookupCond2ResultField"]?.ToString() ?? "",
                 IsNotesField    = rd["IsNotesField"]?.ToString() ?? "",
                 IsMoneyField    = rd["IsMoneyField"]?.ToString() ?? "",
+                bFooter         = rd["bFooter"] as int?,
 
                 OCXLKTableName  = rd["OCXLKTableName"]?.ToString() ?? "",
                 OCXLKResultName = rd["OCXLKResultName"]?.ToString() ?? "",

@@ -1,4 +1,6 @@
 (function () {
+  var dictCache = Object.create(null);
+
   function withJwtHeaders(init) {
     var jwt = localStorage.getItem('jwtId');
     var headers = Object.assign({}, (init && init.headers) || {});
@@ -6,7 +8,19 @@
     return Object.assign({}, init || {}, { headers: headers });
   }
 
-  /* ── Modal 建立 ── */
+  function showPrompt(message, type) {
+    var text = message == null ? '' : String(message);
+    if (typeof window.ccsPrompt === 'function') return window.ccsPrompt(text, type || 'info');
+    if (window.Swal && typeof window.Swal.fire === 'function') {
+      var icon = type === 'error' ? 'error'
+        : type === 'warning' ? 'warning'
+        : type === 'success' ? 'success'
+        : 'info';
+      return window.Swal.fire({ icon: icon, title: text, confirmButtonText: '確定' });
+    }
+    window.alert(text);
+  }
+
   function ensureModal() {
     var modalEl = document.getElementById('updateLogModal');
     if (modalEl) {
@@ -29,6 +43,9 @@
       '      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>',
       '    </div>',
       '    <div class="modal-body">',
+      '      <div class="ul-toolbar">',
+      '        <button type="button" class="btn btn-sm btn-outline-secondary ul-refresh">重新整理</button>',
+      '      </div>',
       '      <div class="ul-layout">',
       '        <section class="ul-top">',
       '          <div class="ul-title">更新記錄</div>',
@@ -101,7 +118,6 @@
   function fmtDate(val) {
     if (!val) return '';
     var s = String(val);
-    // ISO 格式 or .NET 格式
     var d = new Date(s);
     if (isNaN(d.getTime())) return s;
     var pad = function (n) { return n < 10 ? '0' + n : String(n); };
@@ -257,7 +273,10 @@
     var paperId = (opt && opt.paperId) ? String(opt.paperId).trim() : '';
     var logType = (opt && opt.logType) ? String(opt.logType).trim() : '';
 
-    if (!paperNum) { alert('請先選取一筆資料'); return; }
+    if (!paperNum) {
+      showPrompt('請先選取一筆資料', 'warning');
+      return;
+    }
 
     var primaryPaperId = paperId || itemId;
     var secondaryPaperId = (itemId && itemId !== primaryPaperId) ? itemId : '';
@@ -272,7 +291,7 @@
     var historyRows = a.history.length ? a.history : ((b && b.history) || []);
 
     if (!a.ok && !(b && b.ok)) {
-      alert('讀取記錄失敗：' + (a.error || (b && b.error) || 'unknown'));
+      showPrompt('讀取記錄失敗：' + (a.error || (b && b.error) || 'unknown'), 'error');
       return;
     }
 
@@ -305,6 +324,14 @@
       if (tr0) tr0.classList.add('ul-row-selected');
     } else {
       diffEl.value = '';
+    }
+
+    // ★ 綁定「重新整理」按鈕（從 Doc2 補回）
+    var refreshBtn = modalEl.querySelector('.ul-refresh');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', function () {
+        window.openSharedUpdateLog(opt);
+      });
     }
 
     if (window.bootstrap) {

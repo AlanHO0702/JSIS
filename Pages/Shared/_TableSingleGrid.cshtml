@@ -108,7 +108,16 @@
         }
 
         var prop = item.GetType().GetProperty(name!, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-        return prop?.GetValue(item);
+        if (prop == null) return null;
+        if (prop.GetIndexParameters().Length > 0) return null;
+        try
+        {
+            return prop.GetValue(item);
+        }
+        catch (TargetParameterCountException)
+        {
+            return null;
+        }
     }
 
     private static bool ToBool(object? raw, bool defaultValue)
@@ -507,6 +516,16 @@
                               lookupKey = !string.IsNullOrWhiteSpace(keyFieldVal) ? keyFieldVal : keySelfVal;
                       }
 
+                      // 標準 Lookup key（非實體欄位用）：若 lookupKey 仍為空，從 LookupKeyField 取同列值
+                      if (string.IsNullOrWhiteSpace(lookupKey) && dictField != null
+                          && !string.IsNullOrWhiteSpace(dictField.LookupTable)
+                          && !string.IsNullOrWhiteSpace(dictField.LookupKeyField))
+                      {
+                          var stdKeyVal = GetValue(item, dictField.LookupKeyField);
+                          if (stdKeyVal != null)
+                              lookupKey = stdKeyVal.ToString() ?? "";
+                      }
+
                       var cellClass = IsNumberDataType(dictField ?? f) ? "cell-number" : "cell-text";
                       var comboStyleStr = GetFieldProp(dictField ?? (object)f, "ComboStyle");
                       int.TryParse(comboStyleStr, out int comboStyleVal);
@@ -686,12 +705,71 @@
   #condRunSpModal .crs-field { display: flex; align-items: center; gap: 8px; }
   #condRunSpModal .crs-label { white-space: nowrap; margin: 0; flex: 0 0 90px; text-align: right; font-size: var(--field-label-size); }
   #condRunSpModal .crs-control { flex: 1 1 auto; min-width: 0; font-size: var(--field-value-size); }
+
+  /* Checkbox 樣式 - 完全模仿 Bootstrap form-check-input */
+  #mainGrid td input[type="checkbox"].cell-edit {
+    display: inline-block;
+    width: 18px !important;
+    height: 18px !important;
+    min-height: 18px !important;
+    max-height: 18px !important;
+    line-height: 18px !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    vertical-align: middle;
+    cursor: pointer;
+    /* Bootstrap 樣式 */
+    border-radius: 0.25em;
+    border: 1px solid #dee2e6;
+    background-color: #fff;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+  }
+
+  /* Checked 狀態 - 藍色背景 + 深灰色邊框 + 白色勾選圖示 */
+  #mainGrid td input[type="checkbox"].cell-edit:checked {
+    background-color: #0d6efd;
+    border-color: #8f98a1 !important;  /* 深灰色邊框，讓框框明顯 */
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3e%3cpath fill='none' stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='m6 10 3 3 6-6'/%3e%3c/svg%3e");
+  }
+
+  /* Focus 狀態 */
+  #mainGrid td input[type="checkbox"].cell-edit:focus {
+    outline: 0;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+  }
+
+  /* 瀏覽模式（禁用狀態）- 保持清晰可見，不改變顏色 */
+  #mainGrid td input[type="checkbox"].cell-edit:disabled {
+    cursor: not-allowed;
+    opacity: 1;
+    pointer-events: none;  /* 禁止點擊 */
+  }
+
+  /* 瀏覽模式且已勾選 - 保持藍色背景、深灰色邊框和勾勾 */
+  #mainGrid td input[type="checkbox"].cell-edit:disabled:checked {
+    background-color: #0d6efd;
+    border-color: #8f98a1 !important;  /* 深灰色邊框，讓框框明顯 */
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3e%3cpath fill='none' stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='m6 10 3 3 6-6'/%3e%3c/svg%3e");
+  }
+
+  /* 包含 checkbox 的儲存格置中對齊 */
+  #mainGrid td:has(input[type="checkbox"].cell-edit) {
+    text-align: center;
+    vertical-align: middle;
+    padding: 0 !important;
+  }
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="~/js/gridToolbarTemplate.js"></script>
+<script src="~/js/erpGridNav.js" asp-append-version="true"></script>
 <script>
-  document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("DOMContentLoaded", async () => {
     const editBtn = document.getElementById("btnEditToggle");
     const saveBtn = document.getElementById("btnSaveTable");
     const delBtn  = document.getElementById("btnDeleteRow");
@@ -735,7 +813,10 @@
       DataType = f.DataType,
       FormatStr = f.FormatStr,
       ComboStyle = f.ComboStyle,
-      EditColor = f.EditColor
+      EditColor = f.EditColor,
+      LookupTable = f.LookupTable,
+      LookupKeyField = f.LookupKeyField,
+      LookupResultField = f.LookupResultField
     })
   ));
     const customButtonBar = null;
@@ -759,6 +840,34 @@
       }
       return out;
     })();
+    // 標準 Lookup 對照表快取（LookupTable/LookupKeyField/LookupResultField）
+    const _stdLookupCache = {};
+    async function loadStandardLookups() {
+      const fields = (Array.isArray(fieldFormatMap) ? fieldFormatMap : [])
+        .filter(f => f.LookupTable && f.LookupKeyField && f.LookupResultField);
+      for (const f of fields) {
+        const fkey = (f.FieldName || '').toLowerCase();
+        if (lookupMaps[fkey]) continue; // OCX lookup 優先，已存在則跳過
+        const cacheKey = `${f.LookupTable}|${f.LookupKeyField}|${f.LookupResultField}`;
+        if (!_stdLookupCache[cacheKey]) {
+          try {
+            const url = `/api/TableFieldLayout/LookupData`
+              + `?table=${encodeURIComponent(f.LookupTable)}`
+              + `&key=${encodeURIComponent(f.LookupKeyField)}`
+              + `&result=${encodeURIComponent(f.LookupResultField)}`;
+            const rows = await fetch(url).then(r => r.json()).catch(() => []);
+            const map = {};
+            (Array.isArray(rows) ? rows : []).forEach(r => {
+              const k = String(r.key ?? '').trim().toLowerCase();
+              map[k] = (r.result0 ?? '').toString().trim();
+            });
+            _stdLookupCache[cacheKey] = map;
+          } catch { _stdLookupCache[cacheKey] = {}; }
+        }
+        lookupMaps[fkey] = { map: _stdLookupCache[cacheKey], keySelf: (f.LookupKeyField || '').toLowerCase(), keyField: (f.LookupKeyField || '').toLowerCase() };
+      }
+    }
+
     let isEdit = false;
     let totalCountAll = @totalCount;
     let currentPage = @pageNumber;
@@ -783,7 +892,7 @@
     };
 
     const clearActiveCell = () => {
-      if (activeCell && activeCell.classList) activeCell.classList.remove("active-cell");
+      document.querySelectorAll('td.active-cell').forEach(el => el.classList.remove('active-cell'));
       activeCell = null;
     };
 
@@ -816,7 +925,7 @@
         clearActiveCell();
         return;
       }
-      if (activeCell && activeCell !== td) activeCell.classList.remove("active-cell");
+      document.querySelectorAll('td.active-cell').forEach(el => { if (el !== td) el.classList.remove('active-cell'); });
       activeCell = td;
       activeCell.classList.add("active-cell");
 
@@ -833,44 +942,6 @@
       }
     };
 
-    const resolveArrowTargetCell = (fromTd, key) => {
-      if (!fromTd) return null;
-      const fromTr = fromTd.closest("tr");
-      if (!fromTr) return null;
-      const rows = getBodyRows();
-      const rowIdx = rows.indexOf(fromTr);
-      if (rowIdx < 0) return null;
-
-      const visibleCells = Array.from(fromTr.querySelectorAll("td[data-field]")).filter(isCellVisible);
-      if (!visibleCells.length) return null;
-      const cellIdx = visibleCells.indexOf(fromTd);
-      if (cellIdx < 0) return null;
-
-      if (key === "ArrowLeft" || key === "ArrowRight") {
-        const nextIdx = cellIdx + (key === "ArrowLeft" ? -1 : 1);
-        if (nextIdx < 0 || nextIdx >= visibleCells.length) return null;
-        return visibleCells[nextIdx];
-      }
-
-      if (key === "ArrowUp" || key === "ArrowDown") {
-        const nextRowIdx = rowIdx + (key === "ArrowUp" ? -1 : 1);
-        if (nextRowIdx < 0 || nextRowIdx >= rows.length) return null;
-        const targetRow = rows[nextRowIdx];
-        const byField = getCellByField(targetRow, fromTd.dataset.field || "");
-        if (isCellVisible(byField)) return byField;
-        const targetVisibleCells = Array.from(targetRow.querySelectorAll("td[data-field]")).filter(isCellVisible);
-        if (!targetVisibleCells.length) return null;
-        const fallbackIdx = Math.min(cellIdx, targetVisibleCells.length - 1);
-        return targetVisibleCells[fallbackIdx];
-      }
-
-      return null;
-    };
-
-    const getFirstVisibleCell = (tr) => {
-      if (!tr) return null;
-      return Array.from(tr.querySelectorAll("td[data-field]")).find(isCellVisible) || null;
-    };
 
     // 清理舊版 fallback 殘留參數，避免後端把它當成查詢欄位。
     try {
@@ -1600,8 +1671,87 @@
         const inp  = td.querySelector(".cell-edit");
         if (!span || !inp) return;
         const rawVal = inp.dataset.raw ?? inp.value;
-        const lkVal  = inp.dataset.lookupkey ?? rawVal;
+        let lkVal  = inp.dataset.lookupkey ?? rawVal;
+        // 若 lkVal 為空，嘗試從 lookupMaps 的 keySelf 欄位取同列的值（非實體欄位用）
+        if (!lkVal) {
+          const fieldKey = field.toLowerCase();
+          const cfg = lookupMaps[fieldKey];
+          if (cfg?.keySelf && cfg.keySelf !== fieldKey) {
+            const keyTd = Array.from(tr.querySelectorAll('td[data-field]')).find(t =>
+              (t.dataset.field || '').toLowerCase() === cfg.keySelf);
+            const keyInp = keyTd?.querySelector('.cell-edit');
+            if (keyInp) lkVal = keyInp.dataset.raw ?? keyInp.value ?? '';
+          }
+        }
         span.textContent = renderCellDisplay(field, rawVal, lkVal);
+      });
+    });
+  };
+
+  // Checkbox 轉換相關函數
+  const isCheckboxField = (fieldName) => {
+    const meta = getFieldMeta(fieldName);
+    return meta != null && Number(meta.ComboStyle ?? 0) === 1;
+  };
+
+  const applyCheckboxCells = () => {
+    let convertCount = 0;
+    table.querySelectorAll("tbody tr").forEach(tr => {
+      tr.querySelectorAll("td").forEach(td => {
+        const fieldName = td.dataset.field;
+        if (!fieldName) return;
+
+        // server-side 已渲染為 checkbox 格式（data-checkbox="1"），跳過避免重複
+        if (td.dataset.checkbox) return;
+
+        if (!isCheckboxField(fieldName)) return;
+
+        const inp = td.querySelector(".cell-edit");
+        if (!inp) return;
+
+        // 如果已經是 checkbox，就跳過
+        if (inp.type === "checkbox") return;
+
+        convertCount++;
+
+        // 以下是將 text input 轉換為 checkbox 的邏輯
+        const isReadOnly = inp.dataset.readonly === "1";
+        const rawValue = inp.value ?? "";
+        const checked = rawValue === "1" || rawValue === "true" || rawValue.toLowerCase() === "y";
+
+        // 建立 checkbox
+        const chk = document.createElement("input");
+        chk.type = "checkbox";
+        // 使用最基本的 class，不加任何 Bootstrap 樣式
+        chk.className = "cell-edit";
+        if (isReadOnly) chk.classList.add("readonly-cell");
+        chk.name = inp.name;
+        chk.checked = checked;
+        chk.value = checked ? "1" : "0";
+        chk.dataset.raw = inp.dataset.raw || (checked ? "1" : "0");
+        chk.dataset.readonly = inp.dataset.readonly || "0";
+        chk.dataset.lookupkey = inp.dataset.lookupkey || "";
+
+        // 初始狀態根據當前模式設定
+        if (isReadOnly || !isEdit) {
+          chk.disabled = true;
+        }
+
+        // 確保 checkbox 顯示（瀏覽模式時也要顯示）
+        chk.classList.remove('d-none');
+
+        // 監聽變更事件
+        chk.addEventListener("change", () => {
+          chk.value = chk.checked ? "1" : "0";
+          if (isEdit && !isReadOnly) setDirty(true);
+        });
+
+        // 替換原本的 input
+        inp.replaceWith(chk);
+
+        // 確保 span 隱藏（checkbox 欄位不使用 span）
+        const span = td.querySelector(".cell-view");
+        if (span) span.classList.add('d-none');
       });
     });
   };
@@ -1644,16 +1794,29 @@
         const inp  = td.querySelector(".cell-edit");
         if (!span || !inp) return;
 
+        const isCheckbox = inp.type === "checkbox";
+        const isReadonly = inp.dataset.readonly === "1";
+
         if (isEdit) {
-          if (inp.dataset.readonly === "1") {
-            // readonly 欄位：維持顯示 span（lookup 值），隱藏 input
+          if (isCheckbox) {
+            // checkbox: 不切換顯示/隱藏，直接啟用/禁用
+            if (isReadonly) {
+              inp.disabled = true;
+            } else {
+              inp.disabled = false;
+            }
+            // checkbox 始終顯示 input，隱藏 span
+            span.classList.add("d-none");
+            inp.classList.remove("d-none");
+          } else if (isReadonly) {
+            // 一般欄位且 readonly：維持顯示 span，隱藏 input
             span.classList.remove("d-none");
             inp.classList.add("d-none");
             inp.classList.add("readonly-cell");
             inp.setAttribute("readonly", "readonly");
             inp.setAttribute("tabindex", "-1");
           } else {
-            // 可編輯欄位：顯示 input，隱藏 span
+            // 一般欄位且可編輯：顯示 input，隱藏 span
             span.classList.add("d-none");
             inp.classList.remove("d-none");
             inp.classList.remove("readonly-cell");
@@ -1668,6 +1831,9 @@
         }
       });
     });
+
+    // 套用 checkbox 轉換（根據 ComboStyle）
+    applyCheckboxCells();
 
     table.addEventListener("input", (e) => {
       if (!isEdit) return;
@@ -2015,10 +2181,26 @@
     return list;
   }
 
+    // 在 erpGridNav 的 pointerdown (bubble) 之前（capture 階段）記錄切換前的列，
+    // 供 click handler 做 auto-save 判斷（erpGridNav 的 pointerdown 會先更新 SELECTED_ROW）
+    let _clickPrevRow = null;
+    table.addEventListener("pointerdown", (ev) => {
+      const tr = ev.target.closest("tbody tr");
+      if (tr) _clickPrevRow = window.SELECTED_ROW || null;
+    }, { capture: true });
+
     table.addEventListener("click", async (ev) => {
       const tr = ev.target.closest("tbody tr");
       if (!tr) return;
-      await selectRow(tr);
+      const prevRow = _clickPrevRow;
+      _clickPrevRow = null;
+      // erpGridNav 的 pointerdown 可能已透過 onRowSelect 更新 SELECTED_ROW，
+      // 此處用 prevRow 偵測真正的列切換，自行執行 auto-save
+      if (prevRow && prevRow !== tr && isEdit && isDirty) {
+        const ok = await saveTableChanges({ silentSuccess: true, targetRows: [prevRow] });
+        if (!ok) return;
+      }
+      await selectRow(tr, { skipAutoSave: true });
       const td = ev.target.closest("td[data-field]");
       if (td) setActiveCell(td, { skipRowSelect: true });
     });
@@ -2085,51 +2267,8 @@
       if (!sourceTd) return false;
       return copyCellValue(targetTd, sourceTd);
     };
+    // F7/F8/方向鍵/Enter/Escape 由 erpGridNav 統一處理；此處只保留 Delete 清空格子
     table.addEventListener("keydown", (ev) => {
-      if (ev.key === "F7") {
-        if (!isEdit) return;
-        const fromTd = ev.target?.closest?.("td[data-field]") || activeCell;
-        if (!fromTd) return;
-        ev.preventDefault();
-        if (copyRowFromPrevRow(fromTd)) setDirty(true);
-        return;
-      }
-      if (ev.key === "F8") {
-        if (!isEdit) return;
-        const fromTd = ev.target?.closest?.("td[data-field]") || activeCell;
-        if (!fromTd) return;
-        ev.preventDefault();
-        if (copyCellFromPrevRow(fromTd)) setDirty(true);
-        return;
-      }
-
-      if (ev.key === "ArrowUp" || ev.key === "ArrowDown" || ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
-        if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
-        const target = ev.target;
-        const isTextEditor = target instanceof HTMLTextAreaElement
-          || (target instanceof HTMLInputElement && target.type !== "checkbox" && target.type !== "radio")
-          || target instanceof HTMLSelectElement;
-        if (!isEdit && isTextEditor) return;
-        const fromTd = target?.closest?.("td[data-field]") || activeCell;
-        if (!fromTd) return;
-        let nextTd = resolveArrowTargetCell(fromTd, ev.key);
-        if (!nextTd && isEdit && ev.key === "ArrowDown") {
-          const fromTr = fromTd.closest("tr");
-          const rows = getBodyRows();
-          const rowIdx = fromTr ? rows.indexOf(fromTr) : -1;
-          const isAtLastRow = rowIdx >= 0 && rowIdx === rows.length - 1;
-          if (isAtLastRow) {
-            const newRow = addRow({ append: true });
-            const sameFieldTd = getCellByField(newRow, fromTd.dataset.field || "");
-            nextTd = isCellVisible(sameFieldTd) ? sameFieldTd : getFirstVisibleCell(newRow);
-          }
-        }
-        if (!nextTd) return;
-        ev.preventDefault();
-        setActiveCell(nextTd);
-        return;
-      }
-
       if (ev.key !== "Delete") return;
       const el = ev.target;
       if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) return;
@@ -2181,11 +2320,35 @@
       }
     });
 
+    await loadStandardLookups();
     applyLookupToTable();
+    applyCheckboxCells(); // 頁面載入時套用 checkbox 轉換
     setModePanel(isEdit);
     updateCountPanel(getSelectedRowIndex());
     buildCustomButtonsFromMeta();
     wireCustomButtons();
+
+    // ── erpGridNav：鍵盤導航（F7/F8/Enter/Escape/方向鍵） ──
+    if (typeof window.initErpGridNav === 'function') {
+      const _navTbody = table.querySelector('tbody');
+      if (_navTbody) {
+        window.initErpGridNav(_navTbody, {
+          keyFields : KEY_FIELDS,
+          isEditMode: () => isEdit,
+          addRow    : async () => {
+            const tr = addRow({ append: true });
+            return tr ? { ok: true } : { ok: false };
+          },
+          // Enter / F7 / F8 後自動存檔（列切換的 auto-save 由 click handler 的 selectRow 負責）
+          autoSave  : async () => {
+            if (!isDirty) return;
+            await saveTableChanges({ silentSuccess: true, targetRows: [window.SELECTED_ROW].filter(Boolean) });
+          },
+          onRowSelect: (tr) => { if (tr) selectRow(tr, { skipAutoSave: true }); },
+          gridLabel : 'singlegrid',
+        });
+      }
+    }
 
   // 共用狀態變數
   let isSorting = false; // 防止重複請求（排序、分頁共用）
@@ -2288,6 +2451,7 @@
       const emptyMessage = getEmptyMessage(!!data.openNoRecord, !!data.hasQueryParams);
       updateTableBody(data.items, fields, emptyMessage);
       loadSavedColumnOrder();
+      await loadStandardLookups();
       applyLookupToTable(); // 套用 lookup 顯示
 
       // 更新分頁資訊
@@ -2907,6 +3071,16 @@
           }
         }
 
+        // 標準 Lookup key（非實體欄位用）：若 lookupKey 仍為空，從 LookupKeyField 取同列值
+        if (!lookupKey) {
+          const fmeta = (Array.isArray(fieldFormatMap) ? fieldFormatMap : [])
+            .find(x => (x.FieldName || '').toLowerCase() === (fieldName || '').toLowerCase());
+          if (fmeta?.LookupKeyField) {
+            const kfVal = item[fmeta.LookupKeyField] ?? item[(fmeta.LookupKeyField || '').toLowerCase()];
+            if (kfVal !== null && kfVal !== undefined) lookupKey = String(kfVal);
+          }
+        }
+
         // 簡單格式化
         let displayVal = rawVal;
         const dateFormatMode = window._singleGridDateFormat || '';
@@ -2992,6 +3166,9 @@
           '</td>';
       }).join('') + '</tr>';
     }).join('');
+
+    // 套用 checkbox 轉換（根據 ComboStyle）
+    applyCheckboxCells();
 
     window.SELECTED_ROW = null;
     clearActiveCell();
@@ -3267,6 +3444,7 @@
       const emptyMessage = getEmptyMessage(!!data.openNoRecord, !!data.hasQueryParams);
       updateTableBody(data.items, fields, emptyMessage);
       loadSavedColumnOrder();
+      await loadStandardLookups();
       applyLookupToTable(); // 套用 lookup 顯示
 
       // 更新排序狀態（使用實際傳送的欄位名稱）

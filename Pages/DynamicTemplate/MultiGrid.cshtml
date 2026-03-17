@@ -301,6 +301,7 @@ table th{position:relative;}
 </style>
 
 <script src="~/js/gridToolbarTemplate.js"></script>
+<script src="~/js/erpGridNav.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     const queryBtn = document.getElementById('btnMultiGridQuery');
@@ -569,6 +570,36 @@ document.addEventListener('DOMContentLoaded', () => {
         return changes;
     };
 
+    // 輕量存檔：儲存變更但不重載頁面（供 autoSave 使用）
+    const saveWithoutReload = async (grid) => {
+        if (!grid) return;
+        const changes = collectChanges(grid, false, false);
+        if (changes.length === 0) return;
+        const tableName = grid.dataset.tableName || grid.dataset.dictTable;
+        if (!tableName) return;
+        try {
+            const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ TableName: tableName, Data: changes })
+            });
+            if (resp.ok) {
+                grid.querySelectorAll('tbody tr').forEach(tr => {
+                    tr.querySelectorAll('.cell-edit').forEach(inp => {
+                        inp.defaultValue = inp.type === 'checkbox' ? (inp.checked ? '1' : '0') : (inp.value ?? '');
+                    });
+                    if (tr.dataset.state === 'added') {
+                        delete tr.dataset.state;
+                        tr.classList.remove('table-warning');
+                    }
+                });
+                setDirty(false);
+            }
+        } catch (err) {
+            console.warn('autoSave failed', err);
+        }
+    };
+
     const saveChanges = async (onlyAdded = false, includeDeleted = false) => {
         const grid = getActiveGrid();
         if (!grid) return;
@@ -699,6 +730,23 @@ document.addEventListener('DOMContentLoaded', () => {
     // 初始化狀態面板
     setModePanel(false);
     updateCountPanel();
+
+    // 掛載 GRID 鍵盤導航（兩段式點擊、方向鍵、F7/F8、Enter/Escape）
+    if (typeof window.initErpGridNav === 'function') {
+        document.querySelectorAll('table[id^="grid-"]').forEach(grid => {
+            const tbody = grid.querySelector('tbody');
+            if (!tbody) return;
+            const keyFieldsArr = (grid.dataset.keyFields || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+            window.initErpGridNav(tbody, {
+                keyFields : keyFieldsArr,
+                isEditMode: () => isEdit,
+                addRow    : async () => { const tr = addRow(); return tr ? { ok: true } : { ok: false }; },
+                autoSave  : () => saveWithoutReload(grid),
+                onRowSelect: (tr) => { if (tr) selectRow(tr); },
+                gridLabel : grid.id,
+            });
+        });
+    }
 });
 </script>
 

@@ -1,0 +1,1692 @@
+@page "/FMEdPassPCB"
+@model PcbErpApi.Pages.FME.FMEdPassPCBModel
+@{
+    ViewData["Title"] = "單批過帳";
+    Layout = "~/Pages/Shared/_Layout.cshtml";
+}
+
+<div class="pass-pcb-container">
+    <!-- 頂部工具列 -->
+    <div class="toolbar-section">
+        <div class="btn-group me-2">
+            <button type="button" class="btn btn-success btn-sm" id="btnConfirm" title="確認過帳">
+                <i class="bi bi-check-lg"></i> 確 認
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnCancel" title="取消">
+                <i class="bi bi-x-lg"></i> 取消
+            </button>
+        </div>
+        <div class="btn-group me-2">
+            <button type="button" class="btn btn-outline-primary btn-sm" id="btnImportParam" title="匯入參數明細">
+                <i class="bi bi-download"></i> 匯入參數明細
+            </button>
+        </div>
+        <div class="paper-info ms-auto">
+            <span class="me-3"><strong>單號：</strong><span id="lblPaperNum">@Model.PaperNum</span></span>
+            <span><strong>項次：</strong><span id="lblItem">1</span></span>
+        </div>
+    </div>
+
+    <!-- 頁籤區域 -->
+    <ul class="nav nav-tabs" id="passPcbTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="tab-lot" data-bs-toggle="tab" data-bs-target="#pane-lot" type="button" role="tab">
+                單批過帳
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-param" data-bs-toggle="tab" data-bs-target="#pane-param" type="button" role="tab">
+                製程參數
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="passPcbTabContent">
+        <!-- 單批過帳頁籤 -->
+        <div class="tab-pane fade show active" id="pane-lot" role="tabpanel">
+            <div class="row g-1">
+                <!-- 左側：批號資訊區 -->
+                <div class="col-md-7">
+                    <!-- 批號輸入區 -->
+                    <div class="card mb-1">
+                        <div class="card-body py-2">
+                            <div class="row g-2 align-items-center">
+                                <div class="col-auto">
+                                    <button type="button" class="btn btn-primary btn-sm" id="btnOpenWipQuery" title="開啟 WIP 現帳查詢">
+                                        原始批號
+                                    </button>
+                                </div>
+                                <div class="col-md-4">
+                                    <input type="text" class="form-control form-control-sm" id="txtLotNum" placeholder="輸入批號或點左側按鈕查詢...">
+                                </div>
+                                <div class="col-auto">
+                                    <button type="button" class="btn btn-primary btn-sm" id="btnImport">
+                                        <i class="bi bi-box-arrow-in-down"></i> 匯入
+                                    </button>
+                                </div>
+                                <div class="col-auto">
+                                    <label class="form-label form-label-sm mb-0">排版數</label>
+                                </div>
+                                <div class="col-auto">
+                                    <span class="badge bg-secondary" id="lblPanelLayout">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 批號詳細資訊與數量輸入區 -->
+                    <div class="card mb-1">
+                        <div class="card-body py-2">
+                            <div class="row g-1 align-items-center">
+                                <div class="col-auto" style="width: 70px;">
+                                    <label class="form-label form-label-sm mb-0">料 號</label>
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="text" class="form-control form-control-sm bg-light" id="txtPartNum" readonly>
+                                </div>
+                                <div class="col-auto" style="width: 70px;">
+                                    <label class="form-label form-label-sm mb-0">版 序</label>
+                                </div>
+                                <div class="col-md-2">
+                                    <input type="text" class="form-control form-control-sm bg-light" id="txtRevision" readonly>
+                                </div>
+                                <div class="col-auto">
+                                    <label class="form-label form-label-sm mb-0">允收X報數</label>
+                                </div>
+                                <div class="col-md-2">
+                                    <input type="text" class="form-control form-control-sm bg-warning" id="txtXOutQnty" readonly>
+                                </div>
+                            </div>
+                            <div class="row g-1 mt-0 align-items-center">
+                                <div class="col-auto" style="width: 70px;">
+                                    <label class="form-label form-label-sm mb-0">目前製程</label>
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="text" class="form-control form-control-sm bg-light" id="txtProcDisplay" readonly>
+                                </div>
+                                <div class="col-auto" style="width: 70px;">
+                                    <label class="form-label form-label-sm mb-0">下站製程</label>
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="text" class="form-control form-control-sm bg-light" id="txtAftProcDisplay" readonly>
+                                </div>
+                            </div>
+                            <div class="row g-1 mt-0 align-items-center">
+                                <div class="col-auto" style="width: 70px;">
+                                    <label class="form-label form-label-sm mb-0">階 段</label>
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="text" class="form-control form-control-sm bg-light" id="txtLayerName" readonly>
+                                </div>
+                                <div class="col-auto" style="width: 70px;">
+                                    <label class="form-label form-label-sm mb-0">過帳階段</label>
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="text" class="form-control form-control-sm bg-light" id="txtAftLayerName" readonly>
+                                </div>
+                            </div>
+                            <div class="row g-1 mt-0 align-items-center">
+                                <div class="col-auto" style="width: 70px;">
+                                    <label class="form-label form-label-sm mb-0">型 狀</label>
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="text" class="form-control form-control-sm bg-light" id="txtPopName" readonly>
+                                </div>
+                                <div class="col-auto" style="width: 70px;">
+                                    <label class="form-label form-label-sm mb-0">過帳型狀</label>
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="text" class="form-control form-control-sm bg-light" id="txtAftPopName" readonly>
+                                </div>
+                            </div>
+                            <hr class="my-1">
+                            <div class="row g-1 align-items-center">
+                                <div class="col-auto" style="width: 85px;">
+                                    <label class="form-label form-label-sm mb-0">原始數量</label>
+                                </div>
+                                <div class="col-auto" style="width: 85px;">
+                                    <input type="number" class="form-control form-control-sm bg-light" id="txtQnty" readonly>
+                                </div>
+                                <div class="col-auto" style="width: 85px;">
+                                    <label class="form-label form-label-sm mb-0">良品PCS數</label>
+                                </div>
+                                <div class="col-auto" style="width: 85px;">
+                                    <span class="form-control form-control-sm bg-light" id="lblGoodPCS">0</span>
+                                </div>
+                                <div class="col-auto ms-auto" style="width: 120px;">
+                                    <label class="form-label form-label-sm mb-0">整報沖銷單報數</label>
+                                </div>
+                                <div class="col-auto" style="width: 85px;">
+                                    <input type="number" class="form-control form-control-sm" id="txtScrapStrXOutQnty" value="0">
+                                </div>
+                            </div>
+                            <div class="row g-1 mt-0 align-items-center">
+                                <div class="col-auto" style="width: 100px;">
+                                    <label class="form-label form-label-sm mb-0 text-primary fw-bold">過帳良品數</label>
+                                </div>
+                                <div class="col-auto" style="width: 85px;">
+                                    <input type="number" class="form-control form-control-sm border-primary" id="txtPQnty" value="0">
+                                </div>
+                                <div class="col-auto" style="width: 85px;">
+                                    <label class="form-label form-label-sm mb-0">產品類別</label>
+                                </div>
+                                <div class="col-auto" style="width: 150px;">
+                                    <input type="text" class="form-control form-control-sm bg-warning" id="txtPoType" readonly>
+                                </div>
+                            </div>
+                            <div class="row g-1 mt-0 align-items-center">
+                                <div class="col-auto" style="width: 100px;">
+                                    <label class="form-label form-label-sm mb-0 text-danger fw-bold">整片報廢數</label>
+                                </div>
+                                <div class="col-auto" style="width: 85px;">
+                                    <input type="number" class="form-control form-control-sm border-danger" id="txtSQnty" value="0">
+                                </div>
+                            </div>
+                            <div class="row g-1 mt-1">
+                                <div class="col-12">
+                                    <label class="form-label form-label-sm mb-0">備註</label>
+                                    <textarea class="form-control form-control-sm" id="txtNotes" rows="1"></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右側：多報明細區 -->
+                <div class="col-md-5">
+                    <div class="card h-100">
+                        <div class="card-header py-1 d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-list-check"></i> 多報明細檔(單X報廢)</span>
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-outline-success btn-sm" id="btnAddXOut" title="新增">
+                                    <i class="bi bi-plus"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-danger btn-sm" id="btnDelXOut" title="刪除">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                                <table class="table table-sm table-bordered table-hover mb-0" id="tblXOut">
+                                    <thead class="table-light sticky-top">
+                                        <tr>
+                                            <th style="width: 60px;">幾報</th>
+                                            <th>至本站累積片數</th>
+                                            <th>原始累積片數</th>
+                                            <th style="width: 80px;">整報</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- 動態載入 -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 選擇批號區 -->
+            <div class="card mt-1">
+                <div class="card-header py-1">
+                    <span><i class="bi bi-search"></i> 選擇批號</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 200px; overflow-y: auto;">
+                        <table class="table table-sm table-bordered table-hover mb-0" id="tblSelectLot">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width: 40px;">項次</th>
+                                    <th style="width: 150px;">批號(F5)</th>
+                                    <th style="width: 70px;">階段</th>
+                                    <th style="width: 70px;">原始數量</th>
+                                    <th style="width: 70px;">過帳數</th>
+                                    <th style="width: 60px;">報廢數</th>
+                                    <th style="width: 60px;">留存數</th>
+                                    <th style="width: 100px;">本站新增單報數</th>
+                                    <th style="width: 80px;">DateCode</th>
+                                    <th style="width: 90px;">完成良品PCS數</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- 動態載入 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 單報缺點明細區 -->
+            <div class="card mt-1" id="pnlXOutDefect" style="display: none;">
+                <div class="card-header py-1 d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-list-check"></i> 單報缺點明細</span>
+                    <div class="btn-group btn-group-sm">
+                        <button type="button" class="btn btn-outline-success btn-sm" id="btnAddXOutDefect" title="新增">
+                            <i class="bi bi-plus"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm" id="btnDelXOutDefect" title="刪除">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 200px; overflow-y: auto;">
+                        <table class="table table-sm table-bordered table-hover mb-0" id="tblXOutDefect">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width: 50px;">序號</th>
+                                    <th style="width: 100px;">缺點分類</th>
+                                    <th>缺點分類名稱</th>
+                                    <th style="width: 100px;">缺點代號</th>
+                                    <th>缺點名稱</th>
+                                    <th style="width: 100px;">責任製程</th>
+                                    <th>責任製程名稱</th>
+                                    <th style="width: 80px;">原始數量</th>
+                                    <th style="width: 80px;">單報數量</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- 動態載入 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 製程參數頁籤 -->
+        <div class="tab-pane fade" id="pane-param" role="tabpanel">
+            <div class="card">
+                <div class="card-header py-1 d-flex justify-content-between align-items-center">
+                    <div>
+                        <label class="me-2">單號</label>
+                        <input type="text" class="form-control form-control-sm d-inline-block" style="width: 150px;" id="txtParamPaperNum" readonly>
+                        <label class="ms-3 me-2">項次</label>
+                        <input type="text" class="form-control form-control-sm d-inline-block" style="width: 80px;" id="txtParamItem" readonly>
+                    </div>
+                    <div class="btn-group btn-group-sm">
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="btnParamImport">
+                            <i class="bi bi-download"></i> 匯入
+                        </button>
+                        <button type="button" class="btn btn-outline-warning btn-sm" id="btnParamClear">
+                            <i class="bi bi-eraser"></i> 清除
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                        <table class="table table-sm table-bordered table-hover mb-0" id="tblProcParam">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th>參數名稱</th>
+                                    <th>參數值</th>
+                                    <th>單位</th>
+                                    <th>備註</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- 動態載入 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- WIP 現帳查詢 Modal -->
+<div class="modal fade" id="modalWipQuery" tabindex="-1" aria-labelledby="modalWipQueryLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header py-2 bg-light">
+                <h6 class="modal-title" id="modalWipQueryLabel">
+                    <i class="bi bi-search"></i> WIP 現帳查詢
+                </h6>
+                <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+
+            <div class="modal-body p-0">
+                <div class="p-2">
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-3">
+                            <div class="d-flex align-items-center">
+                                <label class="form-label mb-0 me-2 text-end" style="width: 40px;">批號</label>
+                                <input type="text" class="form-control form-control-sm" id="wipLotNum" placeholder="模糊">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="d-flex align-items-center">
+                                <label class="form-label mb-0 me-2 text-end" style="width: 40px;">階段</label>
+                                <input type="text" class="form-control form-control-sm" id="wipLayerId">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="d-flex align-items-center">
+                                <label class="form-label mb-0 me-2 text-end" style="width: 70px;">DateCode</label>
+                                <input type="text" class="form-control form-control-sm" id="wipDateCode">
+                            </div>
+                        </div>
+                        <div class="col-md-2 text-end">
+                            <button type="button" class="btn btn-primary btn-sm px-3" id="btnWipSearch">
+                                <i class="bi bi-binoculars"></i> 重取
+                            </button>
+                        </div>
+
+                        <div class="col-md-3">
+                            <div class="d-flex align-items-center">
+                                <label class="form-label mb-0 me-2 text-end" style="width: 40px;">品號</label>
+                                <input type="text" class="form-control form-control-sm" id="wipPartNum" placeholder="模糊">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="d-flex align-items-center">
+                                <label class="form-label mb-0 me-2 text-end" style="width: 40px;">版序</label>
+                                <input type="text" class="form-control form-control-sm" id="wipRevision" placeholder="模糊">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="d-flex align-items-center">
+                                <label class="form-label mb-0 me-2 text-end" style="width: 70px;">製程</label>
+                                <input type="text" class="form-control form-control-sm" id="wipProcCode" placeholder="代碼或製程名稱">
+                            </div>
+                        </div>
+                        <div class="col-md-2 text-end">
+                             <button type="button" class="btn btn-outline-secondary btn-sm px-3" id="btnWipClear">
+                                <i class="bi bi-eraser"></i> 清除
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="border-top position-relative" style="height: 400px; overflow: auto;">
+                    <table class="table table-sm table-bordered table-hover mb-0" id="tblWipResult" style="font-size: 0.8rem; table-layout: fixed; width: 3000px;">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th style="width: 120px;">批號</th>
+                                <th style="width: 120px;">料號</th>
+                                <th style="width: 60px;">版序</th>
+                                <th style="width: 80px;">製程</th>
+                                <th style="width: 120px;">製程名稱</th>
+                                <th style="width: 60px;">階段</th>
+                                <th style="width: 120px;">階段名稱</th>
+                                <th style="width: 60px;">型狀</th>
+                                <th style="width: 120px;">型狀名稱</th>
+                                <th style="width: 80px;">庫位</th>
+                                <th style="width: 60px;">狀態</th>
+                                <th style="width: 60px;">暫停</th>
+                                <th style="width: 80px;">途序</th>
+                                <th style="width: 80px;">下站製程</th>
+                                <th style="width: 120px;">下站製程名</th>
+                                <th style="width: 80px;">過帳階段</th>
+                                <th style="width: 120px;">過帳階段名</th>
+                                <th style="width: 80px;">過帳型狀</th>
+                                <th style="width: 120px;">過帳型狀名</th>
+                                <th style="width: 80px;">存量</th>
+                                <th style="width: 80px;">過帳數</th>
+                                <th style="width: 80px;">報廢數</th>
+                                <th style="width: 80px;">留存數</th>
+                                <th style="width: 100px;">DateCode</th>
+                                <th style="width: 80px;">訂單種類</th>
+                                <th style="width: 80px;">曾外包</th>
+                                <th style="width: 100px;">預計入庫</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            </tbody>
+                    </table>
+
+                    <div id="msgWipLoading" class="position-absolute top-50 start-50 translate-middle text-center text-muted" style="display:none;">
+                        <div class="spinner-border text-primary spinner-border-sm mb-2" role="status"></div>
+                        <div>查詢中...</div>
+                    </div>
+                    <div id="msgWipNoData" class="position-absolute top-50 start-50 translate-middle text-center text-muted" style="display:none;">
+                        <i class="bi bi-inbox fs-4 d-block mb-2"></i>
+                        無符合條件的資料
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer py-1">
+                <span class="me-auto text-muted" id="wipResultCount">共 0 筆</span>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary btn-sm" id="btnWipSelect">
+                    <i class="bi bi-check-lg"></i> 選擇
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+
+@section Styles {
+<style>
+    .pass-pcb-container {
+        padding: 5px 15px;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+
+    .toolbar-section {
+        display: flex;
+        align-items: center;
+        padding: 5px 0;
+        border-bottom: 1px solid #dee2e6;
+        margin-bottom: 5px;
+    }
+
+    .paper-info {
+        font-size: 0.9rem;
+    }
+
+    .form-label-sm {
+        font-size: 0.75rem;
+        color: #6c757d;
+    }
+
+    .card-header {
+        background-color: #f8f9fa;
+        font-size: 0.85rem;
+        font-weight: 500;
+    }
+
+    .table th {
+        font-size: 0.75rem;
+        font-weight: 500;
+        white-space: nowrap;
+        padding: 0.2rem 0.4rem;
+        line-height: 1.2;
+    }
+
+    .table td {
+        font-size: 0.75rem;
+        vertical-align: middle;
+        white-space: nowrap;
+        padding: 0.2rem 0.4rem;
+        line-height: 1.2;
+    }
+
+    .table tbody tr:hover {
+        background-color: #e7f1ff;
+    }
+
+    .table tbody tr.selected {
+        background-color: #cfe2ff;
+    }
+
+    .nav-tabs .nav-link {
+        font-size: 0.85rem;
+        padding: 0.3rem 0.8rem;
+    }
+
+    .btn-sm {
+        font-size: 0.8rem;
+        padding: 0.25rem 0.5rem;
+    }
+
+    .form-control-sm {
+        font-size: 0.75rem;
+        padding: 0.2rem 0.4rem;
+        height: calc(1.5em + 0.4rem + 2px);
+    }
+
+    /* 隱藏 number input 的箭頭 */
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    input[type="number"] {
+        -moz-appearance: textfield;
+    }
+
+    #txtLotNum {
+        background-color: #fffacd;
+    }
+
+    .bg-warning {
+        background-color: #fff3cd !important;
+    }
+
+    .sticky-top {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+
+    .badge {
+        font-size: 0.75rem;
+        padding: 0.25em 0.5em;
+    }
+
+    /* 選擇批號表格特別樣式 - 更緊湊 */
+    #tblSelectLot th,
+    #tblSelectLot td {
+        padding: 0.15rem 0.3rem;
+        font-size: 0.7rem;
+        line-height: 1.1;
+    }
+
+    /* 多報明細表格 (tblXOut) - input 與 td 邊框完全重疊 */
+    #tblXOut td {
+        padding: 0 !important;  /* 移除 td 的 padding */
+    }
+
+    #tblXOut input.form-control,
+    #tblXOut select.form-select {
+        border: 1px solid transparent;  /* 預設透明邊框，保持尺寸 */
+        background-color: transparent;
+        padding: 0.2rem 0.4rem;  /* input 自己的 padding */
+        width: 100%;
+        margin: 0;
+        border-radius: 0;  /* 移除圓角，與 td 對齊 */
+    }
+
+    #tblXOut input.form-control:focus,
+    #tblXOut select.form-select:focus {
+        border: 1px solid #86b7fe;  /* focus 時藍色邊框與 td 重疊 */
+        background-color: #fff;
+        outline: 0;
+        box-shadow: none;  /* 移除陰影，避免超出 td 範圍 */
+    }
+
+    #tblXOut input[type="checkbox"] {
+        border: 1px solid #dee2e6;
+        background-color: #fff;
+        width: auto;
+        padding: 0;
+    }
+
+    /* 單報缺點明細表格 (tblXOutDefect) - 與選擇批號相同的緊湊樣式 */
+    table#tblXOutDefect th,
+    table#tblXOutDefect td {
+        padding: 0.15rem 0.3rem !important;
+        font-size: 0.7rem !important;
+        line-height: 1.1 !important;
+        vertical-align: middle !important;
+    }
+
+    table#tblXOutDefect tbody td {
+        padding: 0.15rem 0.3rem !important;
+    }
+
+    table#tblXOutDefect input.form-control,
+    table#tblXOutDefect select.form-select {
+        border: 1px solid #dee2e6;  /* 保持正常邊框 */
+        background-color: #fff;
+        padding: 0.1rem 0.25rem !important;
+        font-size: 0.7rem !important;
+        line-height: 1.1 !important;
+        width: 100%;
+        height: auto !important;
+        min-height: unset !important;
+    }
+
+    #tblXOutDefect input.form-control:focus,
+    #tblXOutDefect select.form-select:focus {
+        border-color: #86b7fe;
+        outline: 0;
+        box-shadow: 0 0 0 0.15rem rgba(13, 110, 253, 0.25);
+    }
+
+    #tblXOutDefect input[type="checkbox"] {
+        border: 1px solid #dee2e6;
+        background-color: #fff;
+        width: auto;
+        padding: 0;
+    }
+
+    #tblSelectLot th {
+        font-weight: 600;
+    }
+
+    /* WIP Modal 樣式 */
+    #modalWipQuery .modal-body {
+        background-color: #fafafa;
+    }
+
+    #tblWipResult tbody tr {
+        cursor: pointer;
+    }
+
+    #tblWipResult tbody tr.selected {
+        background-color: #0d6efd !important;
+        color: white;
+    }
+
+    #tblWipResult tbody tr:hover:not(.selected) {
+        background-color: #e7f1ff;
+    }
+
+    /* 原始批號查詢按鈕樣式 */
+    #btnOpenWipQuery {
+        padding: 0.25rem 0.5rem;
+    }
+
+    #btnOpenWipQuery:hover {
+        background-color: #0d6efd;
+        color: white;
+        border-color: #0d6efd;
+    }
+
+    /* WIP 查詢 placeholder 顏色設定 */
+    /* 你可以調整 opacity 數值來改變深淺: 0.3-0.5 較淺, 0.6-0.8 較深 */
+    #modalWipQuery input::placeholder {
+        color: #000000;        
+        opacity: 0.5;          /* 透明度：數值越小越淺 (範圍 0-1) */
+        /* font-style: italic; */  /* 斜體：讓提示更明顯 */
+    }
+</style>
+}
+
+@section Scripts {
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script>
+    // 全域變數 - 作業型畫面，不預先建立單號
+    let lotInfo = null;  // 匯入的批號資訊
+    let currentUserId = '@Model.UserId';
+
+    $(document).ready(function () {
+        // 初始化
+        initPage();
+        // 事件綁定
+        bindEvents();
+    });
+
+    function initPage() {
+        // 作業型畫面：進入時清空表單，等待使用者輸入批號
+        clearForm();
+        $('#txtLotNum').focus();
+    }
+
+    function bindEvents() {
+        // 匯入按鈕
+        $('#btnImport').click(function () {
+            importLot();
+        });
+
+        // 批號輸入框 Enter
+        $('#txtLotNum').keydown(function (e) {
+            if (e.keyCode === 13) {
+                e.preventDefault();
+                importLot();
+            }
+        });
+
+        // 確認過帳
+        $('#btnConfirm').click(function () {
+            executePass();
+        });
+
+        // 取消 (清除表單)
+        $('#btnCancel').click(function () {
+            if (lotInfo && confirm('確定要取消並清除目前資料嗎？')) {
+                clearForm();
+                $('#txtLotNum').focus();
+            }
+        });
+
+        // 新增多報明細
+        $('#btnAddXOut').click(function () {
+            addXOutRow();
+        });
+
+        // 刪除多報明細
+        $('#btnDelXOut').click(function () {
+            deleteSelectedXOut();
+        });
+
+        // 新增報廢明細
+        $('#btnAddXOutDefect').click(function () {
+            addXOutDefectRow();
+        });
+
+        // 刪除單報缺點明細
+        $('#btnDelXOutDefect').click(function () {
+            deleteSelectedXOutDefect();
+        });
+
+        // 表格行選擇
+        $('#tblXOut tbody, #tblXOutDefect tbody, #tblSelectLot tbody').on('click', 'tr', function () {
+            $(this).siblings().removeClass('selected');
+            $(this).addClass('selected');
+        });
+
+        // 數量變更自動計算 (失去焦點或按 Enter 時觸發)
+        $('#txtPQnty, #txtSQnty').on('blur', function () {
+            calculateQuantities(this);
+        });
+
+        // 支援 Enter 鍵觸發
+        $('#txtPQnty, #txtSQnty').on('keypress', function (e) {
+            if (e.which === 13) {  // Enter 鍵
+                calculateQuantities(this);
+                $(this).blur();  // 觸發失去焦點,讓使用者看到調整結果
+            }
+        });
+
+        // === WIP 現帳查詢相關事件 ===
+        // 點擊「原始批號」按鈕開啟 WIP 查詢
+        $('#btnOpenWipQuery').click(function () {
+            openWipQueryModal();
+        });
+
+        // WIP 查詢按鈕
+        $('#btnWipSearch').click(function () {
+            searchWipLots();
+        });
+
+        // WIP 清除按鈕
+        $('#btnWipClear').click(function () {
+                $('#wipLotNum, #wipLayerId, #wipDateCode, #wipProcCode, #wipPartNum, #wipRevision').val('');
+                $('#tblWipResult tbody').empty();
+                $('#wipResultCount').text('共 0 筆');
+            });
+
+        // WIP 查詢條件 Enter 鍵
+        $('#wipLotNum, #wipLayerId, #wipDateCode, #wipProcCode, #wipPartNum, #wipRevision').keydown(function (e) {
+            if (e.keyCode === 13) {
+                e.preventDefault();
+                searchWipLots();
+            }
+        });
+
+        // WIP 結果表格行選擇
+        $('#tblWipResult tbody').on('click', 'tr', function () {
+            $(this).siblings().removeClass('selected');
+            $(this).addClass('selected');
+        });
+
+        // WIP 結果表格雙擊選擇
+        $('#tblWipResult tbody').on('dblclick', 'tr', function () {
+            selectWipLot();
+        });
+
+        // WIP 選擇按鈕
+        $('#btnWipSelect').click(function () {
+            selectWipLot();
+        });
+    }
+
+    // 匯入批號 - 呼叫 FMEdPassChoiceLotPCB SP 取得批號資訊
+    function importLot() {
+        let lotNum = $('#txtLotNum').val().trim();
+        if (!lotNum) {
+            alert('請輸入批號');
+            $('#txtLotNum').focus();
+            return;
+        }
+
+        // 呼叫 API (對應 Delphi 的 prcImport)
+        $.ajax({
+            url: '/api/FMEdPassPCB/import',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                lotNum: lotNum,
+                inStock: 0,      // 0=一般過帳
+                paperNum: '',    // 空字串，SP會檢查重複
+                userId: currentUserId
+            }),
+            success: function (resp) {
+                if (resp.success && resp.lotInfo) {
+                    lotInfo = resp.lotInfo;
+                    fillLotInfo(resp.lotInfo);
+                    $('#txtPQnty').focus();
+                } else {
+                    alert(resp.message || '無此批號!!');
+                    $('#txtLotNum').focus().select();
+                }
+            },
+            error: function (xhr) {
+                // SP 的 RAISERROR 會回傳在這裡 (如: 批號暫扣、報廢中等)
+                alert(xhr.responseJSON?.message || '查詢失敗');
+                $('#txtLotNum').focus().select();
+            }
+        });
+    }
+
+    // 填入批號資訊到表單
+    // FMEdPassChoiceLotPCB SP 回傳欄位 (來自 #Result_81023A):
+    // - 基本: LotNum, PartNum, Revision, ProcCode, LayerId, POP, Qnty, StockId
+    // - 下站: AftProc, AftLayer, AftPOP
+    // - 數量: PQnty, SQnty, UQnty
+    // - 旗標: ProcType, IsShowPQnty, IsXOut, IsDateCode, IsStorage, AftProcType
+    // - 其他: POType, DateCode, GoodPCS, MatchCount, LLPCS, LPCS, etc.
+    // Controller 會補充 Lookup 欄位: ProcName, AftProcName, LayerName, AftLayerName, POPName, AftPOPName
+    // 填入批號資訊到表單
+    function fillLotInfo(info) {
+        console.log('=== lotInfo (FMEdPassChoiceLotPCB) ===', info);
+        console.log('【重要】ProcCode:', info.ProcCode, ', 長度:', info.ProcCode ? info.ProcCode.length : 0);
+        console.log('【重要】ProcCode (Trim):', info.ProcCode ? info.ProcCode.trim() : '');
+        console.log('【重要】是否為壓合站?', info.ProcCode && info.ProcCode.trim() === 'P1200');
+        
+        // --- 內部輔助函式 (保持不變) ---
+        function getVal(obj, key) {
+            if (!obj) return '';
+            var lowerKey = key.toLowerCase();
+            for (var k in obj) {
+                if (k.toLowerCase() === lowerKey) return obj[k] ?? '';
+            }
+            return '';
+        }
+        function getNumVal(obj, key) {
+            var v = getVal(obj, key);
+            return v === '' ? 0 : parseFloat(v) || 0;
+        }
+        function getIntVal(obj, key) {
+            var v = getVal(obj, key);
+            return v === '' ? 0 : parseInt(v) || 0;
+        }
+
+        // --- 填寫基本欄位 (保持不變) ---
+        $('#txtPartNum').val(getVal(info, 'PartNum'));
+        $('#txtRevision').val(getVal(info, 'Revision'));
+
+        // 排版數 - 有數據才顯示
+        var xQnty = getIntVal(info, 'XQnty');
+        var yQnty = getIntVal(info, 'YQnty');
+        if (xQnty > 0 && yQnty > 0) {
+            $('#lblPanelLayout').text(xQnty + ' x ' + yQnty);
+        } else {
+            $('#lblPanelLayout').text('');
+        }
+
+        // 製程與階段 - 組合顯示代號和名稱
+        var procCode = getVal(info, 'ProcCode');
+        var procName = getVal(info, 'ProcName');
+        if (procCode && procName) {
+            $('#txtProcDisplay').val(procCode + ' | ' + procName);
+        } else {
+            $('#txtProcDisplay').val(procCode || procName);
+        }
+
+        var aftProcCode = getVal(info, 'AftProc');
+        var aftProcName = getVal(info, 'AftProcName');
+        if (aftProcCode && aftProcName) {
+            $('#txtAftProcDisplay').val(aftProcCode + ' | ' + aftProcName);
+        } else {
+            $('#txtAftProcDisplay').val(aftProcCode || aftProcName);
+        }
+        $('#txtLayerName').val(getVal(info, 'LayerName') || getVal(info, 'LayerId'));
+        $('#txtAftLayerName').val(getVal(info, 'AftLayerName') || getVal(info, 'AftLayer'));
+        $('#txtPopName').val(getVal(info, 'POPName') || getVal(info, 'POP'));
+        $('#txtAftPopName').val(getVal(info, 'AftPOPName') || getVal(info, 'AftPOP'));
+
+        // 數量
+        var qnty = getNumVal(info, 'Qnty');
+        $('#txtQnty').val(qnty);
+
+        // 良品PCS數
+        var goodPCS = getIntVal(info, 'GoodPCS') || getIntVal(info, 'LLPCS');
+        $('#lblGoodPCS').text(goodPCS);
+
+        // 過帳良品數 (依 IsShowPQnty 旗標)
+        var isShowPQnty = getIntVal(info, 'IsShowPQnty');
+        var pQnty = (isShowPQnty === 1) ? getNumVal(info, 'PQnty') : 0;
+        $('#txtPQnty').val(pQnty);
+
+        // 報廢數
+        $('#txtSQnty').val(getNumVal(info, 'SQnty'));
+
+        // 產品類別與允收X報數
+        $('#txtPoType').val(getVal(info, 'ProdStyle'));
+        $('#txtXOutQnty').val(getIntVal(info, 'AllowXOutQnty'));
+
+        // === ★ 修正重點 1：填入「多報明細」表格 ===
+        // 檢查製程規範是否有勾選多報 (IsXOut = 1)
+        var isXOut = getIntVal(info, 'IsXOut');
+        var allowXOutQnty = getIntVal(info, 'AllowXOutQnty');
+
+        console.log('=== 多報明細檢查 ===');
+        console.log('IsXOut:', isXOut, ', AllowXOutQnty:', allowXOutQnty);
+        console.log('XOutDetailList:', info.XOutDetailList ? info.XOutDetailList.length + ' 筆' : '無');
+
+        // 只要 IsXOut = 1 就顯示多報明細 (不管 AllowXOutQnty 是否為 0)
+        if (isXOut === 1) {
+            // 製程規範有勾選多報,顯示多報明細
+            if (info.XOutDetailList && info.XOutDetailList.length > 0) {
+                // 優先使用 FMEdLotXOutTmp 表的資料
+                console.log('使用 FMEdLotXOutTmp 的多報明細:', info.XOutDetailList.length, '筆');
+                renderXOutTable(info.XOutDetailList);
+            } else {
+                // 如果 SP 沒有產生資料,則用計算方式
+                var goodPcs = getIntVal(info, 'GoodPCS') || getIntVal(info, 'LLPCS');
+                var pcsPerSpnl = 0;
+
+                if (goodPcs > 0 && pQnty > 0) {
+                    pcsPerSpnl = Math.floor(goodPcs / pQnty);  // 576 ÷ 72 = 8 PCS/SPNL
+                }
+
+                if (pcsPerSpnl > 0) {
+                    var xOutList = [];
+                    for (var i = 1; i <= pcsPerSpnl; i++) {
+                        xOutList.push({
+                            Item: i,
+                            Qnty: 0,
+                            OrgQnty: 0,
+                            IsFullScrap: (i === pcsPerSpnl) ? 1 : 0
+                        });
+                    }
+                    renderXOutTable(xOutList);
+                    console.log('計算產生多報明細:', pcsPerSpnl, '筆 (完成良品PCS:', goodPcs, '÷ 過帳數:', pQnty, ')');
+                } else {
+                    $('#tblXOut tbody').empty();
+                    console.log('無法產生多報明細 (pcsPerSpnl = 0)');
+                }
+            }
+        } else {
+            // 製程規範沒有勾選多報,清空表格
+            $('#tblXOut tbody').empty();
+            console.log('製程規範未勾選多報 (IsXOut:', isXOut, ')');
+        }
+
+        // === ★ 修正重點 2：填入「報廢明細」表格 ===
+        // 自動產生報廢缺點明細 (根據製程規範設定)
+        var sqnty = getNumVal(info, 'SQnty');
+
+        // 如果是報廢批 (IsXOut=1) 且有報廢數,自動產生預設行
+        if (isXOut === 1 && sqnty > 0) {
+            // 自動產生一筆預設的報廢明細
+            var defectList = [{
+                SerialNum: 1,
+                ClassId: '',
+                DefectId: '',
+                DutyProc: '',
+                Qnty: sqnty  // 預設為報廢數
+            }];
+            renderXOutDefectTable(defectList);
+        } else if (info.DefectList && info.DefectList.length > 0) {
+            // 如果後端有回傳,使用後端資料
+            renderXOutDefectTable(info.DefectList);
+        } else {
+            $('#tblXOutDefect tbody').empty();
+        }
+
+        // === ★ 修正重點 3：控制顯示邏輯 ===
+        var aftProcType = getIntVal(info, 'AftProcType');
+        
+        // 原始邏輯：只有 (報廢批) 或 (成品入庫) 才顯示
+        if (isXOut === 1 || aftProcType === 990) {
+             $('#pnlXOutDefect').show();
+        } else {
+             $('#pnlXOutDefect').hide();
+        }
+        
+        // 【測試用】如果你想強制看到報廢區塊，可以把上面那幾行註解掉，改成下面這行：
+        // $('#pnlXOutDefect').show(); 
+
+        // Debug 資訊
+        console.log('Qnty:', qnty, 'PQnty:', pQnty, 'IsShowPQnty:', isShowPQnty);
+        console.log('=== lotInfo (FMEdPassChoiceLotPCB) ===');
+        console.log('欄位:', Object.keys(info));
+
+        // 忽略大小寫取值的輔助函數
+        function getVal(obj, key) {
+            if (!obj) return '';
+            var lowerKey = key.toLowerCase();
+            for (var k in obj) {
+                if (k.toLowerCase() === lowerKey) return obj[k] ?? '';
+            }
+            return '';
+        }
+        function getNumVal(obj, key) {
+            var v = getVal(obj, key);
+            return v === '' ? 0 : parseFloat(v) || 0;
+        }
+        function getIntVal(obj, key) {
+            var v = getVal(obj, key);
+            return v === '' ? 0 : parseInt(v) || 0;
+        }
+
+        // === 料號、版序 ===
+        $('#txtPartNum').val(getVal(info, 'PartNum'));
+        $('#txtRevision').val(getVal(info, 'Revision'));
+
+        // === 製程 (Controller 已補 Lookup) ===
+        $('#txtProcName').val(getVal(info, 'ProcName') || getVal(info, 'ProcCode'));
+        $('#txtAftProcName').val(getVal(info, 'AftProcName') || getVal(info, 'AftProc'));
+
+        // === 階段 (Controller 已補 Lookup) ===
+        $('#txtLayerName').val(getVal(info, 'LayerName') || getVal(info, 'LayerId'));
+        $('#txtAftLayerName').val(getVal(info, 'AftLayerName') || getVal(info, 'AftLayer'));
+
+        // === 型狀 (Controller 已補 Lookup) ===
+        $('#txtPopName').val(getVal(info, 'POPName') || getVal(info, 'POP'));
+        $('#txtAftPopName').val(getVal(info, 'AftPOPName') || getVal(info, 'AftPOP'));
+
+        // === 原始數量 (SP 回傳 Qnty) ===
+        var qnty = getNumVal(info, 'Qnty');
+        $('#txtQnty').val(qnty);
+
+        // === 過帳良品數 (依 IsShowPQnty 旗標決定) ===
+        // Delphi 邏輯 (PassPCB.pas:2102-2105):
+        //   if IsShowPQnty = 1 then PQnty := SP.PQnty else PQnty := 0
+        var isShowPQnty = getIntVal(info, 'IsShowPQnty');
+        var pQnty = (isShowPQnty === 1) ? getNumVal(info, 'PQnty') : 0;
+        $('#txtPQnty').val(pQnty);
+
+        // === 報廢數 (SP 直接回傳 SQnty) ===
+        $('#txtSQnty').val(getNumVal(info, 'SQnty'));
+
+        // === 產品類別 (從 MINdMatInfo.ProdStyle) ===
+        // 注意: ProdStyle 是產品類別，POType 是訂單種類 (正常/樣品/試產)
+        var prodStyle = getVal(info, 'ProdStyle');
+        $('#txtPoType').val(prodStyle);
+
+        // === 允收X報數 (從 MINdMatInfo.AllowXOutQnty) ===
+        var allowXOutQnty = getIntVal(info, 'AllowXOutQnty');
+        $('#txtXOutQnty').val(allowXOutQnty);
+
+        // === 報廢明細區塊顯示控制 ===
+        // 依 Delphi 邏輯: IsXOut=1 或 AftProcType=990(成品) 時顯示
+        var isXOut = getIntVal(info, 'IsXOut');
+        var aftProcType = getIntVal(info, 'AftProcType');
+        if (isXOut === 1 || aftProcType === 990) {
+            $('#pnlXOutDefect').show();
+        } else {
+            $('#pnlXOutDefect').hide();
+        }
+
+        // === 單報缺點明細區塊顯示控制 ===
+        // 當製程規範有設定 XOutNeedDefect=1 時顯示
+        var xOutNeedDefect = getIntVal(info, 'XOutNeedDefect');
+        if (xOutNeedDefect === 1) {
+            $('#pnlXOutDefect').show();
+            console.log('顯示單報缺點明細 (XOutNeedDefect=1)');
+        } else {
+            $('#pnlXOutDefect').hide();
+            console.log('隱藏單報缺點明細 (XOutNeedDefect=' + xOutNeedDefect + ')');
+        }
+
+        // === ★ 新增：填入「選擇批號」表格 ===
+        renderSelectLotTable(info);
+
+        // Debug 資訊
+        console.log('Qnty:', qnty, 'PQnty:', pQnty, 'IsShowPQnty:', isShowPQnty);
+        console.log('GoodPCS:', getIntVal(info, 'GoodPCS'));
+    }
+
+    // 填入「選擇批號」表格
+    function renderSelectLotTable(info) {
+        var tbody = $('#tblSelectLot tbody');
+        tbody.empty();
+
+        // 內部輔助函式
+        function getVal(obj, key) {
+            if (!obj) return '';
+            var lowerKey = key.toLowerCase();
+            for (var k in obj) {
+                if (k.toLowerCase() === lowerKey) return obj[k] ?? '';
+            }
+            return '';
+        }
+        function getNumVal(obj, key) {
+            var v = getVal(obj, key);
+            return v === '' ? 0 : parseFloat(v) || 0;
+        }
+
+        // 建立表格列的輔助函數 (必須在使用前定義)
+        function createSelectLotRow(data, serialNum) {
+            var lotNum = getVal(data, 'LotNum');
+            var layerName = getVal(data, 'LayerName') || getVal(data, 'LayerId');
+            var qnty = getNumVal(data, 'Qnty');
+            var pQnty = getNumVal(data, 'PQnty');
+            var sQnty = getNumVal(data, 'SQnty');
+            var uQnty = getNumVal(data, 'UQnty');
+            var xOutQnty = getNumVal(data, 'XOutQnty');
+            var dateCode = getVal(data, 'DateCode');
+            var goodPCS = getNumVal(data, 'GoodPCS');
+
+            var row = $('<tr></tr>');
+            row.append('<td class="text-center">' + serialNum + '</td>');  // 項次
+            row.append('<td>' + (lotNum || '') + '</td>');  // 批號(F5)
+            row.append('<td>' + (layerName || '') + '</td>');  // 階段
+            row.append('<td class="text-end">' + qnty.toFixed(0) + '</td>');  // 原始數量
+            row.append('<td class="text-end">' + pQnty.toFixed(0) + '</td>');  // 過帳數
+            row.append('<td class="text-end">' + sQnty.toFixed(0) + '</td>');  // 報廢數
+            row.append('<td class="text-end">' + uQnty.toFixed(0) + '</td>');  // 留存數
+            row.append('<td class="text-end">' + xOutQnty.toFixed(0) + '</td>');  // 本站新增單報數
+            row.append('<td>' + (dateCode || '') + '</td>');  // DateCode
+            row.append('<td class="text-end">' + goodPCS.toFixed(0) + '</td>');  // 完成良品PCS數
+            return row;
+        }
+
+        console.log('renderSelectLotTable 被呼叫', info);
+        console.log('AllLayers:', info.AllLayers);
+        console.log('AllLayers 長度:', info.AllLayers ? info.AllLayers.length : 0);
+
+        // 檢查是否為壓合站且有多層別資料
+        if (info.AllLayers && info.AllLayers.length > 0) {
+            console.log('壓合站模式：顯示 ' + info.AllLayers.length + ' 個層別');
+            // 壓合站：顯示所有層別
+            info.AllLayers.forEach(function(layer, index) {
+                console.log('  處理層別 ' + (index + 1) + ':', layer);
+                var row = createSelectLotRow(layer, index + 1);
+                tbody.append(row);
+            });
+            return;
+        }
+
+        // 一般情況：顯示單一批號
+        console.log('一般模式：顯示單一批號');
+        var row = createSelectLotRow(info, 1);
+        tbody.append(row);
+    }
+
+    // 執行過帳 - 建立單號並呼叫 FMEdPassResult SP
+    function executePass() {
+        // 驗證
+        if (!lotInfo) {
+            alert('請先匯入批號');
+            $('#txtLotNum').focus();
+            return;
+        }
+
+        var lotNum = $('#txtLotNum').val().trim();
+        if (!lotNum) {
+            alert('請先匯入批號');
+            $('#txtLotNum').focus();
+            return;
+        }
+
+        // 忽略大小寫取值
+        function getVal(key) {
+            if (!lotInfo) return '';
+            var lowerKey = key.toLowerCase();
+            for (var k in lotInfo) {
+                if (k.toLowerCase() === lowerKey) return lotInfo[k] ?? '';
+            }
+            return '';
+        }
+        function getNumVal(key) {
+            var v = getVal(key);
+            return v === '' ? 0 : parseFloat(v) || 0;
+        }
+        function getIntVal(key) {
+            var v = getVal(key);
+            return v === '' ? 0 : parseInt(v) || 0;
+        }
+
+        // 收集畫面資料 (對應 Controller 的 ExecutePassRequest)
+        var passData = {
+            // 基本資訊
+            lotNum: lotNum,
+            userId: currentUserId,
+
+            // 從 lotInfo 帶入 (SP 回傳的欄位)
+            partNum: getVal('PartNum'),
+            revision: getVal('Revision'),
+            procCode: getVal('ProcCode'),
+            layerId: getVal('LayerId'),
+            pop: getIntVal('POP'),
+            stockId: getVal('StockId'),
+            aftProc: getVal('AftProc'),
+            aftLayer: getVal('AftLayer'),
+            aftPOP: getIntVal('AftPOP'),
+
+            // 數量 (從畫面取得，可能被使用者修改)
+            qnty: getNumVal('Qnty'),
+            pQnty: parseFloat($('#txtPQnty').val()) || 0,
+            sQnty: parseFloat($('#txtSQnty').val()) || 0,
+            uQnty: 0,
+            xOutQnty: parseFloat($('#txtScrapStrXOutQnty').val()) || 0,
+
+            // 其他
+            dateCode: getVal('DateCode'),
+            notes: $('#txtNotes').val(),
+
+            // 明細資料
+            xOutList: collectXOutData(),
+            defectList: collectDefectData()
+        };
+
+        // Debug: 檢查傳送的 userId
+        console.log('過帳資料:', passData);
+        console.log('使用者ID:', currentUserId);
+
+        // 呼叫過帳 API
+        $.ajax({
+            url: '/api/FMEdPassPCB/execute',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(passData),
+            success: function (resp) {
+                if (resp.success) {
+                    var msg = resp.message || '過帳完成';
+                    if (resp.paperNum) {
+                        msg += '\n單號: ' + resp.paperNum;
+                    }
+                    alert(msg);
+                    // 清空表單，準備下一筆
+                    clearForm();
+                    $('#txtLotNum').focus();
+                } else {
+                    alert(resp.message || '過帳失敗');
+                }
+            },
+            error: function (xhr) {
+                alert('過帳失敗: ' + (xhr.responseJSON?.message || xhr.responseText));
+            }
+        });
+    }
+
+    // 收集多報明細資料
+    function collectXOutData() {
+        var list = [];
+        $('#tblXOut tbody tr').each(function (idx) {
+            var qnty = parseFloat($(this).find('input[type="number"]').val()) || 0;
+            var isFullScrap = $(this).find('input[type="checkbox"]').is(':checked') ? 1 : 0;
+            if (qnty > 0) {
+                list.push({ item: idx + 1, qnty: qnty, isFullScrap: isFullScrap });
+            }
+        });
+        return list;
+    }
+
+    // 收集報廢明細資料
+    function collectDefectData() {
+        var list = [];
+        $('#tblXOutDefect tbody tr').each(function (idx) {
+            var inputs = $(this).find('input');
+            var classId = inputs.eq(0).val();
+            var defectId = inputs.eq(1).val();
+            var dutyProc = inputs.eq(2).val();
+            var qnty = parseFloat(inputs.eq(3).val()) || 0;
+            if (qnty > 0) {
+                list.push({ serialNum: idx + 1, classId: classId, defectId: defectId, dutyProc: dutyProc, qnty: qnty });
+            }
+        });
+        return list;
+    }
+
+    // 渲染多報明細表格
+    function renderXOutTable(list) {
+        var tbody = $('#tblXOut tbody');
+        tbody.empty();
+        if (list && list.length > 0) {
+            list.forEach(function (item, idx) {
+                var tr = $('<tr>');
+                tr.append($('<td>').text(item.Item || item.item || idx + 1));
+                tr.append($('<td>').append($('<input type="number" class="form-control form-control-sm">').val(item.Qnty || item.qnty || 0)));
+                tr.append($('<td>').text(item.OrgQnty || item.orgQnty || 0));
+
+                // 根據資料中的 IsFullScrap 欄位決定 (各基板允收X報數不同)
+                tr.append($('<td>').append($('<input type="checkbox" class="form-check-input">').prop('checked', (item.IsFullScrap || item.isFullScrap) === 1)));
+
+                tbody.append(tr);
+            });
+        }
+    }
+
+    // 渲染單報缺點明細表格
+    function renderXOutDefectTable(list) {
+        var tbody = $('#tblXOutDefect tbody');
+        tbody.empty();
+        if (list && list.length > 0) {
+            list.forEach(function (item, idx) {
+                var tr = $('<tr>');
+
+                // 序號
+                tr.append($('<td>').text(item.SerialNum || item.serialNum || idx + 1));
+
+                // 缺點分類 (輸入框)
+                tr.append($('<td>').append($('<input type="text" class="form-control form-control-sm">').val(item.ClassId || item.classId || '')));
+
+                // 缺點分類名稱 (只讀)
+                tr.append($('<td>').text(item.ClassName || item.className || ''));
+
+                // 缺點代號 (輸入框)
+                tr.append($('<td>').append($('<input type="text" class="form-control form-control-sm">').val(item.DefectId || item.defectId || '')));
+
+                // 缺點名稱 (只讀)
+                tr.append($('<td>').text(item.DefectName || item.defectName || ''));
+
+                // 責任製程 (輸入框)
+                tr.append($('<td>').append($('<input type="text" class="form-control form-control-sm">').val(item.DutyProc || item.dutyProc || '')));
+
+                // 責任製程名稱 (只讀)
+                tr.append($('<td>').text(item.DutyProcName || item.dutyProcName || ''));
+
+                // 原始數量 (只讀)
+                tr.append($('<td>').text(item.QntyOri || item.qntyOri || 0));
+
+                // 單報數量 (輸入框)
+                tr.append($('<td>').append($('<input type="number" class="form-control form-control-sm">').val(item.Qnty || item.qnty || 0)));
+
+                tbody.append(tr);
+            });
+        }
+    }
+
+    // 新增多報明細行
+    function addXOutRow() {
+        var tbody = $('#tblXOut tbody');
+        var newItem = tbody.find('tr').length + 1;
+        var tr = $('<tr class="selected">');
+        tr.append($('<td>').text(newItem));
+        tr.append($('<td>').append($('<input type="number" class="form-control form-control-sm">').val(0)));
+        tr.append($('<td>').text(0));
+        tr.append($('<td>').append($('<input type="checkbox" class="form-check-input">')));
+        tbody.find('tr').removeClass('selected');
+        tbody.append(tr);
+    }
+
+    // 刪除選中的多報明細
+    function deleteSelectedXOut() {
+        $('#tblXOut tbody tr.selected').remove();
+        $('#tblXOut tbody tr').each(function (idx) {
+            $(this).find('td:first').text(idx + 1);
+        });
+    }
+
+    // 新增單報缺點明細行
+    function addXOutDefectRow() {
+        var tbody = $('#tblXOutDefect tbody');
+        var newSerial = tbody.find('tr').length + 1;
+        var tr = $('<tr class="selected">');
+        tr.append($('<td>').text(newSerial)); // 序號
+        tr.append($('<td>').append($('<input type="text" class="form-control form-control-sm">'))); // 缺點分類
+        tr.append($('<td>').text('')); // 缺點分類名稱
+        tr.append($('<td>').append($('<input type="text" class="form-control form-control-sm">'))); // 缺點代號
+        tr.append($('<td>').text('')); // 缺點名稱
+        tr.append($('<td>').append($('<input type="text" class="form-control form-control-sm">'))); // 責任製程
+        tr.append($('<td>').text('')); // 責任製程名稱
+        tr.append($('<td>').text(0)); // 原始數量
+        tr.append($('<td>').append($('<input type="number" class="form-control form-control-sm">').val(0))); // 單報數量
+        tbody.find('tr').removeClass('selected');
+        tbody.append(tr);
+    }
+
+    // 刪除選中的單報缺點明細
+    function deleteSelectedXOutDefect() {
+        $('#tblXOutDefect tbody tr.selected').remove();
+        $('#tblXOutDefect tbody tr').each(function (idx) {
+            $(this).find('td:first').text(idx + 1);
+        });
+    }
+
+    // 清除表單
+    function clearForm() {
+        $('#txtLotNum').val('');
+        $('#txtPartNum').val('');
+        $('#txtRevision').val('');
+        $('#txtProcDisplay').val('');  // 目前製程
+        $('#txtAftProcDisplay').val('');  // 下站製程
+        $('#txtLayerName').val('');
+        $('#txtAftLayerName').val('');
+        $('#txtPopName').val('');
+        $('#txtAftPopName').val('');
+        $('#txtQnty').val(0);
+        $('#txtPQnty').val(0);
+        $('#txtSQnty').val(0);
+        $('#txtXOutQnty').val(0);
+        $('#txtScrapStrXOutQnty').val(0);
+        $('#txtPoType').val('');
+        $('#txtNotes').val('');
+        $('#lblPanelLayout').text('');  // 排版數
+        $('#lblGoodPCS').text('0');  // 良品PCS數
+        $('#tblXOut tbody').empty();
+        $('#tblXOutDefect tbody').empty();
+        $('#tblSelectLot tbody').empty();
+        $('#lblPaperNum').text('(過帳後產生)');
+        $('#lblItem').text('1');
+        $('#pnlXOutDefect').hide();  // 隱藏單報缺點明細區
+        lotInfo = null;
+    }
+
+    // 互動式數量自動調整
+    // 修改過帳良品數 → 自動調整報廢數
+    // 修改報廢數 → 自動調整過帳良品數
+    function calculateQuantities(triggerElement) {
+        var qnty = parseFloat($('#txtQnty').val()) || 0;
+        var pQnty = parseFloat($('#txtPQnty').val()) || 0;
+        var sQnty = parseFloat($('#txtSQnty').val()) || 0;
+
+        // 判斷是哪個欄位觸發變更
+        var isPQntyChanged = $(triggerElement).is('#txtPQnty');
+        var isSQntyChanged = $(triggerElement).is('#txtSQnty');
+
+        // === 互動式自動調整邏輯 ===
+
+        if (isPQntyChanged) {
+            // 使用者修改了過帳良品數
+
+            // 如果過帳良品數超過原始數量,自動調整為原始數量
+            if (pQnty > qnty) {
+                pQnty = qnty;
+                $('#txtPQnty').val(pQnty);
+            }
+
+            // 自動調整報廢數 = 原始數量 - 過帳良品數
+            sQnty = qnty - pQnty;
+            $('#txtSQnty').val(sQnty);
+
+        } else if (isSQntyChanged) {
+            // 使用者修改了報廢數
+
+            // 如果報廢數超過原始數量,自動調整為原始數量
+            if (sQnty > qnty) {
+                sQnty = qnty;
+                $('#txtSQnty').val(sQnty);
+            }
+
+            // 自動調整過帳良品數 = 原始數量 - 報廢數
+            pQnty = qnty - sQnty;
+            $('#txtPQnty').val(pQnty);
+        }
+
+        // === 同步更新「選擇批號」表格 ===
+        updateSelectLotTable(pQnty, sQnty);
+
+        return true;
+    }
+
+    // 更新「選擇批號」表格中的過帳數和報廢數
+    function updateSelectLotTable(pQnty, sQnty) {
+        var $row = $('#tblSelectLot tbody tr:first');
+        if ($row.length > 0) {
+            // 更新過帳數 (第5欄，索引4)
+            $row.find('td:eq(4)').text(pQnty.toFixed(0));
+            // 更新報廢數 (第6欄，索引5)
+            $row.find('td:eq(5)').text(sQnty.toFixed(0));
+
+            // 計算並更新留存數 = 原始數量 - 過帳數 - 報廢數
+            var qnty = parseFloat($('#txtQnty').val()) || 0;
+            var uQnty = qnty - pQnty - sQnty;
+            $row.find('td:eq(6)').text(uQnty.toFixed(0));
+        }
+    }
+
+    // ========== WIP 現帳查詢功能 ==========
+
+    // 開啟 WIP 查詢 Modal
+    function openWipQueryModal() {
+        // 清空查詢條件和結果
+        $('#wipLotNum, #wipLayerId, #wipDateCode, #wipProcCode, #wipPartNum, #wipRevision').val('');
+        $('#tblWipResult tbody').empty();
+        $('#wipResultCount').text('共 0 筆');
+
+        // 隱藏所有提示訊息
+        $('#msgWipLoading').hide();
+        $('#msgWipNoData').hide();
+
+        // 開啟 Modal
+        var modal = new bootstrap.Modal(document.getElementById('modalWipQuery'));
+        modal.show();
+
+        // 聚焦到批號輸入框
+        setTimeout(function () {
+            $('#wipLotNum').focus();
+        }, 300);
+    }
+
+    // 查詢 WIP 現帳
+    function searchWipLots() {
+        var queryData = {
+            lotNum: $('#wipLotNum').val().trim(),
+            layerId: $('#wipLayerId').val().trim(),
+            dateCode: $('#wipDateCode').val().trim(),
+            procCode: $('#wipProcCode').val().trim(),
+            partNum: $('#wipPartNum').val().trim(),
+            revision: $('#wipRevision').val().trim(),
+            inStock: 0
+        };
+
+        // 清空表格內容
+        $('#tblWipResult tbody').empty();
+
+        // 將卷軸重置到最左邊
+        $('.border-top.position-relative').scrollLeft(0);
+
+        // 顯示載入中
+        $('#msgWipLoading').show();
+        $('#msgWipNoData').hide();
+
+        $.ajax({
+            url: '/api/FMEdPassPCB/wip-query',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(queryData),
+            success: function (resp) {
+                // 資料回來了，把 Loading 藏起來
+                $('#msgWipLoading').hide();
+
+                if (resp.success && resp.data && resp.data.length > 0) {
+                    renderWipResult(resp.data);
+                    $('#wipResultCount').text('共 ' + resp.data.length + ' 筆');
+                } else {
+                    // 顯示「無資料」區塊
+                    $('#msgWipNoData').show();
+                    $('#wipResultCount').text('共 0 筆');
+                }
+            },
+            error: function (xhr) {
+                // 發生錯誤，也要把 Loading 藏起來
+                $('#msgWipLoading').hide();
+                $('#msgWipNoData').html('<div><i class="bi bi-x-circle fs-4 d-block mb-2"></i>查詢失敗</div>').show();
+            }
+        });
+    }
+
+    // 渲染 WIP 查詢結果
+    // SP FMEdPassChoice4LotPass 回傳欄位:
+    // 來自 FMEdProc: LotNum, PartNum, Revision, ProcCode, LayerId, POP, Qnty, StockId, LotStatus, Halted, RouteSerial...
+    // SP 計算: AftProc, AftLayer, AftPOP, PQnty, SQnty, UQnty, ProcType, AftProcType, IsXOut, IsDateCode, POType, DateCode, iSCed, ExpStkTime...
+    // Controller 補充: ProcName, LayerName, POPName, AftProcName, AftLayerName, AftPOPName, ProdStyle
+    function renderWipResult(data) {
+        var tbody = $('#tblWipResult tbody');
+        tbody.empty();
+
+        // 確保隱藏「無資料」提示
+        $('#msgWipNoData').hide();
+
+        if (!data || data.length === 0) {
+            tbody.html('<tr><td colspan="27" class="text-center text-muted py-3">無符合條件的資料</td></tr>');
+            return;
+        }
+
+        // 輔助函數
+        function getVal(obj, key) {
+            if (!obj) return '';
+            var lowerKey = key.toLowerCase();
+            for (var k in obj) {
+                if (k.toLowerCase() === lowerKey) return obj[k] ?? '';
+            }
+            return '';
+        }
+        function formatNum(val) {
+            if (val === '' || val === null || val === undefined) return '';
+            var num = parseFloat(val);
+            return isNaN(num) ? '' : num.toLocaleString();
+        }
+        function formatDate(val) {
+            if (!val) return '';
+            try {
+                var d = new Date(val);
+                if (isNaN(d.getTime())) return val;
+                return d.toLocaleDateString('zh-TW');
+            } catch { return val; }
+        }
+
+        data.forEach(function (item) {
+            // 狀態轉換: 0=正常, 1=重工, 2=報廢
+            var lotStatus = parseInt(getVal(item, 'LotStatus')) || 0;
+            var statusText = lotStatus === 0 ? '正常' : (lotStatus === 1 ? '重工' : (lotStatus === 2 ? '報廢' : lotStatus));
+
+            // 訂單種類: 優先使用後端回傳的 POTypeName，否則顯示 POType 數字
+            var poTypeName = getVal(item, 'POTypeName');
+            var poTypeText = poTypeName || getVal(item, 'POType') || '';
+
+            var tr = $('<tr>').data('lotInfo', item);
+            tr.append($('<td>').text(getVal(item, 'LotNum')));                                    // 批號
+            tr.append($('<td>').text(getVal(item, 'PartNum')));                                   // 料號
+            tr.append($('<td>').text(getVal(item, 'Revision')));                                  // 版序
+            tr.append($('<td>').text(getVal(item, 'ProcCode')));                                  // 製程
+            tr.append($('<td>').text(getVal(item, 'ProcName')));                                  // 製程名稱
+            tr.append($('<td>').text(getVal(item, 'LayerId')));                                   // 階段
+            tr.append($('<td>').text(getVal(item, 'LayerName')));                                 // 階段名稱
+            tr.append($('<td>').text(getVal(item, 'POP')));                                       // 型狀
+            tr.append($('<td>').text(getVal(item, 'POPName')));                                   // 型狀名稱
+            tr.append($('<td>').text(getVal(item, 'StockId')));                                   // 庫位
+            tr.append($('<td>').text(statusText));                                               // 狀態
+            tr.append($('<td>').text(getVal(item, 'Halted') == 1 ? '是' : ''));                  // 暫停
+            tr.append($('<td>').text(getVal(item, 'RouteSerial')));                              // 途序
+            tr.append($('<td>').text(getVal(item, 'AftProc')));                                   // 下站製程
+            tr.append($('<td>').text(getVal(item, 'AftProcName')));                               // 下站製程名
+            tr.append($('<td>').text(getVal(item, 'AftLayer')));                                  // 過帳階段
+            tr.append($('<td>').text(getVal(item, 'AftLayerName')));                              // 過帳階段名
+            tr.append($('<td>').text(getVal(item, 'AftPOP')));                                    // 過帳型狀
+            tr.append($('<td>').text(getVal(item, 'AftPOPName')));                                // 過帳型狀名
+            tr.append($('<td>').text(formatNum(getVal(item, 'Qnty'))));                          // 存量
+            tr.append($('<td>').text(formatNum(getVal(item, 'PQnty'))));                         // 過帳數
+            tr.append($('<td>').text(formatNum(getVal(item, 'SQnty'))));                         // 報廢數
+            tr.append($('<td>').text(formatNum(getVal(item, 'UQnty'))));                         // 留存數
+            tr.append($('<td>').text(getVal(item, 'DateCode')));                                  // DateCode
+            tr.append($('<td>').text(poTypeText));                                               // 訂單種類
+            tr.append($('<td>').text(getVal(item, 'iSCed') == 1 ? '是' : ''));                   // 曾外包
+            tr.append($('<td>').text(formatDate(getVal(item, 'ExpStkTime'))));                   // 預計入庫
+            tbody.append(tr);
+        });
+    }
+
+    // 選擇 WIP 批號
+    function selectWipLot() {
+        var selectedRow = $('#tblWipResult tbody tr.selected');
+        if (selectedRow.length === 0) {
+            alert('請先選擇一筆批號');
+            return;
+        }
+
+        var selectedLotInfo = selectedRow.data('lotInfo');
+        if (!selectedLotInfo) {
+            alert('無法取得批號資料');
+            return;
+        }
+
+        // 取得批號
+        var lotNum = '';
+        for (var k in selectedLotInfo) {
+            if (k.toLowerCase() === 'lotnum') {
+                lotNum = selectedLotInfo[k];
+                break;
+            }
+        }
+
+        if (!lotNum) {
+            alert('無法取得批號');
+            return;
+        }
+
+        // 關閉 Modal
+        bootstrap.Modal.getInstance(document.getElementById('modalWipQuery')).hide();
+
+        // 將批號填入並執行匯入
+        $('#txtLotNum').val(lotNum);
+        importLot();
+    }
+</script>
+}

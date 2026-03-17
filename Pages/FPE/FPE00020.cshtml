@@ -1,0 +1,466 @@
+@page "/FPE/FPE00020"
+@using PcbErpApi.Models
+@model PcbErpApi.Pages.FPE.FPE00020Model
+@{
+    Layout = "_InquiryTemplate";
+    ViewData["Title"] = Model.PageTitle;
+    ViewData["ShowInqHeader"] = false;
+    ViewData["ShowInqRail"] = true;
+    ViewData["InqRailTitle"] = "查詢";
+    ViewData["InqRailWidth"] = "120px";
+}
+
+@section InqRail {
+    <button type="submit" form="inqForm" class="inq-rail-btn">查詢</button>
+    <button type="button" class="inq-rail-btn" id="btnSaveHeight">儲存高度設定</button>
+    <div class="inq-rail-status">
+        <div>資料筆數：<span id="inqTotalCount">0</span></div>
+        <div>目前位置：<span id="inqCurrentPos">0</span></div>
+    </div>
+}
+
+@section InqQuery {
+    @{
+        var qPartNum  = Request.Query["PartNum"].ToString();
+        var qRevision = Request.Query["Revision"].ToString();
+        var qDateCode = Request.Query["DateCode"].ToString();
+        var qFPaperDate = Request.Query["FPaperDate"].ToString();
+        var qEPaperDate = Request.Query["EPaperDate"].ToString();
+        var qTab      = Request.Query["Tab"].ToString();
+        if (string.IsNullOrEmpty(qTab)) qTab = "0";
+    }
+    <form id="inqForm" method="get" class="inq-form">
+        @Html.AntiForgeryToken()
+        <div class="inq-row">
+            <label class="inq-label">品號</label>
+            <input type="text" name="PartNum" class="form-control form-control-sm inq-input inq-input-wide"
+                   value="@qPartNum" autocomplete="off" />
+            <label class="inq-label">版序</label>
+            <input type="text" name="Revision" class="form-control form-control-sm inq-input inq-input-short"
+                   value="@qRevision" autocomplete="off" />
+            <label class="inq-label">DateCode</label>
+            <input type="text" name="DateCode" class="form-control form-control-sm inq-input inq-input-short"
+                   value="@qDateCode" autocomplete="off" />
+        </div>
+        <div class="inq-row" id="rowPaperDate">
+            <label class="inq-label">過帳日期</label>
+            <input type="date" name="FPaperDate" class="form-control form-control-sm inq-input"
+                   value="@qFPaperDate" />
+            <span class="inq-label" style="min-width:20px;text-align:center;">~</span>
+            <input type="date" name="EPaperDate" class="form-control form-control-sm inq-input"
+                   value="@qEPaperDate" />
+        </div>
+        <input type="hidden" name="Tab" id="hidTab" value="@qTab" />
+        <input type="hidden" name="submitted" value="@(Request.Query.ContainsKey("submitted") ? "1" : "")" />
+    </form>
+}
+
+@{
+    var activeTab = Model.ActiveTab;
+    var tabs = Model.Tabs;
+}
+
+<div class="inq-tabs-wrap">
+    <ul class="inq-tabs" id="inqTabs">
+        @for (int i = 0; i < tabs.Count; i++)
+        {
+            <li class="inq-tab @(i == activeTab ? "active" : "")"
+                data-tab="@i">@tabs[i].Label</li>
+        }
+    </ul>
+</div>
+
+<div class="inq-table-wrap">
+    <table class="table table-sm table-hover align-middle inq-table">
+        <thead><tr></tr></thead>
+        <tbody>
+            <tr><td class="text-center text-muted py-2">沒有資料</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<style>
+    .inq-rail-status {
+        margin-top: 4px;
+        padding: 6px 6px;
+        border: 1px solid #d8dee8;
+        border-radius: 8px;
+        background: #f8fafc;
+        color: #1f3a8a;
+        font-size: 0.8rem;
+        line-height: 1.4;
+    }
+    .inq-rail-btn {
+        padding: 4px 6px;
+        font-size: 0.82rem;
+        border-radius: 8px;
+    }
+    .inq-form {
+        display: grid;
+        gap: 6px;
+    }
+    .inq-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+    .inq-label {
+        min-width: 68px;
+        text-align: right;
+        color: #1d3b6b;
+        font-size: 0.82rem;
+    }
+    .inq-input {
+        width: 160px;
+        font-size: 0.82rem;
+        height: 26px;
+        padding: 2px 6px;
+    }
+    .inq-input-wide { width: 240px; }
+    .inq-input-short { width: 80px; }
+    .inq-tabs-wrap {
+        margin-bottom: 0;
+    }
+    .inq-tabs {
+        display: flex;
+        list-style: none;
+        margin: 0;
+        padding: 0 0 0 4px;
+        gap: 2px;
+        border-bottom: 2px solid #c9d2e3;
+    }
+    .inq-tab {
+        padding: 5px 14px;
+        font-size: 0.82rem;
+        color: #4b5563;
+        cursor: pointer;
+        border: 1px solid transparent;
+        border-radius: 6px 6px 0 0;
+        background: #f3f7ff;
+        user-select: none;
+    }
+    .inq-tab:hover { background: #e8eeff; color: #1d3b6b; }
+    .inq-tab.active {
+        background: #fff;
+        color: #1d3b6b;
+        font-weight: 600;
+        border-color: #c9d2e3;
+        border-bottom-color: #fff;
+        margin-bottom: -2px;
+    }
+    .inq-table-wrap {
+        border: 1px solid #d8dee8;
+        border-radius: 0 8px 8px 8px;
+        background: #fff;
+        padding: 0;
+        overflow-x: auto;
+    }
+    .inq-table {
+        border-collapse: separate;
+        border-spacing: 0;
+        table-layout: fixed;
+        width: max-content;
+        min-width: 100%;
+    }
+    .inq-table th,
+    .inq-table td {
+        white-space: nowrap;
+        font-size: 0.82rem;
+        padding: 4px 6px;
+        border: 1px solid #e1e7f0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 300px;
+    }
+    .inq-table th {
+        background: #f3f7ff;
+        color: #2056ac;
+        font-weight: 600;
+        cursor: pointer;
+        user-select: none;
+        position: relative;
+    }
+    .inq-table th .th-text {
+        display: inline-block;
+        padding-right: 8px;
+    }
+    .inq-table th .col-resizer {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 6px;
+        height: 100%;
+        cursor: col-resize;
+        user-select: none;
+        z-index: 2;
+    }
+    .inq-table th.inq-sort-asc::after { content: " ▲"; font-size: 0.7rem; color: #1d3b6b; }
+    .inq-table th.inq-sort-desc::after { content: " ▼"; font-size: 0.7rem; color: #1d3b6b; }
+</style>
+
+<script>
+    const totalEl = document.getElementById("inqTotalCount");
+    const posEl   = document.getElementById("inqCurrentPos");
+    const hidTab  = document.getElementById("hidTab");
+    const rowPaperDate = document.getElementById("rowPaperDate");
+    const table   = document.querySelector(".inq-table");
+    const thead   = table?.querySelector("thead tr");
+    const tbody   = table?.querySelector("tbody");
+
+    // tabs 定義（對應後端 DictTable 名稱）
+    const tabDictTables = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+        Model.Tabs.Select(t => t.DictTable)
+    ));
+
+    let currentFields = []; // 目前 tab 的欄位定義
+    const fieldsCache = {}; // { tabIdx: fields[] } 快取
+
+    // ── 欄寬工具 ──────────────────────────────────────────────
+    function applyColumnWidth(ths, index, width) {
+        const w = Math.max(20, Math.round(width));
+        const th = ths[index];
+        if (!th) return;
+        th.style.width = `${w}px`;
+        th.style.minWidth = `${w}px`;
+        Array.from(table.querySelectorAll(`tbody tr td:nth-child(${index + 1})`))
+            .forEach(td => { td.style.width = `${w}px`; td.style.minWidth = `${w}px`; });
+    }
+
+    function applySavedWidths(dictTable, ths) {
+        const tn = (dictTable || "").trim();
+        if (!tn) return;
+        try {
+            const raw = localStorage.getItem(`colwidth:${tn}`);
+            if (!raw) return;
+            const cols = JSON.parse(raw) || [];
+            const fieldNames = currentFields.map(f => f.fieldName.toLowerCase());
+            cols.forEach(c => {
+                const idx = fieldNames.indexOf((c.fieldName || '').toLowerCase());
+                if (idx >= 0 && Number.isFinite(Number(c.width))) applyColumnWidth(ths, idx, Number(c.width));
+            });
+        } catch { }
+    }
+
+    let isResizing = false, resizeStartX = 0, resizeStartW = 0, resizeThIdx = -1, resizeThs = [];
+
+    function initColumnResize(dictTable) {
+        if (!table) return;
+        const ths = Array.from(table.querySelectorAll('thead th'));
+        resizeThs = ths;
+        applySavedWidths(dictTable, ths);
+        ths.forEach((th, idx) => {
+            const handle = th.querySelector('.col-resizer');
+            if (!handle) return;
+            handle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                isResizing = true; resizeStartX = e.pageX;
+                resizeStartW = th.getBoundingClientRect().width; resizeThIdx = idx;
+                document.body.classList.add('resizing');
+            });
+        });
+    }
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing || resizeThIdx < 0) return;
+        applyColumnWidth(resizeThs, resizeThIdx, Math.max(20, resizeStartW + e.pageX - resizeStartX));
+    });
+    document.addEventListener('mouseup', () => {
+        if (!isResizing) return;
+        isResizing = false;
+        document.body.classList.remove('resizing');
+        const tn = (tabDictTables[parseInt(hidTab?.value || "0")] || "").trim();
+        if (tn) {
+            const payload = resizeThs.map(th => ({ fieldName: th.dataset.field, width: Math.round(th.getBoundingClientRect().width) }));
+            try { localStorage.setItem(`colwidth:${tn}`, JSON.stringify(payload)); } catch { }
+        }
+        resizeThIdx = -1;
+    });
+
+    // ── 排序工具 ──────────────────────────────────────────────
+    const parseSortValue = (text) => {
+        if (text == null) return "";
+        const t = String(text).trim();
+        if (!t) return "";
+        const d = t.match(/^(\d{4})[\/-](\d{2})[\/-](\d{2})$/);
+        if (d) return new Date(`${d[1]}-${d[2]}-${d[3]}`).getTime();
+        const n = t.replace(/,/g, "");
+        if (!isNaN(n) && n !== "") return parseFloat(n);
+        return t.toLowerCase();
+    };
+
+    function bindSortHeaders() {
+        if (!table) return;
+        const headers = Array.from(table.querySelectorAll("thead th"));
+        headers.forEach((th, idx) => {
+            th.addEventListener("click", (e) => {
+                if (e.target?.classList?.contains("col-resizer")) return;
+                const isAsc = !th.classList.contains("inq-sort-asc");
+                headers.forEach(h => h.classList.remove("inq-sort-asc", "inq-sort-desc"));
+                th.classList.add(isAsc ? "inq-sort-asc" : "inq-sort-desc");
+                const trs = Array.from(tbody.querySelectorAll("tr")).filter(r => !r.querySelector("td[colspan]"));
+                const dir = isAsc ? 1 : -1;
+                trs.sort((a, b) => {
+                    const av = parseSortValue(a.children[idx]?.textContent ?? "");
+                    const bv = parseSortValue(b.children[idx]?.textContent ?? "");
+                    return av < bv ? -dir : av > bv ? dir : 0;
+                });
+                trs.forEach(r => tbody.appendChild(r));
+            });
+        });
+    }
+
+    // ── 重建 table ────────────────────────────────────────────
+    function rebuildTable(fields, rows, dictTable) {
+        currentFields = fields;
+
+        // 重建 thead
+        if (thead) {
+            thead.innerHTML = fields.map(f =>
+                `<th class="inq-sortable" data-field="${f.fieldName}"><span class="th-text">${f.label || f.fieldName}</span><span class="col-resizer" draggable="false"></span></th>`
+            ).join("");
+        }
+
+        // 重建 tbody
+        renderRows(rows, fields);
+
+        // 更新計數
+        const cnt = rows.length;
+        if (totalEl) totalEl.textContent = String(cnt);
+        if (posEl) posEl.textContent = cnt > 0 ? "1" : "0";
+
+        // 重新初始化欄寬、排序
+        initColumnResize(dictTable);
+        bindSortHeaders();
+
+        // 列點擊
+        Array.from(tbody.querySelectorAll("tr")).forEach((tr, i) => {
+            tr.addEventListener("click", () => {
+                Array.from(tbody.querySelectorAll("tr")).forEach(r => r.classList.remove("table-active"));
+                tr.classList.add("table-active");
+                if (posEl) posEl.textContent = String(i + 1);
+            });
+        });
+    }
+
+    function renderRows(rows, fields) {
+        if (!tbody) return;
+        if (!rows || rows.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="${Math.max(1, fields.length)}" class="text-center text-muted py-2">沒有資料</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = rows.map(row =>
+            `<tr>${fields.map((f, ci) => `<td>${row[ci] ?? ""}</td>`).join("")}</tr>`
+        ).join("");
+    }
+
+    function clearTable() {
+        const colCount = currentFields.length || 1;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="${colCount}" class="text-center text-muted py-2">沒有資料</td></tr>`;
+        if (totalEl) totalEl.textContent = "0";
+        if (posEl) posEl.textContent = "0";
+    }
+
+    // ── 過帳日期顯示 ──────────────────────────────────────────
+    function updatePaperDateRow(tabIdx) {
+        if (rowPaperDate) rowPaperDate.style.display = parseInt(tabIdx) === 0 ? "none" : "";
+    }
+
+    // ── 初始化：頁面載入時一次預載所有 tab 的欄位定義 ──────
+    const activeTab = @activeTab;
+    updatePaperDateRow(activeTab);
+
+    async function fetchFields(tabIdx) {
+        if (fieldsCache[tabIdx]) return fieldsCache[tabIdx];
+        const qs = new URLSearchParams({ handler: "Query", Tab: tabIdx });
+        const res = await fetch(`/FPE/FPE00020?${qs}`);
+        if (!res.ok) return [];
+        const data = await res.json();
+        fieldsCache[tabIdx] = data.fields || [];
+        return fieldsCache[tabIdx];
+    }
+
+    (async () => {
+        // 先顯示目前 tab 的欄位（優先）
+        const dictTable = tabDictTables[activeTab] || "";
+        const fields = await fetchFields(activeTab);
+        rebuildTable(fields, [], dictTable);
+
+        // 若帶 submitted=1 進來，執行查詢
+        if (@(Model.HasSubmitted ? "true" : "false")) {
+            doQuery();
+        }
+
+        // 背景預載其餘 tab 的欄位定義
+        for (let i = 0; i < tabDictTables.length; i++) {
+            if (i !== activeTab) fetchFields(i).catch(() => {});
+        }
+    })();
+
+    // ── 頁籤切換（直接從快取取，瞬間） ──────────────────────
+    document.querySelectorAll(".inq-tab").forEach(tab => {
+        tab.addEventListener("click", async () => {
+            if (tab.classList.contains("active")) return;
+            const idx = parseInt(tab.dataset.tab);
+            document.querySelectorAll(".inq-tab").forEach(t => t.classList.remove("active"));
+            tab.classList.add("active");
+            if (hidTab) hidTab.value = String(idx);
+            updatePaperDateRow(idx);
+            clearTable();
+            const dictTable = tabDictTables[idx] || "";
+            const fields = await fetchFields(idx); // 幾乎必中快取
+            rebuildTable(fields, [], dictTable);
+        });
+    });
+
+    // ── 查詢 ─────────────────────────────────────────────────
+    async function doQuery() {
+        const fd = new FormData(document.getElementById("inqForm"));
+        const params = new URLSearchParams();
+        for (const [k, v] of fd.entries()) {
+            const val = (v ?? "").toString().trim();
+            if (k === "Tab" || k === "submitted" || val) params.append(k, val);
+        }
+        params.set("submitted", "1");
+        params.set("handler", "Query");
+
+        const tabIdx = parseInt(hidTab?.value || "0");
+        const dictTable = tabDictTables[tabIdx] || "";
+
+        try {
+            const res = await fetch(`/FPE/FPE00020?${params}`);
+            if (!res.ok) { alert("查詢失敗"); return; }
+            const data = await res.json();
+            rebuildTable(data.fields || [], data.rows || [], dictTable);
+        } catch { alert("查詢發生錯誤"); }
+    }
+
+    document.getElementById("inqForm")?.addEventListener("submit", (e) => {
+        e.preventDefault();
+        doQuery();
+    });
+
+    document.getElementById("btnClearInq")?.addEventListener("click", () => {
+        window.location.href = "/FPE/FPE00020";
+    });
+
+    document.getElementById("btnSaveHeight")?.addEventListener("click", async () => {
+        const h = document.querySelector(".inq-body")?.clientHeight || 0;
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
+        const res = await fetch("/api/MatInfoUtility/SaveBrowseHeight", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "RequestVerificationToken": token },
+            body: JSON.stringify({ itemId: "FPE00020", height: h })
+        });
+        if (!res.ok) return alert("儲存失敗");
+        alert("已儲存高度設定");
+    });
+</script>
+
+@if (Request.Query.ContainsKey("debug"))
+{
+    <div class="mt-3 p-2 border rounded bg-light">
+        <div class="fw-bold mb-1">Debug SQL</div>
+        <div class="small text-muted">@Model.DebugExecText</div>
+    </div>
+}

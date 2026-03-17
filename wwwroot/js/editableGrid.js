@@ -325,6 +325,20 @@
       return { ok:true, skipped:false, text:"OK", raw:json };
     }
 
+    // ===== 還原變更（不存檔，只恢復 input 值至 defaultValue）=====
+    function cancelChanges() {
+      table.querySelectorAll('tbody tr').forEach(tr => {
+        tr.querySelectorAll('.cell-edit').forEach(inp => {
+          if (inp.type === 'checkbox') {
+            inp.checked = inp.defaultChecked;
+            inp.value   = inp.defaultChecked ? '1' : '0';
+          } else {
+            inp.value = inp.defaultValue ?? '';
+          }
+        });
+      });
+    }
+
     // ===== 刪除選中的列 =====
     async function deleteRows() {
       if (!editing) return { ok: false, text: "請先進入編輯模式" };
@@ -405,6 +419,7 @@
       isEdit,
       toggleEdit,
       saveChanges,
+      cancelChanges,
       deleteRows,
       insertRows
     };
