@@ -478,7 +478,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── 規格頁籤渲染 ──────────────────────────────────────────
 
-  function renderMasterTab(tabKey, dict, row) {
+  const LOOKUP_CACHE = {};
+
+  async function loadLookup(field) {
+    if (!field.LookupTable || !field.LookupKeyField || !field.LookupResultField) return null;
+    const key = `${field.LookupTable}|${field.LookupKeyField}|${field.LookupResultField}`;
+    if (LOOKUP_CACHE[key]) return LOOKUP_CACHE[key];
+    try {
+      const url = `/api/TableFieldLayout/LookupData`
+        + `?table=${encodeURIComponent(field.LookupTable)}`
+        + `&key=${encodeURIComponent(field.LookupKeyField)}`
+        + `&result=${encodeURIComponent(field.LookupResultField)}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const rows = await response.json();
+      const map = {};
+      rows.forEach(r => { map[r.key] = r.result0; });
+      LOOKUP_CACHE[key] = map;
+      return map;
+    } catch {
+      LOOKUP_CACHE[key] = null;
+      return null;
+    }
+  }
+
+  async function renderMasterTab(tabKey, dict, row) {
     const tabBtn = document.querySelector(`[data-tab-key="${tabKey}"]`);
     if (!tabBtn) return;
     const showWhere = parseInt(tabBtn.dataset.tabShowWhere || '0', 10);
@@ -509,7 +533,7 @@ document.addEventListener('DOMContentLoaded', () => {
       container.parentElement.style.overflowX = 'auto';
       let labelHtml = '';
       let inputHtml2 = '';
-      fields.forEach(f => {
+      for (const f of fields) {
         const fn = f.FieldName ?? '';
         const hideInput = (f.iFieldWidth ?? -1) === 0;
         let val = row[fn] ?? row[fn.toLowerCase()] ?? '';
@@ -522,6 +546,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const isReadOnly = (f.ReadOnly ?? 0) !== 0;
         const isNumber = /^(number|int|smallint|tinyint|bigint|decimal|numeric|money|float|real)/i.test(f.DataType ?? '');
         const isCheckbox = (f.ComboStyle ?? 0) === 1;
+        const lookupMap = f.LookupTable ? await loadLookup(f) : null;
+        const itemsList = (!lookupMap && f.Items) ? f.Items.split(';').filter(s => s.trim()) : null;
         const top = (f.iFieldTop || 0) + headerTopPad;
         const left = f.iFieldLeft || 0;
         const width = f.iFieldWidth || 160;
@@ -538,7 +564,21 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!hideInput) {
           const fieldClass = `spec-draggable${isNumber ? ' field-number' : ' field-text'}`;
           let inp = '';
-          if (isCheckbox) {
+          if (lookupMap) {
+            let opts = `<option value=""></option>`;
+            Object.entries(lookupMap).forEach(([k, v]) => {
+              const sel = String(k) === String(val) ? ' selected' : '';
+              opts += `<option value="${k}"${sel}>${v}</option>`;
+            });
+            inp = `<select class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" data-original="${val}" disabled style="width:100%;height:100%;font-size:12px;background:#fff;box-sizing:border-box;">${opts}</select>`;
+          } else if (itemsList) {
+            let opts = `<option value=""></option>`;
+            itemsList.forEach(item => {
+              const sel = item.trim() === String(val) ? ' selected' : '';
+              opts += `<option value="${item.trim()}"${sel}>${item.trim()}</option>`;
+            });
+            inp = `<select class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" data-original="${val}" disabled style="width:100%;height:100%;font-size:12px;background:#fff;box-sizing:border-box;">${opts}</select>`;
+          } else if (isCheckbox) {
             const checked = (val == 1 || val === true || val === 'true') ? 'checked' : '';
             inp = `<input type="checkbox" class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" value="1" ${checked} data-original="${(val == 1 || val === true || val === 'true') ? '1' : '0'}" disabled>`;
           } else {
@@ -547,7 +587,7 @@ document.addEventListener('DOMContentLoaded', () => {
           inputHtml2 += `<li class="${fieldClass}" data-field="${fn}" data-show-where="${showWhere}"
             style="top:${top}px; left:${left}px; width:${width}px; height:${height}px;">${inp}</li>`;
         }
-      });
+      }
       html = labelHtml + inputHtml2;
     } else {
       container.style.minHeight = '';
@@ -555,26 +595,49 @@ document.addEventListener('DOMContentLoaded', () => {
       container.style.flexWrap = 'wrap';
       container.style.gap = '8px';
       container.style.padding = '8px';
-      fields.forEach(f => {
+      for (const f of fields) {
         const fn = f.FieldName ?? '';
         const val = row[fn] ?? row[fn.toLowerCase()] ?? '';
         const isReadOnly = (f.ReadOnly ?? 0) !== 0;
         const w = f.iFieldWidth ? `${f.iFieldWidth}px` : '150px';
         const label = f.DisplayLabel || fn;
+        const lookupMap = f.LookupTable ? await loadLookup(f) : null;
+        const itemsList = (!lookupMap && f.Items) ? f.Items.split(';').filter(s => s.trim()) : null;
+        let inputEl = '';
+        if (lookupMap) {
+          let opts = `<option value=""></option>`;
+          Object.entries(lookupMap).forEach(([k, v]) => {
+            const sel = String(k) === String(val) ? ' selected' : '';
+            opts += `<option value="${k}"${sel}>${v}</option>`;
+          });
+          inputEl = `<select class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" data-original="${val}"
+            style="width:${w};font-size:12px;border:1px solid #999;border-radius:2px;padding:2px 4px;background:#fff;box-sizing:border-box;" disabled>${opts}</select>`;
+        } else if (itemsList) {
+          let opts = `<option value=""></option>`;
+          itemsList.forEach(item => {
+            const sel = item.trim() === String(val) ? ' selected' : '';
+            opts += `<option value="${item.trim()}"${sel}>${item.trim()}</option>`;
+          });
+          inputEl = `<select class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" data-original="${val}"
+            style="width:${w};font-size:12px;border:1px solid #999;border-radius:2px;padding:2px 4px;background:#fff;box-sizing:border-box;" disabled>${opts}</select>`;
+        } else {
+          inputEl = `<input type="text" class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" value="${val}" data-original="${val}"
+            style="width:${w};font-size:12px;border:1px solid #999;border-radius:2px;padding:2px 6px;background:#fff;box-sizing:border-box;" readonly>`;
+        }
         html += `<div class="d-flex align-items-center gap-1" style="white-space:nowrap;">
           <label class="mb-0 me-1" style="font-size:12px;font-weight:600;color:#0066cc;">${label}</label>
-          <input type="text" class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" value="${val}" data-original="${val}"
-            style="width:${w};font-size:12px;border:1px solid #999;border-radius:2px;padding:2px 6px;background:#fff;box-sizing:border-box;" readonly>
+          ${inputEl}
         </div>`;
-      });
+      }
     }
     container.innerHTML = html;
 
     // 若目前處於編輯模式，對新渲染的欄位立即套用編輯狀態
     if (typeof _layerEditMode !== 'undefined' && _layerEditMode) {
-      container.querySelectorAll('.master-field:not(.readonly-field)').forEach(inp => {
-        if (inp.type === 'checkbox') inp.disabled = false;
-        else inp.removeAttribute('readonly');
+      container.querySelectorAll('.master-field:not(.readonly-field)').forEach(el => {
+        if (el.type === 'checkbox') el.disabled = false;
+        else if (el.tagName === 'SELECT') el.disabled = false;
+        else el.removeAttribute('readonly');
       });
     }
   }
@@ -766,15 +829,15 @@ document.addEventListener('DOMContentLoaded', () => {
     Promise.all([
       getDict(dictName),
       fetch(masterApiUrl).then(r => r.json())
-    ]).then(([dict, rows]) => {
+    ]).then(async ([dict, rows]) => {
       masterDict = dict;
       masterData = (rows && rows.length > 0) ? rows[0] : {};
       // 渲染主檔資訊區
       renderLayerHeader(dict, masterData);
       // 填入所有規格頁籤
-      document.querySelectorAll('#master-tabs [data-tab-key]').forEach(tab => {
-        renderMasterTab(tab.dataset.tabKey, dict, masterData);
-      });
+      for (const tab of document.querySelectorAll('#master-tabs [data-tab-key]')) {
+        await renderMasterTab(tab.dataset.tabKey, dict, masterData);
+      }
     }).catch(() => {});
   }
 

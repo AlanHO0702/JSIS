@@ -1510,13 +1510,27 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
                 }
 
                 // 送審/審核共用檢查流程
-                // 1. EMOdFieldCheck
-                await ExecSpAsync(conn, "EMOdFieldCheck", cmd =>
+                // 1. EMOdFieldCheck → 讀回傳值，1=有必要欄位未填
+                var fieldCheckResult = await ExecSpScalarAsync(conn, "EMOdFieldCheck", cmd =>
                 {
                     cmd.Parameters.AddWithValue("@PartNum", partNum);
                     cmd.Parameters.AddWithValue("@Revision", revision);
-                    cmd.Parameters.AddWithValue("@S", "1");  // 1=審核品號時
+                    cmd.Parameters.AddWithValue("@S", "1");
                 });
+                if (Convert.ToInt32(fieldCheckResult ?? 0) == 1)
+                {
+                    // 讀 EMOdNotValueShow 取得缺填欄位清單（IsError=0 的列已被過濾）
+                    var msgs = await ExecSpReadMessagesAsync(conn, "EMOdNotValueShow", cmd =>
+                    {
+                        cmd.Parameters.AddWithValue("@PartNum", partNum);
+                        cmd.Parameters.AddWithValue("@Revision", revision);
+                    });
+                    // msgs 為空代表 EMOdNotValueShow 判斷無實際錯誤，繼續流程
+                    if (msgs.Count > 0)
+                    {
+                        return BadRequest(new { success = false, message = string.Join("\n", msgs), errorType = "fieldCheck" });
+                    }
+                }
 
                 // 2. EMOdEditCheck
                 await ExecSpAsync(conn, "EMOdEditCheck", cmd =>
@@ -1525,14 +1539,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
                     cmd.Parameters.AddWithValue("@Revision", revision);
                 });
 
-                // 3. EMOdNotValueShow
-                await ExecSpAsync(conn, "EMOdNotValueShow", cmd =>
-                {
-                    cmd.Parameters.AddWithValue("@PartNum", partNum);
-                    cmd.Parameters.AddWithValue("@Revision", revision);
-                });
-
-                // 4. EMOdProductAuditChkValue
+                // 3. EMOdProductAuditChkValue
                 await ExecSpAsync(conn, "EMOdProductAuditChkValue", cmd =>
                 {
                     cmd.Parameters.AddWithValue("@PartNum", partNum);
@@ -1558,10 +1565,63 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
 
         private static async Task ExecSpAsync(SqlConnection conn, string spName, Action<SqlCommand> addParams)
         {
+            // 捕捉 SP 透過 RAISERROR severity<=10 / PRINT 送出的訊息（Delphi SP 常用此方式回傳防呆錯誤）
+            var infoMessages = new List<string>();
+            SqlInfoMessageEventHandler onInfo = (_, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Message))
+                    infoMessages.Add(e.Message);
+            };
+            conn.InfoMessage += onInfo;
+            try
+            {
+                using var cmd = new SqlCommand(spName, conn);
+                cmd.CommandType = CommandType.StoredProcedure;
+                addParams(cmd);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            finally
+            {
+                conn.InfoMessage -= onInfo;
+            }
+
+            // 若 SP 有送出訊息，視為防呆錯誤拋出（與 RAISERROR severity>=11 拋 SqlException 效果相同）
+            if (infoMessages.Count > 0)
+                throw new InvalidOperationException(string.Join("\n", infoMessages));
+        }
+
+        private static async Task<object?> ExecSpScalarAsync(SqlConnection conn, string spName, Action<SqlCommand> addParams)
+        {
             using var cmd = new SqlCommand(spName, conn);
             cmd.CommandType = CommandType.StoredProcedure;
             addParams(cmd);
-            await cmd.ExecuteNonQueryAsync();
+            return await cmd.ExecuteScalarAsync();
+        }
+
+        private static async Task<List<string>> ExecSpReadMessagesAsync(SqlConnection conn, string spName, Action<SqlCommand> addParams)
+        {
+            var messages = new List<string>();
+            using var cmd = new SqlCommand(spName, conn);
+            cmd.CommandType = CommandType.StoredProcedure;
+            addParams(cmd);
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                // 若有 IsError 欄位（第二欄），IsError=0 表示無錯誤，跳過
+                if (reader.FieldCount > 1 && !reader.IsDBNull(1))
+                {
+                    var isError = Convert.ToInt32(reader.GetValue(1));
+                    if (isError == 0) continue;
+                }
+                if (reader.IsDBNull(0)) continue;
+                var text = (reader.GetString(0) ?? "").Trim();
+                // 若同一行含分隔線（____），只取分隔線前的部分
+                var sepIdx = text.IndexOf("____", StringComparison.Ordinal);
+                if (sepIdx >= 0) text = text.Substring(0, sepIdx).Trim();
+                if (!string.IsNullOrWhiteSpace(text))
+                    messages.Add(text);
+            }
+            return messages;
         }
 
         private static async Task ExecEMOdProdAuditAsync(SqlConnection conn, string partNum, string revision, int tag, int ioType, string userId, string meno)

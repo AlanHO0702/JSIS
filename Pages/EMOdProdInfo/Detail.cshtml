@@ -15,6 +15,14 @@
     // 設定全域變數供 ActionRail 使用
     window._itemId = '@(Model.IsViewOnly ? "EMO00018" : "EMO00004")';
     window._headerTableName = '@Model.HeaderTableName';
+    // 提供 masterRow 給 ActionRail execByButton（EMOdProdInfo 用 PartNum+Revision 而非 PaperNum）
+    window._getMasterRow = () => {
+        const mk = window.currentMasterKeys || {};
+        return {
+            PartNum:  (mk.PartNum  || mk.partnum  || '').trim(),
+            Revision: (mk.Revision || mk.revision || '').trim()
+        };
+    };
 </script>
 
 @* 左侧按钮条样式调整 *@
@@ -138,6 +146,20 @@
   border-color: #2564b3 !important;
   outline: 2px solid rgba(37,100,179,0.25) !important;
   background: #fff !important;
+}
+/* select 瀏覽狀態：不顯示下拉箭頭、維持白底 */
+#spec-content .master-field[disabled]:is(select) {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  pointer-events: none;
+  background-color: #fff !important;
+  color: inherit !important;
+  opacity: 1 !important;
+}
+/* select 編輯狀態：顯示下拉箭頭、手型游標 */
+#spec-content.spec-editing select.master-field:not(.readonly-field):not([disabled]) {
+  cursor: pointer !important;
 }
 /* checkbox 編輯狀態：手型游標、無藍框 */
 #spec-content.spec-editing .master-field[type="checkbox"]:not(.readonly-field) {
@@ -528,6 +550,25 @@ else
                                             </thead>
                                             <tbody>
                                                 <tr><td class="text-center text-muted py-3">請點選上方主檔資料</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <!-- 一般頁籤：通用表格 -->
+                                    <div class="table-responsive" data-tab-key="@tab.Key">
+                                        <table class="table table-sm table-hover align-middle mb-0"
+                                               id="grid-@tab.Key"
+                                               data-table-name="@tab.TableName"
+                                               data-dict-name="@tab.DictName"
+                                               data-dict-table="@tab.DictName"
+                                               data-key-fields="@string.Join(",", tab.KeyFields ?? Enumerable.Empty<string>())">
+                                            <thead class="table-light">
+                                                <tr><th class="text-center text-muted">載入中...</th></tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr><td class="text-center text-muted py-3">載入中...</td></tr>
                                             </tbody>
                                         </table>
                                     </div>
@@ -987,7 +1028,7 @@ document.addEventListener('DOMContentLoaded', () => {
     specContent.classList.toggle('spec-editing', enable);
 
     specContent.querySelectorAll('.master-field:not(.readonly-field)').forEach(inp => {
-      if (inp.type === 'checkbox') {
+      if (inp.type === 'checkbox' || inp.tagName === 'SELECT') {
         inp.disabled = !enable;
       } else {
         if (enable) inp.removeAttribute('readonly');
@@ -995,12 +1036,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // 進入編輯時：對規格欄位綁 input 偵測 dirty
+    // 進入編輯時：對規格欄位綁 input/change 偵測 dirty
     if (enable) {
       specContent.querySelectorAll('.master-field:not(.readonly-field)').forEach(inp => {
         if (!inp._dirtyListenerAttached) {
           inp._dirtyListenerAttached = true;
-          inp.addEventListener('input', () => {
+          const evtName = inp.tagName === 'SELECT' ? 'change' : 'input';
+          inp.addEventListener(evtName, () => {
             if (window.updateSaveCancelButtons) window.updateSaveCancelButtons();
           });
         }
@@ -1186,7 +1228,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const targetId = btn.dataset.bsTarget;
         if (targetId) {
           document.querySelectorAll(`${targetId} .master-field:not(.readonly-field)`).forEach(inp => {
-            if (inp.type === 'checkbox') inp.disabled = false;
+            if (inp.type === 'checkbox' || inp.tagName === 'SELECT') inp.disabled = false;
             else inp.removeAttribute('readonly');
           });
         }
@@ -1627,7 +1669,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return max;
   }
 
-  function renderMasterTab(tabKey, dict, row) {
+  async function renderMasterTab(tabKey, dict, row) {
     const tabBtn = document.querySelector(`[data-tab-key="${tabKey}"]`);
     if (!tabBtn) return;
 
@@ -1652,7 +1694,7 @@ document.addEventListener('DOMContentLoaded', () => {
     );
     const headerTopPad = 6;
 
-let html = '';
+    let html = '';
     if (hasCoords) {
       // === 絕對座標模式（複用 _DetailHeaderSection 邏輯）===
       const minH = calcTabMinHeight(fields);
@@ -1665,7 +1707,7 @@ let html = '';
       container.parentElement.style.overflowX = 'auto';
       let labelHtml = '';
       let inputHtml2 = '';
-      fields.forEach(f => {
+      for (const f of fields) {
         const fn = f.FieldName ?? '';
         const hideInput = (f.iFieldWidth ?? -1) === 0;
         let val = row[fn] ?? row[fn.toLowerCase()] ?? '';
@@ -1679,6 +1721,9 @@ let html = '';
         const isReadOnly = (f.ReadOnly ?? 0) !== 0;
         const isNumber = /^(number|int|smallint|tinyint|bigint|decimal|numeric|money|float|real)/i.test(f.DataType ?? '');
         const isCheckbox = (f.ComboStyle ?? 0) === 1;
+        const lookupMap = f.LookupTable ? await loadLookup(f) : null;
+        const itemsList = (!lookupMap && f.Items) ? f.Items.split(';').filter(s => s.trim()) : null;
+        const displayVal = applyFormatStr(val, f.FormatStr);
 
         const top = (f.iFieldTop || 0) + headerTopPad;
         const left = f.iFieldLeft || 0;
@@ -1704,20 +1749,34 @@ let html = '';
         if (!hideInput) {
           const fieldClass = `spec-draggable${isNumber ? ' field-number' : ' field-text'}`;
           let inputHtml = '';
-          if (isCheckbox) {
+          if (lookupMap) {
+            let opts = `<option value=""></option>`;
+            Object.entries(lookupMap).forEach(([k, v]) => {
+              const sel = String(k) === String(val) ? ' selected' : '';
+              opts += `<option value="${k}"${sel}>${v}</option>`;
+            });
+            inputHtml = `<select class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" data-original="${val}" disabled style="width:100%;height:100%;font-size:12px;background:#fff;box-sizing:border-box;">${opts}</select>`;
+          } else if (itemsList) {
+            let opts = `<option value=""></option>`;
+            itemsList.forEach(item => {
+              const sel = item.trim() === String(val) ? ' selected' : '';
+              opts += `<option value="${item.trim()}"${sel}>${item.trim()}</option>`;
+            });
+            inputHtml = `<select class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" data-original="${val}" disabled style="width:100%;height:100%;font-size:12px;background:#fff;box-sizing:border-box;">${opts}</select>`;
+          } else if (isCheckbox) {
             const checked = (val == 1 || val === true || val === 'true') ? 'checked' : '';
             inputHtml = `<input type="checkbox" class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" value="1" ${checked} data-original="${(val == 1 || val === true || val === 'true') ? '1' : '0'}" disabled style="width:16px;height:16px;cursor:default;accent-color:#0066cc;">`;
           } else {
             inputHtml = `<input type="text"
               class="master-field${isReadOnly ? ' readonly-field' : ''}"
-              name="${fn}" value="${val}" data-original="${val}" readonly>`;
+              name="${fn}" value="${displayVal}" data-original="${val}" readonly>`;
           }
           inputHtml2 += `<li class="${fieldClass}"
             data-field="${fn}" data-show-where="${showWhere}"
             style="top:${top}px; left:${left}px; width:${width}px; height:${height}px;"
             ${titleAttr}>${inputHtml}</li>`;
         }
-      });
+      }
       // label 全部在前（下層），input 全部在後（上層蓋住不相關 label）
       html = labelHtml + inputHtml2;
     } else {
@@ -1729,20 +1788,41 @@ let html = '';
       container.style.gap = '8px';
       container.style.padding = '8px';
 
-      fields.forEach(f => {
+      for (const f of fields) {
         const fn = f.FieldName ?? '';
         const val = row[fn] ?? row[fn.toLowerCase()] ?? '';
         const isReadOnly = (f.ReadOnly ?? 0) !== 0;
         const w = f.iFieldWidth ? `${f.iFieldWidth}px` : '150px';
         const label = f.DisplayLabel || fn;
+        const lookupMap = f.LookupTable ? await loadLookup(f) : null;
+        const itemsList = (!lookupMap && f.Items) ? f.Items.split(';').filter(s => s.trim()) : null;
+        const displayVal = applyFormatStr(val, f.FormatStr);
+        let inputEl = '';
+        if (lookupMap) {
+          let opts = `<option value=""></option>`;
+          Object.entries(lookupMap).forEach(([k, v]) => {
+            const sel = String(k) === String(val) ? ' selected' : '';
+            opts += `<option value="${k}"${sel}>${v}</option>`;
+          });
+          inputEl = `<select class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" data-original="${val}"
+            style="width:${w};font-size:12px;border:1px solid #999;border-radius:2px;padding:2px 4px;background:#fff;box-sizing:border-box;" disabled>${opts}</select>`;
+        } else if (itemsList) {
+          let opts = `<option value=""></option>`;
+          itemsList.forEach(item => {
+            const sel = item.trim() === String(val) ? ' selected' : '';
+            opts += `<option value="${item.trim()}"${sel}>${item.trim()}</option>`;
+          });
+          inputEl = `<select class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" data-original="${val}"
+            style="width:${w};font-size:12px;border:1px solid #999;border-radius:2px;padding:2px 4px;background:#fff;box-sizing:border-box;" disabled>${opts}</select>`;
+        } else {
+          inputEl = `<input type="text" class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" value="${displayVal}" data-original="${val}"
+            style="width:${w};font-size:12px;border:1px solid #999;border-radius:2px;padding:2px 6px;background:#fff;box-sizing:border-box;" readonly>`;
+        }
         html += `<div class="d-flex align-items-center gap-1" style="white-space:nowrap;">
           <label class="mb-0 me-1" style="font-size:12px; font-weight:600; color:#0066cc; white-space:nowrap;">${label}</label>
-          <input type="text"
-            class="master-field${isReadOnly ? ' readonly-field' : ''}"
-            name="${fn}" value="${val}" data-original="${val}"
-            style="width:${w}; font-size:12px; border:1px solid #999; border-radius:2px; padding:2px 6px; background:#fff; box-sizing:border-box;" readonly>
+          ${inputEl}
         </div>`;
-      });
+      }
     }
 
     container.innerHTML = html;
@@ -1792,6 +1872,27 @@ let html = '';
         img.style.display = 'none';
       };
     });
+  }
+
+  // ========== 欄位格式化（Delphi FormatStr）==========
+  // 格式字串規則：# 有值才顯示，0 補零，. 小數點，% 附加%符號（不乘100）
+  function applyFormatStr(rawVal, formatStr) {
+    if (!formatStr) return rawVal;
+    const numVal = parseFloat(rawVal);
+    if (isNaN(numVal)) return rawVal;
+
+    const hasPct = formatStr.endsWith('%');
+    const fmt = hasPct ? formatStr.slice(0, -1) : formatStr;
+
+    const dotIdx = fmt.indexOf('.');
+    let decimals = 0;
+    if (dotIdx >= 0) {
+      // 計算小數部分有幾個 0 或 #
+      decimals = fmt.length - dotIdx - 1;
+    }
+
+    const formatted = numVal.toFixed(decimals);
+    return hasPct ? formatted + '%' : formatted;
   }
 
   // ========== 通用 Lookup 功能 ==========
@@ -2213,7 +2314,7 @@ let html = '';
     Promise.all([
       getDict(dictName),
       fetch(masterApiUrl).then(r => r.json())
-    ]).then(([dict, rows]) => {
+    ]).then(async ([dict, rows]) => {
       masterDict = dict;
       masterData = rows && rows.length > 0 ? rows[0] : {};
 
@@ -2228,9 +2329,9 @@ let html = '';
 
       // Render all master tabs
       const masterTabs = document.querySelectorAll('#master-tabs [data-tab-key]');
-      masterTabs.forEach(tab => {
-        renderMasterTab(tab.dataset.tabKey, dict, masterData);
-      });
+      for (const tab of masterTabs) {
+        await renderMasterTab(tab.dataset.tabKey, dict, masterData);
+      }
 
       // 預填 選擇壓合模型 input（TmpPressId = 目前已使用的壓合疊構代碼）
       const _pressModeInp = document.getElementById('selectedPressModelCode');
@@ -2941,6 +3042,8 @@ let html = '';
         const data = await resp.json();
         if (resp.ok && data.success) {
           Swal.fire({ icon: 'success', title: '送審成功' }).then(() => location.reload());
+        } else if (data.errorType === 'fieldCheck') {
+          Swal.fire({ icon: 'warning', title: '未鍵入值之必要欄位', html: (data.message || '').replace(/\n/g, '<br>') });
         } else {
           Swal.fire({ icon: 'error', title: '送審失敗', text: data.message });
         }
@@ -2982,6 +3085,8 @@ let html = '';
         const data = await resp.json();
         if (resp.ok && data.success) {
           Swal.fire({ icon: 'success', title: '審核成功' }).then(() => location.reload());
+        } else if (data.errorType === 'fieldCheck') {
+          Swal.fire({ icon: 'warning', title: '未鍵入值之必要欄位', html: (data.message || '').replace(/\n/g, '<br>') });
         } else {
           Swal.fire({ icon: 'error', title: '審核失敗', text: data.message });
         }
