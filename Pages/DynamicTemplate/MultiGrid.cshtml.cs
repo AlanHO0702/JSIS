@@ -132,10 +132,25 @@ namespace PcbErpApi.Pages.CUR
                         .Where(f => f.Visible == 1)
                         .OrderBy(f => f.SerialNum ?? 0)
                         .ToList();
-                     // 2) 排序欄位
-                    tabVm.OrderBy = string.IsNullOrWhiteSpace(setup.OrderByField)
-                        ? await GetDefaultOrderByAsync(tabVm.TableName)
-                        : setup.OrderByField;
+                     // 2) 排序欄位（支援動態排序）
+                    var sortByKey = $"sortBy_{tabKey}";
+                    var sortDirKey = $"sortDir_{tabKey}";
+                    var sortBy = Request.Query.ContainsKey(sortByKey) ? Request.Query[sortByKey].ToString() : null;
+                    var sortDir = Request.Query.ContainsKey(sortDirKey) ? Request.Query[sortDirKey].ToString() : null;
+
+                    if (!string.IsNullOrWhiteSpace(sortBy))
+                    {
+                        var dir = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC";
+                        tabVm.OrderBy = $"[{sortBy}] {dir}";
+                        tabVm.SortBy = sortBy;
+                        tabVm.SortDir = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase) ? "desc" : "asc";
+                    }
+                    else
+                    {
+                        tabVm.OrderBy = string.IsNullOrWhiteSpace(setup.OrderByField)
+                            ? await GetDefaultOrderByAsync(tabVm.TableName)
+                            : setup.OrderByField;
+                    }
                     // 3) 查詢欄位設定（CURdOCXPaperSelOtherGet）
                     tabVm.QueryFields = await LoadQueryFieldsAsync(itemId, tabVm.TableName, "TW");
                     var filterParams = new List<SqlParameter>();
@@ -625,6 +640,8 @@ SELECT FieldName, DisplaySize
             await conn.OpenAsync();
 
             var schema = await DetectButtonSchemaAsync(conn);
+            var cols = schema.allCols;
+            bool hasCol(string name) => cols.Contains(name);
 
             var sql = $@"
 SELECT ItemId, SerialNum, ButtonName,
@@ -633,10 +650,20 @@ SELECT ItemId, SerialNum, ButtonName,
        CustHint,
        {(schema.hasHintE ? "CustHintE" : "CAST('' AS nvarchar(1)) AS CustHintE")},
        OCXName, CoClassName, SpName,
-       {(schema.hasSearchTemplate ? "SearchTemplate" : "CAST('' AS nvarchar(1)) AS SearchTemplate")},
-       {(schema.hasDialogCaption ? "DialogCaption" : "CAST('' AS nvarchar(1)) AS DialogCaption")},
-       bVisible, {schema.chkCol} AS ChkCanUpdate, bNeedNum, DesignType,
-       {(schema.hasNeedInEdit ? "bNeedInEdit" : "0 AS bNeedInEdit")}
+       {(hasCol("ExecSpName") ? "ExecSpName" : "CAST('' AS nvarchar(1)) AS ExecSpName")},
+       {(hasCol("SearchTemplate") ? "SearchTemplate" : "CAST('' AS nvarchar(1)) AS SearchTemplate")},
+       {(hasCol("MultiSelectDD") ? "MultiSelectDD" : "CAST('' AS nvarchar(1)) AS MultiSelectDD")},
+       {(hasCol("ReplaceExists") ? "ReplaceExists" : "CAST(0 AS int) AS ReplaceExists")},
+       {(hasCol("DialogCaption") ? "DialogCaption" : "CAST('' AS nvarchar(1)) AS DialogCaption")},
+       {(hasCol("AllowSelCount") ? "AllowSelCount" : "CAST(0 AS int) AS AllowSelCount")},
+       bVisible, {schema.chkCol} AS ChkCanUpdate, bNeedNum,
+       {(hasCol("bNeedInEdit") ? "bNeedInEdit" : "CAST(0 AS int) AS bNeedInEdit")},
+       {(hasCol("ChkStatus") ? "ChkStatus" : "CAST(0 AS int) AS ChkStatus")},
+       {(hasCol("bSpHasResult") ? "bSpHasResult" : "CAST(0 AS int) AS bSpHasResult")},
+       {(hasCol("IsUpdateMoney") ? "IsUpdateMoney" : "CAST(0 AS int) AS IsUpdateMoney")},
+       {(hasCol("iNeedConfirmBefExec") ? "iNeedConfirmBefExec" : "CAST(0 AS int) AS iNeedConfirmBefExec")},
+       {(hasCol("sConfirmBefExec") ? "sConfirmBefExec" : "CAST('' AS nvarchar(1)) AS sConfirmBefExec")},
+       DesignType
   FROM CURdOCXItemCustButton WITH (NOLOCK)
  WHERE ItemId = @itemId
  ORDER BY SerialNum, ButtonName;";
@@ -659,19 +686,28 @@ SELECT ItemId, SerialNum, ButtonName,
                     OCXName = rd["OCXName"]?.ToString() ?? string.Empty,
                     CoClassName = rd["CoClassName"]?.ToString() ?? string.Empty,
                     SpName = rd["SpName"]?.ToString() ?? string.Empty,
+                    ExecSpName = rd["ExecSpName"]?.ToString() ?? string.Empty,
                     SearchTemplate = rd["SearchTemplate"]?.ToString() ?? string.Empty,
+                    MultiSelectDD = rd["MultiSelectDD"]?.ToString() ?? string.Empty,
+                    ReplaceExists = TryToInt(rd["ReplaceExists"]),
                     DialogCaption = rd["DialogCaption"]?.ToString() ?? string.Empty,
+                    AllowSelCount = TryToInt(rd["AllowSelCount"]),
                     bVisible = TryToInt(rd["bVisible"]),
                     ChkCanUpdate = TryToInt(rd["ChkCanUpdate"]),
                     bNeedNum = TryToInt(rd["bNeedNum"]),
-                    DesignType = TryToInt(rd["DesignType"]),
-                    bNeedInEdit = TryToInt(rd["bNeedInEdit"])
+                    bNeedInEdit = TryToInt(rd["bNeedInEdit"]),
+                    ChkStatus = TryToInt(rd["ChkStatus"]),
+                    bSpHasResult = TryToInt(rd["bSpHasResult"]),
+                    IsUpdateMoney = TryToInt(rd["IsUpdateMoney"]),
+                    iNeedConfirmBefExec = TryToInt(rd["iNeedConfirmBefExec"]),
+                    sConfirmBefExec = rd["sConfirmBefExec"]?.ToString(),
+                    DesignType = TryToInt(rd["DesignType"])
                 });
             }
             return list;
         }
 
-        private async Task<(bool hasCaptionE, bool hasHintE, bool hasSearchTemplate, bool hasDialogCaption, bool hasNeedInEdit, string chkCol)> DetectButtonSchemaAsync(SqlConnection conn)
+        private async Task<(bool hasCaptionE, bool hasHintE, string chkCol, HashSet<string> allCols)> DetectButtonSchemaAsync(SqlConnection conn)
         {
             var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             const string sql = "SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CURdOCXItemCustButton')";
@@ -685,13 +721,10 @@ SELECT ItemId, SerialNum, ButtonName,
 
             var hasCapE = cols.Contains("CustCaptionE");
             var hasHintE = cols.Contains("CustHintE");
-            var hasSearchTemplate = cols.Contains("SearchTemplate");
-            var hasDialogCaption = cols.Contains("DialogCaption");
-            var hasNeedInEdit = cols.Contains("bNeedInEdit");
             var chkCol = cols.Contains("ChkCanUpdate") ? "ChkCanUpdate"
                        : cols.Contains("ChkCanbUpdate") ? "ChkCanbUpdate"
                        : "ChkCanUpdate";
-            return (hasCapE, hasHintE, hasSearchTemplate, hasDialogCaption, hasNeedInEdit, chkCol);
+            return (hasCapE, hasHintE, chkCol, cols);
         }
 
         private static HtmlString BuildCustomButtonsHtml(IEnumerable<CustomButtonRow> rows)
@@ -701,21 +734,31 @@ SELECT ItemId, SerialNum, ButtonName,
 
             foreach (var b in rows)
             {
-                if (!b.bVisible.HasValue || b.bVisible.Value != 1) continue;
+                if (b.bVisible.HasValue && b.bVisible.Value == 0) continue;
                 if (string.IsNullOrWhiteSpace(b.ButtonName)) continue;
 
                 var caption = string.IsNullOrWhiteSpace(b.CustCaption) ? b.ButtonName : b.CustCaption;
                 var hint = b.CustHint ?? string.Empty;
+                Func<string, string> enc = System.Net.WebUtility.HtmlEncode;
 
                 sb.Append("<button type='button' class='btn btn-outline-secondary btn-sm' data-custom-btn='1'");
-                sb.Append(" data-button-name='").Append(System.Net.WebUtility.HtmlEncode(b.ButtonName)).Append('\'');
-                sb.Append(" data-item-id='").Append(System.Net.WebUtility.HtmlEncode(b.ItemId ?? string.Empty)).Append('\'');
-                sb.Append(" data-search-template='").Append(System.Net.WebUtility.HtmlEncode(b.SearchTemplate ?? string.Empty)).Append('\'');
-                sb.Append(" data-design-type='").Append(System.Net.WebUtility.HtmlEncode(b.DesignType?.ToString() ?? string.Empty)).Append('\'');
-                sb.Append(" data-dialog-caption='").Append(System.Net.WebUtility.HtmlEncode(b.DialogCaption ?? string.Empty)).Append('\'');
-                sb.Append(" data-b-need-in-edit='").Append(System.Net.WebUtility.HtmlEncode(b.bNeedInEdit?.ToString() ?? "0")).Append('\'');
-                sb.Append(" title='").Append(System.Net.WebUtility.HtmlEncode(hint)).Append("'>");
-                sb.Append(System.Net.WebUtility.HtmlEncode(caption));
+                sb.Append(" data-button-name='").Append(enc(b.ButtonName)).Append('\'');
+                sb.Append(" data-item-id='").Append(enc(b.ItemId ?? string.Empty)).Append('\'');
+                sb.Append(" data-search-template='").Append(enc(b.SearchTemplate ?? string.Empty)).Append('\'');
+                sb.Append(" data-design-type='").Append(enc(b.DesignType?.ToString() ?? string.Empty)).Append('\'');
+                sb.Append(" data-dialog-caption='").Append(enc(b.DialogCaption ?? string.Empty)).Append('\'');
+                sb.Append(" data-b-need-in-edit='").Append(enc(b.bNeedInEdit?.ToString() ?? "0")).Append('\'');
+                sb.Append(" data-exec-sp-name='").Append(enc(b.ExecSpName ?? string.Empty)).Append('\'');
+                sb.Append(" data-multi-select-dd='").Append(enc(b.MultiSelectDD ?? string.Empty)).Append('\'');
+                sb.Append(" data-replace-exists='").Append(enc(b.ReplaceExists?.ToString() ?? "0")).Append('\'');
+                sb.Append(" data-allow-sel-count='").Append(enc(b.AllowSelCount?.ToString() ?? "0")).Append('\'');
+                sb.Append(" data-chk-status='").Append(enc(b.ChkStatus?.ToString() ?? "0")).Append('\'');
+                sb.Append(" data-sp-has-result='").Append(enc(b.bSpHasResult?.ToString() ?? "0")).Append('\'');
+                sb.Append(" data-is-update-money='").Append(enc(b.IsUpdateMoney?.ToString() ?? "0")).Append('\'');
+                sb.Append(" data-need-confirm='").Append(enc(b.iNeedConfirmBefExec?.ToString() ?? "0")).Append('\'');
+                sb.Append(" data-confirm-text='").Append(enc(b.sConfirmBefExec ?? string.Empty)).Append('\'');
+                sb.Append(" title='").Append(enc(hint)).Append("'>");
+                sb.Append("<i class='bi bi-gear me-1'></i>").Append(enc(caption));
                 sb.Append("</button>");
             }
 
@@ -741,6 +784,8 @@ SELECT ItemId, SerialNum, ButtonName,
             public int PageSize { get; set; } = 50;
             public int TotalCount { get; set; }
             public string? OrderBy { get; set; }
+            public string? SortBy { get; set; }
+            public string? SortDir { get; set; }
             public List<Dictionary<string, object?>> Items { get; set; } = new();
             public List<CURdTableField> FieldDictList { get; set; } = new();
             public List<CURdTableField> TableFields { get; set; } = new();
@@ -769,13 +814,22 @@ SELECT ItemId, SerialNum, ButtonName,
             public string OCXName { get; set; } = string.Empty;
             public string CoClassName { get; set; } = string.Empty;
             public string SpName { get; set; } = string.Empty;
+            public string ExecSpName { get; set; } = string.Empty;
             public string SearchTemplate { get; set; } = string.Empty;
+            public string MultiSelectDD { get; set; } = string.Empty;
+            public int? ReplaceExists { get; set; }
             public string DialogCaption { get; set; } = string.Empty;
+            public int? AllowSelCount { get; set; }
             public int? bVisible { get; set; }
             public int? ChkCanUpdate { get; set; }
             public int? bNeedNum { get; set; }
-            public int? DesignType { get; set; }
             public int? bNeedInEdit { get; set; }
+            public int? ChkStatus { get; set; }
+            public int? bSpHasResult { get; set; }
+            public int? IsUpdateMoney { get; set; }
+            public int? iNeedConfirmBefExec { get; set; }
+            public string? sConfirmBefExec { get; set; }
+            public int? DesignType { get; set; }
         }
 
         private static async Task<(string? TableName, string? VisibleColumn)> ResolveToolbarButtonTableAsync(SqlConnection conn)
