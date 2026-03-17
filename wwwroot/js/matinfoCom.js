@@ -141,6 +141,7 @@
     let sortDir = 'asc';
   let renderScheduled = false;
   let specTypeOptionsLoaded = false;
+  let browseActiveField = '';
     const pageSize = 200;
     const bufferRows = 8;
   const detailGrids = [];
@@ -3746,6 +3747,8 @@
 
   function selectRecord(item, index) {
     if (!item) return;
+    const nextIndex = (index ?? 0);
+    const sameIndex = currentIndex === (nextIndex + 1);
     fillForm(item);
     currentRecord = item;
     currentKey = { partnum: getValue(item, 'Partnum') ?? '', revision: getValue(item, 'Revision') ?? '' };
@@ -3753,10 +3756,14 @@
     setKeyFieldsEditable(false);
     setEditMode(false);
     detailGrids.forEach((grid) => grid.loadRows());
-    currentIndex = (index ?? 0) + 1;
+    currentIndex = nextIndex + 1;
     updateCount();
-    ensureBrowseVisible(index ?? 0);
-    scheduleRender();
+    ensureBrowseVisible(nextIndex);
+    if (!sameIndex) {
+      tbody?.querySelectorAll('tr.matinfo-row.active').forEach((tr) => tr.classList.remove('active'));
+      const activeRow = tbody?.querySelector(`tr.matinfo-row[data-index="${nextIndex}"]`);
+      if (activeRow) activeRow.classList.add('active');
+    }
     if (useCommonTable) {
       refreshCommonRecord(currentKey.partnum, currentKey.revision);
     }
@@ -3811,6 +3818,24 @@
     requestAnimationFrame(() => { adjustByRect(); });
   }
 
+  function restoreBrowseActiveCell() {
+    if (!tbody || currentIndex <= 0) return;
+    const activeRow = tbody.querySelector(`tr.matinfo-row[data-index="${currentIndex - 1}"]`);
+    if (!activeRow) return;
+
+    let targetCell = null;
+    if (browseActiveField) {
+      const escapedField = window.CSS?.escape ? window.CSS.escape(browseActiveField) : browseActiveField.replace(/"/g, '\\"');
+      targetCell = activeRow.querySelector(`td[data-field="${escapedField}"]`);
+    }
+    if (!targetCell) {
+      targetCell = activeRow.querySelector('td[data-field]');
+    }
+    if (!targetCell) return;
+    targetCell.classList.add('active-cell');
+    browseActiveField = targetCell.dataset.field || browseActiveField;
+  }
+
   function renderVirtual() {
     if (!tbody || !theadRow || !browseScrollBody) return;
     if (!columns.length || totalCount <= 0) {
@@ -3851,12 +3876,15 @@
           ].filter(Boolean).join(' ');
           const classAttr = cls ? ` class="${cls}"` : '';
           const style = col.width ? ` style="width:${col.width};min-width:${col.width};max-width:${col.width}"` : '';
-          return `<td${classAttr}${style}>${formatCellHtml(col, getValue(item, col.key))}</td>`;
+          const fieldAttr = col.key ? ` data-field="${col.key}"` : '';
+          const readonlyAttr = col.readOnly ? ' data-readonly="1"' : '';
+          return `<td${fieldAttr}${readonlyAttr}${classAttr}${style}>${formatCellHtml(col, getValue(item, col.key))}</td>`;
         }).join('') +
         `</tr>`;
     }
     html += `<tr class="matinfo-spacer"><td colspan="${colCount}" style="height:${bottomSpace}px"></td></tr>`;
     tbody.innerHTML = html;
+    restoreBrowseActiveCell();
 
     const firstRow = tbody.querySelector('tr.matinfo-row');
     if (firstRow) {
@@ -3990,8 +4018,13 @@
   tbody?.addEventListener('click', (e) => {
     const row = e.target.closest('tr.matinfo-row');
     if (!row) return;
+    const cell = e.target.closest('td[data-field]');
+    if (cell?.dataset?.field) {
+      browseActiveField = cell.dataset.field;
+    }
     const idx = Number(row.dataset.index ?? '-1');
     if (!Number.isFinite(idx) || idx < 0 || idx >= totalCount) return;
+    if (idx === currentIndex - 1) return;
     const item = dataCache[idx];
     if (!item) return;
     selectRecord(item, idx);
@@ -4190,7 +4223,11 @@
   });
 
   btnAdd?.addEventListener('click', () => {
-    if (itemIdUpper === 'MG000002' || itemIdUpper === 'CPN00007') {
+    const useAddDialog = itemIdUpper === 'MG000008'
+      || itemIdUpper === 'CPN00006'
+      || itemIdUpper === 'MG000002'
+      || itemIdUpper === 'CPN00007';
+    if (useAddDialog) {
       if (window.MatInfoAddHandler?.open) {
         window.MatInfoAddHandler.open({
           itemId,
@@ -4745,6 +4782,27 @@
     }
     loadData();
   });
+
+  if (typeof window.initErpGridNav === 'function' && tbody) {
+    window.initErpGridNav(tbody, {
+      keyFields: ['partnum', 'revision'],
+      isEditMode: () => false,
+      onRowSelect: (tr) => {
+        if (!tr) return;
+        const activeCell = tbody.querySelector('td.active-cell');
+        if (activeCell?.dataset?.field) {
+          browseActiveField = activeCell.dataset.field;
+        }
+        const idx = Number(tr.dataset.index ?? '-1');
+        if (!Number.isFinite(idx) || idx < 0 || idx >= totalCount) return;
+        if (idx === currentIndex - 1) return;
+        const item = dataCache[idx];
+        if (!item) return;
+        selectRecord(item, idx);
+      },
+      gridLabel: 'matinfo-browse'
+    });
+  }
 
   setEditMode(false);
   applyCustTabLabel();

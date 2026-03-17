@@ -301,6 +301,11 @@ namespace PcbErpApi.Pages.CCS
             tabs.Add(new DetailTab("assistant", "聯絡人", "AJNdCompanyAssistant", "AJNdCompanyAssistant", new[] { "CompanyId", "SerialNum" }));
             tabs.Add(new DetailTab("outaddr", "貨運地址", "AJNdCompanyOutAddr", "AJNdCompanyOutAddr", new[] { "CompanyId", "SerialNum" }));
 
+            if (TryGetAvlTable(pt, SystemId, showCustomerTabs, out var avlTableName, out var avlTitle))
+            {
+                tabs.Add(new DetailTab("custpart", avlTitle, avlTableName, avlTableName, new[] { "CompanyId" }));
+            }
+
             if (showCustomerTabs)
             {
                 tabs.Add(new DetailTab("bank", "銀行資料", "AJNdCompanyBank", "AJNdCompanyBank", new[] { "CompanyId", "SerialNum" }));
@@ -309,8 +314,8 @@ namespace PcbErpApi.Pages.CCS
 
             if (showCreditTabs)
             {
-                tabs.Add(new DetailTab("creditline", "銀行資料", "AJNdCompanyCreditLine", "AJNdCompanyCreditLine", new[] { "CompanyId", "SerialNum" }));
-                tabs.Add(new DetailTab("bankassure", "銀行保證", "AJNdCompanyBankAssure", "AJNdCompanyBankAssure", new[] { "CompanyId", "RecYear", "RecMonth" }));
+                tabs.Add(new DetailTab("creditctl", "授信額度", "AJNdCompany", "AJNdCompany", new[] { "CompanyId" }, true));
+                tabs.Add(new DetailTab("bankassure", "銀行保證函", "AJNdCompanyBankAssure", "AJNdCompanyBankAssure", new[] { "CompanyId", "RecYear", "RecMonth" }));
             }
 
             if (showCustomerTabs)
