@@ -214,13 +214,6 @@ namespace PcbErpApi.Services
             var fileName = $"{partNum}{revision}_{GetMapTypeFileName(mapType)}.jpg";
             var fullPath = Path.Combine(basePath, fileName);
 
-            // 如果檔案已存在，直接返回
-            if (File.Exists(fullPath))
-            {
-                _logger.LogInformation("Image already exists: {Path}", fullPath);
-                return fullPath;
-            }
-
             // 渲染圖片（報表用適中尺寸）
             int width = mapType == MapType.Stackup ? 500 : 600;
             int height = mapType == MapType.Stackup ? 500 : 600;

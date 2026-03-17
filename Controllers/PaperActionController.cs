@@ -1546,6 +1546,48 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
                     cmd.Parameters.AddWithValue("@Revision", revision);
                 });
 
+                // 4. 審核時重新產生 EMOdProdMap 排板/裁板資料（先清空避免舊資料殘留）
+                if (req.Tag == 1)
+                {
+                    using var delCmd = new SqlCommand(
+                        "DELETE FROM EMOdProdMap WHERE PartNum=@PartNum AND Revision=@Revision", conn);
+                    delCmd.Parameters.AddWithValue("@PartNum", partNum);
+                    delCmd.Parameters.AddWithValue("@Revision", revision);
+                    await delCmd.ExecuteNonQueryAsync();
+
+                    foreach (var mapKind in new[] { 1, 3 })
+                    {
+                        // EMOdGenMapXFlow 回傳 SELECT（MapData+StrMap+StrMap2+MapData2）
+                        // 需讀出來再 UPDATE 到 EMOdProdMap.MapData（與 Delphi GetNewMapData 邏輯相同）
+                        string mapDataStr = "";
+                        using (var mapCmd = new SqlCommand("EMOdGenMapXFlow", conn))
+                        {
+                            mapCmd.CommandType = CommandType.StoredProcedure;
+                            mapCmd.Parameters.AddWithValue("@PartNum", partNum);
+                            mapCmd.Parameters.AddWithValue("@Revision", revision);
+                            mapCmd.Parameters.AddWithValue("@MapKind", mapKind);
+                            using (var reader = await mapCmd.ExecuteReaderAsync(CommandBehavior.SingleResult))
+                            {
+                                if (await reader.ReadAsync())
+                                {
+                                    mapDataStr =
+                                        (reader["MapData"]  as string ?? "") +
+                                        (reader["StrMap"]   as string ?? "") +
+                                        (reader["StrMap2"]  as string ?? "") +
+                                        (reader["MapData2"] as string ?? "");
+                                }
+                            } // reader 在此確實 dispose，connection 釋放
+                        }
+                        using var updCmd = new SqlCommand(
+                            "UPDATE EMOdProdMap SET MapData=@MapData WHERE PartNum=@PartNum AND Revision=@Revision AND MapKindNo=@MapKindNo", conn);
+                        updCmd.Parameters.AddWithValue("@MapData",   mapDataStr);
+                        updCmd.Parameters.AddWithValue("@PartNum",   partNum);
+                        updCmd.Parameters.AddWithValue("@Revision",  revision);
+                        updCmd.Parameters.AddWithValue("@MapKindNo", mapKind);
+                        await updCmd.ExecuteNonQueryAsync();
+                    }
+                }
+
                 // 5. EMOdProdAudit
                 await ExecEMOdProdAuditAsync(conn, partNum, revision, req.Tag, req.IOType, userId, req.Meno ?? "");
 
