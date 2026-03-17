@@ -715,7 +715,7 @@ SELECT ItemId, SerialNum, ButtonName,
                 sb.Append(" data-dialog-caption='").Append(System.Net.WebUtility.HtmlEncode(b.DialogCaption ?? string.Empty)).Append('\'');
                 sb.Append(" data-b-need-in-edit='").Append(System.Net.WebUtility.HtmlEncode(b.bNeedInEdit?.ToString() ?? "0")).Append('\'');
                 sb.Append(" title='").Append(System.Net.WebUtility.HtmlEncode(hint)).Append("'>");
-                sb.Append("<i class='bi bi-gear me-1'></i>").Append(System.Net.WebUtility.HtmlEncode(caption));
+                sb.Append(System.Net.WebUtility.HtmlEncode(caption));
                 sb.Append("</button>");
             }
 
