@@ -1,0 +1,240 @@
+@page "/ATX/ATXdTaxTune2"
+@model PcbErpApi.Pages.ATX.ATXdTaxTune2Model
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "零稅率申報檔";
+}
+
+<style>
+    .atxtt2-backdrop {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: calc(100vh - var(--app-toolbar-height));
+    }
+    .atxtt2-card {
+        width: 520px;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 4px 24px rgba(0,0,0,.10);
+        padding: 32px 36px 28px;
+    }
+    .atxtt2-title {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #1d3b6b;
+        text-align: center;
+        margin-bottom: 24px;
+    }
+    .atxtt2-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 14px;
+    }
+    .atxtt2-label {
+        width: 100px;
+        flex-shrink: 0;
+        font-size: 0.9rem;
+        color: #374151;
+        text-align: right;
+        padding-right: 12px;
+    }
+    .atxtt2-input,
+    .atxtt2-select {
+        flex: 1;
+        height: 34px;
+        padding: 4px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        font-size: 0.9rem;
+        color: #1e293b;
+        outline: none;
+        transition: border-color .2s;
+        background: #fff;
+    }
+    .atxtt2-input:focus,
+    .atxtt2-select:focus {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59,130,246,.15);
+    }
+    .atxtt2-radio-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 32px;
+        margin: 18px 0 8px;
+    }
+    .atxtt2-radio-row label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.9rem;
+        color: #374151;
+        cursor: pointer;
+    }
+    .atxtt2-btn-row {
+        display: flex;
+        justify-content: center;
+        gap: 16px;
+        margin-top: 28px;
+    }
+    .atxtt2-btn {
+        padding: 8px 36px;
+        font-size: 0.95rem;
+        font-weight: 500;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background .2s;
+    }
+    .atxtt2-btn-ok {
+        background: #2563eb;
+    }
+    .atxtt2-btn-ok:hover {
+        background: #1d4ed8;
+    }
+    .atxtt2-btn-ok:disabled {
+        background: #94a3b8;
+        cursor: not-allowed;
+    }
+</style>
+
+<div class="atxtt2-backdrop">
+    <div class="atxtt2-card">
+        <div class="atxtt2-title">零稅率申報檔</div>
+
+        @if (!string.IsNullOrEmpty(Model.LoadError))
+        {
+            <div class="alert alert-danger">@Model.LoadError</div>
+        }
+
+        <div class="atxtt2-row">
+            <label class="atxtt2-label" for="atxtt2HisId">期別</label>
+            <input type="text" id="atxtt2HisId" class="atxtt2-input" value="@Model.DefaultHisId" />
+        </div>
+
+        <div class="atxtt2-row">
+            <label class="atxtt2-label" for="atxtt2UseId">公司別</label>
+            <select id="atxtt2UseId" class="atxtt2-select">
+                <option value="">-- 請選擇 --</option>
+                @foreach (var opt in Model.UseIdOptions)
+                {
+                    if (opt.Id == Model.DefaultUseId)
+                    {
+                        <option value="@opt.Id" selected>@opt.Id - @opt.Name</option>
+                    }
+                    else
+                    {
+                        <option value="@opt.Id">@opt.Id - @opt.Name</option>
+                    }
+                }
+            </select>
+        </div>
+
+        <div class="atxtt2-row">
+            <label class="atxtt2-label" for="atxtt2UserId">作業人員</label>
+            <select id="atxtt2UserId" class="atxtt2-select">
+                <option value="">-- 請選擇 --</option>
+                @foreach (var opt in Model.UserIdOptions)
+                {
+                    if (opt.Id == Model.DefaultUserId)
+                    {
+                        <option value="@opt.Id" selected>@opt.Id - @opt.Name</option>
+                    }
+                    else
+                    {
+                        <option value="@opt.Id">@opt.Id - @opt.Name</option>
+                    }
+                }
+            </select>
+        </div>
+
+        <div class="atxtt2-radio-row">
+            <label><input type="radio" name="reportType" value="1" checked /> 零稅率申報檔</label>
+            <label><input type="radio" name="reportType" value="2" /> 固資退稅申報檔</label>
+        </div>
+
+        <div class="atxtt2-btn-row">
+            <button type="button" id="atxtt2OkBtn" class="atxtt2-btn atxtt2-btn-ok">確定</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const hisIdEl   = document.getElementById('atxtt2HisId');
+    const useIdEl   = document.getElementById('atxtt2UseId');
+    const userIdEl  = document.getElementById('atxtt2UserId');
+    const okBtn     = document.getElementById('atxtt2OkBtn');
+    function preselectCombo(selectEl, savedVal) {
+        if (!savedVal) return;
+        var val = savedVal.trim();
+        for (var i = 0; i < selectEl.options.length; i++) {
+            if (selectEl.options[i].value.trim() === val) {
+                selectEl.selectedIndex = i;
+                return;
+            }
+        }
+    }
+    preselectCombo(useIdEl, localStorage.getItem('erpLoginBUId'));
+    preselectCombo(userIdEl, localStorage.getItem('erpLoginUserId'));
+
+    okBtn.addEventListener('click', function () {
+        if (!hisIdEl.value.trim()) {
+            Swal.fire({ icon: 'warning', title: '請輸入期別' });
+            return;
+        }
+        if (!useIdEl.value) {
+            Swal.fire({ icon: 'warning', title: '請輸入公司別' });
+            return;
+        }
+        if (!userIdEl.value) {
+            Swal.fire({ icon: 'warning', title: '請輸入作業人員' });
+            return;
+        }
+
+        var reportType = document.querySelector('input[name="reportType"]:checked').value;
+
+        okBtn.disabled = true;
+        okBtn.textContent = '產檔中...';
+
+        const url = new URL(window.location.href);
+        url.searchParams.set('handler', 'Export');
+        url.searchParams.set('hisId', hisIdEl.value.trim());
+        url.searchParams.set('useId', useIdEl.value);
+        url.searchParams.set('userId', userIdEl.value);
+        url.searchParams.set('reportType', reportType);
+
+        fetch(url.toString(), {
+            headers: { 'X-JWTID': localStorage.getItem('jwtId') || '' }
+        })
+        .then(function (resp) {
+            if (!resp.ok) {
+                return resp.json().then(function (err) { throw new Error(err.error || '產檔失敗'); });
+            }
+            return resp.blob().then(function (blob) {
+                var cd = resp.headers.get('Content-Disposition') || '';
+                var match = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';\s]+)/i);
+                var fileName = match ? decodeURIComponent(match[1]) : 'TaxReport.T02';
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(a.href);
+                Swal.fire({ icon: 'success', title: '轉檔完成!' });
+            });
+        })
+        .catch(function (err) {
+            Swal.fire({ icon: 'error', title: '產檔失敗', text: err.message });
+        })
+        .finally(function () {
+            okBtn.disabled = false;
+            okBtn.textContent = '確定';
+        });
+    });
+
+})();
+</script>
