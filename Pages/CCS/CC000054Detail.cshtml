@@ -524,9 +524,12 @@ async function normalizeLookupCodeName(field, rawVal) {
   return { code, name: '' };
 }
 
-function makeLookupValueElement(code, name) {
+function makeLookupValueElement(code, name, codeWidth) {
   const wrap = document.createElement('div');
   wrap.className = 'mf-lk-view';
+  if (Number.isFinite(Number(codeWidth)) && Number(codeWidth) > 0) {
+    wrap.style.gridTemplateColumns = `${Number(codeWidth)}px minmax(60px, 1fr)`;
+  }
 
   const left = document.createElement('span');
   left.className = 'mf-lk-code';
@@ -540,8 +543,20 @@ function makeLookupValueElement(code, name) {
   return wrap;
 }
 
-function getLookupCodeWidth(fieldWidth) {
+function getLookupCodeWidth(field, fieldWidth) {
   const w = Number(fieldWidth) || 0;
+  const comboTextSizeRaw =
+    field?.ComboTextSize ??
+    field?.comboTextSize ??
+    field?.combotextsize;
+  const comboTextSize = parseInt(String(comboTextSizeRaw ?? '').trim(), 10);
+  if (Number.isFinite(comboTextSize) && comboTextSize > 0) {
+    if (w > 0) {
+      // ComboTextSize: 代碼欄寬（像素）
+      return Math.max(40, Math.min(comboTextSize, Math.max(40, w - 40)));
+    }
+    return Math.max(40, comboTextSize);
+  }
   return Math.max(52, Math.min(96, Math.floor(w * 0.36)));
 }
 
@@ -581,6 +596,18 @@ function getLookupNameEditor(inputEl) {
   return inputEl?._lookupNameEditor || null;
 }
 
+function setLookupNameDisplay(inputEl, text) {
+  const nameEditor = getLookupNameEditor(inputEl);
+  if (!nameEditor) return;
+  const next = String(text || '');
+  if (nameEditor instanceof HTMLInputElement || nameEditor instanceof HTMLTextAreaElement) {
+    nameEditor.value = next;
+  } else {
+    nameEditor.textContent = next;
+    nameEditor.title = next;
+  }
+}
+
 function getLookupMetaFromInput(inputEl) {
   if (!inputEl) return null;
   const table = String(inputEl.dataset.lookupTable || '').trim();
@@ -611,7 +638,10 @@ function positionMfSuggest(inputEl) {
   if (!inputEl) return;
   const box = ensureMfSuggest();
   const rect = inputEl.getBoundingClientRect();
-  const minWidth = 280;
+  const nameEditor = getLookupNameEditor(inputEl);
+  const nameWidth = nameEditor ? (nameEditor.getBoundingClientRect?.().width || 0) : 0;
+  const fullWidth = rect.width + nameWidth;
+  const minWidth = Math.max(220, fullWidth || rect.width);
   const maxWidth = Math.max(minWidth, window.innerWidth - 24);
   const width = Math.min(maxWidth, Math.max(rect.width, minWidth));
   let left = rect.left + window.scrollX;
@@ -636,13 +666,14 @@ function applyLookupSelection(inputEl, option) {
   const code = String(option.value || '').trim();
   const label = String(option.label || '').trim();
   inputEl.value = code;
-  const nameEditor = getLookupNameEditor(inputEl);
-  if (nameEditor) nameEditor.value = label;
+  setLookupNameDisplay(inputEl, label);
 }
 
 function renderMfSuggest(inputEl, options, forceAll = false) {
   const box = ensureMfSuggest();
   const q = forceAll ? '' : String(inputEl?.value || '').trim().toLowerCase();
+  const currentRaw = String(inputEl?.value || '').trim().toLowerCase();
+  const current = currentRaw.split(/\s*-\s*/)[0].trim();
   const list = q
     ? (options || []).filter(o =>
         String(o.value || '').toLowerCase().includes(q) ||
@@ -658,7 +689,9 @@ function renderMfSuggest(inputEl, options, forceAll = false) {
   list.slice(0, 200).forEach(o => {
     const item = document.createElement('div');
     item.className = 'mf-suggest-item';
-    item.innerHTML = `<div class="mf-suggest-code">${o.value}</div><div class="mf-suggest-label">${o.label}</div>`;
+    const code = String(o.value || '').trim();
+    if (code && code.toLowerCase() === current) item.classList.add('is-selected');
+    item.textContent = o.value ? `${o.value} - ${o.label}` : (o.label || '');
     item.addEventListener('mousedown', (e) => {
       e.preventDefault();
       applyLookupSelection(inputEl, o);
@@ -666,6 +699,9 @@ function renderMfSuggest(inputEl, options, forceAll = false) {
     });
     box.appendChild(item);
   });
+  if (!box.querySelector('.mf-suggest-item.is-selected')) {
+    box.querySelector('.mf-suggest-item')?.classList.add('is-selected');
+  }
 
   positionMfSuggest(inputEl);
   box.style.display = 'block';
@@ -685,10 +721,9 @@ function commitLookupInputValue(inputEl) {
   if (!inputEl) return;
   const options = __mfSuggestTarget === inputEl ? __mfSuggestOptions : [];
   const textRaw = String(inputEl.value || '').trim();
-  const nameEditor = getLookupNameEditor(inputEl);
   if (!textRaw) {
     inputEl.value = '';
-    if (nameEditor) nameEditor.value = '';
+    setLookupNameDisplay(inputEl, '');
     return;
   }
 
@@ -709,7 +744,7 @@ function commitLookupInputValue(inputEl) {
   }
 
   inputEl.value = token;
-  if (nameEditor) nameEditor.value = '';
+  setLookupNameDisplay(inputEl, '');
 }
 
 function bindLookupSuggestInput(inputEl) {
@@ -740,16 +775,172 @@ function bindLookupSuggestInput(inputEl) {
     if (!allSelected) return;
     e.preventDefault();
     inputEl.value = '';
-    const nameEditor = getLookupNameEditor(inputEl);
-    if (nameEditor) nameEditor.value = '';
+    setLookupNameDisplay(inputEl, '');
     if (__mfSuggestTarget === inputEl) renderMfSuggest(inputEl, __mfSuggestOptions, false);
   });
 }
 
-function openLookupPicker(inputEl) {
+let __lookupDialogEl = null;
+let __lookupDialogModal = null;
+let __lookupDialogState = {
+  inputEl: null,
+  options: [],
+  filtered: [],
+  selectedCode: ''
+};
+
+function ensureLookupDialog() {
+  if (__lookupDialogEl) return __lookupDialogEl;
+  const host = document.createElement('div');
+  host.className = 'modal fade ccs-lookup-dialog';
+  host.tabIndex = -1;
+  host.setAttribute('aria-hidden', 'true');
+  host.innerHTML = `
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">名稱查詢</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="ccs-lk-filter">
+            <input type="text" class="form-control form-control-sm" data-lk-filter="code" placeholder="代碼篩選">
+            <input type="text" class="form-control form-control-sm" data-lk-filter="name" placeholder="名稱篩選">
+          </div>
+          <div class="ccs-lk-list-wrap">
+            <table class="table table-sm mb-0 ccs-lk-table">
+              <thead>
+                <tr><th style="width:120px">代碼</th><th>名稱</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-primary btn-sm" data-lk-action="ok">確定</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(host);
+  __lookupDialogEl = host;
+  __lookupDialogModal = bootstrap.Modal.getOrCreateInstance(host);
+
+  const codeFilter = host.querySelector('[data-lk-filter="code"]');
+  const nameFilter = host.querySelector('[data-lk-filter="name"]');
+  const tbody = host.querySelector('tbody');
+  const okBtn = host.querySelector('[data-lk-action="ok"]');
+
+  const renderRows = () => {
+    const codeQ = String(codeFilter?.value || '').trim().toLowerCase();
+    const nameQ = String(nameFilter?.value || '').trim().toLowerCase();
+    const all = Array.isArray(__lookupDialogState.options) ? __lookupDialogState.options : [];
+    const filtered = all.filter(o => {
+      const v = String(o.value || '').toLowerCase();
+      const n = String(o.label || '').toLowerCase();
+      if (codeQ && !v.includes(codeQ)) return false;
+      if (nameQ && !n.includes(nameQ)) return false;
+      return true;
+    });
+    __lookupDialogState.filtered = filtered;
+    if (!tbody) return;
+    tbody.innerHTML = filtered.map(o => {
+      const code = String(o.value || '');
+      const name = String(o.label || '');
+      const sel = code === __lookupDialogState.selectedCode ? ' class="is-selected"' : '';
+      return `<tr data-code="${code.replace(/"/g, '&quot;')}"${sel}><td>${code}</td><td>${name}</td></tr>`;
+    }).join('');
+    const selected = tbody.querySelector('tr.is-selected') || tbody.querySelector('tr');
+    if (selected) {
+      tbody.querySelectorAll('tr').forEach(tr => tr.classList.remove('is-selected'));
+      selected.classList.add('is-selected');
+      __lookupDialogState.selectedCode = selected.getAttribute('data-code') || '';
+    }
+  };
+
+  const applySelected = () => {
+    const inputEl = __lookupDialogState.inputEl;
+    if (!inputEl) return;
+    const selected = (__lookupDialogState.filtered || []).find(o => String(o.value || '') === __lookupDialogState.selectedCode);
+    if (!selected) return;
+    applyLookupSelection(inputEl, selected);
+    __lookupDialogModal?.hide();
+  };
+
+  host.addEventListener('shown.bs.modal', () => {
+    setTimeout(() => codeFilter?.focus(), 0);
+  });
+
+  codeFilter?.addEventListener('input', renderRows);
+  nameFilter?.addEventListener('input', renderRows);
+  okBtn?.addEventListener('click', applySelected);
+
+  tbody?.addEventListener('click', (e) => {
+    const tr = e.target.closest('tr[data-code]');
+    if (!tr) return;
+    tbody.querySelectorAll('tr').forEach(x => x.classList.remove('is-selected'));
+    tr.classList.add('is-selected');
+    __lookupDialogState.selectedCode = tr.getAttribute('data-code') || '';
+  });
+
+  tbody?.addEventListener('dblclick', (e) => {
+    const tr = e.target.closest('tr[data-code]');
+    if (!tr) return;
+    __lookupDialogState.selectedCode = tr.getAttribute('data-code') || '';
+    applySelected();
+  });
+
+  host.addEventListener('keydown', (e) => {
+    const rows = Array.from(tbody?.querySelectorAll('tr[data-code]') || []);
+    if (!rows.length) return;
+    const cur = rows.findIndex(r => r.classList.contains('is-selected'));
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = e.key === 'ArrowDown'
+        ? Math.min(rows.length - 1, Math.max(0, cur + 1))
+        : Math.max(0, cur <= 0 ? 0 : cur - 1);
+      rows.forEach(r => r.classList.remove('is-selected'));
+      rows[next].classList.add('is-selected');
+      __lookupDialogState.selectedCode = rows[next].getAttribute('data-code') || '';
+      rows[next].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      applySelected();
+    }
+  });
+
+  host._renderRows = renderRows;
+  return host;
+}
+
+async function openLookupDropdown(inputEl, forceAll = true) {
   if (!inputEl) return;
-  inputEl.focus();
-  showFormLookupSuggest(inputEl, true);
+  try {
+    inputEl.focus();
+  } catch { }
+  await showFormLookupSuggest(inputEl, forceAll);
+}
+
+async function openLookupDialog(inputEl) {
+  if (!inputEl) return;
+  const meta = getLookupMetaFromInput(inputEl);
+  if (!meta) return;
+  const options = await getLookupOptions(meta);
+  const host = ensureLookupDialog();
+  __lookupDialogState.inputEl = inputEl;
+  __lookupDialogState.options = options || [];
+  __lookupDialogState.filtered = options || [];
+  __lookupDialogState.selectedCode = String(inputEl.value || '').trim();
+  const codeFilter = host.querySelector('[data-lk-filter="code"]');
+  const nameFilter = host.querySelector('[data-lk-filter="name"]');
+  if (codeFilter) codeFilter.value = '';
+  if (nameFilter) nameFilter.value = '';
+  if (typeof host._renderRows === 'function') host._renderRows();
+  __lookupDialogModal?.show();
+}
+
+async function openLookupPicker(inputEl) {
+  await openLookupDialog(inputEl);
 }
 
 const __layoutEditEnabled = (() => {
@@ -2167,8 +2358,9 @@ function enableFormLayoutEditing(container, dictName) {
           const lookupCode = lookupPair.code ?? '';
           const lookupName = lookupPair.name ?? '';
           if (__formRenderToken[tabKey] !== token) return;
+          const codeWidth = lookupMeta ? getLookupCodeWidth(f, layout.fieldWidth) : layout.fieldWidth;
           const span = lookupMeta
-            ? makeLookupValueElement(lookupCode, lookupName)
+            ? makeLookupValueElement(lookupCode, lookupName, codeWidth)
             : makeValueElement(f, val);
           span.classList.add('mf-view');
           span.style.position = 'absolute';
@@ -2208,7 +2400,6 @@ function enableFormLayoutEditing(container, dictName) {
             editor.style.position = 'absolute';
             editor.style.top = `${layout.fieldTop}px`;
             editor.style.left = `${layout.fieldLeft}px`;
-            const codeWidth = lookupMeta ? getLookupCodeWidth(layout.fieldWidth) : layout.fieldWidth;
             editor.style.width = `${codeWidth}px`;
             editor.style.height = `${layout.fieldHeight}px`;
             editor.style.minHeight = `${layout.fieldHeight}px`;
@@ -2223,46 +2414,51 @@ function enableFormLayoutEditing(container, dictName) {
               lookupTrigger.type = 'button';
               lookupTrigger.className = 'mf-lk-trigger';
               lookupTrigger.setAttribute('aria-label', '開啟清單');
-              lookupTrigger.textContent = '▾';
+              lookupTrigger.textContent = '';
               lookupTrigger.style.position = 'absolute';
-              lookupTrigger.style.top = `${layout.fieldTop}px`;
-              lookupTrigger.style.left = `${layout.fieldLeft + codeWidth - 20}px`;
-              lookupTrigger.style.width = `20px`;
-              lookupTrigger.style.height = `${layout.fieldHeight}px`;
-              lookupTrigger.style.minHeight = `${layout.fieldHeight}px`;
+              lookupTrigger.style.top = `${layout.fieldTop + Math.max(0, Math.floor((layout.fieldHeight - 18) / 2))}px`;
+              lookupTrigger.style.left = `${layout.fieldLeft + codeWidth - 22}px`;
+              lookupTrigger.style.width = `18px`;
+              lookupTrigger.style.height = `18px`;
+              lookupTrigger.style.minHeight = `18px`;
               lookupTrigger.addEventListener('mousedown', (ev) => {
                 ev.preventDefault();
                 ev.stopPropagation();
                 __mfSuggestKeepUntil = Date.now() + 250;
                 if (lookupTrigger?.disabled) return;
-                openLookupPicker(editor);
+                openLookupDropdown(editor, true);
               });
-              lookupNameEditor = document.createElement('input');
-              lookupNameEditor.type = 'text';
-              lookupNameEditor.className = 'form-control form-control-sm mf-lk-edit-name d-none';
-              lookupNameEditor.readOnly = true;
-              lookupNameEditor.value = lookupName || '';
+              lookupNameEditor = document.createElement('button');
+              lookupNameEditor.type = 'button';
+              lookupNameEditor.className = 'mf-lk-name-btn d-none';
+              lookupNameEditor.textContent = lookupName || '';
+              lookupNameEditor.title = lookupName || '';
               lookupNameEditor.style.position = 'absolute';
               lookupNameEditor.style.top = `${layout.fieldTop}px`;
               lookupNameEditor.style.left = `${layout.fieldLeft + codeWidth}px`;
               lookupNameEditor.style.width = `${Math.max(60, layout.fieldWidth - codeWidth)}px`;
               lookupNameEditor.style.height = `${layout.fieldHeight}px`;
               lookupNameEditor.style.minHeight = `${layout.fieldHeight}px`;
-              applyEditColor(lookupNameEditor, f?.EditColor, true);
               editor._lookupNameEditor = lookupNameEditor;
               editor._lookupTrigger = lookupTrigger;
               bindLookupSuggestInput(editor);
-              lookupNameEditor.addEventListener('mousedown', (ev) => {
+              lookupNameEditor.addEventListener('click', (ev) => {
                 ev.preventDefault();
-                editor.focus();
-                const len = (editor.value || '').length;
-                try { editor.setSelectionRange(len, len); } catch { }
+                ev.stopPropagation();
+                if (lookupNameEditor?.disabled || lookupTrigger?.disabled) return;
+                openLookupDialog(editor);
               });
               lookupNameEditor.addEventListener('keydown', (ev) => {
+                if (ev.key === 'F4' || ev.key === 'Enter') {
+                  ev.preventDefault();
+                  if (lookupNameEditor?.disabled || lookupTrigger?.disabled) return;
+                  openLookupDialog(editor);
+                  return;
+                }
                 if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
                 ev.preventDefault();
                 editor.value = '';
-                lookupNameEditor.value = '';
+                setLookupNameDisplay(editor, '');
                 if (__mfSuggestTarget === editor) renderMfSuggest(editor, __mfSuggestOptions, false);
                 editor.focus();
               });
@@ -2991,7 +3187,7 @@ function enableFormLayoutEditing(container, dictName) {
     host.querySelectorAll('.mf-field').forEach(f => {
       const view = f.querySelector('.mf-view');
       const edit = f.querySelector('.mf-edit');
-      const lkEditName = f.querySelector('.mf-lk-edit-name');
+      const lkEditName = f.querySelector('.mf-lk-name-btn');
       const lkTrigger = f.querySelector('.mf-lk-trigger');
       if (!view || !edit) return;
       // Keep same visual layout in both modes: always show edit controls.
@@ -3012,8 +3208,7 @@ function enableFormLayoutEditing(container, dictName) {
         }
       }
       if (lkEditName) {
-        lkEditName.setAttribute('readonly', 'readonly');
-        if (!editable) lkEditName.setAttribute('disabled', 'disabled');
+        if (forceDisabled) lkEditName.setAttribute('disabled', 'disabled');
         else lkEditName.removeAttribute('disabled');
       }
       if (lkTrigger) {
@@ -3405,7 +3600,7 @@ function enableFormLayoutEditing(container, dictName) {
     if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) return;
     if (!el.closest('.ccs-detail-page')) return;
     if (el.readOnly || el.disabled) return;
-    if (!el.classList.contains('mf-edit') && !el.classList.contains('mf-lk-edit-name') && !el.classList.contains('cell-edit')) return;
+    if (!el.classList.contains('mf-edit') && !el.classList.contains('cell-edit')) return;
     ev.preventDefault();
     if (el instanceof HTMLInputElement && el.type === 'checkbox') {
       el.checked = false;
@@ -3724,48 +3919,63 @@ function enableFormLayoutEditing(container, dictName) {
   color: #0f172a !important;
   box-shadow: none !important;
 }
-.ccs-detail-page .mf-field .mf-lk-edit-name {
-  padding: 0 6px !important;
+.ccs-detail-page .mf-field .mf-edit.mf-input.mf-lk-code-input {
+  padding-right: 24px !important;
+  border-radius: 0 !important;
+}
+.ccs-detail-page .mf-field .mf-lk-name-btn {
+  padding: 2px 8px !important;
   border: 1px solid var(--field-border) !important;
   border-left: none !important;
   border-radius: 0 !important;
   font-size: 12px !important;
   background: #fff !important;
-  color: #0f172a !important;
+  color: #495057 !important;
   box-shadow: none !important;
-}
-.ccs-detail-page .mf-field .mf-edit.mf-input.mf-lk-code-input {
-  padding-right: 20px !important;
-}
-.ccs-detail-page .mf-field .mf-lk-trigger {
-  border: 1px solid var(--field-border);
-  border-left: none;
-  border-radius: 0;
-  background: transparent !important;
-  background-image: none !important;
-  color: #4b5563;
-  font-size: 12px;
-  line-height: 1;
-  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
-  z-index: 2;
+}
+.ccs-detail-page .mf-field .mf-lk-name-btn:hover {
+  background: #f8f9fa !important;
+}
+.ccs-detail-page .mf-field .mf-lk-trigger {
+  border: 0;
+  border-radius: 0;
+  background: transparent !important;
+  background-image: none !important;
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
+  padding: 0;
+  cursor: pointer;
+  z-index: 6;
   -webkit-appearance: none;
   appearance: none;
   box-shadow: none;
 }
+.ccs-detail-page .mf-field .mf-lk-trigger::before {
+  content: "";
+  display: block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #6b7280;
+  margin: 0 auto;
+}
 .ccs-detail-page .mf-field .mf-lk-trigger:disabled {
   background: transparent !important;
   background-image: none !important;
-  color: #4b5563;
-  border-color: var(--field-border);
   opacity: 1 !important;
   cursor: default;
 }
 .ccs-detail-page .mf-field .mf-edit.mf-input:disabled,
-.ccs-detail-page .mf-field .mf-lk-edit-name:disabled {
+.ccs-detail-page .mf-field .mf-lk-name-btn:disabled {
   background: #fff !important;
   color: #0f172a !important;
   opacity: 1 !important;
@@ -3773,34 +3983,83 @@ function enableFormLayoutEditing(container, dictName) {
 .mf-suggest {
   position: absolute;
   background: #fff;
-  border: 1px solid #c9d2e3;
+  border: 1px solid #b6c2d9;
   border-radius: 6px;
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
-  max-height: 220px;
+  box-shadow: 0 8px 20px rgba(30, 41, 59, 0.18);
+  max-height: 300px;
   overflow-x: hidden;
   overflow-y: auto;
   z-index: 2200;
-  font-size: 0.82rem;
+  font-size: 0.86rem;
 }
 .mf-suggest-item {
-  display: flex;
-  gap: 6px;
-  padding: 4px 6px;
+  display: block;
+  padding: 4px 10px;
   cursor: pointer;
-}
-.mf-suggest-item:hover {
-  background: #eef3ff;
-}
-.mf-suggest-code {
-  min-width: 48px;
-  font-weight: 600;
-  color: #1d3b6b;
-}
-.mf-suggest-label {
-  color: #374151;
+  line-height: 1.35;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.mf-suggest-item:hover {
+  background: #e2e8f0;
+}
+.mf-suggest-item.is-selected {
+  background: #cfe1ff;
+  color: #0f2f6b;
+  font-weight: 600;
+}
+.ccs-lookup-dialog .modal-dialog {
+  --bs-modal-width: 520px;
+  margin: 4rem auto;
+}
+.ccs-lookup-dialog .modal-content {
+  border: 1px solid #5f87c1;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.ccs-lookup-dialog .modal-header {
+  padding: 7px 10px;
+  background: #f5f7fb;
+  border-bottom: 1px solid #ced8e8;
+}
+.ccs-lookup-dialog .modal-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.ccs-lk-filter {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ccs-lk-list-wrap {
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid #cad4e4;
+}
+.ccs-lk-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f6f8fc;
+}
+.ccs-lk-table th,
+.ccs-lk-table td {
+  font-size: 0.75rem;
+  padding: 2px 4px !important;
+  border-color: #d2dae8 !important;
+}
+.ccs-lk-table tbody tr {
+  cursor: pointer;
+}
+.ccs-lk-table tbody tr.is-selected {
+  background: #c8d7ee;
+}
+.ccs-lookup-dialog .modal-footer {
+  padding: 6px 10px;
+  border-top: 1px solid #d6deec;
+  background: #f7f9fd;
 }
 .ccs-detail-page .mf-field .mf-edit.mf-input:focus {
   border-color: #5b8def !important;
@@ -4274,6 +4533,7 @@ function enableFormLayoutEditing(container, dictName) {
 <script src="~/js/ccsUpdateLog.js" asp-append-version="true"></script>
 
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
 
 
 
