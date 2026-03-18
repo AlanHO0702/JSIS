@@ -1,0 +1,160 @@
+@*
+    BT000011 - 申報結算(401)
+    對應 Delphi: SendEInvDLL.pas
+    自訂按鈕功能:
+      - btnC2: 空白字軌上傳
+    行為:
+      - 開啟 Modal 輸入申報期別 (HisId)，預設帶入目前選取列的 HisId
+      - 檢查 EInvTradeVan → CSV 下載；否則檢查 EInvXMLRev → XML 存檔至伺服器
+*@
+@model dynamic
+
+<div class="modal" id="sendEInvDLLModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:360px;">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" style="font-size:16px;">空白字軌上傳</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body py-3">
+        <div class="row align-items-center">
+          <label class="col-4 col-form-label col-form-label-sm text-end">申報期別</label>
+          <div class="col-6">
+            <input type="text" class="form-control form-control-sm" id="sendEInvDLL_HisId" placeholder="例: 115.01" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button id="sendEInvDLL_BtnOK" type="button" class="btn btn-primary btn-sm">確定</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+    window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+    let bsModal = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    const withJwtHeaders = (init = {}) => {
+        const jwt = localStorage.getItem('jwtId');
+        const headers = Object.assign({}, init.headers || {});
+        if (jwt) headers['X-JWTID'] = jwt;
+        return { ...init, headers };
+    };
+
+    // 從目前選取列取得 HisId
+    const readCurrentHisId = (ctx) => {
+        // 嘗試從 ctx 取得
+        if (ctx?.row?.HisId) return ctx.row.HisId.toString().trim();
+        // 嘗試從 grid 選取列取得
+        const grid = document.getElementById('mainGrid');
+        if (!grid) return '';
+        const sel = grid.querySelector('tbody tr.table-active, tbody tr.selected');
+        if (!sel) return '';
+        const td = sel.querySelector('td[data-field="HisId"]');
+        const val = td?.querySelector('.cell-edit')?.value
+            ?? td?.querySelector('.cell-view')?.textContent?.trim();
+        return (val || '').trim();
+    };
+
+    // 開啟 Modal
+    const openSendEInvDLL = (ctx) => {
+        const modalEl = $('sendEInvDLLModal');
+        if (!modalEl) return;
+
+        if (!bsModal && window.bootstrap?.Modal) {
+            bsModal = new bootstrap.Modal(modalEl, { backdrop: 'static' });
+        }
+
+        // 預設帶入目前列的 HisId
+        const hisIdInput = $('sendEInvDLL_HisId');
+        if (hisIdInput) hisIdInput.value = readCurrentHisId(ctx);
+
+        if (bsModal) bsModal.show();
+    };
+
+    // 執行上傳
+    const doSendEInvDLL = async () => {
+        const hisId = $('sendEInvDLL_HisId')?.value?.trim();
+        if (!hisId) {
+            Swal.fire({ icon: 'warning', title: '請輸入申報期別' });
+            return;
+        }
+
+        Swal.fire({
+            title: '處理中...',
+            text: '正在執行空白字軌上傳',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            didOpen: () => Swal.showLoading()
+        });
+
+        try {
+            const resp = await fetch('/api/EInv/SendEInvDLL', withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ HisId: hisId })
+            }));
+
+            const contentType = resp.headers.get('Content-Type') || '';
+
+            // TradeVan CSV → 觸發檔案下載
+            if (contentType.includes('text/csv') || contentType.includes('application/octet-stream')) {
+                const blob = await resp.blob();
+                const disposition = resp.headers.get('Content-Disposition') || '';
+                let fileName = `${hisId}.csv`;
+                const match = disposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)/i);
+                if (match) fileName = decodeURIComponent(match[1]);
+
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+
+                Swal.fire({ icon: 'success', title: '傳送完成', text: `已下載 ${fileName}` });
+                if (bsModal) bsModal.hide();
+                return;
+            }
+
+            // JSON 回應 (XML 模式或錯誤)
+            const data = await resp.json();
+
+            if (!resp.ok || data.ok === false) {
+                Swal.fire({ icon: 'error', title: '執行失敗', text: data.error || data.message || `HTTP ${resp.status}` });
+                return;
+            }
+
+            Swal.fire({ icon: 'success', title: data.message || '傳送完成' });
+            if (bsModal) bsModal.hide();
+        } catch (err) {
+            console.error('SendEInvDLL error:', err);
+            Swal.fire({ icon: 'error', title: '執行錯誤', text: err.message });
+        }
+    };
+
+    // 綁定確定按鈕
+    const bindEvents = () => {
+        $('sendEInvDLL_BtnOK')?.addEventListener('click', doSendEInvDLL);
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bindEvents);
+    } else {
+        bindEvents();
+    }
+
+    // 註冊 btnC2 (SingleGrid 頁面使用 SingleGridCustomHandlers)
+    window.SingleGridCustomHandlers = window.SingleGridCustomHandlers || {};
+    window.SingleGridCustomHandlers['BT000011'] = window.SingleGridCustomHandlers['BT000011'] || {};
+    window.SingleGridCustomHandlers['BT000011'].btnC2 = openSendEInvDLL;
+})();
+</script>
