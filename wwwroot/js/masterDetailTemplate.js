@@ -331,7 +331,17 @@
 
     if (dataType && String(dataType).toLowerCase().includes("date")) {
       const d = new Date(val);
-      if (!isNaN(d)) return d.toISOString().slice(0, 10).replace(/-/g, "/");
+      if (isNaN(d)) return String(val);
+      if (fmt) {
+        return fmt
+          .replace("yyyy", String(d.getFullYear()))
+          .replace("MM", String(d.getMonth() + 1).padStart(2, "0"))
+          .replace("dd", String(d.getDate()).padStart(2, "0"))
+          .replace("HH", String(d.getHours()).padStart(2, "0"))
+          .replace("mm", String(d.getMinutes()).padStart(2, "0"))
+          .replace("ss", String(d.getSeconds()).padStart(2, "0"));
+      }
+      return d.toISOString().slice(0, 10).replace(/-/g, "/");
     }
 
     if (typeof val === "number") {
@@ -367,19 +377,8 @@
   };
 
   const attachDatePicker = (td, inp) => {
-    if (!td || !inp || inp.readOnly) return;
+    if (!td || !inp) return;
     td.style.position = "relative";
-    inp.style.paddingRight = "22px";
-
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "btn btn-outline-secondary btn-sm date-picker-btn cell-edit d-none";
-    btn.innerHTML = "&#9662;";
-    btn.style.position = "absolute";
-    btn.style.right = "4px";
-    btn.style.top = "50%";
-    btn.style.transform = "translateY(-50%)";
-    btn.tabIndex = -1;
 
     const picker = document.createElement("input");
     picker.type = "date";
@@ -390,8 +389,8 @@
     picker.style.width = "1px";
     picker.style.height = "1px";
 
-    btn.addEventListener("click", () => {
-      if (inp.readOnly) return;
+    inp.addEventListener("click", () => {
+      if (!window._mdEditing || inp.readOnly) return;
       picker.value = toDateInputValue(inp.value);
       if (picker.showPicker) picker.showPicker();
       else picker.focus();
@@ -403,7 +402,6 @@
       inp.dataset.raw = v;
     });
 
-    td.appendChild(btn);
     td.appendChild(picker);
   };
 
@@ -528,7 +526,12 @@
           } else {
               const valText = display == null ? "" : fmtCell(display, DICT_MAP.fmt(f), DICT_MAP.dataType(f));
               span.textContent = valText;
-              inp.value = display == null ? "" : display;
+              // 日期欄位：inp.value 也使用格式化後的值（不含多餘的時分秒）
+              if (isDateType(DICT_MAP.dataType(f))) {
+                inp.value = valText;
+              } else {
+                inp.value = display == null ? "" : display;
+              }
               inp.dataset.raw = raw == null ? "" : raw;
 
               // ★ 若有 lookup 對照表，記錄並綁定雙擊下拉（編輯模式可選取，瀏覽模式唯讀）
@@ -977,9 +980,11 @@
         window._masterEditor.toggleEdit(true);
       }
       mWrapper?.scrollTo({ top: 0, behavior: "auto" });
-      forceAllEditable(mBody);
-      const firstEditable = mBody.querySelector('tr[data-state="added"] .cell-edit:not(.readonly-cell)');
-      firstEditable?.focus();
+      if (window._mdEditing || addMode) {
+        forceAllEditable(mBody);
+        const firstEditable = mBody.querySelector('tr[data-state="added"] .cell-edit:not(.readonly-cell)');
+        firstEditable?.focus();
+      }
     };
 
     // Detail 列點擊高亮
@@ -1037,10 +1042,12 @@
         window._detailEditor.toggleEdit(true);
       }
       dWrapper?.scrollTo({ top: 0, behavior: "auto" });
-      forceAllEditable(dBody);
-      forceRowEditable(dBody);
-      const firstEditable = dBody.querySelector('tr[data-state="added"] .cell-edit:not(.readonly-cell)');
-      firstEditable?.focus();
+      if (window._mdEditing || addMode) {
+        forceAllEditable(dBody);
+        forceRowEditable(dBody);
+        const firstEditable = dBody.querySelector('tr[data-state="added"] .cell-edit:not(.readonly-cell)');
+        firstEditable?.focus();
+      }
     };
 
     const addMasterRow = async () => {
@@ -1094,6 +1101,7 @@
     };
 
     const cancelAdd = async () => {
+      if (!addMode) return;   // 非新增模式時不執行，交給 toolbar 的取消 handler 處理
       masterData = masterData.filter(r => r.__state !== "added");
       detailData = detailData.filter(r => r.__state !== "added");
       currentMasterRow = masterData[0] || null;
@@ -1293,6 +1301,10 @@
 
     const refreshData = async () => {
       try {
+        // 記住捲動位置
+        const prevMasterScroll = mWrapper?.scrollTop || 0;
+        const prevDetailScroll = dWrapper?.scrollTop || 0;
+
         const freshRows = await fetch(masterUrl).then(r => r.json());
         masterData = Array.isArray(freshRows) ? freshRows : [];
         if (!cfg.MasterOrderBy) {
@@ -1312,6 +1324,10 @@
         if (tr) {
           await onMasterClick(tr, targetRow);
         }
+
+        // 還原捲動位置
+        if (mWrapper) mWrapper.scrollTop = prevMasterScroll;
+        if (dWrapper) dWrapper.scrollTop = prevDetailScroll;
       } catch (err) {
         console.warn("masterDetail refresh failed", err);
       }
