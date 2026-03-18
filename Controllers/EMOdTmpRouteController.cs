@@ -163,7 +163,8 @@ public class EMOdTmpRouteController : ControllerBase
         [FromQuery] string? bProc = null,
         [FromQuery] string? eProc = null,
         [FromQuery] string? procLike = null,
-        [FromQuery] string? procNameLike = null)
+        [FromQuery] string? procNameLike = null,
+        [FromQuery] string? procType = null)
     {
         await using var conn = new SqlConnection(_connStr);
         await conn.OpenAsync();
@@ -191,12 +192,33 @@ public class EMOdTmpRouteController : ControllerBase
             where.Add("ProcName LIKE @ProcNameLike");
             parameters.Add(new SqlParameter("@ProcNameLike", $"%{procNameLike.Trim()}%"));
         }
+        if (!string.IsNullOrWhiteSpace(procType) && int.TryParse(procType.Trim(), out var procTypeVal))
+        {
+            where.Add("ProcType = @ProcType");
+            parameters.Add(new SqlParameter("@ProcType", procTypeVal));
+        }
 
         var whereClause = where.Count > 0 ? "WHERE " + string.Join(" AND ", where) : "";
         var sql = $"SELECT ProcCode, ProcName FROM EmodProcInfo WITH (NOLOCK) {whereClause} ORDER BY ProcCode";
 
         await using var cmd = new SqlCommand(sql, conn);
         foreach (var p in parameters) cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value));
+
+        var rows = await ReadRowsAsync(cmd);
+        return Ok(new { ok = true, data = rows });
+    }
+
+    /// <summary>
+    /// 取得製程種類清單 (DISTINCT ProcType from EmodProcInfo)
+    /// </summary>
+    [HttpGet("GetProcTypes")]
+    public async Task<IActionResult> GetProcTypes()
+    {
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        await using var cmd = new SqlCommand(
+            "SELECT ProcType, ProcTypeName FROM FMEdProcType WITH (NOLOCK) ORDER BY ProcType", conn);
 
         var rows = await ReadRowsAsync(cmd);
         return Ok(new { ok = true, data = rows });

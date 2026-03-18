@@ -501,12 +501,14 @@
         const eProc = document.getElementById('rsEdtEProc').value.trim();
         const procLike = document.getElementById('rsEdtProcLike').value.trim();
         const procNameLike = document.getElementById('rsEdtProcNameLike').value.trim();
+        const procType = document.getElementById('rsEdtProcType')?.value.trim() || '';
 
         const params = new URLSearchParams();
         if (bProc) params.set('bProc', bProc);
         if (eProc) params.set('eProc', eProc);
         if (procLike) params.set('procLike', procLike);
         if (procNameLike) params.set('procNameLike', procNameLike);
+        if (procType) params.set('procType', procType);
 
         try {
             const res = await apiGet(`/api/EMOdTmpRoute/GetProcList?${params}`);
@@ -867,9 +869,13 @@
         document.getElementById('btnMsDown').addEventListener('click', msMoveDown);
         document.getElementById('btnRouteSetOk').addEventListener('click', confirmRouteSet);
 
-        ['rsEdtBProc', 'rsEdtEProc', 'rsEdtProcLike', 'rsEdtProcNameLike'].forEach(id => {
-            document.getElementById(id).addEventListener('keydown', e => { if (e.key === 'Enter') searchProcInModal(); });
+        ['rsEdtBProc', 'rsEdtEProc', 'rsEdtProcLike', 'rsEdtProcNameLike', 'rsEdtProcType'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') searchProcInModal(); });
         });
+
+        // 製程種類下拉選單
+        initProcTypeSuggest();
 
         // 備註欄 blur 儲存
         document.getElementById('txtDtlNote').addEventListener('blur', saveDtlNote);
@@ -879,6 +885,55 @@
             initColResize('masterGrid');
             initColResize('detailGrid');
         }, 500);
+    }
+
+    // ==================== 製程種類下拉選單 ====================
+    let procTypeList = [];
+
+    async function initProcTypeSuggest() {
+        const input = document.getElementById('rsEdtProcType');
+        const suggest = document.getElementById('procTypeSuggest');
+        const clearBtn = document.getElementById('btnProcTypeClear');
+        if (!input || !suggest) return;
+
+        // 載入清單
+        try {
+            const res = await apiGet('/api/EMOdTmpRoute/GetProcTypes');
+            procTypeList = (res.data || []).map(r => ({
+                code: String(r.ProcType ?? ''),
+                name: String(r.ProcTypeName ?? '').trim()
+            }));
+        } catch (e) { console.warn('載入製程種類失敗', e); }
+
+        function renderSuggest(filter) {
+            suggest.innerHTML = '';
+            const list = filter
+                ? procTypeList.filter(v => v.code.includes(filter) || v.name.includes(filter))
+                : procTypeList;
+            if (list.length === 0) { suggest.style.display = 'none'; return; }
+            list.forEach(item => {
+                const div = document.createElement('div');
+                div.style.cssText = 'display:flex; gap:8px; padding:4px 10px; cursor:pointer;';
+                div.innerHTML = `<span style="font-weight:600;min-width:36px;color:#1a56db">${item.code}</span><span style="color:#444">${item.name}</span>`;
+                div.addEventListener('mouseenter', () => div.style.background = '#e8f0fe');
+                div.addEventListener('mouseleave', () => div.style.background = '');
+                div.addEventListener('mousedown', e => {
+                    e.preventDefault();
+                    input.value = item.code;
+                    suggest.style.display = 'none';
+                    searchProcInModal();
+                });
+                suggest.appendChild(div);
+            });
+            suggest.style.display = '';
+        }
+
+        input.addEventListener('focus', () => renderSuggest(input.value.trim()));
+        input.addEventListener('input', () => renderSuggest(input.value.trim()));
+        input.addEventListener('blur', () => { suggest.style.display = 'none'; });
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => { input.value = ''; suggest.style.display = 'none'; });
+        }
     }
 
     document.addEventListener('DOMContentLoaded', init);
