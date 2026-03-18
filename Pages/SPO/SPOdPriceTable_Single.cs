@@ -65,6 +65,7 @@ namespace PcbErpApi.Pages.SPO
         public List<QueryFieldDef> QueryFields { get; private set; } = new();
         public List<LookupItem> Customers { get; private set; } = new();
         public List<LookupItem> Parts { get; private set; } = new();
+        public Dictionary<string, PartDefaultItem> PartDefaults { get; private set; } = new(StringComparer.OrdinalIgnoreCase);
         public int TotalCount { get; private set; }
 
         public async Task<IActionResult> OnGetDataAsync(string? sortBy = null, string? sortDir = null, int pageIndex = 1, int pageSize = 50)
@@ -106,6 +107,22 @@ namespace PcbErpApi.Pages.SPO
 
                 QueryFields = await LoadQueryFieldsAsync(ItemId, DictTableName, "TW");
                 ModeNum = await LoadModeAsync(ItemId);
+                var hasQueryParams = HasQueryParams(Request.Query);
+                if (!hasQueryParams)
+                {
+                    return new JsonResult(new
+                    {
+                        success = true,
+                        items = new List<Dictionary<string, object?>>(),
+                        totalCount = 0,
+                        pageNumber = pageIndex,
+                        pageSize,
+                        sortBy,
+                        sortDir,
+                        openNoRecord = true,
+                        hasQueryParams = false
+                    });
+                }
 
                 var filterParams = new List<SqlParameter>();
                 var baseFilter = BuildFilterSql(QueryFields, Request.Query, filterParams);
@@ -120,7 +137,6 @@ namespace PcbErpApi.Pages.SPO
                 var totalCount = await CountRowsAsync(TableName, combinedFilter, filterParams);
                 var items = await LoadRowsAsync(TableName, combinedFilter, orderBy, pageIndex, pageSize, filterParams);
 
-                var hasQueryParams = HasQueryParams(Request.Query);
                 return new JsonResult(new
                 {
                     success = true,
@@ -130,7 +146,7 @@ namespace PcbErpApi.Pages.SPO
                     pageSize,
                     sortBy,
                     sortDir,
-                    openNoRecord = false,
+                    openNoRecord = true,
                     hasQueryParams
                 });
             }
@@ -304,21 +320,33 @@ namespace PcbErpApi.Pages.SPO
 
             ModeNum = await LoadModeAsync(ItemId);
             await LoadLookupsAsync(ModeNum);
+            ViewData["PartDefaults"] = PartDefaults;
+            var hasQueryParams = HasQueryParams(Request.Query);
+            ViewData["OpenNoRecord"] = true;
+            ViewData["HasQueryParams"] = hasQueryParams;
 
-            var filterParams = new List<SqlParameter>();
-            var baseFilter = BuildFilterSql(QueryFields, Request.Query, filterParams);
-            var customFilter = BuildExtraFilter(filterParams);
-            var combinedFilter = CombineFilters(setup.FilterSql, baseFilter, customFilter);
-
-            try
+            if (hasQueryParams)
             {
-                TotalCount = await CountRowsAsync(TableName, combinedFilter, filterParams);
-                Items = await LoadRowsAsync(TableName, combinedFilter, OrderBy, PageNumber, PageSize, filterParams);
+                var filterParams = new List<SqlParameter>();
+                var baseFilter = BuildFilterSql(QueryFields, Request.Query, filterParams);
+                var customFilter = BuildExtraFilter(filterParams);
+                var combinedFilter = CombineFilters(setup.FilterSql, baseFilter, customFilter);
+
+                try
+                {
+                    TotalCount = await CountRowsAsync(TableName, combinedFilter, filterParams);
+                    Items = await LoadRowsAsync(TableName, combinedFilter, OrderBy, PageNumber, PageSize, filterParams);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Load rows failed for {ItemId}/{Table}", ItemId, TableName);
+                    LoadError = ex.Message;
+                    Items = new();
+                    TotalCount = 0;
+                }
             }
-            catch (Exception ex)
+            else
             {
-                _logger.LogError(ex, "Load rows failed for {ItemId}/{Table}", ItemId, TableName);
-                LoadError = ex.Message;
                 Items = new();
                 TotalCount = 0;
             }
@@ -617,6 +645,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         {
             Customers.Clear();
             Parts.Clear();
+            PartDefaults.Clear();
 
             var cs = GetConnStr();
             await using var conn = new SqlConnection(cs);
@@ -634,24 +663,38 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
                     }
                 }
 
-                const string sqlPn = @"SELECT PartNum, MatName FROM dbo.MINdMatInfo WITH (NOLOCK) ORDER BY PartNum";
+                const string sqlPn = @"SELECT PartNum, MatName, Unit, StdUsage FROM dbo.MINdMatInfo WITH (NOLOCK) ORDER BY PartNum";
                 await using (var cmd = new SqlCommand(sqlPn, conn))
                 await using (var rd = await cmd.ExecuteReaderAsync())
                 {
                     while (await rd.ReadAsync())
                     {
-                        Parts.Add(new LookupItem(rd["PartNum"]?.ToString() ?? string.Empty, rd["MatName"]?.ToString() ?? string.Empty));
+                        var partNum = rd["PartNum"]?.ToString() ?? string.Empty;
+                        var matName = rd["MatName"]?.ToString() ?? string.Empty;
+                        var unit = rd["Unit"]?.ToString() ?? string.Empty;
+                        decimal? stdUsage = null;
+                        if (rd["StdUsage"] != DBNull.Value) stdUsage = Convert.ToDecimal(rd["StdUsage"]);
+                        Parts.Add(new LookupItem(partNum, matName, unit, stdUsage));
+                        if (!string.IsNullOrWhiteSpace(partNum))
+                            PartDefaults[partNum] = new PartDefaultItem(unit, stdUsage);
                     }
                 }
             }
             else
             {
-                const string sqlMat = @"SELECT MatName, PartNum FROM dbo.MINdMatInfo WITH (NOLOCK) WHERE MB=1 ORDER BY PartNum";
+                const string sqlMat = @"SELECT MatName, PartNum, Unit, StdUsage FROM dbo.MINdMatInfo WITH (NOLOCK) WHERE MB=1 ORDER BY PartNum";
                 await using var cmd = new SqlCommand(sqlMat, conn);
                 await using var rd = await cmd.ExecuteReaderAsync();
                 while (await rd.ReadAsync())
                 {
-                    Parts.Add(new LookupItem(rd["MatName"]?.ToString() ?? string.Empty, rd["PartNum"]?.ToString() ?? string.Empty));
+                    var matName = rd["MatName"]?.ToString() ?? string.Empty;
+                    var partNum = rd["PartNum"]?.ToString() ?? string.Empty;
+                    var unit = rd["Unit"]?.ToString() ?? string.Empty;
+                    decimal? stdUsage = null;
+                    if (rd["StdUsage"] != DBNull.Value) stdUsage = Convert.ToDecimal(rd["StdUsage"]);
+                    Parts.Add(new LookupItem(matName, partNum, unit, stdUsage));
+                    if (!string.IsNullOrWhiteSpace(partNum))
+                        PartDefaults[partNum] = new PartDefaultItem(unit, stdUsage);
                 }
             }
         }
@@ -808,17 +851,11 @@ SELECT TOP 1 c.name
         private static bool HasQueryParams(IQueryCollection query)
         {
             if (query == null || query.Count == 0) return false;
-            foreach (var key in query.Keys)
-            {
-                if (string.IsNullOrWhiteSpace(key)) continue;
-                if (key.Equals("handler", StringComparison.OrdinalIgnoreCase)) continue;
-                if (key.Equals("pageIndex", StringComparison.OrdinalIgnoreCase)) continue;
-                if (key.Equals("pageSize", StringComparison.OrdinalIgnoreCase)) continue;
-                if (key.Equals("sortBy", StringComparison.OrdinalIgnoreCase)) continue;
-                if (key.Equals("sortDir", StringComparison.OrdinalIgnoreCase)) continue;
-                if (!string.IsNullOrWhiteSpace(query[key])) return true;
-            }
-            return false;
+            if (!query.TryGetValue("doQuery", out var doQuery)) return false;
+            var v = doQuery.ToString().Trim();
+            if (string.IsNullOrWhiteSpace(v)) return false;
+            return !v.Equals("0", StringComparison.OrdinalIgnoreCase)
+                   && !v.Equals("false", StringComparison.OrdinalIgnoreCase);
         }
 
         private string GetConnStr()
@@ -1059,7 +1096,8 @@ SELECT ItemId, SerialNum, ButtonName,
                 .ToList();
         }
 
-        public record LookupItem(string Value, string Label);
+        public record LookupItem(string Value, string Label, string Uom = "", decimal? Qnty = null);
+        public record PartDefaultItem(string Uom, decimal? Qnty);
 
         public class QueryFieldDef
         {
