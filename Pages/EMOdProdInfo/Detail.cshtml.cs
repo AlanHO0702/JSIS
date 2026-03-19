@@ -130,9 +130,8 @@ namespace PcbErpApi.Pages.EMOdProdInfo
                     Config.MasterApi = BuildByKeysApi(MasterTable, MasterKeyValues);
                 }
 
-                ExtraTabs = BuildExtraTabs();
-
                 var itemId = IsViewOnly ? "EMO00018" : "EMO00004";
+                ExtraTabs = await BuildExtraTabsAsync(itemId);
                 var tabCaptions = await LoadMasterTabCaptionsAsync(itemId);
                 var fieldLangs = await LoadFieldLangsAsync(MasterDict);
                 MasterTabs = BuildMasterTabs(masterDict, tabCaptions, fieldLangs);
@@ -228,99 +227,95 @@ namespace PcbErpApi.Pages.EMOdProdInfo
             return $"/api/CommonTable/ByKeys?table={Uri.EscapeDataString(table)}{qs}";
         }
 
-        private List<DetailTab> BuildExtraTabs()
+        // ── Detail 頁籤定義（從 DB CURdOCXTableSetUp 動態產生）─────────────
+        // ── Detail 頁籤定義 ─────────────────────────────────────────────
+        // 硬寫為主（DB 設定不完整，部分頁籤只在 Delphi 有定義），再從 DB 補上額外的
+        private static readonly List<DetailTab> _coreTabs = new()
         {
-            return new List<DetailTab>
+            new("layerpress", "壓合明細/替代料", "EMOdLayerPress",    "EMOdLayerPress",    new[] { "PartNum", "Revision" }),
+            new("boardsize",  "板材尺寸明細檔",  "EMOdProdPOP",       "EMOdProdPOP",       new[] { "PartNum", "Revision", "POP" }),
+            new("cutlayout",  "裁板/排版圖",    "EMOdProdMills",     "EMOdProdMills",     new[] { "PartNum", "Revision" }),
+            new("mixdetail",  "混裁明細檔",     "EMOdProdMixedDtl",  "EMOdProdMixedDtl",  new[] { "PartNum", "Revision" }),
+            new("haltlog",    "暫停記錄",       "EMOdVProdHoldMemo", "EMOdVProdHoldMemo", new[] { "PartNum", "Revision" }),
+            new("modifylog",  "修改記錄",       "EMOdProdModify",    "EMOdProdModify",    new[] { "PartNum", "Revision" }),
+            new("ecnlog",     "ECN記錄",       "EMOdProdECNLog",    "EMOdProdECNLog",    new[] { "PartNum", "Revision" }),
+            new("mergedetail","併板明細檔",     "EMOdPartMerge",     "EMOdPartMerge",     new[] { "PartNum", "Revision" }),
+            new("pressmethod","壓合方式",       "EMOdProdTier",      "EMOdProdTier",      new[] { "PartNum", "Revision", "LayerId" }),
+            new("layerroute", "途程內容",       "EMOdLayerRoute",    "EMOdLayerRoute",    new[] { "PartNum", "Revision", "LayerId" }),
+        };
+
+        // DB 補充時要跳過的 TableName（硬寫已涵蓋 + 功能重疊的）
+        private static readonly HashSet<string> _skipTableNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // 硬寫清單已有的
+            "EMOdLayerPress", "EMOdProdPOP", "EMOdProdMills", "EMOdProdMixedDtl",
+            "EMOdVProdHoldMemo", "EMOdProdModify", "EMOdProdECNLog", "EMOdPartMerge",
+            "EMOdProdTier", "EMOdLayerRoute", "EMOdProdMap",
+            // DB 有但不需要顯示的
+            "EMOdLayerPressDisplace",  // 與 layerpress 壓合明細重疊
+            "EMOdNeedModifyPart",      // 修改記錄的下方子表，已由 modifylog 涵蓋
+            "EMOdProdLayer",           // Delphi 被 ECN 覆蓋，不需要
+        };
+
+        private async Task<List<DetailTab>> BuildExtraTabsAsync(string itemId)
+        {
+            // 1. 先用硬寫清單
+            var tabs = new List<DetailTab>(_coreTabs);
+
+            // 2. 從 DB 讀取，補上硬寫沒有的頁籤（如「內層&外層基本規格」等）
+            try
             {
-                // 壓合明細/替代料
-                new DetailTab(
-                    "layerpress",
-                    "壓合明細/替代料",
-                    "EMOdLayerPress",
-                    "EMOdLayerPress",
-                    new [] { "PartNum", "Revision" }
-                ),
-                // 板材尺寸明細檔（POP 為各列識別碼，必須列入 key 否則 UPDATE 會更新全部列）
-                new DetailTab(
-                    "boardsize",
-                    "板材尺寸明細檔",
-                    "EMOdProdPOP",
-                    "EMOdProdPOP",
-                    new [] { "PartNum", "Revision", "POP" }
-                ),
-                // 裁板/排版圖
-                new DetailTab(
-                    "cutlayout",
-                    "裁板/排版圖",
-                    "EMOdProdMills",
-                    "EMOdProdMills",
-                    new [] { "PartNum", "Revision" }
-                ),
-                // 混裁明細檔
-                new DetailTab(
-                    "mixdetail",
-                    "混裁明細檔",
-                    "EMOdProdMixedDtl",
-                    "EMOdProdMixedDtl",
-                    new [] { "PartNum", "Revision" }
-                ),
-                // 暫停記錄（暫停發料備註）
-                new DetailTab(
-                    "haltlog",
-                    "暫停記錄",
-                    "EMOdVProdHoldMemo",
-                    "EMOdVProdHoldMemo",
-                    new [] { "PartNum", "Revision" }
-                ),
-                // 修改記錄
-                new DetailTab(
-                    "modifylog",
-                    "修改記錄",
-                    "EMOdNotesLog",
-                    "EMOdNotesLog",
-                    new [] { "PartNum", "Revision" }
-                ),
-                // EC記錄
-                new DetailTab(
-                    "ecnlog",
-                    "ECN記錄",
-                    "EMOdProdECNLog",
-                    "EMOdProdECNLog",
-                    new [] { "PartNum", "Revision" }
-                ),
-                // 併板明細圖
-                new DetailTab(
-                    "mergedetail",
-                    "併板明細檔",
-                    "EMOdPartMerge",
-                    "EMOdPartMerge",
-                    new [] { "PartNum", "Revision" }
-                ),
-                // 壓合方式
-                new DetailTab(
-                    "pressmethod",
-                    "壓合方式",
-                    "EMOdProdTier",
-                    "EMOdProdTier",
-                    new [] { "PartNum", "Revision", "LayerId" }
-                ),
-                // 途程內容
-                new DetailTab(
-                    "layerroute",
-                    "途程內容",
-                    "EMOdLayerRoute",
-                    "EMOdLayerRoute",
-                    new [] { "PartNum", "Revision", "LayerId" }
-                ),
-                // 產品工程圖
-                new DetailTab(
-                    "prodmap",
-                    "產品工程圖",
-                    "EMOdProdMap",
-                    "EMOdProdMap",
-                    new [] { "PartNum", "Revision" }
-                )
-            };
+                var cs = _ctx.Database.GetConnectionString()!;
+                await using var conn = new SqlConnection(cs);
+                await conn.OpenAsync();
+
+                const string sql = @"
+SELECT s.TableName, s.TableKind, s.LocateKeys,
+       ISNULL(NULLIF(n.DisplayLabel,''), s.TableName) AS DisplayLabel
+  FROM CURdOCXTableSetUp s WITH (NOLOCK)
+  LEFT JOIN CURdTableName n WITH (NOLOCK) ON n.TableName = s.TableName
+ WHERE s.ItemId = @itemId
+   AND s.TableKind LIKE 'Detail%'
+ ORDER BY s.TableKind";
+
+                await using var cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@itemId", itemId);
+                await using var rd = await cmd.ExecuteReaderAsync();
+
+                var seq = 0;
+                while (await rd.ReadAsync())
+                {
+                    var tableName    = (rd["TableName"]?.ToString() ?? "").Trim();
+                    var displayLabel = (rd["DisplayLabel"]?.ToString() ?? tableName).Trim();
+                    var locateKeys   = rd["LocateKeys"]?.ToString() ?? "";
+                    if (string.IsNullOrWhiteSpace(tableName)) continue;
+
+                    // 硬寫清單已有或功能重疊的 → 跳過
+                    if (_skipTableNames.Contains(tableName)) continue;
+
+                    var keyFields = locateKeys
+                        .Split(new[] { ';', ',', '|' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(k => k.Trim())
+                        .Where(k => !string.IsNullOrWhiteSpace(k))
+                        .ToArray();
+                    if (keyFields.Length == 0)
+                        keyFields = new[] { "PartNum", "Revision" };
+
+                    tabs.Add(new DetailTab(
+                        $"dbdetail{++seq}",
+                        displayLabel,
+                        tableName,
+                        tableName,
+                        keyFields
+                    ));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "讀取 DB Detail 頁籤失敗，僅使用硬寫清單");
+            }
+
+            return tabs;
         }
 
         // 從 CURdOCXItemOtherRule 讀取規格頁籤名稱（PaperMasTb{N}Caption），Master1 從 CURdTableName 取
