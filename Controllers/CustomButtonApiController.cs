@@ -290,10 +290,11 @@ ORDER BY SerialNum, ButtonName;";
                 ins.Parameters["@bVisible"].Value = (object?)r.bVisible ?? 0;
                 ins.Parameters["@" + schema.ChkCanUpdateCol].Value = (object?)r.ChkCanUpdate ?? 0;
                 ins.Parameters["@bNeedNum"].Value = (object?)r.bNeedNum ?? 0;
-                ins.Parameters["@DesignType"].Value = r.DesignType ?? 0;
+                var designType = r.DesignType ?? 0;
+                ins.Parameters["@DesignType"].Value = designType;
 
                 // 擴充 string 欄位賦值（資料庫不允許 NULL，預設空字串）
-                if (schema.Has("SearchTemplate")) ins.Parameters["@SearchTemplate"].Value = r.SearchTemplate ?? "";
+                if (schema.Has("SearchTemplate")) ins.Parameters["@SearchTemplate"].Value = designType == 3 ? "" : (r.SearchTemplate ?? "");
                 if (schema.Has("MultiSelectDD")) ins.Parameters["@MultiSelectDD"].Value = r.MultiSelectDD ?? "";
                 if (schema.Has("ExecSpName")) ins.Parameters["@ExecSpName"].Value = r.ExecSpName ?? "";
                 if (schema.Has("DialogCaption")) ins.Parameters["@DialogCaption"].Value = r.DialogCaption ?? "";
@@ -489,11 +490,192 @@ UPDATE CURdOCXSearchParams
         }
     }
 
+    [HttpPost("SaveInsertKeys")]
+    public async Task<IActionResult> SaveInsertKeys([FromBody] SaveInsertKeysBatchDto batch)
+    {
+        if (batch == null || string.IsNullOrWhiteSpace(batch.ItemId)
+            || string.IsNullOrWhiteSpace(batch.ButtonName)
+            || batch.Rows == null)
+            return BadRequest(new { success = false, message = "ItemId, ButtonName, Rows required" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+        try
+        {
+            var del = new SqlCommand(
+                "DELETE FROM CURdOCXItmCusBtnInsKey WHERE ItemId=@id AND ButtonName=@btn;",
+                conn, (SqlTransaction)tx);
+            del.Parameters.AddWithValue("@id", batch.ItemId);
+            del.Parameters.AddWithValue("@btn", batch.ButtonName);
+            await del.ExecuteNonQueryAsync();
+
+            if (batch.Rows.Count > 0)
+            {
+                var ins = new SqlCommand(@"
+INSERT INTO CURdOCXItmCusBtnInsKey(ItemId,ButtonName,KeyFieldName,SeqNum,PositionType)
+VALUES(@ItemId,@ButtonName,@KeyFieldName,@SeqNum,@PositionType);", conn, (SqlTransaction)tx);
+                ins.Parameters.Add("@ItemId", SqlDbType.VarChar, 16);
+                ins.Parameters.Add("@ButtonName", SqlDbType.VarChar, 64);
+                ins.Parameters.Add("@KeyFieldName", SqlDbType.NVarChar, 128);
+                ins.Parameters.Add("@SeqNum", SqlDbType.Int);
+                ins.Parameters.Add("@PositionType", SqlDbType.Int);
+
+                foreach (var r in batch.Rows)
+                {
+                    ins.Parameters["@ItemId"].Value = batch.ItemId;
+                    ins.Parameters["@ButtonName"].Value = batch.ButtonName;
+                    ins.Parameters["@KeyFieldName"].Value = r.KeyFieldName ?? "";
+                    ins.Parameters["@SeqNum"].Value = r.SeqNum ?? 0;
+                    ins.Parameters["@PositionType"].Value = r.PositionType ?? 0;
+                    await ins.ExecuteNonQueryAsync();
+                }
+            }
+
+            await tx.CommitAsync();
+            return Ok(new { success = true, count = batch.Rows.Count });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPost("SaveCallSpParams")]
+    public async Task<IActionResult> SaveCallSpParams([FromBody] SaveCallSpParamsBatchDto batch)
+    {
+        if (batch == null || string.IsNullOrWhiteSpace(batch.ItemId)
+            || string.IsNullOrWhiteSpace(batch.ButtonName)
+            || batch.Rows == null)
+            return BadRequest(new { success = false, message = "ItemId, ButtonName, Rows required" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+        try
+        {
+            var del = new SqlCommand(
+                "DELETE FROM CURdOCXItmCusBtnParam WHERE ItemId=@id AND ButtonName=@btn;",
+                conn, (SqlTransaction)tx);
+            del.Parameters.AddWithValue("@id", batch.ItemId);
+            del.Parameters.AddWithValue("@btn", batch.ButtonName);
+            await del.ExecuteNonQueryAsync();
+
+            if (batch.Rows.Count > 0)
+            {
+                var ins = new SqlCommand(@"
+INSERT INTO CURdOCXItmCusBtnParam(ItemId,ButtonName,SeqNum,TableKind,ParamFieldName,ParamType)
+VALUES(@ItemId,@ButtonName,@SeqNum,@TableKind,@ParamFieldName,@ParamType);", conn, (SqlTransaction)tx);
+                ins.Parameters.Add("@ItemId", SqlDbType.VarChar, 16);
+                ins.Parameters.Add("@ButtonName", SqlDbType.VarChar, 64);
+                ins.Parameters.Add("@SeqNum", SqlDbType.Int);
+                ins.Parameters.Add("@TableKind", SqlDbType.NVarChar, 128);
+                ins.Parameters.Add("@ParamFieldName", SqlDbType.NVarChar, 128);
+                ins.Parameters.Add("@ParamType", SqlDbType.Int);
+
+                foreach (var r in batch.Rows)
+                {
+                    ins.Parameters["@ItemId"].Value = batch.ItemId;
+                    ins.Parameters["@ButtonName"].Value = batch.ButtonName;
+                    ins.Parameters["@SeqNum"].Value = r.SeqNum ?? 0;
+                    ins.Parameters["@TableKind"].Value = r.TableKind ?? "";
+                    ins.Parameters["@ParamFieldName"].Value = r.ParamFieldName ?? "";
+                    ins.Parameters["@ParamType"].Value = r.ParamType ?? 0;
+                    await ins.ExecuteNonQueryAsync();
+                }
+            }
+
+            await tx.CommitAsync();
+            return Ok(new { success = true, count = batch.Rows.Count });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPost("SaveTranParams")]
+    public async Task<IActionResult> SaveTranParams([FromBody] SaveTranParamsBatchDto batch)
+    {
+        if (batch == null || string.IsNullOrWhiteSpace(batch.ItemId)
+            || string.IsNullOrWhiteSpace(batch.ButtonName)
+            || batch.Rows == null)
+            return BadRequest(new { success = false, message = "ItemId, ButtonName, Rows required" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+        try
+        {
+            var del = new SqlCommand(
+                "DELETE FROM CURdOCXItmCusBtnTranPm WHERE ItemId=@id AND ButtonName=@btn;",
+                conn, (SqlTransaction)tx);
+            del.Parameters.AddWithValue("@id", batch.ItemId);
+            del.Parameters.AddWithValue("@btn", batch.ButtonName);
+            await del.ExecuteNonQueryAsync();
+
+            if (batch.Rows.Count > 0)
+            {
+                var ins = new SqlCommand(@"
+INSERT INTO CURdOCXItmCusBtnTranPm(ItemId,ButtonName,SeqNum,TableKind,ParamFieldName,ParamType)
+VALUES(@ItemId,@ButtonName,@SeqNum,@TableKind,@ParamFieldName,@ParamType);", conn, (SqlTransaction)tx);
+                ins.Parameters.Add("@ItemId", SqlDbType.VarChar, 16);
+                ins.Parameters.Add("@ButtonName", SqlDbType.VarChar, 64);
+                ins.Parameters.Add("@SeqNum", SqlDbType.Int);
+                ins.Parameters.Add("@TableKind", SqlDbType.NVarChar, 128);
+                ins.Parameters.Add("@ParamFieldName", SqlDbType.NVarChar, 128);
+                ins.Parameters.Add("@ParamType", SqlDbType.Int);
+
+                foreach (var r in batch.Rows)
+                {
+                    ins.Parameters["@ItemId"].Value = batch.ItemId;
+                    ins.Parameters["@ButtonName"].Value = batch.ButtonName;
+                    ins.Parameters["@SeqNum"].Value = r.SeqNum ?? 0;
+                    ins.Parameters["@TableKind"].Value = r.TableKind ?? "";
+                    ins.Parameters["@ParamFieldName"].Value = r.ParamFieldName ?? "";
+                    ins.Parameters["@ParamType"].Value = r.ParamType ?? 0;
+                    await ins.ExecuteNonQueryAsync();
+                }
+            }
+
+            await tx.CommitAsync();
+            return Ok(new { success = true, count = batch.Rows.Count });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
     public class SaveSearchParamsBatchDto
     {
         public string? ItemId { get; set; }
         public string? ButtonName { get; set; }
         public List<SearchParamRow> Rows { get; set; } = new();
+    }
+
+    public class SaveInsertKeysBatchDto
+    {
+        public string? ItemId { get; set; }
+        public string? ButtonName { get; set; }
+        public List<InsKeyRow> Rows { get; set; } = new();
+    }
+
+    public class SaveCallSpParamsBatchDto
+    {
+        public string? ItemId { get; set; }
+        public string? ButtonName { get; set; }
+        public List<CallSpParamRow> Rows { get; set; } = new();
+    }
+
+    public class SaveTranParamsBatchDto
+    {
+        public string? ItemId { get; set; }
+        public string? ButtonName { get; set; }
+        public List<TranParamRow> Rows { get; set; } = new();
     }
 
     // ====== DTOs ======

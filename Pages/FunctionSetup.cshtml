@@ -480,6 +480,21 @@ document.getElementById("cbReload").addEventListener("click", () => loadCustom()
 document.getElementById("cbAdd").addEventListener("click", addCustomRow);
 document.getElementById("cbDelete").addEventListener("click", deleteCustomRow);
 document.getElementById("cbSave").addEventListener("click", () => saveCustom().catch(ex => alert(ex.message || ex)));
+document.getElementById("spAdd").addEventListener("click", () => addDetailRow("sp").catch(ex => alert(ex.message || ex)));
+document.getElementById("spDelete").addEventListener("click", () => deleteDetailRow("sp"));
+document.getElementById("spReload").addEventListener("click", () => reloadCustomDetail().catch(ex => alert(ex.message || ex)));
+document.getElementById("ikAdd").addEventListener("click", () => addDetailRow("ik").catch(ex => alert(ex.message || ex)));
+document.getElementById("ikDelete").addEventListener("click", () => deleteDetailRow("ik"));
+document.getElementById("ikReload").addEventListener("click", () => reloadCustomDetail().catch(ex => alert(ex.message || ex)));
+document.getElementById("ikSave").addEventListener("click", () => saveInsertKeys().catch(ex => alert(ex.message || ex)));
+document.getElementById("csAdd").addEventListener("click", () => addDetailRow("cs").catch(ex => alert(ex.message || ex)));
+document.getElementById("csDelete").addEventListener("click", () => deleteDetailRow("cs"));
+document.getElementById("csReload").addEventListener("click", () => reloadCustomDetail().catch(ex => alert(ex.message || ex)));
+document.getElementById("csSave").addEventListener("click", () => saveCallSpParams().catch(ex => alert(ex.message || ex)));
+document.getElementById("tpAdd").addEventListener("click", () => addDetailRow("tp").catch(ex => alert(ex.message || ex)));
+document.getElementById("tpDelete").addEventListener("click", () => deleteDetailRow("tp"));
+document.getElementById("tpReload").addEventListener("click", () => reloadCustomDetail().catch(ex => alert(ex.message || ex)));
+document.getElementById("tpSave").addEventListener("click", () => saveTranParams().catch(ex => alert(ex.message || ex)));
 document.getElementById("orAdd").addEventListener("click", addOtherRuleRow);
 document.getElementById("orDelete").addEventListener("click", deleteOtherRuleRow);
 document.getElementById("orSave").addEventListener("click", () => saveOtherRule().catch(ex => alert(ex.message || ex)));
@@ -1158,6 +1173,21 @@ function appendCustomRow(r){
     }
   });
   attachLookupChangeHandlers(tr, "cbTable");
+  const designTypeTd = tr.querySelector('td[data-field="DesignType"]');
+  const designTypeInput = designTypeTd?.querySelector("input,select");
+  if (designTypeInput) {
+    designTypeInput.addEventListener("change", () => {
+      const v = num(designTypeInput.value);
+      if (v === 3) {
+        writeToCbTableCell(tr, "SearchTemplate", "");
+        const selected = document.querySelector("#cbTable tbody tr.table-primary");
+        if (selected === tr) {
+          const cfgOCXName = document.getElementById("cfgOCXName");
+          if (cfgOCXName) cfgOCXName.value = "";
+        }
+      }
+    });
+  }
   tr.addEventListener("click", () => selectCustomRow(tr));
   document.querySelector("#cbTable tbody").appendChild(tr);
 }
@@ -1303,7 +1333,7 @@ async function selectCustomRow(tr){
     const ikTbody = document.querySelector("#ikTable tbody");
     ikTbody.innerHTML = "";
     ik.forEach(x => {
-      const ikRow = buildDynamicRow("ikTable", x, false);
+      const ikRow = buildDynamicRow("ikTable", x, true);
       ikRow._ikData = x;
       ikRow.addEventListener("click", () => selectIkRow(ikRow));
       attachLookupChangeHandlers(ikRow, "ikTable");
@@ -1319,7 +1349,7 @@ async function selectCustomRow(tr){
     const csTbody = document.querySelector("#csTable tbody");
     csTbody.innerHTML = "";
     cs.forEach(x => {
-      const csRow = buildDynamicRow("csTable", x, false);
+      const csRow = buildDynamicRow("csTable", x, true);
       csRow._csData = x;
       csRow.addEventListener("click", () => selectCsRow(csRow));
       attachLookupChangeHandlers(csRow, "csTable");
@@ -1334,7 +1364,7 @@ async function selectCustomRow(tr){
     const tpTbody = document.querySelector("#tpTable tbody");
     tpTbody.innerHTML = "";
     tp.forEach(x => {
-      const tpRow = buildDynamicRow("tpTable", x, false);
+      const tpRow = buildDynamicRow("tpTable", x, true);
       tpRow._tpData = x;
       tpRow.addEventListener("click", () => selectTpRow(tpRow));
       attachLookupChangeHandlers(tpRow, "tpTable");
@@ -1435,6 +1465,78 @@ function clearSpDetailPanel() {
   document.getElementById("spSuperIdInput").value = "";
 }
 
+const detailTableMap = {
+  sp: { tableId: "spTable", selectedClass: "sp-selected" },
+  ik: { tableId: "ikTable", selectedClass: "ik-selected" },
+  cs: { tableId: "csTable", selectedClass: "cs-selected" },
+  tp: { tableId: "tpTable", selectedClass: "tp-selected" }
+};
+
+function getSelectedCustomButton() {
+  const tr = document.querySelector("#cbTable tbody tr.table-primary");
+  if (!tr) throw new Error("請先選擇自訂按鈕");
+  const btnName = String(fsReadField(tr, "ButtonName")).trim();
+  if (!btnName) throw new Error("ButtonName 不可空白");
+  return { tr, btnName };
+}
+
+function buildDefaultDetailRow(subtab) {
+  if (subtab === "sp") {
+    return {
+      ParamSN: document.querySelectorAll("#spTable tbody tr").length + 1,
+      iVisible: 1,
+      iReadOnly: 0
+    };
+  }
+  if (subtab === "ik") {
+    return { SeqNum: document.querySelectorAll("#ikTable tbody tr").length + 1 };
+  }
+  if (subtab === "cs") {
+    return { SeqNum: document.querySelectorAll("#csTable tbody tr").length + 1 };
+  }
+  return { SeqNum: document.querySelectorAll("#tpTable tbody tr").length + 1 };
+}
+
+function bindDetailRowSelect(subtab, row) {
+  if (subtab === "sp") row.addEventListener("click", () => selectSpRow(row));
+  else if (subtab === "ik") row.addEventListener("click", () => selectIkRow(row));
+  else if (subtab === "cs") row.addEventListener("click", () => selectCsRow(row));
+  else if (subtab === "tp") row.addEventListener("click", () => selectTpRow(row));
+}
+
+async function addDetailRow(subtab) {
+  getSelectedCustomButton();
+  const cfg = detailTableMap[subtab];
+  if (!cfg) return;
+  await ensureDictMeta(dictGridMap[cfg.tableId]);
+  buildDynamicHeaders(cfg.tableId);
+  await preloadLookups(dictGridMap[cfg.tableId]);
+  const row = buildDynamicRow(cfg.tableId, buildDefaultDetailRow(subtab), true);
+  attachLookupChangeHandlers(row, cfg.tableId);
+  bindDetailRowSelect(subtab, row);
+  document.querySelector(`#${cfg.tableId} tbody`)?.appendChild(row);
+  await refreshGridLayout(cfg.tableId);
+  row.click();
+}
+
+function deleteDetailRow(subtab) {
+  const cfg = detailTableMap[subtab];
+  if (!cfg) return;
+  const tr = document.querySelector(`#${cfg.tableId} tbody tr.${cfg.selectedClass}`);
+  if (!tr) return;
+  tr.remove();
+  if (subtab === "sp") {
+    selectedSpRow = null;
+    clearSpDetailPanel();
+  } else if (subtab === "ik") {
+    selectedIkRow = null;
+  } else if (subtab === "cs") {
+    selectedCsRow = null;
+  } else if (subtab === "tp") {
+    selectedTpRow = null;
+  }
+}
+
 function attachLookupChangeHandlers(tr, tableId) {
   const dictTable = dictGridMap[tableId] || "";
   if (!dictTable) return;
@@ -1471,6 +1573,47 @@ function updateLookupNameCols(tr, sel, resultCols) {
 
 const spIntFields = new Set(["ControlType","DefaultType","ParamSN","ParamType",
   "iReadOnly","iVisible","iForInput","iDateTime"]);
+const ikIntFields = new Set(["SeqNum","PositionType"]);
+const csIntFields = new Set(["SeqNum","ParamType"]);
+const tpIntFields = new Set(["SeqNum","ParamType"]);
+
+function collectRowsForTable(tableId, intFields) {
+  return Array.from(document.querySelectorAll(`#${tableId} tbody tr`)).map(tr => {
+    const row = {};
+    tr.querySelectorAll("td[data-field]").forEach(td => {
+      const f = td.dataset.field;
+      const val = fsReadCell(td);
+      row[f] = intFields.has(f) ? num(val) : val;
+    });
+    return row;
+  });
+}
+
+async function saveDetailRows(endpoint, tableId, intFields) {
+  const { tr, btnName } = getSelectedCustomButton();
+  const rows = collectRowsForTable(tableId, intFields).map(r => ({ ...r, ItemId: itemId, ButtonName: btnName }));
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ItemId: itemId, ButtonName: btnName, Rows: rows })
+  });
+  const data = await res.json();
+  if (!res.ok || data?.success !== true) throw new Error(data?.message || "儲存失敗");
+  alert(`已儲存 ${data.count} 筆資料`);
+  await selectCustomRow(tr);
+}
+
+async function saveInsertKeys() {
+  await saveDetailRows("/api/CustomButtonApi/SaveInsertKeys", "ikTable", ikIntFields);
+}
+
+async function saveCallSpParams() {
+  await saveDetailRows("/api/CustomButtonApi/SaveCallSpParams", "csTable", csIntFields);
+}
+
+async function saveTranParams() {
+  await saveDetailRows("/api/CustomButtonApi/SaveTranParams", "tpTable", tpIntFields);
+}
 
 document.getElementById("spSave").addEventListener("click", async () => {
   const cbTr = document.querySelector("#cbTable tbody tr.table-primary");
@@ -1583,6 +1726,9 @@ async function saveCustom(){
     if (!row.ButtonName) row.ButtonName = "";
     if (row.CustCaptionEN != null && row.CustCaptionE == null) row.CustCaptionE = row.CustCaptionEN;
     if (row.CustHintEN != null && row.CustHintE == null) row.CustHintE = row.CustHintEN;
+    if (Number(row.DesignType) === 3) {
+      row.SearchTemplate = "";
+    }
     return row;
   });
   const res = await fetch("/api/CustomButtonApi/Save", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });

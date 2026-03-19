@@ -303,15 +303,25 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         if (!string.IsNullOrWhiteSpace(cond2Field) && (!IsValidCol(cond2Field) || cond2Field.Contains(',')))
             return BadRequest("Invalid column!");
 
+        var keyFields = key.Split(',')
+            .Select(x => x.Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToArray();
+        if (keyFields.Length == 0)
+            return BadRequest("Invalid column!");
+
         var resultFields = result.Split(',').Select(x => $"[{x.Trim()}]").ToArray();
         string selectResult = string.Join(", ", resultFields.Select((col, idx) => $"{col} as [result{idx}]"));
+        string selectKey = keyFields.Length == 1
+            ? $"[{keyFields[0]}] as [key]"
+            : string.Join(", ", keyFields.Select((col, idx) => $"[{col}] as [key{idx}]"));
         var whereList = new List<string>();
         if (!string.IsNullOrWhiteSpace(cond1Field) && !string.IsNullOrWhiteSpace(cond1Value))
             whereList.Add($"[{cond1Field.Trim()}] = @cond1Value");
         if (!string.IsNullOrWhiteSpace(cond2Field) && !string.IsNullOrWhiteSpace(cond2Value))
             whereList.Add($"[{cond2Field.Trim()}] = @cond2Value");
         var whereSql = whereList.Count > 0 ? $" WHERE {string.Join(" AND ", whereList)}" : "";
-        var sql = $"SELECT [{key.Trim()}] as [key], {selectResult} FROM [{table.Trim()}]{whereSql}";
+        var sql = $"SELECT {selectKey}, {selectResult} FROM [{table.Trim()}]{whereSql}";
 
         var list = new List<Dictionary<string, object>>();
         using (var conn = new SqlConnection(_connStr))
@@ -327,7 +337,28 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
                 while (await reader.ReadAsync())
                 {
                     var row = new Dictionary<string, object>();
-                    row["key"] = reader["key"];
+                    if (keyFields.Length == 1)
+                    {
+                        row["key"] = reader["key"];
+                    }
+                    else
+                    {
+                        var keyParts = new List<string>(keyFields.Length);
+                        var keyHasEmpty = false;
+                        for (int i = 0; i < keyFields.Length; i++)
+                        {
+                            var part = reader[$"key{i}"]?.ToString()?.Trim() ?? "";
+                            if (string.IsNullOrWhiteSpace(part))
+                            {
+                                keyHasEmpty = true;
+                                break;
+                            }
+                            keyParts.Add(part.ToLowerInvariant());
+                        }
+                        if (keyHasEmpty)
+                            continue;
+                        row["key"] = string.Join('\u001F', keyParts);
+                    }
                     for (int i = 0; i < resultFields.Length; i++)
                         row[$"result{i}"] = reader[$"result{i}"];
                     list.Add(row);
