@@ -461,16 +461,18 @@ public class StoredProcController : ControllerBase
                 CommandTimeout = 120
             };
 
+            var resolvedParams = new List<object>();
             for (var i = 0; i < paramDefs.Count; i++)
             {
                 var p = paramDefs[i];
                 var value = await ResolveParamValueAsync(conn, tx, tableMap, req.PaperNum, p, systemId, userId, req.Args);
                 cmd.Parameters.AddWithValue($"@p{i + 1}", value ?? DBNull.Value);
+                resolvedParams.Add(new { paramType = p.ParamType, fieldName = p.ParamFieldName, tableKind = p.TableKind, value = value?.ToString() ?? "(null)" });
             }
 
             var affected = await cmd.ExecuteNonQueryAsync();
             await tx.CommitAsync();
-            return Ok(new { ok = true, rowsAffected = affected });
+            return Ok(new { ok = true, rowsAffected = affected, spName = spNameRaw, paramCount = paramDefs.Count, resolvedParams });
         }
         catch (Exception ex)
         {

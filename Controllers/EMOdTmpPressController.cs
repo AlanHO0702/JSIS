@@ -282,6 +282,7 @@ public class EMOdTmpPressController : ControllerBase
     {
         public string MatClass { get; set; } = "";
         public string MatName { get; set; } = "";
+        public string BefLayer { get; set; } = "";
     }
 
     /// <summary>
@@ -331,6 +332,20 @@ public class EMOdTmpPressController : ControllerBase
                 AddParam(insCmd, "@SerialNum", i + 1);
                 AddParam(insCmd, "@MatClass", req.Items[i].MatClass);
                 await insCmd.ExecuteNonQueryAsync();
+            }
+
+            // SP 不支援 BefLayer，INSERT 後補 UPDATE
+            for (int i = 0; i < req.Items.Count; i++)
+            {
+                var befLayer = (req.Items[i].BefLayer ?? "").Trim();
+                if (string.IsNullOrEmpty(befLayer)) continue;
+                await using var updCmd = new SqlCommand(
+                    "UPDATE EMOdTmpPressDtl SET BefLayer = @BefLayer WHERE TmpId = @TmpId AND LayerId = @LayerId AND SerialNum = @SerialNum", conn, tran);
+                AddParam(updCmd, "@TmpId", req.TmpId.Trim());
+                AddParam(updCmd, "@LayerId", req.LayerId.Trim());
+                AddParam(updCmd, "@SerialNum", i + 1);
+                AddParam(updCmd, "@BefLayer", befLayer);
+                await updCmd.ExecuteNonQueryAsync();
             }
 
             await tran.CommitAsync();

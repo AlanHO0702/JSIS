@@ -33,7 +33,11 @@ builder.Services.AddControllers().AddJsonOptions(options =>
 });
 
 // 註冊 Razor Pages 服務，並設定 JSON 序列化時使用 camelCase 命名風格
-builder.Services.AddRazorPages();
+// 開發環境啟用 Runtime Compilation，修改 cshtml 後不需重新 build，重新整理即可生效
+if (builder.Environment.IsDevelopment())
+    builder.Services.AddRazorPages().AddRazorRuntimeCompilation();
+else
+    builder.Services.AddRazorPages();
     /*.AddJsonOptions(options =>
     {
         options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
