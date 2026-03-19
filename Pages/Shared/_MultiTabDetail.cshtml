@@ -194,6 +194,7 @@
             const ocxResult = (r.ocxLKResultName || r.OCXLKResultName || '').toString();
             const ocxKeyField = (r.keyFieldName || r.KeyFieldName || '').toString();
             const ocxKeySelf = (r.keySelfName || r.KeySelfName || '').toString();
+            const keyMapsJson = (r.keyMapsJson || r.KeyMapsJson || '').toString();
             if (table && key && result) {
                 const cond1Field  = (r.lookupCond1Field  || r.LookupCond1Field  || '').toString().trim();
                 const cond1Source = (r.lookupCond1ResultField || r.LookupCond1ResultField || '').toString().trim();
@@ -203,8 +204,32 @@
                     cond1Field, cond1Source, cond2Field, cond2Source });
                 return;
             }
-            if (ocxTable && ocxKeyField && ocxResult) {
-                map.set(field.toLowerCase(), { field, table: ocxTable, key: ocxKeyField, result: ocxResult, keySelf: ocxKeySelf, source: 'ocx' });
+            let keyPairs = [];
+            if (keyMapsJson) {
+                try {
+                    const parsed = JSON.parse(keyMapsJson);
+                    keyPairs = (Array.isArray(parsed) ? parsed : [])
+                        .map(x => ({
+                            key: (x?.KeyFieldName || x?.keyFieldName || '').toString().trim(),
+                            keySelf: (x?.KeySelfName || x?.keySelfName || '').toString().trim()
+                        }))
+                        .filter(x => x.key && x.keySelf);
+                } catch { keyPairs = []; }
+            }
+            if (keyPairs.length === 0 && ocxKeyField) {
+                keyPairs = [{ key: ocxKeyField.trim(), keySelf: (ocxKeySelf || ocxKeyField).trim() }];
+            }
+            if (ocxTable && ocxResult && keyPairs.length > 0) {
+                map.set(field.toLowerCase(), {
+                    field,
+                    table: ocxTable,
+                    key: keyPairs[0].key,
+                    result: ocxResult,
+                    keySelf: keyPairs[0].keySelf,
+                    lookupKey: keyPairs.map(x => x.key).join(','),
+                    keyPairs,
+                    source: 'ocx'
+                });
             }
         });
         LOOKUP_META_CACHE.set(tn, map);
@@ -235,7 +260,8 @@
         const fieldMap = new Map();
         for (const [field, cfg] of meta.entries()) {
             try {
-                const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(cfg.table)}&key=${encodeURIComponent(cfg.key)}&result=${encodeURIComponent(cfg.result)}`;
+                const keyForLookup = cfg.lookupKey || cfg.key;
+                const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(cfg.table)}&key=${encodeURIComponent(keyForLookup)}&result=${encodeURIComponent(cfg.result)}`;
                 const res = await fetch(url);
                 if (!res.ok) continue;
                 const data = await res.json();
@@ -250,8 +276,11 @@
                         .map(v => String(v))
                         .join(' - ');
                     const trimmed = key.trim();
-                    map.set(key, label || key);
-                    if (trimmed && trimmed !== key) map.set(trimmed, label || trimmed);
+                    const lowered = trimmed.toLowerCase();
+                    const text = label || trimmed || key;
+                    map.set(key, text);
+                    if (trimmed && trimmed !== key) map.set(trimmed, text);
+                    if (lowered) map.set(lowered, text);
                 });
                 fieldMap.set(field, map);
             } catch { }
@@ -382,6 +411,8 @@
             if (key && lookupMap.has(key)) return lookupMap.get(key) ?? key;
             const trimmed = key ? key.trim() : '';
             if (trimmed && lookupMap.has(trimmed)) return lookupMap.get(trimmed) ?? trimmed;
+            const lowered = trimmed.toLowerCase();
+            if (lowered && lookupMap.has(lowered)) return lookupMap.get(lowered) ?? lowered;
         }
 
         if (s === '') return '';
@@ -1045,16 +1076,33 @@
                   }
                 let lookupKeyOverride = null;
                   if (allowLookup && metaLookup?.source === 'ocx') {
-                      const candidates = [];
-                      if (metaLookup?.keySelf) candidates.push(metaLookup.keySelf);
-                      if (metaLookup?.key) candidates.push(metaLookup.key);
-                    for (const alt of candidates) {
-                        const keyVal = getValueCaseInsensitive(row, alt);
-                        if (keyVal != null && String(keyVal).trim() !== '') {
-                            lookupKeyOverride = keyVal;
-                            break;
-                        }
-                    }
+                      const pairs = Array.isArray(metaLookup?.keyPairs) ? metaLookup.keyPairs : [];
+                      if (pairs.length > 1) {
+                          const parts = [];
+                          for (const pair of pairs) {
+                              const sourceField = (pair?.keySelf || pair?.key || '').toString();
+                              if (!sourceField) { parts.length = 0; break; }
+                              const keyVal = getValueCaseInsensitive(row, sourceField);
+                              const keyText = keyVal == null ? '' : String(keyVal).trim();
+                              if (!keyText) { parts.length = 0; break; }
+                              parts.push(keyText.toLowerCase());
+                          }
+                          if (parts.length === pairs.length) {
+                              lookupKeyOverride = parts.join('\u001f');
+                          }
+                      }
+                      if (lookupKeyOverride == null) {
+                          const candidates = [];
+                          if (metaLookup?.keySelf) candidates.push(metaLookup.keySelf);
+                          if (metaLookup?.key) candidates.push(metaLookup.key);
+                          for (const alt of candidates) {
+                              const keyVal = getValueCaseInsensitive(row, alt);
+                              if (keyVal != null && String(keyVal).trim() !== '') {
+                                  lookupKeyOverride = keyVal;
+                                  break;
+                              }
+                          }
+                      }
                 }
                     const keyStr = lookupKeyOverride == null ? '' : String(lookupKeyOverride).trim();
                     const keyIsEmpty = keyStr === '';
@@ -1947,4 +1995,3 @@ body.resizing { cursor: col-resize !important; }
     background-color: #e7f3ff !important;
 }
 </style>
-

@@ -17,6 +17,7 @@ public interface ITableDictionaryService
 public class TableDictionaryService : ITableDictionaryService
 {
     private readonly PcbErpContext _context;
+    private const char CompositeKeySeparator = '\u001F';
 
     public TableDictionaryService(PcbErpContext context)
     {
@@ -80,6 +81,142 @@ public class TableDictionaryService : ITableDictionaryService
         {
             return false;
         }
+    }
+
+    private static bool TryLoadCompositeLookupValues(
+        DbConnection conn,
+        string lookupTableName,
+        IReadOnlyList<string> keyFieldNames,
+        string resultFieldName,
+        out Dictionary<string, string> lookupDict)
+    {
+        lookupDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (keyFieldNames == null || keyFieldNames.Count == 0)
+            return false;
+
+        static string Q(string ident) => $"[{ident.Replace("]", "]]")}]";
+        var keySelect = string.Join(", ", keyFieldNames.Select((x, i) => $"{Q(x)} AS [__k{i}]"));
+        var sql = $"SELECT {keySelect}, {Q(resultFieldName)} AS [__v] FROM {Q(lookupTableName)}";
+
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var keyParts = new List<string>(keyFieldNames.Count);
+                var hasEmptyPart = false;
+
+                for (var i = 0; i < keyFieldNames.Count; i++)
+                {
+                    var keyPart = NormalizeLookupKey(reader[$"__k{i}"]?.ToString());
+                    if (string.IsNullOrWhiteSpace(keyPart))
+                    {
+                        hasEmptyPart = true;
+                        break;
+                    }
+                    keyParts.Add(keyPart);
+                }
+
+                if (hasEmptyPart)
+                    continue;
+
+                var value = reader["__v"]?.ToString();
+                if (value == null)
+                    continue;
+
+                lookupDict[BuildCompositeKey(keyParts)] = value;
+            }
+
+            return lookupDict.Count > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string NormalizeLookupKey(string? raw)
+        => (raw ?? "").Trim().ToLowerInvariant();
+
+    private static string BuildCompositeKey(IEnumerable<string> keyParts)
+        => string.Join(CompositeKeySeparator, keyParts.Select(NormalizeLookupKey));
+
+    private static bool TryGetSourceValue(IReadOnlyDictionary<string, object?> source, string? fieldName, out string value)
+    {
+        value = "";
+        if (string.IsNullOrWhiteSpace(fieldName))
+            return false;
+
+        if (source.TryGetValue(fieldName, out var raw))
+        {
+            value = NormalizeLookupKey(raw?.ToString());
+            return !string.IsNullOrWhiteSpace(value);
+        }
+
+        foreach (var kv in source)
+        {
+            if (!string.Equals(kv.Key, fieldName, StringComparison.OrdinalIgnoreCase))
+                continue;
+            value = NormalizeLookupKey(kv.Value?.ToString());
+            return !string.IsNullOrWhiteSpace(value);
+        }
+
+        return false;
+    }
+
+    public static string ResolveLookupDisplay(OCXLookupMap map, IReadOnlyDictionary<string, object?> source)
+    {
+        if (map == null || source == null || string.IsNullOrWhiteSpace(map.FieldName))
+            return "";
+
+        // 複合鍵設定時，先用複合鍵比對，避免只用單一欄位誤配到其他單據
+        if (map.CompositeLookupValues != null
+            && map.CompositeLookupValues.Count > 0
+            && map.CompositeKeyPairs != null
+            && map.CompositeKeyPairs.Count > 1)
+        {
+            var keyParts = new List<string>(map.CompositeKeyPairs.Count);
+            foreach (var pair in map.CompositeKeyPairs)
+            {
+                var sourceField = !string.IsNullOrWhiteSpace(pair.KeySelfName)
+                    ? pair.KeySelfName
+                    : pair.KeyFieldName;
+                if (!TryGetSourceValue(source, sourceField, out var part))
+                {
+                    keyParts.Clear();
+                    break;
+                }
+                keyParts.Add(part);
+            }
+
+            if (keyParts.Count == map.CompositeKeyPairs.Count)
+            {
+                var compositeKey = BuildCompositeKey(keyParts);
+                if (map.CompositeLookupValues.TryGetValue(compositeKey, out var compositeDisplay) && compositeDisplay != null)
+                    return compositeDisplay;
+            }
+
+            // 有設定複合鍵但比不到時，避免退回單鍵導致錯誤值
+            return "";
+        }
+
+        var key = "";
+        if (TryGetSourceValue(source, map.KeyFieldName, out var keyFieldValue))
+            key = keyFieldValue;
+        if (string.IsNullOrWhiteSpace(key) && TryGetSourceValue(source, map.KeySelfName, out var keySelfValue))
+            key = keySelfValue;
+        if (string.IsNullOrWhiteSpace(key) && TryGetSourceValue(source, map.FieldName, out var rawValue))
+            key = rawValue;
+
+        if (!string.IsNullOrWhiteSpace(key)
+            && map.LookupValues != null
+            && map.LookupValues.TryGetValue(key, out var display)
+            && display != null)
+            return display;
+
+        return "";
     }
 
     public List<CURdTableField> GetFieldDict(string tableName, Type modelType)
@@ -217,6 +354,30 @@ public class TableDictionaryService : ITableDictionaryService
             if (HasInvalidLookupSetting(ocxTableName, "X", ocxResultName))
                 continue;
 
+            var compositeKeyPairs = new List<OCXLookupKeyPair>();
+            var pairSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var lk in lkSettings)
+            {
+                var keyField = lk.KeyFieldName?.Trim() ?? "";
+                var keySelf = string.IsNullOrWhiteSpace(lk.KeySelfName)
+                    ? keyField
+                    : lk.KeySelfName.Trim();
+
+                if (HasInvalidLookupSetting(ocxTableName, keyField, ocxResultName)
+                    || string.IsNullOrWhiteSpace(keySelf))
+                    continue;
+
+                var pairToken = $"{keyField}{CompositeKeySeparator}{keySelf}";
+                if (!pairSet.Add(pairToken))
+                    continue;
+
+                compositeKeyPairs.Add(new OCXLookupKeyPair
+                {
+                    KeyFieldName = keyField,
+                    KeySelfName = keySelf
+                });
+            }
+
             var ocxTableClean = Clean(ocxTableName ?? "");
             var resultType = _context.CURdTableFields
                 .Where(x => x.TableName != null
@@ -227,8 +388,20 @@ public class TableDictionaryService : ITableDictionaryService
                 .FirstOrDefault();
 
             Dictionary<string, string>? lookupDict = null;
+            Dictionary<string, string>? compositeLookupDict = null;
             string selectedKeyField = "";
             string selectedKeySelf = "";
+
+            if (compositeKeyPairs.Count > 1
+                && TryLoadCompositeLookupValues(
+                    conn,
+                    ocxTableName!,
+                    compositeKeyPairs.Select(x => x.KeyFieldName).ToList(),
+                    ocxResultName!,
+                    out var loadedCompositeLookupDict))
+            {
+                compositeLookupDict = loadedCompositeLookupDict;
+            }
 
             foreach (var lkSetting in lkSettings)
             {
@@ -259,7 +432,9 @@ public class TableDictionaryService : ITableDictionaryService
                     break;
             }
 
-            if (lookupDict == null || lookupDict.Count == 0)
+            var hasSingleLookup = lookupDict != null && lookupDict.Count > 0;
+            var hasCompositeLookup = compositeLookupDict != null && compositeLookupDict.Count > 0;
+            if (!hasSingleLookup && !hasCompositeLookup)
                 continue;
 
             result.Add(new OCXLookupMap
@@ -267,7 +442,9 @@ public class TableDictionaryService : ITableDictionaryService
                 FieldName = fieldName,
                 KeySelfName = selectedKeySelf,
                 KeyFieldName = selectedKeyField,
-                LookupValues = lookupDict,
+                LookupValues = lookupDict ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                CompositeKeyPairs = compositeKeyPairs,
+                CompositeLookupValues = compositeLookupDict ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
                 ResultDataType = resultType
             });
         }
@@ -299,6 +476,14 @@ public class TableDictionaryService : ITableDictionaryService
         public string KeySelfName { get; set; } = null!;
         public string KeyFieldName { get; set; } = null!;
         public Dictionary<string, string> LookupValues { get; set; } = new();
+        public List<OCXLookupKeyPair> CompositeKeyPairs { get; set; } = new();
+        public Dictionary<string, string> CompositeLookupValues { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public string? ResultDataType { get; set; }
+    }
+
+    public class OCXLookupKeyPair
+    {
+        public string KeySelfName { get; set; } = null!;
+        public string KeyFieldName { get; set; } = null!;
     }
 }
