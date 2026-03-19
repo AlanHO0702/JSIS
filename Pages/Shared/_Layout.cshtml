@@ -19,10 +19,10 @@
       --detail-left-pad: 0px;
       --tab-pad-y: 2px;
       --tab-pad-x: 8px;
-      --top-toolbar-font-size: 15px;
-      --top-toolbar-icon-size: 20px;
-      --top-toolbar-btn-height: 36px;
-      --top-toolbar-icon-font-size: 26px;
+      --top-toolbar-font-size: 14px;
+      --top-toolbar-icon-size: 18px;
+      --top-toolbar-btn-height: 32px;
+      --top-toolbar-icon-font-size: 22px;
       --page-bg: #f4f6fb;
       --section-bg-toolbar: #f6f7f9;
       --section-bg-rail: #eef2f9;
@@ -365,6 +365,13 @@
       background: #e5e7eb;
       color: #374151;
     }
+    /* F4 提示文字 */
+    .partnum-f4-hint {
+      margin-left: 3px;
+      color: #888;
+      font-weight: normal;
+      letter-spacing: 0;
+    }
     .toolbar-brand {
       display: inline-flex;
       align-items: center;
@@ -529,7 +536,7 @@
   toolbarTitle = System.Text.RegularExpressions.Regex.Replace(toolbarTitle, "([\\u4e00-\\u9fff])([A-Za-z0-9])", "$1 $2");
 }
 
-<body class="@(showToolbar ? "with-toolbar" : "")">
+<body autocomplete="off" class="@(showToolbar ? "with-toolbar" : "")">
   @if (showToolbar)
   {
     <div class="app-toolbar @(isBackend ? "backend-toolbar" : "")" role="navigation" aria-label="全站工具列">
@@ -1106,6 +1113,21 @@
     })();
 
     // ===============================
+    // ✅ 全站關閉瀏覽器自動完成 (autocomplete)
+    // ===============================
+    (() => {
+      const kill = (el) => { if (el.tagName === 'INPUT' && !el.hasAttribute('autocomplete')) el.setAttribute('autocomplete', 'off'); };
+      document.querySelectorAll('input').forEach(kill);
+      new MutationObserver(muts => {
+        for (const m of muts) m.addedNodes.forEach(n => {
+          if (n.nodeType !== 1) return;
+          if (n.tagName === 'INPUT') kill(n);
+          else if (n.querySelectorAll) n.querySelectorAll('input').forEach(kill);
+        });
+      }).observe(document.body, { childList: true, subtree: true });
+    })();
+
+    // ===============================
     // ✅ Modal 關閉時自動清理 (防止灰畫面)
     // ===============================
     (() => {
@@ -1282,6 +1304,109 @@
                 });
             }
         }
+    })();
+  </script>
+
+  <script>
+    // ===============================
+    // ✅ 全站 F4 快捷鍵：PARTNUM 欄位按 F4 開啟庫存一覽
+    // ===============================
+    (() => {
+      const normalize = (s) => String(s || '').replace(/_/g, '').toLowerCase();
+
+      function isPartNumField(el) {
+        if (!el) return false;
+        if (normalize(el.name) === 'partnum') return true;
+        if (normalize(el.dataset?.field) === 'partnum') return true;
+        const container = el.closest('[data-field]');
+        if (container && normalize(container.getAttribute('data-field')) === 'partnum') return true;
+        return false;
+      }
+
+      function getPartNumValue(el) {
+        return String(el.value ?? el.textContent ?? '').trim();
+      }
+
+      function openMatDetailPopup(partNum) {
+        const url = '/MIN/MatDetailPopup?PartNum=' + encodeURIComponent(partNum);
+        const pw = 1000, ph = 520;
+        const left = (screen.width - pw) / 2;
+        const top  = (screen.height - ph) / 2;
+        window.open(url, 'MatDetailPopup',
+          'width=' + pw + ',height=' + ph + ',left=' + left + ',top=' + top + ',resizable=yes,scrollbars=yes');
+      }
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'F4') return;
+        const el = document.activeElement;
+        if (!el) return;
+        if (!isPartNumField(el)) return;
+        const partNum = getPartNumValue(el);
+        if (!partNum) return;
+        e.preventDefault();
+        openMatDetailPopup(partNum);
+      });
+
+      // --- 在 PARTNUM 相關標籤後面附加 (F4) 提示 ---
+      function addF4Hint(labelEl) {
+        if (!labelEl) return;
+        const parentTh = labelEl.closest('th');
+        // 防止重複加入：在 th 或 labelEl 內找現有 hint
+        const checkRoot = parentTh || labelEl;
+        if (checkRoot.querySelector('.partnum-f4-hint')) return;
+
+        const hint = document.createElement('span');
+        hint.className = 'partnum-f4-hint';
+        hint.textContent = '(F4)';
+
+        if (parentTh && labelEl.classList?.contains('th-text')) {
+          // 插入在 .th-text 之後，直接放在 <th> 內（不放進 inline-block 裡）
+          // <th> 本身已有 white-space:nowrap CSS，兩者自然並排在同一行
+          parentTh.insertBefore(hint, labelEl.nextSibling);
+        } else {
+          // 表單標籤：附加在元素內部
+          labelEl.style.whiteSpace = 'nowrap';
+          labelEl.appendChild(hint);
+        }
+      }
+
+      function markF4Labels(root) {
+        const scope = (root && root !== document) ? root : document;
+        // 1. 表格欄標頭：<th data-field="PartNum">
+        //    .th-text  → _MultiTabDetail / _Paper3LSubDetail1（display:inline-block）
+        //    .header-label → _TableSingleGrid（display:block）
+        scope.querySelectorAll('th[data-field]').forEach(th => {
+          if (normalize(th.getAttribute('data-field')) !== 'partnum') return;
+          const span = th.querySelector('.th-text') || th.querySelector('.header-label');
+          addF4Hint(span || th);
+        });
+        // 2. 表單標籤：<li class="header-label-item" data-field="PartNum">
+        scope.querySelectorAll('.header-label-item[data-field]').forEach(li => {
+          if (normalize(li.getAttribute('data-field')) !== 'partnum') return;
+          addF4Hint(li);
+        });
+      }
+
+      // 初始掃描（含靜態渲染的元素）
+      document.addEventListener('DOMContentLoaded', () => markF4Labels());
+
+      // 監聽動態插入的元素（表格由 JS 建立）
+      const obs = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          for (const node of m.addedNodes) {
+            if (node.nodeType !== 1) continue;
+            // 若新節點本身就是目標
+            const fn = normalize(node.getAttribute?.('data-field') || '');
+            if (fn === 'partnum') {
+              if (node.matches('th')) { addF4Hint(node.querySelector('.th-text') || node.querySelector('.header-label') || node); }
+              else if (node.matches('.header-label-item')) { addF4Hint(node); }
+            }
+            // 或在子樹中尋找
+            markF4Labels(node);
+          }
+        }
+      });
+      obs.observe(document.body, { childList: true, subtree: true });
     })();
   </script>
 

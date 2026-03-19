@@ -91,8 +91,12 @@ namespace PcbErpApi.Pages.CCS
                 var masterDict = await LoadFieldDictAsync(masterDictName);
                 if (!HasLayoutCoordinates(masterDict) && string.Equals(masterDictName, DefaultMasterDict, StringComparison.OrdinalIgnoreCase))
                 {
-                    masterDictName = LegacyMasterDict;
-                    masterDict = await LoadFieldDictAsync(masterDictName);
+                    var hasLangLayout = await HasLayoutCoordinatesInLangAsync(masterDictName);
+                    if (!hasLangLayout)
+                    {
+                        masterDictName = LegacyMasterDict;
+                        masterDict = await LoadFieldDictAsync(masterDictName);
+                    }
                 }
                 if (masterDict.Count == 0 && !string.Equals(masterDictName, DefaultMasterDict, StringComparison.OrdinalIgnoreCase))
                 {
@@ -295,7 +299,12 @@ namespace PcbErpApi.Pages.CCS
             }
 
             tabs.Add(new DetailTab("assistant", "聯絡人", "AJNdCompanyAssistant", "AJNdCompanyAssistant", new[] { "CompanyId", "SerialNum" }));
-            tabs.Add(new DetailTab("outaddr", "出貨地址", "AJNdCompanyOutAddr", "AJNdCompanyOutAddr", new[] { "CompanyId", "SerialNum" }));
+            tabs.Add(new DetailTab("outaddr", "貨運地址", "AJNdCompanyOutAddr", "AJNdCompanyOutAddr", new[] { "CompanyId", "SerialNum" }));
+
+            if (TryGetAvlTable(pt, SystemId, showCustomerTabs, out var avlTableName, out var avlTitle))
+            {
+                tabs.Add(new DetailTab("custpart", avlTitle, avlTableName, avlTableName, new[] { "CompanyId" }));
+            }
 
             if (showCustomerTabs)
             {
@@ -305,8 +314,8 @@ namespace PcbErpApi.Pages.CCS
 
             if (showCreditTabs)
             {
-                tabs.Add(new DetailTab("creditline", "銀行資料", "AJNdCompanyCreditLine", "AJNdCompanyCreditLine", new[] { "CompanyId", "SerialNum" }));
-                tabs.Add(new DetailTab("bankassure", "銀行保證", "AJNdCompanyBankAssure", "AJNdCompanyBankAssure", new[] { "CompanyId", "RecYear", "RecMonth" }));
+                tabs.Add(new DetailTab("creditctl", "授信額度", "AJNdCompany", "AJNdCompany", new[] { "CompanyId" }, true));
+                tabs.Add(new DetailTab("bankassure", "銀行保證函", "AJNdCompanyBankAssure", "AJNdCompanyBankAssure", new[] { "CompanyId", "RecYear", "RecMonth" }));
             }
 
             if (showCustomerTabs)
@@ -314,10 +323,6 @@ namespace PcbErpApi.Pages.CCS
                 tabs.Add(new DetailTab("ship", "銷貨資料", "AJNdCompanyShip", "AJNdCompanyShip", new[] { "CompanyId" }, true));
                 tabs.Add(new DetailTab("forwarder", "Forwarder", "AJNdCompanyForwarder", "AJNdCompanyForwarder", new[] { "CompanyId", "SerialNum" }));
             }
-
-            if (!string.Equals(ItemId, "CC000054", StringComparison.OrdinalIgnoreCase)
-                && TryGetAvlTable(pt, SystemId, showCustomerTabs, out var avlTable, out var avlTitle))
-                tabs.Add(new DetailTab("avl", avlTitle, avlTable, avlTable, new[] { "CompanyId" }));
 
             if (SystemId == 1 && showCustomerTabs)
                 tabs.Add(new DetailTab("quota", "客戶要求", "AJNdCompanyQuota", "AJNdCompanyQuota", new[] { "CompanyId", "NumId" }));
@@ -408,6 +413,26 @@ namespace PcbErpApi.Pages.CCS
             return false;
         }
 
+        private async Task<bool> HasLayoutCoordinatesInLangAsync(string dictTableName, string languageId = "TW")
+        {
+            var tname = (dictTableName ?? string.Empty)
+                .Trim()
+                .Trim('[', ']')
+                .Replace("dbo.", "", StringComparison.OrdinalIgnoreCase)
+                .ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(tname)) return false;
+
+            return await _ctx.CurdTableFieldLangs.AsNoTracking()
+                .Where(x => x.LanguageId == languageId
+                            && x.TableName != null
+                            && (x.TableName.ToLower() == tname
+                                || x.TableName.ToLower().Replace("dbo.", "") == tname))
+                .AnyAsync(x =>
+                    x.IFieldTop > 0 || x.IFieldLeft > 0
+                    || x.ILabTop > 0 || x.ILabLeft > 0);
+        }
+
         private static int ResolveSystemIdByPowerType(int? powerType)
         {
             if (!powerType.HasValue) return 1;
@@ -449,5 +474,3 @@ namespace PcbErpApi.Pages.CCS
         }
     }
 }
-
-

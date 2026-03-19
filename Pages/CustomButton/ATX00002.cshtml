@@ -1,0 +1,426 @@
+@*
+    ATX00002 - 營業稅單據批次輸入
+    對應 Delphi: BatchDefaultDLL.pas
+    自訂按鈕功能:
+      - btnC1: 預設資料 (BatchDefault)
+    行為:
+      - 開啟 ATXdCertifBatchDefault 資料表，以辭典定義動態渲染
+      - 有 lookup 的 ID 欄位 → 下拉選單 (select)
+      - 辭典有 lookup 的非實體欄位 → 唯讀格子顯示名稱
+      - 變更 InvoiceTypeId 或 IsIn 時，自動把 TaxTypeId 設定成 SP 回傳的對應值，並重建 Grid
+      - 禁止新增/刪除 (對應 Delphi BeforeInsert/BeforeDelete abort)
+      - F3 可開啟辭典設定
+*@
+@model dynamic
+
+<style>
+#atx2DefaultModal .modal-dialog { max-width: 920px; margin-top: 6vh; }
+#atx2DefaultModal .modal-header { padding: 6px 12px; }
+#atx2DefaultModal .modal-title { font-size: 16px; line-height: 1.2; }
+#atx2DefaultModal .modal-body { padding: 0; }
+#atx2DefaultModal .modal-footer { padding: 6px 12px; }
+#atx2DefaultModal .table-fix-wrapper { overflow: auto; max-height: 55vh; }
+#atx2DefaultModal table {
+  border-collapse: collapse; width: auto; min-width: 100%; table-layout: auto;
+}
+#atx2DefaultModal th,
+#atx2DefaultModal td {
+  border: 1px solid #dee2e6; vertical-align: middle;
+  white-space: nowrap; font-size: var(--field-value-size, 13px);
+  padding: 2px 4px; line-height: 1.4;
+}
+#atx2DefaultModal thead th {
+  position: sticky; top: 0; background: #f8fafc; z-index: 2;
+  font-size: var(--field-label-size, 12px); font-weight: 600; text-align: center;
+}
+#atx2DefaultModal .atx2-text {
+  padding: 1px 4px; display: inline-block;
+}
+#atx2DefaultModal select.cell-edit {
+  border: none; background: transparent; padding: 1px 2px;
+  font-size: var(--field-value-size, 13px); cursor: pointer;
+}
+</style>
+
+<div class="modal" id="atx2DefaultModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">預設值設定</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="table-fix-wrapper" data-dict-table="ATXdCertifBatchDefault">
+          <table class="table table-bordered table-hover table-sm align-middle mb-0"
+                 id="atx2Grid"
+                 data-dict-table="ATXdCertifBatchDefault"
+                 data-table-name="ATXdCertifBatchDefault"
+                 data-key-fields="">
+            <thead class="table-light sticky-top">
+              <tr id="atx2GridHead"></tr>
+            </thead>
+            <tbody id="atx2GridBody">
+              <tr><td class="text-center text-muted py-3">載入中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="atx2BtnOK" type="button" class="btn btn-primary btn-sm">確定</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+    window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+    const TABLE_NAME = 'ATXdCertifBatchDefault';
+
+    const withJwtHeaders = (init = {}) => {
+        const jwt = localStorage.getItem('jwtId');
+        const headers = Object.assign({}, init.headers || {});
+        if (jwt) headers['X-JWTID'] = jwt;
+        return { ...init, headers };
+    };
+
+    /* ---------- state ---------- */
+    let fieldDefs = [];           // 辭典欄位定義
+    let gridRows = [];            // 資料列 (原始，記憶體中的資料)
+    let controllerLookups = {};   // 從 Controller 取得的 lookup: { InvoiceTypeId: [{key,display},...], ... }
+    let dictLookupCache = {};     // 從辭典載入的 lookup (非實體欄位用): { fieldName: { map, list } }
+    let bsModal = null;
+
+    // 有 controller lookup 的 ID 欄位 → 用 <select> 下拉選單
+    const DROPDOWN_FIELDS = new Set(['InvoiceTypeId', 'TaxTypeId', 'PayWayCode', 'CertifTypeId', 'TaxCutTypeId', 'MoneyCode']);
+    // 由連動自動設定的唯讀欄位
+    const READONLY_CASCADE_FIELDS = new Set(['TaxTypeId', 'TaxCutTypeId']);
+
+    const $ = (id) => document.getElementById(id);
+
+    const escHtml = (v) => String(v ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    /* ---------- 1. 載入辭典欄位定義 ---------- */
+    const loadFieldDict = async () => {
+        const res = await fetch(`/api/TableFieldLayout/GetTableFields?tableName=${TABLE_NAME}`, withJwtHeaders());
+        const data = await res.json();
+        fieldDefs = (Array.isArray(data) ? data : [])
+            .filter(f => f.Visible === 1 || f.Visible === true)
+            .sort((a, b) => (a.SerialNum ?? 9999) - (b.SerialNum ?? 9999));
+    };
+
+    /* ---------- 2. 載入辭典 Lookup (非實體欄位的 lookup 顯示用) ---------- */
+    const loadDictLookups = async () => {
+        dictLookupCache = {};
+
+        const tasks = fieldDefs.map(f => {
+            // 只處理非 DROPDOWN_FIELDS 的欄位 (非實體欄位如 InvoiceTypeName 等)
+            if (DROPDOWN_FIELDS.has(f.FieldName)) return null;
+
+            if (f.OCXLKTableName && f.OCXLKResultName) {
+                const keyField = f.KeySelfName || f.KeyFieldName || f.FieldName;
+                return { fieldName: f.FieldName, table: f.OCXLKTableName, key: keyField, result: f.OCXLKResultName };
+            }
+            if (f.LookupTable && f.LookupKeyField && f.LookupResultField) {
+                return { fieldName: f.FieldName, table: f.LookupTable, key: f.LookupKeyField, result: f.LookupResultField };
+            }
+            return null;
+        }).filter(Boolean);
+
+        await Promise.all(tasks.map(async (t) => {
+            try {
+                const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(t.table)}` +
+                    `&key=${encodeURIComponent(t.key)}&result=${encodeURIComponent(t.result)}`;
+                const res = await fetch(url, withJwtHeaders());
+                const list = await res.json();
+                if (Array.isArray(list)) {
+                    const map = {};
+                    list.forEach(item => { map[String(item.key)] = item.result0 ?? item.key; });
+                    dictLookupCache[t.fieldName] = { map, list };
+                }
+            } catch (err) {
+                console.warn(`載入 ${t.fieldName} dict lookup 失敗:`, err);
+            }
+        }));
+    };
+
+    /* ---------- 3. 載入主資料 + Controller Lookup ---------- */
+    const loadData = async () => {
+        const res = await fetch('/api/ATX00002/GetBatchDefault', withJwtHeaders());
+        const data = await res.json();
+        gridRows = data.ok ? (data.rows || []) : [];
+        controllerLookups = data.lookups || {};
+    };
+
+    /* ---------- 4. lookup 顯示值 ---------- */
+    const getControllerLookupDisplay = (fieldName, rawVal) => {
+        const list = controllerLookups[fieldName];
+        if (!list || !Array.isArray(list)) return String(rawVal ?? '');
+        const item = list.find(i => String(i.key) === String(rawVal));
+        return item ? (item.display ?? String(rawVal ?? '')) : String(rawVal ?? '');
+    };
+
+    const getDictLookupDisplay = (fieldName, row) => {
+        const cache = dictLookupCache[fieldName];
+        if (!cache) return null; // 沒有 dict lookup
+        // 非實體欄位: 用對應的 key 欄位值去查
+        const fieldDef = fieldDefs.find(f => f.FieldName === fieldName);
+        if (!fieldDef) return null;
+        const keyFieldName = fieldDef.KeySelfName || fieldDef.KeyFieldName || fieldDef.FieldName;
+        const rawKey = row[keyFieldName];
+        if (rawKey == null) return '';
+        return cache.map[String(rawKey)] ?? String(rawKey);
+    };
+
+    /* ---------- 5. 渲染 Grid (重建方法) ---------- */
+    const renderGrid = () => {
+        const thead = $('atx2GridHead');
+        const tbody = $('atx2GridBody');
+        if (!thead || !tbody) return;
+
+        // 表頭
+        thead.innerHTML = fieldDefs.map(f => {
+            const label = f.DisplayLabel || f.FieldName;
+            const widthPx = f.DisplaySize ? f.DisplaySize * 10 : null;
+            const style = widthPx ? `width:${widthPx}px;min-width:${widthPx}px;` : '';
+            return `<th class="text-nowrap" style="${style}">${escHtml(label)}</th>`;
+        }).join('');
+
+        if (!gridRows.length) {
+            tbody.innerHTML = `<tr><td colspan="${fieldDefs.length}" class="text-center text-muted py-3">（無資料）</td></tr>`;
+            return;
+        }
+
+        // 表身 (固定一筆資料)
+        tbody.innerHTML = gridRows.map((row, rowIdx) => {
+            const cells = fieldDefs.map(f => {
+                const rawVal = row[f.FieldName];
+                const raw = rawVal != null ? String(rawVal) : '';
+                const isReadOnly = (f.ReadOnly === 1 || f.ReadOnly === true);
+
+                let cellContent;
+
+                if (DROPDOWN_FIELDS.has(f.FieldName)) {
+                    // ★ Controller 提供 lookup 的 ID 欄位 → <select> 下拉選單
+                    const list = controllerLookups[f.FieldName] || [];
+                    if (READONLY_CASCADE_FIELDS.has(f.FieldName)) {
+                        // 連動自動設定的唯讀欄位，直接顯示原始值
+                        cellContent = `<span class="atx2-text atx2-lookup-display" data-field="${f.FieldName}">${escHtml(raw)}</span>` +
+                            `<input type="hidden" class="cell-edit" name="${f.FieldName}" value="${escHtml(raw)}" data-raw="${escHtml(raw)}" />`;
+                    } else {
+                        // 可編輯的下拉選單
+                        const options = list.map(item => {
+                            const k = String(item.key);
+                            const d = item.display ?? k;
+                            const label = d !== k ? `${k} - ${d}` : k;
+                            const sel = k === raw ? ' selected' : '';
+                            return `<option value="${escHtml(k)}"${sel}>${escHtml(label)}</option>`;
+                        }).join('');
+                        cellContent = `<select class="form-select form-select-sm cell-edit" name="${f.FieldName}" data-raw="${escHtml(raw)}"` +
+                            `${isReadOnly ? ' disabled' : ''}>${options}</select>`;
+                    }
+                } else if (dictLookupCache[f.FieldName]) {
+                    // ★ 辭典有 lookup 的非實體欄位 → 唯讀格子顯示名稱
+                    const displayVal = getDictLookupDisplay(f.FieldName, row) ?? raw;
+                    cellContent = `<span class="atx2-text">${escHtml(displayVal)}</span>`;
+                } else if (f.ComboStyle === 1) {
+                    // checkbox
+                    cellContent = `<input type="checkbox" class="form-check-input checkbox-dark cell-edit" ` +
+                        `name="${f.FieldName}" value="${raw}" data-raw="${escHtml(raw)}" ` +
+                        `${raw === '1' ? 'checked' : ''} ${isReadOnly ? 'disabled' : ''} />`;
+                } else if (isReadOnly) {
+                    // 辭典標記唯讀
+                    cellContent = `<span class="atx2-text">${escHtml(raw)}</span>` +
+                        `<input type="hidden" class="cell-edit" name="${f.FieldName}" value="${escHtml(raw)}" data-raw="${escHtml(raw)}" />`;
+                } else {
+                    // 一般可編輯欄位
+                    cellContent = `<input class="form-control form-control-sm cell-edit" style="border:none;background:transparent;" ` +
+                        `name="${f.FieldName}" value="${escHtml(raw)}" data-raw="${escHtml(raw)}" />`;
+                }
+
+                return `<td data-field="${f.FieldName}">${cellContent}</td>`;
+            }).join('');
+
+            return `<tr data-row-idx="${rowIdx}">${cells}</tr>`;
+        }).join('');
+    };
+
+    /* ---------- 6. 從 Grid 收集當前值到記憶體 row ---------- */
+    const syncGridToMemory = () => {
+        if (!gridRows.length) return;
+        const tbody = $('atx2GridBody');
+        if (!tbody) return;
+        const tr = tbody.querySelector('tr[data-row-idx="0"]');
+        if (!tr) return;
+
+        tr.querySelectorAll('.cell-edit').forEach(el => {
+            if (!el.name) return;
+            if (el.type === 'checkbox') {
+                gridRows[0][el.name] = el.checked ? 1 : 0;
+            } else {
+                const val = el.value ?? '';
+                // 嘗試轉為數字
+                const num = Number(val);
+                gridRows[0][el.name] = isNaN(num) ? val : num;
+            }
+        });
+    };
+
+    /* ---------- 7. 連動更新 TaxTypeId + TaxCutTypeId + 重建 Grid ---------- */
+    const autoUpdateCascade = async () => {
+        if (!gridRows.length) return;
+        const row = gridRows[0];
+        const invoiceTypeId = parseInt(row.InvoiceTypeId, 10) || 0;
+        const isIn = parseInt(row.IsIn, 10) || 0;
+
+        try {
+            const res = await fetch(
+                `/api/ATX00002/GetCascadeValues?invoiceTypeId=${invoiceTypeId}&isIn=${isIn}`,
+                withJwtHeaders()
+            );
+            const data = await res.json();
+            if (data.ok) {
+                if (data.taxTypeId != null) gridRows[0].TaxTypeId = data.taxTypeId;
+                if (data.taxCutTypeId != null) gridRows[0].TaxCutTypeId = data.taxCutTypeId;
+            }
+        } catch (err) {
+            console.error('autoUpdateCascade error:', err);
+        }
+
+        // 重建 Grid
+        renderGrid();
+        bindGridEvents();
+    };
+
+    /* ---------- 8. 綁定 change 事件 ---------- */
+    const bindGridEvents = () => {
+        const tbody = $('atx2GridBody');
+        if (!tbody) return;
+
+        // 移除舊的 listener (重建時需要)
+        const newTbody = tbody.cloneNode(true);
+        tbody.parentNode.replaceChild(newTbody, tbody);
+
+        newTbody.addEventListener('change', (e) => {
+            const el = e.target;
+            if (!el.matches('.cell-edit')) return;
+
+            const fieldName = el.name;
+
+            // 先同步當前值到記憶體
+            syncGridToMemory();
+
+            // InvoiceTypeId 或 IsIn 變更 → 連動設定 TaxTypeId + TaxCutTypeId + 重建
+            if (fieldName === 'InvoiceTypeId' || fieldName === 'IsIn') {
+                autoUpdateCascade();
+            }
+        });
+    };
+
+    /* ---------- 9. 收集所有列資料 ---------- */
+    const collectAllRows = () => {
+        const tbody = $('atx2GridBody');
+        if (!tbody) return [];
+
+        const rows = [];
+        tbody.querySelectorAll('tr[data-row-idx]').forEach(tr => {
+            const rowData = {};
+            tr.querySelectorAll('.cell-edit').forEach(el => {
+                if (!el.name) return;
+                if (el.type === 'checkbox') {
+                    rowData[el.name] = el.checked ? '1' : '0';
+                } else {
+                    rowData[el.name] = el.value ?? '';
+                }
+            });
+            rows.push(rowData);
+        });
+        return rows;
+    };
+
+    /* ---------- 10. 確定 → 儲存 ---------- */
+    const doSave = async () => {
+        const rows = collectAllRows();
+        if (!rows.length) {
+            if (window.Swal) await Swal.fire({ icon: 'info', title: '無資料需要儲存' });
+            return;
+        }
+
+        const row = rows[0];
+
+        try {
+            const res = await fetch('/api/ATX00002/SaveBatchDefault', withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(row)
+            }));
+
+            const data = await res.json();
+
+            if (!res.ok || data.ok === false) {
+                const msg = data.error || data.message || `HTTP ${res.status}`;
+                if (window.Swal) {
+                    await Swal.fire({ icon: 'warning', title: '儲存失敗', text: msg });
+                } else {
+                    alert('儲存失敗: ' + msg);
+                }
+                return;
+            }
+
+            if (bsModal) bsModal.hide();
+        } catch (err) {
+            console.error('doSave error:', err);
+            if (window.Swal) {
+                await Swal.fire({ icon: 'error', title: '儲存失敗', text: err.message });
+            } else {
+                alert('儲存失敗: ' + err.message);
+            }
+        }
+    };
+
+    /* ---------- 11. 開啟 Modal ---------- */
+    const openDefaultModal = async (ctx) => {
+        const modalEl = $('atx2DefaultModal');
+        if (!modalEl) return;
+
+        if (!bsModal && window.bootstrap?.Modal) {
+            bsModal = new bootstrap.Modal(modalEl, { backdrop: 'static' });
+        }
+        if (bsModal) bsModal.show();
+
+        const tbody = $('atx2GridBody');
+        if (tbody) tbody.innerHTML = '<tr><td class="text-center text-muted py-3">載入中...</td></tr>';
+
+        try {
+            await loadFieldDict();
+            await Promise.all([loadDictLookups(), loadData()]);
+            renderGrid();
+            bindGridEvents();
+        } catch (err) {
+            console.error('openDefaultModal error:', err);
+            if (tbody) tbody.innerHTML = `<tr><td class="text-center text-danger py-3">${escHtml(err.message)}</td></tr>`;
+        }
+    };
+
+    /* ---------- bind OK button ---------- */
+    const bindEvents = () => {
+        const btnOK = $('atx2BtnOK');
+        if (btnOK) btnOK.addEventListener('click', doSave);
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bindEvents);
+    } else {
+        bindEvents();
+    }
+
+    // 註冊按鈕處理函式
+    window.ActionRailCustomHandlers['ATX00002'] = {
+        btnC1: openDefaultModal   // 預設資料
+    };
+})();
+</script>

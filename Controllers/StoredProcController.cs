@@ -138,6 +138,20 @@ public class StoredProcController : ControllerBase
             ["AJNdTransferAccData"] = new StoredProcDef(
                 ProcName: "dbo.AJNdTransferAccData",
                 RequiredParams: new[] { "UseId", "FromDate", "DueDate", "SaveType", "UserId" }
+            ),
+
+            // BT000011 401營業稅申報
+            ["ATXdTaxHistorySet"] = new StoredProcDef(
+                ProcName: "dbo.ATXdTaxHistorySet",
+                RequiredParams: new[] { "HisId", "UseId", "Is403" }
+            ),
+            ["ATXdTaxCheck"] = new StoredProcDef(
+                ProcName: "dbo.ATXdTaxCheck",
+                RequiredParams: new[] { "HisId", "UseId", "UserId", "IsInCond", "IsCurrectCond" }
+            ),
+            ["ATXdTaxUpdate403"] = new StoredProcDef(
+                ProcName: "dbo.ATXdTaxUpdate403",
+                RequiredParams: new[] { "HisId", "UseId" }
             )
 
         };

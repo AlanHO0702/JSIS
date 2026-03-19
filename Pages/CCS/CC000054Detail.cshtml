@@ -208,12 +208,18 @@ else
                     <div class="tab-pane fade @active" id="tab-@tab.Key" role="tabpanel" aria-labelledby="tab-@tab.Key-tab" data-form="@((tab.IsForm ? "1" : "0"))">
                         @if (tab.IsForm)
                         {
-                            
-                          <div id="form-@tab.Key"
-                                class="position-relative mf-container"
-                                data-dict="@tab.DictName"
-                                data-dict-table="@tab.DictName"
-                                style="min-height:170px;"></div>
+                            @if (string.Equals(tab.Key, "creditctl", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <div id="form-@tab.Key" class="ccs-credit-legacy" data-dict="@tab.DictName" data-dict-table="@tab.DictName"></div>
+                            }
+                            else
+                            {
+                                <div id="form-@tab.Key"
+                                     class="position-relative mf-container"
+                                     data-dict="@tab.DictName"
+                                     data-dict-table="@tab.DictName"
+                                     style="min-height:170px;"></div>
+                            }
                            
                         }
                         else
@@ -518,9 +524,12 @@ async function normalizeLookupCodeName(field, rawVal) {
   return { code, name: '' };
 }
 
-function makeLookupValueElement(code, name) {
+function makeLookupValueElement(code, name, codeWidth) {
   const wrap = document.createElement('div');
   wrap.className = 'mf-lk-view';
+  if (Number.isFinite(Number(codeWidth)) && Number(codeWidth) > 0) {
+    wrap.style.gridTemplateColumns = `${Number(codeWidth)}px minmax(60px, 1fr)`;
+  }
 
   const left = document.createElement('span');
   left.className = 'mf-lk-code';
@@ -534,8 +543,20 @@ function makeLookupValueElement(code, name) {
   return wrap;
 }
 
-function getLookupCodeWidth(fieldWidth) {
+function getLookupCodeWidth(field, fieldWidth) {
   const w = Number(fieldWidth) || 0;
+  const comboTextSizeRaw =
+    field?.ComboTextSize ??
+    field?.comboTextSize ??
+    field?.combotextsize;
+  const comboTextSize = parseInt(String(comboTextSizeRaw ?? '').trim(), 10);
+  if (Number.isFinite(comboTextSize) && comboTextSize > 0) {
+    if (w > 0) {
+      // ComboTextSize: 代碼欄寬（像素）
+      return Math.max(40, Math.min(comboTextSize, Math.max(40, w - 40)));
+    }
+    return Math.max(40, comboTextSize);
+  }
   return Math.max(52, Math.min(96, Math.floor(w * 0.36)));
 }
 
@@ -575,6 +596,18 @@ function getLookupNameEditor(inputEl) {
   return inputEl?._lookupNameEditor || null;
 }
 
+function setLookupNameDisplay(inputEl, text) {
+  const nameEditor = getLookupNameEditor(inputEl);
+  if (!nameEditor) return;
+  const next = String(text || '');
+  if (nameEditor instanceof HTMLInputElement || nameEditor instanceof HTMLTextAreaElement) {
+    nameEditor.value = next;
+  } else {
+    nameEditor.textContent = next;
+    nameEditor.title = next;
+  }
+}
+
 function getLookupMetaFromInput(inputEl) {
   if (!inputEl) return null;
   const table = String(inputEl.dataset.lookupTable || '').trim();
@@ -605,7 +638,10 @@ function positionMfSuggest(inputEl) {
   if (!inputEl) return;
   const box = ensureMfSuggest();
   const rect = inputEl.getBoundingClientRect();
-  const minWidth = 280;
+  const nameEditor = getLookupNameEditor(inputEl);
+  const nameWidth = nameEditor ? (nameEditor.getBoundingClientRect?.().width || 0) : 0;
+  const fullWidth = rect.width + nameWidth;
+  const minWidth = Math.max(220, fullWidth || rect.width);
   const maxWidth = Math.max(minWidth, window.innerWidth - 24);
   const width = Math.min(maxWidth, Math.max(rect.width, minWidth));
   let left = rect.left + window.scrollX;
@@ -630,13 +666,14 @@ function applyLookupSelection(inputEl, option) {
   const code = String(option.value || '').trim();
   const label = String(option.label || '').trim();
   inputEl.value = code;
-  const nameEditor = getLookupNameEditor(inputEl);
-  if (nameEditor) nameEditor.value = label;
+  setLookupNameDisplay(inputEl, label);
 }
 
 function renderMfSuggest(inputEl, options, forceAll = false) {
   const box = ensureMfSuggest();
   const q = forceAll ? '' : String(inputEl?.value || '').trim().toLowerCase();
+  const currentRaw = String(inputEl?.value || '').trim().toLowerCase();
+  const current = currentRaw.split(/\s*-\s*/)[0].trim();
   const list = q
     ? (options || []).filter(o =>
         String(o.value || '').toLowerCase().includes(q) ||
@@ -652,7 +689,9 @@ function renderMfSuggest(inputEl, options, forceAll = false) {
   list.slice(0, 200).forEach(o => {
     const item = document.createElement('div');
     item.className = 'mf-suggest-item';
-    item.innerHTML = `<div class="mf-suggest-code">${o.value}</div><div class="mf-suggest-label">${o.label}</div>`;
+    const code = String(o.value || '').trim();
+    if (code && code.toLowerCase() === current) item.classList.add('is-selected');
+    item.textContent = o.value ? `${o.value} - ${o.label}` : (o.label || '');
     item.addEventListener('mousedown', (e) => {
       e.preventDefault();
       applyLookupSelection(inputEl, o);
@@ -660,6 +699,9 @@ function renderMfSuggest(inputEl, options, forceAll = false) {
     });
     box.appendChild(item);
   });
+  if (!box.querySelector('.mf-suggest-item.is-selected')) {
+    box.querySelector('.mf-suggest-item')?.classList.add('is-selected');
+  }
 
   positionMfSuggest(inputEl);
   box.style.display = 'block';
@@ -679,10 +721,9 @@ function commitLookupInputValue(inputEl) {
   if (!inputEl) return;
   const options = __mfSuggestTarget === inputEl ? __mfSuggestOptions : [];
   const textRaw = String(inputEl.value || '').trim();
-  const nameEditor = getLookupNameEditor(inputEl);
   if (!textRaw) {
     inputEl.value = '';
-    if (nameEditor) nameEditor.value = '';
+    setLookupNameDisplay(inputEl, '');
     return;
   }
 
@@ -703,7 +744,7 @@ function commitLookupInputValue(inputEl) {
   }
 
   inputEl.value = token;
-  if (nameEditor) nameEditor.value = '';
+  setLookupNameDisplay(inputEl, '');
 }
 
 function bindLookupSuggestInput(inputEl) {
@@ -734,16 +775,172 @@ function bindLookupSuggestInput(inputEl) {
     if (!allSelected) return;
     e.preventDefault();
     inputEl.value = '';
-    const nameEditor = getLookupNameEditor(inputEl);
-    if (nameEditor) nameEditor.value = '';
+    setLookupNameDisplay(inputEl, '');
     if (__mfSuggestTarget === inputEl) renderMfSuggest(inputEl, __mfSuggestOptions, false);
   });
 }
 
-function openLookupPicker(inputEl) {
+let __lookupDialogEl = null;
+let __lookupDialogModal = null;
+let __lookupDialogState = {
+  inputEl: null,
+  options: [],
+  filtered: [],
+  selectedCode: ''
+};
+
+function ensureLookupDialog() {
+  if (__lookupDialogEl) return __lookupDialogEl;
+  const host = document.createElement('div');
+  host.className = 'modal fade ccs-lookup-dialog';
+  host.tabIndex = -1;
+  host.setAttribute('aria-hidden', 'true');
+  host.innerHTML = `
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">名稱查詢</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="ccs-lk-filter">
+            <input type="text" class="form-control form-control-sm" data-lk-filter="code" placeholder="代碼篩選">
+            <input type="text" class="form-control form-control-sm" data-lk-filter="name" placeholder="名稱篩選">
+          </div>
+          <div class="ccs-lk-list-wrap">
+            <table class="table table-sm mb-0 ccs-lk-table">
+              <thead>
+                <tr><th style="width:120px">代碼</th><th>名稱</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-primary btn-sm" data-lk-action="ok">確定</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(host);
+  __lookupDialogEl = host;
+  __lookupDialogModal = bootstrap.Modal.getOrCreateInstance(host);
+
+  const codeFilter = host.querySelector('[data-lk-filter="code"]');
+  const nameFilter = host.querySelector('[data-lk-filter="name"]');
+  const tbody = host.querySelector('tbody');
+  const okBtn = host.querySelector('[data-lk-action="ok"]');
+
+  const renderRows = () => {
+    const codeQ = String(codeFilter?.value || '').trim().toLowerCase();
+    const nameQ = String(nameFilter?.value || '').trim().toLowerCase();
+    const all = Array.isArray(__lookupDialogState.options) ? __lookupDialogState.options : [];
+    const filtered = all.filter(o => {
+      const v = String(o.value || '').toLowerCase();
+      const n = String(o.label || '').toLowerCase();
+      if (codeQ && !v.includes(codeQ)) return false;
+      if (nameQ && !n.includes(nameQ)) return false;
+      return true;
+    });
+    __lookupDialogState.filtered = filtered;
+    if (!tbody) return;
+    tbody.innerHTML = filtered.map(o => {
+      const code = String(o.value || '');
+      const name = String(o.label || '');
+      const sel = code === __lookupDialogState.selectedCode ? ' class="is-selected"' : '';
+      return `<tr data-code="${code.replace(/"/g, '&quot;')}"${sel}><td>${code}</td><td>${name}</td></tr>`;
+    }).join('');
+    const selected = tbody.querySelector('tr.is-selected') || tbody.querySelector('tr');
+    if (selected) {
+      tbody.querySelectorAll('tr').forEach(tr => tr.classList.remove('is-selected'));
+      selected.classList.add('is-selected');
+      __lookupDialogState.selectedCode = selected.getAttribute('data-code') || '';
+    }
+  };
+
+  const applySelected = () => {
+    const inputEl = __lookupDialogState.inputEl;
+    if (!inputEl) return;
+    const selected = (__lookupDialogState.filtered || []).find(o => String(o.value || '') === __lookupDialogState.selectedCode);
+    if (!selected) return;
+    applyLookupSelection(inputEl, selected);
+    __lookupDialogModal?.hide();
+  };
+
+  host.addEventListener('shown.bs.modal', () => {
+    setTimeout(() => codeFilter?.focus(), 0);
+  });
+
+  codeFilter?.addEventListener('input', renderRows);
+  nameFilter?.addEventListener('input', renderRows);
+  okBtn?.addEventListener('click', applySelected);
+
+  tbody?.addEventListener('click', (e) => {
+    const tr = e.target.closest('tr[data-code]');
+    if (!tr) return;
+    tbody.querySelectorAll('tr').forEach(x => x.classList.remove('is-selected'));
+    tr.classList.add('is-selected');
+    __lookupDialogState.selectedCode = tr.getAttribute('data-code') || '';
+  });
+
+  tbody?.addEventListener('dblclick', (e) => {
+    const tr = e.target.closest('tr[data-code]');
+    if (!tr) return;
+    __lookupDialogState.selectedCode = tr.getAttribute('data-code') || '';
+    applySelected();
+  });
+
+  host.addEventListener('keydown', (e) => {
+    const rows = Array.from(tbody?.querySelectorAll('tr[data-code]') || []);
+    if (!rows.length) return;
+    const cur = rows.findIndex(r => r.classList.contains('is-selected'));
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = e.key === 'ArrowDown'
+        ? Math.min(rows.length - 1, Math.max(0, cur + 1))
+        : Math.max(0, cur <= 0 ? 0 : cur - 1);
+      rows.forEach(r => r.classList.remove('is-selected'));
+      rows[next].classList.add('is-selected');
+      __lookupDialogState.selectedCode = rows[next].getAttribute('data-code') || '';
+      rows[next].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      applySelected();
+    }
+  });
+
+  host._renderRows = renderRows;
+  return host;
+}
+
+async function openLookupDropdown(inputEl, forceAll = true) {
   if (!inputEl) return;
-  inputEl.focus();
-  showFormLookupSuggest(inputEl, true);
+  try {
+    inputEl.focus();
+  } catch { }
+  await showFormLookupSuggest(inputEl, forceAll);
+}
+
+async function openLookupDialog(inputEl) {
+  if (!inputEl) return;
+  const meta = getLookupMetaFromInput(inputEl);
+  if (!meta) return;
+  const options = await getLookupOptions(meta);
+  const host = ensureLookupDialog();
+  __lookupDialogState.inputEl = inputEl;
+  __lookupDialogState.options = options || [];
+  __lookupDialogState.filtered = options || [];
+  __lookupDialogState.selectedCode = String(inputEl.value || '').trim();
+  const codeFilter = host.querySelector('[data-lk-filter="code"]');
+  const nameFilter = host.querySelector('[data-lk-filter="name"]');
+  if (codeFilter) codeFilter.value = '';
+  if (nameFilter) nameFilter.value = '';
+  if (typeof host._renderRows === 'function') host._renderRows();
+  __lookupDialogModal?.show();
+}
+
+async function openLookupPicker(inputEl) {
+  await openLookupDialog(inputEl);
 }
 
 const __layoutEditEnabled = (() => {
@@ -922,7 +1119,7 @@ function enableFormLayoutEditing(container, dictName) {
   }
   const tabState = {};
   const tabMeta = {}; // grid metadata
-  const iconToolbarTabs = new Set(['assistant', 'outaddr', 'bank', 'bankcredit', 'creditline', 'bankassure', 'forwarder', 'quota', 'xout', 'attach']);
+  const iconToolbarTabs = new Set(['assistant', 'outaddr', 'bank', 'bankcredit', 'creditline', 'bankassure', 'forwarder', 'quota', 'xout', 'attach', 'custpart']);
   let hasGridPendingAdd = false;
   const detailBaseUrl = '@Url.Page("CC000054Detail", new { itemId = Model.ItemId, systemId = Model.SystemId })';
   const detailSystemId = Number('@Model.SystemId');
@@ -1887,6 +2084,7 @@ function enableFormLayoutEditing(container, dictName) {
       || tabTitle.includes('貨運地址')
       || tabTitle.includes('出貨地址')
       || tabTitle.includes('銀行資料')
+      || tabTitle.includes('客戶品號')
       || tabTitle.includes('銀行授信')
       || tabTitle.includes('銀行保證')
       || tabTitle.toUpperCase().includes('FORWARDER')
@@ -2160,8 +2358,9 @@ function enableFormLayoutEditing(container, dictName) {
           const lookupCode = lookupPair.code ?? '';
           const lookupName = lookupPair.name ?? '';
           if (__formRenderToken[tabKey] !== token) return;
+          const codeWidth = lookupMeta ? getLookupCodeWidth(f, layout.fieldWidth) : layout.fieldWidth;
           const span = lookupMeta
-            ? makeLookupValueElement(lookupCode, lookupName)
+            ? makeLookupValueElement(lookupCode, lookupName, codeWidth)
             : makeValueElement(f, val);
           span.classList.add('mf-view');
           span.style.position = 'absolute';
@@ -2201,7 +2400,6 @@ function enableFormLayoutEditing(container, dictName) {
             editor.style.position = 'absolute';
             editor.style.top = `${layout.fieldTop}px`;
             editor.style.left = `${layout.fieldLeft}px`;
-            const codeWidth = lookupMeta ? getLookupCodeWidth(layout.fieldWidth) : layout.fieldWidth;
             editor.style.width = `${codeWidth}px`;
             editor.style.height = `${layout.fieldHeight}px`;
             editor.style.minHeight = `${layout.fieldHeight}px`;
@@ -2216,46 +2414,51 @@ function enableFormLayoutEditing(container, dictName) {
               lookupTrigger.type = 'button';
               lookupTrigger.className = 'mf-lk-trigger';
               lookupTrigger.setAttribute('aria-label', '開啟清單');
-              lookupTrigger.textContent = '▾';
+              lookupTrigger.textContent = '';
               lookupTrigger.style.position = 'absolute';
-              lookupTrigger.style.top = `${layout.fieldTop}px`;
-              lookupTrigger.style.left = `${layout.fieldLeft + codeWidth - 20}px`;
-              lookupTrigger.style.width = `20px`;
-              lookupTrigger.style.height = `${layout.fieldHeight}px`;
-              lookupTrigger.style.minHeight = `${layout.fieldHeight}px`;
+              lookupTrigger.style.top = `${layout.fieldTop + Math.max(0, Math.floor((layout.fieldHeight - 18) / 2))}px`;
+              lookupTrigger.style.left = `${layout.fieldLeft + codeWidth - 22}px`;
+              lookupTrigger.style.width = `18px`;
+              lookupTrigger.style.height = `18px`;
+              lookupTrigger.style.minHeight = `18px`;
               lookupTrigger.addEventListener('mousedown', (ev) => {
                 ev.preventDefault();
                 ev.stopPropagation();
                 __mfSuggestKeepUntil = Date.now() + 250;
                 if (lookupTrigger?.disabled) return;
-                openLookupPicker(editor);
+                openLookupDropdown(editor, true);
               });
-              lookupNameEditor = document.createElement('input');
-              lookupNameEditor.type = 'text';
-              lookupNameEditor.className = 'form-control form-control-sm mf-lk-edit-name d-none';
-              lookupNameEditor.readOnly = true;
-              lookupNameEditor.value = lookupName || '';
+              lookupNameEditor = document.createElement('button');
+              lookupNameEditor.type = 'button';
+              lookupNameEditor.className = 'mf-lk-name-btn d-none';
+              lookupNameEditor.textContent = lookupName || '';
+              lookupNameEditor.title = lookupName || '';
               lookupNameEditor.style.position = 'absolute';
               lookupNameEditor.style.top = `${layout.fieldTop}px`;
               lookupNameEditor.style.left = `${layout.fieldLeft + codeWidth}px`;
               lookupNameEditor.style.width = `${Math.max(60, layout.fieldWidth - codeWidth)}px`;
               lookupNameEditor.style.height = `${layout.fieldHeight}px`;
               lookupNameEditor.style.minHeight = `${layout.fieldHeight}px`;
-              applyEditColor(lookupNameEditor, f?.EditColor, true);
               editor._lookupNameEditor = lookupNameEditor;
               editor._lookupTrigger = lookupTrigger;
               bindLookupSuggestInput(editor);
-              lookupNameEditor.addEventListener('mousedown', (ev) => {
+              lookupNameEditor.addEventListener('click', (ev) => {
                 ev.preventDefault();
-                editor.focus();
-                const len = (editor.value || '').length;
-                try { editor.setSelectionRange(len, len); } catch { }
+                ev.stopPropagation();
+                if (lookupNameEditor?.disabled || lookupTrigger?.disabled) return;
+                openLookupDialog(editor);
               });
               lookupNameEditor.addEventListener('keydown', (ev) => {
+                if (ev.key === 'F4' || ev.key === 'Enter') {
+                  ev.preventDefault();
+                  if (lookupNameEditor?.disabled || lookupTrigger?.disabled) return;
+                  openLookupDialog(editor);
+                  return;
+                }
                 if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
                 ev.preventDefault();
                 editor.value = '';
-                lookupNameEditor.value = '';
+                setLookupNameDisplay(editor, '');
                 if (__mfSuggestTarget === editor) renderMfSuggest(editor, __mfSuggestOptions, false);
                 editor.focus();
               });
@@ -2264,6 +2467,9 @@ function enableFormLayoutEditing(container, dictName) {
           if (Number(f.ReadOnly ?? 0) === 1) {
             editor.setAttribute('readonly', 'readonly');
             editor.dataset.readonly = '1';
+            if (lookupNameEditor) {
+              lookupNameEditor.dataset.readonly = '1';
+            }
             if (lookupTrigger) {
               lookupTrigger.disabled = true;
               lookupTrigger.dataset.readonly = '1';
@@ -2327,6 +2533,215 @@ function enableFormLayoutEditing(container, dictName) {
     }
   }
 
+  const toCheckVal = (v) => {
+    const s = String(v ?? '').trim().toLowerCase();
+    return s === '1' || s === 'true' || s === 'y';
+  };
+
+  const escHtml = (v) => String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  const creditFieldBlock = (cfg) => {
+    const {
+      type = 'text',
+      name = '',
+      value = '',
+      label = '',
+      readOnly = false,
+      classes = ''
+    } = cfg || {};
+    if (type === 'checkbox') {
+      const checked = toCheckVal(value) ? 'checked' : '';
+      const original = toCheckVal(value) ? '1' : '0';
+      return `<div class="mf-field ccs-credit-check" data-field="${escHtml(name)}">
+  <span class="mf-view d-none"></span>
+  <label class="form-check m-0">
+    <input type="checkbox" class="form-check-input mf-edit ${escHtml(classes)}" name="${escHtml(name)}" data-original="${original}" ${checked} ${(readOnly ? 'disabled data-readonly="1"' : '')}>
+    <span class="form-check-label">${escHtml(label || name)}</span>
+  </label>
+</div>`;
+    }
+    const val = (value == null ? '' : String(value));
+    return `<div class="ccs-credit-row mf-field" data-field="${escHtml(name)}">
+  <label class="ccs-credit-label">${escHtml(label || name)}</label>
+  <span class="mf-view d-none"></span>
+  <input type="text" class="form-control form-control-sm mf-edit ccs-credit-input ${escHtml(classes)}" name="${escHtml(name)}" value="${escHtml(val)}" data-original="${escHtml(val)}" ${(readOnly ? 'readonly data-readonly="1"' : '')}>
+</div>`;
+  };
+
+  const renderCreditGroupList = async (creditGroupId) => {
+    const tbody = document.querySelector('#creditctl-group-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td class="text-muted text-center py-2" colspan="3">載入中...</td></tr>';
+    const gid = String(creditGroupId || '').trim();
+    if (!gid) {
+      tbody.innerHTML = '<tr><td class="text-muted text-center py-2" colspan="3">尚未設定授信額度群組</td></tr>';
+      return;
+    }
+    try {
+      const url = `/api/CommonTable/Paged?table=AJNdCompany&page=1&pageSize=2000`;
+      const resp = await fetch(url);
+      const json = await resp.json().catch(() => ({}));
+      const rows = Array.isArray(json?.data) ? json.data : [];
+      const matched = rows.filter(r => String(r?.CreditGroupId || '').trim() === gid);
+      if (!matched.length) {
+        tbody.innerHTML = '<tr><td class="text-muted text-center py-2" colspan="3">無群組資料</td></tr>';
+        return;
+      }
+      tbody.innerHTML = matched.map(r => `<tr>
+  <td>${escHtml(r?.CreditGroupId || '')}</td>
+  <td>${escHtml(r?.CompanyId || '')}</td>
+  <td>${escHtml(r?.ShortName || '')}</td>
+</tr>`).join('');
+    } catch {
+      tbody.innerHTML = '<tr><td class="text-danger text-center py-2" colspan="3">授信額度群組載入失敗</td></tr>';
+    }
+  };
+
+  async function renderCreditControlForm(companyId) {
+    const host = document.getElementById('form-creditctl');
+    if (!host || !companyId) return;
+    const rows = await fetch(`/api/CommonTable/ByKeys?table=AJNdCompany&keyNames=CompanyId&keyValues=${encodeURIComponent(companyId)}`).then(r => r.json());
+    const data = Array.isArray(rows) ? (rows[0] || {}) : {};
+    const creditAmountVal = data.CreditAmount == null || data.CreditAmount === '' ? '' : Number(data.CreditAmount).toLocaleString('en-US');
+    host.innerHTML = `
+<div class="ccs-credit-wrap">
+  <div class="ccs-credit-left">
+    <div class="ccs-credit-group">
+      <div class="ccs-credit-group-title">訂單檢查</div>
+      <div class="ccs-credit-order-grid">
+        <div class="ccs-credit-order-left">
+          ${creditFieldBlock({ type: 'checkbox', name: 'CheckMoney', value: data.CheckMoney, label: '檢查授信額度' })}
+          ${creditFieldBlock({ type: 'checkbox', name: 'CreditOg', value: data.CreditOg, label: '以原幣計算' })}
+          ${creditFieldBlock({ type: 'checkbox', name: 'CheckDate', value: data.CheckDate, label: '檢查帳款逾期' })}
+          ${creditFieldBlock({ type: 'checkbox', name: 'CheckBankAssure', value: data.CheckBankAssure, label: '檢查銀行保證函' })}
+        </div>
+        <div class="ccs-credit-order-right">
+          ${creditFieldBlock({ type: 'text', name: 'CreditGroupId', value: data.CreditGroupId, label: '授信額度群組', classes: 'ccs-credit-narrow' })}
+          ${creditFieldBlock({ type: 'text', name: 'CreditAmount', value: creditAmountVal, label: '額度', classes: 'ccs-credit-narrow' })}
+          ${creditFieldBlock({ type: 'text', name: 'consignment', value: data.consignment, label: '帳款容忍天數', classes: 'ccs-credit-narrow' })}
+        </div>
+      </div>
+    </div>
+    <div class="ccs-credit-group">
+      <div class="ccs-credit-group-title">授信額度群組</div>
+      <div class="table-responsive ccs-credit-group-grid">
+        <table id="creditctl-group-table" class="table table-sm table-hover ccs-credit-group-table mb-0">
+          <thead><tr><th>群組名稱</th><th>代碼</th><th>簡稱</th></tr></thead>
+          <tbody><tr><td class="text-muted text-center py-2" colspan="3">載入中...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="ccs-credit-group">
+      <div class="ccs-credit-group-title">出貨檢查</div>
+      <div class="ccs-credit-due-row">
+        ${creditFieldBlock({ type: 'checkbox', name: 'CheckDueDate', value: data.CheckDueDate, label: '檢查出貨逾期' })}
+        ${creditFieldBlock({ type: 'text', name: 'consignmentMonth', value: data.consignmentMonth, label: '應出未出天數', classes: 'ccs-credit-narrow' })}
+      </div>
+    </div>
+    <div class="mf-field d-none">
+      <span class="mf-view d-none"></span>
+      <input type="text" class="mf-edit" name="CompanyId" value="${escHtml(data.CompanyId || companyId)}" data-original="${escHtml(data.CompanyId || companyId)}" readonly data-readonly="1">
+    </div>
+  </div>
+  <div class="ccs-credit-right">
+    <div class="ccs-credit-group">
+      <div class="ccs-credit-group-head">
+        <div class="ccs-credit-group-title mb-0">授信額度放行</div>
+        <div class="tab-icon-toolbar" data-tab-icon-toolbar="creditline">
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-add" data-creditline-tool="add" title="新增" aria-label="新增"><i class="bi bi-plus-lg"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-del" data-creditline-tool="delete" title="刪除" aria-label="刪除"><i class="bi bi-dash-lg"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-save" data-creditline-tool="save" title="儲存" aria-label="儲存"><i class="bi bi-check-lg"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-cancel" data-creditline-tool="cancel" title="取消" aria-label="取消"><i class="bi bi-x-lg"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-icon ccs-tool-refresh" data-creditline-tool="edit" title="重新整理" aria-label="重新整理"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+      </div>
+      <div class="table-responsive ccs-subgrid-wrap" data-tab-key="creditline">
+        <table class="table table-sm table-hover align-middle mb-0 ccs-subgrid-table"
+               id="grid-creditline"
+               data-table-name="AJNdCompanyCreditLine"
+               data-dict-name="AJNdCompanyCreditLine"
+               data-dict-table="AJNdCompanyCreditLine"
+               data-key-fields="CompanyId,SerialNum">
+          <thead class="table-light">
+            <tr><th class="text-center text-muted">載入中...</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="text-center text-muted py-3">請點選上方主檔資料</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>`;
+
+    formState.creditctl = {
+      tableName: 'AJNdCompany',
+      dictName: 'AJNdCompany',
+      extras: [],
+      keyFields: ['CompanyId'],
+      lastRowData: data || {},
+      editable: formEditMode
+    };
+    host.querySelectorAll('[data-creditline-tool]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const action = btn.getAttribute('data-creditline-tool');
+        if (action === 'add') {
+          addBlankGridRow('creditline');
+          return;
+        }
+        if (action === 'delete') {
+          const table = document.getElementById('grid-creditline');
+          const tr = table?.querySelector('tbody tr.row-selected');
+          if (tr) {
+            tr.dataset.state = 'deleted';
+            tr.classList.add('table-danger');
+            hasGridPendingAdd = true;
+            syncGridButtons('creditline');
+          }
+          return;
+        }
+        if (action === 'save') {
+          await saveGridChanges('creditline');
+          return;
+        }
+        if (action === 'cancel') {
+          cancelGridAdd('creditline');
+          toggleGridEdit('creditline', false);
+          return;
+        }
+        if (action === 'edit') {
+          if (currentCompany) await renderCreditLineEmbedded(currentCompany);
+        }
+      });
+    });
+    await renderCreditGroupList(data.CreditGroupId);
+    await renderCreditLineEmbedded(companyId);
+    setTimeout(() => {
+      const t = document.getElementById('grid-creditline');
+      if (t) {
+        applySubGridWidths(t);
+        attachSubGridResizers(t);
+        syncGridButtons('creditline');
+      }
+    }, 0);
+  }
+
+  async function renderCreditLineEmbedded(companyId) {
+    if (!companyId) return;
+    const tableName = 'AJNdCompanyCreditLine';
+    const dictName = 'AJNdCompanyCreditLine';
+    const [dict, rows] = await Promise.all([
+      getDict(dictName),
+      fetch(`/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&keyNames=CompanyId&keyValues=${encodeURIComponent(companyId)}`).then(r => r.json())
+    ]);
+    await buildTable('creditline', dict || [], Array.isArray(rows) ? rows : [], [], tableName);
+  }
+
   async function loadTabData(tabKey, companyId) {
     const btn = document.getElementById(`tab-${tabKey}-tab`);
     if (!btn) return;
@@ -2339,6 +2754,11 @@ function enableFormLayoutEditing(container, dictName) {
 
     try {
       if (isForm) {
+        if (tabKey === 'creditctl') {
+          await renderCreditControlForm(companyId);
+          setFormMode(tabKey, !!formEditMode);
+          return;
+        }
         await renderForm(tabKey, dictName, tableName, companyId, extras);
         setFormMode(tabKey, !!formEditMode);
         return;
@@ -2770,7 +3190,7 @@ function enableFormLayoutEditing(container, dictName) {
     host.querySelectorAll('.mf-field').forEach(f => {
       const view = f.querySelector('.mf-view');
       const edit = f.querySelector('.mf-edit');
-      const lkEditName = f.querySelector('.mf-lk-edit-name');
+      const lkEditName = f.querySelector('.mf-lk-name-btn');
       const lkTrigger = f.querySelector('.mf-lk-trigger');
       if (!view || !edit) return;
       // Keep same visual layout in both modes: always show edit controls.
@@ -2791,8 +3211,7 @@ function enableFormLayoutEditing(container, dictName) {
         }
       }
       if (lkEditName) {
-        lkEditName.setAttribute('readonly', 'readonly');
-        if (!editable) lkEditName.setAttribute('disabled', 'disabled');
+        if (forceDisabled) lkEditName.setAttribute('disabled', 'disabled');
         else lkEditName.removeAttribute('disabled');
       }
       if (lkTrigger) {
@@ -2821,8 +3240,14 @@ function enableFormLayoutEditing(container, dictName) {
       const isKeyField = keySet.has(lower);
       // Readonly non-key fields should not be posted back to avoid wrong type writes.
       if (el.dataset.readonly === '1' && !isKeyField) return;
-      const currentVal = el.type === 'checkbox' ? (el.checked ? '1' : '0') : (el.value ?? '');
-      const originalVal = el.dataset.original ?? '';
+      let currentVal = el.type === 'checkbox' ? (el.checked ? '1' : '0') : (el.value ?? '');
+      if (lower === 'creditamount' && typeof currentVal === 'string') {
+        currentVal = currentVal.replace(/,/g, '').trim();
+      }
+      let originalVal = el.dataset.original ?? '';
+      if (lower === 'creditamount' && typeof originalVal === 'string') {
+        originalVal = originalVal.replace(/,/g, '').trim();
+      }
       // Follow other modules: only submit key fields + changed values.
       if (!isKeyField && String(currentVal) === String(originalVal)) return;
       if (!isKeyField) changedNonKeyCount += 1;
@@ -3178,7 +3603,7 @@ function enableFormLayoutEditing(container, dictName) {
     if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) return;
     if (!el.closest('.ccs-detail-page')) return;
     if (el.readOnly || el.disabled) return;
-    if (!el.classList.contains('mf-edit') && !el.classList.contains('mf-lk-edit-name') && !el.classList.contains('cell-edit')) return;
+    if (!el.classList.contains('mf-edit') && !el.classList.contains('cell-edit')) return;
     ev.preventDefault();
     if (el instanceof HTMLInputElement && el.type === 'checkbox') {
       el.checked = false;
@@ -3497,83 +3922,159 @@ function enableFormLayoutEditing(container, dictName) {
   color: #0f172a !important;
   box-shadow: none !important;
 }
-.ccs-detail-page .mf-field .mf-lk-edit-name {
-  padding: 0 6px !important;
+.ccs-detail-page .mf-field .mf-edit.mf-input.mf-lk-code-input {
+  padding-right: 24px !important;
+  border-radius: 0 !important;
+}
+.ccs-detail-page .mf-field .mf-lk-name-btn {
+  padding: 2px 8px !important;
   border: 1px solid var(--field-border) !important;
   border-left: none !important;
   border-radius: 0 !important;
   font-size: 12px !important;
   background: #fff !important;
-  color: #0f172a !important;
+  color: #495057 !important;
   box-shadow: none !important;
-}
-.ccs-detail-page .mf-field .mf-edit.mf-input.mf-lk-code-input {
-  padding-right: 20px !important;
-}
-.ccs-detail-page .mf-field .mf-lk-trigger {
-  border: 1px solid var(--field-border);
-  border-left: none;
-  border-radius: 0;
-  background: transparent !important;
-  background-image: none !important;
-  color: #4b5563;
-  font-size: 12px;
-  line-height: 1;
-  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
-  z-index: 2;
+}
+.ccs-detail-page .mf-field .mf-lk-name-btn:hover {
+  background: #f8f9fa !important;
+}
+.ccs-detail-page .mf-field .mf-lk-trigger {
+  border: 0;
+  border-radius: 0;
+  background: transparent !important;
+  background-image: none !important;
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
+  padding: 0;
+  cursor: pointer;
+  z-index: 6;
   -webkit-appearance: none;
   appearance: none;
   box-shadow: none;
 }
+.ccs-detail-page .mf-field .mf-lk-trigger::before {
+  content: "";
+  display: block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #6b7280;
+  margin: 0 auto;
+}
 .ccs-detail-page .mf-field .mf-lk-trigger:disabled {
   background: transparent !important;
   background-image: none !important;
-  color: #4b5563;
-  border-color: var(--field-border);
   opacity: 1 !important;
   cursor: default;
 }
 .ccs-detail-page .mf-field .mf-edit.mf-input:disabled,
-.ccs-detail-page .mf-field .mf-lk-edit-name:disabled {
+.ccs-detail-page .mf-field .mf-lk-name-btn:disabled {
   background: #fff !important;
   color: #0f172a !important;
   opacity: 1 !important;
 }
+.ccs-detail-page .mf-edit[data-readonly="1"]:not([type="checkbox"]),
+.ccs-detail-page .mf-edit[data-readonly="1"]:not([type="checkbox"]):focus,
+.ccs-detail-page .mf-field .mf-lk-name-btn[data-readonly="1"],
+.ccs-detail-page .mf-field .mf-lk-name-btn[data-readonly="1"]:focus {
+  background: var(--bs-secondary-bg, #e9ecef) !important;
+  color: #495057 !important;
+}
+.ccs-detail-page .ccs-subgrid-table .readonly-cell,
+.ccs-detail-page .ccs-subgrid-table .readonly-cell:focus {
+  background: var(--bs-secondary-bg, #e9ecef) !important;
+  color: #555 !important;
+}
 .mf-suggest {
   position: absolute;
   background: #fff;
-  border: 1px solid #c9d2e3;
+  border: 1px solid #b6c2d9;
   border-radius: 6px;
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
-  max-height: 220px;
+  box-shadow: 0 8px 20px rgba(30, 41, 59, 0.18);
+  max-height: 300px;
   overflow-x: hidden;
   overflow-y: auto;
   z-index: 2200;
-  font-size: 0.82rem;
+  font-size: 0.86rem;
 }
 .mf-suggest-item {
-  display: flex;
-  gap: 6px;
-  padding: 4px 6px;
+  display: block;
+  padding: 4px 10px;
   cursor: pointer;
-}
-.mf-suggest-item:hover {
-  background: #eef3ff;
-}
-.mf-suggest-code {
-  min-width: 48px;
-  font-weight: 600;
-  color: #1d3b6b;
-}
-.mf-suggest-label {
-  color: #374151;
+  line-height: 1.35;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.mf-suggest-item:hover {
+  background: #e2e8f0;
+}
+.mf-suggest-item.is-selected {
+  background: #cfe1ff;
+  color: #0f2f6b;
+  font-weight: 600;
+}
+.ccs-lookup-dialog .modal-dialog {
+  --bs-modal-width: 520px;
+  margin: 4rem auto;
+}
+.ccs-lookup-dialog .modal-content {
+  border: 1px solid #5f87c1;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.ccs-lookup-dialog .modal-header {
+  padding: 7px 10px;
+  background: #f5f7fb;
+  border-bottom: 1px solid #ced8e8;
+}
+.ccs-lookup-dialog .modal-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.ccs-lk-filter {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ccs-lk-list-wrap {
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid #cad4e4;
+}
+.ccs-lk-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f6f8fc;
+}
+.ccs-lk-table th,
+.ccs-lk-table td {
+  font-size: 0.75rem;
+  padding: 2px 4px !important;
+  border-color: #d2dae8 !important;
+}
+.ccs-lk-table tbody tr {
+  cursor: pointer;
+}
+.ccs-lk-table tbody tr.is-selected {
+  background: #c8d7ee;
+}
+.ccs-lookup-dialog .modal-footer {
+  padding: 6px 10px;
+  border-top: 1px solid #d6deec;
+  background: #f7f9fd;
 }
 .ccs-detail-page .mf-field .mf-edit.mf-input:focus {
   border-color: #5b8def !important;
@@ -3907,10 +4408,147 @@ function enableFormLayoutEditing(container, dictName) {
   grid-template-columns: 95px minmax(0, 1fr);
   gap: 5px;
 }
+.ccs-credit-legacy {
+  min-height: 248px;
+  border: 1px solid #d8e0ee;
+  background: #fff;
+  padding: 6px;
+  font-size: 12px;
+}
+.ccs-credit-wrap {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+.ccs-credit-left,
+.ccs-credit-right {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ccs-credit-group {
+  border: 1px solid #c9d5ea;
+  background: #f8fbff;
+}
+.ccs-credit-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  border-bottom: 1px solid #c9d5ea;
+  background: #eef4ff;
+  padding-right: 3px;
+}
+.ccs-credit-group-title {
+  padding: 3px 6px;
+  color: #1f3d78;
+  font-weight: 600;
+  font-size: 12px;
+}
+.ccs-credit-group-head .tab-icon-toolbar .btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  line-height: 1;
+}
+.ccs-credit-group .ccs-credit-check,
+.ccs-credit-group .ccs-credit-row {
+  padding: 2px 6px;
+}
+.ccs-credit-order-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  align-items: start;
+}
+.ccs-credit-order-left .ccs-credit-check {
+  padding: 2px 6px;
+}
+.ccs-credit-order-right .ccs-credit-row {
+  grid-template-columns: 86px 120px;
+  justify-content: start;
+}
+.ccs-credit-order-right .ccs-credit-label {
+  text-align: right;
+}
+.ccs-credit-due-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px;
+}
+.ccs-credit-due-row .ccs-credit-row {
+  grid-template-columns: 86px 120px;
+  margin-right: 6px;
+}
+.ccs-credit-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-items: center;
+  gap: 4px;
+}
+.ccs-credit-label {
+  margin: 0;
+  text-align: right;
+  color: #2a3a58;
+  font-size: 12px;
+}
+.ccs-credit-input {
+  height: 24px;
+  min-height: 24px;
+  padding: 1px 4px;
+  font-size: 12px;
+}
+.ccs-credit-narrow {
+  max-width: 120px;
+}
+.ccs-credit-check .form-check-label {
+  font-size: 12px;
+}
+.ccs-credit-check .form-check-input {
+  margin-top: 0.15rem;
+}
+.ccs-credit-group-table thead th,
+.ccs-credit-group-table tbody td {
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 2px 5px !important;
+}
+.ccs-credit-group-grid {
+  max-height: 220px;
+}
+.ccs-credit-right .ccs-subgrid-wrap {
+  max-height: 290px;
+}
+.ccs-credit-right .ccs-subgrid-table thead th {
+  height: 24px;
+}
+.ccs-credit-right .ccs-subgrid-table tbody td {
+  height: 22px;
+}
+@@media (max-width: 1200px) {
+  .ccs-credit-wrap {
+    grid-template-columns: 1fr;
+  }
+  .ccs-credit-order-grid,
+  .ccs-credit-due-row {
+    grid-template-columns: 1fr;
+  }
+  .ccs-credit-order-right .ccs-credit-row,
+  .ccs-credit-due-row .ccs-credit-row {
+    grid-template-columns: 86px minmax(90px, 130px);
+  }
+  .ccs-credit-group-grid,
+  .ccs-credit-right .ccs-subgrid-wrap {
+    max-height: none;
+  }
+}
 </style>
 <script src="~/js/ccsUpdateLog.js" asp-append-version="true"></script>
 
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+
 
 
 

@@ -184,8 +184,21 @@ SELECT TOP 1 DLLValue
             await using var conn = new SqlConnection(_connStr);
             await using var cmd = new SqlCommand(sql, conn);
             await conn.OpenAsync();
-            await cmd.ExecuteNonQueryAsync();
-            return Ok(new { ok = true });
+            string copiedPartNum = string.Empty;
+            await using (var rd = await cmd.ExecuteReaderAsync())
+            {
+                do
+                {
+                    while (await rd.ReadAsync())
+                    {
+                        copiedPartNum = TryExtractPartNum(rd) ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(copiedPartNum)) break;
+                    }
+                    if (!string.IsNullOrWhiteSpace(copiedPartNum)) break;
+                }
+                while (await rd.NextResultAsync());
+            }
+            return Ok(new { ok = true, partNum = copiedPartNum });
         }
 
         [HttpGet]
@@ -317,6 +330,43 @@ SELECT RuleId, ISNULL(DLLValue,'') AS DLLValue
             };
 
             return Ok(response);
+        }
+
+        private static string? TryExtractPartNum(SqlDataReader rd)
+        {
+            if (rd == null || rd.FieldCount <= 0) return null;
+
+            static string? ReadByName(SqlDataReader reader, string name)
+            {
+                try
+                {
+                    var idx = reader.GetOrdinal(name);
+                    if (reader.IsDBNull(idx)) return null;
+                    var value = Convert.ToString(reader.GetValue(idx))?.Trim();
+                    return string.IsNullOrWhiteSpace(value) ? null : value;
+                }
+                catch (IndexOutOfRangeException)
+                {
+                    return null;
+                }
+            }
+
+            var named = ReadByName(rd, "PartNum")
+                        ?? ReadByName(rd, "Partnum")
+                        ?? ReadByName(rd, "NewPartNum")
+                        ?? ReadByName(rd, "NewPartnum");
+            if (!string.IsNullOrWhiteSpace(named)) return named;
+
+            for (var i = 0; i < rd.FieldCount; i++)
+            {
+                if (rd.IsDBNull(i)) continue;
+                var value = Convert.ToString(rd.GetValue(i))?.Trim();
+                if (string.IsNullOrWhiteSpace(value)) continue;
+                if (string.Equals(value, "ok", StringComparison.OrdinalIgnoreCase)) continue;
+                return value;
+            }
+
+            return null;
         }
 
         private static string EscapeSqlLiteral(string input)

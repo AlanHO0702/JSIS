@@ -506,13 +506,31 @@ document.addEventListener('DOMContentLoaded', () => {
         overwriteChecked,
         allowOtherSubSystem
       };
-      const resp = await fetch('/api/CCSCompanyAdd/add', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
+      let resp = null;
+      let lastErr = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          resp = await fetch('/api/CCSCompanyAdd/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            credentials: 'same-origin'
+          });
+          break;
+        } catch (err) {
+          lastErr = err;
+          if (attempt === 0) {
+            await new Promise((r) => setTimeout(r, 250));
+            continue;
+          }
+          throw err;
+        }
+      }
+      if (!resp) {
+        throw lastErr || new Error('add request failed');
+      }
       const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(data?.message || resp.statusText || 'add failed');
+      if (!resp.ok) throw new Error(data?.message || `HTTP ${resp.status}` || resp.statusText || 'add failed');
       return data;
     };
 
@@ -738,10 +756,16 @@ document.addEventListener('DOMContentLoaded', () => {
       const q = new URLSearchParams();
       q.set('itemId', (window._singleItemId || 'CC000054').toString());
       q.set('systemId', (window._cc000054SystemId || '1').toString());
-      const resp = await fetch(`/api/CCSCompanyAdd/query-init?${q.toString()}`);
-      const data = await resp.json().catch(() => ({}));
+      const jwt = localStorage.getItem('jwtId');
+      const resp = await fetch(`/api/CCSCompanyAdd/query-init?${q.toString()}`, {
+        headers: jwt ? { 'X-JWTID': jwt } : {}
+      });
+      const txt = await resp.text();
+      let data = {};
+      try { data = txt ? JSON.parse(txt) : {}; } catch { data = {}; }
       if (!resp.ok || !data?.success) {
-        throw new Error(data?.message || resp.statusText || 'query-init failed');
+        const msg = data?.message || data?.error || txt || `${resp.status} ${resp.statusText || ''}`.trim() || 'query-init failed';
+        throw new Error(msg);
       }
 
       systemId = Number(data.systemId || window._cc000054SystemId || 1);
@@ -806,6 +830,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!loaded || (qSubClass && qSubClass.options.length <= 1)) await loadQueryInit();
         applyQueryToModal();
         queryModal?.show();
+        getInput('qCompanyLike')?.focus();
       } catch (err) {
         window.ccsPrompt('讀取查詢條件失敗：' + err);
       }
@@ -822,30 +847,46 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       });
 
-    btnCompanySelectSearch?.addEventListener('click', () => {
-      const url = new URL(window.location.origin + window.location.pathname);
-      const setParam = (key, id) => {
+    btnCompanySelectSearch?.addEventListener('click', async () => {
+      const setParam = (url, key, id) => {
         const el = getInput(id);
         const val = (el?.value || '').toString().trim();
         if (val) url.searchParams.set(key, val);
       };
-      url.searchParams.set('pageIndex', '1');
-      url.searchParams.set('pageSize', pageSizeVal);
-      setParam('cs_companyLike', 'qCompanyLike');
-      setParam('cs_companyStart', 'qCompanyStart');
-      setParam('cs_companyEnd', 'qCompanyEnd');
-      setParam('cs_shortName', 'qShortName');
-      setParam('cs_phoneCond', 'qPhoneCond');
-      setParam('cs_phone', 'qPhone');
-      setParam('cs_faxCond', 'qFaxCond');
-      setParam('cs_fax', 'qFax');
-      setParam('cs_uniFormId', 'qUniFormId');
-      setParam('cs_companyName', 'qCompanyName');
-      setParam('cs_companyAddr', 'qCompanyAddr');
-      setParam('cs_bnsItem', 'qBnsItem');
-      setParam('cs_subClass', 'qSubClass');
-      if (showSales) setParam('cs_salesId', 'qSalesId');
-      window.location.href = url.toString();
+      try {
+        const dataUrl = new URL(window.location.href);
+        dataUrl.searchParams.set('handler', 'Data');
+        dataUrl.searchParams.set('pageIndex', '1');
+        dataUrl.searchParams.set('pageSize', '1');
+        setParam(dataUrl, 'cs_companyLike', 'qCompanyLike');
+        setParam(dataUrl, 'cs_companyStart', 'qCompanyStart');
+        setParam(dataUrl, 'cs_companyEnd', 'qCompanyEnd');
+        setParam(dataUrl, 'cs_shortName', 'qShortName');
+        setParam(dataUrl, 'cs_phoneCond', 'qPhoneCond');
+        setParam(dataUrl, 'cs_phone', 'qPhone');
+        setParam(dataUrl, 'cs_faxCond', 'qFaxCond');
+        setParam(dataUrl, 'cs_fax', 'qFax');
+        setParam(dataUrl, 'cs_uniFormId', 'qUniFormId');
+        setParam(dataUrl, 'cs_companyName', 'qCompanyName');
+        setParam(dataUrl, 'cs_companyAddr', 'qCompanyAddr');
+        setParam(dataUrl, 'cs_bnsItem', 'qBnsItem');
+        setParam(dataUrl, 'cs_subClass', 'qSubClass');
+        if (showSales) setParam(dataUrl, 'cs_salesId', 'qSalesId');
+
+        const resp = await fetch(dataUrl.toString());
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || !json?.success) throw new Error(json?.error || json?.message || resp.statusText || 'query failed');
+        const first = Array.isArray(json.items) ? json.items[0] : null;
+        if (!first) { window.ccsPrompt('查無資料'); return; }
+        const cidKey = Object.keys(first).find(k => String(k).toLowerCase() === 'companyid');
+        const cid = cidKey ? String(first[cidKey] || '').trim() : '';
+        if (!cid) { window.ccsPrompt('查無公司代碼'); return; }
+        queryModal?.hide();
+        const detailUrl = `${window._cc000054DetailUrl}?CompanyId=${encodeURIComponent(cid)}&systemId=${encodeURIComponent(window._cc000054SystemId || 1)}`;
+        window.location.href = detailUrl;
+      } catch (err) {
+        window.ccsPrompt('查詢失敗：' + err);
+      }
     });
 
     // Preload once so first open equals second open.
@@ -1012,6 +1053,10 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 </script>
 <style>
+#mainGrid tbody td.readonly-td {
+  background: #fff !important;
+}
+
 #cc000054AddModal .modal-dialog {
   max-width: 340px;
 }

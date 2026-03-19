@@ -98,6 +98,13 @@
   const btnSaveHeight = document.getElementById('btnMatInfoSaveHeight');
   const btnCopyPN4YX = document.getElementById('btnMatInfoCopyPN4YX');
   const btnUpdateCustPn = document.getElementById('btnMatInfoUpdateCustPn');
+  const updateCustPnModalEl = document.getElementById('matinfo-update-custpn-modal');
+  const updateCustPnInputEl = document.getElementById('matinfo-update-custpn-input');
+  const updateCustEgInputEl = document.getElementById('matinfo-update-custeg-input');
+  const btnUpdateCustPnOk = document.getElementById('btnMatInfoUpdateCustPnOk');
+  const updateCustPnModal = window.bootstrap?.Modal && updateCustPnModalEl
+    ? window.bootstrap.Modal.getOrCreateInstance(updateCustPnModalEl, { backdrop: 'static', keyboard: true })
+    : null;
   const glyphImage = document.getElementById('matinfo-glyph-image');
   const glyphFrame = document.getElementById('matinfo-glyph-frame');
   const glyphEmpty = document.getElementById('matinfo-glyph-empty');
@@ -134,6 +141,7 @@
     let sortDir = 'asc';
   let renderScheduled = false;
   let specTypeOptionsLoaded = false;
+  let browseActiveField = '';
     const pageSize = 200;
     const bufferRows = 8;
   const detailGrids = [];
@@ -224,6 +232,7 @@
 
   const uiConfig = await fetchUiConfig();
   window._matinfoUiConfig = uiConfig;
+  const enableHistoryFeature = false;
   const custDetailTableName = uiConfig.custDetailTableName || 'MGNdCustPartNum';
   const custTabLabel = uiConfig.custTabCaption || defaultUiConfig.custTabCaption;
   const useCommonTable = dictTableName.trim().toLowerCase() !== 'mindmatinfo';
@@ -260,6 +269,8 @@
   const dictTypeMap = new Map();
   const formDictCache = { fields: null };
   const formDictTypeMap = new Map();
+  const detailHeaderBindings = [];
+  const detailHeaderDictCache = new Map();
   const formLookupFields = new Map();
   const formLookupOptionsCache = new Map();
   const formLookupControlMap = new Map();
@@ -279,6 +290,11 @@
     'allowxoutrate', 'allowxoutqnty', 'boardarea', 'dheight', 'dvolume',
     'dlengthmax', 'dwidthmax', 'dheightmax', 'dvolumemax', 'dpackqntymax',
     'dvolumeaddon'
+  ]);
+  // Keep this field rendered as checkbox even if dict ComboStyle is toggled accidentally.
+  const forcedPanelCheckboxFields = new Set([
+    'ineedbatchnum',
+    'islongdelivery'
   ]);
 
   const layoutFieldKeys = [
@@ -511,6 +527,60 @@
     if (pane) pane.classList.add('ctx-current');
   };
 
+  function registerDetailHeaderBinding(table, tableName, columns) {
+    if (!table || !tableName || !Array.isArray(columns) || !columns.length) return;
+    detailHeaderBindings.push({
+      table,
+      tableName: String(tableName),
+      columns: columns.map((c) => String(c || '').trim()).filter(Boolean)
+    });
+  }
+
+  async function loadDetailHeaderCaptionMap(tableName) {
+    const key = String(tableName || '').trim();
+    if (!key) return new Map();
+    if (detailHeaderDictCache.has(key)) return detailHeaderDictCache.get(key);
+    const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(key)}&lang=TW`);
+    if (!res.ok) return new Map();
+    const rows = await res.json();
+    const map = new Map();
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      const field = String(getRowValue(row, 'FieldName') ?? '').trim().toLowerCase();
+      if (!field) return;
+      const caption = String(
+        getRowValue(row, 'DisplayLabel')
+        ?? getRowValue(row, 'displayLabel')
+        ?? getRowValue(row, 'DisplayName')
+        ?? getRowValue(row, 'displayName')
+        ?? ''
+      ).trim();
+      if (caption) map.set(field, caption);
+    });
+    detailHeaderDictCache.set(key, map);
+    return map;
+  }
+
+  async function applyDetailHeaderCaption(binding) {
+    if (!binding?.table || !binding?.tableName || !binding?.columns?.length) return;
+    const map = await loadDetailHeaderCaptionMap(binding.tableName);
+    if (!map || map.size === 0) return;
+    const ths = Array.from(binding.table.querySelectorAll('thead th'));
+    if (!ths.length) return;
+    binding.columns.forEach((field, idx) => {
+      const th = ths[idx];
+      if (!th) return;
+      const caption = map.get(field.toLowerCase());
+      if (caption) th.textContent = caption;
+    });
+  }
+
+  async function applyAllDetailHeaderCaptions(forceReload = false) {
+    if (forceReload) detailHeaderDictCache.clear();
+    for (const binding of detailHeaderBindings) {
+      await applyDetailHeaderCaption(binding);
+    }
+  }
+
   const createDetailGridManager = (cfg) => {
     const state = {
       rows: [],
@@ -619,9 +689,18 @@
       if (!tbodyEl) return;
       tbodyEl.innerHTML = '';
       if (!state.rows.length) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td colspan="${cfg.columns.length}">沒有資料</td>`;
-        tbodyEl.appendChild(tr);
+        const rowCount = 1;
+        const colCount = Math.max(1, Number(cfg.columns?.length || 1));
+        for (let r = 0; r < rowCount; r += 1) {
+          const tr = document.createElement('tr');
+          tr.classList.add('matinfo-empty-row');
+          for (let c = 0; c < colCount; c += 1) {
+            const td = document.createElement('td');
+            td.innerHTML = '&nbsp;';
+            tr.appendChild(td);
+          }
+          tbodyEl.appendChild(tr);
+        }
         applyDetailTableWidths(cfg.table);
         attachDetailTableResizers(cfg.table);
         state.selectedIndex = -1;
@@ -830,6 +909,14 @@
     map: null,
     loading: null
   };
+  const unitUseTypeLookupState = {
+    map: null,
+    loading: null
+  };
+  const unitBasicLookupState = {
+    map: null,
+    loading: null
+  };
 
   const propLookupState = {
     data: null,
@@ -876,10 +963,23 @@
         .map((p) => row[p])
         .filter((v) => v != null && typeof v !== 'object' && String(v).trim() !== '')
         .map((v) => String(v));
-      const label = labelParts.join(' - ');
+      const label = normalizeLookupName(labelParts.join(' - '), keyStr);
       setKeyVariants(keyStr, label || keyStr);
     });
     return map;
+  }
+
+  function normalizeLookupName(label, code) {
+    const raw = String(label ?? '').trim();
+    const key = String(code ?? '').trim();
+    if (!raw) return '';
+    if (!key) return raw;
+    let name = raw;
+    if (name.toLowerCase().startsWith(key.toLowerCase())) {
+      name = name.substring(key.length).trim();
+      if (name.startsWith('-') || name.startsWith('－')) name = name.substring(1).trim();
+    }
+    return name || raw;
   }
 
   async function loadCustCompanyLookup() {
@@ -906,34 +1006,135 @@
     return result;
   }
 
-  async function loadPropLookups() {
-    if (propLookupState.data) return propLookupState.data;
-    if (propLookupState.loading) return propLookupState.loading;
-    propLookupState.loading = (async () => {
-      const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent('MGNdMatInfoDtl')}&lang=TW`);
-      if (!res.ok) return { numMap: new Map(), dtlMap: new Map() };
+  async function applyCustHeaderCaptionsFromDict() {
+    if (!custTable) return;
+    const headRow = custTable.querySelector('thead tr');
+    if (!headRow) return;
+    const ths = Array.from(headRow.children || []);
+    if (ths.length < 9) return;
+
+    const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(custDetailTableName)}&lang=TW`);
+    if (!res.ok) return;
+    const rows = await res.json();
+    const map = new Map();
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      const field = String(getRowValue(row, 'FieldName') ?? '').trim().toLowerCase();
+      if (!field) return;
+      const caption = String(
+        getRowValue(row, 'DisplayLabel')
+        ?? getRowValue(row, 'displayLabel')
+        ?? getRowValue(row, 'DisplayName')
+        ?? getRowValue(row, 'displayName')
+        ?? ''
+      ).trim();
+      if (caption) map.set(field, caption);
+    });
+
+    ths[0].textContent = map.get('companyid') || ths[0].textContent || '客戶代碼';
+    ths[1].textContent = map.get('shortname') || ths[1].textContent || '客戶簡稱';
+    ths[2].textContent = map.get('customerpartnum') || ths[2].textContent || '客戶品號';
+    ths[3].textContent = map.get('description') || ths[3].textContent || '物品說明';
+    ths[4].textContent = map.get('material') || ths[4].textContent || '材質';
+    ths[5].textContent = map.get('enggauge') || ths[5].textContent || '尺寸';
+    ths[6].textContent = map.get('specificity') || ths[6].textContent || '機械性質';
+    ths[7].textContent = map.get('tradenotes') || ths[7].textContent || '貿易條款';
+    ths[8].textContent = map.get('shipnotes') || ths[8].textContent || '交貨狀態';
+  }
+
+  async function loadUnitUseTypeLookup() {
+    if (unitUseTypeLookupState.map) return unitUseTypeLookupState.map;
+    if (unitUseTypeLookupState.loading) return unitUseTypeLookupState.loading;
+    unitUseTypeLookupState.loading = (async () => {
+      const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent('MINdMatUnit')}&lang=TW`);
+      if (!res.ok) return new Map();
       const rows = await res.json();
-      const findMeta = (name) => (rows || []).find((r) => {
+      const meta = (rows || []).find((r) => {
         const field = (r.FieldName || r.fieldName || '').toString().trim().toLowerCase();
-        return field === name;
+        return field === 'usetype';
       });
-      const numMeta = findMeta('numid');
-      const dtlMeta = findMeta('dtlnumid');
-      const numTable = (numMeta?.LookupTable || numMeta?.lookupTable || '').toString();
-      const numKey = (numMeta?.LookupKeyField || numMeta?.lookupKeyField || '').toString();
-      const numResult = (numMeta?.LookupResultField || numMeta?.lookupResultField || '').toString();
-      const dtlTable = (dtlMeta?.LookupTable || dtlMeta?.lookupTable || '').toString();
-      const dtlKey = (dtlMeta?.LookupKeyField || dtlMeta?.lookupKeyField || '').toString();
-      const dtlResult = (dtlMeta?.LookupResultField || dtlMeta?.lookupResultField || '').toString();
-      const numMap = await buildLookupMapFromApi(numTable, numKey, numResult);
-      const dtlMap = await buildLookupMapFromApi(dtlTable, dtlKey, dtlResult);
-      const payload = { numMap, dtlMap };
-      propLookupState.data = payload;
-      return payload;
+      const table = (meta?.LookupTable || meta?.lookupTable || '').toString();
+      const key = (meta?.LookupKeyField || meta?.lookupKeyField || '').toString();
+      const result = (meta?.LookupResultField || meta?.lookupResultField || '').toString();
+      if (!table || !key || !result) return new Map();
+      const map = await buildLookupMapFromApi(table, key, result);
+      unitUseTypeLookupState.map = map;
+      return map;
     })();
-    const result = await propLookupState.loading;
-    propLookupState.loading = null;
+    const result = await unitUseTypeLookupState.loading;
+    unitUseTypeLookupState.loading = null;
     return result;
+  }
+
+  async function loadUnitBasicLookup() {
+    if (unitBasicLookupState.map) return unitBasicLookupState.map;
+    if (unitBasicLookupState.loading) return unitBasicLookupState.loading;
+    unitBasicLookupState.loading = (async () => {
+      const resp = await fetch('/api/MatInfoAdd/Units', withJwtHeaders());
+      if (!resp.ok) return new Map();
+      const rows = await resp.json();
+      const map = new Map();
+      (Array.isArray(rows) ? rows : []).forEach((row) => {
+        const code = String(getRowValue(row, 'Unit') ?? '').trim();
+        if (!code) return;
+        const name = String(getRowValue(row, 'Notes') ?? '').trim();
+        map.set(code, name);
+        map.set(code.toLowerCase(), name);
+      });
+      unitBasicLookupState.map = map;
+      return map;
+    })();
+    const result = await unitBasicLookupState.loading;
+    unitBasicLookupState.loading = null;
+    return result;
+  }
+
+  async function loadPropLookups(rows = []) {
+    const numMap = new Map();
+    const dtlMap = new Map();
+    const flagMap = new Map();
+
+    const setClasses = Array.from(new Set(
+      (rows || [])
+        .map((r) => getRowValue(r, 'SetClass'))
+        .filter((v) => v != null && String(v).trim() !== '')
+        .map((v) => String(v).trim())
+    ));
+    if (!setClasses.length) return { numMap, dtlMap, flagMap };
+
+    for (const setClass of setClasses) {
+      const subResp = await fetch(`/api/MG000006/setnum-sub?setClass=${encodeURIComponent(setClass)}`);
+      if (!subResp.ok) continue;
+      const subRows = await subResp.json();
+      const numIds = [];
+      (subRows || []).forEach((row) => {
+        const numId = (getRowValue(row, 'NumId') ?? '').toString().trim();
+        if (!numId) return;
+        numIds.push(numId);
+        const numName = (getRowValue(row, 'NumName') ?? '').toString().trim();
+        if (numName) {
+          numMap.set(`${setClass}|${numId}`.toLowerCase(), numName);
+          if (!numMap.has(numId.toLowerCase())) numMap.set(numId.toLowerCase(), numName);
+        }
+        const isMust = Number(getRowValue(row, 'IsMust') ?? 0);
+        const isHand = Number(getRowValue(row, 'IsHand') ?? 0);
+        flagMap.set(`${setClass}|${numId}`.toLowerCase(), { isMust: isMust ? 1 : 0, isHand: isHand ? 1 : 0 });
+      });
+
+      for (const numId of numIds) {
+        const dtlResp = await fetch(`/api/MG000006/setnum-subdtl?setClass=${encodeURIComponent(setClass)}&numId=${encodeURIComponent(numId)}`);
+        if (!dtlResp.ok) continue;
+        const dtlRows = await dtlResp.json();
+        (dtlRows || []).forEach((row) => {
+          const dtlNumId = (getRowValue(row, 'DtlNumId') ?? '').toString().trim();
+          const dtlNumName = (getRowValue(row, 'DtlNumName') ?? '').toString().trim();
+          if (!dtlNumId || !dtlNumName) return;
+          dtlMap.set(`${setClass}|${numId}|${dtlNumId}`.toLowerCase(), dtlNumName);
+          if (!dtlMap.has(`${numId}|${dtlNumId}`.toLowerCase())) dtlMap.set(`${numId}|${dtlNumId}`.toLowerCase(), dtlNumName);
+        });
+      }
+    }
+
+    return { numMap, dtlMap, flagMap };
   }
 
   function openCustCompanyLookup(td, input, lookupMap) {
@@ -970,14 +1171,15 @@
     const applySelection = (key, label) => {
       const tr = td.closest('tr');
       const keyValue = key ?? '';
+      const shortNameValue = normalizeLookupName(label, keyValue);
       input.value = keyValue;
       const view = td.querySelector('.cell-view');
       if (view) view.textContent = keyValue;
       const shortInput = tr?.querySelector('.cell-edit[name="ShortName"]');
       if (shortInput) {
-        shortInput.value = label ?? '';
+        shortInput.value = shortNameValue;
         const shortView = shortInput.closest('td')?.querySelector('.cell-view');
-        if (shortView) shortView.textContent = label ?? '';
+        if (shortView) shortView.textContent = shortNameValue;
       }
       if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
       cleanup();
@@ -1008,15 +1210,181 @@
     window.addEventListener('resize', onResize, true);
   }
 
+  function openUnitUseTypeLookup(td, input, lookupMap) {
+    if (!td || !input || !lookupMap || lookupMap.size === 0) return;
+    const existing = document.querySelector('.lookup-dropdown-list');
+    if (existing) existing.remove();
+    const isReadOnly = input.dataset.readonly === '1' || input.readOnly;
+    if (isReadOnly || !isEditMode) return;
+
+    const currentKey = (input.value ?? '').toString().trim();
+    const list = document.createElement('div');
+    list.className = 'lookup-dropdown-list';
+
+    const addItem = (key, label) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'lookup-dropdown-item';
+      item.dataset.key = key == null ? '' : String(key);
+      const suffix = label && label !== key ? ` ${label}` : '';
+      item.textContent = `${key ?? ''}${suffix}`.trim() || '(空白)';
+      if ((currentKey ?? '') === (key ?? '')) item.classList.add('is-selected');
+      list.appendChild(item);
+    };
+
+    addItem('', '');
+    lookupMap.forEach((label, key) => addItem(key, label));
+
+    const cleanup = () => {
+      list.remove();
+      document.removeEventListener('mousedown', onDocDown, true);
+      window.removeEventListener('resize', onResize, true);
+    };
+
+    const applySelection = (key, label) => {
+      const tr = td.closest('tr');
+      const keyValue = key ?? '';
+      const nameValue = normalizeLookupName(label, keyValue);
+      input.value = keyValue;
+      const view = td.querySelector('.cell-view');
+      if (view) view.textContent = keyValue;
+      const nameInput = tr?.querySelector('.cell-edit[name="UseTypeName"]');
+      if (nameInput) {
+        nameInput.value = nameValue;
+        const nameView = nameInput.closest('td')?.querySelector('.cell-view');
+        if (nameView) nameView.textContent = nameValue;
+      }
+      if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
+      cleanup();
+    };
+
+    const onPick = (e) => {
+      const item = e.target.closest('.lookup-dropdown-item');
+      if (!item) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const key = item.dataset.key ?? '';
+      const label = lookupMap.get(key) ?? '';
+      applySelection(key, label);
+    };
+
+    const onDocDown = (e) => {
+      if (list.contains(e.target)) return;
+      cleanup();
+    };
+    const onResize = () => cleanup();
+
+    list.addEventListener('pointerdown', onPick);
+    list.addEventListener('mousedown', onPick);
+    list.addEventListener('click', onPick);
+    document.body.appendChild(list);
+    positionLookupList(list, td);
+    document.addEventListener('mousedown', onDocDown, true);
+    window.addEventListener('resize', onResize, true);
+  }
+
+  function openUnitReplaceLookup(td, input, lookupMap) {
+    if (!td || !input || !lookupMap || lookupMap.size === 0) return;
+    const existing = document.querySelector('.lookup-dropdown-list');
+    if (existing) existing.remove();
+    const isReadOnly = input.dataset.readonly === '1' || input.readOnly;
+    if (isReadOnly || !isEditMode) return;
+
+    const currentKey = (input.value ?? '').toString().trim();
+    const list = document.createElement('div');
+    list.className = 'lookup-dropdown-list';
+
+    const addItem = (key, label) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'lookup-dropdown-item';
+      item.dataset.key = key == null ? '' : String(key);
+      const suffix = label && label !== key ? ` ${label}` : '';
+      item.textContent = `${key ?? ''}${suffix}`.trim() || '(空白)';
+      if ((currentKey ?? '') === (key ?? '')) item.classList.add('is-selected');
+      list.appendChild(item);
+    };
+
+    addItem('', '');
+    const keys = Array.from(new Set(Array.from(lookupMap.keys()).filter((k) => k === String(k).trim())));
+    keys.sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    keys.forEach((key) => addItem(key, lookupMap.get(key) ?? ''));
+
+    const cleanup = () => {
+      list.remove();
+      document.removeEventListener('mousedown', onDocDown, true);
+      window.removeEventListener('resize', onResize, true);
+    };
+
+    const applySelection = (key) => {
+      const tr = td.closest('tr');
+      const keyValue = key ?? '';
+      input.value = keyValue;
+      const view = td.querySelector('.cell-view');
+      if (view) view.textContent = keyValue;
+      if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
+      cleanup();
+    };
+
+    const onPick = (e) => {
+      const item = e.target.closest('.lookup-dropdown-item');
+      if (!item) return;
+      e.preventDefault();
+      e.stopPropagation();
+      applySelection(item.dataset.key ?? '');
+    };
+
+    const onDocDown = (e) => {
+      if (list.contains(e.target)) return;
+      cleanup();
+    };
+    const onResize = () => cleanup();
+
+    list.addEventListener('pointerdown', onPick);
+    list.addEventListener('mousedown', onPick);
+    list.addEventListener('click', onPick);
+    document.body.appendChild(list);
+    positionLookupList(list, td);
+    document.addEventListener('mousedown', onDocDown, true);
+    window.addEventListener('resize', onResize, true);
+  }
+
+  async function applyUnitHeaderCaptionsFromDict() {
+    if (!unitTable) return;
+    const headRow = unitTable.querySelector('thead tr');
+    if (!headRow) return;
+    const ths = Array.from(headRow.children || []);
+    if (ths.length < 5) return;
+    const res = await fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent('MINdMatUnit')}&lang=TW`);
+    if (!res.ok) return;
+    const rows = await res.json();
+    const map = new Map();
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      const field = String(getRowValue(row, 'FieldName') ?? '').trim().toLowerCase();
+      if (!field) return;
+      const caption = String(
+        getRowValue(row, 'DisplayLabel')
+        ?? getRowValue(row, 'displayLabel')
+        ?? getRowValue(row, 'DisplayName')
+        ?? getRowValue(row, 'displayName')
+        ?? ''
+      ).trim();
+      if (caption) map.set(field, caption);
+    });
+    ths[0].textContent = map.get('replaceunit') || ths[0].textContent || '替代單位';
+    ths[1].textContent = map.get('ratio') || ths[1].textContent || '換算比率(主單位)';
+    ths[2].textContent = map.get('usetype') || ths[2].textContent || '應用類型';
+    ths[3].textContent = map.get('usetypename') || ths[3].textContent || '應用類型名';
+    ths[4].textContent = map.get('notes') || ths[4].textContent || '備註';
+  }
+
   if (unitWrap && unitTable) {
     const unitHeadRow = unitTable.querySelector('thead tr');
     if (unitHeadRow) {
-      const hasUseTypeName = Array.from(unitHeadRow.children)
-        .some((th) => (th.textContent || '').trim() === '用途類型名稱');
-      if (!hasUseTypeName) {
+      if (unitHeadRow.children.length < 5) {
         const th = document.createElement('th');
         th.style.width = '160px';
-        th.textContent = '用途類型名稱';
+        th.textContent = '應用類型名';
         const notesTh = unitHeadRow.lastElementChild;
         if (notesTh) unitHeadRow.insertBefore(th, notesTh);
         else unitHeadRow.appendChild(th);
@@ -1026,6 +1394,7 @@
     if (unitEmptyCell && unitEmptyCell.getAttribute('colspan') === '4') {
       unitEmptyCell.setAttribute('colspan', '5');
     }
+    applyUnitHeaderCaptionsFromDict();
 
     unitGrid = createDetailGridManager({
       tableName: 'MINdMatUnit',
@@ -1039,6 +1408,25 @@
         { name: 'UseTypeName', readonly: true },
         { name: 'Notes' }
       ],
+      mapRows: async (rows) => {
+        if (!rows.length) return rows;
+        const lookupMap = await loadUnitUseTypeLookup();
+        if (!lookupMap || lookupMap.size === 0) return rows;
+        return rows.map((row) => {
+          const next = { ...row };
+          const useTypeRaw = getRowValue(row, 'UseType');
+          const useTypeNameRaw = getRowValue(row, 'UseTypeName');
+          const useType = useTypeRaw == null ? '' : String(useTypeRaw).trim();
+          const useTypeName = useTypeNameRaw == null ? '' : String(useTypeNameRaw).trim();
+          if (!useTypeName && useType) {
+            next.UseTypeName = normalizeLookupName(
+              lookupMap.get(useType) || lookupMap.get(useType.toLowerCase()) || next.UseTypeName,
+              useType
+            );
+          }
+          return next;
+        });
+      },
       toolbar: {
         first: btnUnitFirst,
         prev: btnUnitPrev,
@@ -1052,6 +1440,25 @@
       }
     });
     detailGrids.push(unitGrid);
+    registerDetailHeaderBinding(unitTable, 'MINdMatUnit', ['ReplaceUnit', 'Ratio', 'UseType', 'UseTypeName', 'Notes']);
+
+    unitTable.addEventListener('dblclick', async (e) => {
+      const td = e.target.closest('td');
+      if (!td) return;
+      const useTypeInput = td.querySelector('.cell-edit[name="UseType"]');
+      if (useTypeInput) {
+        const lookupMap = await loadUnitUseTypeLookup();
+        if (!lookupMap || lookupMap.size === 0) return;
+        openUnitUseTypeLookup(td, useTypeInput, lookupMap);
+        return;
+      }
+      const replaceInput = td.querySelector('.cell-edit[name="ReplaceUnit"]');
+      if (replaceInput) {
+        const lookupMap = await loadUnitBasicLookup();
+        if (!lookupMap || lookupMap.size === 0) return;
+        openUnitReplaceLookup(td, replaceInput, lookupMap);
+      }
+    });
   }
 
   if (custWrap && custTable) {
@@ -1082,7 +1489,7 @@
           const companyId = companyIdRaw == null ? '' : String(companyIdRaw).trim();
           const shortName = shortNameRaw == null ? '' : String(shortNameRaw).trim();
           if (!shortName && companyId && lookupMap.has(companyId)) {
-            next.ShortName = lookupMap.get(companyId);
+            next.ShortName = normalizeLookupName(lookupMap.get(companyId), companyId);
           }
           return next;
         });
@@ -1100,6 +1507,8 @@
       }
     });
     detailGrids.push(custGrid);
+    registerDetailHeaderBinding(custTable, custDetailTableName, ['CompanyId', 'ShortName', 'CustomerPartNum', 'Description', 'Material', 'EngGauge', 'Specificity', 'TradeNotes', 'ShipNotes']);
+    applyCustHeaderCaptionsFromDict();
 
     custTable.addEventListener('dblclick', async (e) => {
       const td = e.target.closest('td');
@@ -1122,26 +1531,39 @@
         { name: 'NumId', readonly: true },
         { name: 'NumName', readonly: true },
         { name: 'DtlNumId', readonly: true },
-        { name: 'DtlNumName', readonly: true }
+        { name: 'DtlNumName', readonly: true },
+        { name: 'IsMust', type: 'checkbox', readonly: true },
+        { name: 'IsHand', type: 'checkbox', readonly: true }
       ],
       mapRows: async (rows) => {
         if (!rows.length) return rows;
-        const lookups = await loadPropLookups();
+        const lookups = await loadPropLookups(rows);
         const numMap = lookups?.numMap || new Map();
         const dtlMap = lookups?.dtlMap || new Map();
+        const flagMap = lookups?.flagMap || new Map();
         return rows.map((row) => {
           const next = { ...row };
+          const setClassRaw = getRowValue(row, 'SetClass');
           const numIdRaw = getRowValue(row, 'NumId');
           const dtlIdRaw = getRowValue(row, 'DtlNumId');
+          const setClass = setClassRaw == null ? '' : String(setClassRaw).trim();
           const numId = numIdRaw == null ? '' : String(numIdRaw).trim();
           const dtlId = dtlIdRaw == null ? '' : String(dtlIdRaw).trim();
           const numName = getRowValue(row, 'NumName');
           const dtlName = getRowValue(row, 'DtlNumName');
-          if ((!numName || String(numName).trim() === '') && numId && numMap.has(numId)) {
-            next.NumName = numMap.get(numId);
+          const numKey = `${setClass}|${numId}`.toLowerCase();
+          const dtlKey = `${setClass}|${numId}|${dtlId}`.toLowerCase();
+          if ((!numName || String(numName).trim() === '') && numId) {
+            next.NumName = numMap.get(numKey) || numMap.get(numId.toLowerCase()) || next.NumName;
           }
-          if ((!dtlName || String(dtlName).trim() === '') && dtlId && dtlMap.has(dtlId)) {
-            next.DtlNumName = dtlMap.get(dtlId);
+          if ((!dtlName || String(dtlName).trim() === '') && dtlId) {
+            next.DtlNumName = dtlMap.get(dtlKey) || dtlMap.get(`${numId}|${dtlId}`.toLowerCase()) || next.DtlNumName;
+          }
+          if ((next.IsMust == null || next.IsMust === '') && flagMap.has(numKey)) {
+            next.IsMust = flagMap.get(numKey)?.isMust ?? 0;
+          }
+          if ((next.IsHand == null || next.IsHand === '') && flagMap.has(numKey)) {
+            next.IsHand = flagMap.get(numKey)?.isHand ?? 0;
           }
           return next;
         });
@@ -1149,6 +1571,7 @@
       toolbar: {}
     });
     detailGrids.push(propGrid);
+    registerDetailHeaderBinding(propTable, 'MGNdMatInfoDtl', ['NumId', 'NumName', 'DtlNumId', 'DtlNumName', 'IsMust', 'IsHand']);
   }
 
   if (mapWrap && mapTable) {
@@ -1176,6 +1599,7 @@
       }
     });
     detailGrids.push(mapGrid);
+    registerDetailHeaderBinding(mapTable, 'MGNdProdMap', ['SerialNum', 'CrossName', 'Notes']);
   }
 
   if (specWrap && specTable) {
@@ -1200,6 +1624,7 @@
       }
     });
     detailGrids.push(specGrid);
+    registerDetailHeaderBinding(specTable, 'MGNdSpecData', ['DemandId', 'DemandName', 'DemandContext']);
   }
 
   if (commonWrap && commonTable) {
@@ -1231,6 +1656,7 @@
       newRow: () => ({ UseQnty: 0, UseBase: 1 })
     });
     detailGrids.push(commonGrid);
+    registerDetailHeaderBinding(commonTable, 'MGNdMatDisplaceEZDtl', ['SerialNum', 'MatCode', 'MatName', 'UseQnty', 'UseBase']);
   }
 
   if (kitWrap && kitTable) {
@@ -1261,6 +1687,7 @@
       }
     });
     detailGrids.push(kitGrid);
+    registerDetailHeaderBinding(kitTable, 'MGNdKitItem', ['Item', 'KitItemPartNum', 'Lk_MatName', 'Lk_Unit', 'KitItemQnty', 'Notes']);
   }
 
   const getUserId = () => {
@@ -1532,6 +1959,65 @@
     }
   };
 
+  const openUpdateCustPnDialog = (defaultCustPn, defaultCustEg) => {
+    const fallbackPrompt = () => {
+      const newCustPn = window.prompt('輸入新的客戶料號', defaultCustPn || '');
+      if (newCustPn == null) return null;
+      const newCustEg = window.prompt('輸入客戶機種(可空白)', defaultCustEg || '') ?? '';
+      return {
+        newCustPn: String(newCustPn).trim(),
+        newCustEg: String(newCustEg).trim()
+      };
+    };
+
+    if (!updateCustPnModal || !updateCustPnModalEl || !updateCustPnInputEl || !updateCustEgInputEl || !btnUpdateCustPnOk) {
+      return Promise.resolve(fallbackPrompt());
+    }
+
+    updateCustPnInputEl.value = defaultCustPn || '';
+    updateCustEgInputEl.value = defaultCustEg || '';
+
+    return new Promise((resolve) => {
+      let submitted = false;
+
+      const cleanup = () => {
+        btnUpdateCustPnOk.removeEventListener('click', onOk);
+        updateCustPnInputEl.removeEventListener('keydown', onEnter);
+        updateCustEgInputEl.removeEventListener('keydown', onEnter);
+      };
+
+      const onHidden = () => {
+        cleanup();
+        if (!submitted) {
+          resolve(null);
+          return;
+        }
+        resolve({
+          newCustPn: String(updateCustPnInputEl.value || '').trim(),
+          newCustEg: String(updateCustEgInputEl.value || '').trim()
+        });
+      };
+
+      const onOk = (e) => {
+        e?.preventDefault();
+        submitted = true;
+        updateCustPnModal.hide();
+      };
+
+      const onEnter = (e) => {
+        if (e.key !== 'Enter') return;
+        onOk(e);
+      };
+
+      btnUpdateCustPnOk.addEventListener('click', onOk);
+      updateCustPnInputEl.addEventListener('keydown', onEnter);
+      updateCustEgInputEl.addEventListener('keydown', onEnter);
+      updateCustPnModalEl.addEventListener('hidden.bs.modal', onHidden, { once: true });
+      updateCustPnModal.show();
+      setTimeout(() => updateCustPnInputEl.focus(), 60);
+    });
+  };
+
   function setValue(el, value) {
     if (!el) return;
     if (el.type === 'checkbox') {
@@ -1657,18 +2143,40 @@
 
   function getFormData() {
     const data = {};
+    const controlsByField = new Map();
     form.querySelectorAll('[data-field]').forEach((el) => {
-      const field = el.getAttribute('data-field');
+      const field = (el.getAttribute('data-field') || '').trim();
       if (!field) return;
+      if (!controlsByField.has(field)) controlsByField.set(field, []);
+      controlsByField.get(field).push(el);
+    });
+
+    const normalizeCompareValue = (value) => {
+      if (value === null || value === undefined || value === '') return '';
+      if (typeof value === 'number') return Number.isFinite(value) ? value : '';
+      if (typeof value === 'boolean') return value ? 1 : 0;
+      const text = String(value).trim();
+      if (!text) return '';
+      if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
+      return text.toLowerCase();
+    };
+
+    controlsByField.forEach((controls, field) => {
       const recordValue = currentRecord ? getValue(currentRecord, field) : null;
-      if (el.type === 'checkbox') {
-        data[field] = coerceFormValue(field, el.checked, true, recordValue);
-        return;
+      const values = controls.map((el) => {
+        if (el.type === 'checkbox') return coerceFormValue(field, el.checked, true, recordValue);
+        const rawValue = (el.dataset.lookupEnabled || '') === '1'
+          ? (el.dataset.lookupValue ?? '')
+          : (el.value ?? '');
+        return coerceFormValue(field, rawValue, false, recordValue);
+      });
+      let chosen = values[0];
+      if (currentRecord && values.length > 1) {
+        const base = normalizeCompareValue(recordValue);
+        const changed = values.find((v) => normalizeCompareValue(v) !== base);
+        if (changed !== undefined) chosen = changed;
       }
-      const rawValue = (el.dataset.lookupEnabled || '') === '1'
-        ? (el.dataset.lookupValue ?? '')
-        : (el.value ?? '');
-      data[field] = coerceFormValue(field, rawValue, false, recordValue);
+      data[field] = chosen;
     });
     return data;
   }
@@ -1748,7 +2256,7 @@
     const list = Array.isArray(rows) ? rows : [];
     if (!list.length) {
       if (thead) thead.innerHTML = '';
-      if (tbodyEl) tbodyEl.innerHTML = `<tr><td>${emptyText}</td></tr>`;
+      if (tbodyEl) tbodyEl.innerHTML = `<tr class="matinfo-empty-row"><td colspan="1">${emptyText}</td></tr>`;
       return;
     }
     const keys = Object.keys(list[0] || {});
@@ -1948,7 +2456,17 @@
           return c.includes(q) || n.includes(q);
         })
       : (options || []);
-    formLookupSuggestFiltered = filtered.slice(0, 200);
+    const seen = new Set();
+    const deduped = [];
+    filtered.forEach((o) => {
+      const key = String(o?.value || '').trim().toLowerCase();
+      const name = String(o?.label || '').trim().toLowerCase();
+      const dedupKey = key || `__label__${name}`;
+      if (!dedupKey || seen.has(dedupKey)) return;
+      seen.add(dedupKey);
+      deduped.push(o);
+    });
+    formLookupSuggestFiltered = deduped.slice(0, 200);
     formLookupSuggest.innerHTML = '';
     formLookupSuggestActiveIndex = -1;
     if (!formLookupSuggestFiltered.length) {
@@ -2138,7 +2656,7 @@
       ctrl.options = await getLookupOptions(cfg.meta);
       ctrl.optionsLoaded = true;
       applyLookupValue(target, target.dataset.lookupValue || target.value || '', ctrl.options);
-      if (cfg.readOnly || target.readOnly || target.hasAttribute('readonly')) {
+      if (cfg.readOnly || target.hasAttribute('readonly')) {
         target.dataset.readonly = '1';
         target.readOnly = true;
         if (ctrl.button) ctrl.button.disabled = true;
@@ -2317,8 +2835,9 @@
 
   function buildFieldElements(row) {
     const fieldName = (row.FieldName || row.fieldName || '').toString().trim();
+    const fieldKey = fieldName.toLowerCase();
     const labelText = (row.DisplayLabel || row.displayLabel || fieldName).toString();
-    const isCheck = Number(row.ComboStyle ?? row.comboStyle ?? 0) === 1;
+    const isCheck = forcedPanelCheckboxFields.has(fieldKey) || Number(row.ComboStyle ?? row.comboStyle ?? 0) === 1;
     const readOnly = Number(row.ReadOnly ?? row.readOnly ?? 0) === 1;
     const label = document.createElement('label');
     label.textContent = labelText;
@@ -2382,13 +2901,14 @@
     }
   }
 
-  function applyBasic1AbsLayout(rows) {
+  function applyBasic1AbsLayout(rows, allRows = rows) {
     if (!basic1Grid || !basic1Abs) return;
     resetBasic1Abs();
     basic1Abs.innerHTML = '';
     basic1Abs.style.minHeight = '';
     basic1Grid.style.display = '';
     const map = new Map();
+    const allMap = new Map();
     const existing = new Set();
     basic1Grid.querySelectorAll('[data-field]').forEach((el) => {
       const field = (el.getAttribute('data-field') || '').toLowerCase();
@@ -2398,33 +2918,59 @@
       const name = (row.FieldName || row.fieldName || '').toString().trim().toLowerCase();
       if (name) map.set(name, row);
     });
+    (allRows || []).forEach((row) => {
+      const name = (row.FieldName || row.fieldName || '').toString().trim().toLowerCase();
+      if (name) allMap.set(name, row);
+    });
 
     let maxBottom = 0;
     let movedControls = 0;
     let gridAdded = 0;
     const moved = new Set();
     basic1Grid.querySelectorAll('[data-field]').forEach((el) => {
-      const field = (el.getAttribute('data-field') || '').toLowerCase();
+      let ctrl = el;
+      const field = (ctrl.getAttribute('data-field') || '').toLowerCase();
       if (!field) return;
+      if (forcedPanelCheckboxFields.has(field) && ctrl.type !== 'checkbox') {
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.setAttribute('data-field', ctrl.getAttribute('data-field') || field);
+        checkbox.checked = ctrl.value === '1' || ctrl.value === 'true';
+        checkbox.disabled = ctrl.disabled || ctrl.readOnly;
+        ctrl.replaceWith(checkbox);
+        ctrl = checkbox;
+      }
+      const allRow = allMap.get(field);
+      const labelForVisibility = ctrl.type === 'checkbox' ? ctrl.closest('label') : findLabelForField(ctrl);
+      if (allRow) {
+        const isVisible = Number(allRow.Visible ?? allRow.visible ?? 1) === 1;
+        if (!isVisible) {
+          if (labelForVisibility) labelForVisibility.style.display = 'none';
+          ctrl.style.display = 'none';
+          return;
+        }
+      }
+      if (labelForVisibility) labelForVisibility.style.display = '';
+      ctrl.style.display = '';
       const row = map.get(field);
       if (!row) return;
-      const layout = adjustPanelLayout(row, getLayoutPair(row), el.type === 'checkbox');
+      const layout = adjustPanelLayout(row, getLayoutPair(row), ctrl.type === 'checkbox');
       if (isLayoutBlank(layout)) return;
-      const isCheckbox = el.type === 'checkbox';
-      const labelEl = isCheckbox ? el.closest('label') : findLabelForField(el);
+      const isCheckbox = ctrl.type === 'checkbox';
+      const labelEl = isCheckbox ? ctrl.closest('label') : findLabelForField(ctrl);
       if (labelEl && !moved.has(labelEl)) {
-        if (isCheckbox && !labelEl.contains(el)) labelEl.appendChild(el);
+        if (isCheckbox && !labelEl.contains(ctrl)) labelEl.appendChild(ctrl);
         const usePos = isCheckbox ? layout.field : layout.label;
         const bottom = applyAbsStyle(labelEl, usePos);
         if (bottom) maxBottom = Math.max(maxBottom, bottom);
         basic1Abs.appendChild(labelEl);
         moved.add(labelEl);
       }
-      if (!isCheckbox && !moved.has(el)) {
-        const bottom = applyAbsStyle(el, layout.field);
+      if (!isCheckbox && !moved.has(ctrl)) {
+        const bottom = applyAbsStyle(ctrl, layout.field);
         if (bottom) maxBottom = Math.max(maxBottom, bottom);
-        basic1Abs.appendChild(el);
-        moved.add(el);
+        basic1Abs.appendChild(ctrl);
+        moved.add(ctrl);
         movedControls += 1;
       } else if (isCheckbox && labelEl) {
         labelEl.classList.add('abs-checkbox-label');
@@ -2484,7 +3030,7 @@
     basic2Abs.style.minHeight = '';
 
     const { basic1, basic2 } = splitPanelFields(rows);
-    applyBasic1AbsLayout(basic1);
+    applyBasic1AbsLayout(basic1, rows);
 
     let maxBottom = 0;
     let absAdded = 0;
@@ -2538,13 +3084,13 @@
       if (!field) return;
       const cfg = map.get(field);
       if (!cfg) return;
-      const label = findLabelForField(el);
-      if (label) label.textContent = cfg.label;
+      const label = el.type === 'checkbox' ? el.closest('label') : findLabelForField(el);
       if (el.type === 'checkbox') {
-        const checkboxLabel = el.closest('label') || label;
+        const checkboxLabel = label;
         if (checkboxLabel) setCheckboxLabelText(checkboxLabel, cfg.label);
         applyEditColor(checkboxLabel, cfg.editColor);
       } else {
+        if (label) label.textContent = cfg.label;
         applyEditColor(el, cfg.editColor);
       }
       if (cfg.readOnly) {
@@ -2555,6 +3101,9 @@
         else if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) el.readOnly = true;
       } else if (el instanceof HTMLSelectElement) {
         el.dataset.readonly = '0';
+        el.disabled = false;
+      } else if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        if (!el.hasAttribute('readonly')) el.readOnly = false;
       }
       const lookupWrap = el.closest('.matinfo-lookup');
       if (!cfg.visible) {
@@ -3143,8 +3692,63 @@
     selectRecord(dataCache[idx], idx);
   }
 
+  async function refreshCurrentRecordInPlace() {
+    const partnum = String(currentKey?.partnum || '').trim();
+    const revision = String(currentKey?.revision || '').trim();
+    if (!partnum || !revision) return false;
+
+    if (useCommonTable) {
+      const row = await fetchCommonRecord(partnum, revision);
+      if (!row) return false;
+      const idx = upsertRecordToCache(row, Math.max(0, (currentIndex || 1) - 1));
+      selectRecord(dataCache[idx], idx);
+      return true;
+    }
+
+    try {
+      const url = `/api/MindMatInfo/${encodeURIComponent(partnum)}/${encodeURIComponent(revision)}`;
+      const resp = await fetch(url);
+      if (!resp.ok) return false;
+      const row = await resp.json();
+      if (!row) return false;
+      const idx = upsertRecordToCache(row, Math.max(0, (currentIndex || 1) - 1));
+      selectRecord(dataCache[idx], idx);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function removeRecordFromCache(partnum, revision) {
+    const idx = findRecordIndex(partnum, revision, Math.max(0, (currentIndex || 1) - 1));
+    if (idx < 0) return false;
+
+    dataCache.splice(idx, 1);
+    totalCount = dataCache.length;
+    currentIndex = totalCount > 0 ? Math.min(idx + 1, totalCount) : 0;
+    updateCount();
+
+    if (totalCount <= 0) {
+      clearForm();
+      currentRecord = null;
+      currentKey = null;
+      isNew = false;
+      setKeyFieldsEditable(false);
+      setEditMode(false);
+      detailGrids.forEach((grid) => grid.loadRows());
+      scheduleRender();
+      return true;
+    }
+
+    const nextIdx = Math.max(0, Math.min(idx, totalCount - 1));
+    selectRecord(dataCache[nextIdx], nextIdx);
+    return true;
+  }
+
   function selectRecord(item, index) {
     if (!item) return;
+    const nextIndex = (index ?? 0);
+    const sameIndex = currentIndex === (nextIndex + 1);
     fillForm(item);
     currentRecord = item;
     currentKey = { partnum: getValue(item, 'Partnum') ?? '', revision: getValue(item, 'Revision') ?? '' };
@@ -3152,10 +3756,14 @@
     setKeyFieldsEditable(false);
     setEditMode(false);
     detailGrids.forEach((grid) => grid.loadRows());
-    currentIndex = (index ?? 0) + 1;
+    currentIndex = nextIndex + 1;
     updateCount();
-    ensureBrowseVisible(index ?? 0);
-    scheduleRender();
+    ensureBrowseVisible(nextIndex);
+    if (!sameIndex) {
+      tbody?.querySelectorAll('tr.matinfo-row.active').forEach((tr) => tr.classList.remove('active'));
+      const activeRow = tbody?.querySelector(`tr.matinfo-row[data-index="${nextIndex}"]`);
+      if (activeRow) activeRow.classList.add('active');
+    }
     if (useCommonTable) {
       refreshCommonRecord(currentKey.partnum, currentKey.revision);
     }
@@ -3210,11 +3818,29 @@
     requestAnimationFrame(() => { adjustByRect(); });
   }
 
+  function restoreBrowseActiveCell() {
+    if (!tbody || currentIndex <= 0) return;
+    const activeRow = tbody.querySelector(`tr.matinfo-row[data-index="${currentIndex - 1}"]`);
+    if (!activeRow) return;
+
+    let targetCell = null;
+    if (browseActiveField) {
+      const escapedField = window.CSS?.escape ? window.CSS.escape(browseActiveField) : browseActiveField.replace(/"/g, '\\"');
+      targetCell = activeRow.querySelector(`td[data-field="${escapedField}"]`);
+    }
+    if (!targetCell) {
+      targetCell = activeRow.querySelector('td[data-field]');
+    }
+    if (!targetCell) return;
+    targetCell.classList.add('active-cell');
+    browseActiveField = targetCell.dataset.field || browseActiveField;
+  }
+
   function renderVirtual() {
     if (!tbody || !theadRow || !browseScrollBody) return;
     if (!columns.length || totalCount <= 0) {
       theadRow.innerHTML = '';
-      tbody.innerHTML = '<tr><td colspan="1">沒有資料</td></tr>';
+      tbody.innerHTML = '<tr class="matinfo-empty-row"><td colspan="1">&nbsp;</td></tr>';
       return;
     }
 
@@ -3250,12 +3876,15 @@
           ].filter(Boolean).join(' ');
           const classAttr = cls ? ` class="${cls}"` : '';
           const style = col.width ? ` style="width:${col.width};min-width:${col.width};max-width:${col.width}"` : '';
-          return `<td${classAttr}${style}>${formatCellHtml(col, getValue(item, col.key))}</td>`;
+          const fieldAttr = col.key ? ` data-field="${col.key}"` : '';
+          const readonlyAttr = col.readOnly ? ' data-readonly="1"' : '';
+          return `<td${fieldAttr}${readonlyAttr}${classAttr}${style}>${formatCellHtml(col, getValue(item, col.key))}</td>`;
         }).join('') +
         `</tr>`;
     }
     html += `<tr class="matinfo-spacer"><td colspan="${colCount}" style="height:${bottomSpace}px"></td></tr>`;
     tbody.innerHTML = html;
+    restoreBrowseActiveCell();
 
     const firstRow = tbody.querySelector('tr.matinfo-row');
     if (firstRow) {
@@ -3389,8 +4018,13 @@
   tbody?.addEventListener('click', (e) => {
     const row = e.target.closest('tr.matinfo-row');
     if (!row) return;
+    const cell = e.target.closest('td[data-field]');
+    if (cell?.dataset?.field) {
+      browseActiveField = cell.dataset.field;
+    }
     const idx = Number(row.dataset.index ?? '-1');
     if (!Number.isFinite(idx) || idx < 0 || idx >= totalCount) return;
+    if (idx === currentIndex - 1) return;
     const item = dataCache[idx];
     if (!item) return;
     selectRecord(item, idx);
@@ -3508,6 +4142,8 @@
       notify('error', '請先選擇一筆資料');
       return;
     }
+    const deletingPartnum = currentKey.partnum;
+    const deletingRevision = currentKey.revision;
     const ok = window.Swal
       ? (await window.Swal.fire({ icon: 'warning', title: '確定要刪除?', showCancelButton: true })).isConfirmed
       : confirm('確定要刪除?');
@@ -3538,7 +4174,7 @@
         return;
       }
       notify('success', '刪除完成');
-      await loadData();
+      removeRecordFromCache(deletingPartnum, deletingRevision);
       return;
     }
 
@@ -3549,7 +4185,7 @@
       return;
     }
     notify('success', '刪除完成');
-    await loadData();
+    removeRecordFromCache(deletingPartnum, deletingRevision);
   }
 
   btnQuery?.addEventListener('click', () => {
@@ -3587,10 +4223,22 @@
   });
 
   btnAdd?.addEventListener('click', () => {
-    if (window.MatInfoAddHandler?.open) {
-      window.MatInfoAddHandler.open({ itemId, dictTableName });
+    const useAddDialog = itemIdUpper === 'MG000008'
+      || itemIdUpper === 'CPN00006'
+      || itemIdUpper === 'MG000002'
+      || itemIdUpper === 'CPN00007';
+    if (useAddDialog) {
+      if (window.MatInfoAddHandler?.open) {
+        window.MatInfoAddHandler.open({
+          itemId,
+          dictTableName
+        });
+        return;
+      }
+      notify('error', '新增視窗尚未載入');
       return;
     }
+
     cancelSnapshot = getFormData();
     preserveCancelSnapshot = true;
     clearForm();
@@ -3675,27 +4323,37 @@
   btnTabNext?.addEventListener('click', () => moveRow('next'));
   btnTabLast?.addEventListener('click', () => moveRow('last'));
 
-  btnHistory?.addEventListener('click', async () => {
-    if (!currentKey || !currentKey.partnum) {
-      notify('error', '請先選擇一筆資料');
-      return;
-    }
-    const userId = getUserId();
-    const qs = `paperId=${encodeURIComponent(itemId)}&paperNum=${encodeURIComponent(currentKey.partnum)}&userId=${encodeURIComponent(userId)}`;
-    const [masterResp, historyResp] = await Promise.all([
-      fetch(`/api/UpdateLog/Master?${qs}`, withJwtHeaders()),
-      fetch(`/api/UpdateLog/History?${qs}`, withJwtHeaders())
-    ]);
-    if (!masterResp.ok || !historyResp.ok) {
-      notify('error', '讀取歷史失敗');
-      return;
-    }
-    const masterData = await masterResp.json();
-    const historyData = await historyResp.json();
-    renderLogTable(logMasterTable, masterData?.rows ?? [], '尚無更新記錄');
-    renderLogTable(logHistoryTable, historyData?.rows ?? [], '尚無歷史記錄');
-    showLogModal();
-  });
+  if (enableHistoryFeature) {
+    btnHistory?.addEventListener('click', async () => {
+      if (!currentKey || !currentKey.partnum) {
+        notify('error', '請先選擇一筆資料');
+        return;
+      }
+      if (typeof window.openSharedUpdateLog === 'function') {
+        await window.openSharedUpdateLog({
+          paperId: dictTableName,
+          itemId,
+          paperNum: currentKey.partnum
+        });
+        return;
+      }
+      const userId = getUserId();
+      const qs = `paperId=${encodeURIComponent(dictTableName)}&itemId=${encodeURIComponent(itemId)}&paperNum=${encodeURIComponent(currentKey.partnum)}&userId=${encodeURIComponent(userId)}`;
+      const [masterResp, historyResp] = await Promise.all([
+        fetch(`/api/UpdateLog/Master?${qs}`, withJwtHeaders()),
+        fetch(`/api/UpdateLog/History?${qs}`, withJwtHeaders())
+      ]);
+      if (!masterResp.ok || !historyResp.ok) {
+        notify('error', '讀取歷史失敗');
+        return;
+      }
+      const masterData = await masterResp.json();
+      const historyData = await historyResp.json();
+      renderLogTable(logMasterTable, masterData?.rows ?? [], '尚無更新記錄');
+      renderLogTable(logHistoryTable, historyData?.rows ?? [], '尚無歷史記錄');
+      showLogModal();
+    });
+  }
 
   logModalEl?.querySelectorAll('[data-bs-dismiss="modal"], .btn-close').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -3736,7 +4394,7 @@
       return;
     }
     notify('success', '轉工程資料成功');
-    await loadData();
+    await refreshCurrentRecordInPlace();
   });
 
   btnDelete?.addEventListener('click', () => {
@@ -3949,16 +4607,25 @@
       notify('error', '請先進入編輯模式');
       return;
     }
-    const newCustPn = window.prompt('輸入新的客戶料號');
-    if (newCustPn == null) return;
-    const newCustEg = window.prompt('輸入客戶機種(可空白)') ?? '';
+    const defaultCustPn = String(
+      getValue(currentRecord, 'CustomerPartNum') ||
+      getValue(currentRecord, 'CustPartNum') ||
+      ''
+    ).trim();
+    const defaultCustEg = String(
+      getValue(currentRecord, 'CustEg') ||
+      getValue(currentRecord, 'CustomerType') ||
+      ''
+    ).trim();
+    const input = await openUpdateCustPnDialog(defaultCustPn, defaultCustEg);
+    if (!input) return;
     const resp = await fetch('/api/MatInfoUtility/UpdateCustPn', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         partNum: currentKey.partnum,
-        newCustPn: String(newCustPn).trim(),
-        newCustEg: String(newCustEg).trim(),
+        newCustPn: input.newCustPn,
+        newCustEg: input.newCustEg,
         userId: getUserId()
       })
     });
@@ -3967,7 +4634,7 @@
       return;
     }
     notify('success', '已完成修改');
-    await loadData();
+    await refreshCurrentRecordInPlace();
   });
   btnCopyPN4YX?.addEventListener('click', async () => {
     if (!currentKey?.partnum) {
@@ -3986,8 +4653,16 @@
       notify('error', await resp.text());
       return;
     }
+    let result = null;
+    try {
+      result = await resp.json();
+    } catch {
+      result = null;
+    }
+    const copiedPartNum = String(result?.partNum || result?.PartNum || '').trim();
     notify('success', '已完成');
-    await loadData();
+    if (copiedPartNum && await searchByAddedPartnum(copiedPartNum)) return;
+    await refreshCurrentRecordInPlace();
   });
 
   syncScroll(browseScrollTop, browseScrollBody);
@@ -4024,8 +4699,8 @@
   const openFieldDict = () => {
     const el = document.getElementById('fieldDictModal');
     if (!el) return;
-    const target = document.activeElement?.closest?.('[data-dict-table]')?.dataset?.dictTable
-      || document.querySelector('.ctx-current[data-dict-table]')?.dataset?.dictTable
+    const target = document.querySelector('.ctx-current[data-dict-table]')?.dataset?.dictTable
+      || document.activeElement?.closest?.('[data-dict-table]')?.dataset?.dictTable
       || window._dictTableName
       || dictPanelTableName;
     if (typeof window.showDictModal === 'function') {
@@ -4053,6 +4728,7 @@
     formDictCache.fields = null;
     formDictTypeMap.clear();
     loadFormDict();
+    applyAllDetailHeaderCaptions(true);
   });
 
   function applyTabVisibility() {
@@ -4096,7 +4772,7 @@
   document.addEventListener('matinfo:add:done', async (e) => {
     const partnum = e.detail?.partnum;
     if (await searchByAddedPartnum(partnum)) return;
-    loadData();
+    await refreshCurrentRecordInPlace();
   });
   document.addEventListener('matinfo:search:done', (e) => {
     const rows = e.detail?.rows;
@@ -4107,13 +4783,36 @@
     loadData();
   });
 
+  if (typeof window.initErpGridNav === 'function' && tbody) {
+    window.initErpGridNav(tbody, {
+      keyFields: ['partnum', 'revision'],
+      isEditMode: () => false,
+      onRowSelect: (tr) => {
+        if (!tr) return;
+        const activeCell = tbody.querySelector('td.active-cell');
+        if (activeCell?.dataset?.field) {
+          browseActiveField = activeCell.dataset.field;
+        }
+        const idx = Number(tr.dataset.index ?? '-1');
+        if (!Number.isFinite(idx) || idx < 0 || idx >= totalCount) return;
+        if (idx === currentIndex - 1) return;
+        const item = dataCache[idx];
+        if (!item) return;
+        selectRecord(item, idx);
+      },
+      gridLabel: 'matinfo-browse'
+    });
+  }
+
   setEditMode(false);
   applyCustTabLabel();
   applyDynamicCaptions();
   applyTabDictTables();
   applyTopToolbarVisibility();
+  if (!enableHistoryFeature && btnHistory) btnHistory.style.display = 'none';
   applyTabVisibility();
   setActiveTabContext(document.querySelector('.matinfo-tabs .nav-link.active'));
+  await applyAllDetailHeaderCaptions();
   initBrowseResizer();
   loadBrowseHeight();
   await loadSpecTypeOptions();
