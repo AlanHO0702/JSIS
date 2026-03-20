@@ -82,6 +82,87 @@ public class TableDictionaryService : ITableDictionaryService
         }
     }
 
+    /// <summary>
+    /// 複合鍵版本：用多個 key 欄位組成複合鍵（以 CompositeKeySep 分隔）載入 lookup 值。
+    /// 例如 keyFieldNames = ["AccId","SubAccId"]，結果 key = "5516\x1f01" → "房屋及建築物"
+    /// </summary>
+    private static bool TryLoadCompositeKeyLookupValues(
+        DbConnection conn,
+        string lookupTableName,
+        List<string> keyFieldNames,
+        string resultFieldName,
+        out Dictionary<string, string> lookupDict)
+    {
+        lookupDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        static string Q(string ident) => $"[{ident.Replace("]", "]]")}]";
+
+        // SELECT [AccId] AS [__k0], [SubAccId] AS [__k1], [SubAccName] AS [__v] FROM [AJNdSubAccId]
+        var keyCols = string.Join(", ", keyFieldNames.Select((k, i) => $"{Q(k)} AS [__k{i}]"));
+        var sql = $"SELECT {keyCols}, {Q(resultFieldName)} AS [__v] FROM {Q(lookupTableName)}";
+
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var value = reader["__v"]?.ToString();
+                if (value == null) continue;
+
+                var parts = new string[keyFieldNames.Count];
+                var allValid = true;
+                for (var i = 0; i < keyFieldNames.Count; i++)
+                {
+                    var part = reader[$"__k{i}"]?.ToString()?.Trim();
+                    if (string.IsNullOrWhiteSpace(part)) { allValid = false; break; }
+                    parts[i] = part;
+                }
+                if (!allValid) continue;
+
+                var compositeKey = string.Join(CompositeKeySep.ToString(), parts).ToLowerInvariant();
+                lookupDict[compositeKey] = value;
+            }
+
+            return lookupDict.Count > 0;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[CompositeKeyLookup] 例外: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 從 row 資料中，根據 OCXLookupMap 的 key 欄位組合出 lookup key。
+    /// 支援複合鍵與單一鍵。
+    /// </summary>
+    public static string BuildLookupKey(OCXLookupMap map, Func<string, string> getFieldValue)
+    {
+        if (map.IsCompositeKey)
+        {
+            var parts = new string[map.KeySelfNames.Count];
+            for (var i = 0; i < map.KeySelfNames.Count; i++)
+            {
+                var val = getFieldValue(map.KeySelfNames[i])?.Trim();
+                if (string.IsNullOrWhiteSpace(val)) return "";
+                parts[i] = val;
+            }
+            return string.Join(CompositeKeySep.ToString(), parts);
+        }
+
+        // 單一鍵：依序嘗試 KeyFieldName → KeySelfName → FieldName
+        var key = "";
+        if (!string.IsNullOrWhiteSpace(map.KeyFieldName))
+            key = getFieldValue(map.KeyFieldName)?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(map.KeySelfName))
+            key = getFieldValue(map.KeySelfName)?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(key))
+            key = getFieldValue(map.FieldName)?.Trim() ?? "";
+        return key;
+    }
+
     public List<CURdTableField> GetFieldDict(string tableName, Type modelType)
     {
         var tname = Clean(tableName);
@@ -177,13 +258,6 @@ public class TableDictionaryService : ITableDictionaryService
 
         var result = new List<OCXLookupMap>();
 
-        static bool HasInvalidLookupSetting(string? table, string? keyField, string? resultField)
-        {
-            return string.IsNullOrWhiteSpace(table)
-                   || string.IsNullOrWhiteSpace(keyField)
-                   || string.IsNullOrWhiteSpace(resultField);
-        }
-
         var conn = _context.Database.GetDbConnection();
         var shouldClose = false;
         if (conn.State != System.Data.ConnectionState.Open)
@@ -198,6 +272,9 @@ public class TableDictionaryService : ITableDictionaryService
             var ocxResultName = field.OCXLKResultName;
             var fieldName = field.FieldName ?? "";
             var fieldNameLower = fieldName.ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(ocxTableName) || string.IsNullOrWhiteSpace(ocxResultName))
+                continue;
 
             var lkSettings = _context.CURdOCXTableFieldLK
                 .Where(x => x.TableName != null
@@ -214,9 +291,6 @@ public class TableDictionaryService : ITableDictionaryService
             if (lkSettings.Count == 0)
                 continue;
 
-            if (HasInvalidLookupSetting(ocxTableName, "X", ocxResultName))
-                continue;
-
             var ocxTableClean = Clean(ocxTableName ?? "");
             var resultType = _context.CURdTableFields
                 .Where(x => x.TableName != null
@@ -226,37 +300,63 @@ public class TableDictionaryService : ITableDictionaryService
                 .Select(x => x.DataType)
                 .FirstOrDefault();
 
-            Dictionary<string, string>? lookupDict = null;
-            string selectedKeyField = "";
-            string selectedKeySelf = "";
-
-            foreach (var lkSetting in lkSettings)
+            // 收集所有不重複的 (KeyFieldName, KeySelfName) 配對
+            var allKeyFieldNames = new List<string>();
+            var allKeySelfNames = new List<string>();
+            foreach (var lk in lkSettings)
             {
-                var keyCandidates = new List<string>();
-                if (!string.IsNullOrWhiteSpace(lkSetting.KeyFieldName))
-                    keyCandidates.Add(lkSetting.KeyFieldName.Trim());
-                if (!string.IsNullOrWhiteSpace(lkSetting.KeySelfName)
-                    && !keyCandidates.Any(x => string.Equals(x, lkSetting.KeySelfName, StringComparison.OrdinalIgnoreCase)))
-                    keyCandidates.Add(lkSetting.KeySelfName.Trim());
-
-                foreach (var keyCandidate in keyCandidates)
+                var kf = (lk.KeyFieldName ?? "").Trim();
+                var ks = (lk.KeySelfName ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(kf) || string.IsNullOrWhiteSpace(ks)) continue;
+                if (!allKeyFieldNames.Contains(kf, StringComparer.OrdinalIgnoreCase))
                 {
-                    if (HasInvalidLookupSetting(ocxTableName, keyCandidate, ocxResultName))
-                        continue;
-
-                    if (TryLoadLookupValues(conn, ocxTableName!, keyCandidate, ocxResultName!, out var loadedLookupDict))
-                    {
-                        lookupDict = loadedLookupDict;
-                        selectedKeyField = keyCandidate;
-                        selectedKeySelf = string.IsNullOrWhiteSpace(lkSetting.KeySelfName)
-                            ? keyCandidate
-                            : lkSetting.KeySelfName;
-                        break;
-                    }
+                    allKeyFieldNames.Add(kf);
+                    allKeySelfNames.Add(ks);
                 }
+            }
 
-                if (lookupDict != null)
-                    break;
+            if (allKeyFieldNames.Count == 0)
+                continue;
+
+            Dictionary<string, string>? lookupDict = null;
+
+            if (allKeyFieldNames.Count > 1)
+            {
+                // ★ 複合鍵模式：用所有 key 欄位組成複合鍵
+                var compositeOk = TryLoadCompositeKeyLookupValues(conn, ocxTableName!, allKeyFieldNames, ocxResultName!, out var compositeDict);
+                if (compositeDict.Count > 0)
+                    lookupDict = compositeDict;
+            }
+
+            if (lookupDict == null)
+            {
+                // 單一鍵模式（或複合鍵載入失敗的 fallback）：使用排序優先的第一個有效 key
+                foreach (var lkSetting in lkSettings)
+                {
+                    var keyCandidates = new List<string>();
+                    if (!string.IsNullOrWhiteSpace(lkSetting.KeyFieldName))
+                        keyCandidates.Add(lkSetting.KeyFieldName.Trim());
+                    if (!string.IsNullOrWhiteSpace(lkSetting.KeySelfName)
+                        && !keyCandidates.Any(x => string.Equals(x, lkSetting.KeySelfName, StringComparison.OrdinalIgnoreCase)))
+                        keyCandidates.Add(lkSetting.KeySelfName.Trim());
+
+                    foreach (var keyCandidate in keyCandidates)
+                    {
+                        if (string.IsNullOrWhiteSpace(keyCandidate)) continue;
+
+                        if (TryLoadLookupValues(conn, ocxTableName!, keyCandidate, ocxResultName!, out var loadedLookupDict))
+                        {
+                            lookupDict = loadedLookupDict;
+                            // 單一鍵模式：只保留第一個 key
+                            allKeyFieldNames = new List<string> { keyCandidate };
+                            allKeySelfNames = new List<string> {
+                                string.IsNullOrWhiteSpace(lkSetting.KeySelfName) ? keyCandidate : lkSetting.KeySelfName
+                            };
+                            break;
+                        }
+                    }
+                    if (lookupDict != null) break;
+                }
             }
 
             if (lookupDict == null || lookupDict.Count == 0)
@@ -265,8 +365,10 @@ public class TableDictionaryService : ITableDictionaryService
             result.Add(new OCXLookupMap
             {
                 FieldName = fieldName,
-                KeySelfName = selectedKeySelf,
-                KeyFieldName = selectedKeyField,
+                KeySelfName = allKeySelfNames[0],
+                KeyFieldName = allKeyFieldNames[0],
+                KeySelfNames = allKeySelfNames,
+                KeyFieldNames = allKeyFieldNames,
                 LookupValues = lookupDict,
                 ResultDataType = resultType
             });
@@ -293,12 +395,22 @@ public class TableDictionaryService : ITableDictionaryService
         return "text";
     }
 
+    /// <summary>複合鍵分隔符（ASCII Unit Separator）</summary>
+    public const char CompositeKeySep = '\x1f';
+
     public class OCXLookupMap
     {
         public string FieldName { get; set; } = null!;
         public string KeySelfName { get; set; } = null!;
         public string KeyFieldName { get; set; } = null!;
+        /// <summary>複合鍵時的所有 Self 欄位名稱（依序）</summary>
+        public List<string> KeySelfNames { get; set; } = new();
+        /// <summary>複合鍵時的所有 Lookup 表欄位名稱（依序）</summary>
+        public List<string> KeyFieldNames { get; set; } = new();
         public Dictionary<string, string> LookupValues { get; set; } = new();
         public string? ResultDataType { get; set; }
+
+        /// <summary>是否為複合鍵 lookup</summary>
+        public bool IsCompositeKey => KeySelfNames.Count > 1;
     }
 }

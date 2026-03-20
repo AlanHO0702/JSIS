@@ -45,27 +45,35 @@ public static Dictionary<string, string> BuildHeaderLookupMap(
 
     IDictionary<string, object>? d = headerData as IDictionary<string, object>;
 
+    // 輔助：從 headerData 取某個欄位值（忽略大小寫）
+    string GetFieldStr(string name)
+    {
+        if (d != null)
+        {
+            var hit = d.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
+            return hit != null ? (d[hit]?.ToString()?.Trim() ?? "") : "";
+        }
+        return headerData!.GetType().GetProperty(name)?.GetValue(headerData)?.ToString()?.Trim() ?? "";
+    }
+
     foreach (var map in lookupMaps)
     {
-        object? keyValueObj = null;
-        string? foundKey = null;
         string? fieldName = map.FieldName;
         if (string.IsNullOrWhiteSpace(fieldName))
             continue;
 
-        if (d != null)
+        // ★ 使用 BuildLookupKey 支援複合鍵
+        string keyValue;
+        if (map is TableDictionaryService.OCXLookupMap typedMap)
         {
-            // ★★★ 忽略大小寫比對 key ★★★
-            foundKey = d.Keys.FirstOrDefault(k => string.Equals(k, map.KeySelfName, StringComparison.OrdinalIgnoreCase));
-            if (foundKey != null)
-                keyValueObj = d[foundKey];
+            keyValue = TableDictionaryService.BuildLookupKey(typedMap, GetFieldStr);
         }
         else
         {
-            keyValueObj = headerData.GetType().GetProperty(map.KeySelfName)?.GetValue(headerData);
+            // fallback: dynamic 型別走舊邏輯
+            keyValue = GetFieldStr((string)(map.KeySelfName ?? ""));
         }
 
-        var keyValue = keyValueObj?.ToString();
         if (string.IsNullOrWhiteSpace(keyValue))
             continue;
 
