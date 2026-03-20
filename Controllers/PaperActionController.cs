@@ -18,11 +18,15 @@ namespace PcbErpApi.Controllers
     public class PaperActionController : ControllerBase
     {
         private readonly IConfiguration _config;
+        private const int LegacyCommandTimeoutSeconds = 9600; // 與 Delphi 相同的 timeout
 
         public PaperActionController(IConfiguration config)
         {
             _config = config;
         }
+
+        private static SqlCommand CreateLegacyCommand(string sql, SqlConnection conn)
+            => new SqlCommand(sql, conn) { CommandTimeout = LegacyCommandTimeoutSeconds };
 
         public class DoActionRequest
         {
@@ -190,7 +194,7 @@ namespace PcbErpApi.Controllers
                     }
                 }
 
-                using var cmd = new SqlCommand("CURdPaperAction", conn);
+                using var cmd = CreateLegacyCommand("CURdPaperAction", conn);
                 cmd.CommandType = CommandType.StoredProcedure;
                 cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
                 cmd.Parameters.AddWithValue("@PaperNum", paperNum);
@@ -713,7 +717,7 @@ UPDATE [{table}]
                 }
 
                 var sql = "exec CURdPaperDoNewStatus @PaperId,@PaperNum,@UserId,0,3,@Reason";
-                using (var cmd = new SqlCommand(sql, conn))
+                using (var cmd = CreateLegacyCommand(sql, conn))
                 {
                     cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
                     cmd.Parameters.AddWithValue("@PaperNum", paperNum);
@@ -757,7 +761,7 @@ UPDATE [{table}]
 
             var status = string.Equals(dictPaperId, "fmedpassmain", StringComparison.OrdinalIgnoreCase) ? 2 : 3;
 
-            using (var cmd = new SqlCommand("CURdPaperAction", conn))
+            using (var cmd = CreateLegacyCommand("CURdPaperAction", conn))
             {
                 cmd.CommandType = CommandType.StoredProcedure;
                 cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
@@ -790,7 +794,7 @@ UPDATE [{table}]
             if (canbRunFlow == 1 && canbAudit == 0)
                 return new BadRequestObjectResult(new { message = "您沒有「審核」的權限" });
 
-            using (var cmd = new SqlCommand("CURdPaperAction", conn))
+            using (var cmd = CreateLegacyCommand("CURdPaperAction", conn))
             {
                 cmd.CommandType = CommandType.StoredProcedure;
                 cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
@@ -823,7 +827,7 @@ UPDATE [{table}]
             string useId)
         {
             var sql = "exec CURdPaperDoNewStatus @PaperId,@PaperNum,@UserId,1,3,@Blank";
-            using (var cmd = new SqlCommand(sql, conn))
+            using (var cmd = CreateLegacyCommand(sql, conn))
             {
                 cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
                 cmd.Parameters.AddWithValue("@PaperNum", paperNum);
@@ -861,7 +865,7 @@ UPDATE [{table}]
 
             var sql = @"
 exec CURdCallPaperAftTran @GlobalId,@PaperCallPaperAftExam,@PaperId,@PaperNum,@UserId,@UseId";
-            using var cmd = new SqlCommand(sql, conn);
+            using var cmd = CreateLegacyCommand(sql, conn);
             cmd.Parameters.AddWithValue("@GlobalId", globalId);
             cmd.Parameters.AddWithValue("@PaperCallPaperAftExam", paperCallPaperAftExam);
             cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
@@ -942,7 +946,7 @@ SELECT TOP 1 SystemId
             try
             {
                 const string sql = "exec CURdOCXSysParamGet @SystemId, @ParamName";
-                using var cmd = new SqlCommand(sql, conn);
+                using var cmd = CreateLegacyCommand(sql, conn);
                 cmd.Parameters.AddWithValue("@SystemId", systemId ?? "");
                 cmd.Parameters.AddWithValue("@ParamName", paramName ?? "");
                 using var rd = await cmd.ExecuteReaderAsync();
@@ -972,7 +976,7 @@ SELECT TOP 1 SystemId
             try
             {
                 const string sql = "exec CURdPaperMsgGet @ItemId, @BtnName, @IsAfter";
-                using var cmd = new SqlCommand(sql, conn);
+                using var cmd = CreateLegacyCommand(sql, conn);
                 cmd.Parameters.AddWithValue("@ItemId", itemId);
                 cmd.Parameters.AddWithValue("@BtnName", btnName);
                 cmd.Parameters.AddWithValue("@IsAfter", isAfter);
@@ -1001,7 +1005,7 @@ SELECT TOP 1 SystemId
             try
             {
                 var sql = "exec CURdOCXPaperToFlow @ItemId,@PaperId,@PaperNum,@UserId,@UseId,@SystemId,@FlowStatus";
-                using var cmd = new SqlCommand(sql, conn);
+                using var cmd = CreateLegacyCommand(sql, conn);
                 cmd.Parameters.AddWithValue("@ItemId", itemId);
                 cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
                 cmd.Parameters.AddWithValue("@PaperNum", paperNum);
@@ -1083,7 +1087,7 @@ SELECT FieldName, ISNULL(NULLIF(DisplayLabel,''), FieldName) AS DisplayLabel, IS
 
         private static async Task<string?> RunQueryFirstStringAsync(SqlConnection conn, string sql)
         {
-            using var cmd = new SqlCommand(sql, conn);
+            using var cmd = CreateLegacyCommand(sql, conn);
             using var rd = await cmd.ExecuteReaderAsync();
             if (await rd.ReadAsync())
                 return rd.GetValue(0)?.ToString();
@@ -1092,7 +1096,7 @@ SELECT FieldName, ISNULL(NULLIF(DisplayLabel,''), FieldName) AS DisplayLabel, IS
 
         private static async Task ExecSqlAsync(SqlConnection conn, string sql)
         {
-            using var cmd = new SqlCommand(sql, conn);
+            using var cmd = CreateLegacyCommand(sql, conn);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -1357,7 +1361,7 @@ SELECT FieldName, ISNULL(NULLIF(DisplayLabel,''), FieldName) AS DisplayLabel, IS
                 }
 
                 // 呼叫 CURdPaperAction 執行退審 (AftFinished = 3 -> 審核中)
-                using var cmd = new SqlCommand("CURdPaperAction", conn);
+                using var cmd = CreateLegacyCommand("CURdPaperAction", conn);
                 cmd.CommandType = CommandType.StoredProcedure;
                 cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
                 cmd.Parameters.AddWithValue("@PaperNum", paperNum);

@@ -141,7 +141,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
             ViewData["PaperNum"] = PaperNum;
             ViewData["MultiTabAllowEdit"] = true;
 
-            var tabs = new List<object>(details.Count);
+            var tabs = new List<TabInfoItem>(details.Count);
             var tabFieldDicts = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
 
             for (var i = 0; i < details.Count; i++)
@@ -154,7 +154,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
                 var title = await ResolveDisplayLabelAsync(dictTable) ?? dictTable;
                 var apiUrl = $"/api/DynamicTable/ByPaperNum?table={Uri.EscapeDataString(dictTable)}";
 
-                tabs.Add(new { Id = tabId, Title = title, ApiUrl = apiUrl, DictTable = dictTable });
+                tabs.Add(new TabInfoItem { Id = tabId, Title = title, ApiUrl = apiUrl, DictTable = dictTable });
 
                 var fields = _dictService.GetFieldDict(dictTable, typeof(object));
                 tabFieldDicts[tabId] = fields
@@ -386,6 +386,14 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         {
             public int totalCount { get; set; }
             public List<Dictionary<string, object?>>? data { get; set; }
+        }
+
+        public class TabInfoItem
+        {
+            public string Id { get; set; } = "";
+            public string Title { get; set; } = "";
+            public string ApiUrl { get; set; } = "";
+            public string DictTable { get; set; } = "";
         }
 
         public sealed record KeyMapPair(string ParentField, string ChildField);
