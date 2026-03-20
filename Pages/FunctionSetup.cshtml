@@ -308,6 +308,7 @@ const itemId = "@Model.ItemId";
 let dictCurrentRow = null;
 let customRows = [];
 let selectedCustomIdx = -1;
+const deletedCustomButtonNames = new Set();
 let otherRuleOptions = [];
 const dictMetaCache = {};
 let templateOptions = [];
@@ -1154,6 +1155,7 @@ const cbConfigFields = ["SearchTemplate","DialogCaption","SpName","ExecSpName","
 
 function appendCustomRow(r){
   const tr = buildDynamicRow("cbTable", r, true);
+  tr.dataset.originalButtonName = String(pickField(r, "ButtonName") ?? "").trim();
   cbConfigFields.forEach(f => {
     if (!tr.querySelector(`td[data-field="${f}"]`)) {
       const dt = dictGridMap.cbTable;
@@ -1203,6 +1205,7 @@ async function loadCustom(){
   const tbody = document.querySelector("#cbTable tbody");
   tbody.innerHTML = "";
   selectedCustomIdx = -1;
+  deletedCustomButtonNames.clear();
   customRows.forEach(appendCustomRow);
   await refreshGridLayout("cbTable");
   document.querySelector("#spTable tbody").innerHTML = "";
@@ -1219,6 +1222,10 @@ function addCustomRow(){
 function deleteCustomRow(){
   const tr = document.querySelector("#cbTable tbody tr.table-primary");
   if (!tr) return;
+  const currentName = String(fsReadField(tr, "ButtonName") || "").trim();
+  const originalName = String(tr.dataset.originalButtonName || "").trim();
+  const deleteName = originalName || currentName;
+  if (deleteName) deletedCustomButtonNames.add(deleteName);
   tr.remove();
   selectedCustomIdx = -1;
   document.querySelector("#spTable tbody").innerHTML = "";
@@ -1729,11 +1736,30 @@ async function saveCustom(){
     if (Number(row.DesignType) === 3) {
       row.SearchTemplate = "";
     }
+
+    const originalName = String(tr.dataset.originalButtonName || "").trim();
+    const currentName = String(row.ButtonName || "").trim();
+    if (originalName && currentName && originalName !== currentName) {
+      deletedCustomButtonNames.add(originalName);
+    }
+
     return row;
   });
-  const res = await fetch("/api/CustomButtonApi/Save", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
+
+  const liveNames = new Set(payload.map(r => String(r.ButtonName || "").trim()).filter(Boolean));
+  const deletedButtonNames = Array.from(deletedCustomButtonNames).filter(name => !liveNames.has(String(name || "").trim()));
+
+  const res = await fetch("/api/CustomButtonApi/Save", {
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ ItemId: itemId, Rows: payload, DeletedButtonNames: deletedButtonNames })
+  });
   const data = await res.json();
   if (!res.ok || data?.success !== true) throw new Error(data?.message || "儲存失敗");
+  Array.from(document.querySelectorAll("#cbTable tbody tr")).forEach(tr => {
+    tr.dataset.originalButtonName = String(fsReadField(tr, "ButtonName") || "").trim();
+  });
+  deletedCustomButtonNames.clear();
   alert(`已儲存 ${data.count} 筆自訂按鈕`);
   await loadCustom();
 }
