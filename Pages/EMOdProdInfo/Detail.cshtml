@@ -146,6 +146,82 @@
 .spec-draggable.field-number .master-field { text-align: right; }
 .spec-draggable.md-selected { outline: 2px solid #5b8def; border-radius: 4px; background: rgba(91,141,239,0.08); }
 
+/* === fix: flex item 可縮小（僅編輯模式） === */
+body.layout-edit-enabled .spec-draggable .master-field { min-width: 0; flex-shrink: 1; }
+/* === Layout 編輯模式（Admin + Shift） === */
+body.layout-edit-enabled { user-select: none; -webkit-user-select: none; }
+body.layout-edit-enabled .spec-draggable {
+  cursor: move;
+}
+body.layout-edit-enabled .spec-draggable,
+body.layout-edit-enabled .spec-draggable .master-field {
+  outline: none !important;
+  box-shadow: none !important;
+}
+/* layout 模式下 input/select 不攔截滑鼠，讓 li 接收拖曳 */
+body.layout-edit-enabled .spec-draggable .master-field {
+  pointer-events: none !important;
+}
+/* 確保 li 本身接收滑鼠 */
+body.layout-edit-enabled .spec-draggable {
+  pointer-events: auto !important;
+}
+/* 選取時的淡藍背景 */
+body.layout-edit-enabled .spec-draggable.md-selected {
+  background: rgba(91,141,239, 0.12);
+}
+body.layout-edit-enabled .spec-draggable.md-selected input.master-field,
+body.layout-edit-enabled .spec-draggable.md-selected select.master-field {
+  background: rgba(91,141,239, 0.12) !important;
+}
+body.layout-edit-enabled .spec-field-label.md-selected-label {
+  background: rgba(91,141,239, 0.12);
+}
+/* resize 三角形（右下角直角三角形） */
+body.layout-edit-enabled .rsz-handle.se {
+  width: 0 !important; height: 0 !important;
+  border-style: solid;
+  border-width: 0 0 10px 10px;
+  border-color: transparent transparent #5b8def transparent;
+  cursor: se-resize;
+  opacity: 0.6;
+}
+body.layout-edit-enabled .rsz-handle.se:hover { opacity: 1; }
+/* 隱藏右邊 resize（只保留右下角三角形） */
+body.layout-edit-enabled .rsz-handle.e { display: none; }
+/* 編輯模式下隱藏 tooltip（靠 JS 動態控制） */
+body:not(.layout-edit-enabled) .spec-draggable[title],
+body:not(.layout-edit-enabled) .spec-field-label[title] {
+  pointer-events: auto;
+}
+/* 吸附輔助線 */
+.snap-guide {
+  position: absolute;
+  background: #5b8def;
+  z-index: 9999;
+  pointer-events: none;
+}
+.snap-guide.guide-h { height: 1px; left: 0; right: 0; }
+.snap-guide.guide-v { width: 1px; top: 0; bottom: 0; }
+body.layout-edit-enabled .spec-draggable:hover {
+  border-color: #4A90E2;
+  background: rgba(74, 144, 226, 0.05);
+}
+body.layout-edit-enabled .spec-field-label {
+  pointer-events: auto;
+  cursor: move;
+  border: 1px dashed transparent;
+}
+body.layout-edit-enabled .spec-field-label:hover {
+  border-color: #aab8cf;
+}
+/* jQuery UI resizable 手柄 */
+body.layout-edit-enabled .ui-resizable-handle {
+  background: #5b8def; opacity: 0.5; border-radius: 2px;
+}
+body.layout-edit-enabled .ui-resizable-e { width: 4px; right: 0; }
+body.layout-edit-enabled .ui-resizable-se { width: 8px; height: 8px; right: 0; bottom: 0; }
+
 /* 規格頁籤編輯狀態（排除 checkbox） */
 #spec-content.spec-editing .master-field:not(.readonly-field):not([type="checkbox"]) {
   border-color: #5b8def !important;
@@ -1844,7 +1920,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const labHeight = f.iLabHeight || 22;
 
         const label = f.DisplayLabel || fn;
-        const titleAttr = window.__isAdmin ? `title="${fn}：${label}"` : '';
+        // title 由 JS 在編輯模式下動態加入
+        const titleAttr = `data-layout-title="${fn}：${label}"`;
 
         // 所有 label 先收集（先渲染 = 在下層），iLabWidth=0 不顯示
         if ((f.iLabWidth ?? -1) !== 0) {
@@ -4988,5 +5065,403 @@ document.addEventListener('DOMContentLoaded', function () {
     tabBtn.addEventListener('shown.bs.tab', () => { loadStackup(); });
   }
 });
+</script>
+
+<script>
+// ============================================
+// 規格頁籤拖曳排版（Vanilla JS，零依賴）
+// Admin + Shift 啟動
+// ============================================
+(function initSpecLayoutDrag() {
+  'use strict';
+  const PAD = 6, SNAP_PX = 2, SEL = 'md-selected', SEL_LAB = 'md-selected-label';
+
+  /* ---- DOM helpers ---- */
+  const qAll = (s, p) => Array.from((p || document).querySelectorAll(s));
+  const allFields = () => qAll('.spec-draggable');
+  const allLabels = () => qAll('.spec-field-label');
+  const selected  = () => allFields().filter(el => el.classList.contains(SEL));
+  const selectedLabels = () => allLabels().filter(el => el.classList.contains(SEL_LAB));
+  const clearSel  = () => { selected().forEach(el => el.classList.remove(SEL)); selectedLabels().forEach(el => el.classList.remove(SEL_LAB)); };
+  const labelFor  = el => el ? document.querySelector(`.spec-field-label[data-field="${el.dataset.field}"]`) : null;
+  const inLayout = () => document.body.classList.contains('layout-edit-enabled');
+
+  /* ---- snap 吸附（全部用 getBoundingClientRect 統一座標）---- */
+  let snap = { tops:[], lefts:[], rights:[], bottoms:[] };
+  let snapContainer = null; // 記住容器，給輔助線用
+
+  // 取得元素相對於容器的座標
+  function relRect(el, container) {
+    const er = el.getBoundingClientRect();
+    const cr = container.getBoundingClientRect();
+    return { top: er.top - cr.top, left: er.left - cr.left, width: er.width, height: er.height };
+  }
+
+  // excludeEls: 要排除的 DOM 元素陣列（拖曳中會跟著動的元素不應參與吸附）
+  function buildSnap(dragEl, excludeEls) {
+    const s = { tops:[], lefts:[], rights:[], bottoms:[] };
+    const tab = dragEl.closest('.master-spec-tab');
+    if (!tab) return s;
+    snapContainer = tab;
+    if (!tab.style.position || tab.style.position === 'static') {
+      tab.style.position = 'relative';
+    }
+    const excl = new Set(excludeEls || []);
+    excl.add(dragEl);
+    qAll('.spec-draggable, .spec-field-label', tab).forEach(el => {
+      if (excl.has(el)) return;
+      const r = relRect(el, tab);
+      s.tops.push(r.top); s.lefts.push(r.left);
+      s.rights.push(r.left + r.width); s.bottoms.push(r.top + r.height);
+    });
+    s.tops=[...new Set(s.tops)]; s.lefts=[...new Set(s.lefts)];
+    s.rights=[...new Set(s.rights)]; s.bottoms=[...new Set(s.bottoms)];
+    return s;
+  }
+  function applySnap(t, l, w, h) {
+    let snapH = null, snapV = null;
+    // 上邊 ↔ 其他上邊
+    for (const e of snap.tops)    { if (Math.abs(t - e) <= SNAP_PX) { t = e; snapH = e; break; } }
+    // 下邊 ↔ 其他下邊
+    if (snapH === null) for (const e of snap.bottoms) { if (Math.abs(t + h - e) <= SNAP_PX) { t = e - h; snapH = e; break; } }
+    // 下邊 ↔ 其他上邊
+    if (snapH === null) for (const e of snap.tops)    { if (Math.abs(t + h - e) <= SNAP_PX) { t = e - h; snapH = e; break; } }
+    // 上邊 ↔ 其他下邊
+    if (snapH === null) for (const e of snap.bottoms) { if (Math.abs(t - e) <= SNAP_PX) { t = e; snapH = e; break; } }
+    // 左邊 ↔ 其他左邊
+    for (const e of snap.lefts)   { if (Math.abs(l - e) <= SNAP_PX) { l = e; snapV = e; break; } }
+    // 左邊 ↔ 其他右邊
+    if (snapV === null) for (const e of snap.rights)  { if (Math.abs(l - e) <= SNAP_PX) { l = e; snapV = e; break; } }
+    // 右邊 ↔ 其他左邊
+    if (snapV === null) for (const e of snap.lefts)   { if (Math.abs(l + w - e) <= SNAP_PX) { l = e - w; snapV = e; break; } }
+    // 右邊 ↔ 其他右邊
+    if (snapV === null) for (const e of snap.rights)  { if (Math.abs(l + w - e) <= SNAP_PX) { l = e - w; snapV = e; break; } }
+    showGuides(snapH, snapV);
+    return { top: t, left: l };
+  }
+
+  /* ---- 吸附輔助線 ---- */
+  function showGuides(hY, vX) {
+    clearGuides();
+    const container = snapContainer;
+    if (!container) return;
+    if (hY !== null) {
+      const g = document.createElement('div');
+      g.className = 'snap-guide guide-h';
+      g.style.top = hY + 'px';
+      container.appendChild(g);
+    }
+    if (vX !== null) {
+      const g = document.createElement('div');
+      g.className = 'snap-guide guide-v';
+      g.style.left = vX + 'px';
+      container.appendChild(g);
+    }
+  }
+  function clearGuides() {
+    document.querySelectorAll('.snap-guide').forEach(g => g.remove());
+  }
+
+  /* ---- debounced save ---- */
+  let saveTimer = null;
+  function debounceSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveLayout, 400); }
+  function saveLayout() {
+    const layout = allFields().map(el => {
+      const lab = labelFor(el);
+      return {
+        fieldName: el.dataset.field,
+        top:  Math.max(0, el.offsetTop - PAD),
+        left: el.offsetLeft,
+        width: el.offsetWidth,
+        height: el.offsetHeight,
+        labTop:  lab ? Math.max(0, lab.offsetTop - PAD) : null,
+        labLeft: lab ? lab.offsetLeft : null,
+        ishowWhere: parseInt(el.dataset.showWhere) || 1
+      };
+    });
+    if (!layout.length) return;
+    fetch('/api/TableFieldLayout/SaveHeaderLayout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tableName: window._headerTableName || 'EMOdProdInfo', layoutUpdates: layout })
+    }).catch(() => {});
+  }
+
+  /* ---- drag state ---- */
+  let drag = null; // { el, startX, startY, items:[{el,t0,l0,lab,labT0,labL0}] }
+
+  function startDrag(el, e) {
+    if (!inLayout()) return;
+    const grp = selected().length ? selected() : [el];
+    // 排除所有會跟著動的元素
+    snap = buildSnap(el, grp);
+    const ct = snapContainer;
+    drag = {
+      el, startX: e.clientX, startY: e.clientY, container: ct,
+      items: grp.map(f => {
+        const r = relRect(f, ct);
+        return { el: f, t0: r.top, l0: r.left };
+      })
+    };
+    el.style.opacity = '0.5';
+  }
+
+  /* ---- 拖曳切換頁籤 ---- */
+  let tabHoverTimer = null;
+  function checkTabSwitch(e) {
+    if (!drag) return;
+    // 暫時隱藏被拖曳的元素，讓 elementFromPoint 能穿透到下方的頁籤按鈕
+    const hiddenEls = drag.items.map(it => it.el);
+    hiddenEls.forEach(el => el.style.pointerEvents = 'none');
+    const hit = document.elementFromPoint(e.clientX, e.clientY);
+    hiddenEls.forEach(el => el.style.pointerEvents = '');
+    const tabBtn = hit?.closest('.nav-link[data-bs-toggle="tab"]');
+    if (tabBtn && !tabBtn.classList.contains('active')) {
+      if (tabHoverTimer && tabHoverTimer._target === tabBtn) return;
+      clearTimeout(tabHoverTimer);
+      tabHoverTimer = setTimeout(() => {
+        const bsTab = new bootstrap.Tab(tabBtn);
+        bsTab.show();
+        setTimeout(initFields, 200);
+      }, 300);
+      tabHoverTimer._target = tabBtn;
+    } else if (!tabBtn) {
+      clearTimeout(tabHoverTimer);
+      tabHoverTimer = null;
+    }
+  }
+
+  function onDragMove(e) {
+    if (!drag) return;
+    const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
+    checkTabSwitch(e);
+    const base = drag.items.find(i => i.el === drag.el);
+    const rawT = base.t0 + dy, rawL = base.l0 + dx;
+    const w = drag.el.offsetWidth, h = drag.el.offsetHeight;
+    const snapped = applySnap(rawT, rawL, w, h);
+    const snapDY = snapped.top - base.t0, snapDX = snapped.left - base.l0;
+    drag.items.forEach(it => {
+      it.el.style.top  = Math.max(0, it.t0 + snapDY) + 'px';
+      it.el.style.left = Math.max(0, it.l0 + snapDX) + 'px';
+    });
+  }
+
+  function onDragEnd() {
+    if (!drag) return;
+    drag.el.style.opacity = '';
+    snap = { tops:[], lefts:[], rights:[], bottoms:[] };
+    clearGuides();
+    clearTimeout(tabHoverTimer); tabHoverTimer = null;
+    drag = null;
+    debounceSave();
+  }
+
+  /* ---- resize state ---- */
+  let rsz = null; // { el, startX, startY, w0, h0, edge }
+
+  function startResize(el, e, edge) {
+    if (!inLayout()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    rsz = { el, startX: e.clientX, startY: e.clientY, w0: el.offsetWidth, h0: el.offsetHeight, edge };
+    document.addEventListener('mousemove', onResizeMove);
+    document.addEventListener('mouseup', onResizeEnd);
+  }
+
+  function onResizeMove(e) {
+    if (!rsz) return;
+    const dx = e.clientX - rsz.startX, dy = e.clientY - rsz.startY;
+    const newW = Math.max(30, rsz.w0 + dx);
+    rsz.el.style.width = newW + 'px';
+    if (rsz.edge === 'se') {
+      rsz.el.style.height = Math.max(18, rsz.h0 + dy) + 'px';
+    }
+  }
+
+  function onResizeEnd() {
+    if (!rsz) return;
+    rsz = null;
+    document.removeEventListener('mousemove', onResizeMove);
+    document.removeEventListener('mouseup', onResizeEnd);
+    debounceSave();
+  }
+
+  /* ---- 建立 resize 手柄 DOM ---- */
+  function addResizeHandles(el) {
+    if (el.querySelector('.rsz-handle')) return;
+    const mkH = (cls, css) => {
+      const d = document.createElement('div');
+      d.className = 'rsz-handle ' + cls;
+      Object.assign(d.style, { position:'absolute', zIndex:'5', ...css });
+      d.addEventListener('mousedown', e => startResize(el, e, cls));
+      el.appendChild(d);
+    };
+    mkH('e',  { right:'0', top:'0', width:'5px', height:'100%', cursor:'e-resize' });
+    mkH('se', { right:'0', bottom:'0', width:'8px', height:'8px', cursor:'se-resize' });
+  }
+
+  /* ---- init：對新渲染的欄位綁定事件 ---- */
+  const DEAD_ZONE = 3; // 滑鼠移動超過 3px 才算拖曳，否則算點擊
+
+  function initFields() {
+    const fields = allFields();
+    console.log('[LayoutDrag] initFields:', fields.length, 'fields');
+    fields.forEach(el => {
+      if (el._layoutInit) return;
+      el._layoutInit = true;
+      addResizeHandles(el);
+      el.addEventListener('mousedown', function (e) {
+        if (!inLayout()) return;
+        if (e.target.closest('.rsz-handle')) return;
+        e.preventDefault();
+        const sX = e.clientX, sY = e.clientY;
+        let dragging = false;
+        const onMove = ev => {
+          if (!dragging && (Math.abs(ev.clientX - sX) > DEAD_ZONE || Math.abs(ev.clientY - sY) > DEAD_ZONE)) {
+            dragging = true;
+            // 如果這個欄位已被選取，拖全部；否則只拖這個
+            if (!el.classList.contains(SEL)) { clearSel(); el.classList.add(SEL); }
+            startDrag(el, e);
+          }
+          if (dragging && drag) onDragMove(ev);
+        };
+        const onUp = ev => {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          if (dragging && drag) {
+            onDragEnd();
+          } else {
+            // 沒超過 dead zone → 當作點擊，處理選取
+            if (ev.ctrlKey || ev.metaKey) el.classList.toggle(SEL);
+            else { clearSel(); el.classList.add(SEL); }
+          }
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
+    // label 也可獨立拖曳（同樣加 dead zone）
+    qAll('.spec-field-label').forEach(lab => {
+      if (lab._layoutInit) return;
+      lab._layoutInit = true;
+      lab.addEventListener('mousedown', function (e) {
+        if (!inLayout()) return;
+        e.preventDefault();
+        const sX = e.clientX, sY = e.clientY;
+        let dragging = false;
+        let labSnap, labCt, labT0, labL0;
+        const onMove = ev => {
+          if (!dragging && (Math.abs(ev.clientX - sX) > DEAD_ZONE || Math.abs(ev.clientY - sY) > DEAD_ZONE)) {
+            dragging = true;
+            snap = buildSnap(lab, [lab]);
+            labCt = snapContainer;
+            const r0 = relRect(lab, labCt);
+            labT0 = r0.top; labL0 = r0.left;
+          }
+          if (dragging) {
+            const rawT = labT0 + (ev.clientY - sY), rawL = labL0 + (ev.clientX - sX);
+            const s = applySnap(rawT, rawL, lab.offsetWidth, lab.offsetHeight);
+            lab.style.top = Math.max(0, s.top) + 'px';
+            lab.style.left = Math.max(0, s.left) + 'px';
+          }
+        };
+        const onUp = ev => {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          if (dragging) {
+            snap = { tops:[], lefts:[], rights:[], bottoms:[] };
+            clearGuides();
+            debounceSave();
+          } else {
+            // 點擊 → 選取 label
+            if (ev.ctrlKey || ev.metaKey) lab.classList.toggle(SEL_LAB);
+            else { clearSel(); lab.classList.add(SEL_LAB); }
+          }
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
+  }
+
+  /* ---- Admin + Shift toggle（按 Shift 進入，按 Escape 退出） ---- */
+  function isAdmin() {
+    const uid = localStorage.getItem('erpLoginUserId') || window._userId || '';
+    const cached = uid ? localStorage.getItem(`erpIsAdmin:${uid}`) === '1' : false;
+    const body = document.body?.dataset?.isAdmin === '1';
+    return window.__isAdmin === true || cached || body;
+  }
+  function setEnabled(on) {
+    const can = !!on && isAdmin();
+    console.log('[LayoutDrag] setEnabled:', { on, can, __isAdmin: window.__isAdmin });
+    document.body.classList.toggle('layout-edit-enabled', can);
+    // 編輯模式下才顯示欄位名稱 tooltip
+    qAll('[data-layout-title]').forEach(el => {
+      if (can) el.title = el.dataset.layoutTitle;
+      else el.removeAttribute('title');
+    });
+    if (can) {
+      console.log('%c[LayoutDrag] 編輯模式已啟用 — 按 Escape 退出', 'color:#5b8def;font-weight:bold');
+    }
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Shift' && !e.repeat && !inLayout()) {
+      // Shift 按一次 → 進入編輯模式
+      setEnabled(true);
+    } else if (e.key === 'Escape' && inLayout()) {
+      // Escape → 退出編輯模式
+      clearSel();
+      setEnabled(false);
+    }
+  });
+  window.addEventListener('adminStateReady', () => {});
+
+  /* ---- 點擊空白處取消選取 ---- */
+  document.addEventListener('mouseup', function (e) {
+    if (!inLayout() || drag || rsz) return;
+    // 不是點在欄位或 label 上 → 取消所有選取
+    if (!e.target.closest('.spec-draggable') && !e.target.closest('.spec-field-label')) {
+      if (e.target.closest('.master-spec-tab')) clearSel();
+    }
+  });
+
+  /* ---- keyboard shortcuts（僅方向鍵，capture 攔截 Bootstrap Tab）---- */
+  document.addEventListener('keydown', function (e) {
+    if (!inLayout()) return;
+    if (!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) return;
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    const step = e.shiftKey ? 10 : 1;
+    const dT = e.key==='ArrowUp' ? -step : e.key==='ArrowDown' ? step : 0;
+    const dL = e.key==='ArrowLeft' ? -step : e.key==='ArrowRight' ? step : 0;
+
+    // 移動所有選取的 field（各自獨立）
+    selected().forEach(f => {
+      f.style.top = (f.offsetTop + dT) + 'px';
+      f.style.left = (f.offsetLeft + dL) + 'px';
+    });
+    // 移動所有選取的 label（各自獨立）
+    selectedLabels().forEach(lab => {
+      lab.style.top = (lab.offsetTop + dT) + 'px';
+      lab.style.left = (lab.offsetLeft + dL) + 'px';
+    });
+    debounceSave();
+  }, true); // capture: true 確保在 Bootstrap Tab 之前攔截
+
+  /* ---- MutationObserver：自動偵測新欄位 ---- */
+  let initTimer = null;
+  const obs = new MutationObserver(() => { clearTimeout(initTimer); initTimer = setTimeout(initFields, 150); });
+  function startObs() {
+    qAll('.master-spec-tab').forEach(t => obs.observe(t, { childList: true, subtree: true }));
+  }
+  if (document.readyState === 'complete') { startObs(); setTimeout(initFields, 300); }
+  else window.addEventListener('load', () => { startObs(); setTimeout(initFields, 300); });
+  const sc = document.getElementById('spec-content');
+  if (sc) new MutationObserver(startObs).observe(sc, { childList: true });
+})();
 </script>
 
