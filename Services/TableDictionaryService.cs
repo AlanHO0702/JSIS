@@ -360,9 +360,7 @@ public class TableDictionaryService : ITableDictionaryService
                 }
             }
 
-            var hasSingleLookup = lookupDict != null && lookupDict.Count > 0;
-            var hasCompositeLookup = compositeLookupDict != null && compositeLookupDict.Count > 0;
-            if (!hasSingleLookup && !hasCompositeLookup)
+            if (lookupDict == null || lookupDict.Count == 0)
                 continue;
 
             result.Add(new OCXLookupMap
@@ -411,7 +409,6 @@ public class TableDictionaryService : ITableDictionaryService
         /// <summary>複合鍵時的所有 Lookup 表欄位名稱（依序）</summary>
         public List<string> KeyFieldNames { get; set; } = new();
         public Dictionary<string, string> LookupValues { get; set; } = new();
-        public List<OCXLookupKeyPair> CompositeKeyPairs { get; set; } = new();
         public Dictionary<string, string> CompositeLookupValues { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public string? ResultDataType { get; set; }
 

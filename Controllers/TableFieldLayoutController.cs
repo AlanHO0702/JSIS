@@ -312,9 +312,6 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
 
         var resultFields = result.Split(',').Select(x => $"[{x.Trim()}]").ToArray();
         string selectResult = string.Join(", ", resultFields.Select((col, idx) => $"{col} as [result{idx}]"));
-        string selectKey = keyFields.Length == 1
-            ? $"[{keyFields[0]}] as [key]"
-            : string.Join(", ", keyFields.Select((col, idx) => $"[{col}] as [key{idx}]"));
         var whereList = new List<string>();
         if (!string.IsNullOrWhiteSpace(cond1Field) && !string.IsNullOrWhiteSpace(cond1Value))
             whereList.Add($"[{cond1Field.Trim()}] = @cond1Value");
@@ -323,9 +320,8 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         var whereSql = whereList.Count > 0 ? $" WHERE {string.Join(" AND ", whereList)}" : "";
 
         // ★ 支援複合鍵：key 可以是逗號分隔的多個欄位（如 "AccId,SubAccId"）
-        var keyFields = key.Split(',').Select(x => x.Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
-        string selectKey;
         bool isCompositeKey = keyFields.Length > 1;
+        string selectKey;
 
         if (isCompositeKey)
         {
@@ -360,21 +356,11 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
                     }
                     else
                     {
-                        var keyParts = new List<string>(keyFields.Length);
-                        var keyHasEmpty = false;
-                        for (int i = 0; i < keyFields.Length; i++)
-                        {
-                            var part = reader[$"key{i}"]?.ToString()?.Trim() ?? "";
-                            if (string.IsNullOrWhiteSpace(part))
-                            {
-                                keyHasEmpty = true;
-                                break;
-                            }
-                            keyParts.Add(part.ToLowerInvariant());
-                        }
-                        if (keyHasEmpty)
+                        // 複合鍵：SQL 已用 CHAR(31) 串接成單一 [key] 欄位，直接讀取即可
+                        var compositeKey = reader["key"]?.ToString() ?? "";
+                        if (string.IsNullOrWhiteSpace(compositeKey))
                             continue;
-                        row["key"] = string.Join('\u001F', keyParts);
+                        row["key"] = compositeKey;
                     }
                     for (int i = 0; i < resultFields.Length; i++)
                         row[$"result{i}"] = reader[$"result{i}"];

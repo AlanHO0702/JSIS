@@ -661,16 +661,18 @@
     const _keyToLookup = {};
     for (const f of fields) {
       const ocxData = ocxMaps[f.FieldName];
-      if (!ocxData) continue;
-      const keySelfNames = ocxData._compositeKeySelfNames || (f.KeySelfName ? [f.KeySelfName] : []);
+      const lkData = lookupMaps[f.FieldName];
+      if (!ocxData && !lkData) continue;
+      const keySelfNames = ocxData?._compositeKeySelfNames
+        || (f.KeySelfName ? [f.KeySelfName] : (f.LookupKeyField ? [f.LookupKeyField] : []));
       for (const kn of keySelfNames) {
         const knLower = kn.toLowerCase();
         if (!_keyToLookup[knLower]) _keyToLookup[knLower] = [];
         _keyToLookup[knLower].push({
           resultFieldName: f.FieldName,
-          ocxData,
-          compositeKeySelfNames: ocxData._compositeKeySelfNames || null,
-          keySelf: f.KeySelfName || null
+          ocxData: ocxData || lkData,
+          compositeKeySelfNames: ocxData?._compositeKeySelfNames || null,
+          keySelf: f.KeySelfName || f.LookupKeyField || null
         });
       }
     }
@@ -702,7 +704,7 @@
           } else if (dep.keySelf) {
             lookupKey = getFieldVal(dep.keySelf);
           }
-          const displayVal = lookupKey ? (dep.ocxData.cell[lookupKey] || dep.ocxData.cell[lookupKey.trim()] || '') : '';
+          const displayVal = lookupKey ? (dep.ocxData.cell[lookupKey] || dep.ocxData.cell[lookupKey.trim()] || dep.ocxData.cell[lookupKey.trim().toLowerCase()] || '') : '';
           const resultInp = Array.from(tr.querySelectorAll('input'))
             .find(i => (i.name || '').toLowerCase() === dep.resultFieldName.toLowerCase());
           if (resultInp) {
