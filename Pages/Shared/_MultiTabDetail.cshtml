@@ -204,32 +204,21 @@
                     cond1Field, cond1Source, cond2Field, cond2Source });
                 return;
             }
-            let keyPairs = [];
-            if (keyMapsJson) {
-                try {
-                    const parsed = JSON.parse(keyMapsJson);
-                    keyPairs = (Array.isArray(parsed) ? parsed : [])
-                        .map(x => ({
-                            key: (x?.KeyFieldName || x?.keyFieldName || '').toString().trim(),
-                            keySelf: (x?.KeySelfName || x?.keySelfName || '').toString().trim()
-                        }))
-                        .filter(x => x.key && x.keySelf);
-                } catch { keyPairs = []; }
-            }
-            if (keyPairs.length === 0 && ocxKeyField) {
-                keyPairs = [{ key: ocxKeyField.trim(), keySelf: (ocxKeySelf || ocxKeyField).trim() }];
-            }
-            if (ocxTable && ocxResult && keyPairs.length > 0) {
-                map.set(field.toLowerCase(), {
-                    field,
-                    table: ocxTable,
-                    key: keyPairs[0].key,
-                    result: ocxResult,
-                    keySelf: keyPairs[0].keySelf,
-                    lookupKey: keyPairs.map(x => x.key).join(','),
-                    keyPairs,
-                    source: 'ocx'
-                });
+            if (ocxTable && ocxKeyField && ocxResult) {
+                // ★ 解析 KeyMapsJson 支援複合鍵
+                const keyMapsJson = (r.keyMapsJson || r.KeyMapsJson || '').toString();
+                let compositeKeySelfNames = null;
+                let effectiveKey = ocxKeyField;
+                if (keyMapsJson) {
+                    try {
+                        const maps = JSON.parse(keyMapsJson);
+                        if (Array.isArray(maps) && maps.length > 1) {
+                            effectiveKey = maps.map(m => m.KeyFieldName).filter(Boolean).join(',');
+                            compositeKeySelfNames = maps.map(m => m.KeySelfName).filter(Boolean);
+                        }
+                    } catch { }
+                }
+                map.set(field.toLowerCase(), { field, table: ocxTable, key: effectiveKey, result: ocxResult, keySelf: ocxKeySelf, source: 'ocx', compositeKeySelfNames });
             }
         });
         LOOKUP_META_CACHE.set(tn, map);
@@ -403,7 +392,16 @@
 
         if (allowLookup && lookupMap) {
             let key = lookupKeyOverride != null ? String(lookupKeyOverride) : s;
-            if ((!key || key.trim() === '') && (lookupMeta?.keySelf || lookupMeta?.key)) {
+            // Composite key: build from multiple fields
+            if ((!key || key.trim() === '') && lookupMeta?.compositeKeySelfNames && lookupMeta.compositeKeySelfNames.length > 1 && row) {
+                const parts = lookupMeta.compositeKeySelfNames.map(f => {
+                    const v = getValueCaseInsensitive(row, f);
+                    return v == null ? '' : String(v).trim();
+                });
+                if (parts.every(p => p !== '')) {
+                    key = parts.join('\x1f');
+                }
+            } else if ((!key || key.trim() === '') && (lookupMeta?.keySelf || lookupMeta?.key)) {
                 const fallbackKey = lookupMeta?.keySelf || lookupMeta?.key || '';
                 const fallback = getValueCaseInsensitive(row, fallbackKey);
                 key = fallback == null ? '' : String(fallback);
@@ -590,13 +588,13 @@
 
             if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
             window.__unsavedChanges = true;
+            // ★ 在 input 元素上標記：此次值變更來自 lookup 選取，
+            //   後續的 change 事件（含瀏覽器 blur 觸發的原生 change）都不觸發自動儲存
+            edit._fromLookup = true;
             try {
                 edit.dispatchEvent(new Event('input', { bubbles: true }));
                 edit.dispatchEvent(new Event('change', { bubbles: true }));
             } catch {}
-            if (typeof window.__autoSaveDetail === 'function') {
-                window.__autoSaveDetail();
-            }
             cleanup();
         };
 
@@ -1076,22 +1074,16 @@
                   }
                 let lookupKeyOverride = null;
                   if (allowLookup && metaLookup?.source === 'ocx') {
-                      const pairs = Array.isArray(metaLookup?.keyPairs) ? metaLookup.keyPairs : [];
-                      if (pairs.length > 1) {
-                          const parts = [];
-                          for (const pair of pairs) {
-                              const sourceField = (pair?.keySelf || pair?.key || '').toString();
-                              if (!sourceField) { parts.length = 0; break; }
-                              const keyVal = getValueCaseInsensitive(row, sourceField);
-                              const keyText = keyVal == null ? '' : String(keyVal).trim();
-                              if (!keyText) { parts.length = 0; break; }
-                              parts.push(keyText.toLowerCase());
+                      // Composite key: build key from multiple fields joined by \x1f
+                      if (metaLookup.compositeKeySelfNames && metaLookup.compositeKeySelfNames.length > 1) {
+                          const parts = metaLookup.compositeKeySelfNames.map(f => {
+                              const v = getValueCaseInsensitive(row, f);
+                              return v == null ? '' : String(v).trim();
+                          });
+                          if (parts.every(p => p !== '')) {
+                              lookupKeyOverride = parts.join('\x1f');
                           }
-                          if (parts.length === pairs.length) {
-                              lookupKeyOverride = parts.join('\u001f');
-                          }
-                      }
-                      if (lookupKeyOverride == null) {
+                      } else {
                           const candidates = [];
                           if (metaLookup?.keySelf) candidates.push(metaLookup.keySelf);
                           if (metaLookup?.key) candidates.push(metaLookup.key);
@@ -1106,10 +1098,21 @@
                 }
                     const keyStr = lookupKeyOverride == null ? '' : String(lookupKeyOverride).trim();
                     const keyIsEmpty = keyStr === '';
-                    const keyFieldName = metaLookup?.source === 'ocx' ? (metaLookup?.keySelf || metaLookup?.key || '') : '';
-                    const keyRawVal = keyFieldName ? getValueCaseInsensitive(row, keyFieldName) : null;
-                    const keyRawStr = keyRawVal == null ? '' : String(keyRawVal).trim();
-                    const keySourceMissing = !!keyFieldName && keyRawStr === '';
+                    let keySourceMissing = false;
+                    if (metaLookup?.source === 'ocx') {
+                        if (metaLookup.compositeKeySelfNames && metaLookup.compositeKeySelfNames.length > 1) {
+                            // For composite keys, check ALL key fields
+                            keySourceMissing = metaLookup.compositeKeySelfNames.some(f => {
+                                const v = getValueCaseInsensitive(row, f);
+                                return v == null || String(v).trim() === '';
+                            });
+                        } else {
+                            const keyFieldName = metaLookup?.keySelf || metaLookup?.key || '';
+                            const keyRawVal = keyFieldName ? getValueCaseInsensitive(row, keyFieldName) : null;
+                            const keyRawStr = keyRawVal == null ? '' : String(keyRawVal).trim();
+                            keySourceMissing = !!keyFieldName && keyRawStr === '';
+                        }
+                    }
                     if (keySourceMissing) {
                         rawValue = '';
                     }
@@ -1343,6 +1346,21 @@
                         window.__updateToolbarCounts();
                     }
                 });
+                // ★ 建立反向索引：key 欄位名稱 → 依賴它的 lookup 結果欄位清單
+                const keyToLookupFields = new Map();
+                for (const [resultField, cfg] of lookupMeta.entries()) {
+                    if (cfg.source !== 'ocx' && cfg.source !== 'lookup') continue;
+                    // lookup 來源：欄位本身就是 key，用欄位自身名稱作為觸發 key
+                    const keyNames = cfg.source === 'lookup'
+                        ? [resultField]
+                        : (cfg.compositeKeySelfNames || (cfg.keySelf ? [cfg.keySelf] : (cfg.key ? [cfg.key] : [])));
+                    for (const kn of keyNames) {
+                        const knLower = kn.toLowerCase();
+                        if (!keyToLookupFields.has(knLower)) keyToLookupFields.set(knLower, []);
+                        keyToLookupFields.get(knLower).push({ resultField, cfg });
+                    }
+                }
+
                 tbody.addEventListener('change', (e) => {
                     const inp = e.target;
                     if (!inp.classList.contains('cell-edit') || inp.classList.contains('cell-date-input')) return;
@@ -1350,7 +1368,47 @@
                     const tr = inp.closest('tr');
                     if (!tr || !tbody.contains(tr)) return;
                     if (tr.dataset.state !== 'added') tr.dataset.state = 'modified';
-                    if (typeof window.__autoSaveDetail === 'function') {
+
+                    // ★ 動態刷新：當 key 欄位變更時，更新對應的 lookup 中文名稱
+                    const changedField = (inp.dataset.field || inp.name || '').toLowerCase();
+                    const deps = keyToLookupFields.get(changedField);
+                    if (deps && deps.length > 0) {
+                        const getFieldVal = (fieldName) => {
+                            const fn = fieldName.toLowerCase();
+                            const target = Array.from(tr.querySelectorAll('input.cell-edit[data-field]'))
+                                .find(i => (i.dataset.field || '').toLowerCase() === fn);
+                            return target ? (target.value ?? '').trim() : '';
+                        };
+                        for (const { resultField, cfg } of deps) {
+                            const lkMap = lookupMaps.get(resultField);
+                            if (!lkMap) continue;
+                            let lookupKey = '';
+                            if (cfg.compositeKeySelfNames && cfg.compositeKeySelfNames.length > 1) {
+                                const parts = cfg.compositeKeySelfNames.map(f => getFieldVal(f));
+                                if (parts.every(p => p !== '')) lookupKey = parts.join('\x1f');
+                            } else {
+                                lookupKey = getFieldVal(cfg.keySelf || cfg.key || '');
+                            }
+                            const displayVal = lookupKey ? (lkMap.get(lookupKey) || lkMap.get(lookupKey.trim()) || lkMap.get(lookupKey.trim().toLowerCase()) || '') : '';
+                            // 更新結果欄位的顯示值
+                            const resultFieldName = cfg.result || resultField;
+                            const resultInp = Array.from(tr.querySelectorAll('input.cell-edit[data-field]'))
+                                .find(i => (i.dataset.field || '').toLowerCase() === resultFieldName.toLowerCase());
+                            if (resultInp) {
+                                resultInp.value = displayVal;
+                                const td = resultInp.closest('td');
+                                const view = td?.querySelector('.cell-view');
+                                if (view) view.textContent = displayVal;
+                            }
+                        }
+                    }
+
+                    // ★ lookup 選取後只刷新不儲存，一般手動輸入仍自動儲存
+                    //   旗標標記在 input 元素上，合成事件(isTrusted=false)不消耗旗標，
+                    //   原生事件(isTrusted=true, blur 觸發)消耗旗標後恢復正常行為
+                    if (inp._fromLookup) {
+                        if (e.isTrusted) inp._fromLookup = false;
+                    } else if (typeof window.__autoSaveDetail === 'function') {
                         window.__autoSaveDetail();
                     }
                 });

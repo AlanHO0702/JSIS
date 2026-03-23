@@ -34,19 +34,36 @@
   // 🧩 OCX Lookup（第二層，非實體欄位用）
   // -----------------------------
   const OCX_CACHE = {};
+  const COMPOSITE_KEY_SEP = '\x1f';
+
+  function parseKeyMaps(f) {
+    if (!f.KeyMapsJson) return null;
+    try {
+      const maps = JSON.parse(f.KeyMapsJson);
+      if (!Array.isArray(maps) || maps.length <= 1) return null;
+      return {
+        keyFieldNames: maps.map(m => m.KeyFieldName).filter(Boolean),
+        keySelfNames:  maps.map(m => m.KeySelfName).filter(Boolean)
+      };
+    } catch { return null; }
+  }
 
   async function loadOCXLookup(f) {
-    const key = `${f.OCXLKTableName}|${f.KeyFieldName}|${f.OCXLKResultName}`;
+    const composite = parseKeyMaps(f);
+    const compositeKeyFields = composite ? composite.keyFieldNames.join(',') : null;
+    const effectiveKeyField = compositeKeyFields || f.KeyFieldName;
+
+    const key = `${f.OCXLKTableName}|${effectiveKeyField}|${f.OCXLKResultName}`;
 
     if (OCX_CACHE[key]) return OCX_CACHE[key];
 
-    if (!f.OCXLKTableName || !f.KeyFieldName || !f.OCXLKResultName) {
+    if (!f.OCXLKTableName || !effectiveKeyField || !f.OCXLKResultName) {
       return (OCX_CACHE[key] = null);
     }
 
     const url = `/api/TableFieldLayout/LookupData`
       + `?table=${encodeURIComponent(f.OCXLKTableName)}`
-      + `&key=${encodeURIComponent(f.KeyFieldName)}`
+      + `&key=${encodeURIComponent(effectiveKeyField)}`
       + `&result=${encodeURIComponent(f.OCXLKResultName)}`;
 
     const rows = await fetch(url).then(r => r.json());
@@ -56,7 +73,11 @@
       cell[k]     = (r.result0 ?? "").toString().trim();
       dropdown[k] = combineResults(r);
     });
-    return (OCX_CACHE[key] = { cell, dropdown });
+    const result = { cell, dropdown };
+    if (composite) {
+      result._compositeKeySelfNames = composite.keySelfNames;
+    }
+    return (OCX_CACHE[key] = result);
   }
 
   // 將 result0, result1, ... 合併成顯示字串
@@ -476,9 +497,16 @@
 
           let display = raw;
 
-          // OCX Lookup（優先）
-          if (ocxMaps[col]?.cell?.[raw] != null) {
-              display = ocxMaps[col].cell[raw];
+          // OCX Lookup（優先）— 支援複合鍵
+          const ocxData = ocxMaps[col];
+          if (ocxData?._compositeKeySelfNames) {
+              const parts = ocxData._compositeKeySelfNames.map(n => String(row[n] ?? "").trim());
+              if (parts.every(p => p !== "")) {
+                  const compositeKey = parts.join(COMPOSITE_KEY_SEP);
+                  if (ocxData.cell?.[compositeKey] != null) display = ocxData.cell[compositeKey];
+              }
+          } else if (ocxData?.cell?.[raw] != null) {
+              display = ocxData.cell[raw];
           }
           // 一般 Lookup（次之）
           else if (lookupMaps[col]?.cell?.[raw] != null) {
@@ -628,6 +656,66 @@
       if (onRowClick) tr.addEventListener("click", () => onRowClick(tr, row));
       tbody.appendChild(tr);
     });
+
+    // ★ 建立反向索引：key 欄位 → 依賴它的 lookup 結果欄位（供動態刷新用）
+    const _keyToLookup = {};
+    for (const f of fields) {
+      const ocxData = ocxMaps[f.FieldName];
+      const lkData = lookupMaps[f.FieldName];
+      if (!ocxData && !lkData) continue;
+      const keySelfNames = ocxData?._compositeKeySelfNames
+        || (f.KeySelfName ? [f.KeySelfName] : (f.LookupKeyField ? [f.LookupKeyField] : []));
+      for (const kn of keySelfNames) {
+        const knLower = kn.toLowerCase();
+        if (!_keyToLookup[knLower]) _keyToLookup[knLower] = [];
+        _keyToLookup[knLower].push({
+          resultFieldName: f.FieldName,
+          ocxData: ocxData || lkData,
+          compositeKeySelfNames: ocxData?._compositeKeySelfNames || null,
+          keySelf: f.KeySelfName || f.LookupKeyField || null
+        });
+      }
+    }
+    tbody._keyToLookup = _keyToLookup;
+
+    // ★ 動態刷新：監聽 change 事件，當 key 欄位變更時更新對應 lookup 中文名稱
+    if (!tbody._lookupRefreshBound) {
+      tbody._lookupRefreshBound = true;
+      tbody.addEventListener('change', (e) => {
+        const inp = e.target.closest('.cell-edit');
+        if (!inp) return;
+        const tr = inp.closest('tr');
+        const keyToLookup = tbody._keyToLookup;
+        if (!tr || !keyToLookup) return;
+        const changedField = (inp.name || '').toLowerCase();
+        const deps = keyToLookup[changedField];
+        if (!deps || !deps.length) return;
+        const getFieldVal = (fieldName) => {
+          const fn = fieldName.toLowerCase();
+          const target = Array.from(tr.querySelectorAll('input'))
+            .find(i => (i.name || '').toLowerCase() === fn);
+          return target ? (target.value ?? '').trim() : '';
+        };
+        for (const dep of deps) {
+          let lookupKey = '';
+          if (dep.compositeKeySelfNames && dep.compositeKeySelfNames.length > 1) {
+            const parts = dep.compositeKeySelfNames.map(f => getFieldVal(f));
+            if (parts.every(p => p !== '')) lookupKey = parts.join(COMPOSITE_KEY_SEP);
+          } else if (dep.keySelf) {
+            lookupKey = getFieldVal(dep.keySelf);
+          }
+          const displayVal = lookupKey ? (dep.ocxData.cell[lookupKey] || dep.ocxData.cell[lookupKey.trim()] || dep.ocxData.cell[lookupKey.trim().toLowerCase()] || '') : '';
+          const resultInp = Array.from(tr.querySelectorAll('input'))
+            .find(i => (i.name || '').toLowerCase() === dep.resultFieldName.toLowerCase());
+          if (resultInp) {
+            resultInp.value = displayVal;
+            const td = resultInp.closest('td');
+            const view = td?.querySelector('.cell-view');
+            if (view) view.textContent = displayVal;
+          }
+        }
+      });
+    }
   };
 
   // -----------------------------

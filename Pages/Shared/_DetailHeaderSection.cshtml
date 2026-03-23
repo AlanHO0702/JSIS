@@ -4654,6 +4654,12 @@ window.__updateToolbarCounts = updateToolbarCounts;
     });
     const newItem = maxItem + 1;
 
+    // ★ 取得當前分頁的 lookup 欄位資訊，讓新增行也能雙擊下拉選單
+    const tabContainer = activePane.querySelector('.table-container[data-tab-id]');
+    const currentTabId = tabContainer?.dataset?.tabId || '';
+    const lookupFields = new Set((window._multiTabLookupFields?.[currentTabId] || []).map(f => f.toLowerCase()));
+    const lookupMetaMap = window._multiTabLookupMeta?.[currentTabId] || {};
+
     let html = `<tr data-paper-num="${pn}" data-item="${newItem}" data-state="added" class="row-selected">`;
       fields.forEach(field => {
         const fieldKey = (field || '').toString().toLowerCase();
@@ -4666,7 +4672,14 @@ window.__updateToolbarCounts = updateToolbarCounts;
         const value = defVal == null ? '' : String(defVal);
         const safeValue = escAttr(value);
         const alignClass = alignMap.get(fieldKey) || 'align-left';
-        html += `<td data-field="${escAttr(field)}" class="${alignClass}" data-readonly="${isReadOnly ? '1' : '0'}">
+        // ★ 若此欄位有 lookup 下拉，加上 lookup 相關屬性
+        const isLookup = lookupFields.has(fieldKey);
+        const lkMeta = isLookup ? lookupMetaMap[fieldKey] : null;
+        const lookupCls = isLookup ? ' lookup-cell' : '';
+        const lookupAttr = isLookup
+          ? ` data-lookup-field="${escAttr(field)}" data-lookup-key-field="${escAttr(lkMeta?.key || '')}" data-lookup-result-field="${escAttr(lkMeta?.result || '')}"`
+          : '';
+        html += `<td data-field="${escAttr(field)}" class="${alignClass}${lookupCls}" data-readonly="${isReadOnly ? '1' : '0'}"${lookupAttr}>
           <span class="${viewClass}${roClass}" data-init-view="${safeValue}" data-readonly="${isReadOnly ? '1' : '0'}">${safeValue}</span>
           <input type="text" class="${editClass}${roClass}" data-field="${field}" data-init="${safeValue}" value="${safeValue}"${roAttr}>
         </td>`;
