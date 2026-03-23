@@ -9,9 +9,20 @@
 @model dynamic
 
 @{
-    var tableName     = (string)(Model.TableName ?? "");
-    var items         = (IEnumerable<object>)(Model.Items ?? new List<object>());
-    var fields        = (IEnumerable<dynamic>)(Model.TableFields ?? new List<object>());
+    object modelObj = Model;
+    object? GetModelValue(string name)
+    {
+        if (modelObj == null) return null;
+        if (modelObj is IDictionary<string, object> dict && dict.TryGetValue(name, out var v))
+            return v;
+        var p = modelObj.GetType().GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+        return p?.GetValue(modelObj);
+    }
+
+    var tableName     = GetModelValue("TableName")?.ToString() ?? "";
+    var items         = (IEnumerable<object>)(GetModelValue("Items") as IEnumerable<object> ?? new List<object>());
+    var fields        = (IEnumerable<dynamic>)(GetModelValue("TableFields") as IEnumerable<dynamic> ?? new List<object>());
+    var fieldsJson    = JsonSerializer.Serialize(fields);
     var customButtons = ViewData["CustomButtons"] as HtmlString;
     var customButtonMeta = ViewData["CustomButtonMeta"] as IEnumerable<dynamic>;
     var hasServerButtons = customButtons != null && !string.IsNullOrWhiteSpace(customButtons.ToString());
@@ -64,9 +75,9 @@
     int pageNumber = 1;
     int pageSize = 0;
     int totalCount = 0;
-    try { pageNumber = (int)(Model.PageNumber ?? 1); } catch { }
-    try { pageSize = (int)(Model.PageSize ?? 0); } catch { }
-    try { totalCount = (int)(Model.TotalCount ?? 0); } catch { }
+    try { pageNumber = Convert.ToInt32(GetModelValue("PageNumber") ?? 1); } catch { }
+    try { pageSize = Convert.ToInt32(GetModelValue("PageSize") ?? 0); } catch { }
+    try { totalCount = Convert.ToInt32(GetModelValue("TotalCount") ?? 0); } catch { }
     if (pageSize <= 0) pageSize = Math.Max(1, items.Count());
     if (totalCount <= 0) totalCount = items.Count();
     var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
@@ -446,6 +457,8 @@
   .singlegrid-toolbar .toolbar-btn-del { color: #cc3a3a; border-color: #efb3b3; }
   .singlegrid-toolbar .toolbar-btn-check { color: #1d62d8; border-color: #abc4f8; }
   .singlegrid-toolbar .toolbar-btn-cancel { color: #6b7280; border-color: #d1d5db; }
+  .singlegrid-pager .btn { min-height: 30px; }
+  .singlegrid-pager #pagerInfo { font-size: 12px; }
 </style>
 
 <div class="table-wrapper">
@@ -539,9 +552,24 @@
                 <tr class="sg-empty-row">
                   @foreach (var f in fields)
                   {
+                    string? name = Convert.ToString(f.FieldName);
+                    var dictField = dictFields.FirstOrDefault(df =>
+                        string.Equals(Convert.ToString(df.FieldName), name, StringComparison.OrdinalIgnoreCase));
                     bool isHidden = !ToBool(f.Visible, defaultValue: true);
+                    bool isReadOnly = ToBool(f.ReadOnly, defaultValue: false);
                     var hiddenStyle = isHidden ? "display:none;" : "";
-                    <td class="text-nowrap" style="@hiddenStyle"><span class="cell-view">&nbsp;</span></td>
+                    var cellClass = IsNumberDataType(dictField ?? f) ? "cell-number" : "cell-text";
+                    <td class="text-nowrap @cellClass @(isReadOnly ? "readonly-td" : "")" data-field="@name" style="@hiddenStyle" tabindex="-1">
+                      <span class="cell-view @(isReadOnly ? "readonly-cell" : "")" data-raw="" data-lookupkey="">&nbsp;</span>
+                      <input class="form-control form-control-sm cell-edit d-none @(isReadOnly ? "readonly-cell" : "")"
+                             type="text"
+                             name="@name"
+                             value=""
+                             data-raw=""
+                             data-lookupkey=""
+                             data-readonly="@(isReadOnly ? "1" : "0")"
+                             @(isReadOnly ? "readonly" : "") />
+                    </td>
                   }
                 </tr>
               }
@@ -642,6 +670,20 @@
           </tbody>
         </table>
       </div>
+
+      @if (!hidePager)
+      {
+        <div class="singlegrid-pager d-flex align-items-center gap-2 flex-wrap mt-2">
+          <button id="pagerFirst" type="button" class="btn btn-sm btn-outline-secondary">第一頁</button>
+          <button id="pagerPrev" type="button" class="btn btn-sm btn-outline-secondary">上一頁</button>
+          <button id="pagerNext" type="button" class="btn btn-sm btn-outline-secondary">下一頁</button>
+          <button id="pagerLast" type="button" class="btn btn-sm btn-outline-secondary">最後頁</button>
+          <span class="text-muted">頁次</span>
+          <input id="pagerGoInput" type="number" min="1" value="@pageNumber" class="form-control form-control-sm" style="width:80px" />
+          <button id="pagerGoBtn" type="button" class="btn btn-sm btn-primary">跳轉</button>
+          <span id="pagerInfo" class="text-muted"></span>
+        </div>
+      }
 
       @if (hideToolbar)
       {
@@ -2747,6 +2789,7 @@
     const pagerNext = document.getElementById("pagerNext");
     const pagerLast = document.getElementById("pagerLast");
     const pagerFirst = document.getElementById("pagerFirst");
+    const pagerInfo = document.getElementById("pagerInfo");
     const pagerPageSize = document.getElementById("pagerPageSize");
     const pagerCurrentEl = document.getElementById("pagerCurrent");
     const pagerTotalEl = document.getElementById("pagerTotal");
@@ -2780,6 +2823,9 @@
       if (pagerGoInput) {
         pagerGoInput.value = currentPage;
         pagerGoInput.max = totalPages;
+      }
+      if (pagerInfo) {
+        pagerInfo.textContent = `第 ${currentPage} / ${totalPages} 頁，共 ${totalCountAll} 筆`;
       }
 
       // 更新按鈕狀態
@@ -2834,7 +2880,7 @@
       }
 
       // 更新表格
-      const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+      const fields = @Html.Raw(fieldsJson);
       const emptyMessage = getEmptyMessage(!!data.openNoRecord, !!data.hasQueryParams);
       updateTableBody(data.items, fields, emptyMessage);
       loadSavedColumnOrder();
@@ -3005,7 +3051,7 @@
     const tbody = table.querySelector("tbody");
     if (!tbody) return;
     const append = !!options.append;
-    const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+    const fields = @Html.Raw(fieldsJson);
     const placeholderRows = Array.from(tbody.querySelectorAll("tr.sg-empty-row"));
     if (placeholderRows.length > 0) {
       placeholderRows.forEach(r => r.remove());
@@ -3488,7 +3534,22 @@
       html += '<tr class="sg-empty-row">';
       cols.forEach(f => {
         const hidden = !isFieldVisibleForEmpty(f);
-        html += '<td class="text-nowrap"' + (hidden ? ' style="display:none;"' : '') + '><span class="cell-view">&nbsp;</span></td>';
+        const fieldName = (f?.FieldName ?? '').toString();
+        const dt = (f?.DataType || '').toString().toLowerCase();
+        const isNumber = dt.includes('number') || dt.startsWith('decimal') || dt.startsWith('numeric')
+          || dt.startsWith('money') || dt.startsWith('smallmoney') || dt.startsWith('float') || dt.startsWith('real')
+          || dt.startsWith('int') || dt.startsWith('smallint') || dt.startsWith('tinyint') || dt.startsWith('bigint');
+        const cellClass = isNumber ? 'cell-number' : 'cell-text';
+        const readOnly = !(f?.ReadOnly == null || f?.ReadOnly == 0 || f?.ReadOnly === false || String(f?.ReadOnly) === '');
+        const tdClass = 'text-nowrap ' + cellClass + (readOnly ? ' readonly-td' : '');
+        const roClass = readOnly ? ' readonly-cell' : '';
+        const roAttr = readOnly ? ' readonly' : '';
+        html += '<td class="' + tdClass + '" data-field="' + fieldName + '" tabindex="-1"'
+          + (hidden ? ' style="display:none;"' : '')
+          + '><span class="cell-view' + roClass + '" data-raw="" data-lookupkey="">&nbsp;</span>'
+          + '<input class="form-control form-control-sm cell-edit d-none' + roClass + '" type="text"'
+          + ' name="' + fieldName + '" value="" data-raw="" data-lookupkey="" data-readonly="' + (readOnly ? '1' : '0') + '"' + roAttr + ' />'
+          + '</td>';
       });
       html += "</tr>";
     }
@@ -3670,7 +3731,7 @@
   // 將函式暴露到 window，供外部 JS（如 singlegrid/*.js）呼叫
   window._sgUpdateTableBody = updateTableBody;
   window._sgApplyLookup = applyLookupToTable;
-  window._sgTableFields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+  window._sgTableFields = @Html.Raw(fieldsJson);
 
   let suppressSortClickUntil = 0;
   let draggingHeaderField = "";
@@ -3837,7 +3898,7 @@
   async function handleSort(fieldName) {
     if (isSorting) return;
 
-    const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+    const fields = @Html.Raw(fieldsJson);
     const ocxLookupPayload = @Html.Raw(JsonSerializer.Serialize(ocxLookupPayload));
 
     // 計算實際要排序的欄位名稱
