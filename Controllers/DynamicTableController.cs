@@ -888,11 +888,34 @@ SELECT TOP 1 RunSQLAfterAdd
                         }
 
                         // 2) 舊版回傳 lookupMapData（其他頁面可能仍在用）
-                        lookupMapData = LookupDisplayHelper.BuildLookupDisplayMap(
-                            result,
-                            lookupMaps.Cast<dynamic>(),
-                            item => item.TryGetValue("PaperNum", out var v) ? v?.ToString() ?? "" : ""
-                        );
+                        lookupMapData = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var row in result)
+                        {
+                            if (!row.TryGetValue("PaperNum", out var masterObj))
+                                continue;
+                            var masterKey = masterObj?.ToString()?.Trim() ?? "";
+                            if (string.IsNullOrWhiteSpace(masterKey))
+                                continue;
+
+                            if (!lookupMapData.TryGetValue(masterKey, out var lookupFieldMap))
+                            {
+                                lookupFieldMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                                lookupMapData[masterKey] = lookupFieldMap;
+                            }
+
+                            foreach (var map in lookupMaps)
+                            {
+                                if (map == null || string.IsNullOrWhiteSpace(map.FieldName))
+                                    continue;
+                                if (!row.TryGetValue(map.FieldName, out var displayObj))
+                                    continue;
+
+                                var display = displayObj?.ToString();
+                                if (string.IsNullOrWhiteSpace(display))
+                                    continue;
+                                lookupFieldMap[map.FieldName] = display;
+                            }
+                        }
                     }
                     catch (Exception ex)
                     {

@@ -282,6 +282,7 @@ public class EMOdTmpPressController : ControllerBase
     {
         public string MatClass { get; set; } = "";
         public string MatName { get; set; } = "";
+        public string BefLayer { get; set; } = "";
     }
 
     /// <summary>
@@ -331,6 +332,20 @@ public class EMOdTmpPressController : ControllerBase
                 AddParam(insCmd, "@SerialNum", i + 1);
                 AddParam(insCmd, "@MatClass", req.Items[i].MatClass);
                 await insCmd.ExecuteNonQueryAsync();
+            }
+
+            // SP 不支援 BefLayer，INSERT 後補 UPDATE
+            for (int i = 0; i < req.Items.Count; i++)
+            {
+                var befLayer = (req.Items[i].BefLayer ?? "").Trim();
+                if (string.IsNullOrEmpty(befLayer)) continue;
+                await using var updCmd = new SqlCommand(
+                    "UPDATE EMOdTmpPressDtl SET BefLayer = @BefLayer WHERE TmpId = @TmpId AND LayerId = @LayerId AND SerialNum = @SerialNum", conn, tran);
+                AddParam(updCmd, "@TmpId", req.TmpId.Trim());
+                AddParam(updCmd, "@LayerId", req.LayerId.Trim());
+                AddParam(updCmd, "@SerialNum", i + 1);
+                AddParam(updCmd, "@BefLayer", befLayer);
+                await updCmd.ExecuteNonQueryAsync();
             }
 
             await tran.CommitAsync();
@@ -956,6 +971,48 @@ ORDER BY CASE WHEN f.SerialNum IS NULL THEN 1 ELSE 0 END, f.SerialNum, f.FieldNa
         }
 
         return Ok(new { ok = true });
+    }
+
+    // ==================== 套用組合模型到料號 (EMOdProdLayerIns) ====================
+
+    public class ApplyBOMModelRequest
+    {
+        public string TmpBOMId  { get; set; } = "";
+        public string PartNum   { get; set; } = "";
+        public string Revision  { get; set; } = "";
+    }
+
+    /// <summary>
+    /// 套用組合模型：呼叫 EMOdProdLayerIns，將 BOM 疊構寫入料號層別
+    /// 對應 Delphi 的 EMOdTmpBOMSelect.dll 確定後的邏輯
+    /// </summary>
+    [HttpPost("ApplyBOMModel")]
+    public async Task<IActionResult> ApplyBOMModel([FromBody] ApplyBOMModelRequest req)
+    {
+        if (req == null
+            || string.IsNullOrWhiteSpace(req.TmpBOMId)
+            || string.IsNullOrWhiteSpace(req.PartNum))
+            return BadRequest(new { ok = false, error = "TmpBOMId 與 PartNum 為必填。" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        try
+        {
+            await using var cmd = new SqlCommand(
+                "EXEC EMOdProdLayerIns @P1, @P2, @P3", conn);
+            cmd.CommandTimeout = 60;
+            cmd.Parameters.AddWithValue("@P1", req.PartNum.Trim());
+            cmd.Parameters.AddWithValue("@P2", req.Revision.Trim());
+            cmd.Parameters.AddWithValue("@P3", req.TmpBOMId.Trim());
+            await cmd.ExecuteNonQueryAsync();
+            return Ok(new { ok = true });
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "ApplyBOMModel failed TmpBOMId={TmpBOMId} PartNum={PartNum}", req.TmpBOMId, req.PartNum);
+            return StatusCode(500, new { ok = false, error = ex.Message });
+        }
     }
 
     // ==================== 套用壓合模型到料號 ====================

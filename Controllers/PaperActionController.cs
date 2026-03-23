@@ -18,11 +18,15 @@ namespace PcbErpApi.Controllers
     public class PaperActionController : ControllerBase
     {
         private readonly IConfiguration _config;
+        private const int LegacyCommandTimeoutSeconds = 9600; // 與 Delphi 相同的 timeout
 
         public PaperActionController(IConfiguration config)
         {
             _config = config;
         }
+
+        private static SqlCommand CreateLegacyCommand(string sql, SqlConnection conn)
+            => new SqlCommand(sql, conn) { CommandTimeout = LegacyCommandTimeoutSeconds };
 
         public class DoActionRequest
         {
@@ -190,7 +194,7 @@ namespace PcbErpApi.Controllers
                     }
                 }
 
-                using var cmd = new SqlCommand("CURdPaperAction", conn);
+                using var cmd = CreateLegacyCommand("CURdPaperAction", conn);
                 cmd.CommandType = CommandType.StoredProcedure;
                 cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
                 cmd.Parameters.AddWithValue("@PaperNum", paperNum);
@@ -713,7 +717,7 @@ UPDATE [{table}]
                 }
 
                 var sql = "exec CURdPaperDoNewStatus @PaperId,@PaperNum,@UserId,0,3,@Reason";
-                using (var cmd = new SqlCommand(sql, conn))
+                using (var cmd = CreateLegacyCommand(sql, conn))
                 {
                     cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
                     cmd.Parameters.AddWithValue("@PaperNum", paperNum);
@@ -757,7 +761,7 @@ UPDATE [{table}]
 
             var status = string.Equals(dictPaperId, "fmedpassmain", StringComparison.OrdinalIgnoreCase) ? 2 : 3;
 
-            using (var cmd = new SqlCommand("CURdPaperAction", conn))
+            using (var cmd = CreateLegacyCommand("CURdPaperAction", conn))
             {
                 cmd.CommandType = CommandType.StoredProcedure;
                 cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
@@ -790,7 +794,7 @@ UPDATE [{table}]
             if (canbRunFlow == 1 && canbAudit == 0)
                 return new BadRequestObjectResult(new { message = "您沒有「審核」的權限" });
 
-            using (var cmd = new SqlCommand("CURdPaperAction", conn))
+            using (var cmd = CreateLegacyCommand("CURdPaperAction", conn))
             {
                 cmd.CommandType = CommandType.StoredProcedure;
                 cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
@@ -823,7 +827,7 @@ UPDATE [{table}]
             string useId)
         {
             var sql = "exec CURdPaperDoNewStatus @PaperId,@PaperNum,@UserId,1,3,@Blank";
-            using (var cmd = new SqlCommand(sql, conn))
+            using (var cmd = CreateLegacyCommand(sql, conn))
             {
                 cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
                 cmd.Parameters.AddWithValue("@PaperNum", paperNum);
@@ -861,7 +865,7 @@ UPDATE [{table}]
 
             var sql = @"
 exec CURdCallPaperAftTran @GlobalId,@PaperCallPaperAftExam,@PaperId,@PaperNum,@UserId,@UseId";
-            using var cmd = new SqlCommand(sql, conn);
+            using var cmd = CreateLegacyCommand(sql, conn);
             cmd.Parameters.AddWithValue("@GlobalId", globalId);
             cmd.Parameters.AddWithValue("@PaperCallPaperAftExam", paperCallPaperAftExam);
             cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
@@ -942,7 +946,7 @@ SELECT TOP 1 SystemId
             try
             {
                 const string sql = "exec CURdOCXSysParamGet @SystemId, @ParamName";
-                using var cmd = new SqlCommand(sql, conn);
+                using var cmd = CreateLegacyCommand(sql, conn);
                 cmd.Parameters.AddWithValue("@SystemId", systemId ?? "");
                 cmd.Parameters.AddWithValue("@ParamName", paramName ?? "");
                 using var rd = await cmd.ExecuteReaderAsync();
@@ -972,7 +976,7 @@ SELECT TOP 1 SystemId
             try
             {
                 const string sql = "exec CURdPaperMsgGet @ItemId, @BtnName, @IsAfter";
-                using var cmd = new SqlCommand(sql, conn);
+                using var cmd = CreateLegacyCommand(sql, conn);
                 cmd.Parameters.AddWithValue("@ItemId", itemId);
                 cmd.Parameters.AddWithValue("@BtnName", btnName);
                 cmd.Parameters.AddWithValue("@IsAfter", isAfter);
@@ -1001,7 +1005,7 @@ SELECT TOP 1 SystemId
             try
             {
                 var sql = "exec CURdOCXPaperToFlow @ItemId,@PaperId,@PaperNum,@UserId,@UseId,@SystemId,@FlowStatus";
-                using var cmd = new SqlCommand(sql, conn);
+                using var cmd = CreateLegacyCommand(sql, conn);
                 cmd.Parameters.AddWithValue("@ItemId", itemId);
                 cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
                 cmd.Parameters.AddWithValue("@PaperNum", paperNum);
@@ -1083,7 +1087,7 @@ SELECT FieldName, ISNULL(NULLIF(DisplayLabel,''), FieldName) AS DisplayLabel, IS
 
         private static async Task<string?> RunQueryFirstStringAsync(SqlConnection conn, string sql)
         {
-            using var cmd = new SqlCommand(sql, conn);
+            using var cmd = CreateLegacyCommand(sql, conn);
             using var rd = await cmd.ExecuteReaderAsync();
             if (await rd.ReadAsync())
                 return rd.GetValue(0)?.ToString();
@@ -1092,7 +1096,7 @@ SELECT FieldName, ISNULL(NULLIF(DisplayLabel,''), FieldName) AS DisplayLabel, IS
 
         private static async Task ExecSqlAsync(SqlConnection conn, string sql)
         {
-            using var cmd = new SqlCommand(sql, conn);
+            using var cmd = CreateLegacyCommand(sql, conn);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -1357,7 +1361,7 @@ SELECT FieldName, ISNULL(NULLIF(DisplayLabel,''), FieldName) AS DisplayLabel, IS
                 }
 
                 // 呼叫 CURdPaperAction 執行退審 (AftFinished = 3 -> 審核中)
-                using var cmd = new SqlCommand("CURdPaperAction", conn);
+                using var cmd = CreateLegacyCommand("CURdPaperAction", conn);
                 cmd.CommandType = CommandType.StoredProcedure;
                 cmd.Parameters.AddWithValue("@PaperId", safePaperId);  // SP 需要真實表名稱
                 cmd.Parameters.AddWithValue("@PaperNum", paperNum);
@@ -1510,13 +1514,27 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
                 }
 
                 // 送審/審核共用檢查流程
-                // 1. EMOdFieldCheck
-                await ExecSpAsync(conn, "EMOdFieldCheck", cmd =>
+                // 1. EMOdFieldCheck → 讀回傳值，1=有必要欄位未填
+                var fieldCheckResult = await ExecSpScalarAsync(conn, "EMOdFieldCheck", cmd =>
                 {
                     cmd.Parameters.AddWithValue("@PartNum", partNum);
                     cmd.Parameters.AddWithValue("@Revision", revision);
-                    cmd.Parameters.AddWithValue("@S", "1");  // 1=審核品號時
+                    cmd.Parameters.AddWithValue("@S", "1");
                 });
+                if (Convert.ToInt32(fieldCheckResult ?? 0) == 1)
+                {
+                    // 讀 EMOdNotValueShow 取得缺填欄位清單（IsError=0 的列已被過濾）
+                    var msgs = await ExecSpReadMessagesAsync(conn, "EMOdNotValueShow", cmd =>
+                    {
+                        cmd.Parameters.AddWithValue("@PartNum", partNum);
+                        cmd.Parameters.AddWithValue("@Revision", revision);
+                    });
+                    // msgs 為空代表 EMOdNotValueShow 判斷無實際錯誤，繼續流程
+                    if (msgs.Count > 0)
+                    {
+                        return BadRequest(new { success = false, message = string.Join("\n", msgs), errorType = "fieldCheck" });
+                    }
+                }
 
                 // 2. EMOdEditCheck
                 await ExecSpAsync(conn, "EMOdEditCheck", cmd =>
@@ -1525,19 +1543,54 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
                     cmd.Parameters.AddWithValue("@Revision", revision);
                 });
 
-                // 3. EMOdNotValueShow
-                await ExecSpAsync(conn, "EMOdNotValueShow", cmd =>
-                {
-                    cmd.Parameters.AddWithValue("@PartNum", partNum);
-                    cmd.Parameters.AddWithValue("@Revision", revision);
-                });
-
-                // 4. EMOdProductAuditChkValue
+                // 3. EMOdProductAuditChkValue
                 await ExecSpAsync(conn, "EMOdProductAuditChkValue", cmd =>
                 {
                     cmd.Parameters.AddWithValue("@PartNum", partNum);
                     cmd.Parameters.AddWithValue("@Revision", revision);
                 });
+
+                // 4. 審核時重新產生 EMOdProdMap 排板/裁板資料（先清空避免舊資料殘留）
+                if (req.Tag == 1)
+                {
+                    using var delCmd = new SqlCommand(
+                        "DELETE FROM EMOdProdMap WHERE PartNum=@PartNum AND Revision=@Revision", conn);
+                    delCmd.Parameters.AddWithValue("@PartNum", partNum);
+                    delCmd.Parameters.AddWithValue("@Revision", revision);
+                    await delCmd.ExecuteNonQueryAsync();
+
+                    foreach (var mapKind in new[] { 1, 3 })
+                    {
+                        // EMOdGenMapXFlow 回傳 SELECT（MapData+StrMap+StrMap2+MapData2）
+                        // 需讀出來再 UPDATE 到 EMOdProdMap.MapData（與 Delphi GetNewMapData 邏輯相同）
+                        string mapDataStr = "";
+                        using (var mapCmd = new SqlCommand("EMOdGenMapXFlow", conn))
+                        {
+                            mapCmd.CommandType = CommandType.StoredProcedure;
+                            mapCmd.Parameters.AddWithValue("@PartNum", partNum);
+                            mapCmd.Parameters.AddWithValue("@Revision", revision);
+                            mapCmd.Parameters.AddWithValue("@MapKind", mapKind);
+                            using (var reader = await mapCmd.ExecuteReaderAsync(CommandBehavior.SingleResult))
+                            {
+                                if (await reader.ReadAsync())
+                                {
+                                    mapDataStr =
+                                        (reader["MapData"]  as string ?? "") +
+                                        (reader["StrMap"]   as string ?? "") +
+                                        (reader["StrMap2"]  as string ?? "") +
+                                        (reader["MapData2"] as string ?? "");
+                                }
+                            } // reader 在此確實 dispose，connection 釋放
+                        }
+                        using var updCmd = new SqlCommand(
+                            "UPDATE EMOdProdMap SET MapData=@MapData WHERE PartNum=@PartNum AND Revision=@Revision AND MapKindNo=@MapKindNo", conn);
+                        updCmd.Parameters.AddWithValue("@MapData",   mapDataStr);
+                        updCmd.Parameters.AddWithValue("@PartNum",   partNum);
+                        updCmd.Parameters.AddWithValue("@Revision",  revision);
+                        updCmd.Parameters.AddWithValue("@MapKindNo", mapKind);
+                        await updCmd.ExecuteNonQueryAsync();
+                    }
+                }
 
                 // 5. EMOdProdAudit
                 await ExecEMOdProdAuditAsync(conn, partNum, revision, req.Tag, req.IOType, userId, req.Meno ?? "");
@@ -1558,10 +1611,63 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
 
         private static async Task ExecSpAsync(SqlConnection conn, string spName, Action<SqlCommand> addParams)
         {
+            // 捕捉 SP 透過 RAISERROR severity<=10 / PRINT 送出的訊息（Delphi SP 常用此方式回傳防呆錯誤）
+            var infoMessages = new List<string>();
+            SqlInfoMessageEventHandler onInfo = (_, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Message))
+                    infoMessages.Add(e.Message);
+            };
+            conn.InfoMessage += onInfo;
+            try
+            {
+                using var cmd = new SqlCommand(spName, conn);
+                cmd.CommandType = CommandType.StoredProcedure;
+                addParams(cmd);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            finally
+            {
+                conn.InfoMessage -= onInfo;
+            }
+
+            // 若 SP 有送出訊息，視為防呆錯誤拋出（與 RAISERROR severity>=11 拋 SqlException 效果相同）
+            if (infoMessages.Count > 0)
+                throw new InvalidOperationException(string.Join("\n", infoMessages));
+        }
+
+        private static async Task<object?> ExecSpScalarAsync(SqlConnection conn, string spName, Action<SqlCommand> addParams)
+        {
             using var cmd = new SqlCommand(spName, conn);
             cmd.CommandType = CommandType.StoredProcedure;
             addParams(cmd);
-            await cmd.ExecuteNonQueryAsync();
+            return await cmd.ExecuteScalarAsync();
+        }
+
+        private static async Task<List<string>> ExecSpReadMessagesAsync(SqlConnection conn, string spName, Action<SqlCommand> addParams)
+        {
+            var messages = new List<string>();
+            using var cmd = new SqlCommand(spName, conn);
+            cmd.CommandType = CommandType.StoredProcedure;
+            addParams(cmd);
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                // 若有 IsError 欄位（第二欄），IsError=0 表示無錯誤，跳過
+                if (reader.FieldCount > 1 && !reader.IsDBNull(1))
+                {
+                    var isError = Convert.ToInt32(reader.GetValue(1));
+                    if (isError == 0) continue;
+                }
+                if (reader.IsDBNull(0)) continue;
+                var text = (reader.GetString(0) ?? "").Trim();
+                // 若同一行含分隔線（____），只取分隔線前的部分
+                var sepIdx = text.IndexOf("____", StringComparison.Ordinal);
+                if (sepIdx >= 0) text = text.Substring(0, sepIdx).Trim();
+                if (!string.IsNullOrWhiteSpace(text))
+                    messages.Add(text);
+            }
+            return messages;
         }
 
         private static async Task ExecEMOdProdAuditAsync(SqlConnection conn, string partNum, string revision, int tag, int ioType, string userId, string meno)

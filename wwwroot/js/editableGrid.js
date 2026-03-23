@@ -209,7 +209,7 @@
             }
             return inp.value ?? "";
           })();
-          const oldVal = (dataType === "number" && (oldValRaw === "" || oldValRaw == null)) ? null : oldValRaw;
+          const oldVal = (dataType === "number" && (oldValRaw === "" || oldValRaw == null)) ? "0" : oldValRaw;
           const isReadonly = inp.dataset.readonly === "1";
           const isKey = keyFieldSet.has((inp.name || "").toLowerCase());
           if (!isReadonly && String(oldVal) !== String(newVal)) hasDiff = true;
@@ -218,18 +218,38 @@
 
         if (!hasDiff) return;
         const rowAll = {};
+        const isAdded = tr.dataset.state === "added";
 
-        // 編輯欄位
+        // 編輯欄位：只送 key fields + 真正有變更的欄位（避免 SQL trigger UPDATE() 誤判）
         tr.querySelectorAll(".cell-edit").forEach(inp => {
             if (!inp.name) return;
             const dataType = inp.dataset.type || "";
-            if (inp.type === "checkbox") {
-              rowAll[inp.name] = inp.checked ? "1" : "0";
-            } else if (dataType === "number") {
-              const raw = (inp.value ?? "").trim();
-              rowAll[inp.name] = raw === "" ? "0" : raw;
+            const isKey = keyFieldSet.has((inp.name || "").toLowerCase());
+            const curVal = (() => {
+              if (inp.type === "checkbox") return inp.checked ? "1" : "0";
+              if (dataType === "number") {
+                const raw = (inp.value ?? "").trim();
+                return raw === "" ? "0" : raw;
+              }
+              return inp.value ?? "";
+            })();
+
+            if (isAdded || isKey) {
+              // 新增列或 key 欄位：一律送出
+              rowAll[inp.name] = curVal;
             } else {
-              rowAll[inp.name] = inp.value ?? "";
+              // 既有列：比對 defaultValue，只送真正改過的欄位
+              const origVal = (() => {
+                if (inp.type === "checkbox") return inp.defaultChecked ? "1" : "0";
+                if (dataType === "number") {
+                  const raw = (inp.defaultValue ?? "").trim();
+                  return raw === "" ? "0" : raw;
+                }
+                return inp.defaultValue ?? "";
+              })();
+              if (String(origVal) !== String(curVal)) {
+                rowAll[inp.name] = curVal;
+              }
             }
         });
 

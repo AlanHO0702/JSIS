@@ -194,6 +194,7 @@
             const ocxResult = (r.ocxLKResultName || r.OCXLKResultName || '').toString();
             const ocxKeyField = (r.keyFieldName || r.KeyFieldName || '').toString();
             const ocxKeySelf = (r.keySelfName || r.KeySelfName || '').toString();
+            const keyMapsJson = (r.keyMapsJson || r.KeyMapsJson || '').toString();
             if (table && key && result) {
                 const cond1Field  = (r.lookupCond1Field  || r.LookupCond1Field  || '').toString().trim();
                 const cond1Source = (r.lookupCond1ResultField || r.LookupCond1ResultField || '').toString().trim();
@@ -248,7 +249,8 @@
         const fieldMap = new Map();
         for (const [field, cfg] of meta.entries()) {
             try {
-                const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(cfg.table)}&key=${encodeURIComponent(cfg.key)}&result=${encodeURIComponent(cfg.result)}`;
+                const keyForLookup = cfg.lookupKey || cfg.key;
+                const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(cfg.table)}&key=${encodeURIComponent(keyForLookup)}&result=${encodeURIComponent(cfg.result)}`;
                 const res = await fetch(url);
                 if (!res.ok) continue;
                 const data = await res.json();
@@ -263,8 +265,11 @@
                         .map(v => String(v))
                         .join(' - ');
                     const trimmed = key.trim();
-                    map.set(key, label || key);
-                    if (trimmed && trimmed !== key) map.set(trimmed, label || trimmed);
+                    const lowered = trimmed.toLowerCase();
+                    const text = label || trimmed || key;
+                    map.set(key, text);
+                    if (trimmed && trimmed !== key) map.set(trimmed, text);
+                    if (lowered) map.set(lowered, text);
                 });
                 fieldMap.set(field, map);
             } catch { }
@@ -404,6 +409,8 @@
             if (key && lookupMap.has(key)) return lookupMap.get(key) ?? key;
             const trimmed = key ? key.trim() : '';
             if (trimmed && lookupMap.has(trimmed)) return lookupMap.get(trimmed) ?? trimmed;
+            const lowered = trimmed.toLowerCase();
+            if (lowered && lookupMap.has(lowered)) return lookupMap.get(lowered) ?? lowered;
         }
 
         if (s === '') return '';
@@ -2040,4 +2047,3 @@ body.resizing { cursor: col-resize !important; }
     background-color: #e7f3ff !important;
 }
 </style>
-

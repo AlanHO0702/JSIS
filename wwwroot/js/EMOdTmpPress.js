@@ -571,7 +571,9 @@
                 caption: String(r.ClassName || '').trim(),
                 matClass: String(r.MatClass || '').trim(),
                 matName: String(r.MatName || '').trim(),
-                className: String(r.ClassName || '').trim()
+                className: String(r.ClassName || '').trim(),
+                befLayer: String(r.BefLayer || '').trim(),
+                layerName: String(r.LayerName || '').trim()
             }));
 
             msSelectedSource = null;
@@ -635,7 +637,7 @@
         let lastClickTime = 0;
         msTargetItems.forEach((item, idx) => {
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${esc(item.caption)}</td><td></td><td>${esc(item.matClass)}</td><td></td>`;
+            tr.innerHTML = `<td>${esc(item.caption)}</td><td>${esc(item.befLayer || '')}</td><td>${esc(item.matClass)}</td><td>${esc(item.layerName || '')}</td>`;
             tr.addEventListener('click', () => {
                 msSelectedTarget = idx;
                 tbody.querySelectorAll('tr').forEach((r, i) => r.classList.toggle('selected', i === idx));
@@ -707,6 +709,7 @@
         const tgt = msTargetItems[msSelectedTarget];
         tgt.caption = src.caption;
         tgt.matName = src.matName;
+        tgt.matClass = src.matClass;
         renderMsTargetList();
     }
 
@@ -720,7 +723,8 @@
                 LayerId: currLayer,
                 Items: msTargetItems.map(item => ({
                     MatClass: item.matClass,
-                    MatName: item.matName || item.caption
+                    MatName: item.matName || item.caption,
+                    BefLayer: item.befLayer || ''
                 }))
             });
             if (!res.ok) { alert(res.error || '儲存失敗'); return; }
@@ -781,6 +785,7 @@
         const { row } = befLayerTargetRow;
         await saveBefLayerInput(row, befLayerTargetInput.value.trim());
         document.getElementById('befLayerOverlay').style.display = 'none';
+        loadPressDtl(); // 重新載入明細，更新 LayerName
     }
 
     async function saveBefLayerInput(row, value) {
