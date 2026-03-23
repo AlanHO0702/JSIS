@@ -588,8 +588,9 @@
 
             if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
             window.__unsavedChanges = true;
-            // ★ 設定旗標：lookup 選取後只做動態刷新，不觸發自動儲存
-            window.__skipAutoSaveOnce = true;
+            // ★ 在 input 元素上標記：此次值變更來自 lookup 選取，
+            //   後續的 change 事件（含瀏覽器 blur 觸發的原生 change）都不觸發自動儲存
+            edit._fromLookup = true;
             try {
                 edit.dispatchEvent(new Event('input', { bubbles: true }));
                 edit.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1348,8 +1349,11 @@
                 // ★ 建立反向索引：key 欄位名稱 → 依賴它的 lookup 結果欄位清單
                 const keyToLookupFields = new Map();
                 for (const [resultField, cfg] of lookupMeta.entries()) {
-                    if (cfg.source !== 'ocx') continue;
-                    const keyNames = cfg.compositeKeySelfNames || (cfg.keySelf ? [cfg.keySelf] : []);
+                    if (cfg.source !== 'ocx' && cfg.source !== 'lookup') continue;
+                    // lookup 來源：欄位本身就是 key，用欄位自身名稱作為觸發 key
+                    const keyNames = cfg.source === 'lookup'
+                        ? [resultField]
+                        : (cfg.compositeKeySelfNames || (cfg.keySelf ? [cfg.keySelf] : (cfg.key ? [cfg.key] : [])));
                     for (const kn of keyNames) {
                         const knLower = kn.toLowerCase();
                         if (!keyToLookupFields.has(knLower)) keyToLookupFields.set(knLower, []);
@@ -1385,7 +1389,7 @@
                             } else {
                                 lookupKey = getFieldVal(cfg.keySelf || cfg.key || '');
                             }
-                            const displayVal = lookupKey ? (lkMap.get(lookupKey) || lkMap.get(lookupKey.trim()) || '') : '';
+                            const displayVal = lookupKey ? (lkMap.get(lookupKey) || lkMap.get(lookupKey.trim()) || lkMap.get(lookupKey.trim().toLowerCase()) || '') : '';
                             // 更新結果欄位的顯示值
                             const resultFieldName = cfg.result || resultField;
                             const resultInp = Array.from(tr.querySelectorAll('input.cell-edit[data-field]'))
@@ -1400,8 +1404,10 @@
                     }
 
                     // ★ lookup 選取後只刷新不儲存，一般手動輸入仍自動儲存
-                    if (window.__skipAutoSaveOnce) {
-                        window.__skipAutoSaveOnce = false;
+                    //   旗標標記在 input 元素上，合成事件(isTrusted=false)不消耗旗標，
+                    //   原生事件(isTrusted=true, blur 觸發)消耗旗標後恢復正常行為
+                    if (inp._fromLookup) {
+                        if (e.isTrusted) inp._fromLookup = false;
                     } else if (typeof window.__autoSaveDetail === 'function') {
                         window.__autoSaveDetail();
                     }

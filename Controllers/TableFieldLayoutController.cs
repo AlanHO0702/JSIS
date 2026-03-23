@@ -356,21 +356,11 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
                     }
                     else
                     {
-                        var keyParts = new List<string>(keyFields.Length);
-                        var keyHasEmpty = false;
-                        for (int i = 0; i < keyFields.Length; i++)
-                        {
-                            var part = reader[$"key{i}"]?.ToString()?.Trim() ?? "";
-                            if (string.IsNullOrWhiteSpace(part))
-                            {
-                                keyHasEmpty = true;
-                                break;
-                            }
-                            keyParts.Add(part.ToLowerInvariant());
-                        }
-                        if (keyHasEmpty)
+                        // 複合鍵：SQL 已用 CHAR(31) 串接成單一 [key] 欄位，直接讀取即可
+                        var compositeKey = reader["key"]?.ToString() ?? "";
+                        if (string.IsNullOrWhiteSpace(compositeKey))
                             continue;
-                        row["key"] = string.Join('\u001F', keyParts);
+                        row["key"] = compositeKey;
                     }
                     for (int i = 0; i < resultFields.Length; i++)
                         row[$"result{i}"] = reader[$"result{i}"];

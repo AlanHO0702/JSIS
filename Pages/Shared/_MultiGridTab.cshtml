@@ -55,9 +55,21 @@
 
         if (field.FieldName != null && lookupMap.TryGetValue(field.FieldName, out var lk))
         {
-            var keyVal = GetValue(row, lk.KeySelfName)?.ToString()?.Trim() ?? "";
-            if (lk.LookupValues.TryGetValue(keyVal, out var display) && !string.IsNullOrWhiteSpace(display))
-                return display;
+            if (lk.IsCompositeKey)
+            {
+                // 複合鍵：用 Unit Separator 串接各 key 欄位值來查找
+                var compositeKey = string.Join("\x1f",
+                    lk.KeySelfNames.Select(k => GetValue(row, k)?.ToString()?.Trim() ?? ""));
+                if (lk.CompositeLookupValues.TryGetValue(compositeKey, out var compositeDisplay))
+                    return compositeDisplay;
+            }
+            else
+            {
+                // 單一鍵
+                var keyVal = raw?.ToString()?.Trim() ?? "";
+                if (lk.LookupValues.TryGetValue(keyVal, out var display))
+                    return display;
+            }
         }
 
         return FormatValue(raw);
