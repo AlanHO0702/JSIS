@@ -144,10 +144,9 @@
   outline: none;
 }
 .spec-draggable.field-number .master-field { text-align: right; }
-.spec-draggable.md-selected { outline: 2px solid #5b8def; border-radius: 4px; background: rgba(91,141,239,0.08); }
+/* .md-selected 僅在編輯模式下生效（由 body.layout-edit-enabled 控制） */
 
-/* === fix: flex item 可縮小（僅編輯模式） === */
-body.layout-edit-enabled .spec-draggable .master-field { min-width: 0; flex-shrink: 1; }
+/* resize 時由 JS 直接設定 input 寬度，不再用 flex-shrink */
 /* === Layout 編輯模式（Admin + Shift） === */
 body.layout-edit-enabled { user-select: none; -webkit-user-select: none; }
 body.layout-edit-enabled .spec-draggable {
@@ -187,8 +186,7 @@ body.layout-edit-enabled .rsz-handle.se {
   opacity: 0.6;
 }
 body.layout-edit-enabled .rsz-handle.se:hover { opacity: 1; }
-/* 隱藏右邊 resize（只保留右下角三角形） */
-body.layout-edit-enabled .rsz-handle.e { display: none; }
+/* 右邊 resize handle 已移除，只保留右下角三角形 */
 /* 編輯模式下隱藏 tooltip（靠 JS 動態控制） */
 body:not(.layout-edit-enabled) .spec-draggable[title],
 body:not(.layout-edit-enabled) .spec-field-label[title] {
@@ -204,7 +202,6 @@ body:not(.layout-edit-enabled) .spec-field-label[title] {
 .snap-guide.guide-h { height: 1px; left: 0; right: 0; }
 .snap-guide.guide-v { width: 1px; top: 0; bottom: 0; }
 body.layout-edit-enabled .spec-draggable:hover {
-  border-color: #4A90E2;
   background: rgba(74, 144, 226, 0.05);
 }
 body.layout-edit-enabled .spec-field-label {
@@ -5075,6 +5072,8 @@ document.addEventListener('DOMContentLoaded', function () {
 (function initSpecLayoutDrag() {
   'use strict';
   const PAD = 6, SNAP_PX = 2, SEL = 'md-selected', SEL_LAB = 'md-selected-label';
+  const dirtyFields = new Set(); // 記錄被修改過的欄位名稱
+  const originalPos = new Map(); // 記錄欄位修改前的原始位置 { fieldName → {ft,fl,fw,fh,lt,ll} }
 
   /* ---- DOM helpers ---- */
   const qAll = (s, p) => Array.from((p || document).querySelectorAll(s));
@@ -5162,43 +5161,168 @@ document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('.snap-guide').forEach(g => g.remove());
   }
 
-  /* ---- debounced save ---- */
-  let saveTimer = null;
-  function debounceSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveLayout, 400); }
-  function saveLayout() {
-    const layout = allFields().map(el => {
-      const lab = labelFor(el);
-      return {
-        fieldName: el.dataset.field,
-        top:  Math.max(0, el.offsetTop - PAD),
-        left: el.offsetLeft,
-        width: el.offsetWidth,
-        height: el.offsetHeight,
-        labTop:  lab ? Math.max(0, lab.offsetTop - PAD) : null,
-        labLeft: lab ? lab.offsetLeft : null,
-        ishowWhere: parseInt(el.dataset.showWhere) || 1
-      };
+  /* ---- dirty tracking + save ---- */
+  // 在移動/resize 開始前記錄原始位置（只記錄第一次）
+  function captureOriginals(els) {
+    els.forEach(el => {
+      const fn = el.dataset?.field;
+      if (!fn || originalPos.has(fn)) return;
+      const field = document.querySelector(`.spec-draggable[data-field="${fn}"]`);
+      const lab = labelFor(field);
+      originalPos.set(fn, {
+        ft: field ? field.style.top : null,
+        fl: field ? field.style.left : null,
+        fw: field ? field.style.width : null,
+        fh: field ? field.style.height : null,
+        lt: lab ? lab.style.top : null,
+        ll: lab ? lab.style.left : null
+      });
     });
+  }
+  function markDirty(els) {
+    els.forEach(el => {
+      const fn = el.dataset?.field;
+      if (fn) dirtyFields.add(fn);
+    });
+    console.log('[LayoutDrag] markDirty:', dirtyFields.size, '個欄位', [...dirtyFields]);
+    updateSaveBtn();
+  }
+  function updateSaveBtn() {
+    const wrap = document.getElementById('layout-btn-wrap');
+    const btnSave = document.getElementById('layout-save-btn');
+    const btnCancel = document.getElementById('layout-cancel-btn');
+    if (!wrap) return;
+    const n = dirtyFields.size;
+    if (!inLayout()) {
+      wrap.style.display = 'none';
+      return;
+    }
+    // 編輯模式下永遠顯示
+    wrap.style.display = 'flex';
+    if (n > 0) {
+      btnSave.textContent = `保存 (${n})`;
+      btnSave.style.background = '#5b8def';
+      btnSave.style.cursor = 'pointer';
+      btnSave.disabled = false;
+      btnCancel.style.background = '#e74c3c';
+      btnCancel.style.cursor = 'pointer';
+      btnCancel.disabled = false;
+    } else {
+      btnSave.textContent = '無修改';
+      btnSave.style.background = '#999';
+      btnSave.style.cursor = 'default';
+      btnSave.disabled = true;
+      btnCancel.style.background = '#999';
+      btnCancel.style.cursor = 'default';
+      btnCancel.disabled = true;
+    }
+  }
+  function saveLayout() {
+    if (!dirtyFields.size) return;
+    const layout = allFields()
+      .filter(el => dirtyFields.has(el.dataset.field))
+      .map(el => {
+        const lab = labelFor(el);
+        return {
+          fieldName: el.dataset.field,
+          top:  Math.max(0, el.offsetTop - PAD),
+          left: el.offsetLeft,
+          width: el.offsetWidth,
+          height: el.offsetHeight,
+          labTop:  lab ? Math.max(0, lab.offsetTop - PAD) : null,
+          labLeft: lab ? lab.offsetLeft : null,
+          ishowWhere: parseInt(el.dataset.showWhere) || 1
+        };
+      });
     if (!layout.length) return;
+    const btn = document.getElementById('layout-save-btn');
+    if (btn) { btn.textContent = '保存中...'; btn.disabled = true; }
     fetch('/api/TableFieldLayout/SaveHeaderLayout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tableName: window._headerTableName || 'EMOdProdInfo', layoutUpdates: layout })
-    }).catch(() => {});
+    }).then(r => {
+      if (r.ok) {
+        dirtyFields.clear();
+        originalPos.clear();
+        updateSaveBtn();
+        console.log('[LayoutDrag] 保存成功:', layout.length, '個欄位');
+      } else {
+        if (btn) { btn.textContent = `保存失敗 (${dirtyFields.size})`; btn.disabled = false; }
+      }
+    }).catch(() => {
+      if (btn) { btn.textContent = `保存失敗 (${dirtyFields.size})`; btn.disabled = false; }
+    });
   }
+  function cancelLayout() {
+    // 還原所有修改過的欄位到原始位置
+    originalPos.forEach((pos, fn) => {
+      const field = document.querySelector(`.spec-draggable[data-field="${fn}"]`);
+      const lab = labelFor(field);
+      if (field) {
+        if (pos.ft !== null) field.style.top = pos.ft;
+        if (pos.fl !== null) field.style.left = pos.fl;
+        if (pos.fw !== null) field.style.width = pos.fw;
+        if (pos.fh !== null) field.style.height = pos.fh;
+        // 同步還原 input 寬高（resize 時有設定 inner）
+        const inner = field.querySelector('.master-field');
+        if (inner && pos.fw !== null) inner.style.width = pos.fw;
+        if (inner && pos.fh !== null) inner.style.height = pos.fh;
+      }
+      if (lab) {
+        if (pos.lt !== null) lab.style.top = pos.lt;
+        if (pos.ll !== null) lab.style.left = pos.ll;
+      }
+    });
+    dirtyFields.clear();
+    originalPos.clear();
+    updateSaveBtn();
+    console.log('[LayoutDrag] 已取消所有修改，還原到原始位置');
+  }
+  // 建立保存 + 取消按鈕 DOM（只建一次）
+  (function createBtns() {
+    const wrap = document.createElement('div');
+    wrap.id = 'layout-btn-wrap';
+    wrap.style.cssText = 'display:none;position:fixed;bottom:20px;right:20px;z-index:10000;gap:8px;';
+
+    const btnSave = document.createElement('button');
+    btnSave.id = 'layout-save-btn';
+    btnSave.type = 'button';
+    btnSave.textContent = '保存';
+    btnSave.style.cssText = 'padding:8px 18px;background:#5b8def;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);';
+    btnSave.addEventListener('mouseenter', () => { if (!btnSave.disabled) btnSave.style.background = '#4a7ce0'; });
+    btnSave.addEventListener('mouseleave', () => { if (!btnSave.disabled) btnSave.style.background = '#5b8def'; });
+    btnSave.addEventListener('click', saveLayout);
+
+    const btnCancel = document.createElement('button');
+    btnCancel.id = 'layout-cancel-btn';
+    btnCancel.type = 'button';
+    btnCancel.textContent = '取消';
+    btnCancel.style.cssText = 'padding:8px 18px;background:#e74c3c;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);';
+    btnCancel.addEventListener('mouseenter', () => { if (!btnCancel.disabled) btnCancel.style.background = '#c0392b'; });
+    btnCancel.addEventListener('mouseleave', () => { if (!btnCancel.disabled) btnCancel.style.background = '#e74c3c'; });
+    btnCancel.addEventListener('click', cancelLayout);
+
+    wrap.appendChild(btnCancel);
+    wrap.appendChild(btnSave);
+    document.body.appendChild(wrap);
+    console.log('[LayoutDrag] 保存/取消按鈕已建立');
+  })();
 
   /* ---- drag state ---- */
   let drag = null; // { el, startX, startY, items:[{el,t0,l0,lab,labT0,labL0}] }
 
   function startDrag(el, e) {
     if (!inLayout()) return;
-    const grp = selected().length ? selected() : [el];
-    // 排除所有會跟著動的元素
-    snap = buildSnap(el, grp);
+    const grpFields = selected().length ? selected() : [el];
+    const grpLabels = selectedLabels();
+    const allMoving = [...grpFields, ...grpLabels];
+    captureOriginals(allMoving); // 移動前記錄原始位置
+    snap = buildSnap(el, allMoving);
     const ct = snapContainer;
     drag = {
       el, startX: e.clientX, startY: e.clientY, container: ct,
-      items: grp.map(f => {
+      items: allMoving.map(f => {
         const r = relRect(f, ct);
         return { el: f, t0: r.top, l0: r.left };
       })
@@ -5249,11 +5373,11 @@ document.addEventListener('DOMContentLoaded', function () {
   function onDragEnd() {
     if (!drag) return;
     drag.el.style.opacity = '';
+    markDirty(drag.items.map(i => i.el));
     snap = { tops:[], lefts:[], rights:[], bottoms:[] };
     clearGuides();
     clearTimeout(tabHoverTimer); tabHoverTimer = null;
     drag = null;
-    debounceSave();
   }
 
   /* ---- resize state ---- */
@@ -5263,6 +5387,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!inLayout()) return;
     e.preventDefault();
     e.stopPropagation();
+    captureOriginals([el]); // resize 前記錄原始位置
     rsz = { el, startX: e.clientX, startY: e.clientY, w0: el.offsetWidth, h0: el.offsetHeight, edge };
     document.addEventListener('mousemove', onResizeMove);
     document.addEventListener('mouseup', onResizeEnd);
@@ -5273,17 +5398,22 @@ document.addEventListener('DOMContentLoaded', function () {
     const dx = e.clientX - rsz.startX, dy = e.clientY - rsz.startY;
     const newW = Math.max(30, rsz.w0 + dx);
     rsz.el.style.width = newW + 'px';
+    // 同步設定內部 input/select 寬度，確保能縮小
+    const inner = rsz.el.querySelector('.master-field');
+    if (inner) inner.style.width = newW + 'px';
     if (rsz.edge === 'se') {
-      rsz.el.style.height = Math.max(18, rsz.h0 + dy) + 'px';
+      const newH = Math.max(18, rsz.h0 + dy);
+      rsz.el.style.height = newH + 'px';
+      if (inner) inner.style.height = newH + 'px';
     }
   }
 
   function onResizeEnd() {
     if (!rsz) return;
+    markDirty([rsz.el]);
     rsz = null;
     document.removeEventListener('mousemove', onResizeMove);
     document.removeEventListener('mouseup', onResizeEnd);
-    debounceSave();
   }
 
   /* ---- 建立 resize 手柄 DOM ---- */
@@ -5296,7 +5426,6 @@ document.addEventListener('DOMContentLoaded', function () {
       d.addEventListener('mousedown', e => startResize(el, e, cls));
       el.appendChild(d);
     };
-    mkH('e',  { right:'0', top:'0', width:'5px', height:'100%', cursor:'e-resize' });
     mkH('se', { right:'0', bottom:'0', width:'8px', height:'8px', cursor:'se-resize' });
   }
 
@@ -5321,7 +5450,7 @@ document.addEventListener('DOMContentLoaded', function () {
             dragging = true;
             // 如果這個欄位已被選取，拖全部；否則只拖這個
             if (!el.classList.contains(SEL)) { clearSel(); el.classList.add(SEL); }
-            startDrag(el, e);
+            startDrag(el, ev);
           }
           if (dragging && drag) onDragMove(ev);
         };
@@ -5340,7 +5469,7 @@ document.addEventListener('DOMContentLoaded', function () {
         document.addEventListener('mouseup', onUp);
       });
     });
-    // label 也可獨立拖曳（同樣加 dead zone）
+    // label 也可獨立拖曳（支援多選群組拖曳）
     qAll('.spec-field-label').forEach(lab => {
       if (lab._layoutInit) return;
       lab._layoutInit = true;
@@ -5349,29 +5478,43 @@ document.addEventListener('DOMContentLoaded', function () {
         e.preventDefault();
         const sX = e.clientX, sY = e.clientY;
         let dragging = false;
-        let labSnap, labCt, labT0, labL0;
+        let labItems = []; // [{el, t0, l0}]
+        let dragStartX, dragStartY; // 記錄拖曳起始位置（超過 dead zone 後的 ev）
         const onMove = ev => {
           if (!dragging && (Math.abs(ev.clientX - sX) > DEAD_ZONE || Math.abs(ev.clientY - sY) > DEAD_ZONE)) {
             dragging = true;
-            snap = buildSnap(lab, [lab]);
-            labCt = snapContainer;
-            const r0 = relRect(lab, labCt);
-            labT0 = r0.top; labL0 = r0.left;
+            dragStartX = ev.clientX; dragStartY = ev.clientY;
+            // 如果此 label 已被選取，拖全部已選取的 label + field；否則只拖自己
+            if (!lab.classList.contains(SEL_LAB)) { clearSel(); lab.classList.add(SEL_LAB); }
+            const grpLabels = selectedLabels().length ? selectedLabels() : [lab];
+            const grpFields = selected();
+            const allMoving = [...grpLabels, ...grpFields];
+            captureOriginals(allMoving); // 移動前記錄原始位置
+            snap = buildSnap(lab, allMoving);
+            const ct = snapContainer;
+            labItems = allMoving.map(l => {
+              const r0 = relRect(l, ct);
+              return { el: l, t0: r0.top, l0: r0.left };
+            });
           }
-          if (dragging) {
-            const rawT = labT0 + (ev.clientY - sY), rawL = labL0 + (ev.clientX - sX);
+          if (dragging && labItems.length) {
+            const base = labItems.find(i => i.el === lab);
+            const rawT = base.t0 + (ev.clientY - dragStartY), rawL = base.l0 + (ev.clientX - dragStartX);
             const s = applySnap(rawT, rawL, lab.offsetWidth, lab.offsetHeight);
-            lab.style.top = Math.max(0, s.top) + 'px';
-            lab.style.left = Math.max(0, s.left) + 'px';
+            const snapDY = s.top - base.t0, snapDX = s.left - base.l0;
+            labItems.forEach(it => {
+              it.el.style.top  = Math.max(0, it.t0 + snapDY) + 'px';
+              it.el.style.left = Math.max(0, it.l0 + snapDX) + 'px';
+            });
           }
         };
         const onUp = ev => {
           document.removeEventListener('mousemove', onMove);
           document.removeEventListener('mouseup', onUp);
           if (dragging) {
+            markDirty(labItems.map(i => i.el));
             snap = { tops:[], lefts:[], rights:[], bottoms:[] };
             clearGuides();
-            debounceSave();
           } else {
             // 點擊 → 選取 label
             if (ev.ctrlKey || ev.metaKey) lab.classList.toggle(SEL_LAB);
@@ -5403,6 +5546,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (can) {
       console.log('%c[LayoutDrag] 編輯模式已啟用 — 按 Escape 退出', 'color:#5b8def;font-weight:bold');
     }
+    updateSaveBtn(); // 進入/退出編輯模式時更新按鈕顯示
   }
 
   document.addEventListener('keydown', e => {
@@ -5410,12 +5554,16 @@ document.addEventListener('DOMContentLoaded', function () {
       // Shift 按一次 → 進入編輯模式
       setEnabled(true);
     } else if (e.key === 'Escape' && inLayout()) {
-      // Escape → 退出編輯模式
+      // Escape → 退出編輯模式（有未保存修改時先確認）
+      if (dirtyFields.size > 0) {
+        if (!confirm(`有 ${dirtyFields.size} 個欄位尚未保存，確定要退出嗎？\n按「確定」= 取消修改並退出\n按「取消」= 留在編輯模式`)) return;
+        cancelLayout();
+      }
       clearSel();
       setEnabled(false);
     }
   });
-  window.addEventListener('adminStateReady', () => {});
+  /* adminStateReady 事件由 _Layout.cshtml 觸發，此處不需額外處理 */
 
   /* ---- 點擊空白處取消選取 ---- */
   document.addEventListener('mouseup', function (e) {
@@ -5439,17 +5587,21 @@ document.addEventListener('DOMContentLoaded', function () {
     const dT = e.key==='ArrowUp' ? -step : e.key==='ArrowDown' ? step : 0;
     const dL = e.key==='ArrowLeft' ? -step : e.key==='ArrowRight' ? step : 0;
 
+    // 方向鍵移動前記錄原始位置
+    const movedFields = selected();
+    const movedLabels = selectedLabels();
+    captureOriginals([...movedFields, ...movedLabels]);
     // 移動所有選取的 field（各自獨立）
-    selected().forEach(f => {
+    movedFields.forEach(f => {
       f.style.top = (f.offsetTop + dT) + 'px';
       f.style.left = (f.offsetLeft + dL) + 'px';
     });
     // 移動所有選取的 label（各自獨立）
-    selectedLabels().forEach(lab => {
+    movedLabels.forEach(lab => {
       lab.style.top = (lab.offsetTop + dT) + 'px';
       lab.style.left = (lab.offsetLeft + dL) + 'px';
     });
-    debounceSave();
+    markDirty([...movedFields, ...movedLabels]);
   }, true); // capture: true 確保在 Bootstrap Tab 之前攔截
 
   /* ---- MutationObserver：自動偵測新欄位 ---- */
