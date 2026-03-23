@@ -19,34 +19,201 @@
       @foreach (var p in cfg.Params)
       {
           var name = p.Name;
-          <div class="col-md-4">
-            <label class="form-label">@p.Label</label>
+          <div class="col-md-8">
             @if (p.Ui == "select")
             {
-              <select id="@name" class="form-select" data-lookup="@p.LookupKey" data-default="@p.DefaultValue" data-super="@p.SuperId">
-                <option value=""></option>
-                @foreach (var (value,text) in p.Options)
-                { <option value="@value">@text</option> }
-              </select>
+              <div class="rpt-lookup-split">
+                <label class="form-label rpt-lookup-label mb-0">@p.Label</label>
+                <div class="rpt-lookup-code-wrap">
+                  <input type="hidden" id="@name" data-lookup="@p.LookupKey" data-default="@p.DefaultValue" data-super="@p.SuperId" />
+                  <input type="text" class="form-control rpt-lookup-code-input" data-for="@name" readonly />
+                  <button type="button" class="rpt-lookup-toggle" data-for="@name" tabindex="-1" aria-label="展開下拉"></button>
+                </div>
+                <button type="button" class="rpt-lookup-name-btn" data-for="@name" title="點擊搜尋"></button>
+              </div>
             }
             else if (p.Ui == "date")
-            { <input id="@name" type="date" class="form-control" value="@p.DefaultValue" /> }
+            { <label class="form-label">@p.Label</label><input id="@name" type="date" class="form-control" value="@p.DefaultValue" /> }
             else if (p.Ui == "number")
-            { <input id="@name" type="number" class="form-control" value="@p.DefaultValue" /> }
+            { <label class="form-label">@p.Label</label><input id="@name" type="number" class="form-control" value="@p.DefaultValue" /> }
             else
-            { <input id="@name" type="text" class="form-control" value="@p.DefaultValue" /> }
+            { <label class="form-label">@p.Label</label><input id="@name" type="text" class="form-control" value="@p.DefaultValue" /> }
           </div>
       }
     </div>
   </div>
 </div>
 
+<!-- Lookup 名稱查詢 Modal -->
+<div class="modal fade" id="rptLookupModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="false">
+  <div class="modal-dialog modal-dialog-scrollable" style="max-width:420px;">
+    <div class="modal-content" style="font-size:0.82rem;">
+      <div class="modal-header py-2 px-3">
+        <h6 class="modal-title mb-0" id="rptLookupModalTitle">名稱查詢</h6>
+        <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-2">
+        <div class="d-flex gap-1 mb-2">
+          <input type="text" class="form-control form-control-sm" id="rptLookupFilterCode" placeholder="代碼篩選">
+          <input type="text" class="form-control form-control-sm" id="rptLookupFilterName" placeholder="名稱篩選">
+        </div>
+        <div style="max-height:300px; overflow-y:auto;">
+          <table class="table table-sm table-hover table-bordered mb-0" id="rptLookupTable">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th style="width:35%; padding:3px 6px;">代碼</th>
+                <th style="padding:3px 6px;">名稱</th>
+              </tr>
+            </thead>
+            <tbody id="rptLookupBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer py-1 px-2">
+        <button type="button" class="btn btn-success btn-sm" id="rptLookupConfirm">確定</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.rpt-lookup-split {
+  display: flex;
+  align-items: stretch;
+}
+.rpt-lookup-split .rpt-lookup-label {
+  flex: 0 0 5em;
+  width: 5em;
+  margin-right: 0.5rem;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  align-self: center;
+  text-align: right;
+}
+.rpt-lookup-split .rpt-lookup-code-wrap {
+  flex: 1 1 50%;
+  position: relative;
+}
+.rpt-lookup-split .rpt-lookup-code-input {
+  width: 100%;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-right: 28px;
+  cursor: pointer;
+  background-color: #fff;
+}
+.rpt-lookup-split .rpt-lookup-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  z-index: 2;
+  padding: 0;
+}
+.rpt-lookup-split .rpt-lookup-toggle::before {
+  content: "";
+  display: block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #6b7280;
+  margin: 0 auto;
+}
+.rpt-lookup-dropdown {
+  position: absolute;
+  z-index: 2000;
+  background: #fff;
+  border: 1px solid #b6c2d9;
+  border-radius: 0 0 6px 6px;
+  box-shadow: 0 8px 20px rgba(30,41,59,0.18);
+  max-height: 220px;
+  overflow-y: auto;
+  left: 0;
+  right: 0;
+  top: 100%;
+}
+.rpt-lookup-dropdown .rpt-dd-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 4px 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rpt-lookup-dropdown .rpt-dd-item:hover,
+.rpt-lookup-dropdown .rpt-dd-item:focus {
+  background: #e2e8f0;
+  outline: none;
+}
+.rpt-lookup-dropdown .rpt-dd-item.is-selected {
+  background: #dbeafe;
+}
+.rpt-lookup-split .rpt-lookup-name-btn {
+  flex: 1 1 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  padding: 0.25rem 0.5rem;
+  background: #fff;
+  border: 1px solid #ced4da;
+  border-left: none;
+  border-top-right-radius: 0.375rem;
+  border-bottom-right-radius: 0.375rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  cursor: pointer;
+  color: #495057;
+  min-width: 0;
+}
+.rpt-lookup-split .rpt-lookup-name-btn:hover {
+  background: #f8f9fa;
+}
+#rptLookupBody tr { cursor: pointer; }
+#rptLookupBody tr td { padding: 3px 6px; }
+#rptLookupBody tr.table-primary { background-color: #cfe2ff !important; }
+#rptLookupBody tr:hover { background-color: #e9ecef; }
+</style>
+
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
 (() => {
   const cfg = @Html.Raw(json);
 
-  // 取值並送 /api/report/generate-url，回來 PDF blob
+  // lookup data store: { paramName: [{ value, text }] }
+  const lookupData = {};
+
+  // 設定值：hidden 存代碼，code-input 顯示代碼，name-btn 顯示名稱
+  function setParamValue(paramName, value) {
+    const hidden = document.getElementById(paramName);
+    if (hidden) hidden.value = value || '';
+    const codeInput = document.querySelector(`.rpt-lookup-code-input[data-for="${CSS.escape(paramName)}"]`);
+    if (codeInput) codeInput.value = value || '';
+    const btn = document.querySelector(`.rpt-lookup-name-btn[data-for="${CSS.escape(paramName)}"]`);
+    if (btn) {
+      if (!value) { btn.textContent = ''; return; }
+      const items = lookupData[paramName] || [];
+      const item = items.find(o => (o.value ?? '').toString() === value);
+      btn.textContent = item?.text || '';
+    }
+  }
+
+  function getParamValue(paramName) {
+    return document.getElementById(paramName)?.value || '';
+  }
+
   async function doPrint() {
     const params = {};
     for (const p of cfg.Params || []) {
@@ -55,14 +222,12 @@
       params[p.Name] = el.value ?? "";
     }
 
-    // �K�[�S�w�Ѽơ]���ܩ� UI�^
     if (cfg.ExtraParams) {
       Object.entries(cfg.ExtraParams).forEach(([k,v]) => {
         if (k) params[k] = v ?? "";
       });
     }
 
-    // 基本驗證：第一個欄位必填
     if (cfg.Params?.length && !params[cfg.Params[0].Name]) {
       Swal.fire({ icon:'warning', title:`請輸入 ${cfg.Params[0].Label}` });
       return;
@@ -108,54 +273,211 @@
     });
   }
 
-  async function loadLookup(key, el, superVal) {
+  async function loadLookup(key, paramName, superVal) {
     try {
       const qs = superVal ? `?parent=${encodeURIComponent(superVal)}` : "";
       const res = await fetch(`/api/Report/lookup/${key}${qs}`);
       if (!res.ok) throw 0;
-      const data = await res.json();
-      el.innerHTML = '<option value=""></option>';
-      data.forEach(o => {
-        const opt = document.createElement('option');
-        opt.value = o.value ?? "";
-        opt.textContent = o.value && o.text ? `${o.value} ${o.text}` : (o.text ?? o.value ?? "");
-        el.appendChild(opt);
-      });
+      lookupData[paramName] = await res.json();
     } catch {
-      el.innerHTML = '<option value="">(載入失敗)</option>';
+      lookupData[paramName] = [];
     }
   }
+
+  // --- 自訂下拉 ---
+  let _activeDropdown = null;
+
+  function closeDropdown() {
+    if (_activeDropdown) { _activeDropdown.remove(); _activeDropdown = null; }
+  }
+
+  function openDropdown(paramName) {
+    closeDropdown();
+    const wrap = document.querySelector(`.rpt-lookup-code-input[data-for="${CSS.escape(paramName)}"]`)?.closest('.rpt-lookup-code-wrap');
+    if (!wrap) return;
+    const items = lookupData[paramName] || [];
+    const currentVal = getParamValue(paramName);
+
+    const dd = document.createElement('div');
+    dd.className = 'rpt-lookup-dropdown';
+    _activeDropdown = dd;
+
+    items.forEach(o => {
+      const val = (o.value ?? '').toString();
+      const txt = (o.text ?? '').toString();
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'rpt-dd-item';
+      item.textContent = val && txt ? `${val} ${txt}` : (val || txt);
+      item.dataset.key = val;
+      if (val === currentVal) item.classList.add('is-selected');
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        setParamValue(paramName, val);
+        closeDropdown();
+        const hidden = document.getElementById(paramName);
+        if (hidden) hidden.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      dd.appendChild(item);
+    });
+
+    wrap.appendChild(dd);
+  }
+
+  // 點擊 code-input 或 toggle → 開關下拉
+  document.addEventListener('click', (e) => {
+    const codeInput = e.target.closest('.rpt-lookup-code-input');
+    const toggle = e.target.closest('.rpt-lookup-toggle');
+    const target = codeInput || toggle;
+    if (target) {
+      e.preventDefault();
+      e.stopPropagation();
+      const paramName = target.dataset.for;
+      if (_activeDropdown && _activeDropdown.closest('.rpt-lookup-code-wrap') === target.closest('.rpt-lookup-code-wrap')) {
+        closeDropdown();
+      } else {
+        openDropdown(paramName);
+      }
+      return;
+    }
+    // 點擊外部關閉
+    if (_activeDropdown && !e.target.closest('.rpt-lookup-dropdown')) {
+      closeDropdown();
+    }
+  });
+
+  // --- Modal logic ---
+  let _modalTargetParam = null;
+  let _modalSelectedKey = null;
+  let _modalInstance = null;
+
+  function escHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function renderModalRows(items, filterCode, filterName, currentKey) {
+    const tbody = document.getElementById('rptLookupBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const fc = (filterCode || '').toLowerCase();
+    const fn = (filterName || '').toLowerCase();
+    items.forEach(o => {
+      const val = (o.value ?? '').toString();
+      const txt = (o.text ?? '').toString();
+      if (fc && !val.toLowerCase().includes(fc)) return;
+      if (fn && !txt.toLowerCase().includes(fn)) return;
+      const tr = document.createElement('tr');
+      if (val === currentKey) {
+        tr.classList.add('table-primary');
+        _modalSelectedKey = val;
+      }
+      tr.innerHTML = `<td>${escHtml(val)}</td><td>${escHtml(txt)}</td>`;
+      tr.addEventListener('click', () => {
+        tbody.querySelectorAll('tr').forEach(r => r.classList.remove('table-primary'));
+        tr.classList.add('table-primary');
+        _modalSelectedKey = val;
+      });
+      tr.addEventListener('dblclick', () => {
+        _modalSelectedKey = val;
+        applyModalSelection();
+      });
+      tbody.appendChild(tr);
+    });
+  }
+
+  function openLookupModal(paramName) {
+    _modalTargetParam = paramName;
+    _modalSelectedKey = null;
+    const items = lookupData[paramName] || [];
+    const currentKey = document.getElementById(paramName)?.value || '';
+    const p = (cfg.Params || []).find(x => x.Name === paramName);
+    const title = document.getElementById('rptLookupModalTitle');
+    if (title) title.textContent = (p?.Label || '名稱') + '查詢';
+    const codeFilter = document.getElementById('rptLookupFilterCode');
+    const nameFilter = document.getElementById('rptLookupFilterName');
+    if (codeFilter) codeFilter.value = '';
+    if (nameFilter) nameFilter.value = '';
+    renderModalRows(items, '', '', currentKey);
+
+    const doFilter = () => renderModalRows(items, codeFilter?.value || '', nameFilter?.value || '', currentKey);
+    if (codeFilter) codeFilter.oninput = doFilter;
+    if (nameFilter) nameFilter.oninput = doFilter;
+
+    _modalInstance = bootstrap.Modal.getOrCreateInstance(document.getElementById('rptLookupModal'), { backdrop: false });
+    _modalInstance.show();
+    setTimeout(() => { if (codeFilter) codeFilter.focus(); }, 300);
+  }
+
+  function applyModalSelection() {
+    if (!_modalTargetParam || _modalSelectedKey == null) return;
+    setParamValue(_modalTargetParam, _modalSelectedKey);
+    const hidden = document.getElementById(_modalTargetParam);
+    if (hidden) hidden.dispatchEvent(new Event('change', { bubbles: true }));
+    _modalInstance?.hide();
+  }
+
+  document.getElementById('rptLookupConfirm')?.addEventListener('click', applyModalSelection);
+
+  // 名稱按鈕 → 開啟 Modal
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.rpt-lookup-name-btn');
+    if (!btn) return;
+    const paramName = btn.dataset.for;
+    if (paramName) openLookupModal(paramName);
+  });
+
+  // Backspace / Delete 清空欄位
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+    const inp = e.target;
+    if (!inp.classList?.contains('rpt-lookup-code-input')) return;
+    e.preventDefault();
+    const paramName = inp.dataset.for;
+    setParamValue(paramName, '');
+    const hidden = document.getElementById(paramName);
+    if (hidden) hidden.dispatchEvent(new Event('change', { bubbles: true }));
+  });
 
   // init
   document.addEventListener("DOMContentLoaded", async () => {
     const params = Array.isArray(cfg.Params) ? cfg.Params : [];
 
-    // load lookups with parent value if any
+    // load lookups
     for (const p of params) {
-      const el = document.getElementById(p.Name);
+      if (!p.LookupKey) continue;
       let superVal = "";
       if (p.SuperId) {
         const parent = params.find(x => (x.Label || "").trim() === p.SuperId.trim());
-        if (parent) {
-          const parentEl = document.getElementById(parent.Name);
-          superVal = (parentEl?.value ?? parent.DefaultValue ?? "").toString();
-        }
+        if (parent) superVal = (getParamValue(parent.Name) || parent.DefaultValue || "").toString();
       }
-      if (p.LookupKey && el) await loadLookup(p.LookupKey, el, superVal);
+      await loadLookup(p.LookupKey, p.Name, superVal);
+      if (p.DefaultValue) setParamValue(p.Name, p.DefaultValue);
+    }
+
+    // non-lookup defaults
+    for (const p of params) {
+      if (p.LookupKey) continue;
+      const el = document.getElementById(p.Name);
       if (el && p.DefaultValue) el.value = p.DefaultValue;
     }
 
-    // parent change -> refresh children
+    // change → 更新名稱按鈕 + refresh children
     for (const p of params) {
       const el = document.getElementById(p.Name);
       if (!el) continue;
       el.addEventListener("change", async () => {
+        setParamValue(p.Name, el.value);
         const children = params.filter(c => c.SuperId && (c.SuperId.trim() === (p.Label || "").trim()));
         for (const child of children) {
-          const childEl = document.getElementById(child.Name);
-          if (!childEl || !child.LookupKey) continue;
-          await loadLookup(child.LookupKey, childEl, el.value ?? "");
-          if (child.DefaultValue) childEl.value = child.DefaultValue;
+          if (!child.LookupKey) continue;
+          await loadLookup(child.LookupKey, child.Name, el.value ?? "");
+          if (child.DefaultValue) {
+            setParamValue(child.Name, child.DefaultValue);
+          } else {
+            setParamValue(child.Name, '');
+          }
         }
       });
     }

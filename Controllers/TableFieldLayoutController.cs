@@ -312,9 +312,6 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
 
         var resultFields = result.Split(',').Select(x => $"[{x.Trim()}]").ToArray();
         string selectResult = string.Join(", ", resultFields.Select((col, idx) => $"{col} as [result{idx}]"));
-        string selectKey = keyFields.Length == 1
-            ? $"[{keyFields[0]}] as [key]"
-            : string.Join(", ", keyFields.Select((col, idx) => $"[{col}] as [key{idx}]"));
         var whereList = new List<string>();
         if (!string.IsNullOrWhiteSpace(cond1Field) && !string.IsNullOrWhiteSpace(cond1Value))
             whereList.Add($"[{cond1Field.Trim()}] = @cond1Value");
@@ -323,9 +320,8 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         var whereSql = whereList.Count > 0 ? $" WHERE {string.Join(" AND ", whereList)}" : "";
 
         // ★ 支援複合鍵：key 可以是逗號分隔的多個欄位（如 "AccId,SubAccId"）
-        var keyFields = key.Split(',').Select(x => x.Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
-        string selectKey;
         bool isCompositeKey = keyFields.Length > 1;
+        string selectKey;
 
         if (isCompositeKey)
         {

@@ -737,6 +737,66 @@ UPDATE CURdPaperPaper
             }
         }
 
+        // 對沒有 CommandText 且 ControlType 為 0/null 的欄位，檢查 CURdTableField 是否有 lookup 設定
+        // 若有，將 ControlType 設為 1，讓前端自動渲染下拉
+        var needCheckCols = selected
+            .Where(r => string.IsNullOrWhiteSpace(r.CommandText) && (r.ControlType ?? 0) == 0)
+            .Select(r => r.ColumnName)
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .ToList();
+
+        if (needCheckCols.Count > 0)
+        {
+            // 收集所有可能的 table name（含主表與各欄位自身的 TableName）
+            var tableNames = selected
+                .Select(r => r.TableName)
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Append(dictTable)
+                .Append(realTable)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            // 用 raw SQL 檢查 OCXLKTableName 或 LookupTable 設定，避免 EF Core 轉譯問題
+            var tblParams = string.Join(",", tableNames.Select((_, i) => $"@t{i}"));
+            var colParams = string.Join(",", needCheckCols.Select((_, i) => $"@c{i}"));
+            var rawSql = $@"
+SELECT DISTINCT FieldName
+  FROM CURdTableField WITH (NOLOCK)
+ WHERE TableName IN ({tblParams})
+   AND FieldName IN ({colParams})
+   AND ((ISNULL(OCXLKTableName,'') <> '' AND ISNULL(OCXLKResultName,'') <> '')
+     OR (ISNULL(LookupTable,'') <> '' AND ISNULL(LookupKeyField,'') <> '' AND ISNULL(LookupResultField,'') <> ''))";
+
+            await using var lookupCmd = new SqlCommand(rawSql, conn);
+            for (int i = 0; i < tableNames.Count; i++)
+                lookupCmd.Parameters.AddWithValue($"@t{i}", tableNames[i]);
+            for (int i = 0; i < needCheckCols.Count; i++)
+                lookupCmd.Parameters.AddWithValue($"@c{i}", needCheckCols[i]);
+
+            var lookupSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using (var rd = await lookupCmd.ExecuteReaderAsync())
+            {
+                while (await rd.ReadAsync())
+                {
+                    var fn = rd.GetString(0).Trim();
+                    if (!string.IsNullOrWhiteSpace(fn)) lookupSet.Add(fn);
+                }
+            }
+
+            if (lookupSet.Count > 0)
+            {
+                foreach (var row in selected)
+                {
+                    if (string.IsNullOrWhiteSpace(row.CommandText)
+                        && (row.ControlType ?? 0) == 0
+                        && lookupSet.Contains(row.ColumnName))
+                    {
+                        row.ControlType = 1;
+                    }
+                }
+            }
+        }
+
         if (resolveDefault == 1)
         {
             foreach (var row in selected)
@@ -865,7 +925,35 @@ UPDATE CURdPaperSelected
         var paperId = await ResolvePaperIdAsync(conn, itemId, dictTable, realTable) ?? realTable;
 
         var cmdText = await LoadQueryCommandTextAsync(conn, paperId, dictTable, column);
-        if (string.IsNullOrWhiteSpace(cmdText)) return NotFound();
+        if (string.IsNullOrWhiteSpace(cmdText))
+        {
+            // 從 CURdPaperSelected 找出該欄位實際的 TableName（可能是單身表如 SPOdOrderSub）
+            var col = column.Trim();
+            var fieldTableNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { dictTable, realTable };
+            await using (var ftCmd = new SqlCommand(@"
+SELECT DISTINCT TableName FROM CURdPaperSelected WITH (NOLOCK)
+ WHERE (PaperId = @pid OR TableName = @dt) AND ColumnName = @col
+   AND TableName IS NOT NULL AND TableName <> ''", conn))
+            {
+                ftCmd.Parameters.AddWithValue("@pid", paperId);
+                ftCmd.Parameters.AddWithValue("@dt", dictTable);
+                ftCmd.Parameters.AddWithValue("@col", col);
+                await using var ftRd = await ftCmd.ExecuteReaderAsync();
+                while (await ftRd.ReadAsync())
+                {
+                    var tn = ftRd.GetString(0).Trim();
+                    if (!string.IsNullOrWhiteSpace(tn)) fieldTableNames.Add(tn);
+                }
+            }
+
+            // 依序嘗試每個可能的 TableName
+            foreach (var tn in fieldTableNames)
+            {
+                var result = await LoadOcxLookupOptionsAsync(conn, tn, col);
+                if (result != null) return Ok(result);
+            }
+            return NotFound();
+        }
 
         var raw = cmdText.Trim();
         if (raw.Contains("@@@@@", StringComparison.Ordinal))
@@ -973,6 +1061,113 @@ SELECT TOP 1 CommandText
         cmd.Parameters.AddWithValue("@col", column ?? string.Empty);
         var obj = await cmd.ExecuteScalarAsync();
         return obj == null || obj == DBNull.Value ? null : obj.ToString();
+    }
+
+    /// <summary>
+    /// 從 CURdTableField 的 lookup 設定載入下拉選項（fallback 用）
+    /// 優先使用 OCXLKTableName，其次使用 LookupTable/LookupKeyField/LookupResultField
+    /// </summary>
+    private static async Task<List<object>?> LoadOcxLookupOptionsAsync(SqlConnection conn, string dictTable, string column)
+    {
+        // 1. 查 CURdTableField 取得 lookup 設定
+        const string fieldSql = @"
+SELECT TOP 1 OCXLKTableName, OCXLKResultName, LookupTable, LookupKeyField, LookupResultField
+  FROM CURdTableField WITH (NOLOCK)
+ WHERE TableName = @tbl
+   AND FieldName = @col;";
+        string? ocxTableName = null, ocxResultName = null;
+        string? lookupTable = null, lookupKeyField = null, lookupResultField = null;
+        await using (var cmd = new SqlCommand(fieldSql, conn))
+        {
+            cmd.Parameters.AddWithValue("@tbl", dictTable);
+            cmd.Parameters.AddWithValue("@col", column);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            if (!await rd.ReadAsync()) return null;
+            ocxTableName = rd.IsDBNull(0) ? null : rd.GetString(0).Trim();
+            ocxResultName = rd.IsDBNull(1) ? null : rd.GetString(1).Trim();
+            lookupTable = rd.IsDBNull(2) ? null : rd.GetString(2).Trim();
+            lookupKeyField = rd.IsDBNull(3) ? null : rd.GetString(3).Trim();
+            lookupResultField = rd.IsDBNull(4) ? null : rd.GetString(4).Trim();
+        }
+
+        // 路徑 A: OCX lookup（OCXLKTableName + OCXLKResultName + CURdOCXTableFieldLK）
+        if (!string.IsNullOrWhiteSpace(ocxTableName) && !string.IsNullOrWhiteSpace(ocxResultName))
+        {
+            const string lkSql = @"
+SELECT KeyFieldName
+  FROM CURdOCXTableFieldLK WITH (NOLOCK)
+ WHERE TableName = @tbl AND FieldName = @col
+ ORDER BY KeyFieldName;";
+            string? keyFieldName = null;
+            await using (var cmd = new SqlCommand(lkSql, conn))
+            {
+                cmd.Parameters.AddWithValue("@tbl", dictTable);
+                cmd.Parameters.AddWithValue("@col", column);
+                await using var rd = await cmd.ExecuteReaderAsync();
+                if (await rd.ReadAsync())
+                    keyFieldName = rd.GetString(0).Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(keyFieldName))
+            {
+                var selectSql = $@"
+SELECT DISTINCT [{keyFieldName}] AS value, [{ocxResultName}] AS text
+  FROM [{ocxTableName}] WITH (NOLOCK)
+ WHERE [{keyFieldName}] IS NOT NULL AND [{keyFieldName}] <> ''
+ ORDER BY [{keyFieldName}];";
+                var list = new List<object>();
+                try
+                {
+                    await using var cmd = new SqlCommand(selectSql, conn);
+                    await using var rd = await cmd.ExecuteReaderAsync();
+                    while (await rd.ReadAsync())
+                    {
+                        var value = rd.IsDBNull(0) ? "" : rd.GetValue(0)?.ToString() ?? "";
+                        var text = rd.IsDBNull(1) ? "" : rd.GetValue(1)?.ToString() ?? "";
+                        list.Add(new { value, text });
+                    }
+                    return list;
+                }
+                catch { /* 繼續嘗試 LookupTable */ }
+            }
+        }
+
+        // 路徑 B: LookupTable / LookupKeyField / LookupResultField
+        if (!string.IsNullOrWhiteSpace(lookupTable)
+            && !string.IsNullOrWhiteSpace(lookupKeyField)
+            && !string.IsNullOrWhiteSpace(lookupResultField))
+        {
+            // LookupResultField 可能含逗號分隔的多欄位（如 "CompanyId, ShortName"）
+            // 取最後一個非 key 的欄位作為顯示文字
+            var resultParts = lookupResultField.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var textField = resultParts.LastOrDefault(p => !p.Equals(lookupKeyField, StringComparison.OrdinalIgnoreCase))
+                            ?? resultParts.Last();
+
+            var selectSql = $@"
+SELECT DISTINCT [{lookupKeyField}] AS value, [{textField}] AS text
+  FROM [{lookupTable}] WITH (NOLOCK)
+ WHERE [{lookupKeyField}] IS NOT NULL AND [{lookupKeyField}] <> ''
+ ORDER BY [{lookupKeyField}];";
+            var list = new List<object>();
+            try
+            {
+                await using var cmd = new SqlCommand(selectSql, conn);
+                await using var rd = await cmd.ExecuteReaderAsync();
+                while (await rd.ReadAsync())
+                {
+                    var value = rd.IsDBNull(0) ? "" : rd.GetValue(0)?.ToString() ?? "";
+                    var text = rd.IsDBNull(1) ? "" : rd.GetValue(1)?.ToString() ?? "";
+                    list.Add(new { value, text });
+                }
+                return list;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     private static async Task<List<PaperSelectedRow>> LoadPaperDictSelectAsync(
