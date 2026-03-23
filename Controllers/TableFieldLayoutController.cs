@@ -321,6 +321,23 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         if (!string.IsNullOrWhiteSpace(cond2Field) && !string.IsNullOrWhiteSpace(cond2Value))
             whereList.Add($"[{cond2Field.Trim()}] = @cond2Value");
         var whereSql = whereList.Count > 0 ? $" WHERE {string.Join(" AND ", whereList)}" : "";
+
+        // ★ 支援複合鍵：key 可以是逗號分隔的多個欄位（如 "AccId,SubAccId"）
+        var keyFields = key.Split(',').Select(x => x.Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
+        string selectKey;
+        bool isCompositeKey = keyFields.Length > 1;
+
+        if (isCompositeKey)
+        {
+            // 複合鍵：各欄位用 CHAR(31)（Unit Separator）串接成一個 key
+            var concatParts = string.Join($" + CHAR(31) + ", keyFields.Select(k => $"ISNULL(RTRIM([{k}]),'')"));
+            selectKey = $"({concatParts}) as [key]";
+        }
+        else
+        {
+            selectKey = $"[{keyFields[0]}] as [key]";
+        }
+
         var sql = $"SELECT {selectKey}, {selectResult} FROM [{table.Trim()}]{whereSql}";
 
         var list = new List<Dictionary<string, object>>();

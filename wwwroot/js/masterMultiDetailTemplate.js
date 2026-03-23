@@ -5,6 +5,33 @@
   // ==============================================================================
   const LOOKUP_CACHE = {};
   const OCX_CACHE = {};
+  const COMPOSITE_KEY_SEP = '\x1f'; // 複合鍵分隔符（與後端一致）
+
+  // 同步讀取已快取的 Lookup 資料（供 addRowTo 等非 async 場景使用）
+  function getCachedLookup(f) {
+    const key = `${f.LookupTable}|${f.LookupKeyField}|${f.LookupResultField}`;
+    return LOOKUP_CACHE[key] || null;
+  }
+  function getCachedOCXLookup(f) {
+    const composite = parseKeyMaps(f);
+    const compositeKeyFields = composite ? composite.keyFieldNames.join(',') : null;
+    const effectiveKeyField = compositeKeyFields || f.KeyFieldName;
+    const key = `${f.OCXLKTableName}|${effectiveKeyField}|${f.OCXLKResultName}`;
+    return OCX_CACHE[key] || null;
+  }
+
+  /// 解析 KeyMapsJson，取得所有 key 欄位名稱陣列
+  function parseKeyMaps(f) {
+    if (!f.KeyMapsJson) return null;
+    try {
+      const maps = JSON.parse(f.KeyMapsJson);
+      if (!Array.isArray(maps) || maps.length <= 1) return null;
+      return {
+        keyFieldNames: maps.map(m => m.KeyFieldName).filter(Boolean),
+        keySelfNames:  maps.map(m => m.KeySelfName).filter(Boolean)
+      };
+    } catch { return null; }
+  }
 
   async function loadLookup(f) {
     const key = `${f.LookupTable}|${f.LookupKeyField}|${f.LookupResultField}`;
@@ -29,15 +56,20 @@
   }
 
   async function loadOCXLookup(f) {
-    const key = `${f.OCXLKTableName}|${f.KeyFieldName}|${f.OCXLKResultName}`;
+    // ★ 檢查是否有複合鍵設定
+    const composite = parseKeyMaps(f);
+    const compositeKeyFields = composite ? composite.keyFieldNames.join(',') : null;
+    const effectiveKeyField = compositeKeyFields || f.KeyFieldName;
+
+    const key = `${f.OCXLKTableName}|${effectiveKeyField}|${f.OCXLKResultName}`;
     if (OCX_CACHE[key]) return OCX_CACHE[key];
 
-    if (!f.OCXLKTableName || !f.KeyFieldName || !f.OCXLKResultName)
+    if (!f.OCXLKTableName || !effectiveKeyField || !f.OCXLKResultName)
       return OCX_CACHE[key] = null;
 
     const url = `/api/TableFieldLayout/LookupData`
       + `?table=${encodeURIComponent(f.OCXLKTableName)}`
-      + `&key=${encodeURIComponent(f.KeyFieldName)}`
+      + `&key=${encodeURIComponent(effectiveKeyField)}`
       + `&result=${encodeURIComponent(f.OCXLKResultName)}`;
 
     const rows = await fetch(url).then(r => r.json());
@@ -47,7 +79,13 @@
       cell[k]     = (r.result0 ?? "").toString().trim();
       dropdown[k] = combineResults(r);
     });
-    return OCX_CACHE[key] = { cell, dropdown };
+
+    const result = { cell, dropdown };
+    // ★ 記錄複合鍵資訊，供 cell rendering 時使用
+    if (composite) {
+      result._compositeKeySelfNames = composite.keySelfNames;
+    }
+    return OCX_CACHE[key] = result;
   }
 
   // 將 result0, result1, ... 合併成顯示字串
@@ -807,8 +845,18 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
       if (raw === "" && f.KeySelfName) raw = getRowValue(row, f.KeySelfName);
 
       let display = raw;
-      if (oc[f.FieldName]?.cell?.[raw] != null) display = oc[f.FieldName].cell[raw];
-      else if (lk[f.FieldName]?.cell?.[raw] != null) display = lk[f.FieldName].cell[raw];
+      // ★ 複合鍵支援：若 OCX lookup 有 _compositeKeySelfNames，用多欄位組成複合鍵查找
+      const ocxData = oc[f.FieldName];
+      if (ocxData?._compositeKeySelfNames) {
+        const parts = ocxData._compositeKeySelfNames.map(n => String(getRowValue(row, n) ?? "").trim());
+        if (parts.every(p => p !== "")) {
+          const compositeKey = parts.join(COMPOSITE_KEY_SEP);
+          if (ocxData.cell?.[compositeKey] != null) display = ocxData.cell[compositeKey];
+        }
+      } else if (ocxData?.cell?.[raw] != null) {
+        display = ocxData.cell[raw];
+      }
+      if (display === raw && lk[f.FieldName]?.cell?.[raw] != null) display = lk[f.FieldName].cell[raw];
 
       // ★ 是否顯示為勾選框 (ComboStyle==1)
       const isCheckbox = String(f.ComboStyle ?? "").trim() === "1";
@@ -886,6 +934,26 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
     }
     tbody.appendChild(tr);
   });
+
+  // ★ 建立反向索引：key 欄位 → 依賴它的 lookup 結果欄位（供動態刷新用）
+  const _keyToLookup = {};
+  for (const f of fields) {
+    const ocxData = oc[f.FieldName];
+    if (!ocxData) continue;
+    const keySelfNames = ocxData._compositeKeySelfNames || (f.KeySelfName ? [f.KeySelfName] : []);
+    for (const kn of keySelfNames) {
+      const knLower = kn.toLowerCase();
+      if (!_keyToLookup[knLower]) _keyToLookup[knLower] = [];
+      _keyToLookup[knLower].push({
+        resultFieldName: f.FieldName,
+        ocxData,
+        compositeKeySelfNames: ocxData._compositeKeySelfNames || null,
+        keySelf: f.KeySelfName || null
+      });
+    }
+  }
+  tbody._keyToLookup = _keyToLookup;
+  tbody._ocxMaps = oc;
 
   // ★ 套用已儲存的排序狀態
   const table = tbody.closest('table');
@@ -1067,26 +1135,73 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
 // ======================================================================
 //   切換 Master → 重新載入全部明細
 // ======================================================================
+let _detailGen = 0;   // ★ generation counter 防止重複載入
+// DetailCascadeMode: 0/未設定=全部從 Master 取 key, 1=串聯式(Detail[N]←Detail[N-1]), 2=扇出式(Detail[1]+←Detail[0])
+const cascadeMode = cfg.DetailCascadeMode || 0;
 const loadAllDetails = async (row) => {
+  const gen = ++_detailGen;   // 取得本次呼叫的 generation
+  let prevDetailRows = null;  // 級聯模式下，記錄上一層 Detail 的查詢結果
 
   for (let i = 0; i < (cfg.Details || []).length; i++) {
+    if (gen !== _detailGen) return;   // ★ 已有更新的呼叫，放棄本次
     const d = cfg.Details[i];
     const tbody = document.getElementById(`${cfg.DomId}-detail-${i}-body`);
     if (!tbody) continue;
+
+    // ⭐ 根據 DetailCascadeMode 決定 key 值的來源
+    //    mode 0: 全部從 Master row 取值（原始行為）
+    //    mode 1: Detail[0]←Master, Detail[N]←Detail[N-1] 的第一筆
+    //    mode 2: Detail[0]←Master, Detail[1]+←Detail[0] 的第一筆
+    let sourceRow = row; // 預設從 Master 取值
+    if (i > 0 && cascadeMode > 0) {
+      const parentRows = prevDetailRows;
+      if (!parentRows || parentRows.length === 0) {
+        // 上層沒有資料 → 本層及後續層都不查詢，顯示空白
+        tbody._lastQueryCtx = {};
+        tbody.innerHTML = "";
+        const dict = detailDicts[i] || [];
+        const visibleCols = dict.filter(f => (f.Visible ?? 1) === 1).length || 1;
+        const placeholderTr = document.createElement("tr");
+        placeholderTr.className = "mmd-placeholder-row";
+        placeholderTr.style.cursor = "pointer";
+        placeholderTr.dataset.placeholder = "1";
+        const td = document.createElement("td");
+        td.colSpan = visibleCols;
+        td.className = "text-center text-muted";
+        td.style.padding = "8px";
+        td.innerHTML = "<small>（點擊此處後可使用上方 + 按鈕新增資料）</small>";
+        placeholderTr.appendChild(td);
+        const detailIndex = i;
+        placeholderTr.addEventListener("click", () => {
+          activeTarget.type = "detail";
+          activeTarget.index = detailIndex;
+          tbody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
+          placeholderTr.classList.add("selected");
+          updateCountPanel();
+        });
+        tbody.appendChild(placeholderTr);
+        if (cascadeMode === 1) prevDetailRows = null; // 串聯式：本層無資料，後續層也無
+        continue;
+      }
+      sourceRow = parentRows[0];
+    }
 
     const names = [];
     const values = [];
     const ctx = {};
 
-    // ⭐ 正確作法：查詢明細只用 Master → Detail 的 KeyMap.Master 來查！
     (d.KeyMap || []).forEach(k => {
       names.push(k.Detail);               // 用明細的欄位當查詢欄位
-      values.push(row[k.Master]);         // 值取 Master 的欄位值
-      ctx[k.Detail] = row[k.Master];
+      values.push(sourceRow[k.Master]);    // 值取來源列的欄位值
+      ctx[k.Detail] = sourceRow[k.Master];
     });
     tbody._lastQueryCtx = ctx;
 
     const rows = await fetchByKeys(d.DetailTable, names, values, d.OrderByField);
+    if (gen !== _detailGen) return;   // ★ await 後再檢查一次
+    // 級聯模式：記錄本層結果供下一層使用
+    if (cascadeMode === 1) prevDetailRows = rows;           // 串聯式：下一層用本層
+    else if (cascadeMode === 2 && i === 0) prevDetailRows = rows; // 扇出式：只記 Detail[0]
 
     // ★ 為 Detail 表格添加 row click 事件處理，實現 Focus 功能
     await buildBody(tbody, detailDicts[i], rows, (row, tr) => {
@@ -1718,6 +1833,21 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
           inp.className = "form-control form-control-sm cell-edit";
           inp.value = (raw ?? "").toString();
           inp.dataset.raw = (raw ?? "").toString();
+
+          // ★ 從快取綁定雙擊下拉選單（與 buildBody 一致）
+          const ocxData = getCachedOCXLookup(f);
+          const lkData  = getCachedLookup(f);
+          const fieldLookupMap = ocxData?.dropdown || lkData?.dropdown;
+          const fieldCellMap   = ocxData?.cell    || lkData?.cell;
+          if (fieldLookupMap && Object.keys(fieldLookupMap).length > 0) {
+            inp._lookupMap     = fieldLookupMap;
+            inp._lookupCellMap = fieldCellMap;
+            td.addEventListener('dblclick', (e) => {
+              e.stopPropagation();
+              const isReadOnly = !window._mmdEditing || inp.readOnly || inp.disabled;
+              showLookupDropdown(inp, td, inp._lookupMap, isReadOnly);
+            });
+          }
         }
 
         if (DICT.readonly(f) || f.KeySelfName || (DICT.isKey(f) && tr.dataset.state !== "added")) {
@@ -2135,7 +2265,44 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       if (e.target.closest('.cell-edit')) setDirty(true);
     });
     root.addEventListener('change', (e) => {
-      if (e.target.closest('.cell-edit')) setDirty(true);
+      const inp = e.target.closest('.cell-edit');
+      if (inp) {
+        setDirty(true);
+        // ★ 動態刷新：當 key 欄位變更時，更新對應的 lookup 中文名稱
+        const tr = inp.closest('tr');
+        const tbody = tr?.closest('tbody');
+        const keyToLookup = tbody?._keyToLookup;
+        if (tr && keyToLookup) {
+          const changedField = (inp.name || '').toLowerCase();
+          const deps = keyToLookup[changedField];
+          if (deps && deps.length > 0) {
+            const getFieldVal = (fieldName) => {
+              const fn = fieldName.toLowerCase();
+              const target = Array.from(tr.querySelectorAll('input'))
+                .find(i => (i.name || '').toLowerCase() === fn);
+              return target ? (target.value ?? '').trim() : '';
+            };
+            for (const dep of deps) {
+              let lookupKey = '';
+              if (dep.compositeKeySelfNames && dep.compositeKeySelfNames.length > 1) {
+                const parts = dep.compositeKeySelfNames.map(f => getFieldVal(f));
+                if (parts.every(p => p !== '')) lookupKey = parts.join(COMPOSITE_KEY_SEP);
+              } else if (dep.keySelf) {
+                lookupKey = getFieldVal(dep.keySelf);
+              }
+              const displayVal = lookupKey ? (dep.ocxData.cell[lookupKey] || dep.ocxData.cell[lookupKey.trim()] || '') : '';
+              const resultInp = Array.from(tr.querySelectorAll('input'))
+                .find(i => (i.name || '').toLowerCase() === dep.resultFieldName.toLowerCase());
+              if (resultInp) {
+                resultInp.value = displayVal;
+                const td = resultInp.closest('td');
+                const view = td?.querySelector('.cell-view');
+                if (view) view.textContent = displayVal;
+              }
+            }
+          }
+        }
+      }
     });
 
     setModePanel(false);

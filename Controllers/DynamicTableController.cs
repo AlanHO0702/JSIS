@@ -869,7 +869,17 @@ SELECT TOP 1 RunSQLAfterAdd
                                     // 若實體欄位本來就存在，避免覆寫
                                     if (row.ContainsKey(map.FieldName)) continue;
 
-                                    var display = TableDictionaryService.ResolveLookupDisplay(map, row);
+                                    static string ToKey(object? v) => v == null || v == DBNull.Value ? "" : v.ToString()?.Trim() ?? "";
+
+                                    var key = TableDictionaryService.BuildLookupKey(map, fieldName =>
+                                    {
+                                        if (row.TryGetValue(fieldName, out var val)) return ToKey(val);
+                                        return "";
+                                    });
+
+                                    var display = "";
+                                    if (!string.IsNullOrWhiteSpace(key) && map.LookupValues != null && map.LookupValues.TryGetValue(key, out var dv) && dv != null)
+                                        display = dv;
 
                                     // 即使沒找到，也補空字串，避免前端因第一筆缺值而不產生欄位
                                     row[map.FieldName] = display;
@@ -1132,6 +1142,7 @@ SELECT TOP (@top) {selectCols}
                     {
                         var tableDictService = new TableDictionaryService(_ctx);
                         var lookupMaps = tableDictService.GetOCXLookups(dictTable);
+
                         if (lookupMaps.Count > 0)
                         {
                             foreach (var row in list)
@@ -1141,9 +1152,26 @@ SELECT TOP (@top) {selectCols}
                                     if (map == null || string.IsNullOrWhiteSpace(map.FieldName)) continue;
 
                                     // 若該顯示欄位本來就存在於實體表，前面 safeCols 已會選出，這裡不要覆寫
-                                    if (existingCols.Contains(map.FieldName)) continue;
+                                    if (existingCols.Contains(map.FieldName))
+                                    {
+                                        _logger.LogInformation("[ByPaperNum] {Field}: 跳過（existingCols 已包含此欄位）", map.FieldName);
+                                        continue;
+                                    }
 
-                                    var display = TableDictionaryService.ResolveLookupDisplay(map, row);
+                                    static string ToKey(object? v) => v == null || v == DBNull.Value ? "" : v.ToString()?.Trim() ?? "";
+
+                                    var key = TableDictionaryService.BuildLookupKey(map, fieldName =>
+                                    {
+                                        if (row.TryGetValue(fieldName, out var val)) return ToKey(val);
+                                        return "";
+                                    });
+
+                                    var display = "";
+                                    if (!string.IsNullOrWhiteSpace(key) && map.LookupValues != null && map.LookupValues.TryGetValue(key, out var dv) && dv != null)
+                                        display = dv;
+
+                                    _logger.LogInformation("[ByPaperNum] {Field}: key=[{Key}](len={KeyLen}), display=[{Display}], LookupValues有{LvCount}筆",
+                                        map.FieldName, key, key?.Length ?? 0, display, map.LookupValues?.Count ?? 0);
 
                                     // 無論是否找到，都補一個 key，確保前端能產生欄位（避免第一列缺值導致欄位被吃掉）
                                     row[map.FieldName] = display;
