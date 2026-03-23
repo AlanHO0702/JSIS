@@ -31,7 +31,7 @@
     .table-list-page .container { max-width: 100%; }
     .table-list-page .title-row { display: flex; justify-content: space-between; align-items: flex-end; }
     .table-list-page .order-count { font-size: var(--field-value-size); color: #666; margin-bottom: 6px; }
-    .table-list-page .table { box-shadow: 0 2px 12px 0 #c3d4e6; border-radius: 16px; overflow: hidden; background: #fff; }
+    .table-list-page .table { box-shadow: 0 2px 12px 0 #c3d4e6; border-radius: 16px; overflow: hidden; background: #fff; table-layout: fixed; }
     .table-list-page .table th, .table-list-page .table td {
         vertical-align: middle !important;
         white-space: nowrap;
@@ -46,6 +46,18 @@
         background: linear-gradient(90deg, #e8f2fe 0%, #f3f8ff 100%);
         color: #2056ac; letter-spacing: 2px; font-weight: 600; font-size: var(--field-label-size);
         border-bottom: 2px solid #bdd2f7; padding: 2px 10px;
+        user-select: none;
+    }
+    .table-list-page .table th .sort-indicator {
+        font-size: 0.75em; color: #3a72d9; vertical-align: middle;
+    }
+    .table-list-page .table th { position: relative; }
+    .table-list-page .table th .col-resizer {
+        position: absolute; right: 0; top: 0; bottom: 0; width: 5px;
+        cursor: col-resize; z-index: 2;
+    }
+    .table-list-page .table th .col-resizer:hover {
+        background: rgba(58,114,217,0.3);
     }
     .table-list-page .table td { font-size: var(--field-value-size); }
     .table-list-page .table tbody tr { transition: background .15s; }
@@ -155,8 +167,13 @@
                 <tr id="table-header-row">
                     @foreach (var field in fields)
                     {
-                         <th class="sortable" draggable="true" data-field="@field.FieldName" data-serial="@field.SerialNum">
+                        var widthPx = field.DisplaySize.HasValue && field.DisplaySize.Value > 0
+                            ? field.DisplaySize.Value * 10 : (int?)null;
+                        var widthStyle = widthPx.HasValue
+                            ? $"width:{widthPx}px;min-width:{widthPx}px;max-width:{widthPx}px;" : "";
+                         <th class="sortable" draggable="true" data-field="@field.FieldName" data-serial="@field.SerialNum" style="@widthStyle">
                             @(string.IsNullOrWhiteSpace(field.DisplayLabel) ? field.FieldName : field.DisplayLabel)
+                            <span class="col-resizer"></span>
                         </th>
                     }
                 </tr>
@@ -233,6 +250,10 @@
 let selectedPaperNum = null;
 const addApiUrl = '@addApiUrl';
 const detailRouteTemplate = '@detailRouteTemplate';
+
+// 排序狀態
+let currentSortField = null;
+let currentSortDir = null;
 const http = (url, init, msg) =>
   (window.busyFetch ? window.busyFetch(url, init, msg) : fetch(url, init));
 
@@ -645,7 +666,9 @@ function doQuery(page = 1, direction = null) {
     table: tableName,
     itemId: itemId,
     filters: filters,
-    skipLookup: skipLookup
+    skipLookup: skipLookup,
+    sortBy: currentSortField || null,
+    sortDir: currentSortDir || null
   };
 
   // 🔥 如果有 Cursor 快取，使用 Keyset Pagination
@@ -655,6 +678,10 @@ function doQuery(page = 1, direction = null) {
     requestBody.direction = pageCursorCache[page].direction;
   } else if (direction) {
     requestBody.direction = direction;
+  }
+
+  if (requestBody.sortBy) {
+    console.log('[排序] sortBy:', requestBody.sortBy, 'sortDir:', requestBody.sortDir);
   }
 
   http('/api/DynamicTable/PagedQuery', {
@@ -818,6 +845,8 @@ document.addEventListener("DOMContentLoaded", function () {
       swap: true,
       swapClass: 'highlight',
       ghostClass: 'ghost',
+      filter: '.col-resizer',
+      preventOnFilter: false,
       onEnd: function () {
         const newOrder = Array.from(headerRow.children).map((th, index) => ({
           fieldName: th.dataset.field, serialNum: index + 1
@@ -830,6 +859,95 @@ document.addEventListener("DOMContentLoaded", function () {
           .then(res => { if (!res.ok) throw new Error("更新失敗"); return res.json(); })
           .then(() => location.reload())
           .catch(() => Swal.fire({ icon: 'error', title: '欄位順序儲存失敗！' }));
+      }
+    });
+  }
+
+  // 雙擊欄位標題排序
+  if (headerRow) {
+    headerRow.querySelectorAll('th.sortable').forEach(th => {
+      th.style.cursor = 'pointer';
+      th.addEventListener('dblclick', (e) => {
+        if (e.target.closest('.col-resizer')) return; // 排除拖曳把手
+        e.preventDefault();
+        e.stopPropagation();
+        const field = th.dataset.field;
+        if (!field) return;
+
+        // 切換排序方向
+        if (currentSortField === field) {
+          currentSortDir = currentSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          currentSortField = field;
+          currentSortDir = 'asc';
+        }
+
+        // 清除 Keyset 快取（排序改變後 cursor 無效）
+        pageCursorCache = {};
+
+        // 更新排序指標
+        headerRow.querySelectorAll('th.sortable .sort-indicator').forEach(s => s.remove());
+        const indicator = document.createElement('span');
+        indicator.className = 'sort-indicator';
+        indicator.style.marginLeft = '4px';
+        indicator.textContent = currentSortDir === 'asc' ? '▲' : '▼';
+        th.appendChild(indicator);
+
+        // 重新查詢（回到第一頁）
+        doQuery(1);
+      });
+    });
+  }
+
+  // 欄位寬度拖曳調整
+  if (headerRow) {
+    const tableName = window._tableName || '';
+    let colDrag = null;
+
+    headerRow.addEventListener('mousedown', (e) => {
+      const handle = e.target.closest('.col-resizer');
+      if (!handle) return;
+      const th = handle.parentElement;
+      if (!th) return;
+      e.preventDefault();
+      e.stopPropagation();
+      colDrag = {
+        th,
+        field: th.dataset.field || '',
+        startX: e.clientX,
+        startW: th.getBoundingClientRect().width
+      };
+      document.body.style.cursor = 'col-resize';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!colDrag) return;
+      const newW = Math.max(60, colDrag.startW + (e.clientX - colDrag.startX));
+      const px = `${newW}px`;
+      colDrag.th.style.width = px;
+      colDrag.th.style.minWidth = px;
+      colDrag.th.style.maxWidth = px;
+    });
+
+    document.addEventListener('mouseup', async () => {
+      if (!colDrag) return;
+      document.body.style.cursor = '';
+      const width = colDrag.th.getBoundingClientRect().width;
+      const field = colDrag.field;
+      colDrag = null;
+      if (!tableName || !field) return;
+      try {
+        await fetch('/api/DictSetupApi/FieldWidth/Save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tableName: tableName,
+            fieldName: field,
+            widthPx: Math.round(width)
+          })
+        });
+      } catch (err) {
+        console.warn('[欄寬儲存失敗]', err);
       }
     });
   }

@@ -44,6 +44,10 @@ namespace PcbErpApi.Controllers
             public string? CursorDate { get; set; }      // 上一頁最後一筆的 PaperDate
             public string? CursorKey { get; set; }       // 上一頁最後一筆的 PaperNum/PartNum
             public string? Direction { get; set; }       // "next" 或 "prev"
+
+            // 自訂排序
+            public string? SortBy { get; set; }          // 排序欄位名稱
+            public string? SortDir { get; set; }         // "asc" 或 "desc"
         }
 
         public class PaperTypeOption
@@ -560,7 +564,9 @@ SELECT TOP 1 RunSQLAfterAdd
                 .Select(f => f.FieldName)
                 .ToListAsync();
 
-            var fieldSet = new HashSet<string>(fieldList, StringComparer.OrdinalIgnoreCase);
+            var fieldSet = new HashSet<string>(
+                fieldList.Where(f => !string.IsNullOrWhiteSpace(f)).Select(f => f.Trim()),
+                StringComparer.OrdinalIgnoreCase);
             var fieldMap = fieldList
                 .Where(f => !string.IsNullOrWhiteSpace(f))
                 .GroupBy(f => f, StringComparer.OrdinalIgnoreCase)
@@ -740,6 +746,27 @@ SELECT TOP 1 RunSQLAfterAdd
                 keyField = "";
             }
 
+            // 自訂排序：前端指定排序欄位時優先使用（停用 Keyset 分頁）
+            bool useCustomSort = false;
+            _logger.LogInformation("[PagedQuery] req.SortBy={SortBy}, req.SortDir={SortDir}, fieldSet count={Count}",
+                req.SortBy, req.SortDir, fieldSet.Count);
+            var sortByTrimmed = req.SortBy?.Trim();
+            if (!string.IsNullOrWhiteSpace(sortByTrimmed) && fieldSet.Contains(sortByTrimmed))
+            {
+                var safeDir = string.Equals(req.SortDir, "desc", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC";
+                orderField1 = sortByTrimmed;
+                orderField2 = "";
+                hasTwoOrderFields = false;
+                isDescending = safeDir == "DESC";
+                useCustomSort = true;
+                _logger.LogInformation("[PagedQuery] Custom sort applied: [{Field}] {Dir}", orderField1, safeDir);
+            }
+            else if (!string.IsNullOrWhiteSpace(sortByTrimmed))
+            {
+                _logger.LogWarning("[PagedQuery] SortBy={SortBy} NOT in fieldSet. Available: {Fields}",
+                    sortByTrimmed, string.Join(", ", fieldSet.Take(20)));
+            }
+
             var orderSql = string.IsNullOrEmpty(orderField1)
                 ? "1"
                 : hasTwoOrderFields
@@ -750,8 +777,8 @@ SELECT TOP 1 RunSQLAfterAdd
             {
                 var sw = Stopwatch.StartNew();
 
-                // 判斷是否使用 Keyset 分頁
-                var useKeyset = !string.IsNullOrEmpty(req.CursorDate) || !string.IsNullOrEmpty(req.CursorKey);
+                // 判斷是否使用 Keyset 分頁（自訂排序時停用，因排序欄位與 cursor 不一致）
+                var useKeyset = !useCustomSort && (!string.IsNullOrEmpty(req.CursorDate) || !string.IsNullOrEmpty(req.CursorKey));
                 var isNext = string.Equals(req.Direction, "next", StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(req.Direction);
 
                 var sqlPaged = new StringBuilder();
