@@ -175,6 +175,7 @@ namespace PcbErpApi.Pages.CCS
             {
                 TotalCount = await CountRowsAsync(TableName, filterSql, filterParams);
                 Items = await LoadRowsAsync(TableName, filterSql, orderBy, PageNumber, PageSize, filterParams);
+                await ApplyCompanySystemDefaultsAsync(Items, SystemId, SubSystemId, ApplySubSystemFilter);
             }
             catch (Exception ex)
             {
@@ -185,6 +186,7 @@ namespace PcbErpApi.Pages.CCS
                         orderBy = await GetDefaultOrderByAsync(TableName);
                         TotalCount = await CountRowsAsync(TableName, filterSql, filterParams);
                         Items = await LoadRowsAsync(TableName, filterSql, orderBy, PageNumber, PageSize, filterParams);
+                        await ApplyCompanySystemDefaultsAsync(Items, SystemId, SubSystemId, ApplySubSystemFilter);
                         sortBy = null;
                         sortDir = null;
                     }
@@ -293,6 +295,7 @@ namespace PcbErpApi.Pages.CCS
             {
                 var totalCount = await CountRowsAsync(TableName, filterSql, filterParams);
                 var itemsData = await LoadRowsAsync(TableName, filterSql, orderBy, PageNumber, PageSize, filterParams);
+                await ApplyCompanySystemDefaultsAsync(itemsData, SystemId, SubSystemId, ApplySubSystemFilter);
                 var hasQueryParams = HasQueryParams(Request.Query, FieldDictList);
                 return new JsonResult(new
                 {
@@ -316,6 +319,7 @@ namespace PcbErpApi.Pages.CCS
                         var fallbackOrder = await GetDefaultOrderByAsync(TableName);
                         var totalCount = await CountRowsAsync(TableName, filterSql, filterParams);
                         var itemsData = await LoadRowsAsync(TableName, filterSql, fallbackOrder, PageNumber, PageSize, filterParams);
+                        await ApplyCompanySystemDefaultsAsync(itemsData, SystemId, SubSystemId, ApplySubSystemFilter);
                         var hasQueryParams = HasQueryParams(Request.Query, FieldDictList);
                         return new JsonResult(new
                         {
@@ -524,6 +528,159 @@ SELECT *
             var obj = await cmd.ExecuteScalarAsync();
             if (obj == null || obj == DBNull.Value) return 0;
             return Convert.ToInt32(obj);
+        }
+
+        private async Task ApplyCompanySystemDefaultsAsync(
+            List<Dictionary<string, object?>> rows,
+            int systemId,
+            int subSystemId,
+            bool withSubSystem)
+        {
+            if (rows == null || rows.Count == 0) return;
+            if (!string.Equals(TableName, DataTable, StringComparison.OrdinalIgnoreCase)) return;
+
+            var rowsNeedDefaults = rows.Where(RowNeedsDefaults).ToList();
+            if (rowsNeedDefaults.Count == 0) return;
+
+            var companyIds = rowsNeedDefaults
+                .Select(GetCompanyId)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (companyIds.Count == 0)
+            {
+                ApplyFallbackDefaults(rowsNeedDefaults);
+                return;
+            }
+
+            var sysMap = new Dictionary<string, (object? InvoiceTypeId, object? PayWayCode, object? MoneyCode)>(StringComparer.OrdinalIgnoreCase);
+
+            var cs = GetConnStr();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            const int batchSize = 600;
+            for (var offset = 0; offset < companyIds.Count; offset += batchSize)
+            {
+                var batch = companyIds.Skip(offset).Take(batchSize).ToList();
+                if (batch.Count == 0) continue;
+
+                await using var cmd = conn.CreateCommand();
+                cmd.Parameters.AddWithValue("@sysId", systemId);
+                if (withSubSystem)
+                    cmd.Parameters.AddWithValue("@subSystemId", subSystemId);
+
+                var inNames = new List<string>(batch.Count);
+                for (var i = 0; i < batch.Count; i++)
+                {
+                    var pName = "@c" + i;
+                    inNames.Add(pName);
+                    cmd.Parameters.AddWithValue(pName, batch[i]);
+                }
+
+                var where = withSubSystem
+                    ? "AND s.SubSystemId = @subSystemId"
+                    : string.Empty;
+
+                cmd.CommandText = $@"
+SELECT s.CompanyId, s.InvoiceTypeId, s.PayWayCode, s.MoneyCode
+  FROM AJNdCompanySystem s WITH (NOLOCK)
+ WHERE s.SystemId = @sysId
+   {where}
+   AND s.CompanyId IN ({string.Join(",", inNames)});";
+
+                await using var rd = await cmd.ExecuteReaderAsync();
+                while (await rd.ReadAsync())
+                {
+                    var cid = rd["CompanyId"]?.ToString()?.Trim();
+                    if (string.IsNullOrWhiteSpace(cid)) continue;
+                    var invoiceTypeId = rd["InvoiceTypeId"] == DBNull.Value ? null : rd["InvoiceTypeId"];
+                    var payWayCode = rd["PayWayCode"] == DBNull.Value ? null : rd["PayWayCode"];
+                    var moneyCode = rd["MoneyCode"] == DBNull.Value ? null : rd["MoneyCode"];
+                    sysMap[cid] = (invoiceTypeId, payWayCode, moneyCode);
+                }
+            }
+
+            foreach (var row in rowsNeedDefaults)
+            {
+                var cid = GetCompanyId(row);
+                if (string.IsNullOrWhiteSpace(cid))
+                {
+                    EnsureZeroDefaults(row);
+                    continue;
+                }
+
+                if (sysMap.TryGetValue(cid, out var v))
+                {
+                    FillIfNullOrEmpty(row, "InvoiceTypeId", v.InvoiceTypeId ?? 0);
+                    FillIfNullOrEmpty(row, "PayWayCode", v.PayWayCode ?? 0);
+                    FillIfNullOrEmpty(row, "MoneyCode", v.MoneyCode ?? 0);
+                }
+                else
+                {
+                    EnsureZeroDefaults(row);
+                }
+            }
+
+            static bool RowNeedsDefaults(Dictionary<string, object?> row)
+            {
+                return !HasValue(row, "InvoiceTypeId")
+                    || !HasValue(row, "PayWayCode")
+                    || !HasValue(row, "MoneyCode");
+            }
+
+            static bool HasValue(Dictionary<string, object?> row, string fieldName)
+            {
+                if (row.TryGetValue(fieldName, out var cur))
+                    return cur != null && cur != DBNull.Value && !string.IsNullOrWhiteSpace(cur.ToString());
+                var hit = row.FirstOrDefault(kv => string.Equals(kv.Key, fieldName, StringComparison.OrdinalIgnoreCase));
+                return hit.Key != null && hit.Value != null && hit.Value != DBNull.Value && !string.IsNullOrWhiteSpace(hit.Value.ToString());
+            }
+
+            static string GetCompanyId(Dictionary<string, object?> row)
+            {
+                if (row.TryGetValue("CompanyId", out var val) && val != null)
+                    return val.ToString()?.Trim() ?? string.Empty;
+                var hit = row.FirstOrDefault(kv => string.Equals(kv.Key, "CompanyId", StringComparison.OrdinalIgnoreCase));
+                return hit.Value?.ToString()?.Trim() ?? string.Empty;
+            }
+
+            static void FillIfNullOrEmpty(Dictionary<string, object?> row, string fieldName, object value)
+            {
+                if (row.TryGetValue(fieldName, out var cur))
+                {
+                    if (cur == null || cur == DBNull.Value || string.IsNullOrWhiteSpace(cur.ToString()))
+                    {
+                        row[fieldName] = value;
+                    }
+                    return;
+                }
+
+                var hit = row.Keys.FirstOrDefault(k => string.Equals(k, fieldName, StringComparison.OrdinalIgnoreCase));
+                if (hit != null)
+                {
+                    var cur2 = row[hit];
+                    if (cur2 == null || cur2 == DBNull.Value || string.IsNullOrWhiteSpace(cur2.ToString()))
+                        row[hit] = value;
+                    return;
+                }
+                row[fieldName] = value;
+            }
+
+            static void EnsureZeroDefaults(Dictionary<string, object?> row)
+            {
+                FillIfNullOrEmpty(row, "InvoiceTypeId", 0);
+                FillIfNullOrEmpty(row, "PayWayCode", 0);
+                FillIfNullOrEmpty(row, "MoneyCode", 0);
+            }
+
+            static void ApplyFallbackDefaults(List<Dictionary<string, object?>> rowsData)
+            {
+                foreach (var row in rowsData)
+                {
+                    EnsureZeroDefaults(row);
+                }
+            }
         }
 
         private static string BuildSelectSql(string tableName, string? filter, string? orderBy, int page, int pageSize)
