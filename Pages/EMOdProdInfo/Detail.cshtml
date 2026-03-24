@@ -201,6 +201,14 @@ body:not(.layout-edit-enabled) .spec-field-label[title] {
 }
 .snap-guide.guide-h { height: 1px; left: 0; right: 0; }
 .snap-guide.guide-v { width: 1px; top: 0; bottom: 0; }
+/* 框選矩形 */
+.marquee-rect {
+  position: fixed;
+  border: 1px solid #5b8def;
+  background: rgba(91,141,239, 0.08);
+  z-index: 9999;
+  pointer-events: none;
+}
 body.layout-edit-enabled .spec-draggable:hover {
   background: rgba(74, 144, 226, 0.05);
 }
@@ -514,10 +522,10 @@ else
                                 {
                                     <!-- 壓合明細/替代料：上方操作按鈕 + 表格 -->
                                     <div class="d-flex gap-2 align-items-center px-2 py-1 border-bottom">
-                                        <button type="button" id="btnSelectPressModel" class="btn btn-outline-primary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>選擇壓合模型</button>
+                                        <button type="button" id="btnSelectPressModel" class="btn btn-outline-primary btn-sm edit-only-btn" disabled>選擇壓合模型</button>
                                         <input type="text" id="selectedPressModelCode" class="form-control form-control-sm text-primary fw-semibold" style="width:120px" readonly placeholder="未選擇">
-                                        <button type="button" id="btnLayerChange" class="btn btn-outline-primary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>疊構變更</button>
-                                        <button type="button" id="btnMaterialSet" class="btn btn-outline-primary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>材料設定</button>
+                                        <button type="button" id="btnLayerChange" class="btn btn-outline-primary btn-sm edit-only-btn" disabled>疊構變更</button>
+                                        <button type="button" id="btnMaterialSet" class="btn btn-outline-primary btn-sm edit-only-btn" disabled>材料設定</button>
                                     </div>
                                     <div class="table-responsive" data-tab-key="@tab.Key">
                                         <table class="table table-sm table-hover align-middle mb-0"
@@ -614,12 +622,12 @@ else
                                 {
                                     <!-- 途程內容頁籤：操作按鈕 + 表格 -->
                                     <div class="d-flex gap-2 align-items-center px-2 py-1 border-bottom flex-wrap" id="layerroute-toolbar">
-                                        <button type="button" id="btnChangeProcRoute" class="btn btn-outline-primary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>C途程異動</button>
+                                        <button type="button" id="btnChangeProcRoute" class="btn btn-outline-primary btn-sm edit-only-btn" disabled>C途程異動</button>
                                         <input type="text" id="currentTmpRouteId" class="form-control form-control-sm text-primary fw-semibold" style="width:120px" readonly placeholder="未設定">
-                                        <button type="button" id="btnNotesStyleTree" class="btn btn-outline-primary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>C途程備註</button>
-                                        <button type="button" id="btnBackupNotes" class="btn btn-outline-secondary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>複製備註</button>
-                                        <button type="button" id="btnPasteNotes" class="btn btn-outline-secondary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>貼上備註</button>
-                                        <button type="button" id="btnRouteChange" class="btn btn-outline-primary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>途程內容變更</button>
+                                        <button type="button" id="btnNotesStyleTree" class="btn btn-outline-primary btn-sm edit-only-btn" disabled>C途程備註</button>
+                                        <button type="button" id="btnBackupNotes" class="btn btn-outline-secondary btn-sm edit-only-btn" disabled>複製備註</button>
+                                        <button type="button" id="btnPasteNotes" class="btn btn-outline-secondary btn-sm edit-only-btn" disabled>貼上備註</button>
+                                        <button type="button" id="btnRouteChange" class="btn btn-outline-primary btn-sm edit-only-btn" disabled>途程內容變更</button>
                                     </div>
                                     <div class="table-responsive" data-tab-key="@tab.Key">
                                         <table class="table table-sm table-hover align-middle mb-0"
@@ -641,7 +649,7 @@ else
                                 {
                                     <!-- 裁板/排版圖：產生裁版圖按鈕 + 左側列表 + 右側大圖 -->
                                     <div class="d-flex gap-2 align-items-center px-2 py-1 border-bottom flex-shrink-0">
-                                        <button type="button" id="btnGenerateCutLayout" class="btn btn-outline-primary btn-sm" @(Model.IsViewOnly ? "disabled" : "")>自動產生裁版圖</button>
+                                        <button type="button" id="btnGenerateCutLayout" class="btn btn-outline-primary btn-sm">自動產生裁版圖</button>
                                         <span id="cutLayoutStatus" class="small text-muted"></span>
                                     </div>
                                     <div id="cutLayoutPreview" class="d-flex" style="min-height:420px">
@@ -1205,6 +1213,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     specEditMode = enable;
     window.specEditMode = enable;
+    // 表單頁籤的操作按鈕：只在修改模式下啟用（放在 specContent 檢查前，確保一定執行）
+    document.querySelectorAll('.edit-only-btn').forEach(btn => { btn.disabled = !enable; });
+
     const specContent = document.getElementById('spec-content');
     if (!specContent) return;
     specContent.classList.toggle('spec-editing', enable);
@@ -5074,6 +5085,8 @@ document.addEventListener('DOMContentLoaded', function () {
   const PAD = 6, SNAP_PX = 2, SEL = 'md-selected', SEL_LAB = 'md-selected-label';
   const dirtyFields = new Set(); // 記錄被修改過的欄位名稱
   const originalPos = new Map(); // 記錄欄位修改前的原始位置 { fieldName → {ft,fl,fw,fh,lt,ll} }
+  let lastMouseXY = { x: 0, y: 0 }; // 追蹤最新滑鼠位置（供頁籤切換 rebase 用）
+  let labelDrag = null; // label 拖曳全域狀態 { lab, items: [{el,t0,l0}], startX, startY }
 
   /* ---- DOM helpers ---- */
   const qAll = (s, p) => Array.from((p || document).querySelectorAll(s));
@@ -5169,13 +5182,16 @@ document.addEventListener('DOMContentLoaded', function () {
       if (!fn || originalPos.has(fn)) return;
       const field = document.querySelector(`.spec-draggable[data-field="${fn}"]`);
       const lab = labelFor(field);
+      const container = (field || lab)?.closest('.master-spec-tab') || null;
       originalPos.set(fn, {
         ft: field ? field.style.top : null,
         fl: field ? field.style.left : null,
         fw: field ? field.style.width : null,
         fh: field ? field.style.height : null,
         lt: lab ? lab.style.top : null,
-        ll: lab ? lab.style.left : null
+        ll: lab ? lab.style.left : null,
+        showWhere: field ? field.dataset.showWhere : null,
+        container: container  // 原始所在的頁籤容器
       });
     });
   }
@@ -5259,6 +5275,15 @@ document.addEventListener('DOMContentLoaded', function () {
     originalPos.forEach((pos, fn) => {
       const field = document.querySelector(`.spec-draggable[data-field="${fn}"]`);
       const lab = labelFor(field);
+      // 如果欄位被移到了其他頁籤，先移回原始頁籤
+      if (pos.container && field) {
+        const currentContainer = field.closest('.master-spec-tab');
+        if (currentContainer !== pos.container) {
+          pos.container.appendChild(field);
+          if (lab) pos.container.appendChild(lab);
+          if (pos.showWhere) field.dataset.showWhere = pos.showWhere;
+        }
+      }
       if (field) {
         if (pos.ft !== null) field.style.top = pos.ft;
         if (pos.fl !== null) field.style.left = pos.fl;
@@ -5332,20 +5357,28 @@ document.addEventListener('DOMContentLoaded', function () {
 
   /* ---- 拖曳切換頁籤 ---- */
   let tabHoverTimer = null;
+  let lastSwitchedTab = null; // 記住切換到的頁籤按鈕
+
   function checkTabSwitch(e) {
-    if (!drag) return;
-    // 暫時隱藏被拖曳的元素，讓 elementFromPoint 能穿透到下方的頁籤按鈕
-    const hiddenEls = drag.items.map(it => it.el);
-    hiddenEls.forEach(el => el.style.pointerEvents = 'none');
-    const hit = document.elementFromPoint(e.clientX, e.clientY);
-    hiddenEls.forEach(el => el.style.pointerEvents = '');
-    const tabBtn = hit?.closest('.nav-link[data-bs-toggle="tab"]');
+    // 只偵測有 data-tab-show-where 的規格頁籤（排除「規格/表單」等頂層頁籤）
+    let tabBtn = null;
+    document.querySelectorAll('.nav-link[data-tab-show-where]').forEach(btn => {
+      const r = btn.getBoundingClientRect();
+      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+        tabBtn = btn;
+      }
+    });
     if (tabBtn && !tabBtn.classList.contains('active')) {
       if (tabHoverTimer && tabHoverTimer._target === tabBtn) return;
       clearTimeout(tabHoverTimer);
       tabHoverTimer = setTimeout(() => {
         const bsTab = new bootstrap.Tab(tabBtn);
         bsTab.show();
+        lastSwitchedTab = tabBtn;
+        // 立即移動拖曳中的元素到新頁籤（避免舊頁籤隱藏時元素消失）
+        const newTabKey = tabBtn.dataset.tabKey;
+        const nc = document.querySelector(`#master-content-${newTabKey} .master-spec-tab`);
+        if (nc) rebaseDragToNewTab(nc, tabBtn);
         setTimeout(initFields, 200);
       }, 300);
       tabHoverTimer._target = tabBtn;
@@ -5355,8 +5388,123 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
+  // 將欄位（+ 配對的 label/input）移到目標頁籤，保持相對位置
+  const _movedFields = new Set(); // 防止同一欄位重複移動
+  function moveFieldToTab(el, targetTabBtn) {
+    const fn = el.dataset?.field;
+    if (!fn || _movedFields.has(fn)) return;
+    _movedFields.add(fn);
+
+    const newShowWhere = parseInt(targetTabBtn.dataset.tabShowWhere) || 1;
+    const newTabKey = targetTabBtn.dataset.tabKey;
+    const newContainer = document.querySelector(`#master-content-${newTabKey} .master-spec-tab`);
+    if (!newContainer) return;
+
+    const field = document.querySelector(`.spec-draggable[data-field="${fn}"]`);
+    const lab = labelFor(field);
+
+    // 找到來源容器（field 或 label 的）
+    const srcEl = field || lab;
+    if (!srcEl) return;
+    const oldContainer = srcEl.closest('.master-spec-tab');
+    if (oldContainer === newContainer) return; // 同一頁籤，不需移動
+
+    // 計算 label 相對於 field 的偏移量
+    let labOffsetTop = 0, labOffsetLeft = 0;
+    if (field && lab) {
+      labOffsetTop  = lab.offsetTop - field.offsetTop;
+      labOffsetLeft = lab.offsetLeft - field.offsetLeft;
+    }
+
+    // 移動 field 到新容器
+    if (field) {
+      newContainer.appendChild(field);
+      field.dataset.showWhere = newShowWhere;
+    }
+
+    // label 也跟著移動，保持相對位置
+    if (lab) {
+      newContainer.appendChild(lab);
+      if (field) {
+        lab.style.top  = (field.offsetTop + labOffsetTop) + 'px';
+        lab.style.left = (field.offsetLeft + labOffsetLeft) + 'px';
+      }
+    }
+
+    console.log(`[LayoutDrag] 欄位 ${fn} 移至頁籤 ${newTabKey} (iShowWhere=${newShowWhere})`);
+  }
+  function clearMovedFields() { _movedFields.clear(); }
+
+  // 頁籤切換時，立即移動拖曳中的元素到新容器並重置座標
+  function rebaseDragToNewTab(nc, tabBtn) {
+    const items = drag ? drag.items : (labelDrag ? labelDrag.items : null);
+    if (!items || !nc) return;
+    const newShowWhere = parseInt(tabBtn.dataset.tabShowWhere) || 1;
+    const primaryEl = drag ? drag.el : (labelDrag ? labelDrag.lab : null);
+    if (!primaryEl) return;
+
+    // Step 1: 用 getBoundingClientRect 記錄所有元素相對於主拖曳元素的偏移
+    const primaryRect = primaryEl.getBoundingClientRect();
+    const offsets = new Map();
+    items.forEach(it => {
+      const r = it.el.getBoundingClientRect();
+      offsets.set(it.el, { dTop: r.top - primaryRect.top, dLeft: r.left - primaryRect.left });
+    });
+
+    // Step 2: 找配對元素，記錄偏移，加入拖曳群組
+    const moved = new Set();
+    const newItems = [];
+    items.forEach(it => {
+      const fn = it.el.dataset?.field;
+      if (!fn || moved.has(fn)) return;
+      moved.add(fn);
+      const field = document.querySelector(`.spec-draggable[data-field="${fn}"]`);
+      const lab = labelFor(field);
+      if (field && !items.some(i => i.el === field)) {
+        const r = field.getBoundingClientRect();
+        offsets.set(field, { dTop: r.top - primaryRect.top, dLeft: r.left - primaryRect.left });
+        newItems.push({ el: field, t0: 0, l0: 0 });
+      }
+      if (lab && !items.some(i => i.el === lab)) {
+        const r = lab.getBoundingClientRect();
+        offsets.set(lab, { dTop: r.top - primaryRect.top, dLeft: r.left - primaryRect.left });
+        newItems.push({ el: lab, t0: 0, l0: 0 });
+      }
+      // 移動到新容器
+      if (field && !nc.contains(field)) { nc.appendChild(field); field.dataset.showWhere = newShowWhere; }
+      if (lab && !nc.contains(lab)) nc.appendChild(lab);
+    });
+    items.push(...newItems);
+
+    // Step 3: 以滑鼠位置為主元素的新位置，所有元素按偏移排列
+    const cr = nc.getBoundingClientRect();
+    const primaryTop = lastMouseXY.y - cr.top;
+    const primaryLeft = lastMouseXY.x - cr.left;
+    items.forEach(it => {
+      const off = offsets.get(it.el) || { dTop: 0, dLeft: 0 };
+      it.el.style.top  = Math.max(0, Math.round(primaryTop + off.dTop)) + 'px';
+      it.el.style.left = Math.max(0, Math.round(primaryLeft + off.dLeft)) + 'px';
+    });
+
+    // Step 4: 重置座標
+    snapContainer = nc;
+    const mx = lastMouseXY.x, my = lastMouseXY.y;
+    if (drag) {
+      drag.startX = mx; drag.startY = my;
+      drag.items.forEach(it => { const r = relRect(it.el, nc); it.t0 = r.top; it.l0 = r.left; });
+      snap = buildSnap(drag.el, drag.items.map(i => i.el));
+    }
+    if (labelDrag) {
+      labelDrag.startX = mx; labelDrag.startY = my;
+      labelDrag.items.forEach(it => { const r = relRect(it.el, nc); it.t0 = r.top; it.l0 = r.left; });
+      snap = buildSnap(labelDrag.lab, labelDrag.items.map(i => i.el));
+    }
+    console.log(`[LayoutDrag] rebase 到新頁籤，${moved.size} 個欄位`);
+  }
+
   function onDragMove(e) {
     if (!drag) return;
+    lastMouseXY.x = e.clientX; lastMouseXY.y = e.clientY;
     const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
     checkTabSwitch(e);
     const base = drag.items.find(i => i.el === drag.el);
@@ -5373,6 +5521,7 @@ document.addEventListener('DOMContentLoaded', function () {
   function onDragEnd() {
     if (!drag) return;
     drag.el.style.opacity = '';
+    lastSwitchedTab = null;
     markDirty(drag.items.map(i => i.el));
     snap = { tops:[], lefts:[], rights:[], bottoms:[] };
     clearGuides();
@@ -5478,45 +5627,45 @@ document.addEventListener('DOMContentLoaded', function () {
         e.preventDefault();
         const sX = e.clientX, sY = e.clientY;
         let dragging = false;
-        let labItems = []; // [{el, t0, l0}]
-        let dragStartX, dragStartY; // 記錄拖曳起始位置（超過 dead zone 後的 ev）
         const onMove = ev => {
+          lastMouseXY.x = ev.clientX; lastMouseXY.y = ev.clientY;
           if (!dragging && (Math.abs(ev.clientX - sX) > DEAD_ZONE || Math.abs(ev.clientY - sY) > DEAD_ZONE)) {
             dragging = true;
-            dragStartX = ev.clientX; dragStartY = ev.clientY;
-            // 如果此 label 已被選取，拖全部已選取的 label + field；否則只拖自己
             if (!lab.classList.contains(SEL_LAB)) { clearSel(); lab.classList.add(SEL_LAB); }
             const grpLabels = selectedLabels().length ? selectedLabels() : [lab];
             const grpFields = selected();
             const allMoving = [...grpLabels, ...grpFields];
-            captureOriginals(allMoving); // 移動前記錄原始位置
+            captureOriginals(allMoving);
             snap = buildSnap(lab, allMoving);
             const ct = snapContainer;
-            labItems = allMoving.map(l => {
-              const r0 = relRect(l, ct);
-              return { el: l, t0: r0.top, l0: r0.left };
-            });
+            labelDrag = {
+              lab, startX: ev.clientX, startY: ev.clientY,
+              items: allMoving.map(l => { const r0 = relRect(l, ct); return { el: l, t0: r0.top, l0: r0.left }; })
+            };
           }
-          if (dragging && labItems.length) {
-            const base = labItems.find(i => i.el === lab);
-            const rawT = base.t0 + (ev.clientY - dragStartY), rawL = base.l0 + (ev.clientX - dragStartX);
+          if (dragging && labelDrag && labelDrag.items.length) {
+            const base = labelDrag.items.find(i => i.el === lab);
+            const rawT = base.t0 + (ev.clientY - labelDrag.startY), rawL = base.l0 + (ev.clientX - labelDrag.startX);
             const s = applySnap(rawT, rawL, lab.offsetWidth, lab.offsetHeight);
             const snapDY = s.top - base.t0, snapDX = s.left - base.l0;
-            labItems.forEach(it => {
+            labelDrag.items.forEach(it => {
               it.el.style.top  = Math.max(0, it.t0 + snapDY) + 'px';
               it.el.style.left = Math.max(0, it.l0 + snapDX) + 'px';
             });
+            checkTabSwitch(ev);
           }
         };
         const onUp = ev => {
           document.removeEventListener('mousemove', onMove);
           document.removeEventListener('mouseup', onUp);
-          if (dragging) {
-            markDirty(labItems.map(i => i.el));
+          if (dragging && labelDrag) {
+            lastSwitchedTab = null;
+            markDirty(labelDrag.items.map(i => i.el));
             snap = { tops:[], lefts:[], rights:[], bottoms:[] };
             clearGuides();
+            clearTimeout(tabHoverTimer); tabHoverTimer = null;
+            labelDrag = null;
           } else {
-            // 點擊 → 選取 label
             if (ev.ctrlKey || ev.metaKey) lab.classList.toggle(SEL_LAB);
             else { clearSel(); lab.classList.add(SEL_LAB); }
           }
@@ -5565,14 +5714,62 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   /* adminStateReady 事件由 _Layout.cshtml 觸發，此處不需額外處理 */
 
-  /* ---- 點擊空白處取消選取 ---- */
-  document.addEventListener('mouseup', function (e) {
-    if (!inLayout() || drag || rsz) return;
-    // 不是點在欄位或 label 上 → 取消所有選取
-    if (!e.target.closest('.spec-draggable') && !e.target.closest('.spec-field-label')) {
-      if (e.target.closest('.master-spec-tab')) clearSel();
-    }
+  /* ---- 框選 (Marquee Selection) ---- */
+  let marquee = null; // { rect: HTMLElement, startX, startY, additive }
+  document.addEventListener('mousedown', function (e) {
+    if (!inLayout() || e.button !== 0) return;
+    // 只在空白處啟動框選（不是點在 field/label/按鈕/resize handle 上）
+    if (e.target.closest('.spec-draggable') || e.target.closest('.spec-field-label')
+      || e.target.closest('#layout-btn-wrap') || e.target.closest('.rsz-handle')) return;
+    // 必須在 spec-tab 容器內
+    if (!e.target.closest('.master-spec-tab')) return;
+    e.preventDefault();
+    const additive = e.ctrlKey || e.metaKey;
+    if (!additive) clearSel();
+    const rect = document.createElement('div');
+    rect.className = 'marquee-rect';
+    rect.style.left = e.clientX + 'px';
+    rect.style.top  = e.clientY + 'px';
+    rect.style.width = '0px';
+    rect.style.height = '0px';
+    document.body.appendChild(rect);
+    marquee = { rect, startX: e.clientX, startY: e.clientY, additive };
   });
+  document.addEventListener('mousemove', function (e) {
+    if (!marquee) return;
+    const x = Math.min(e.clientX, marquee.startX);
+    const y = Math.min(e.clientY, marquee.startY);
+    const w = Math.abs(e.clientX - marquee.startX);
+    const h = Math.abs(e.clientY - marquee.startY);
+    marquee.rect.style.left   = x + 'px';
+    marquee.rect.style.top    = y + 'px';
+    marquee.rect.style.width  = w + 'px';
+    marquee.rect.style.height = h + 'px';
+  });
+  document.addEventListener('mouseup', function (e) {
+    if (!marquee) return;
+    const mr = marquee.rect.getBoundingClientRect();
+    marquee.rect.remove();
+    // 只有拖出一定大小才算框選（避免誤觸）
+    if (mr.width > 5 || mr.height > 5) {
+      // 檢查所有 field 和 label 是否在框選範圍內
+      qAll('.spec-draggable').forEach(el => {
+        const r = el.getBoundingClientRect();
+        if (rectsOverlap(mr, r)) el.classList.add(SEL);
+      });
+      qAll('.spec-field-label').forEach(el => {
+        const r = el.getBoundingClientRect();
+        if (rectsOverlap(mr, r)) el.classList.add(SEL_LAB);
+      });
+    } else if (!marquee.additive) {
+      // 小範圍點擊空白處 → 取消選取
+      clearSel();
+    }
+    marquee = null;
+  });
+  function rectsOverlap(a, b) {
+    return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
+  }
 
   /* ---- keyboard shortcuts（僅方向鍵，capture 攔截 Bootstrap Tab）---- */
   document.addEventListener('keydown', function (e) {
