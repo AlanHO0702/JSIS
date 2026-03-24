@@ -99,34 +99,56 @@ namespace PcbErpApi.Controllers
                         }
                     }
 
-                    // ??setPairs ?寞??葆甈?鞈?嚗靘蹂?敺捱摰??詨???
+                    // 分類欄位到 keyPairs / setPairs
                     var setPairs = new List<(ColumnInfo Col, object? Value)>();
                     var keyPairs = new List<(ColumnInfo Col, object? Value)>();
                     var skipped  = new List<string>();
 
+                    // ★ 解析 __originalKeys（前端修改了 key 欄位時會帶原始值）
+                    Dictionary<string, object?>? originalKeyValues = null;
+                    if (row.TryGetPropertyValue("__originalKeys", out var okNode) && okNode is JsonObject okObj)
+                    {
+                        originalKeyValues = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var (okName, okVal) in okObj)
+                        {
+                            if (columns.ContainsKey(okName))
+                                originalKeyValues[okName] = ConvertJsonToDbValue(okVal, columns[okName].DbType);
+                        }
+                    }
+
                     foreach (var (name, jv) in row)
                     {
+                        if (name == "__originalKeys") continue;
                         if (!columns.ContainsKey(name)) continue;
                         var col = columns[name];
 
-                        // === Binary / RowVersion ?孵?? ===
+                        // === Binary / RowVersion 特殊處理 ===
                         if (col.IsBinary || col.IsRowVersion)
                         {
                             var (shouldSet, isNull, bytes) = ConvertBinaryForUpdate(jv);
-                            if (!shouldSet) { skipped.Add(col.Name); continue; }          // 蝛箏?銝???頝喲?嚗??湔
+                            if (!shouldSet) { skipped.Add(col.Name); continue; }
                             setPairs.Add((col, isNull ? DBNull.Value : bytes));
                             continue;
                         }
 
-                        // ?嗡??
                         var val = ConvertJsonToDbValue(jv, col.DbType);
 
                         if (keyNames.Any(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase)))
-                            keyPairs.Add((col, val));
+                        {
+                            // ★ 如果有 __originalKeys，用原始值做 WHERE，新值放 SET
+                            if (originalKeyValues != null && originalKeyValues.TryGetValue(name, out var origVal))
+                            {
+                                keyPairs.Add((col, origVal));   // 原始值 → WHERE
+                                setPairs.Add((col, val));       // 新值 → SET
+                            }
+                            else
+                            {
+                                keyPairs.Add((col, val));
+                            }
+                        }
                         else if (updatable.Contains(col.Name, StringComparer.OrdinalIgnoreCase))
                             setPairs.Add((col, val));
                     }
-
                     if (keyPairs.Count != keyNames.Count || keyPairs.Any(k => IsNullOrEmptyDbValue(k.Value)))
                     {
                         results.Add(new { ok = false, reason = "Key fields missing or empty.", row, keys = keyNames });
@@ -151,6 +173,22 @@ namespace PcbErpApi.Controllers
 
                     if (setPairs.Count == 0)
                     {
+                        // ★ 先檢查資料是否已存在，避免既有資料被重複 INSERT
+                        var checkWhereSql0 = string.Join(" AND ", keyPairs.Select(p => $"[{p.Col.Name}] = @K_{p.Col.Name}"));
+                        var checkSql0 = $"SELECT COUNT(*) FROM [{actualTable}] WHERE {checkWhereSql0}";
+                        using var checkCmd0 = conn.CreateCommand();
+                        checkCmd0.Transaction = (System.Data.Common.DbTransaction)tx;
+                        checkCmd0.CommandText = checkSql0;
+                        foreach (var kp in keyPairs)
+                            AddTypedParameter(checkCmd0, $"@K_{kp.Col.Name}", kp.Value, kp.Col);
+                        var existsCount = (int)(await checkCmd0.ExecuteScalarAsync() ?? 0);
+                        if (existsCount > 0)
+                        {
+                            // 資料已存在且沒有可更新的欄位 → 跳過（不新增重複資料）
+                            results.Add(new { ok = true, affected = 0, skip = "Row already exists, no updatable changes" });
+                            continue;
+                        }
+
                         var insertSeen0 = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         var insertPairs0 = new List<(ColumnInfo Col, object? Value)>();
                         foreach (var kp in keyPairs)
@@ -228,7 +266,7 @@ namespace PcbErpApi.Controllers
                                 AddTypedParameter(insertCmd, $"@I_{p.Col.Name}", p.Value, p.Col);
 
                             affected = await insertCmd.ExecuteNonQueryAsync();
-                            results.Add(new { ok = affected > 0, affected, sql = insertSql, inserted = true, skipped });
+                            results.Add(new { ok = affected > 0, affected, sql = insertSql, inserted = true, skipped, attemptedUpdateSql = sql });
                             continue;
                         }
                     }
