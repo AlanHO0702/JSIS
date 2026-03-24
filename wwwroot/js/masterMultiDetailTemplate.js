@@ -272,7 +272,18 @@
       + keyValues.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("")
       + (orderBy ? `&orderBy=${encodeURIComponent(orderBy)}` : "")
       + (orderBy ? `&orderDir=${encodeURIComponent(orderDir || "ASC")}` : "");
-    return await fetch(url).then(r => r.json());
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => res.statusText);
+        console.error(`[MMD] fetchByKeys 失敗: ${tableName}`, { keyNames, keyValues, status: res.status, error: errText });
+        return [];
+      }
+      return await res.json();
+    } catch (err) {
+      console.error(`[MMD] fetchByKeys 例外: ${tableName}`, { keyNames, keyValues, error: err.message });
+      return [];
+    }
   };
 
   // ==============================================================================
@@ -898,18 +909,67 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
         inp.addEventListener("click", syncCheckbox);
       } else {
         span.textContent = fmtCell(display, DICT.fmt(f), DICT.type(f));
-        inp.value = display == null ? "" : display;
-        inp.dataset.raw = raw == null ? "" : raw;
-
+        inp.value = display == null ? "" : String(display);
+        inp.dataset.raw = raw == null ? "" : String(raw);
         // ★ 若有 lookup 對照表，記錄並綁定雙擊下拉（編輯模式可選取，瀏覽模式唯讀）
         const fieldLookupMap = oc[f.FieldName]?.dropdown || lk[f.FieldName]?.dropdown;
         const fieldCellMap   = oc[f.FieldName]?.cell    || lk[f.FieldName]?.cell;
         if (fieldLookupMap && Object.keys(fieldLookupMap).length > 0) {
           inp._lookupMap     = fieldLookupMap;  // 下拉用（含所有顯示欄位合併）
           inp._lookupCellMap = fieldCellMap;    // 儲存格顯示用（只用 result0）
-          td.addEventListener('dblclick', (e) => {
+          // ★ 記錄條件過濾欄位資訊
+          const cond1Field  = (f.LookupCond1Field || '').trim();
+          const cond1Source = (f.LookupCond1ResultField || '').trim();
+          const cond2Field  = (f.LookupCond2Field || '').trim();
+          const cond2Source = (f.LookupCond2ResultField || '').trim();
+          const hasCondition = !!(cond1Field || cond2Field);
+          const lookupTable  = f.LookupTable || f.OCXLKTableName || '';
+          const lookupKey    = f.LookupKeyField || f.KeyFieldName || '';
+          const lookupResult = f.LookupResultField || f.OCXLKResultName || '';
+          td.addEventListener('dblclick', async (e) => {
             e.stopPropagation();
             const isReadOnly = !window._mmdEditing || inp.readOnly || inp.disabled;
+            // ★ 有條件過濾時，即時查詢 API 取得過濾後的資料
+            if (hasCondition && lookupTable && lookupKey && lookupResult) {
+              const currentTr = td.closest('tr');
+              const getCondVal = (sourceField) => {
+                if (!sourceField || !currentTr) return '';
+                const sfLower = sourceField.toLowerCase();
+                // ★ 優先從 td[data-field] 找 cell-edit 的 dataset.raw（原始 key 值）
+                //   因為 inp.value 可能是 lookup 翻譯後的顯示文字，不是實際的 key
+                const tdCell = Array.from(currentTr.querySelectorAll('td[data-field]'))
+                  .find(t => (t.dataset.field || '').toLowerCase() === sfLower);
+                if (tdCell) {
+                  const cellInp = tdCell.querySelector('.cell-edit');
+                  if (cellInp) return (cellInp.dataset?.raw ?? cellInp.value ?? '').trim();
+                }
+                // 再找隱藏 input（PK/FK hidden）
+                const found = Array.from(currentTr.querySelectorAll('input[type="hidden"]'))
+                  .find(i => (i.name || '').toLowerCase() === sfLower);
+                if (found) return (found.value ?? '').trim();
+                return '';
+              };
+              const c1Val = getCondVal(cond1Source);
+              const c2Val = getCondVal(cond2Source);
+              let url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(lookupTable)}&key=${encodeURIComponent(lookupKey)}&result=${encodeURIComponent(lookupResult)}`;
+              if (cond1Field && c1Val) url += `&cond1Field=${encodeURIComponent(cond1Field)}&cond1Value=${encodeURIComponent(c1Val)}`;
+              if (cond2Field && c2Val) url += `&cond2Field=${encodeURIComponent(cond2Field)}&cond2Value=${encodeURIComponent(c2Val)}`;
+              try {
+                const res = await fetch(url);
+                if (!res.ok) return;
+                const data = await res.json();
+                const filteredMap = {};
+                (data || []).forEach(row => {
+                  const k = String(row.key ?? '');
+                  if (!k) return;
+                  filteredMap[k] = combineResults(row);
+                });
+                if (Object.keys(filteredMap).length > 0) {
+                  showLookupDropdown(inp, td, filteredMap, isReadOnly);
+                }
+              } catch { }
+              return;
+            }
             showLookupDropdown(inp, td, inp._lookupMap, isReadOnly);
           });
         }
@@ -1220,13 +1280,11 @@ const loadAllDetails = async (row) => {
       selectedBucket.lastDetailIndex = i;
 
       // ★★★ Detail Focus 聯動功能 ★★★
+      //   自動串聯只載入資料，不會改寫 activeTarget，所以 activeTarget 保持在使用者點擊的層級
       if (cfg.EnableDetailFocusCascade) {
-        // BalanceSheet 佈局（Layout = 3）使用平行式聯動，其他佈局使用串聯式聯動
         if (layoutMode === 3) {
-          // 平行式：點擊 Detail[0] → 同時載入 Detail[1], Detail[2], ...
           loadAllSubDetailsFromFocus(i, row);
         } else {
-          // 串聯式：點擊 Detail[i] → 載入 Detail[i+1] → 載入 Detail[i+2] → ...
           loadNextDetailFromFocus(i, row);
         }
       }
@@ -1310,18 +1368,25 @@ const loadAllDetails = async (row) => {
       // 載入下一層 Detail 的資料，同時保留 Focus 聯動功能
       await buildBody(tbody, detailDicts[nextIndex], rows, (row, tr) => {
         tbody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
-      tr.classList.add("selected");
-      activeTarget.type = "detail";
-      activeTarget.index = nextIndex;
-      updateCountPanel();
+        tr.classList.add("selected");
+        activeTarget.type = "detail";
+        activeTarget.index = nextIndex;
+        updateCountPanel();
+        selectedBucket.details[nextIndex] = row;
+        selectedBucket.lastDetailRow = row;
+        selectedBucket.lastDetailIndex = nextIndex;
 
         // 遞迴：如果還有下一層，繼續聯動
+        //   自動串聯只載入資料，不會改寫 activeTarget
         if (cfg.EnableDetailFocusCascade) {
           loadNextDetailFromFocus(nextIndex, row);
         }
       }, true);
 
-      // ★ 當 detail 沒有資料時，放一列空白佔位列
+      const detailGridEl = document.getElementById(`${cfg.DomId}-detail-${nextIndex}-grid`);
+      buildFooter(detailGridEl, detailDicts[nextIndex], rows);
+
+      // ★ 當 detail 沒有資料時，放一列空白佔位列（與 loadAllDetails 一致）
       if (rows.length === 0 && tbody.querySelectorAll("tr").length === 0) {
         const dict = detailDicts[nextIndex] || [];
         const visibleCols = dict.filter(f => (f.Visible ?? 1) === 1).length || 1;
@@ -1353,6 +1418,39 @@ const loadAllDetails = async (row) => {
           tbody._pendingRebind = false;
         } else {
           tbody._pendingRebind = true;
+        }
+      }
+
+      // ★ 自動串聯後續層級：有資料時用第一筆繼續載入下一層，無資料時清除後續層並顯示 placeholder
+      if (rows.length > 0) {
+        // 自動選取第一筆，串聯載入下一層
+        const firstTr = tbody.querySelector("tr");
+        if (firstTr && cfg.EnableDetailFocusCascade) {
+          firstTr.classList.add("selected");
+          // ★ 不在自動串聯中改寫 activeTarget，讓它只由使用者的實際點擊來設定
+          //    這樣按 + 時 getActive() 才能正確回傳使用者真正選取的層級
+          selectedBucket.details[nextIndex] = rows[0];
+          selectedBucket.lastDetailRow = rows[0];
+          selectedBucket.lastDetailIndex = nextIndex;
+          await loadNextDetailFromFocus(nextIndex, rows[0]);
+        }
+      } else {
+        // ★ 前一階無資料：後續層級顯示「請點選上方一筆資料」（不可選擇，不可新增）
+        for (let subIdx = nextIndex + 1; subIdx < (cfg.Details || []).length; subIdx++) {
+          const subTbody = document.getElementById(`${cfg.DomId}-detail-${subIdx}-body`);
+          if (!subTbody) continue;
+          subTbody._lastQueryCtx = {};
+          subTbody.innerHTML = "";
+          const subDict = detailDicts[subIdx] || [];
+          const subVisibleCols = subDict.filter(f => (f.Visible ?? 1) === 1).length || 1;
+          const hintTr = document.createElement("tr");
+          const hintTd = document.createElement("td");
+          hintTd.colSpan = subVisibleCols;
+          hintTd.className = "text-center text-muted";
+          hintTd.style.padding = "8px";
+          hintTd.textContent = "請先新增前一階資料";
+          hintTr.appendChild(hintTd);
+          subTbody.appendChild(hintTr);
         }
       }
     };
@@ -1844,9 +1942,82 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
           if (fieldLookupMap && Object.keys(fieldLookupMap).length > 0) {
             inp._lookupMap     = fieldLookupMap;
             inp._lookupCellMap = fieldCellMap;
-            td.addEventListener('dblclick', (e) => {
+            // ★ 記錄條件過濾欄位資訊
+            const cond1Field  = (f.LookupCond1Field || '').trim();
+            const cond1Source = (f.LookupCond1ResultField || '').trim();
+            const cond2Field  = (f.LookupCond2Field || '').trim();
+            const cond2Source = (f.LookupCond2ResultField || '').trim();
+            const hasCondition = !!(cond1Field || cond2Field);
+            const lookupTable  = f.LookupTable || f.OCXLKTableName || '';
+            const lookupKey    = f.LookupKeyField || f.KeyFieldName || '';
+            const lookupResult = f.LookupResultField || f.OCXLKResultName || '';
+            td.addEventListener('dblclick', async (e) => {
               e.stopPropagation();
               const isReadOnly = !window._mmdEditing || inp.readOnly || inp.disabled;
+              // ★ 有條件過濾時，即時查詢 API 取得過濾後的資料
+              if (hasCondition && lookupTable && lookupKey && lookupResult) {
+                const currentTr = td.closest('tr');
+                const getCondVal = (sourceField) => {
+                  if (!sourceField || !currentTr) return '';
+                  const sfLower = sourceField.toLowerCase();
+                  // ★ 從當前行的 td[data-field] 找 cell-edit 的 dataset.raw（原始 key 值）
+                  const tdCell = Array.from(currentTr.querySelectorAll('td[data-field]'))
+                    .find(t => (t.dataset.field || '').toLowerCase() === sfLower);
+                  if (tdCell) {
+                    const cellInp = tdCell.querySelector('.cell-edit');
+                    if (cellInp) {
+                      const v = (cellInp.dataset?.raw ?? cellInp.value ?? '').trim();
+                      if (v) return v;
+                    }
+                  }
+                  // 再找隱藏 input（PK/FK hidden）
+                  const found = Array.from(currentTr.querySelectorAll('input[type="hidden"]'))
+                    .find(i => (i.name || '').toLowerCase() === sfLower);
+                  if (found && (found.value ?? '').trim()) return found.value.trim();
+                  // ★ 從當前行的 cell-edit input 找 dataset.raw（新增行沒有 data-field，用 name 找）
+                  const anyInp = Array.from(currentTr.querySelectorAll('input.cell-edit'))
+                    .find(i => (i.name || '').toLowerCase() === sfLower);
+                  if (anyInp) {
+                    const v = (anyInp.dataset?.raw ?? anyInp.value ?? '').trim();
+                    if (v) return v;
+                  }
+                  // ★ 從 selectedBucket 已選取行取值（同層 → 父層 → Master）
+                  const lookupInRow = (rowData) => {
+                    if (!rowData) return '';
+                    const rk = Object.keys(rowData).find(k => k.toLowerCase() === sfLower);
+                    return rk && rowData[rk] != null ? String(rowData[rk]).trim() : '';
+                  };
+                  const selfVal = lookupInRow(selectedBucket.details[target.index]);
+                  if (selfVal) return selfVal;
+                  for (let pi = (target.index ?? 0) - 1; pi >= 0; pi--) {
+                    const pv = lookupInRow(selectedBucket.details[pi]);
+                    if (pv) return pv;
+                  }
+                  const mv = lookupInRow(selectedBucket.master);
+                  if (mv) return mv;
+                  return '';
+                };
+                const c1Val = getCondVal(cond1Source);
+                const c2Val = getCondVal(cond2Source);
+                let url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(lookupTable)}&key=${encodeURIComponent(lookupKey)}&result=${encodeURIComponent(lookupResult)}`;
+                if (cond1Field && c1Val) url += `&cond1Field=${encodeURIComponent(cond1Field)}&cond1Value=${encodeURIComponent(c1Val)}`;
+                if (cond2Field && c2Val) url += `&cond2Field=${encodeURIComponent(cond2Field)}&cond2Value=${encodeURIComponent(c2Val)}`;
+                try {
+                  const res = await fetch(url);
+                  if (!res.ok) return;
+                  const data = await res.json();
+                  const filteredMap = {};
+                  (data || []).forEach(row => {
+                    const k = String(row.key ?? '');
+                    if (!k) return;
+                    filteredMap[k] = combineResults(row);
+                  });
+                  if (Object.keys(filteredMap).length > 0) {
+                    showLookupDropdown(inp, td, filteredMap, isReadOnly);
+                  }
+                } catch { }
+                return;
+              }
               showLookupDropdown(inp, td, inp._lookupMap, isReadOnly);
             });
           }
@@ -1926,20 +2097,47 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       }
     }
 
-    const saveAll = async () => {
-      const focusTarget = pendingAddedRow && pendingAddedTarget
-        ? {
-            type: pendingAddedTarget.type,
-            index: pendingAddedTarget.index,
-            keyValues: captureKeyValues(
-              pendingAddedRow,
-              pendingAddedTarget.type === "detail"
-                ? (detailKeyFields[pendingAddedTarget.index] || [])
-                : masterPK
-            )
-          }
-        : null;
+    // ★ 儲存/刪除後動態刷新資料，並選回前幾階的資料
+    //   根據 cascadeMode 決定刷新策略：
+    //   Mode 0（預設）：所有 Detail 都從 Master 取 key → 重新載入所有明細即可
+    //   Mode 1（串聯）：Detail[N]←Detail[N-1] → 從前一階的已選資料重新載入
+    //   Mode 2（扇出）：Detail[1]+←Detail[0] → Detail[0]變更時全部重載，其他時從 Detail[0] 重載
+    const reloadAfterChange = async (changedDetailIndex) => {
+      if (!lastMasterRow) return;
+      if (changedDetailIndex < 0) { location.reload(); return; }
 
+      // 串聯式 (Mode 1) 且非第一階：從前一階重新載入即可，前幾階保持選取
+      if (cascadeMode === 1 && changedDetailIndex > 0) {
+        const parentRow = selectedBucket.details[changedDetailIndex - 1];
+        if (parentRow) {
+          await loadNextDetailFromFocus(changedDetailIndex - 1, parentRow);
+          activeTarget.type = "detail";
+          activeTarget.index = changedDetailIndex - 1;
+          updateCountPanel();
+          return;
+        }
+      }
+
+      // 扇出式 (Mode 2) 且非 Detail[0]：從 Detail[0] 的已選資料重新載入
+      if (cascadeMode === 2 && changedDetailIndex > 0) {
+        const detail0Row = selectedBucket.details[0];
+        if (detail0Row) {
+          await loadAllSubDetailsFromFocus(0, detail0Row);
+          activeTarget.type = "detail";
+          activeTarget.index = 0;
+          updateCountPanel();
+          return;
+        }
+      }
+
+      // 其他情況（Mode 0、第一階變更、或找不到前一階資料）：重新載入所有明細
+      await loadAllDetails(lastMasterRow);
+      activeTarget.type = "master";
+      activeTarget.index = -1;
+      updateCountPanel();
+    };
+
+    const saveAll = async () => {
       const rMaster = await masterEditor.saveChanges();
       const rDetails = await Promise.all(detailEditors.map(ed => ed.saveChanges()));
 
@@ -1955,45 +2153,23 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       }
 
       Swal?.fire({ icon: "success", title: "儲存完成", timer: 900, showConfirmButton: false });
+      // ★ 儲存成功後：退出編輯模式、清除異動狀態
+      const savedTarget = pendingAddedTarget;
+      masterEditor.cancelChanges();
+      detailEditors.forEach(ed => ed.cancelChanges());
       setEditMode(false);
+      setDirty(false);
       pendingAddedRow = null;
       pendingAddedTarget = null;
 
-      if (focusTarget?.keyValues && Object.keys(focusTarget.keyValues).length) {
-        if (focusTarget.type === "master") {
-          const rows = cfg.MasterApi
-            ? await fetch(cfg.MasterApi).then(r => r.json())
-            : await fetchTopRows(cfg.MasterTable, cfg.MasterTop || 200);
-          const sortedRows = sortRowsByItemIfNeeded(rows, masterPK);
-          await buildBody(mBody, masterDict, sortedRows, async (row, tr) => {
-            Array.from(mBody.children).forEach(x => x.classList.remove("selected"));
-            tr.classList.add("selected");
-            activeTarget.type = "master";
-            activeTarget.index = -1;
-            updateCountPanel();
-            lastMasterRow = row;
-            selectedBucket.master = row;
-            await loadAllDetails(row);
-          }, false);
-
-          const tr = findRowByKeys(mBody, focusTarget.keyValues);
-          if (tr) {
-            tr.click();
-            try { tr.scrollIntoView({ block: "center", behavior: "auto" }); } catch { }
-          }
-        } else if (focusTarget.type === "detail") {
-          const masterRow = selectedBucket.master || lastMasterRow;
-          if (masterRow) {
-            await loadAllDetails(masterRow);
-            const tbody = document.getElementById(`${cfg.DomId}-detail-${focusTarget.index}-body`);
-            const tr = findRowByKeys(tbody, focusTarget.keyValues);
-            if (tr) {
-              tr.click();
-              try { tr.scrollIntoView({ block: "center", behavior: "auto" }); } catch { }
-            }
-          }
-        }
+      // ★ 動態刷新資料並選回前幾階
+      if (savedTarget && savedTarget.type === "detail") {
+        await reloadAfterChange(savedTarget.index);
+      } else if (!rMaster.skipped) {
+        // Master 資料有異動，重新載入頁面
+        location.reload();
       }
+
       return { ok: true, skipped: false };
     };
 
@@ -2085,7 +2261,12 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       await notify("success", "刪除完成");
       setDirty(false);
       updateCountPanel();
-      if (target.type === "master") location.reload();
+      // ★ 動態刷新資料並選回前幾階
+      if (target.type === "master") {
+        location.reload();
+      } else if (target.type === "detail") {
+        await reloadAfterChange(target.index);
+      }
     };
 
     const addSubDetailRow = () => {
@@ -2235,7 +2416,12 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
         customSave: async () => { await saveAll(); },
         onDelete: async () => { await deleteSelected(); },
         onCancelPending: (row) => { row?.remove?.(); },
-        onCancelEdit: async () => { location.reload(); }
+        onCancelEdit: async () => {
+          masterEditor.cancelChanges();
+          detailEditors.forEach(ed => ed.cancelChanges());
+          setEditMode(false);
+          setDirty(false);
+        }
       });
     } else {
       let pendingRow = null;
@@ -2258,7 +2444,10 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
           pendingRow = null;
           return;
         }
-        location.reload();
+        masterEditor.cancelChanges();
+        detailEditors.forEach(ed => ed.cancelChanges());
+        setEditMode(false);
+        setDirty(false);
       });
     }
 
