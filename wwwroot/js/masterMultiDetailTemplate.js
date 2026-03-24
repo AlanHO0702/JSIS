@@ -120,7 +120,7 @@
     document.head.appendChild(style);
   }
 
-  function showLookupDropdown(inp, td, lookupMap, readOnly) {
+  function showLookupDropdown(inp, td, lookupMap, readOnly, onSelect) {
     ensureLookupDropdownCss();
     const existing = document.getElementById('mmd-lookup-dd');
     if (existing) existing.remove();
@@ -148,12 +148,42 @@
     list.className = 'mmd-lookup-list';
     dd.appendChild(list);
 
+    // ── 模糊比對：判斷 query 的每個字元是否依序出現在 text 中 ──
+    const fuzzyMatch = (text, query) => {
+      let ti = 0;
+      for (let qi = 0; qi < query.length; qi++) {
+        const idx = text.indexOf(query[qi], ti);
+        if (idx < 0) return false;
+        ti = idx + 1;
+      }
+      return true;
+    };
+
+    // ── 匹配等級：0=前綴, 1=包含, 2=模糊, -1=不符 ──
+    const matchRank = (text, key, q) => {
+      const tL = text.toLowerCase(), kL = key.toLowerCase();
+      if (tL.startsWith(q) || kL.startsWith(q)) return 0;
+      if (tL.includes(q) || kL.includes(q)) return 1;
+      if (fuzzyMatch(tL, q) || fuzzyMatch(kL, q)) return 2;
+      return -1;
+    };
+
+    // ── 渲染下拉項目（含搜尋過濾＋依匹配程度排序） ──
     const renderItems = (filter) => {
       list.innerHTML = '';
       const q = (filter || '').toLowerCase();
+      let matched = [];
       entries.forEach(([key, label]) => {
         const text = `${label}`;
-        if (q && !text.toLowerCase().includes(q) && !key.toLowerCase().includes(q)) return;
+        if (!q) {
+          matched.push({ key, label, text, rank: 0 });
+        } else {
+          const rank = matchRank(text, String(key), q);
+          if (rank >= 0) matched.push({ key, label, text, rank });
+        }
+      });
+      if (q) matched.sort((a, b) => a.rank - b.rank);
+      matched.forEach(({ key, label, text }) => {
         const item = document.createElement('div');
         item.className = 'mmd-lookup-item';
         item.tabIndex = -1;
@@ -163,12 +193,16 @@
         if (!readOnly) {
           item.addEventListener('mousedown', (e) => {
             e.preventDefault();
-            inp.value = key;
-            inp.dataset.raw = key;
-            const span = td.querySelector('.cell-view');
-            if (span) span.textContent = label;
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-            inp.dispatchEvent(new Event('change', { bubbles: true }));
+            if (onSelect) {
+              onSelect(key, label);
+            } else {
+              inp.value = key;
+              inp.dataset.raw = key;
+              const span = td.querySelector('.cell-view');
+              if (span) span.textContent = label;
+              inp.dispatchEvent(new Event('input', { bubbles: true }));
+              inp.dispatchEvent(new Event('change', { bubbles: true }));
+            }
             dd.remove();
           });
         }
@@ -926,9 +960,37 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
           const lookupTable  = f.LookupTable || f.OCXLKTableName || '';
           const lookupKey    = f.LookupKeyField || f.KeyFieldName || '';
           const lookupResult = f.LookupResultField || f.OCXLKResultName || '';
+          // ★ 非實體 lookup 欄位（有 KeySelfName）：編輯模式下允許從下拉選單選取，
+          //   選取後同步更新 key 欄位並觸發 change 事件刷新其他依賴欄位
+          const keySelfName = (f.KeySelfName || '').trim();
           td.addEventListener('dblclick', async (e) => {
             e.stopPropagation();
-            const isReadOnly = !window._mmdEditing || inp.readOnly || inp.disabled;
+            let isReadOnly = !window._mmdEditing || inp.readOnly || inp.disabled;
+            let onSelect = null;
+            if (isReadOnly && window._mmdEditing && keySelfName && !inp.disabled) {
+              isReadOnly = false;
+              onSelect = (key, label) => {
+                inp.value = label;
+                inp.dataset.raw = key;
+                const span = td.querySelector('.cell-view');
+                if (span) { span.textContent = label; span.dataset.raw = key; }
+                const tr = td.closest('tr');
+                if (tr) {
+                  const kfLower = keySelfName.toLowerCase();
+                  const keyInp = Array.from(tr.querySelectorAll('input'))
+                    .find(i => (i.name || '').toLowerCase() === kfLower);
+                  if (keyInp) {
+                    keyInp.value = key;
+                    keyInp.dataset.raw = key;
+                    const keyTd = keyInp.closest('td');
+                    const keyView = keyTd?.querySelector('.cell-view');
+                    if (keyView) { keyView.textContent = key; keyView.dataset.raw = key; }
+                    keyInp.dispatchEvent(new Event('input', { bubbles: true }));
+                    keyInp.dispatchEvent(new Event('change', { bubbles: true }));
+                  }
+                }
+              };
+            }
             // ★ 有條件過濾時，即時查詢 API 取得過濾後的資料
             if (hasCondition && lookupTable && lookupKey && lookupResult) {
               const currentTr = td.closest('tr');
@@ -965,12 +1027,12 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
                   filteredMap[k] = combineResults(row);
                 });
                 if (Object.keys(filteredMap).length > 0) {
-                  showLookupDropdown(inp, td, filteredMap, isReadOnly);
+                  showLookupDropdown(inp, td, filteredMap, isReadOnly, onSelect);
                 }
               } catch { }
               return;
             }
-            showLookupDropdown(inp, td, inp._lookupMap, isReadOnly);
+            showLookupDropdown(inp, td, inp._lookupMap, isReadOnly, onSelect);
           });
         }
       }
@@ -1433,24 +1495,6 @@ const loadAllDetails = async (row) => {
           selectedBucket.lastDetailRow = rows[0];
           selectedBucket.lastDetailIndex = nextIndex;
           await loadNextDetailFromFocus(nextIndex, rows[0]);
-        }
-      } else {
-        // ★ 前一階無資料：後續層級顯示「請點選上方一筆資料」（不可選擇，不可新增）
-        for (let subIdx = nextIndex + 1; subIdx < (cfg.Details || []).length; subIdx++) {
-          const subTbody = document.getElementById(`${cfg.DomId}-detail-${subIdx}-body`);
-          if (!subTbody) continue;
-          subTbody._lastQueryCtx = {};
-          subTbody.innerHTML = "";
-          const subDict = detailDicts[subIdx] || [];
-          const subVisibleCols = subDict.filter(f => (f.Visible ?? 1) === 1).length || 1;
-          const hintTr = document.createElement("tr");
-          const hintTd = document.createElement("td");
-          hintTd.colSpan = subVisibleCols;
-          hintTd.className = "text-center text-muted";
-          hintTd.style.padding = "8px";
-          hintTd.textContent = "請先新增前一階資料";
-          hintTr.appendChild(hintTd);
-          subTbody.appendChild(hintTr);
         }
       }
     };
@@ -1951,9 +1995,36 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
             const lookupTable  = f.LookupTable || f.OCXLKTableName || '';
             const lookupKey    = f.LookupKeyField || f.KeyFieldName || '';
             const lookupResult = f.LookupResultField || f.OCXLKResultName || '';
+            // ★ 非實體 lookup 欄位（有 KeySelfName）：編輯模式下允許從下拉選單選取
+            const keySelfName2 = (f.KeySelfName || '').trim();
             td.addEventListener('dblclick', async (e) => {
               e.stopPropagation();
-              const isReadOnly = !window._mmdEditing || inp.readOnly || inp.disabled;
+              let isReadOnly = !window._mmdEditing || inp.readOnly || inp.disabled;
+              let onSelect = null;
+              if (isReadOnly && window._mmdEditing && keySelfName2 && !inp.disabled) {
+                isReadOnly = false;
+                onSelect = (key, label) => {
+                  inp.value = label;
+                  inp.dataset.raw = key;
+                  const span = td.querySelector('.cell-view');
+                  if (span) { span.textContent = label; span.dataset.raw = key; }
+                  const tr = td.closest('tr');
+                  if (tr) {
+                    const kfLower = keySelfName2.toLowerCase();
+                    const keyInp = Array.from(tr.querySelectorAll('input'))
+                      .find(i => (i.name || '').toLowerCase() === kfLower);
+                    if (keyInp) {
+                      keyInp.value = key;
+                      keyInp.dataset.raw = key;
+                      const keyTd = keyInp.closest('td');
+                      const keyView = keyTd?.querySelector('.cell-view');
+                      if (keyView) { keyView.textContent = key; keyView.dataset.raw = key; }
+                      keyInp.dispatchEvent(new Event('input', { bubbles: true }));
+                      keyInp.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                  }
+                };
+              }
               // ★ 有條件過濾時，即時查詢 API 取得過濾後的資料
               if (hasCondition && lookupTable && lookupKey && lookupResult) {
                 const currentTr = td.closest('tr');
@@ -2013,12 +2084,12 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
                     filteredMap[k] = combineResults(row);
                   });
                   if (Object.keys(filteredMap).length > 0) {
-                    showLookupDropdown(inp, td, filteredMap, isReadOnly);
+                    showLookupDropdown(inp, td, filteredMap, isReadOnly, onSelect);
                   }
                 } catch { }
                 return;
               }
-              showLookupDropdown(inp, td, inp._lookupMap, isReadOnly);
+              showLookupDropdown(inp, td, inp._lookupMap, isReadOnly, onSelect);
             });
           }
         }
@@ -2148,7 +2219,13 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
 
       const ok = rMaster.ok && rDetails.every(r => r.ok);
       if (!ok) {
-        Swal?.fire({ icon: "error", title: "儲存失敗", text: "部分明細未成功" });
+        const errMsgs = [];
+        if (!rMaster.ok && rMaster.text) errMsgs.push(rMaster.text);
+        rDetails.forEach(r => {
+          if (!r.ok && r.text) errMsgs.push(r.text);
+        });
+        const errText = errMsgs.length ? errMsgs.join("\n") : "部分明細未成功";
+        Swal?.fire({ icon: "error", title: "儲存失敗", html: `<pre style="text-align:left;white-space:pre-wrap;font-size:20px;">${errText}</pre>` });
         return { ok: false, skipped: false };
       }
 
@@ -2463,17 +2540,23 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
         const tr = inp.closest('tr');
         const tbody = tr?.closest('tbody');
         const keyToLookup = tbody?._keyToLookup;
+        const changedField = (inp.name || '').toLowerCase();
         if (tr && keyToLookup) {
-          const changedField = (inp.name || '').toLowerCase();
           const deps = keyToLookup[changedField];
           if (deps && deps.length > 0) {
             const getFieldVal = (fieldName) => {
               const fn = fieldName.toLowerCase();
+              // 優先從 cell-edit input 取值（含剛修改的值），避免讀到 hidden PK 的舊值
+              const cellEdit = Array.from(tr.querySelectorAll('input.cell-edit'))
+                .find(i => (i.name || '').toLowerCase() === fn);
+              if (cellEdit) return (cellEdit.dataset?.raw ?? cellEdit.value ?? '').trim();
               const target = Array.from(tr.querySelectorAll('input'))
                 .find(i => (i.name || '').toLowerCase() === fn);
               return target ? (target.value ?? '').trim() : '';
             };
             for (const dep of deps) {
+              // 跳過自我參照（避免覆蓋使用者剛選的值）
+              if (dep.resultFieldName.toLowerCase() === changedField) continue;
               let lookupKey = '';
               if (dep.compositeKeySelfNames && dep.compositeKeySelfNames.length > 1) {
                 const parts = dep.compositeKeySelfNames.map(f => getFieldVal(f));

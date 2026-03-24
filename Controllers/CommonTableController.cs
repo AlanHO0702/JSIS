@@ -281,7 +281,23 @@ namespace PcbErpApi.Controllers
             {
                 await tx.RollbackAsync();
                 _logger.LogError(ex, "SaveTableChanges failed");
-                return StatusCode(500, $"SaveTableChanges failed: {ex.Message}");
+
+                // 從 SqlException 取第一個錯誤訊息（通常是 RAISERROR 自訂的內容），
+                // 過濾掉系統自動附加的「交易在觸發程序中結束。已中止批次。」等訊息
+                var userMsg = ex.Message;
+                if (ex is SqlException sqlEx && sqlEx.Errors.Count > 0)
+                {
+                    var customErrors = sqlEx.Errors
+                        .Cast<SqlError>()
+                        .Where(e => e.Class >= 11 && e.Class <= 16)
+                        .Select(e => e.Message)
+                        .Where(m => !m.Contains("交易在觸發程序中結束"))
+                        .ToList();
+                    if (customErrors.Count > 0)
+                        userMsg = string.Join("\n", customErrors);
+                }
+
+                return StatusCode(500, new { success = false, message = userMsg });
             }
         }
 
