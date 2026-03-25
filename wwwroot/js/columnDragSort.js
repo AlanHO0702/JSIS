@@ -11,9 +11,13 @@
        tableName:    'SPOdOrderMain',                              // 字典表名
        fieldsArray:  window._tableFields,                          // 欄位陣列 [{FieldName}] (可選)
        onSaved:      () => doQuery(currentPage),                   // 儲存成功後回呼 (可選)
-       saveUrl:      '/api/TableFieldLayout/SaveSerialOrder',      // 儲存 API (可選)
+       saveUrl:      '/api/TableFieldLayout/SaveSerialOrder',      // 儲存順序 API (可選)
+       saveWidthUrl: '/api/DictSetupApi/FieldWidth/Save',          // 儲存寬度 API (可選)
        fetchFn:      window.busyFetch || fetch                     // fetch 函式 (可選)
      });
+
+   F9 鍵：儲存所有已註冊表格的欄位順序與寬度到後端
+   未按 F9 時，拖曳排序僅為暫時性，重新整理或離開頁面後恢復辭典初始排序
    ============================================================ */
 
 (function () {
@@ -21,6 +25,11 @@
 
   const EDGE_ZONE = 60;
   const SCROLL_SPEED_MAX = 18;
+  const DEFAULT_SAVE_ORDER_URL = '/api/TableFieldLayout/SaveSerialOrder';
+  const DEFAULT_SAVE_WIDTH_URL = '/api/DictSetupApi/FieldWidth/Save';
+
+  // 已註冊的所有表格（供 F9 統一儲存）
+  const _registry = [];
 
   /**
    * @param {Object} opts
@@ -33,8 +42,12 @@
     const scrollWrap = opts.scrollWrap || headerRow.closest('.table-wrap') || headerRow.closest('.erp-table-wrapper');
     const scrollSync = opts.scrollSync || null;
     const tableName  = opts.tableName || window._tableName || '';
-    const saveUrl    = opts.saveUrl || '/api/TableFieldLayout/SaveSerialOrder';
+    const saveUrl    = opts.saveUrl || DEFAULT_SAVE_ORDER_URL;
+    const saveWidthUrl = opts.saveWidthUrl || DEFAULT_SAVE_WIDTH_URL;
     const fetchFn    = opts.fetchFn || (window.busyFetch ? window.busyFetch : fetch.bind(window));
+
+    // 註冊到全域清單
+    _registry.push({ headerRow, tbody, tableName, saveUrl, saveWidthUrl, fetchFn, onSaved: opts.onSaved });
 
     let autoScrollRAF = null;
     let lastMouseX = 0;
@@ -102,7 +115,7 @@
         var orderChanged = newFieldOrder.some(function (f, i) { return f !== originalOrder[i]; });
         if (!orderChanged) return;
 
-        // 同步 tbody
+        // 同步 tbody（僅 DOM 操作，不儲存到後端）
         if (tbody) {
           Array.from(tbody.rows).forEach(function (tr) {
             var cells = Array.from(tr.children);
@@ -127,30 +140,104 @@
           reordered.forEach(function (f) { opts.fieldsArray.push(f); });
         }
 
-        // 儲存到後端
-        var newOrder = newFieldOrder.map(function (field, index) {
-          return { fieldName: field, serialNum: index + 1 };
-        });
-
-        var fn = fetchFn;
-        fn(saveUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tableName: tableName, fieldOrders: newOrder })
-        }, '儲存欄位順序…')
-          .then(function (res) { if (!res.ok) throw new Error('更新失敗'); return res.json(); })
-          .then(function () {
-            if (typeof opts.onSaved === 'function') opts.onSaved();
-          })
-          .catch(function () {
-            if (window.Swal) {
-              Swal.fire({ icon: 'error', title: '欄位順序儲存失敗！' });
-            }
-          });
+        // 不自動儲存到後端 — 按 F9 才會儲存
       }
     });
   }
 
+  // ---- F9：儲存所有已註冊表格的欄位順序與寬度 ----
+  async function saveAllLayouts() {
+    if (!_registry.length) return;
+
+    var hasError = false;
+    var savedCount = 0;
+
+    for (var i = 0; i < _registry.length; i++) {
+      var entry = _registry[i];
+      var headerRow = entry.headerRow;
+      var tableName = entry.tableName;
+      var fetchFn   = entry.fetchFn;
+
+      if (!tableName || !headerRow) continue;
+
+      var ths = Array.from(headerRow.children);
+
+      // 儲存欄位順序
+      var fieldOrders = ths.map(function (th, idx) {
+        return { fieldName: th.dataset.field, serialNum: idx + 1 };
+      });
+
+      try {
+        var res = await fetchFn(entry.saveUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tableName: tableName, fieldOrders: fieldOrders })
+        }, '儲存欄位順序…');
+        if (!res.ok) throw new Error('儲存順序失敗');
+      } catch (e) {
+        hasError = true;
+      }
+
+      // 儲存欄位寬度
+      for (var j = 0; j < ths.length; j++) {
+        var th = ths[j];
+        var field = th.dataset.field;
+        var width = Math.round(th.getBoundingClientRect().width);
+        if (!field || !width) continue;
+        try {
+          await fetch(entry.saveWidthUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tableName: tableName, fieldName: field, widthPx: width })
+          });
+        } catch (e) {
+          hasError = true;
+        }
+      }
+
+      savedCount++;
+
+      // 呼叫 onSaved 回呼
+      if (typeof entry.onSaved === 'function') {
+        try { entry.onSaved(); } catch (e) { /* ignore */ }
+      }
+    }
+
+    // 顯示結果通知
+    if (window.Swal) {
+      if (hasError) {
+        Swal.fire({ icon: 'error', title: '欄位配置儲存失敗！' });
+      } else {
+        Swal.fire({ icon: 'success', title: '欄位順序及寬度已儲存', timer: 1500, showConfirmButton: false });
+      }
+    }
+  }
+
+  // ---- 全域 F9 鍵盤事件 ----
+  var _f9Bound = false;
+  function bindF9() {
+    if (_f9Bound) return;
+    _f9Bound = true;
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'F9') {
+        e.preventDefault();
+        if (!window.Swal) { saveAllLayouts(); return; }
+        Swal.fire({
+          title: '是否要儲存欄位順序及寬度？',
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonText: '是',
+          cancelButtonText: '否',
+          reverseButtons: false
+        }).then(function (result) {
+          if (result.isConfirmed) saveAllLayouts();
+        });
+      }
+    });
+  }
+  bindF9();
+
   // 匯出為全域函式
   window.initColumnDragSort = initColumnDragSort;
+  window.saveColumnLayout = saveAllLayouts;
 })();

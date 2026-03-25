@@ -926,48 +926,49 @@ SELECT TOP 1 RunSQLAfterAdd
 
                 sw.Restart();
                 // lookup（失敗不要影響主要資料回傳）
-                // 當前端已有快取 (SkipLookup=true) 時，跳過耗時的 lookup 查詢
+                // 非實體欄位的 lookup 充實必須每頁都執行，否則切頁後虛擬欄位會消失
+                // SkipLookup 只跳過「舊版 lookupMapData 回傳」，不跳過行列充實
                 Dictionary<string, Dictionary<string, string>> lookupMapData = new();
                 List<OCXLookupMap>? lookupMaps = null;
 
-                if (!req.SkipLookup)
+                try
                 {
-                    try
+                    var tableDictService = new TableDictionaryService(_ctx);
+                    lookupMaps = tableDictService.GetOCXLookups(dictTable);
+
+                    // 1) 補上 OCX Lookup 的「非實體顯示欄位」— 每頁都必須執行
+                    if (lookupMaps.Count > 0)
                     {
-                        var tableDictService = new TableDictionaryService(_ctx);
-                        lookupMaps = tableDictService.GetOCXLookups(dictTable);
-
-                        // 1) 補上 OCX Lookup 的「非實體顯示欄位」（第三階子明細會用到）
-                        if (lookupMaps.Count > 0)
+                        foreach (var row in result)
                         {
-                            foreach (var row in result)
+                            foreach (var map in lookupMaps)
                             {
-                                foreach (var map in lookupMaps)
+                                if (map == null || string.IsNullOrWhiteSpace(map.FieldName)) continue;
+
+                                // 若實體欄位本來就存在，避免覆寫
+                                if (row.ContainsKey(map.FieldName)) continue;
+
+                                static string ToKey(object? v) => v == null || v == DBNull.Value ? "" : v.ToString()?.Trim() ?? "";
+
+                                var key = TableDictionaryService.BuildLookupKey(map, fieldName =>
                                 {
-                                    if (map == null || string.IsNullOrWhiteSpace(map.FieldName)) continue;
+                                    if (row.TryGetValue(fieldName, out var val)) return ToKey(val);
+                                    return "";
+                                });
 
-                                    // 若實體欄位本來就存在，避免覆寫
-                                    if (row.ContainsKey(map.FieldName)) continue;
+                                var display = "";
+                                if (!string.IsNullOrWhiteSpace(key) && map.LookupValues != null && map.LookupValues.TryGetValue(key, out var dv) && dv != null)
+                                    display = dv;
 
-                                    static string ToKey(object? v) => v == null || v == DBNull.Value ? "" : v.ToString()?.Trim() ?? "";
-
-                                    var key = TableDictionaryService.BuildLookupKey(map, fieldName =>
-                                    {
-                                        if (row.TryGetValue(fieldName, out var val)) return ToKey(val);
-                                        return "";
-                                    });
-
-                                    var display = "";
-                                    if (!string.IsNullOrWhiteSpace(key) && map.LookupValues != null && map.LookupValues.TryGetValue(key, out var dv) && dv != null)
-                                        display = dv;
-
-                                    // 即使沒找到，也補空字串，避免前端因第一筆缺值而不產生欄位
-                                    row[map.FieldName] = display;
-                                }
+                                // 即使沒找到，也補空字串，避免前端因第一筆缺值而不產生欄位
+                                row[map.FieldName] = display;
                             }
                         }
+                    }
 
-                        // 2) 舊版回傳 lookupMapData（其他頁面可能仍在用）
+                    // 2) 舊版回傳 lookupMapData（僅在未 SkipLookup 時建構）
+                    if (!req.SkipLookup)
+                    {
                         lookupMapData = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
                         foreach (var row in result)
                         {
@@ -997,11 +998,11 @@ SELECT TOP 1 RunSQLAfterAdd
                             }
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Build lookup map failed for {Table}", dictTable);
-                        lookupMapData = new();
-                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Build lookup map failed for {Table}", dictTable);
+                    lookupMapData = new();
                 }
                 var lookupTime = sw.ElapsedMilliseconds;
 
