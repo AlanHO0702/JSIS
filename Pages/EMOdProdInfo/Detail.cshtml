@@ -5443,12 +5443,14 @@ document.addEventListener('DOMContentLoaded', function () {
     const primaryEl = drag ? drag.el : (labelDrag ? labelDrag.lab : null);
     if (!primaryEl) return;
 
-    // Step 1: 用 getBoundingClientRect 記錄所有元素相對於主拖曳元素的偏移
-    const primaryRect = primaryEl.getBoundingClientRect();
+    // Step 1: 用 CSS style.top/left 記錄偏移（getBoundingClientRect 對隱藏元素回傳 0）
+    const pTop = parseFloat(primaryEl.style.top) || 0;
+    const pLeft = parseFloat(primaryEl.style.left) || 0;
     const offsets = new Map();
     items.forEach(it => {
-      const r = it.el.getBoundingClientRect();
-      offsets.set(it.el, { dTop: r.top - primaryRect.top, dLeft: r.left - primaryRect.left });
+      const t = parseFloat(it.el.style.top) || 0;
+      const l = parseFloat(it.el.style.left) || 0;
+      offsets.set(it.el, { dTop: t - pTop, dLeft: l - pLeft });
     });
 
     // Step 2: 找配對元素，記錄偏移，加入拖曳群組
@@ -5461,13 +5463,15 @@ document.addEventListener('DOMContentLoaded', function () {
       const field = document.querySelector(`.spec-draggable[data-field="${fn}"]`);
       const lab = labelFor(field);
       if (field && !items.some(i => i.el === field)) {
-        const r = field.getBoundingClientRect();
-        offsets.set(field, { dTop: r.top - primaryRect.top, dLeft: r.left - primaryRect.left });
+        const t = parseFloat(field.style.top) || 0;
+        const l = parseFloat(field.style.left) || 0;
+        offsets.set(field, { dTop: t - pTop, dLeft: l - pLeft });
         newItems.push({ el: field, t0: 0, l0: 0 });
       }
       if (lab && !items.some(i => i.el === lab)) {
-        const r = lab.getBoundingClientRect();
-        offsets.set(lab, { dTop: r.top - primaryRect.top, dLeft: r.left - primaryRect.left });
+        const t = parseFloat(lab.style.top) || 0;
+        const l = parseFloat(lab.style.left) || 0;
+        offsets.set(lab, { dTop: t - pTop, dLeft: l - pLeft });
         newItems.push({ el: lab, t0: 0, l0: 0 });
       }
       // 移動到新容器
@@ -5476,14 +5480,21 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     items.push(...newItems);
 
-    // Step 3: 以滑鼠位置為主元素的新位置，所有元素按偏移排列
+    // Step 3: 以滑鼠位置為主元素的新位置，所有元素按偏移排列（群組邊界限制）
     const cr = nc.getBoundingClientRect();
     const primaryTop = lastMouseXY.y - cr.top;
     const primaryLeft = lastMouseXY.x - cr.left;
-    items.forEach(it => {
+    const rpos = items.map(it => {
       const off = offsets.get(it.el) || { dTop: 0, dLeft: 0 };
-      it.el.style.top  = Math.max(0, Math.round(primaryTop + off.dTop)) + 'px';
-      it.el.style.left = Math.max(0, Math.round(primaryLeft + off.dLeft)) + 'px';
+      return { el: it.el, newT: Math.round(primaryTop + off.dTop), newL: Math.round(primaryLeft + off.dLeft) };
+    });
+    const rminT = Math.min(...rpos.map(p => p.newT));
+    const rminL = Math.min(...rpos.map(p => p.newL));
+    const radjT = rminT < 0 ? -rminT : 0;
+    const radjL = rminL < 0 ? -rminL : 0;
+    rpos.forEach(p => {
+      p.el.style.top  = (p.newT + radjT) + 'px';
+      p.el.style.left = (p.newL + radjL) + 'px';
     });
 
     // Step 4: 重置座標
@@ -5512,9 +5523,15 @@ document.addEventListener('DOMContentLoaded', function () {
     const w = drag.el.offsetWidth, h = drag.el.offsetHeight;
     const snapped = applySnap(rawT, rawL, w, h);
     const snapDY = snapped.top - base.t0, snapDX = snapped.left - base.l0;
-    drag.items.forEach(it => {
-      it.el.style.top  = Math.max(0, it.t0 + snapDY) + 'px';
-      it.el.style.left = Math.max(0, it.l0 + snapDX) + 'px';
+    // 群組邊界限制：找最小值，整組一起停住（不個別 clamp）
+    const positions = drag.items.map(it => ({ el: it.el, newT: it.t0 + snapDY, newL: it.l0 + snapDX }));
+    const minT = Math.min(...positions.map(p => p.newT));
+    const minL = Math.min(...positions.map(p => p.newL));
+    const adjT = minT < 0 ? -minT : 0;
+    const adjL = minL < 0 ? -minL : 0;
+    positions.forEach(p => {
+      p.el.style.top  = Math.round(p.newT + adjT) + 'px';
+      p.el.style.left = Math.round(p.newL + adjL) + 'px';
     });
   }
 
@@ -5532,28 +5549,65 @@ document.addEventListener('DOMContentLoaded', function () {
   /* ---- resize state ---- */
   let rsz = null; // { el, startX, startY, w0, h0, edge }
 
+  const MIN_W = 50, MIN_H = 22;
+
   function startResize(el, e, edge) {
     if (!inLayout()) return;
     e.preventDefault();
     e.stopPropagation();
-    captureOriginals([el]); // resize 前記錄原始位置
-    rsz = { el, startX: e.clientX, startY: e.clientY, w0: el.offsetWidth, h0: el.offsetHeight, edge };
+    captureOriginals([el]);
+    const r = relRect(el, snapContainer || el.closest('.master-spec-tab'));
+    rsz = { el, startX: e.clientX, startY: e.clientY, w0: el.offsetWidth, h0: el.offsetHeight, edge, elTop: r.top, elLeft: r.left };
+    // 建立 resize 用的 snap 資料（排除自己）
+    snap = buildSnap(el, [el]);
     document.addEventListener('mousemove', onResizeMove);
     document.addEventListener('mouseup', onResizeEnd);
+  }
+
+  function applyResizeSnap(newW, newH, elTop, elLeft) {
+    let snapV = null, snapH = null;
+    const right = elLeft + newW;
+    const bottom = elTop + newH;
+    // 右邊緣 ↔ 其他右邊緣
+    for (const e of snap.rights)  { if (Math.abs(right - e) <= SNAP_PX) { newW = e - elLeft; snapV = e; break; } }
+    // 右邊緣 ↔ 其他左邊緣
+    if (snapV === null) for (const e of snap.lefts) { if (Math.abs(right - e) <= SNAP_PX) { newW = e - elLeft; snapV = e; break; } }
+    // 下邊緣 ↔ 其他下邊緣
+    if (newH !== null) {
+      for (const e of snap.bottoms) { if (Math.abs(bottom - e) <= SNAP_PX) { newH = e - elTop; snapH = e; break; } }
+      // 下邊緣 ↔ 其他上邊緣
+      if (snapH === null) for (const e of snap.tops) { if (Math.abs(bottom - e) <= SNAP_PX) { newH = e - elTop; snapH = e; break; } }
+    }
+    // 等寬吸附：寬度接近其他欄位的寬度
+    if (snapV === null) {
+      const tab = snapContainer;
+      if (tab) {
+        qAll('.spec-draggable', tab).forEach(other => {
+          if (other === rsz.el || snapV !== null) return;
+          const ow = other.offsetWidth;
+          if (Math.abs(newW - ow) <= SNAP_PX) { newW = ow; snapV = elLeft + ow; }
+        });
+      }
+    }
+    showGuides(snapH, snapV);
+    return { w: newW, h: newH };
   }
 
   function onResizeMove(e) {
     if (!rsz) return;
     const dx = e.clientX - rsz.startX, dy = e.clientY - rsz.startY;
-    const newW = Math.max(30, rsz.w0 + dx);
+    let newW = Math.max(MIN_W, rsz.w0 + dx);
+    let newH = rsz.edge === 'se' ? Math.max(MIN_H, rsz.h0 + dy) : null;
+    // 吸附
+    const snapped = applyResizeSnap(newW, newH, rsz.elTop, rsz.elLeft);
+    newW = Math.max(MIN_W, snapped.w);
     rsz.el.style.width = newW + 'px';
-    // 同步設定內部 input/select 寬度，確保能縮小
     const inner = rsz.el.querySelector('.master-field');
     if (inner) inner.style.width = newW + 'px';
-    if (rsz.edge === 'se') {
-      const newH = Math.max(18, rsz.h0 + dy);
-      rsz.el.style.height = newH + 'px';
-      if (inner) inner.style.height = newH + 'px';
+    if (rsz.edge === 'se' && snapped.h !== null) {
+      const finalH = Math.max(MIN_H, snapped.h);
+      rsz.el.style.height = finalH + 'px';
+      if (inner) inner.style.height = finalH + 'px';
     }
   }
 
@@ -5561,6 +5615,8 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!rsz) return;
     markDirty([rsz.el]);
     rsz = null;
+    snap = { tops:[], lefts:[], rights:[], bottoms:[] };
+    clearGuides();
     document.removeEventListener('mousemove', onResizeMove);
     document.removeEventListener('mouseup', onResizeEnd);
   }
@@ -5648,9 +5704,15 @@ document.addEventListener('DOMContentLoaded', function () {
             const rawT = base.t0 + (ev.clientY - labelDrag.startY), rawL = base.l0 + (ev.clientX - labelDrag.startX);
             const s = applySnap(rawT, rawL, lab.offsetWidth, lab.offsetHeight);
             const snapDY = s.top - base.t0, snapDX = s.left - base.l0;
-            labelDrag.items.forEach(it => {
-              it.el.style.top  = Math.max(0, it.t0 + snapDY) + 'px';
-              it.el.style.left = Math.max(0, it.l0 + snapDX) + 'px';
+            // 群組邊界限制：整組一起停住
+            const lpos = labelDrag.items.map(it => ({ el: it.el, newT: it.t0 + snapDY, newL: it.l0 + snapDX }));
+            const lminT = Math.min(...lpos.map(p => p.newT));
+            const lminL = Math.min(...lpos.map(p => p.newL));
+            const ladjT = lminT < 0 ? -lminT : 0;
+            const ladjL = lminL < 0 ? -lminL : 0;
+            lpos.forEach(p => {
+              p.el.style.top  = Math.round(p.newT + ladjT) + 'px';
+              p.el.style.left = Math.round(p.newL + ladjL) + 'px';
             });
             checkTabSwitch(ev);
           }
