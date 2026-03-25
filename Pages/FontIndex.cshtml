@@ -2975,9 +2975,9 @@ body {
                     const row = e.target.closest('tr');
                     if (!row || !row.dataset.itemid) return;
 
-                    const itemId = row.dataset.itemid;
+                    const displayCode = row.dataset.displaycode || row.dataset.itemid;
                     const programName = row.dataset.programname;
-                    input.value = itemId;
+                    input.value = displayCode;
                     nameBtn.textContent = programName;
                     modal.hide();
                 });
@@ -3011,8 +3011,9 @@ body {
 
                 let html = '';
                 items.forEach((item, index) => {
-                    html += `<tr data-index="${index}" data-itemid="${item.itemId}" data-programname="${item.programName || ''}">
-                        <td style="padding: 6px 8px; font-family: 'Consolas', monospace;">${item.itemId}</td>
+                    const displayCode = item.sWebMenuId || item.itemId;
+                    html += `<tr data-index="${index}" data-itemid="${item.itemId}" data-programname="${item.programName || ''}" data-displaycode="${displayCode}">
+                        <td style="padding: 6px 8px; font-family: 'Consolas', monospace;">${displayCode}</td>
                         <td style="padding: 6px 8px;">${item.programName || ''}</td>
                     </tr>`;
                 });
@@ -3029,10 +3030,10 @@ body {
                     filteredItems = [...allItems];
                 } else {
                     filteredItems = allItems.filter(item => {
-                        const itemId = (item.itemId || '').toUpperCase();
+                        const displayCode = (item.sWebMenuId || item.itemId || '').toUpperCase();
                         const programName = (item.programName || '').toUpperCase();
 
-                        const match1 = !filter1 || itemId.includes(filter1);
+                        const match1 = !filter1 || displayCode.includes(filter1);
                         const match2 = !filter2 || programName.includes(filter2);
 
                         return match1 && match2;
@@ -3052,23 +3053,41 @@ body {
                     return;
                 }
 
-                const itemId = selectedRow.dataset.itemid;
+                const displayCode = selectedRow.dataset.displaycode || selectedRow.dataset.itemid;
                 const programName = selectedRow.dataset.programname;
 
-                input.value = itemId;
+                input.value = displayCode;
                 nameBtn.textContent = programName;
                 modal.hide();
             }
 
+            // 根據前台代碼或ItemId找到對應的真實ItemId
+            function resolveItemId(code) {
+                if (!code || !allItems.length) return code;
+                code = code.trim().toUpperCase();
+                // 先用 sWebMenuId 比對
+                const byWebMenuId = allItems.find(i => (i.sWebMenuId || '').trim().toUpperCase() === code);
+                if (byWebMenuId) return byWebMenuId.itemId;
+                // 再用 itemId 比對
+                const byItemId = allItems.find(i => (i.itemId || '').trim().toUpperCase() === code);
+                if (byItemId) return byItemId.itemId;
+                return code; // 找不到就原樣返回
+            }
+
             // 啟動項目
-            async function launchItem(itemId) {
-                itemId = itemId.trim();
-                if (!itemId) {
+            async function launchItem(inputCode) {
+                inputCode = inputCode.trim();
+                if (!inputCode) {
                     if (window.Swal) {
                         Swal.fire({ icon: 'error', title: '請先輸入功能代碼', timer: 2000, showConfirmButton: false });
                     }
                     return;
                 }
+
+                // 如果 allItems 還沒載入，先載入
+                if (!allItems.length) await loadAllItems();
+
+                const itemId = resolveItemId(inputCode);
 
                 try {
                     const response = await fetch(`/api/QuickLaunch/Item/${encodeURIComponent(itemId)}`);
@@ -3106,11 +3125,16 @@ body {
             // 更新名稱按鈕
             let updateNameTimer = null;
             async function updateNameButton() {
-                const itemId = input.value.trim().toUpperCase();
-                if (!itemId) {
+                const inputCode = input.value.trim().toUpperCase();
+                if (!inputCode) {
                     nameBtn.textContent = '';
                     return;
                 }
+
+                // 如果 allItems 還沒載入，先載入
+                if (!allItems.length) await loadAllItems();
+
+                const itemId = resolveItemId(inputCode);
 
                 try {
                     const response = await fetch(`/api/QuickLaunch/Item/${encodeURIComponent(itemId)}`);

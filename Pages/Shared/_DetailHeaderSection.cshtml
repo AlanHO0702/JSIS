@@ -2043,11 +2043,28 @@
             @if (ViewData["HasAttachment"] is true)
             {
                 var attachDictTable = ViewData["AttachmentDictTable"]?.ToString() ?? "CURdMasAttachment";
+                var attachRealTable = ViewData["HeaderRealTableName"]?.ToString() ?? Model.HeaderTableName ?? "";
                 <div class="tab-pane fade" id="tab-attachment" role="tabpanel">
+                    <div class="mb-1 mt-1 ms-1">
+                        <button type="button" id="btnAttachUpload" class="btn btn-sm btn-outline-primary" disabled
+                                data-real-table="@attachRealTable"
+                                data-item-id="@(Model.ItemId ?? "")">
+                            <i class="bi bi-upload"></i> 上傳
+                        </button>
+                        <button type="button" id="btnAttachView" class="btn btn-sm btn-outline-secondary">
+                            <i class="bi bi-eye"></i> 檢視
+                        </button>
+                        <button type="button" id="btnAttachDelete" class="btn btn-sm btn-outline-danger" disabled
+                                data-real-table="@attachRealTable"
+                                data-item-id="@(Model.ItemId ?? "")">
+                            <i class="bi bi-trash"></i> 刪除
+                        </button>
+                        <input type="file" id="attachFileInput" style="display:none" />
+                    </div>
                     <div id="attachmentGridContainer" class="multi-tab-detail"
                          data-dict-table="@attachDictTable"
                          data-api-url="/api/DynamicTable/ByPaperNum?table=@Uri.EscapeDataString(attachDictTable)"
-                         style="overflow:auto; max-height:340px;">
+                         style="overflow:auto; max-height:310px;">
                         <div class="text-center text-muted py-3">載入中…</div>
                     </div>
                 </div>
@@ -2126,7 +2143,7 @@ const PAGE_PAPER_NUM = ("@PaperNum" || "").trim();
 const KEY_FIELD = ("@(keyFieldName ?? "PaperNum")" || "PaperNum").trim();
 
 // ============================
-// 夾檔頁籤：延遲載入 CURdMasAttachment
+// 夾檔頁籤：延遲載入 CURdMasAttachment + 上傳
 // ============================
 (function initAttachmentTab() {
   const container = document.getElementById('attachmentGridContainer');
@@ -2134,6 +2151,111 @@ const KEY_FIELD = ("@(keyFieldName ?? "PaperNum")" || "PaperNum").trim();
   const apiUrl = container.dataset.apiUrl;
   const dictTable = container.dataset.dictTable;
   let loaded = false;
+  let cachedFields = null;
+
+  const isNumType = (dt) => {
+    const t = (dt || '').toLowerCase();
+    return t === 'number' || t.startsWith('decimal') || t.startsWith('numeric')
+      || t.startsWith('money') || t.startsWith('float') || t.startsWith('real')
+      || t.startsWith('int') || t.startsWith('smallint') || t.startsWith('tinyint') || t.startsWith('bigint');
+  };
+
+  // 渲染表格（可重複呼叫）
+  function renderAttachTable(fields, rows) {
+    if (!fields || fields.length === 0) {
+      container.innerHTML = '<div class="text-center text-muted py-3">無欄位定義</div>';
+      return;
+    }
+    let html = '<table class="erp-table" data-dict-table="' + dictTable + '"'
+      + ' style="table-layout:auto;width:max-content;min-width:0">';
+    html += '<thead><tr>';
+    for (const f of fields) {
+      const label = f.DisplayLabel || f.displayLabel || f.FieldName || f.fieldName || '';
+      const fn = f.FieldName || f.fieldName || '';
+      const num = isNumType(f.DataType || f.dataType);
+      const alignCls = num ? 'align-right' : 'align-left';
+      const w = (f.FieldWidth || f.DisplaySize) ? (f.FieldWidth || f.DisplaySize) * 10 : 100;
+      html += `<th class="${alignCls}" data-field="${fn}" style="width:${w}px;min-width:30px;padding:2px 6px;position:relative;">`
+        + `<span class="th-text">${label}</span>`
+        + `<span class="col-resizer" draggable="false"></span>`
+        + `</th>`;
+    }
+    html += '</tr></thead><tbody>';
+
+    const dataRows = rows.length > 0 ? rows : [{}];
+    for (const row of dataRows) {
+      // 把每列的原始資料存到 data-* 屬性，方便檢視/刪除取用
+      const item = row['Item'] ?? row['item'] ?? '';
+      const fn_ = row['FileName'] ?? row['filename'] ?? row['Filename'] ?? '';
+      const uid_ = row['Userid'] ?? row['userid'] ?? row['UserId'] ?? '';
+      html += `<tr data-item="${item}" data-filename="${fn_}" data-userid="${uid_}" style="cursor:pointer;">`;
+      for (const f of fields) {
+        const fn = f.FieldName || f.fieldName || '';
+        let val = row[fn] ?? '';
+        if (val === '' && Object.keys(row).length > 0) {
+          const key = Object.keys(row).find(k => k.toLowerCase() === fn.toLowerCase());
+          if (key) val = row[key] ?? '';
+        }
+        const num = isNumType(f.DataType || f.dataType);
+        const alignCls = num ? 'align-right' : 'align-left';
+        html += `<td class="${alignCls}">`
+          + `<span class="cell-view" style="padding:2px 6px;display:block;">${val}</span>`
+          + `</td>`;
+      }
+      html += '</tr>';
+    }
+    html += '</tbody></table>';
+    container.innerHTML = html;
+    initColResize();
+    initRowSelect();
+  }
+
+  // 欄寬拖曳
+  function initColResize() {
+    const tbl = container.querySelector('table.erp-table');
+    if (!tbl) return;
+    const ths = Array.from(tbl.querySelectorAll('thead th'));
+    let drag = null;
+    tbl.addEventListener('mousedown', (e) => {
+      const handle = e.target.closest('.col-resizer');
+      if (!handle) return;
+      e.preventDefault();
+      const th = handle.parentElement;
+      const idx = ths.indexOf(th);
+      drag = { idx, startX: e.pageX, startW: th.getBoundingClientRect().width };
+      document.body.style.cursor = 'col-resize';
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!drag) return;
+      const w = Math.max(30, drag.startW + (e.pageX - drag.startX));
+      ths[drag.idx].style.width = `${w}px`;
+      tbl.querySelectorAll(`tbody tr td:nth-child(${drag.idx + 1})`).forEach(td => td.style.width = `${w}px`);
+    });
+    document.addEventListener('mouseup', () => {
+      if (!drag) return;
+      document.body.style.cursor = '';
+      const field = ths[drag.idx]?.dataset.field;
+      const width = Math.round(ths[drag.idx].getBoundingClientRect().width);
+      drag = null;
+      if (field && dictTable) {
+        fetch('/api/DictSetupApi/FieldWidth/Save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tableName: dictTable, fieldName: field, widthPx: width })
+        }).catch(() => {});
+      }
+    });
+  }
+
+  // 重新載入資料
+  async function reloadAttachData() {
+    const paperNum = PAGE_PAPER_NUM || window.selectedPaperNum || '';
+    const dataUrl = apiUrl + `&PaperNum=${encodeURIComponent(paperNum)}`;
+    const dataResp = await fetch(dataUrl);
+    const dataJson = await dataResp.json();
+    const rows = dataJson.data || dataJson || [];
+    renderAttachTable(cachedFields, rows);
+  }
 
   // 當切換到「夾檔」頁籤時才載入
   const tabBtn = document.getElementById('tab-attachment-tab');
@@ -2142,109 +2264,155 @@ const KEY_FIELD = ("@(keyFieldName ?? "PaperNum")" || "PaperNum").trim();
     if (loaded) return;
     loaded = true;
     try {
-      // 1) 取得欄位辭典（API 回傳陣列，Visible 已在 SQL 篩過）
       const metaResp = await fetch(`/api/TableFieldLayout/DictFields?table=${encodeURIComponent(dictTable)}`);
-      const fields = await metaResp.json();
-
-      // 2) 取得資料
-      const paperNum = PAGE_PAPER_NUM || window.selectedPaperNum || '';
-      const dataUrl = apiUrl + `&PaperNum=${encodeURIComponent(paperNum)}`;
-      const dataResp = await fetch(dataUrl);
-      const dataJson = await dataResp.json();
-      const rows = dataJson.data || dataJson || [];
-
-      // 3) 渲染表格
-      if (fields.length === 0) {
-        container.innerHTML = '<div class="text-center text-muted py-3">無欄位定義</div>';
-        return;
-      }
-
-      const isNumType = (dt) => {
-        const t = (dt || '').toLowerCase();
-        return t === 'number' || t.startsWith('decimal') || t.startsWith('numeric')
-          || t.startsWith('money') || t.startsWith('float') || t.startsWith('real')
-          || t.startsWith('int') || t.startsWith('smallint') || t.startsWith('tinyint') || t.startsWith('bigint');
-      };
-
-      // 使用跟單身明細一樣的 erp-table 結構
-      let html = '<table class="erp-table" data-dict-table="' + dictTable + '"'
-        + ' style="table-layout:auto;width:max-content;min-width:0">';
-      html += '<thead><tr>';
-      for (const f of fields) {
-        const label = f.DisplayLabel || f.displayLabel || f.FieldName || f.fieldName || '';
-        const fn = f.FieldName || f.fieldName || '';
-        const num = isNumType(f.DataType || f.dataType);
-        const alignCls = num ? 'align-right' : 'align-left';
-        const w = (f.FieldWidth || f.DisplaySize) ? (f.FieldWidth || f.DisplaySize) * 10 : 100;
-        html += `<th class="${alignCls}" data-field="${fn}" style="width:${w}px;min-width:30px;padding:2px 6px;position:relative;">`
-          + `<span class="th-text">${label}</span>`
-          + `<span class="col-resizer" draggable="false"></span>`
-          + `</th>`;
-      }
-      html += '</tr></thead><tbody>';
-
-      const dataRows = rows.length > 0 ? rows : [{}]; // 無資料時顯示一行空列
-      for (const row of dataRows) {
-        html += '<tr>';
-        for (const f of fields) {
-          const fn = f.FieldName || f.fieldName || '';
-          let val = row[fn] ?? '';
-          if (val === '' && Object.keys(row).length > 0) {
-            const key = Object.keys(row).find(k => k.toLowerCase() === fn.toLowerCase());
-            if (key) val = row[key] ?? '';
-          }
-          const num = isNumType(f.DataType || f.dataType);
-          const alignCls = num ? 'align-right' : 'align-left';
-          html += `<td class="${alignCls}">`
-            + `<span class="cell-view" style="padding:2px 6px;display:block;">${val}</span>`
-            + `</td>`;
-        }
-        html += '</tr>';
-      }
-      html += '</tbody></table>';
-      container.innerHTML = html;
-
-      // 欄寬拖曳
-      const tbl = container.querySelector('table.erp-table');
-      if (tbl) {
-        const ths = Array.from(tbl.querySelectorAll('thead th'));
-        let drag = null;
-        tbl.addEventListener('mousedown', (e) => {
-          const handle = e.target.closest('.col-resizer');
-          if (!handle) return;
-          e.preventDefault();
-          const th = handle.parentElement;
-          const idx = ths.indexOf(th);
-          drag = { idx, startX: e.pageX, startW: th.getBoundingClientRect().width };
-          document.body.style.cursor = 'col-resize';
-        });
-        document.addEventListener('mousemove', (e) => {
-          if (!drag) return;
-          const w = Math.max(30, drag.startW + (e.pageX - drag.startX));
-          ths[drag.idx].style.width = `${w}px`;
-          tbl.querySelectorAll(`tbody tr td:nth-child(${drag.idx + 1})`).forEach(td => td.style.width = `${w}px`);
-        });
-        document.addEventListener('mouseup', () => {
-          if (!drag) return;
-          document.body.style.cursor = '';
-          // 儲存欄寬
-          const field = ths[drag.idx]?.dataset.field;
-          const width = Math.round(ths[drag.idx].getBoundingClientRect().width);
-          drag = null;
-          if (field && dictTable) {
-            fetch('/api/DictSetupApi/FieldWidth/Save', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ tableName: dictTable, fieldName: field, widthPx: width })
-            }).catch(() => {});
-          }
-        });
-      }
+      cachedFields = await metaResp.json();
+      await reloadAttachData();
     } catch (err) {
       console.error('載入夾檔失敗:', err);
       container.innerHTML = '<div class="text-center text-danger py-3">載入夾檔失敗</div>';
     }
   });
+
+  // 上傳按鈕
+  const uploadBtn = document.getElementById('btnAttachUpload');
+  const fileInput = document.getElementById('attachFileInput');
+  if (uploadBtn && fileInput) {
+    uploadBtn.addEventListener('click', () => {
+      fileInput.value = '';
+      fileInput.click();
+    });
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      const paperNum = (PAGE_PAPER_NUM || window.selectedPaperNum || '').trim();
+      if (!paperNum) {
+        Swal.fire({ icon: 'warning', title: '請先選擇單據' });
+        return;
+      }
+
+      const realTable = uploadBtn.dataset.realTable || '';
+      const itemId = uploadBtn.dataset.itemId || PAGE.itemId || '';
+      const userId = localStorage.getItem('erpLoginUserId') || window._userId || '';
+
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('tableName', realTable);
+      fd.append('paperNum', paperNum);
+      fd.append('itemId', itemId);
+      fd.append('userId', userId);
+
+      try {
+        const resp = await fetch('/api/CompanyAttachFile/MasAttachUpload', {
+          method: 'POST',
+          body: fd
+        });
+        if (resp.status === 409) {
+          Swal.fire({ icon: 'warning', title: '檔案已存在!!' });
+          return;
+        }
+        if (!resp.ok) {
+          const msg = await resp.text();
+          Swal.fire({ icon: 'error', title: msg || '上傳失敗' });
+          return;
+        }
+        Swal.fire({ icon: 'success', title: '上傳成功', timer: 1500, showConfirmButton: false });
+        // 重新載入夾檔列表
+        await reloadAttachData();
+      } catch (err) {
+        console.error('上傳夾檔失敗:', err);
+        Swal.fire({ icon: 'error', title: '上傳失敗' });
+      }
+    });
+  }
+
+  // 行選取
+  function initRowSelect() {
+    const tbl = container.querySelector('table.erp-table');
+    if (!tbl) return;
+    tbl.addEventListener('click', (e) => {
+      const tr = e.target.closest('tbody tr');
+      if (!tr) return;
+      tbl.querySelectorAll('tbody tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+      tr.classList.add('row-selected');
+    });
+  }
+
+  // 取得目前選取行
+  function getSelectedRow() {
+    const tbl = container.querySelector('table.erp-table');
+    return tbl?.querySelector('tbody tr.row-selected') || null;
+  }
+
+  // 檢視按鈕
+  const viewBtn = document.getElementById('btnAttachView');
+  if (viewBtn) {
+    viewBtn.addEventListener('click', () => {
+      const row = getSelectedRow();
+      if (!row || !row.dataset.filename) {
+        Swal.fire({ icon: 'warning', title: '請先選取一筆夾檔' });
+        return;
+      }
+      const realTable = document.getElementById('btnAttachUpload')?.dataset.realTable || '';
+      const paperNum = (PAGE_PAPER_NUM || window.selectedPaperNum || '').trim();
+      const fileName = row.dataset.filename;
+      const url = `/api/CompanyAttachFile/MasAttachView?tableName=${encodeURIComponent(realTable)}&paperNum=${encodeURIComponent(paperNum)}&fileName=${encodeURIComponent(fileName)}`;
+      window.open(url, '_blank');
+    });
+  }
+
+  // 刪除按鈕
+  const deleteBtn = document.getElementById('btnAttachDelete');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async () => {
+      const row = getSelectedRow();
+      if (!row || !row.dataset.filename) {
+        Swal.fire({ icon: 'warning', title: '請先選取一筆夾檔' });
+        return;
+      }
+
+      const realTable = deleteBtn.dataset.realTable || '';
+      const itemId = deleteBtn.dataset.itemId || PAGE.itemId || '';
+      const userId = (localStorage.getItem('erpLoginUserId') || window._userId || '').trim();
+      const fileUserId = (row.dataset.userid || '').trim();
+      const paperNum = (PAGE_PAPER_NUM || window.selectedPaperNum || '').trim();
+      const fileName = row.dataset.filename;
+      const item = parseInt(row.dataset.item || '0', 10);
+
+      // 非上傳者不可刪除
+      if (fileUserId && userId.toLowerCase() !== fileUserId.toLowerCase() && userId.toLowerCase() !== 'admin') {
+        Swal.fire({ icon: 'warning', title: '非上傳者不可刪除夾檔!!' });
+        return;
+      }
+
+      const confirm = await Swal.fire({
+        icon: 'question',
+        title: `確定要刪除夾檔 ${item}？`,
+        showCancelButton: true,
+        confirmButtonText: '確定',
+        cancelButtonText: '取消'
+      });
+      if (!confirm.isConfirmed) return;
+
+      try {
+        const resp = await fetch('/api/CompanyAttachFile/MasAttachDelete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tableName: realTable, paperNum, fileName, item, itemId, userId })
+        });
+        if (!resp.ok) {
+          const msg = await resp.text();
+          Swal.fire({ icon: 'error', title: msg || '刪除失敗' });
+          return;
+        }
+        Swal.fire({ icon: 'success', title: '刪除成功', timer: 1500, showConfirmButton: false });
+        await reloadAttachData();
+      } catch (err) {
+        console.error('刪除夾檔失敗:', err);
+        Swal.fire({ icon: 'error', title: '刪除失敗' });
+      }
+    });
+  }
 })();
 
 const backToMainTpl = (PAGE.queryRedirectUrl || '').trim()
@@ -3120,6 +3288,12 @@ if (editBtn) {
     applyHeaderEditState(isEdit);
     applyToolbarEditState(isEdit);
 
+    // 夾檔按鈕：瀏覽模式下上傳/刪除灰掉，檢視可用
+    const btnUp = document.getElementById('btnAttachUpload');
+    const btnDel = document.getElementById('btnAttachDelete');
+    if (btnUp) { btnUp.disabled = !isEdit; }
+    if (btnDel) { btnDel.disabled = !isEdit; }
+
     // 切換單頭欄位的 disabled 狀態
     document.querySelectorAll('.erp-header-form input, .erp-header-form textarea, .erp-header-form select')
       .forEach(el => {
@@ -3143,11 +3317,11 @@ if (editBtn) {
         }
       });
 
-    // ? 切換單身表格的顯示/編輯模式（針對 _MultiTabDetail.cshtml）
+    // ? 切換單身表格的顯示/編輯模式（針對 _MultiTabDetail.cshtml，排除夾檔區域）
     document.querySelectorAll('.multi-tab-detail .erp-table .cell-view')
-      .forEach(el => el.classList.toggle('d-none', isEdit));
+      .forEach(el => { if (!el.closest('#attachmentGridContainer')) el.classList.toggle('d-none', isEdit); });
     document.querySelectorAll('.multi-tab-detail .erp-table .cell-edit')
-      .forEach(el => el.classList.toggle('d-none', !isEdit));
+      .forEach(el => { if (!el.closest('#attachmentGridContainer')) el.classList.toggle('d-none', !isEdit); });
 
     // 綁定 input 事件，標記列為已修改
     if (isEdit) {
@@ -5142,6 +5316,14 @@ window.addEventListener('pageshow', () => {
 </script>
 
 <style>
+/* 夾檔表格行選取 */
+#attachmentGridContainer .erp-table tbody tr.row-selected td {
+  background: #fff3cd !important;
+}
+#attachmentGridContainer .erp-table tbody tr:hover td {
+  background: #f0f4ff;
+}
+
 /* =========================================
    A) 全局/版面
    ========================================= */
