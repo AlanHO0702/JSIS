@@ -104,35 +104,7 @@
     .table-list-page .highlight { background-color: #ffd !important; }
     .table-list-page .ghost { opacity: 0.5; }
 
-    /* 拖曳把手 — hover 時顯示 */
-    .table-list-page .table th .drag-handle {
-        display: none;
-        cursor: grab;
-        margin-right: 6px;
-        color: #999;
-        font-size: 1em;
-        vertical-align: middle;
-    }
-    .table-list-page .table th .drag-handle:hover { color: #333; }
-    .table-list-page .table th:hover .drag-handle { display: inline; }
-    .table-list-page .table th:hover { background-color: #edf2fa; }
-
-    /* 拖曳中的欄位（SortableJS ghostClass） */
-    .table-list-page .table th.col-dragging {
-        opacity: 0.5;
-        background-color: #d0ebff !important;
-        cursor: grabbing;
-    }
-
-    /* 放置目標指示線（SortableJS onMove 加的 class） */
-    .table-list-page .table th.drag-over::after {
-        content: '';
-        position: absolute;
-        right: 0; top: 0;
-        height: 100%;
-        width: 4px;
-        background: #1890ff;
-    }
+    /* 拖曳排序樣式由 columnDragSort.css 提供 */
     .table-list-page #search-panel {
     background: #f8fafb;
     border-radius: 10px;
@@ -223,7 +195,6 @@
 
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
 <script>
   (function () {
@@ -868,109 +839,18 @@ document.addEventListener("DOMContentLoaded", function () {
       if (formEl && Array.isArray(saved) && saved.length) restoreSearchFormSafe(formEl, saved);
   });
 
-  /* ========= 欄位拖曳排序（SortableJS + handle + 自動捲動） ========= */
+  /* ========= 欄位拖曳排序（使用共用模組） ========= */
   const headerRow = document.getElementById("table-header-row");
-  if (headerRow && window.Sortable) {
-    const EDGE_ZONE = 60;        // px — 接近容器邊緣此範圍內開始自動捲動
-    const SCROLL_SPEED_MAX = 18; // px/frame — 最大捲動速度
-    let autoScrollRAF = null;
-    let lastMouseX = 0;
-    let originalOrder = [];      // 拖曳前欄位順序
-    let lastOverEl = null;       // 上一個 drag-over 的 th
-
-    const tableWrap = headerRow.closest('.table-wrap');
-    const botBar = document.getElementById('hscrollBottom');
-
-    // --- 自動捲動 ---
-    function autoScrollTick() {
-      if (!tableWrap) { stopAutoScroll(); return; }
-      const wrapRect = tableWrap.getBoundingClientRect();
-      let delta = 0;
-      if (lastMouseX < wrapRect.left + EDGE_ZONE) {
-        delta = -Math.round(SCROLL_SPEED_MAX * (1 - Math.max(0, lastMouseX - wrapRect.left) / EDGE_ZONE));
-      } else if (lastMouseX > wrapRect.right - EDGE_ZONE) {
-        delta = Math.round(SCROLL_SPEED_MAX * (1 - Math.max(0, wrapRect.right - lastMouseX) / EDGE_ZONE));
-      }
-      if (delta !== 0) {
-        tableWrap.scrollLeft += delta;
-        if (botBar) botBar.scrollLeft = tableWrap.scrollLeft;
-      }
-      autoScrollRAF = requestAnimationFrame(autoScrollTick);
-    }
-    function startAutoScroll() { if (!autoScrollRAF) autoScrollRAF = requestAnimationFrame(autoScrollTick); }
-    function stopAutoScroll()  { if (autoScrollRAF) { cancelAnimationFrame(autoScrollRAF); autoScrollRAF = null; } }
-
-    // 追蹤滑鼠位置（SortableJS 拖曳中也能取得）
-    document.addEventListener('mousemove', (e) => { lastMouseX = e.clientX; });
-
-    // --- 清除 drag-over 指示線 ---
-    function clearDragOver() {
-      headerRow.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-      lastOverEl = null;
-    }
-
-    Sortable.create(headerRow, {
-      animation: 150,
-      handle: '.drag-handle',
-      ghostClass: 'col-dragging',
-      filter: '.col-resizer',
-      preventOnFilter: false,
-
-      onStart: function () {
-        originalOrder = Array.from(headerRow.children).map(h => h.dataset.field);
-        startAutoScroll();
-      },
-
-      onMove: function (evt) {
-        // 清除舊的指示線，在目標 th 加上 drag-over
-        clearDragOver();
-        if (evt.related && evt.related !== evt.dragged) {
-          evt.related.classList.add('drag-over');
-          lastOverEl = evt.related;
-        }
-      },
-
-      onEnd: function (evt) {
-        stopAutoScroll();
-        clearDragOver();
-
-        // 比較順序是否有變化
-        const newFieldOrder = Array.from(headerRow.children).map(h => h.dataset.field);
-        const orderChanged = newFieldOrder.some((f, i) => f !== originalOrder[i]);
-        if (!orderChanged) return;
-
-        // 同步 tbody 欄位順序
-        document.querySelectorAll('#dataTbody tr').forEach(tr => {
-          const cells = Array.from(tr.children);
-          if (evt.oldIndex < cells.length && evt.newIndex < cells.length) {
-            const moved = cells[evt.oldIndex];
-            const target = cells[evt.newIndex];
-            if (evt.oldIndex < evt.newIndex) {
-              target.after(moved);
-            } else {
-              target.before(moved);
-            }
-          }
-        });
-
-        // 更新 _tableFields 順序
-        const fieldMap = {};
-        window._tableFields.forEach(f => { fieldMap[f.FieldName] = f; });
-        window._tableFields = newFieldOrder.map(fn => fieldMap[fn]).filter(Boolean);
-
-        // 儲存新順序到後端，成功後動態刷新（維持查詢條件）
-        const newOrder = newFieldOrder.map((field, index) => ({
-          fieldName: field, serialNum: index + 1
-        }));
-        http('/api/TableFieldLayout/SaveSerialOrder', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tableName: window._tableName, fieldOrders: newOrder })
-        }, '儲存欄位順序…')
-          .then(res => { if (!res.ok) throw new Error("更新失敗"); return res.json(); })
-          .then(() => doQuery(currentPage))
-          .catch(() => Swal.fire({ icon: 'error', title: '欄位順序儲存失敗！' }));
-      }
+  if (headerRow && window.initColumnDragSort) {
+    initColumnDragSort({
+      headerRow:   headerRow,
+      tbody:       document.getElementById('dataTbody'),
+      scrollWrap:  headerRow.closest('.table-wrap'),
+      scrollSync:  document.getElementById('hscrollBottom'),
+      tableName:   window._tableName,
+      fieldsArray: window._tableFields,
+      onSaved:     () => doQuery(currentPage),
+      fetchFn:     http
     });
   }
 
