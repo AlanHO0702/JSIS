@@ -1,0 +1,444 @@
+<script>
+// FME00011 item-specific enhancement:
+// add a third detail tab ("來源檔") on PaperDetail without modifying shared templates.
+(function () {
+  "use strict";
+
+  const ITEM_ID = "FME00011";
+  const DETAIL_DICT = "FMEdMRPSub";
+  const SUBITEM_DICT = "FMEdMRPSubItem";
+  const SUBITEM_VIEW = "FMEdV_MRPSubItem";
+  const SUB_TAB_ID = "fme00011_subitem";
+  const WIDTH_STORE_KEY = `colwidth:${SUBITEM_DICT.toLowerCase()}`;
+
+  if (((window._itemId || "").toString().trim().toUpperCase()) !== ITEM_ID) return;
+  if (!document.querySelector(".multi-tab-detail")) return;
+
+  let detailTabId = "";
+  let currentPaperNum = "";
+  let currentDetailItem = "";
+  let currentDetailPartNum = "";
+  let dictFields = [];
+  let cacheRows = [];
+  let resizeBound = false;
+
+  const resizeState = {
+    active: false,
+    table: null,
+    ths: [],
+    thIndex: -1,
+    startX: 0,
+    startWidth: 0,
+    saveTimer: null
+  };
+
+  function esc(v) {
+    return String(v ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function toArray(x) {
+    if (Array.isArray(x)) return x;
+    if (x && Array.isArray(x.value)) return x.value;
+    return [];
+  }
+
+  function sortFields(rows) {
+    return [...rows]
+      .filter(r => (r?.Visible ?? r?.visible ?? true))
+      .sort((a, b) => Number(a?.SerialNum ?? a?.serialNum ?? 0) - Number(b?.SerialNum ?? b?.serialNum ?? 0));
+  }
+
+  function isNumberType(dataType) {
+    const t = (dataType || "").toString().toLowerCase();
+    return t.includes("int")
+      || t.includes("decimal")
+      || t.includes("numeric")
+      || t.includes("money")
+      || t.includes("float")
+      || t.includes("real");
+  }
+
+  function isDateType(dataType) {
+    const t = (dataType || "").toString().toLowerCase();
+    return t.includes("date") || t.includes("time");
+  }
+
+  function pad2(v) {
+    return String(v).padStart(2, "0");
+  }
+
+  function formatDateOnly(raw) {
+    if (raw == null) return "";
+    const s = String(raw).trim();
+    if (!s) return "";
+    const m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    if (m) return `${m[1]}/${pad2(m[2])}/${pad2(m[3])}`;
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return s;
+    return `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
+  }
+
+  function fieldValue(row, fieldName) {
+    if (!row || !fieldName) return "";
+    if (row[fieldName] != null) return row[fieldName];
+    const hit = Object.keys(row).find(k => k.toLowerCase() === fieldName.toLowerCase());
+    return hit ? row[hit] : "";
+  }
+
+  function detectDetailTabId() {
+    const tabs = Array.isArray(window._multiTabTabs) ? window._multiTabTabs : [];
+    const found = tabs.find(t => ((t?.DictTable || "").toString().trim().toLowerCase()) === DETAIL_DICT.toLowerCase());
+    detailTabId = (found?.Id || "").toString().trim();
+  }
+
+  async function fetchDictFields() {
+    const res = await fetch(`/api/TableFieldLayout/DictFields?table=${encodeURIComponent(SUBITEM_DICT)}&lang=TW`);
+    if (!res.ok) throw new Error(`DictFields failed: ${res.status}`);
+    dictFields = sortFields(toArray(await res.json()));
+  }
+
+  async function fetchSubRowsByPaper(paperNum) {
+    if (!paperNum) return [];
+    async function fetchRows(tableName) {
+      const url = `/api/DynamicTable/ByPaperNum?table=${encodeURIComponent(tableName)}&paperNum=${encodeURIComponent(paperNum)}&top=5000`;
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      return toArray(await res.json());
+    }
+    // Legacy Delphi query reads view FMEdV_MRPSubItem first; fallback to dict table.
+    let rows = await fetchRows(SUBITEM_VIEW);
+    if (!rows.length) rows = await fetchRows(SUBITEM_DICT);
+    rows.sort((a, b) => Number(fieldValue(a, "Item") || 0) - Number(fieldValue(b, "Item") || 0));
+    return rows;
+  }
+
+  function getSubItemValue(row) {
+    const v = fieldValue(row, "SubItem");
+    return v == null ? "" : String(v).trim();
+  }
+
+  function getItemValue(row) {
+    const v = fieldValue(row, "Item");
+    return v == null ? "" : String(v).trim();
+  }
+
+  function getPartNumValue(row, fallback = currentDetailPartNum) {
+    const direct = fieldValue(row, "PartNum");
+    if (direct != null && String(direct).trim() !== "") return String(direct).trim();
+    const candidates = ["Lk_PartNum", "SourPartNum", "SourcePartNum", "PartNo"];
+    for (const f of candidates) {
+      const v = fieldValue(row, f);
+      if (v != null && String(v).trim() !== "") return String(v).trim();
+    }
+    return fallback || "";
+  }
+
+  function formatCellValue(raw, col, row) {
+    const fieldName = (col?.name || "").toString();
+    if (fieldName.toLowerCase() === "partnum") {
+      return getPartNumValue(row);
+    }
+    if (isDateType(col?.dataType)) {
+      return formatDateOnly(raw);
+    }
+    return raw == null ? "" : raw;
+  }
+
+  function filterRowsByDetailItem(rows, item) {
+    const key = String(item ?? "").trim();
+    if (!key) return [];
+    return rows.filter(r => getSubItemValue(r) === key);
+  }
+
+  function applyColumnWidth(table, ths, index, width) {
+    const th = ths[index];
+    if (!th) return;
+    const w = Math.max(30, Math.round(width));
+    th.style.width = `${w}px`;
+    Array.from(table.querySelectorAll(`tbody tr td:nth-child(${index + 1})`)).forEach(td => {
+      td.style.width = `${w}px`;
+    });
+  }
+
+  function saveWidthsToLocal(table, cols) {
+    const ths = Array.from(table.querySelectorAll("thead th"));
+    const payload = cols.map((c, i) => ({
+      fieldName: c.name,
+      width: Math.round(ths[i]?.getBoundingClientRect().width || 0)
+    })).filter(x => x.width > 0);
+    localStorage.setItem(WIDTH_STORE_KEY, JSON.stringify(payload));
+  }
+
+  async function persistWidthsToServer(table, cols) {
+    try {
+      const ths = Array.from(table.querySelectorAll("thead th"));
+      const payload = {
+        tableName: SUBITEM_DICT,
+        cols: cols.map((c, i) => ({
+          fieldName: c.name,
+          width: Math.round(ths[i]?.getBoundingClientRect().width || 0)
+        })).filter(x => x.width > 0)
+      };
+      if (!payload.cols.length) return;
+      await fetch("/api/TableFieldLayout/SaveDetailLayout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  function debouncePersist(table, cols) {
+    clearTimeout(resizeState.saveTimer);
+    resizeState.saveTimer = setTimeout(async () => {
+      saveWidthsToLocal(table, cols);
+      await persistWidthsToServer(table, cols);
+    }, 350);
+  }
+
+  function applySavedWidths(table, cols) {
+    const raw = localStorage.getItem(WIDTH_STORE_KEY);
+    if (!raw) return;
+    let saved = [];
+    try { saved = JSON.parse(raw) || []; } catch { saved = []; }
+    const ths = Array.from(table.querySelectorAll("thead th"));
+    saved.forEach(s => {
+      const idx = cols.findIndex(c => c.name.toLowerCase() === String(s.fieldName || "").toLowerCase());
+      const w = Number(s.width);
+      if (idx >= 0 && Number.isFinite(w) && w > 0) applyColumnWidth(table, ths, idx, w);
+    });
+  }
+
+  function applyDefaultWidths(table, cols) {
+    const ths = Array.from(table.querySelectorAll("thead th"));
+    cols.forEach((c, i) => {
+      const px = Number(c.width || 0) > 0 ? Number(c.width) : (Number(c.displaySize || 0) > 0 ? Number(c.displaySize) * 10 : 0);
+      if (px > 0) applyColumnWidth(table, ths, i, px);
+    });
+  }
+
+  function bindResizeGlobalOnce(cols) {
+    if (resizeBound) return;
+    resizeBound = true;
+
+    document.addEventListener("mousemove", (e) => {
+      if (!resizeState.active || !resizeState.table) return;
+      const dx = e.pageX - resizeState.startX;
+      const nextWidth = Math.max(30, resizeState.startWidth + dx);
+      applyColumnWidth(resizeState.table, resizeState.ths, resizeState.thIndex, nextWidth);
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (!resizeState.active || !resizeState.table) return;
+      resizeState.active = false;
+      document.body.classList.remove("resizing");
+      resizeState.ths.forEach(th => th.classList.remove("resizing"));
+      debouncePersist(resizeState.table, cols);
+      resizeState.table = null;
+      resizeState.ths = [];
+      resizeState.thIndex = -1;
+    });
+  }
+
+  function initColumnResize(table, cols) {
+    const ths = Array.from(table.querySelectorAll("thead th"));
+    ths.forEach((th, idx) => {
+      const handle = th.querySelector(".col-resizer");
+      if (!handle) return;
+      handle.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        resizeState.active = true;
+        resizeState.table = table;
+        resizeState.ths = ths;
+        resizeState.thIndex = idx;
+        resizeState.startX = e.pageX;
+        resizeState.startWidth = th.getBoundingClientRect().width;
+        document.body.classList.add("resizing");
+        th.classList.add("resizing");
+      });
+    });
+    bindResizeGlobalOnce(cols);
+  }
+
+  function bindRowSelection(table) {
+    const tbody = table.querySelector("tbody");
+    if (!tbody) return;
+    tbody.addEventListener("click", (e) => {
+      const tr = e.target.closest("tr");
+      if (!tr || !tbody.contains(tr)) return;
+      tbody.querySelectorAll("tr.row-selected").forEach(r => r.classList.remove("row-selected"));
+      tr.classList.add("row-selected");
+    });
+  }
+
+  function renderSubTab(rows, item) {
+    const pane = document.getElementById(`content-${SUB_TAB_ID}`);
+    if (!pane) return;
+    const container = pane.querySelector(".table-container");
+    if (!container) return;
+
+    if (!dictFields.length) {
+      container.innerHTML = '<div class="alert alert-warning m-2">來源檔欄位辭典未設定。</div>';
+      return;
+    }
+
+    if (!item) {
+      container.innerHTML = '<div class="alert alert-info m-2">請先在明細檔選擇一筆項次。</div>';
+      return;
+    }
+
+    const cols = dictFields.map(f => ({
+      name: (f.FieldName || f.fieldName || "").toString(),
+      label: (f.DisplayLabel || f.displayLabel || f.FieldName || f.fieldName || "").toString(),
+      dataType: (f.DataType || f.dataType || "").toString(),
+      width: Number(f.FieldWidth || f.fieldWidth || 0),
+      displaySize: Number(f.DisplaySize || f.displaySize || 0)
+    })).filter(x => x.name);
+
+    const header = cols.map(c => {
+      const align = isNumberType(c.dataType) ? "align-right" : "align-left";
+      return `<th class="${align}" data-field="${esc(c.name)}"><span class="th-text">${esc(c.label)}</span><span class="col-resizer" draggable="false"></span></th>`;
+    }).join("");
+
+    const bodyRows = rows.length
+      ? rows.map(r => {
+          const tds = cols.map(c => {
+            const align = isNumberType(c.dataType) ? "align-right" : "align-left";
+            const raw = fieldValue(r, c.name);
+            const display = formatCellValue(raw, c, r);
+            return `<td class="${align}" data-field="${esc(c.name)}"><span class="cell-view">${esc(display)}</span></td>`;
+          }).join("");
+          return `<tr data-state="unchanged">${tds}</tr>`;
+        }).join("")
+      : `<tr><td colspan="${Math.max(cols.length, 1)}" class="text-center text-muted py-2">無來源資料</td></tr>`;
+
+    container.innerHTML = `
+      <div class="erp-table-wrapper">
+        <div class="erp-table-scroll-body">
+          <table class="erp-table">
+            <thead><tr>${header}</tr></thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+
+    const table = container.querySelector("table.erp-table");
+    if (!table) return;
+
+    applyDefaultWidths(table, cols);
+    applySavedWidths(table, cols);
+    initColumnResize(table, cols);
+    bindRowSelection(table);
+    if (rows.length === 1) {
+      const only = table.querySelector("tbody tr");
+      if (only) only.classList.add("row-selected");
+    }
+  }
+
+  function ensureTabDom() {
+    const wrap = document.querySelector(".multi-tab-detail");
+    if (!wrap) return false;
+
+    const nav = wrap.querySelector("ul.nav.nav-tabs");
+    const content = wrap.querySelector("div.tab-content");
+    if (!nav || !content) return false;
+
+    if (!document.getElementById(`tab-${SUB_TAB_ID}`)) {
+      const li = document.createElement("li");
+      li.className = "nav-item";
+      li.setAttribute("role", "presentation");
+      li.innerHTML = `
+        <button class="nav-link"
+                id="tab-${SUB_TAB_ID}"
+                data-bs-toggle="tab"
+                data-bs-target="#content-${SUB_TAB_ID}"
+                data-tab-id="${SUB_TAB_ID}"
+                type="button"
+                role="tab">來源檔</button>`;
+      nav.appendChild(li);
+    }
+
+    if (!document.getElementById(`content-${SUB_TAB_ID}`)) {
+      const pane = document.createElement("div");
+      pane.className = "tab-pane fade";
+      pane.id = `content-${SUB_TAB_ID}`;
+      pane.setAttribute("role", "tabpanel");
+      pane.innerHTML = `<div class="table-container" data-tab-id="${SUB_TAB_ID}" data-dict-table="${SUBITEM_DICT}"></div>`;
+      content.appendChild(pane);
+    }
+    return true;
+  }
+
+  function updateAndRenderFromCache() {
+    const filtered = filterRowsByDetailItem(cacheRows, currentDetailItem);
+    renderSubTab(filtered, currentDetailItem);
+  }
+
+  async function loadSubTabData(force) {
+    currentPaperNum = (window._paperNum || "").toString().trim();
+    if (!currentPaperNum) return;
+    if (!cacheRows.length || force) cacheRows = await fetchSubRowsByPaper(currentPaperNum);
+    updateAndRenderFromCache();
+  }
+
+  function bindDetailRowEvent() {
+    window.addEventListener("multiTabRowSelected", (e) => {
+      const d = e?.detail || {};
+      const tabId = (d.tabId || "").toString().trim();
+      if (!tabId || (detailTabId && tabId !== detailTabId)) return;
+      currentDetailItem = getItemValue(d.rowData);
+      currentDetailPartNum = getPartNumValue(d.rowData, "");
+      updateAndRenderFromCache();
+    });
+  }
+
+  function bindSubTabShown() {
+    const btn = document.getElementById(`tab-${SUB_TAB_ID}`);
+    if (!btn) return;
+    btn.addEventListener("shown.bs.tab", async () => {
+      try {
+        await loadSubTabData(false);
+      } catch (err) {
+        const pane = document.getElementById(`content-${SUB_TAB_ID}`);
+        const container = pane?.querySelector(".table-container");
+        if (container) container.innerHTML = `<div class="alert alert-danger m-2">${esc(err?.message || err)}</div>`;
+      }
+    });
+  }
+
+  function syncInitialDetailSelection() {
+    if (!detailTabId) return;
+    const row = window._multiTabSelectedRows?.[detailTabId];
+    if (row) {
+      currentDetailItem = getItemValue(row);
+      currentDetailPartNum = getPartNumValue(row, "");
+    }
+    if (currentDetailItem) return;
+    const tr = document.querySelector(`#content-${detailTabId} tbody tr`);
+    if (tr) currentDetailItem = (tr.getAttribute("data-item") || "").trim();
+  }
+
+  async function init() {
+    detectDetailTabId();
+    if (!ensureTabDom()) return;
+    await fetchDictFields();
+    bindDetailRowEvent();
+    bindSubTabShown();
+    syncInitialDetailSelection();
+    await loadSubTabData(false);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => { init().catch(() => {}); });
+  } else {
+    init().catch(() => {});
+  }
+})();
+</script>
