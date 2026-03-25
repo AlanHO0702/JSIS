@@ -751,20 +751,73 @@ SELECT TOP 1 RunSQLAfterAdd
             _logger.LogInformation("[PagedQuery] req.SortBy={SortBy}, req.SortDir={SortDir}, fieldSet count={Count}",
                 req.SortBy, req.SortDir, fieldSet.Count);
             var sortByTrimmed = req.SortBy?.Trim();
-            if (!string.IsNullOrWhiteSpace(sortByTrimmed) && fieldSet.Contains(sortByTrimmed))
+            if (!string.IsNullOrWhiteSpace(sortByTrimmed))
             {
-                var safeDir = string.Equals(req.SortDir, "desc", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC";
-                orderField1 = sortByTrimmed;
-                orderField2 = "";
-                hasTwoOrderFields = false;
-                isDescending = safeDir == "DESC";
-                useCustomSort = true;
-                _logger.LogInformation("[PagedQuery] Custom sort applied: [{Field}] {Dir}", orderField1, safeDir);
-            }
-            else if (!string.IsNullOrWhiteSpace(sortByTrimmed))
-            {
-                _logger.LogWarning("[PagedQuery] SortBy={SortBy} NOT in fieldSet. Available: {Fields}",
-                    sortByTrimmed, string.Join(", ", fieldSet.Take(20)));
+                // 載入字典欄位的 DataType，用以判斷是否為實體欄位
+                var fieldMeta = await _ctx.CURdTableFields
+                    .AsNoTracking()
+                    .Where(f => f.TableName.ToLower() == dictTable.ToLower())
+                    .Select(f => new { f.FieldName, f.DataType, f.LookupCond1Field })
+                    .ToListAsync();
+
+                var metaDict = fieldMeta
+                    .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
+                    .GroupBy(f => f.FieldName.Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+                // 解析排序欄位：虛擬欄位轉換為對應的實體欄位
+                var resolvedSortBy = sortByTrimmed;
+                if (metaDict.TryGetValue(sortByTrimmed, out var sortMeta)
+                    && string.IsNullOrWhiteSpace(sortMeta.DataType?.Trim()))
+                {
+                    // 虛擬欄位：嘗試從 LookupCond1Field 找到對應的實體欄位
+                    var resolved = false;
+                    if (!string.IsNullOrWhiteSpace(sortMeta.LookupCond1Field)
+                        && metaDict.TryGetValue(sortMeta.LookupCond1Field.Trim(), out var keyMeta)
+                        && !string.IsNullOrWhiteSpace(keyMeta.DataType?.Trim()))
+                    {
+                        resolvedSortBy = sortMeta.LookupCond1Field.Trim();
+                        resolved = true;
+                    }
+
+                    // 嘗試去掉 Name 後綴
+                    if (!resolved && sortByTrimmed.EndsWith("Name", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var baseName = sortByTrimmed.Substring(0, sortByTrimmed.Length - 4);
+                        if (metaDict.TryGetValue(baseName, out var baseMeta)
+                            && !string.IsNullOrWhiteSpace(baseMeta.DataType?.Trim()))
+                        {
+                            resolvedSortBy = baseName;
+                            resolved = true;
+                        }
+                    }
+
+                    if (!resolved)
+                    {
+                        _logger.LogWarning("[PagedQuery] SortBy={SortBy} is a virtual field, cannot resolve to real column", sortByTrimmed);
+                        resolvedSortBy = null;
+                    }
+                    else
+                    {
+                        _logger.LogInformation("[PagedQuery] SortBy resolved: {From} → {To}", sortByTrimmed, resolvedSortBy);
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(resolvedSortBy) && fieldSet.Contains(resolvedSortBy))
+                {
+                    var safeDir = string.Equals(req.SortDir, "desc", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC";
+                    orderField1 = resolvedSortBy;
+                    orderField2 = "";
+                    hasTwoOrderFields = false;
+                    isDescending = safeDir == "DESC";
+                    useCustomSort = true;
+                    _logger.LogInformation("[PagedQuery] Custom sort applied: [{Field}] {Dir}", orderField1, safeDir);
+                }
+                else if (!string.IsNullOrWhiteSpace(sortByTrimmed))
+                {
+                    _logger.LogWarning("[PagedQuery] SortBy={SortBy} NOT in fieldSet. Available: {Fields}",
+                        sortByTrimmed, string.Join(", ", fieldSet.Take(20)));
+                }
             }
 
             var orderSql = string.IsNullOrEmpty(orderField1)
@@ -1022,7 +1075,7 @@ SELECT TOP 1 RunSQLAfterAdd
             catch (Exception ex)
             {
                 _logger.LogError(ex, "DynamicTable query failed for {Table}", dictTable);
-                return BadRequest($"查詢 {dictTable} 失敗: {ex.Message}");
+                return BadRequest(new { error = $"查詢 {dictTable} 失敗: {ex.Message}" });
             }
         }
 

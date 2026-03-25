@@ -14,6 +14,15 @@ public sealed class CompanyAttachFileController : ControllerBase
         public IFormFile? File { get; set; }
     }
 
+    public sealed class MasAttachUploadRequest
+    {
+        public IFormFile? File { get; set; }
+        public string? TableName { get; set; }
+        public string? PaperNum { get; set; }
+        public string? ItemId { get; set; }
+        public string? UserId { get; set; }
+    }
+
     private readonly IWebHostEnvironment _env;
     private readonly ILogger<CompanyAttachFileController> _logger;
     private readonly PcbErpContext _ctx;
@@ -105,12 +114,14 @@ public sealed class CompanyAttachFileController : ControllerBase
     [HttpPost("MasAttachUpload")]
     [RequestSizeLimit(50 * 1024 * 1024)]
     public async Task<IActionResult> MasAttachUpload(
-        [FromForm] IFormFile? file,
-        [FromForm] string? tableName,
-        [FromForm] string? paperNum,
-        [FromForm] string? itemId,
-        [FromForm] string? userId)
+        [FromForm] MasAttachUploadRequest request)
     {
+        var file = request?.File;
+        var tableName = request?.TableName;
+        var paperNum = request?.PaperNum;
+        var itemId = request?.ItemId;
+        var userId = request?.UserId;
+
         if (file is null || file.Length == 0)
             return BadRequest("請選擇檔案");
         if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(paperNum))
