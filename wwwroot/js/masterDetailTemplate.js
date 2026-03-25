@@ -534,15 +534,18 @@
 
           if (isCheckbox) {
               const checked = raw === true || raw === 1 || raw === "1";
+              const chkSize = "width:16px;height:16px;min-width:16px;min-height:16px;max-width:16px;max-height:16px;";
               const viewChk = document.createElement("input");
               viewChk.type = "checkbox";
               viewChk.disabled = true;
               viewChk.tabIndex = -1;
               viewChk.className = "form-check-input checkbox-dark";
+              viewChk.style.cssText = chkSize;
               viewChk.checked = checked;
               span.appendChild(viewChk);
 
               inp.type = "checkbox";
+              inp.style.cssText = chkSize;
               inp.checked = checked;
               inp.value = checked ? "1" : "0";
               inp.dataset.raw = inp.value;

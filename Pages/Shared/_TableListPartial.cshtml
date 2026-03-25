@@ -173,6 +173,14 @@
                             ? field.DisplaySize.Value * 10 : (int?)null;
                         var widthStyle = widthPx.HasValue
                             ? $"width:{widthPx}px;min-width:{widthPx}px;max-width:{widthPx}px;" : "";
+                        var dtLower = (field.DataType ?? "").Trim().ToLowerInvariant();
+                        var isNum = dtLower == "number"
+                            || dtLower.StartsWith("decimal") || dtLower.StartsWith("numeric")
+                            || dtLower.StartsWith("money") || dtLower.StartsWith("smallmoney")
+                            || dtLower.StartsWith("float") || dtLower.StartsWith("real")
+                            || dtLower.StartsWith("int") || dtLower.StartsWith("smallint")
+                            || dtLower.StartsWith("tinyint") || dtLower.StartsWith("bigint");
+                        var alignStyle = isNum ? "text-align:right;" : "text-align:left;";
                          <th class="sortable" data-field="@field.FieldName" data-serial="@field.SerialNum" style="@widthStyle">
                             <span class="drag-handle">☰</span>@(string.IsNullOrWhiteSpace(field.DisplayLabel) ? field.FieldName : field.DisplayLabel)
                             <span class="col-resizer"></span>
@@ -456,6 +464,18 @@ function renderTable(data) {
       const td = document.createElement('td');
       td.innerHTML = valStr ?? "";
 
+      // 數值欄位靠右，字串欄位靠左
+      const dt = (field.DataType || '').toLowerCase();
+      if (dt === 'number' || dt.startsWith('decimal') || dt.startsWith('numeric')
+          || dt.startsWith('money') || dt.startsWith('smallmoney')
+          || dt.startsWith('float') || dt.startsWith('real')
+          || dt.startsWith('int') || dt.startsWith('smallint')
+          || dt.startsWith('tinyint') || dt.startsWith('bigint')) {
+        td.style.textAlign = 'right';
+      } else {
+        td.style.textAlign = 'left';
+      }
+
       // 根據辭典的 FieldLen 設定欄位寬度
       if (field.FieldLen && field.FieldLen > 0) {
         const width = Math.min(field.FieldLen * 10, 300); // 每個字元約 10px，最大 300px
@@ -690,7 +710,13 @@ function doQuery(page = 1, direction = null) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(requestBody)
   }, '讀取資料中…')
-    .then(r => r.json())
+    .then(r => {
+      if (!r.ok) return r.json().catch(() => r.text()).then(body => {
+        const msg = (body && body.error) ? body.error : (typeof body === 'string' ? body : '查詢失敗');
+        throw new Error(msg);
+      });
+      return r.json();
+    })
     .then(result => {
       // 如果後端有回傳 lookup 資料，存入快取（含完整資料）
       if (result.lookupMapData && Object.keys(result.lookupMapData).length > 0) {
@@ -854,6 +880,32 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
+  // 解析虛擬欄位對應的實體排序欄位
+  function resolveSortField(fieldName) {
+    const fields = window._tableFields || [];
+    const fieldDef = fields.find(f => f.FieldName === fieldName);
+    if (!fieldDef) return fieldName;
+
+    // 有 DataType 表示是實體欄位，可直接排序
+    const dt = (fieldDef.DataType || '').trim();
+    if (dt) return fieldName;
+
+    // 虛擬欄位：嘗試從 LookupCond1Field 找到對應的實體欄位
+    if (fieldDef.LookupCond1Field) {
+      const keyField = fields.find(f => f.FieldName === fieldDef.LookupCond1Field);
+      if (keyField && (keyField.DataType || '').trim()) return fieldDef.LookupCond1Field;
+    }
+
+    // 嘗試去掉 Name 後綴找到對應的實體欄位
+    if (fieldName.endsWith('Name')) {
+      const baseName = fieldName.substring(0, fieldName.length - 4);
+      const baseField = fields.find(f => f.FieldName === baseName);
+      if (baseField && (baseField.DataType || '').trim()) return baseName;
+    }
+
+    return fieldName; // 找不到時送原始欄位名，由後端處理解析
+  }
+
   // 雙擊欄位標題排序
   if (headerRow) {
     headerRow.querySelectorAll('th.sortable').forEach(th => {
@@ -865,11 +917,14 @@ document.addEventListener("DOMContentLoaded", function () {
         const field = th.dataset.field;
         if (!field) return;
 
+        // 解析實際排序欄位（虛擬欄位轉換為對應的實體欄位）
+        const actualSortField = resolveSortField(field);
+
         // 切換排序方向
-        if (currentSortField === field) {
+        if (currentSortField === actualSortField) {
           currentSortDir = currentSortDir === 'asc' ? 'desc' : 'asc';
         } else {
-          currentSortField = field;
+          currentSortField = actualSortField;
           currentSortDir = 'asc';
         }
 

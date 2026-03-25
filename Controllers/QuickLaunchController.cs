@@ -46,22 +46,24 @@ namespace PcbErpApi.Controllers
 
                     if (tableExists)
                     {
-                        // 從 CURdMenuTemp 查詢
+                        // 從 CURdMenuTemp 查詢，JOIN CURdSysItems 取得 sWebMenuId
                         await using var cmd = new SqlCommand(@"
                             SELECT DISTINCT
-                                ItemId,
-                                RealItemName AS ProgramName,
-                                ClassName,
-                                OCXTemplete,
-                                SystemId,
-                                sServerName,
-                                sDBName,
-                                ItemType,
-                                SuperId,
-                                OutputType
-                            FROM CURdMenuTemp WITH (NOLOCK)
-                            WHERE ItemType IN (2, 6)
-                            ORDER BY ItemId", conn);
+                                t.ItemId,
+                                t.RealItemName AS ProgramName,
+                                t.ClassName,
+                                t.OCXTemplete,
+                                t.SystemId,
+                                t.sServerName,
+                                t.sDBName,
+                                t.ItemType,
+                                t.SuperId,
+                                t.OutputType,
+                                s.sWebMenuId
+                            FROM CURdMenuTemp t WITH (NOLOCK)
+                            LEFT JOIN CURdSysItems s WITH (NOLOCK) ON t.ItemId = s.ItemId
+                            WHERE t.ItemType IN (2, 6)
+                            ORDER BY t.ItemId", conn);
 
                         var items = new List<object>();
                         await using var reader = await cmd.ExecuteReaderAsync();
@@ -78,7 +80,8 @@ namespace PcbErpApi.Controllers
                                 dbName = reader["sDBName"]?.ToString()?.Trim(),
                                 itemType = reader["ItemType"] == DBNull.Value ? 0 : Convert.ToInt32(reader["ItemType"]),
                                 superId = reader["SuperId"]?.ToString()?.Trim(),
-                                outputType = reader["OutputType"] == DBNull.Value ? (int?)null : Convert.ToInt32(reader["OutputType"])
+                                outputType = reader["OutputType"] == DBNull.Value ? (int?)null : Convert.ToInt32(reader["OutputType"]),
+                                sWebMenuId = reader["sWebMenuId"]?.ToString()?.Trim()
                             });
                         }
 
@@ -107,7 +110,8 @@ namespace PcbErpApi.Controllers
                         dbName = (string?)null,
                         itemType = i.ItemType,
                         superId = i.SuperId,
-                        outputType = i.OutputType
+                        outputType = i.OutputType,
+                        sWebMenuId = i.SWebMenuId
                     })
                     .ToListAsync();
 
@@ -148,19 +152,21 @@ namespace PcbErpApi.Controllers
                     {
                         await using var cmd = new SqlCommand(@"
                             SELECT TOP 1
-                                ItemId,
-                                RealItemName AS ProgramName,
-                                ClassName,
-                                OCXTemplete,
-                                SystemId,
-                                sServerName,
-                                sDBName,
-                                ItemType,
-                                SuperId,
-                                OutputType
-                            FROM CURdMenuTemp WITH (NOLOCK)
-                            WHERE ItemId = @itemId
-                            AND ItemType IN (2, 6)", conn);
+                                t.ItemId,
+                                t.RealItemName AS ProgramName,
+                                t.ClassName,
+                                t.OCXTemplete,
+                                t.SystemId,
+                                t.sServerName,
+                                t.sDBName,
+                                t.ItemType,
+                                t.SuperId,
+                                t.OutputType,
+                                s.sWebMenuId
+                            FROM CURdMenuTemp t WITH (NOLOCK)
+                            LEFT JOIN CURdSysItems s WITH (NOLOCK) ON t.ItemId = s.ItemId
+                            WHERE t.ItemId = @itemId
+                            AND t.ItemType IN (2, 6)", conn);
 
                         cmd.Parameters.Add(new SqlParameter("@itemId", SqlDbType.VarChar, 15) { Value = itemId.Trim() });
 
@@ -178,7 +184,8 @@ namespace PcbErpApi.Controllers
                                 dbName = reader["sDBName"]?.ToString()?.Trim(),
                                 itemType = reader["ItemType"] == DBNull.Value ? 0 : Convert.ToInt32(reader["ItemType"]),
                                 superId = reader["SuperId"]?.ToString()?.Trim(),
-                                outputType = reader["OutputType"] == DBNull.Value ? (int?)null : Convert.ToInt32(reader["OutputType"])
+                                outputType = reader["OutputType"] == DBNull.Value ? (int?)null : Convert.ToInt32(reader["OutputType"]),
+                                sWebMenuId = reader["sWebMenuId"]?.ToString()?.Trim()
                             };
 
                             return Ok(result);
@@ -206,7 +213,8 @@ namespace PcbErpApi.Controllers
                         dbName = (string?)null,
                         itemType = i.ItemType,
                         superId = i.SuperId,
-                        outputType = i.OutputType
+                        outputType = i.OutputType,
+                        sWebMenuId = i.SWebMenuId
                     })
                     .FirstOrDefaultAsync();
 
