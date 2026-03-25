@@ -103,6 +103,8 @@
     }
     .table-list-page .highlight { background-color: #ffd !important; }
     .table-list-page .ghost { opacity: 0.5; }
+
+    /* 拖曳排序樣式由 columnDragSort.css 提供 */
     .table-list-page #search-panel {
     background: #f8fafb;
     border-radius: 10px;
@@ -179,8 +181,8 @@
                             || dtLower.StartsWith("int") || dtLower.StartsWith("smallint")
                             || dtLower.StartsWith("tinyint") || dtLower.StartsWith("bigint");
                         var alignStyle = isNum ? "text-align:right;" : "text-align:left;";
-                         <th class="sortable" draggable="true" data-field="@field.FieldName" data-serial="@field.SerialNum" style="@widthStyle @alignStyle">
-                            @(string.IsNullOrWhiteSpace(field.DisplayLabel) ? field.FieldName : field.DisplayLabel)
+                         <th class="sortable" data-field="@field.FieldName" data-serial="@field.SerialNum" style="@widthStyle">
+                            <span class="drag-handle">☰</span>@(string.IsNullOrWhiteSpace(field.DisplayLabel) ? field.FieldName : field.DisplayLabel)
                             <span class="col-resizer"></span>
                         </th>
                     }
@@ -201,7 +203,6 @@
 
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
 <script>
   (function () {
@@ -858,28 +859,18 @@ document.addEventListener("DOMContentLoaded", function () {
       if (formEl && Array.isArray(saved) && saved.length) restoreSearchFormSafe(formEl, saved);
   });
 
+  /* ========= 欄位拖曳排序（使用共用模組） ========= */
   const headerRow = document.getElementById("table-header-row");
-  if (headerRow && window.Sortable) {
-    Sortable.create(headerRow, {
-      animation: 150,
-      swap: true,
-      swapClass: 'highlight',
-      ghostClass: 'ghost',
-      filter: '.col-resizer',
-      preventOnFilter: false,
-      onEnd: function () {
-        const newOrder = Array.from(headerRow.children).map((th, index) => ({
-          fieldName: th.dataset.field, serialNum: index + 1
-        }));
-        http('/api/TableFieldLayout/SaveSerialOrder', {
-           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tableName: window._tableName, fieldOrders: newOrder })
-        }, '儲存欄位順序…')
-          .then(res => { if (!res.ok) throw new Error("更新失敗"); return res.json(); })
-          .then(() => location.reload())
-          .catch(() => Swal.fire({ icon: 'error', title: '欄位順序儲存失敗！' }));
-      }
+  if (headerRow && window.initColumnDragSort) {
+    initColumnDragSort({
+      headerRow:   headerRow,
+      tbody:       document.getElementById('dataTbody'),
+      scrollWrap:  headerRow.closest('.table-wrap'),
+      scrollSync:  document.getElementById('hscrollBottom'),
+      tableName:   window._tableName,
+      fieldsArray: window._tableFields,
+      onSaved:     () => doQuery(currentPage),
+      fetchFn:     http
     });
   }
 
