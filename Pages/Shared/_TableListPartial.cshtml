@@ -454,6 +454,7 @@ function renderTable(data) {
     tr.setAttribute('data-paper-num', keyValue);
 
     fields.forEach(field => {
+      const isCheckbox = (field.ComboStyle ?? 0) === 1;
       let valStr = "";
       if (keyValue && lookupMapData?.[keyValue]?.[field.FieldName]) {
         valStr = lookupMapData[keyValue][field.FieldName];
@@ -462,18 +463,34 @@ function renderTable(data) {
         valStr = formatCell(field, raw);
       }
       const td = document.createElement('td');
-      td.innerHTML = valStr ?? "";
+
+      if (isCheckbox) {
+        const raw = item[field.FieldName];
+        const checked = String(raw) === '1' || raw === true;
+        td.style.textAlign = 'center';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'form-check-input checkbox-dark';
+        cb.disabled = true;
+        cb.tabIndex = -1;
+        if (checked) cb.checked = true;
+        td.appendChild(cb);
+      } else {
+        td.innerHTML = valStr ?? "";
+      }
 
       // 數值欄位靠右，字串欄位靠左
       const dt = (field.DataType || '').toLowerCase();
-      if (dt === 'number' || dt.startsWith('decimal') || dt.startsWith('numeric')
-          || dt.startsWith('money') || dt.startsWith('smallmoney')
-          || dt.startsWith('float') || dt.startsWith('real')
-          || dt.startsWith('int') || dt.startsWith('smallint')
-          || dt.startsWith('tinyint') || dt.startsWith('bigint')) {
-        td.style.textAlign = 'right';
-      } else {
-        td.style.textAlign = 'left';
+      if (!isCheckbox) {
+        if (dt === 'number' || dt.startsWith('decimal') || dt.startsWith('numeric')
+            || dt.startsWith('money') || dt.startsWith('smallmoney')
+            || dt.startsWith('float') || dt.startsWith('real')
+            || dt.startsWith('int') || dt.startsWith('smallint')
+            || dt.startsWith('tinyint') || dt.startsWith('bigint')) {
+          td.style.textAlign = 'right';
+        } else {
+          td.style.textAlign = 'left';
+        }
       }
 
       // 根據辭典的 FieldLen 設定欄位寬度
@@ -1005,7 +1022,9 @@ document.addEventListener("DOMContentLoaded", function () {
   const urlParams = new URLSearchParams(window.location.search);
   const urlPageParam = urlParams.get('page');
   const useStoredQuery = urlParams.get('useStoredQuery') === '1';
-  const initialPage = urlPageParam ? parseInt(urlPageParam, 10) : 1;
+  // 從 localStorage 還原已儲存的頁碼（從單身頁切換回來時使用）
+  const savedPage = state.pageNumber && state.pageNumber > 0 ? state.pageNumber : 1;
+  const initialPage = urlPageParam ? parseInt(urlPageParam, 10) : (useStoredQuery ? savedPage : 1);
 
   // 獲取查詢欄位配置（用於讀取默認比對條件）
   const queryFieldsConfig = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(ViewData["QueryFields"] as List<QueryFieldViewModel> ?? new List<QueryFieldViewModel>()));
