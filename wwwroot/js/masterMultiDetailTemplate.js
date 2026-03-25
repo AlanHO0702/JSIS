@@ -1213,6 +1213,9 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
     buildHead(mHead, masterDict);
     const masterGrid = document.getElementById(`${cfg.DomId}-masterGrid`);
     enableColumnResize(masterGrid, cfg.MasterTable || cfg.MasterDict);
+    if (window.initColumnDragSort && mHead) {
+      initColumnDragSort({ headerRow: mHead, tbody: masterGrid?.querySelector('tbody'), scrollWrap: masterGrid?.closest('.table-responsive') || masterGrid?.parentElement, tableName: cfg.MasterDict || cfg.MasterTable || '', onSaved: null });
+    }
 
     const uniq = (arr) => [...new Set((arr || []).filter(Boolean).map(s => String(s)))];
 
@@ -1241,6 +1244,9 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
       if (headTr) buildHead(headTr, dict);
       const detailGrid = document.getElementById(`${cfg.DomId}-detail-${i}-grid`);
       enableColumnResize(detailGrid, d.DetailTable || d.DetailDict);
+      if (window.initColumnDragSort && headTr) {
+        initColumnDragSort({ headerRow: headTr, tbody: detailGrid?.querySelector('tbody'), scrollWrap: detailGrid?.closest('.mmd-detail-scroll') || detailGrid?.parentElement, tableName: d.DetailDict || d.DetailTable || '', onSaved: null });
+      }
       detailDicts[i] = dict;
     }
 
