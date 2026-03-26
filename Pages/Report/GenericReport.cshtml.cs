@@ -204,12 +204,24 @@ public class GenericReportPageModel : PageModel
 
     private static bool LooksLikeDate(string name, string label, string defaultVal)
     {
-        bool hasDateKeyword = name.Contains("date", StringComparison.OrdinalIgnoreCase)
-                              || label.Contains("日")
-                              || label.Contains("日期")
-                              || label.Contains("Date", StringComparison.OrdinalIgnoreCase);
-        if (hasDateKeyword) return true;
-        return DateTime.TryParse(defaultVal, out _);
+        // 排除含「期別」的標籤（期別是會計期間，不是日期）
+        if (label.Contains("期別")) return false;
+
+        // 參數名或標籤含日期關鍵字
+        if (name.Contains("date", StringComparison.OrdinalIgnoreCase)
+            || label.Contains("日期")
+            || label.Contains("Date", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // 標籤含「日」且不含「期別」（上面已排除）
+        if (label.Contains("日")) return true;
+
+        // 預設值符合日期格式 yyyy/MM/dd 或 yyyy-MM-dd 才視為日期
+        if (!string.IsNullOrEmpty(defaultVal) &&
+            System.Text.RegularExpressions.Regex.IsMatch(defaultVal, @"^\d{4}[-/]\d{2}[-/]\d{2}$"))
+            return true;
+
+        return false;
     }
     private string ResolveDefaultValue(CurdAddonParam p)
     {
@@ -226,10 +238,13 @@ public class GenericReportPageModel : PageModel
                 cmd.CommandText = p.DefaultValue;
                 conn.Open();
                 var result = cmd.ExecuteScalar();
-                return result?.ToString() ?? "";
+                var resolved = result?.ToString() ?? "";
+                System.Diagnostics.Debug.WriteLine($"[ResolveDefault] {p.ParamName}: SQL={p.DefaultValue} → Result={resolved}");
+                return resolved;
             }
-            catch
+            catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine($"[ResolveDefault] {p.ParamName}: SQL={p.DefaultValue} → ERROR: {ex.Message}");
                 return p.DefaultValue ?? "";
             }
         }

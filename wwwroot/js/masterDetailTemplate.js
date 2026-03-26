@@ -231,10 +231,8 @@
   }
 
   // -----------------------------
-  // 🧩 欄寬存取（拖曳後寫回辭典 + localStorage）
+  // 🧩 欄寬存取（從辭典讀取初始寬度）
   // -----------------------------
-  const WIDTH_SAVE_URL = "/api/TableFieldLayout/SaveDetailLayout";
-  const WIDTH_SAVE_API = "/api/DictSetupApi/FieldWidth/Save";
   const normalizeTableName = (name) => (name || "").replace(/^dbo\./i, "").trim().toLowerCase();
   const savedWidthKey = (table) => `colwidth:${normalizeTableName(table)}`;
 
@@ -250,37 +248,6 @@
       });
       return map;
     } catch { return {}; }
-  };
-
-  const persistWidths = async (table, ths) => {
-    const cols = ths.map(th => ({
-      fieldName: th.dataset.field || "",
-      width: Math.round(th.getBoundingClientRect().width)
-    }));
-    const payload = { tableName: normalizeTableName(table), cols };
-    localStorage.setItem(savedWidthKey(table), JSON.stringify(cols));
-    try {
-      await fetch(WIDTH_SAVE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-    } catch { /* ignore */ }
-  };
-
-  const persistWidthField = async (table, field, width) => {
-    if (!table || !field || !Number.isFinite(width)) return;
-    try {
-      await fetch(WIDTH_SAVE_API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tableName: normalizeTableName(table),
-          fieldName: field,
-          widthPx: Math.round(width)
-        })
-      });
-    } catch { /* ignore */ }
   };
 
   const enableColumnResize = (tableEl, tableName) => {
@@ -300,12 +267,7 @@
       }
     });
 
-    let isDown = false, startX = 0, startW = 0, th = null, activeField = "";
-    let saveTimer = null;
-    const debounceSave = () => {
-      clearTimeout(saveTimer);
-      saveTimer = setTimeout(() => persistWidths(tableName, ths), 350);
-    };
+    let isDown = false, startX = 0, startW = 0, th = null;
 
     ths.forEach(h => {
       const handle = h.querySelector(".md-col-resizer");
@@ -316,7 +278,6 @@
         th = h;
         startX = e.pageX;
         startW = th.getBoundingClientRect().width;
-        activeField = th.dataset.field || "";
         document.body.classList.add("resizing");
         th.classList.add("resizing");
       });
@@ -334,13 +295,8 @@
       isDown = false;
       document.body.classList.remove("resizing");
       th?.classList.remove("resizing");
-      if (th && activeField) {
-        const w = th.getBoundingClientRect().width;
-        persistWidthField(tableName, activeField, w);
-      }
-      debounceSave();
+      // 欄寬不自動儲存，按 F9 統一儲存順序及寬度
       th = null;
-      activeField = "";
     });
   };
 
@@ -534,15 +490,18 @@
 
           if (isCheckbox) {
               const checked = raw === true || raw === 1 || raw === "1";
+              const chkSize = "width:16px;height:16px;min-width:16px;min-height:16px;max-width:16px;max-height:16px;";
               const viewChk = document.createElement("input");
               viewChk.type = "checkbox";
               viewChk.disabled = true;
               viewChk.tabIndex = -1;
               viewChk.className = "form-check-input checkbox-dark";
+              viewChk.style.cssText = chkSize;
               viewChk.checked = checked;
               span.appendChild(viewChk);
 
               inp.type = "checkbox";
+              inp.style.cssText = chkSize;
               inp.checked = checked;
               inp.value = checked ? "1" : "0";
               inp.dataset.raw = inp.value;
@@ -981,6 +940,25 @@
     buildHead(dHead, dDict, false, detailName);
     enableColumnResize(masterTbl, masterName);
     enableColumnResize(detailTbl, detailName);
+
+    // 欄位拖曳排序
+    if (window.initColumnDragSort) {
+      [
+        { grid: masterTbl, tableName: masterName },
+        { grid: detailTbl, tableName: detailName }
+      ].forEach(({ grid, tableName }) => {
+        const hRow = grid?.querySelector('thead tr');
+        if (hRow) {
+          initColumnDragSort({
+            headerRow: hRow,
+            tbody: grid.querySelector('tbody'),
+            scrollWrap: grid.closest('.table-responsive') || grid.parentElement,
+            tableName: tableName,
+            onSaved: null
+          });
+        }
+      });
+    }
 
     const bindHeaderSort = (tableEl, dict, isMaster) => {
       if (!tableEl) return;

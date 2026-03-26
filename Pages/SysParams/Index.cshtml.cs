@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
+using PcbErpApi.Models;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -11,13 +12,23 @@ namespace PcbErpApi.Pages.SysParams
     public class IndexModel : PageModel
     {
         private readonly PcbErpContext _ctx;
-        public IndexModel(PcbErpContext ctx) { _ctx = ctx; }
+        private readonly ITableDictionaryService _dictService;
+
+        public IndexModel(PcbErpContext ctx, ITableDictionaryService dictService)
+        {
+            _ctx = ctx;
+            _dictService = dictService;
+        }
 
         [BindProperty(SupportsGet = true)]
         public string? SelectedSystem { get; set; }
 
         public List<string> SystemList { get; set; } = new();
         public List<CURdSysParams> Rows { get; set; } = new();
+
+        public string DictTableName => "CURdSysParams";
+        public List<CURdTableField> FieldDictList { get; set; } = new();
+        public List<CURdTableField> TableFields { get; set; } = new();
 
         public async Task OnGetAsync()
         {
@@ -46,7 +57,16 @@ namespace PcbErpApi.Pages.SysParams
                     .OrderBy(x => x.ParamId)
                     .AsNoTracking()
                     .ToListAsync();
-        }
 
+            // 5) 載入辭典欄位定義
+            FieldDictList = _dictService.GetFieldDict(DictTableName, typeof(CURdSysParams));
+            TableFields = FieldDictList
+                .Where(f => f.Visible == 1)
+                .OrderBy(f => f.SerialNum ?? 0)
+                .ToList();
+
+            ViewData["DictTableName"] = DictTableName;
+            ViewData["FieldDictList"] = FieldDictList;
+        }
     }
 }

@@ -176,7 +176,8 @@ namespace PcbErpApi.Pages.DynamicTemplate
                         LookupCond2Field = x.LookupCond2Field,
                         LookupCond2ResultField = x.LookupCond2ResultField,
                         ReadOnly = x.ReadOnly,
-                        DisplaySize = x.DisplaySize
+                        DisplaySize = x.DisplaySize,
+                        ComboStyle = x.ComboStyle
                     };
                 }).ToList();
             ViewData["Fields"] = TableFields;
