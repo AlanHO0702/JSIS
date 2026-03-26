@@ -443,6 +443,7 @@ window._masterTable   = 'EMOdProdLayer';
 window._masterApi     = '@Html.Raw(Model.MasterApi ?? "")';
 </script>
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+<script src="~/js/erpDetailNav.js" asp-append-version="true"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
@@ -857,91 +858,50 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('shown.bs.tab', () => loadDetailTab(btn));
   });
 
-  // ── Toolbar 計數框 & 上一筆/下一筆導航 ───────────────────────
+  // ── Toolbar 計數框 & 上一筆/下一筆導航（使用共用模組） ────────
+  const nav = new DetailNavigator({
+    tableName:      'EMOdProdLayer',
+    keyFields:      ['PartNum', 'Revision', 'LayerId'],
+    detailPath:     '/EMOdProdLayer/Detail',
+    dataHandlerUrl: '/EMOdProdLayer?handler=Data',
+    extraParams:    {},
+    currentKeys: {
+      PartNum:  (window._masterKeyValues?.PartNum  ?? '').trim(),
+      Revision: (window._masterKeyValues?.Revision ?? '').trim(),
+      LayerId:  (window._masterKeyValues?.LayerId  ?? '').trim()
+    },
+    onNavigate: async (keys) => {
+      // 更新全域主鍵
+      currentMasterKeys.PartNum  = keys.PartNum;
+      currentMasterKeys.Revision = keys.Revision;
+      currentMasterKeys.LayerId  = keys.LayerId;
 
-  const NAV_BTN_FIRST = document.getElementById('btnFirst');
-  const NAV_BTN_PREV  = document.getElementById('btnPrev');
-  const NAV_BTN_NEXT  = document.getElementById('btnNext');
-  const NAV_BTN_LAST  = document.getElementById('btnLast');
-  let navKeys  = [];
-  let navIndex = -1;
+      // 動態組裝 API URL
+      const apiUrl = `/api/CommonTable/ByKeys?table=EMOdProdLayer&keyNames=PartNum&keyValues=${encodeURIComponent(keys.PartNum)}&keyNames=Revision&keyValues=${encodeURIComponent(keys.Revision)}&keyNames=LayerId&keyValues=${encodeURIComponent(keys.LayerId)}`;
 
-  const CURRENT_KEYS = {
-    PartNum:  (window._masterKeyValues?.PartNum  ?? '').trim(),
-    Revision: (window._masterKeyValues?.Revision ?? '').trim(),
-    LayerId:  (window._masterKeyValues?.LayerId  ?? '').trim()
-  };
-  const _tn = 'emodprodlayer';
+      // 重新載入 master 資料
+      const [dict, rows] = await Promise.all([
+        getDict(dictName),
+        fetch(apiUrl).then(r => r.json())
+      ]);
+      masterDict = dict;
+      masterData = (rows && rows.length > 0) ? rows[0] : {};
 
-  function updateDetailCount(count) {
-    // 單身計數隱藏（層別資料維護不顯示第二列）
-  }
+      // 重新渲染
+      renderLayerHeader(dict, masterData);
+      for (const tab of document.querySelectorAll('#master-tabs [data-tab-key]')) {
+        await renderMasterTab(tab.dataset.tabKey, dict, masterData);
+      }
 
-  function updateHeaderCount() {
-    const el = document.getElementById('toolbarHeaderCount');
-    if (!el) return;
-    const total = navKeys.length;
-    if (total > 0 && navIndex >= 0) {
-      el.textContent = `${navIndex + 1} / ${total}`;
-    } else {
-      const si = parseInt(localStorage.getItem(`orderListQueryIndex:${_tn}`) || '0', 10);
-      const st = parseInt(localStorage.getItem(`orderListQueryTotal:${_tn}`) || '0', 10);
-      el.textContent = st > 0 ? `${si || '--'} / ${st}` : '-- / --';
+      // 重設表單頁籤 guard
+      formTabLoaded = false;
+
+      // 重新載入當前顯示的單身頁籤
+      const activeDetailTab = document.querySelector('#extra-tabs [data-table][data-dict].active');
+      if (activeDetailTab) loadDetailTab(activeDetailTab);
     }
-  }
-
-  function gotoRecord(key, targetIndex) {
-    if (!key) return;
-    if (targetIndex !== undefined && navKeys.length > 0) {
-      localStorage.setItem(`orderListQueryIndex:${_tn}`, targetIndex + 1);
-      localStorage.setItem(`orderListQueryTotal:${_tn}`, navKeys.length);
-    }
-    const url = `/EMOdProdLayer/Detail?PartNum=${encodeURIComponent(key.PartNum)}&Revision=${encodeURIComponent(key.Revision)}&LayerId=${encodeURIComponent(key.LayerId)}`;
-    window.location.href = url;
-  }
-
-  function updateNavButtons() {
-    const hasPrev  = navIndex > 0;
-    const hasNext  = navIndex >= 0 && navIndex < navKeys.length - 1;
-    if (NAV_BTN_FIRST) { NAV_BTN_FIRST.disabled = !hasPrev;  NAV_BTN_FIRST.onclick = () => hasPrev && gotoRecord(navKeys[0], 0); }
-    if (NAV_BTN_PREV)  { NAV_BTN_PREV.disabled  = !hasPrev;  NAV_BTN_PREV.onclick  = () => hasPrev && gotoRecord(navKeys[navIndex - 1], navIndex - 1); }
-    if (NAV_BTN_NEXT)  { NAV_BTN_NEXT.disabled  = !hasNext;  NAV_BTN_NEXT.onclick  = () => hasNext && gotoRecord(navKeys[navIndex + 1], navIndex + 1); }
-    if (NAV_BTN_LAST)  { NAV_BTN_LAST.disabled  = !hasNext;  NAV_BTN_LAST.onclick  = () => hasNext && gotoRecord(navKeys[navKeys.length - 1], navKeys.length - 1); }
-    updateHeaderCount();
-  }
-
-  async function initRowNavigation() {
-    // 立即用 localStorage 顯示（避免等待 API）
-    const si = localStorage.getItem(`orderListQueryIndex:${_tn}`);
-    const st = localStorage.getItem(`orderListQueryTotal:${_tn}`);
-    const el = document.getElementById('toolbarHeaderCount');
-    if (el) el.textContent = (si && st) ? `${si} / ${st}` : '載入中...';
-
-    try {
-      const res = await fetch('/EMOdProdLayer?handler=Data&pageIndex=1&pageSize=999999');
-      if (!res.ok) throw new Error('fetch failed');
-      const json = await res.json();
-      const rows = Array.isArray(json.items) ? json.items : (Array.isArray(json) ? json : []);
-      navKeys = rows.map(r => ({
-        PartNum:  (r.PartNum  || r.partNum  || '').toString().trim(),
-        Revision: (r.Revision || r.revision || '').toString().trim(),
-        LayerId:  (r.LayerId  || r.layerId  || '').toString().trim()
-      })).filter(k => k.PartNum || k.LayerId);
-
-      navIndex = navKeys.findIndex(k =>
-        k.PartNum.toLowerCase()  === CURRENT_KEYS.PartNum.toLowerCase()  &&
-        k.Revision.toLowerCase() === CURRENT_KEYS.Revision.toLowerCase() &&
-        k.LayerId.toLowerCase()  === CURRENT_KEYS.LayerId.toLowerCase()
-      );
-      updateNavButtons();
-    } catch {
-      if (NAV_BTN_PREV) NAV_BTN_PREV.disabled = true;
-      if (NAV_BTN_NEXT) NAV_BTN_NEXT.disabled = true;
-      updateHeaderCount();
-    }
-  }
-
-  initRowNavigation();
+  });
+  nav.init();
 
   // ── btnSwitch → 返回 Index ────────────────────────────────
   const btnSwitch = document.getElementById('btnSwitch');

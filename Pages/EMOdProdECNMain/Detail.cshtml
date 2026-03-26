@@ -319,6 +319,7 @@ window._masterApi     = '@Html.Raw(Model.MasterApi ?? "")';
 window._detailApi     = '@Html.Raw(Model.DetailApi ?? "")';
 </script>
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+<script src="~/js/erpDetailNav.js" asp-append-version="true"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
@@ -707,97 +708,25 @@ document.addEventListener('DOMContentLoaded', () => {
       });
   }
 
-  // ── Toolbar 計數框 & 上一筆/下一筆導航 ───────────────────────
-
-  const NAV_BTN_FIRST = document.getElementById('btnFirst');
-  const NAV_BTN_PREV  = document.getElementById('btnPrev');
-  const NAV_BTN_NEXT  = document.getElementById('btnNext');
-  const NAV_BTN_LAST  = document.getElementById('btnLast');
-  let navKeys  = [];
-  let navIndex = -1;
-
-  const CURRENT_KEYS = {
-    PaperNum: (window._masterKeyValues?.PaperNum ?? '').trim()
-  };
-  const _tn = 'emodprodecnmain';
-
-  function updateHeaderCount() {
-    const el = document.getElementById('toolbarHeaderCount');
-    if (!el) return;
-    if (navKeys.length > 0 && navIndex >= 0) {
-      el.textContent = `${navIndex + 1} / ${navKeys.length}`;
-    } else {
-      const si = parseInt(localStorage.getItem(`orderListQueryIndex:${_tn}`) || '0', 10);
-      const st = parseInt(localStorage.getItem(`orderListQueryTotal:${_tn}`) || '0', 10);
-      el.textContent = st > 0 ? `${si || '--'} / ${st}` : '-- / --';
+  // ── Toolbar 計數框 & 上一筆/下一筆導航（使用共用模組） ────────
+  const nav = new DetailNavigator({
+    tableName:      'EMOdProdECNMain',
+    keyFields:      ['PaperNum'],
+    detailPath:     '/EMOdProdECNMain/Detail',
+    dataHandlerUrl: '/EMOdProdECNMain?handler=Data',
+    extraParams:    { itemId: 'EMO00019' },
+    currentKeys:    { PaperNum: (window._masterKeyValues?.PaperNum ?? '').trim() },
+    onNavigate:     async (keys) => {
+      currentMasterKeys['PaperNum'] = keys.PaperNum;
+      currentMasterKeys['papernum'] = keys.PaperNum;
+      window.selectedPaperNum = keys.PaperNum;
+      _prevPartNum = '';
+      _currentItem = 1;
+      await loadMasterData(keys.PaperNum);
+      await loadDetailData(keys.PaperNum);
     }
-  }
-
-  async function gotoRecord(key, targetIndex) {
-    if (!key) return;
-    if (targetIndex !== undefined && navKeys.length > 0) {
-      localStorage.setItem(`orderListQueryIndex:${_tn}`, targetIndex + 1);
-      localStorage.setItem(`orderListQueryTotal:${_tn}`, navKeys.length);
-    }
-
-    const newPaperNum = key.PaperNum;
-
-    // AJAX 切換：更新 URL 但不重載頁面
-    const newUrl = `/EMOdProdECNMain/Detail?PaperNum=${encodeURIComponent(newPaperNum)}&itemId=EMO00019`;
-    history.pushState(null, '', newUrl);
-
-    // 更新全域狀態
-    currentMasterKeys['PaperNum'] = newPaperNum;
-    currentMasterKeys['papernum'] = newPaperNum;
-    window.selectedPaperNum = newPaperNum;
-    CURRENT_KEYS.PaperNum = newPaperNum;
-    navIndex = targetIndex;
-    _prevPartNum = '';
-    _currentItem = 1;
-
-    // 重新載入資料（不重載頁面）
-    await loadMasterData(newPaperNum);
-    await loadDetailData(newPaperNum);
-    updateNavButtons();
-  }
-
-  function updateNavButtons() {
-    const hasPrev = navIndex > 0;
-    const hasNext = navIndex >= 0 && navIndex < navKeys.length - 1;
-    if (NAV_BTN_FIRST) { NAV_BTN_FIRST.disabled = !hasPrev; NAV_BTN_FIRST.onclick = () => hasPrev && gotoRecord(navKeys[0], 0); }
-    if (NAV_BTN_PREV)  { NAV_BTN_PREV.disabled  = !hasPrev; NAV_BTN_PREV.onclick  = () => hasPrev && gotoRecord(navKeys[navIndex - 1], navIndex - 1); }
-    if (NAV_BTN_NEXT)  { NAV_BTN_NEXT.disabled  = !hasNext; NAV_BTN_NEXT.onclick  = () => hasNext && gotoRecord(navKeys[navIndex + 1], navIndex + 1); }
-    if (NAV_BTN_LAST)  { NAV_BTN_LAST.disabled  = !hasNext; NAV_BTN_LAST.onclick  = () => hasNext && gotoRecord(navKeys[navKeys.length - 1], navKeys.length - 1); }
-    updateHeaderCount();
-  }
-
-  async function initRowNavigation() {
-    const si = localStorage.getItem(`orderListQueryIndex:${_tn}`);
-    const st = localStorage.getItem(`orderListQueryTotal:${_tn}`);
-    const el = document.getElementById('toolbarHeaderCount');
-    if (el) el.textContent = (si && st) ? `${si} / ${st}` : '載入中...';
-
-    try {
-      const res = await fetch('/EMOdProdECNMain?handler=Data&pageIndex=1&pageSize=999999');
-      if (!res.ok) throw new Error('fetch failed');
-      const json = await res.json();
-      const rows = Array.isArray(json.items) ? json.items : (Array.isArray(json) ? json : []);
-      navKeys = rows.map(r => ({
-        PaperNum: (r.PaperNum || r.paperNum || r.papernum || '').toString().trim()
-      })).filter(k => k.PaperNum);
-
-      navIndex = navKeys.findIndex(k =>
-        k.PaperNum.toLowerCase() === CURRENT_KEYS.PaperNum.toLowerCase()
-      );
-      updateNavButtons();
-    } catch {
-      if (NAV_BTN_PREV) NAV_BTN_PREV.disabled = true;
-      if (NAV_BTN_NEXT) NAV_BTN_NEXT.disabled = true;
-      updateHeaderCount();
-    }
-  }
-
-  initRowNavigation();
+  });
+  nav.init();
 
   // ── btnSwitch → 返回 Index ────────────────────────────────
   const btnSwitch = document.getElementById('btnSwitch');
@@ -874,9 +803,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 導航按鈕：編輯中禁用
-    [NAV_BTN_FIRST, NAV_BTN_PREV, NAV_BTN_NEXT, NAV_BTN_LAST].forEach(btn => {
-      if (btn) btn.disabled = editing;
-    });
+    nav.setEditMode(editing);
 
     // toolbar count box 樣式
     const countBox = document.getElementById('toolbarCountBox');
@@ -966,7 +893,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // 4. 更新導航（新單據會在最後）
         _prevPartNum = '';
         _currentItem = 1;
-        initRowNavigation();
+        nav.currentKeys.PaperNum = newPaperNum;
+        nav.reinit();
 
         // 5. 自動進入編輯模式
         setEcnEditMode(true);

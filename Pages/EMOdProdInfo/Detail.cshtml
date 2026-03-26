@@ -2709,6 +2709,72 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // ============================
+  // 上一筆 / 下一筆 導航邏輯（使用共用模組）
+  // ============================
+  // 隱藏單身計數（EMOdProdInfo 不需要）
+  const _detailCountEl = document.getElementById('toolbarDetailCount');
+  if (_detailCountEl) _detailCountEl.style.display = 'none';
+
+  const nav = new DetailNavigator({
+    tableName:      window._headerTableName || 'EMOdProdInfo',
+    keyFields:      ['PartNum', 'Revision'],
+    detailPath:     '/EMOdProdInfo/Detail',
+    dataHandlerUrl: '/EMOdProdInfo?handler=Data',
+    extraParams:    {},
+    currentKeys: {
+      PartNum:  '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "PartNum").Value ?? "")',
+      Revision: '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "Revision").Value ?? "")'
+    },
+    onNavigate: async (keys) => {
+      // 更新全域主鍵
+      currentMasterKeys.PartNum  = keys.PartNum;
+      currentMasterKeys.Revision = keys.Revision;
+      window.currentMasterKeys = currentMasterKeys;
+
+      // 動態組裝 API URL
+      const apiUrl = `/api/CommonTable/ByKeys?table=EMOdProdInfo&keyNames=PartNum&keyValues=${encodeURIComponent(keys.PartNum)}&keyNames=Revision&keyValues=${encodeURIComponent(keys.Revision)}`;
+
+      // 重新載入 master 資料
+      const [dict, rows] = await Promise.all([
+        getDict('@cfg?.MasterDict'),
+        fetch(apiUrl).then(r => r.json())
+      ]);
+      masterDict = dict;
+      masterData = rows && rows.length > 0 ? rows[0] : {};
+
+      // 重新渲染
+      renderHeaderFields(dict, masterData);
+      loadLayerPress();
+      loadSidebarHaltLog();
+
+      const masterTabBtns = document.querySelectorAll('#master-tabs [data-tab-key]');
+      for (const tab of masterTabBtns) {
+        await renderMasterTab(tab.dataset.tabKey, dict, masterData);
+      }
+
+      // 更新壓合模型相關
+      const pressModeInp = document.getElementById('selectedPressModelCode');
+      if (pressModeInp) {
+        const curTmpPressId = (masterData.TmpPressId ?? '').trim();
+        pressModeInp.value = curTmpPressId;
+        if (curTmpPressId) window._selectedPressTmpId = curTmpPressId;
+      }
+      window.currentMasterTmpBOMId = (masterData.TmpBOMId ?? masterData.TmpBomid ?? '').trim();
+
+      // 重設表單頁籤 guard + 清除 editor 快取
+      formTabLoaded = false;
+      Object.keys(tabState).forEach(k => {
+        if (tabState[k]?.editor) tabState[k].editor = null;
+      });
+
+      // 重新載入當前顯示的單身頁籤
+      const activeDetailTab = document.querySelector('[data-table][data-dict].active');
+      if (activeDetailTab) loadDetailTab(activeDetailTab);
+    }
+  });
+  nav.init();
+
 });
 </script>
 
@@ -2973,6 +3039,7 @@ document.addEventListener('DOMContentLoaded', () => {
 </style>
 
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+<script src="~/js/erpDetailNav.js" asp-append-version="true"></script>
 
 <script>
 // ============================================
@@ -3005,150 +3072,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const revision = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "Revision").Value ?? "")';
     return `${partNum}|${revision}`;
   }
-
-  // ============================
-  // 上一筆 / 下一筆 導航邏輯
-  // ============================
-  const NAV_BTN_FIRST = document.getElementById('btnFirst');
-  const NAV_BTN_PREV  = document.getElementById('btnPrev');
-  const NAV_BTN_NEXT  = document.getElementById('btnNext');
-  const NAV_BTN_LAST  = document.getElementById('btnLast');
-  let navKeys = [];  // 儲存所有 { PartNum, Revision } 的清單
-  let navIndex = -1; // 目前在清單中的位置
-
-  // 目前這筆的主鍵
-  const CURRENT_PARTNUM = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "PartNum").Value ?? "")';
-  const CURRENT_REVISION = '@(Model.MasterKeyValues.FirstOrDefault(k => k.Key == "Revision").Value ?? "")';
-
-  // 讀取 Index 頁面儲存的查詢條件
-  function loadLastFilters() {
-    try {
-      const tableName = (window._headerTableName || 'EMOdProdInfo').toLowerCase();
-      const filterKey = `orderListQueryFilters:${tableName}`;
-      const saved = localStorage.getItem(filterKey);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  }
-
-  // 跳轉到指定的資料（跳頁前先把目標 index 存入 localStorage，下一頁可立即顯示正確計數）
-  function gotoRecord(key, targetIndex) {
-    if (!key || !key.PartNum) return;
-    const tn = (window._headerTableName || 'emodprodinfo').toLowerCase();
-    if (targetIndex !== undefined && navKeys.length > 0) {
-      localStorage.setItem(`orderListQueryIndex:${tn}`, targetIndex + 1); // 1-based
-      localStorage.setItem(`orderListQueryTotal:${tn}`, navKeys.length);
-    }
-    const url = `/EMOdProdInfo/Detail?PartNum=${encodeURIComponent(key.PartNum)}&Revision=${encodeURIComponent(key.Revision || '0')}`;
-    window.location.href = url;
-  }
-
-  // 更新按鈕狀態與計數器
-  function updateNavButtons() {
-    const hasPrev  = navIndex > 0;
-    const hasNext  = navIndex >= 0 && navIndex < navKeys.length - 1;
-    const hasFirst = hasPrev;
-    const hasLast  = hasNext;
-
-    if (NAV_BTN_FIRST) {
-      NAV_BTN_FIRST.disabled = !hasFirst;
-      NAV_BTN_FIRST.onclick = () => hasFirst && gotoRecord(navKeys[0], 0);
-    }
-    if (NAV_BTN_PREV) {
-      NAV_BTN_PREV.disabled = !hasPrev;
-      NAV_BTN_PREV.onclick = () => hasPrev && gotoRecord(navKeys[navIndex - 1], navIndex - 1);
-    }
-    if (NAV_BTN_NEXT) {
-      NAV_BTN_NEXT.disabled = !hasNext;
-      NAV_BTN_NEXT.onclick = () => hasNext && gotoRecord(navKeys[navIndex + 1], navIndex + 1);
-    }
-    if (NAV_BTN_LAST) {
-      NAV_BTN_LAST.disabled = !hasLast;
-      NAV_BTN_LAST.onclick = () => hasLast && gotoRecord(navKeys[navKeys.length - 1], navKeys.length - 1);
-    }
-
-    // 更新計數器顯示
-    updateToolbarCount();
-  }
-
-  // 更新工具列計數器
-  function updateToolbarCount() {
-    const countEl = document.getElementById('toolbarHeaderCount');
-    if (!countEl) return;
-
-    // 隱藏單身計數（EMOdProdInfo 不需要）
-    const detailCountEl = document.getElementById('toolbarDetailCount');
-    if (detailCountEl) detailCountEl.style.display = 'none';
-
-    const total = navKeys.length;
-    if (total > 0 && navIndex >= 0) {
-      countEl.textContent = `${navIndex + 1} / ${total}`;
-    } else {
-      // fallback: 使用 localStorage 的資料
-      const tableName = (window._headerTableName || 'EMOdProdInfo').toLowerCase();
-      const storedIndex = parseInt(localStorage.getItem(`orderListQueryIndex:${tableName}`) || '0', 10);
-      const storedTotal = parseInt(localStorage.getItem(`orderListQueryTotal:${tableName}`) || '0', 10);
-      if (storedTotal > 0) {
-        countEl.textContent = `${storedIndex || '--'} / ${storedTotal}`;
-      } else {
-        countEl.textContent = '-- / --';
-      }
-    }
-  }
-
-  // 呼叫 API 取得所有主鍵清單
-  async function fetchKeyList(filters) {
-    // 使用 EMOdProdInfo 的 handler=Data API，支援大量資料
-    const res = await fetch('/EMOdProdInfo?handler=Data&pageIndex=1&pageSize=999999');
-    if (!res.ok) throw new Error('API 呼叫失敗');
-    const json = await res.json();
-    const rows = Array.isArray(json.items) ? json.items : [];
-    // 回傳 { PartNum, Revision } 物件陣列
-    return rows.map(r => ({
-      PartNum: (r.PartNum || r.partNum || '').toString().trim(),
-      Revision: (r.Revision || r.revision || '0').toString().trim()
-    })).filter(k => k.PartNum);
-  }
-
-  // 初始化導航
-  async function initRowNavigation() {
-    // 隱藏單身計數的 --
-    const detailCountEl = document.getElementById('toolbarDetailCount');
-    if (detailCountEl) detailCountEl.style.display = 'none';
-
-    // 先用 localStorage 立即顯示計數（不用等 API）
-    const countEl = document.getElementById('toolbarHeaderCount');
-    const tableName = (window._headerTableName || 'emodprodinfo').toLowerCase();
-    const storedIndex = localStorage.getItem(`orderListQueryIndex:${tableName}`);
-    const storedTotal = localStorage.getItem(`orderListQueryTotal:${tableName}`);
-    if (countEl && storedIndex && storedTotal) {
-      countEl.textContent = `${storedIndex} / ${storedTotal}`;
-    } else if (countEl) {
-      countEl.textContent = '載入中...';
-    }
-
-    try {
-      const filters = loadLastFilters();
-      navKeys = await fetchKeyList(filters);
-
-      // 找出目前這筆在清單中的位置
-      navIndex = navKeys.findIndex(k =>
-        k.PartNum.toLowerCase() === CURRENT_PARTNUM.toLowerCase() &&
-        k.Revision.toLowerCase() === CURRENT_REVISION.toLowerCase()
-      );
-
-      updateNavButtons();
-    } catch (e) {
-      console.error('初始化導航失敗', e);
-      if (NAV_BTN_PREV) NAV_BTN_PREV.disabled = true;
-      if (NAV_BTN_NEXT) NAV_BTN_NEXT.disabled = true;
-      updateToolbarCount();
-    }
-  }
-
-  // 執行初始化
-  initRowNavigation();
 
   document.addEventListener('DOMContentLoaded', function() {
     // ============================
