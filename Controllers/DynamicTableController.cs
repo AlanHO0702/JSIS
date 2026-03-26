@@ -291,6 +291,7 @@ SELECT TOP 1 SelectType, HeadFirst
             }
 
             PaperTypeOption? selectedType = null;
+            int? defaultPaperType = null;
             if (selectType == 1)
             {
                 if (req?.PaperType == null)
@@ -327,7 +328,6 @@ SELECT TOP 1 PaperType, PaperTypeName, HeadFirst, PowerType, UpdateFieldName, Up
             }
             else if (!string.IsNullOrWhiteSpace(itemId))
             {
-                int? defaultPaperType = null;
                 await using (var cmdItem = new SqlCommand(@"
 SELECT TOP 1 PaperType
   FROM CURdSysItems WITH (NOLOCK)
@@ -452,9 +452,32 @@ SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, c.COLUMN_DEFAULT
                 if (!string.IsNullOrWhiteSpace(selectedType.TradeId))
                     values["TradeId"] = selectedType.TradeId;
             }
+            else if (defaultPaperType.HasValue)
+            {
+                // Keep legacy behavior: persist default PaperType from CURdSysItems
+                // even when CURdPaperType has no matching row (e.g. 255).
+                values["dllPaperType"] = defaultPaperType.Value;
+                values["dllPaperTypeName"] = string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(defaultHeadFirst))
+                    values["dllHeadFirst"] = defaultHeadFirst;
+            }
             else if (!string.IsNullOrWhiteSpace(defaultHeadFirst))
             {
                 values["dllHeadFirst"] = defaultHeadFirst;
+            }
+
+            // Legacy MPHdSendOrderMain behavior: source-vendor flags default to enabled.
+            // Apply only when all four columns exist to avoid affecting unrelated tables.
+            if (colMap.ContainsKey("UseRecent") &&
+                colMap.ContainsKey("UseQuota") &&
+                colMap.ContainsKey("UseTable") &&
+                colMap.ContainsKey("IsPost"))
+            {
+                if (!values.ContainsKey("UseRecent")) values["UseRecent"] = 1;
+                if (!values.ContainsKey("UseQuota")) values["UseQuota"] = 1;
+                if (!values.ContainsKey("UseTable")) values["UseTable"] = 1;
+                if (!values.ContainsKey("IsPost")) values["IsPost"] = 1;
             }
 
             foreach (var kvp in values)
