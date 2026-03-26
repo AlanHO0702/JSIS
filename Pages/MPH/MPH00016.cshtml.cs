@@ -553,7 +553,6 @@ where t3.PaperNum=@SourNum
             foreach (var p in paramNames)
             {
                 object? val = null;
-                var hasExplicitQueryValue = Request.Query.ContainsKey(p);
                 var qsVal = Request.Query[p].ToString();
                 CURdTableField? qField = null;
                 if (!qFieldMap.TryGetValue(p, out qField) && FieldNameByParam.TryGetValue(p, out var fn))
@@ -604,10 +603,6 @@ where t3.PaperNum=@SourNum
                 {
                     val = useIdVal.Substring(0, 3);
                 }
-
-                // Empty-search should mean full-query: unchecked checkbox filters should not keep default 0/1.
-                if (!hasExplicitQueryValue && Request.Query.ContainsKey("search") && IsCheckboxField(qField))
-                    val = null;
 
                 // Keep resolved values; nullable entries may be omitted to preserve SP default behavior.
                 paramValues.Add((p, val));
