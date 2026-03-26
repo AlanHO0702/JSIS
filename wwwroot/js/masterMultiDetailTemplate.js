@@ -286,9 +286,10 @@
    * @param {number} top - 抓取筆數，預設 200
    * @returns {Promise<Array>} 資料列陣列
    */
-  const fetchTopRows = async (tableName, top = 200) => {
+  const fetchTopRows = async (tableName, top = 200, filter = '') => {
     if (!tableName) return [];
-    const url = `/api/CommonTable/TopRows?table=${encodeURIComponent(tableName)}&top=${top}`;
+    let url = `/api/CommonTable/TopRows?table=${encodeURIComponent(tableName)}&top=${top}`;
+    if (filter) url += `&filter=${encodeURIComponent(filter)}`;
     return await fetch(url).then(r => r.json());
   };
 
@@ -942,9 +943,13 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
         inp.addEventListener("change", syncCheckbox);
         inp.addEventListener("click", syncCheckbox);
       } else {
-        span.textContent = fmtCell(display, DICT.fmt(f), DICT.type(f));
-        inp.value = display == null ? "" : String(display);
+        const formatted = fmtCell(display, DICT.fmt(f), DICT.type(f));
+        span.textContent = formatted;
         inp.dataset.raw = raw == null ? "" : String(raw);
+        // 日期欄位：input 也顯示格式化值，raw 留存原始值供儲存
+        inp.value = isDateType(DICT.type(f)) && formatted
+          ? formatted
+          : (display == null ? "" : String(display));
         // ★ 若有 lookup 對照表，記錄並綁定雙擊下拉（編輯模式可選取，瀏覽模式唯讀）
         const fieldLookupMap = oc[f.FieldName]?.dropdown || lk[f.FieldName]?.dropdown;
         const fieldCellMap   = oc[f.FieldName]?.cell    || lk[f.FieldName]?.cell;
@@ -1219,10 +1224,26 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
 
     const uniq = (arr) => [...new Set((arr || []).filter(Boolean).map(s => String(s)))];
 
-    // === Master 資料 ===
-    const masterRows = cfg.MasterApi
-      ? await fetch(cfg.MasterApi).then(r => r.json())
-      : await fetchTopRows(cfg.MasterTable, cfg.MasterTop || 200);
+    // === Master 資料（若 URL 帶有查詢參數則走 Query endpoint 篩選）===
+    const masterFilterSql = cfg.MasterFilterSql || '';
+    const masterRows = await (async () => {
+      if (cfg.MasterApi) return fetch(cfg.MasterApi).then(r => r.json());
+      const urlParams = new URLSearchParams(window.location.search);
+      const excludeKeys = new Set(['pageIndex', 'pageindex']);
+      const filterParams = [];
+      for (const [k, v] of urlParams.entries()) {
+        if (!excludeKeys.has(k) && v) filterParams.push([k, v]);
+      }
+      if (filterParams.length > 0) {
+        const qp = new URLSearchParams();
+        qp.set('table', cfg.MasterTable);
+        qp.set('top', String(cfg.MasterTop || 200));
+        if (masterFilterSql) qp.set('filter', masterFilterSql);
+        filterParams.forEach(([k, v]) => qp.set(k, v));
+        return fetch(`/api/CommonTable/Query?${qp}`).then(r => r.json());
+      }
+      return fetchTopRows(cfg.MasterTable, cfg.MasterTop || 200, masterFilterSql);
+    })();
 
     // Master key fields: prefer cfg.MasterPkFields, fallback to dict IsKey
     const masterKeyFields = uniq([
@@ -1231,6 +1252,18 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
     ]);
     // Let buildBody inject hidden keys even if not visible
     mBody._keyFields = masterKeyFields;
+
+    // ★ 從 FilterSQL 解析預設值（如 "and t0.FactorType=104" → {FactorType: "104"}）
+    if (masterFilterSql) {
+      const filterDefaults = {};
+      // 匹配 field=value 模式（支援 t0.Field=Value 或 Field=Value）
+      const re = /(?:t\d+\.)?(\w+)\s*=\s*(\d+|'[^']*')/gi;
+      let m;
+      while ((m = re.exec(masterFilterSql)) !== null) {
+        filterDefaults[m[1]] = m[2].replace(/^'|'$/g, '');
+      }
+      mBody._filterDefaults = filterDefaults;
+    }
 
     // === Detail 辭典 ===
     const detailDicts = [];
@@ -1863,6 +1896,10 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
         }
         Object.assign(defaults, ctx);
       }
+      // ★ Master 新增時從 FilterSQL 解析預設值（如 FactorType=104）
+      if (target.type === "master" && tbody._filterDefaults) {
+        Object.assign(defaults, tbody._filterDefaults);
+      }
 
       // 系統慣例：UseId 缺值時預設帶 A001（或由全域覆蓋）
       const hasUseIdKey = (keyFields || []).some(k => String(k).toLowerCase() === "useid");
@@ -1937,6 +1974,25 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
         fk.className = "mmd-fk-hidden";
         tr.append(fk);
       });
+
+      // ★ FilterSQL 預設欄位：建立 hidden input（如 FactorType=104）
+      if (tbody._filterDefaults) {
+        const coveredFields = new Set([
+          ...pkNames.map(n => n.toLowerCase()),
+          ...keyMap.map(k => k.Detail.toLowerCase()),
+          ...fields.map(f => f.FieldName.toLowerCase())
+        ]);
+        Object.entries(tbody._filterDefaults).forEach(([name, val]) => {
+          if (!coveredFields.has(name.toLowerCase())) {
+            const hid = document.createElement("input");
+            hid.type = "hidden";
+            hid.name = name;
+            hid.value = val;
+            hid.className = "cell-edit";
+            tr.append(hid);
+          }
+        });
+      }
 
       fields.forEach(f => {
         const td = document.createElement("td");
@@ -2125,7 +2181,12 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
 
       clearSelected(tbody);
       tr.classList.add("selected");
-      tbody.appendChild(tr);
+      // ★ Master 新增列插入在最前面，Detail 仍 append 在最後
+      if (target.type === "master") {
+        tbody.prepend(tr);
+      } else {
+        tbody.appendChild(tr);
+      }
       updateCountPanel();
       pendingAddedRow = tr;
       pendingAddedTarget = { type: target.type, index: target.index };
@@ -2238,6 +2299,10 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       Swal?.fire({ icon: "success", title: "儲存完成", timer: 900, showConfirmButton: false });
       // ★ 儲存成功後：退出編輯模式、清除異動狀態
       const savedTarget = pendingAddedTarget;
+      // ★ 若有新增 Master 列，在 reload 前先捕捉 PK 值以便重新選取
+      const addedMasterKeys = (pendingAddedRow && (!savedTarget || savedTarget.type === "master"))
+        ? captureKeyValues(pendingAddedRow, masterPK)
+        : null;
       masterEditor.cancelChanges();
       detailEditors.forEach(ed => ed.cancelChanges());
       setEditMode(false);
@@ -2249,8 +2314,13 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       if (savedTarget && savedTarget.type === "detail") {
         await reloadAfterChange(savedTarget.index);
       } else if (!rMaster.skipped) {
-        // Master 資料有異動，重新載入頁面
-        location.reload();
+        // Master 資料有異動，重新載入頁面（帶上新增列的 PK 以便重新選取）
+        const url = new URL(location.href);
+        if (addedMasterKeys && Object.keys(addedMasterKeys).length) {
+          Object.entries(addedMasterKeys).forEach(([k, v]) => url.searchParams.set(k, v));
+          url.searchParams.set("pageIndex", "1");
+        }
+        location.href = url.toString();
       }
 
       return { ok: true, skipped: false };
@@ -2584,6 +2654,46 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
         }
       }
     });
+
+    // ★ 頁面載入後：依 URL pageIndex 或 PK 參數自動選取對應的 Master 列
+    {
+      const urlP = new URLSearchParams(window.location.search);
+      const pageIdx = parseInt(urlP.get("pageIndex") || urlP.get("pageindex") || "0", 10);
+      const rows = Array.from(mBody.querySelectorAll("tr"));
+      let targetRow = null;
+
+      // 優先用 PK 欄位值精確比對
+      if (masterKeyFields.length > 0) {
+        const pkVals = {};
+        masterKeyFields.forEach(k => {
+          const v = urlP.get(k);
+          if (v) pkVals[k] = v;
+        });
+        if (Object.keys(pkVals).length > 0) {
+          targetRow = rows.find(tr => {
+            return Object.entries(pkVals).every(([k, v]) => {
+              const inp = Array.from(tr.querySelectorAll("input")).find(i => (i.name || "").toLowerCase() === k.toLowerCase());
+              return inp && String(inp.value ?? "").trim() === String(v).trim();
+            });
+          }) || null;
+        }
+      }
+
+      // 否則用 pageIndex（1-based）
+      if (!targetRow && pageIdx > 0 && pageIdx <= rows.length) {
+        targetRow = rows[pageIdx - 1];
+      }
+
+      // 預設選第一列
+      if (!targetRow && rows.length > 0) {
+        targetRow = rows[0];
+      }
+
+      if (targetRow) {
+        targetRow.click();
+        try { targetRow.scrollIntoView({ block: "center", behavior: "auto" }); } catch {}
+      }
+    }
 
     setModePanel(false);
     setDirty(false);

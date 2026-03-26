@@ -429,4 +429,73 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         var obj = await cmd.ExecuteScalarAsync();
         return obj == null || obj == DBNull.Value ? null : obj.ToString();
     }
+
+    /// <summary>
+    /// 取得 EditGrid 按鈕的設定（呼叫 CURdOCXItmCusBtnRGGet）
+    /// </summary>
+    [HttpGet("EditGridConfig")]
+    public async Task<IActionResult> EditGridConfig(
+        [FromQuery] string itemId,
+        [FromQuery] string buttonName,
+        [FromQuery] int opKind = 0)
+    {
+        if (string.IsNullOrWhiteSpace(itemId) || string.IsNullOrWhiteSpace(buttonName))
+            return BadRequest(new { ok = false, error = "itemId/buttonName 為必填" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        string? spName = null, multiSelectDD = null, dialogCaption = null;
+        string? clientTblName = null, editGridTableField = null;
+        int editGridType = 0;
+
+        // Try CURdOCXItmCusBtnRGGet SP first
+        try
+        {
+            await using var cmd = new SqlCommand(
+                "exec CURdOCXItmCusBtnRGGet @itemId, @btn, @op", conn);
+            cmd.Parameters.AddWithValue("@itemId", itemId.Trim());
+            cmd.Parameters.AddWithValue("@btn", buttonName.Trim());
+            cmd.Parameters.AddWithValue("@op", opKind);
+
+            await using var rd = await cmd.ExecuteReaderAsync();
+            if (await rd.ReadAsync())
+            {
+                spName = rd["SpName"]?.ToString()?.Trim();
+                multiSelectDD = rd["MultiSelectDD"]?.ToString()?.Trim();
+                dialogCaption = rd["DialogCaption"]?.ToString()?.Trim();
+                editGridType = rd["iEditGridType"] is DBNull ? 0 : Convert.ToInt32(rd["iEditGridType"]);
+                try { clientTblName = rd["ClientTblName"]?.ToString()?.Trim(); } catch { }
+                try { editGridTableField = rd["EditGridTableField"]?.ToString()?.Trim(); } catch { }
+            }
+        }
+        catch
+        {
+            // Fallback: read directly from CURdOCXItemCustButton
+            await using var cmd2 = new SqlCommand(@"
+                SELECT SpName, MultiSelectDD, DialogCaption
+                  FROM CURdOCXItemCustButton WITH (NOLOCK)
+                 WHERE ItemId = @itemId AND ButtonName = @btn", conn);
+            cmd2.Parameters.AddWithValue("@itemId", itemId.Trim());
+            cmd2.Parameters.AddWithValue("@btn", buttonName.Trim());
+            await using var rd2 = await cmd2.ExecuteReaderAsync();
+            if (await rd2.ReadAsync())
+            {
+                spName = rd2["SpName"]?.ToString()?.Trim();
+                multiSelectDD = rd2["MultiSelectDD"]?.ToString()?.Trim();
+                dialogCaption = rd2["DialogCaption"]?.ToString()?.Trim();
+            }
+        }
+
+        return Ok(new
+        {
+            ok = true,
+            editGridType,
+            tableName = spName ?? string.Empty,
+            ddTableName = multiSelectDD ?? string.Empty,
+            dialogCaption = dialogCaption ?? string.Empty,
+            clientTblName = clientTblName ?? string.Empty,
+            editGridTableField = editGridTableField ?? string.Empty
+        });
+    }
 }
