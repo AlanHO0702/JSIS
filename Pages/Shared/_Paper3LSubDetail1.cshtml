@@ -124,7 +124,7 @@
   const LOOKUP_META_CACHE = new Map(); // tn -> Map(fieldLower -> { table, key, result, keySelf, field })
   const LOOKUP_DATA_CACHE = new Map(); // tn -> Map(fieldLower -> Map(key -> label))
   const READONLY_META_CACHE = new Map(); // tn -> Map(fieldLower -> boolean)
-  const DICT_META_CACHE = new Map(); // tn -> Map(fieldLower -> { dataType, formatStr })
+  const DICT_META_CACHE = new Map(); // tn -> Map(fieldLower -> { dataType, formatStr, comboStyle })
 
   async function fetchDictMeta(dictTable) {
     const tn = cleanTableName(dictTable);
@@ -144,7 +144,8 @@
         if (!field) return;
         map.set(field.toLowerCase(), {
           dataType: (r.dataType || r.DataType || '').toString(),
-          formatStr: (r.formatStr || r.FormatStr || '').toString()
+          formatStr: (r.formatStr || r.FormatStr || '').toString(),
+          comboStyle: Number(r.comboStyle ?? r.ComboStyle ?? 0)
         });
       });
       DICT_META_CACHE.set(tn, map);
@@ -540,8 +541,26 @@
   }
 
   function getAlignClass(meta, raw) {
+    if (Number(meta?.comboStyle ?? 0) === 1) return 'align-center';
     if (isNumberType(meta?.dataType)) return 'align-right';
     return 'align-left';
+  }
+
+  function isCheckboxMeta(meta) {
+    return Number(meta?.comboStyle ?? 0) === 1;
+  }
+
+  function isCheckboxChecked(raw) {
+    if (raw == null) return false;
+    if (typeof raw === 'boolean') return raw;
+    const s = String(raw).trim().toLowerCase();
+    return s === '1' || s === 'true' || s === 'y' || s === 'yes';
+  }
+
+  function getEditorValue(inp) {
+    if (!inp) return '';
+    if (inp.type === 'checkbox') return inp.checked ? '1' : '0';
+    return (inp.value ?? '').toString().trim();
   }
 
   function isDateType(meta) {
@@ -764,6 +783,10 @@
     if (!inputs.length) return false;
     let hasValue = false;
     inputs.forEach(inp => {
+      if (inp.type === 'checkbox') {
+        if (inp.checked) hasValue = true;
+        return;
+      }
       const v = (inp.value ?? '').toString().trim();
       if (v === '') return;
       if (/^[-–—]+$/.test(v)) return;
@@ -825,6 +848,7 @@
         const canDropdown = !!(meta?.source === 'lookup' && metaFieldLower && metaFieldLower === fieldLower && lookupMap && lookupMap.size);
         const fieldMeta = metaMap.get(fieldLower);
         const alignClass = getAlignClass(fieldMeta, null);
+        const isCheckbox = isCheckboxMeta(fieldMeta);
         const isDate = isDateType(fieldMeta);
         const keyFieldAttr = canDropdown ? ` data-lookup-key-field="${escapeHtml(meta?.key || '')}"` : "";
         const resultFieldAttr = canDropdown ? ` data-lookup-result-field="${escapeHtml(meta?.result || '')}"` : "";
@@ -837,13 +861,18 @@
         const lookupAttr = canDropdown
           ? ` data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
           : "";
-        const dateEditClass = isDate ? ' date-dropdown' : '';
+        const dateEditClass = (!isCheckbox && isDate) ? ' date-dropdown' : '';
         const dateValue = isDate ? normalizeDateForPicker('') : '';
-        const dateAddon = isDate
+        const dateAddon = (!isCheckbox && isDate)
           ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
              <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
           : '';
-        html += `<td${classAttr}${lookupAttr} data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}>${dateAddon}${partNumBtn}</td>`;
+        if (isCheckbox) {
+          const chkRoAttr = isReadOnly ? ' data-readonly="1" disabled' : ' data-readonly="0"';
+          html += `<td${classAttr}${lookupAttr} data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"><input type="checkbox" class="cell-view-checkbox" disabled></span><input type="checkbox" class="cell-edit d-none${roClass}" data-field="${escapeHtml(fn)}" data-init="0"${chkRoAttr}>${partNumBtn}</td>`;
+        } else {
+          html += `<td${classAttr}${lookupAttr} data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}>${dateAddon}${partNumBtn}</td>`;
+        }
       });
       html += '</tr></tbody></table></div>';
       container.innerHTML = html;
@@ -876,14 +905,16 @@
       }
       const tbody = container.querySelector('tbody');
       if (tbody) {
-        tbody.addEventListener('input', (e) => {
+        const markRowDirty = (e) => {
           window.__activeDetailGrid = 'paper3l';
           const inp = e.target;
           if (!inp.classList.contains('cell-edit')) return;
           const tr = inp.closest('tr');
           if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
           window.__unsavedChanges = true;
-        });
+        };
+        tbody.addEventListener('input', markRowDirty);
+        tbody.addEventListener('change', markRowDirty);
         tbody.addEventListener('click', (e) => {
           window.__activeDetailGrid = 'paper3l';
           const tr = e.target.closest('tr');
@@ -936,7 +967,7 @@
                 });
                 if (resp.ok) {
                   container?.querySelectorAll('tbody tr[data-state="modified"], tbody tr[data-state="added"]').forEach(tr => {
-                    tr.querySelectorAll('input.cell-edit[data-field]').forEach(inp => { inp.dataset.init = inp.value ?? ''; });
+                    tr.querySelectorAll('input.cell-edit[data-field]').forEach(inp => { inp.dataset.init = getEditorValue(inp); });
                     delete tr.dataset.state;
                   });
                 }
@@ -981,14 +1012,20 @@
           const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
           const fieldMeta = metaMap.get(fieldLower);
           const alignClass = getAlignClass(fieldMeta, raw);
+          const isCheckbox = isCheckboxMeta(fieldMeta);
           const isDate = isDateType(fieldMeta);
-          const dateEditClass = isDate ? ' date-dropdown' : '';
+          const dateEditClass = (!isCheckbox && isDate) ? ' date-dropdown' : '';
           const dateValue = isDate ? normalizeDateForPicker('') : '';
-          const dateAddon = isDate
+          const dateAddon = (!isCheckbox && isDate)
             ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
                <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
             : '';
-          html += `<td class="${alignClass}" data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}"></span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" value=""${roAttr}>${dateAddon}${partNumBtn}</td>`;
+          if (isCheckbox) {
+            const chkRoAttr = isReadOnly ? ' data-readonly="1" disabled' : ' data-readonly="0"';
+            html += `<td class="${alignClass}" data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}"><input type="checkbox" class="cell-view-checkbox" disabled></span><input type="checkbox" class="cell-edit d-none${roClass}" data-field="${escapeHtml(fn)}" data-init="0"${chkRoAttr}></td>`;
+          } else {
+            html += `<td class="${alignClass}" data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}"></span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" value=""${roAttr}>${dateAddon}${partNumBtn}</td>`;
+          }
           return;
         }
         const fieldLower = fn.toLowerCase();
@@ -1048,11 +1085,14 @@
         if (hasMultiKey && !hasField && fieldLower !== metaKeySelf && fieldLower !== metaKey) {
           display = '';
         }
+        const isCheckbox = isCheckboxMeta(fieldMeta);
         let v = display == null || typeof display === 'object' ? '' : String(display);
-        if (!displayIsLookup) {
+        if (!displayIsLookup && !isCheckbox) {
           v = formatDisplayByMeta(v, fieldMeta);
         }
-        const inputValue = (isReadOnly || !allowLookup) ? v : raw;
+        const inputValue = isCheckbox
+          ? (isCheckboxChecked(raw) ? '1' : '0')
+          : ((isReadOnly || !allowLookup) ? v : raw);
         const viewText = (v == null ? '' : String(v)).trim();
         const editText = (inputValue == null ? '' : String(inputValue)).trim();
         const alignClass = getAlignClass(fieldMeta, raw);
@@ -1068,13 +1108,19 @@
         const lookupAttr = canDropdown
           ? ` data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
           : "";
-        const dateEditClass = isDate ? ' date-dropdown' : '';
+        const dateEditClass = (!isCheckbox && isDate) ? ' date-dropdown' : '';
         const dateValue = isDate ? normalizeDateForPicker(editText) : '';
-        const dateAddon = isDate
+        const dateAddon = (!isCheckbox && isDate)
           ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
              <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
           : '';
-        html += `<td${classAttr}${lookupAttr} data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" data-init="${escapeHtml(editText)}" value="${escapeHtml(editText)}"${roAttr}>${dateAddon}${partNumBtn}</td>`;
+        if (isCheckbox) {
+          const checkedAttr = isCheckboxChecked(editText) ? ' checked' : '';
+          const chkRoAttr = isReadOnly ? ' data-readonly="1" disabled' : ' data-readonly="0"';
+          html += `<td${classAttr}${lookupAttr} data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"><input type="checkbox" class="cell-view-checkbox" disabled${checkedAttr}></span><input type="checkbox" class="cell-edit d-none${roClass}" data-field="${escapeHtml(fn)}" data-init="${escapeHtml(editText)}"${checkedAttr}${chkRoAttr}>${partNumBtn}</td>`;
+        } else {
+          html += `<td${classAttr}${lookupAttr} data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="cell-view${roClass}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span><input class="cell-edit d-none${roClass}${dateEditClass}" data-field="${escapeHtml(fn)}" data-init="${escapeHtml(editText)}" value="${escapeHtml(editText)}"${roAttr}>${dateAddon}${partNumBtn}</td>`;
+        }
       });
       html += '</tr>';
     });
@@ -1106,14 +1152,16 @@
 
     const tbody = container.querySelector('tbody');
     if (tbody) {
-      tbody.addEventListener('input', (e) => {
+      const markRowDirty = (e) => {
         window.__activeDetailGrid = 'paper3l';
         const inp = e.target;
         if (!inp.classList.contains('cell-edit')) return;
         const tr = inp.closest('tr');
         if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
         window.__unsavedChanges = true;
-      });
+      };
+      tbody.addEventListener('input', markRowDirty);
+      tbody.addEventListener('change', markRowDirty);
       tbody.addEventListener('click', (e) => {
         window.__activeDetailGrid = 'paper3l';
         const tr = e.target.closest('tr');
@@ -1169,7 +1217,7 @@
               });
               if (resp.ok) {
                 container?.querySelectorAll('tbody tr[data-state="modified"], tbody tr[data-state="added"]').forEach(tr => {
-                  tr.querySelectorAll('input.cell-edit[data-field]').forEach(inp => { inp.dataset.init = inp.value ?? ''; });
+                  tr.querySelectorAll('input.cell-edit[data-field]').forEach(inp => { inp.dataset.init = getEditorValue(inp); });
                   delete tr.dataset.state;
                 });
               }
@@ -1202,7 +1250,7 @@
         tr.querySelectorAll('input.cell-edit[data-field]').forEach(inp => {
           const field = inp.dataset.field || '';
           if (!field) return;
-          const currentValue = (inp.value ?? '').trim();
+          const currentValue = getEditorValue(inp);
           const initValue = (inp.dataset.init ?? '').toString().trim();
           const isKey = keyCandidates.has(field.toLowerCase());
           if (!isAdded && !isKey && currentValue === initValue) return;
@@ -1265,6 +1313,7 @@
           && ((metaFieldLower && metaFieldLower === fieldLower) || (meta?.result || '').toString().toLowerCase() === fieldLower));
         const fieldMeta = dictMetaMap.get(fieldLower);
         const alignClass = getAlignClass(fieldMeta, null);
+        const isCheckbox = isCheckboxMeta(fieldMeta);
         const tdClasses = [alignClass];
         if (canDropdown) tdClasses.push('lookup-cell');
         const isPartNum = isPartNumField(fn);
@@ -1276,7 +1325,12 @@
         const lookupAttr = canDropdown
           ? ` data-lookup-field="${escapeHtml(fn)}"${keyFieldAttr}${resultFieldAttr}`
           : "";
-        html += `<td${classAttr}${lookupAttr} data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="${viewClass}${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="${editClass}${roClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}>${partNumBtn}</td>`;
+        if (isCheckbox) {
+          const chkRoAttr = isReadOnly ? ' data-readonly="1" disabled' : ' data-readonly="0"';
+          html += `<td${classAttr}${lookupAttr} data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="${viewClass}${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"><input type="checkbox" class="cell-view-checkbox" disabled></span><input type="checkbox" class="${editClass}${roClass}" data-field="${escapeHtml(fn)}" data-init="0"${chkRoAttr}>${partNumBtn}</td>`;
+        } else {
+          html += `<td${classAttr}${lookupAttr} data-field="${escapeHtml(fn)}" data-readonly="${isReadOnly ? '1' : '0'}"><span class="${viewClass}${roClass}" data-readonly="${isReadOnly ? '1' : '0'}"></span><input class="${editClass}${roClass}" data-field="${escapeHtml(fn)}" data-init="" value=""${roAttr}>${partNumBtn}</td>`;
+        }
       });
       html += '</tr>';
 
@@ -1507,6 +1561,17 @@ body.resizing { cursor: col-resize !important; }
   text-align: inherit;
   padding: 2px 6px;
   white-space: nowrap;
+}
+.paper3l-subdetail .erp-table td.align-center{ text-align: center; }
+.paper3l-subdetail .erp-table td .cell-view-checkbox,
+.paper3l-subdetail .erp-table td .cell-edit[type="checkbox"]{
+  width: 16px !important;
+  height: 16px !important;
+  min-height: 16px !important;
+  margin: 3px auto !important;
+  padding: 0 !important;
+  display: block;
+  accent-color: #0d6efd;
 }
 .paper3l-subdetail .erp-table td .cell-edit.date-dropdown{
   padding-right: 14px;
