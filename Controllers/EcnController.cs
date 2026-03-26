@@ -108,7 +108,7 @@ namespace PcbErpApi.Controllers
             var addDataRows = new List<Dictionary<string, object?>>();
             {
                 const string sql =
-                    "SELECT * FROM EMOdECNSetNumAddData WITH (NOLOCK) WHERE PaperNum=@pn ORDER BY SerialNum";
+                    "SELECT * FROM EMOdECNSetNumAddData WITH (NOLOCK) WHERE PaperNum=@pn";
                 await using var cmd = new SqlCommand(sql, conn);
                 cmd.Parameters.AddWithValue("@pn", req.PaperNum.Trim());
                 await using var rd = await cmd.ExecuteReaderAsync();

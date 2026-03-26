@@ -69,7 +69,7 @@ namespace PcbErpApi.Pages.EMOdProdECNMain
             {
                 FieldDictList = await LoadFieldDictAsync(DictTableName);
                 var orderBy = BuildOrderByClause(sortBy, sortDir)
-                              ?? await GetDefaultOrderByAsync(DataTable);
+                              ?? "PaperDate DESC, PaperNum DESC";
                 var totalCount = await CountRowsAsync(DataTable, string.Empty, null);
                 var items = await LoadRowsAsync(DataTable, string.Empty, orderBy, pageIndex, pageSize, null);
 

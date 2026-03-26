@@ -137,11 +137,15 @@
   display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
 }
 .ecn-detail-form .ecn-groupbox {
-  border: 1px solid #999; border-radius: 4px; padding: 8px 10px; margin: 4px 0;
-  position: relative;
+  border: 1px solid #999; border-radius: 4px; padding: 6px 10px 8px; margin: 4px 0 4px 0;
+  min-width: 0;
 }
-.ecn-detail-form .ecn-groupbox legend {
-  font-size: 12px; font-weight: 600; padding: 0 4px; width: auto; margin-bottom: 4px;
+.ecn-detail-form .ecn-groupbox > legend {
+  all: revert;
+  float: none; display: inline; width: auto;
+  font-size: 12px; font-weight: 600;
+  padding: 0 6px; margin: 0; line-height: 1;
+  border: 0;
 }
 .ecn-detail-form .ecn-grid {
   border: 1px solid #c8d0dc; border-collapse: collapse; font-size: 12px; margin: 4px 0;
@@ -211,7 +215,7 @@
         DeleteBtnId  = "btnBatchDelete",
         SearchText   = "查詢",
         AddText      = "新增",
-        DeleteText   = "刪除",
+        DeleteText   = "作廢",
         ModalId      = "searchModal",
         ReportSpName = ""
     })
@@ -318,9 +322,16 @@ window._detailApi     = '@Html.Raw(Model.DetailApi ?? "")';
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+  // 隱藏不需要的按鈕
+  document.getElementById('btnPaperTrace')?.remove();
+  document.getElementById('btnPaperLog')?.remove();
+
   const currentMasterKeys = window._masterKeyValues || {};
   let masterDict = null;
   let masterData = null;
+
+  // 設定 selectedPaperNum 供 toolbar 送審/退審/作廢使用
+  window.selectedPaperNum = (currentMasterKeys['PaperNum'] || currentMasterKeys['papernum'] || '').trim();
 
   // ── 工具函數 ──────────────────────────────────────────────
 
@@ -520,7 +531,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <input class="ecn-input" type="text" value="${v('MatClass')}" readonly data-field="MatClass" style="width:80px;">
               </span>
             </div>
-            <div style="overflow:auto; max-height:120px; margin:2px 0;">
+            <div style="margin:2px 0;">
               <table class="ecn-grid" id="ecn-adddata-grid">
                 <thead><tr><th>選號資料</th><th>名稱</th><th>屬性</th><th>屬性名稱</th></tr></thead>
                 <tbody><tr><td colspan="4" class="text-muted text-center">載入中...</td></tr></tbody>
@@ -534,16 +545,6 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </fieldset>
 
-          <div class="ecn-row">
-            <span class="ecn-field">
-              <label class="ecn-lbl" style="min-width:60px;">對應CCN</label>
-              <input class="ecn-input" type="text" value="${v('SourNum')}" readonly data-field="SourNum" style="width:121px; background:#e0e0e0;">
-            </span>
-            <span class="ecn-field" style="margin-left:12px;">
-              <label class="ecn-lbl" style="min-width:60px;">下料版本</label>
-              <input type="checkbox" ${(v('DefaultRev') == 1 || v('DefaultRev') === true) ? 'checked' : ''} disabled data-field="DefaultRev" data-editable="1">
-            </span>
-          </div>
         </div>
 
         <!-- ── 右欄 ── -->
@@ -588,6 +589,19 @@ document.addEventListener('DOMContentLoaded', () => {
             <span class="ecn-field" style="width:100%; align-items:flex-start;">
               <label class="ecn-lbl" style="min-width:60px; margin-top:3px;">協辦內容</label>
               <textarea class="ecn-input" readonly rows="4" data-field="HelpDictionary" data-editable="1" style="flex:1; min-width:100px; resize:vertical;">${v('HelpDictionary')}</textarea>
+            </span>
+          </div>
+
+          <div class="ecn-row">
+            <span class="ecn-field">
+              <label class="ecn-lbl" style="min-width:60px;">對應CCN</label>
+              <input class="ecn-input" type="text" value="${v('SourNum')}" readonly data-field="SourNum" style="width:121px; background:#e0e0e0;">
+            </span>
+          </div>
+          <div class="ecn-row">
+            <span class="ecn-field">
+              <label class="ecn-lbl" style="min-width:60px;">下料版本</label>
+              <input type="checkbox" ${(v('DefaultRev') == 1 || v('DefaultRev') === true) ? 'checked' : ''} disabled data-field="DefaultRev" data-editable="1" style="width:14px; height:14px;">
             </span>
           </div>
         </div>
@@ -719,13 +733,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function gotoRecord(key, targetIndex) {
+  async function gotoRecord(key, targetIndex) {
     if (!key) return;
     if (targetIndex !== undefined && navKeys.length > 0) {
       localStorage.setItem(`orderListQueryIndex:${_tn}`, targetIndex + 1);
       localStorage.setItem(`orderListQueryTotal:${_tn}`, navKeys.length);
     }
-    window.location.href = `/EMOdProdECNMain/Detail?PaperNum=${encodeURIComponent(key.PaperNum)}&itemId=EMO00019`;
+
+    const newPaperNum = key.PaperNum;
+
+    // AJAX 切換：更新 URL 但不重載頁面
+    const newUrl = `/EMOdProdECNMain/Detail?PaperNum=${encodeURIComponent(newPaperNum)}&itemId=EMO00019`;
+    history.pushState(null, '', newUrl);
+
+    // 更新全域狀態
+    currentMasterKeys['PaperNum'] = newPaperNum;
+    currentMasterKeys['papernum'] = newPaperNum;
+    window.selectedPaperNum = newPaperNum;
+    CURRENT_KEYS.PaperNum = newPaperNum;
+    navIndex = targetIndex;
+    _prevPartNum = '';
+    _currentItem = 1;
+
+    // 重新載入資料（不重載頁面）
+    await loadMasterData(newPaperNum);
+    await loadDetailData(newPaperNum);
+    updateNavButtons();
   }
 
   function updateNavButtons() {
@@ -923,6 +956,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 2. 更新全域 key
         currentMasterKeys['PaperNum'] = newPaperNum;
         currentMasterKeys['papernum'] = newPaperNum;
+        window.selectedPaperNum = newPaperNum;
         window._masterKeyValues = { PaperNum: newPaperNum };
 
         // 3. 重新載入 master + detail 資料
@@ -947,6 +981,106 @@ document.addEventListener('DOMContentLoaded', () => {
       } finally {
         btnAdd.disabled = false;
       }
+    });
+  }
+
+  // ── 作廢按鈕 ──────────────────────────────────────────────
+  const btnDel = document.getElementById('btnBatchDelete');
+  if (btnDel) {
+    btnDel.addEventListener('click', async () => {
+      if (isEditMode) {
+        Swal.fire({ icon: 'warning', title: '請先儲存或取消目前的修改' });
+        return;
+      }
+
+      const paperNum = window.selectedPaperNum;
+      if (!paperNum) {
+        Swal.fire({ icon: 'warning', title: '查無單號！' });
+        return;
+      }
+
+      // 檢查是否已審核（finished == 1 已確認）
+      const finished = masterData?.Finished ?? masterData?.finished ?? null;
+      if (finished === 1) {
+        Swal.fire({ icon: 'warning', title: '該單據已審核，不能作廢' });
+        return;
+      }
+
+      const confirm = await Swal.fire({
+        title: '確定要作廢此單據？',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: '確定作廢',
+        cancelButtonText: '取消'
+      });
+      if (!confirm.isConfirmed) return;
+
+      const userId = (window._userId || localStorage.getItem('erpLoginUserId') || 'admin').toString().trim();
+      const tableName = window._headerTableName || 'EMOdProdECNMain';
+
+      const runVoid = async (extra = {}) => {
+        try {
+          const resp = await fetch('/api/PaperAction/DoAction', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              paperId: tableName,
+              paperNum: paperNum,
+              userId: userId,
+              eoc: 1,
+              aftFinished: 2,
+              itemId: window._itemId || 'EMO00019',
+              useId: window._useId || window.DEFAULT_USEID || 'A001',
+              ...extra
+            })
+          });
+
+          if (!resp.ok) {
+            let msg = '作廢失敗';
+            try {
+              const err = await resp.json();
+              msg = err.message || err.Message || msg;
+            } catch {
+              try { msg = await resp.text() || msg; } catch {}
+            }
+            Swal.fire({ icon: 'error', title: msg });
+            return;
+          }
+
+          const data = await resp.json().catch(() => ({}));
+
+          // 後端要求輸入作廢原因
+          if (data?.code === 'NEED_VOID_REASON') {
+            const reasonResp = await Swal.fire({
+              icon: 'question',
+              title: '請輸入作廢原因',
+              input: 'textarea',
+              inputPlaceholder: '請輸入原因...',
+              showCancelButton: true,
+              confirmButtonText: '確定作廢',
+              cancelButtonText: '取消',
+              inputValidator: v => { if (!v || !v.trim()) return '請輸入作廢原因'; }
+            });
+            if (!reasonResp.isConfirmed) return;
+            await runVoid({ ...extra, voidReason: reasonResp.value });
+            return;
+          }
+
+          Swal.fire({ icon: 'success', title: data.message || '作廢成功', timer: 1500, showConfirmButton: false });
+
+          // 如果是直接刪除（最新單據），回到 Index
+          if (data.deleted) {
+            setTimeout(() => { window.location.href = '/EMOdProdECNMain?itemId=EMO00019'; }, 1500);
+          } else {
+            // Finished 變更為已作廢，重新載入畫面
+            setTimeout(() => { location.reload(); }, 1500);
+          }
+        } catch (err) {
+          Swal.fire({ icon: 'error', title: '作廢錯誤', text: err.message });
+        }
+      };
+
+      await runVoid();
     });
   }
 
@@ -1048,7 +1182,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       btnEdit.disabled = true;
-      btnEdit.innerHTML = '<i class="bi bi-hourglass-split"></i>儲存中...';
 
       const resp = await fetch('/api/CommonTable/SaveTableChanges', {
         method: 'POST',
