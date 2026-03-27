@@ -85,8 +85,9 @@ namespace PcbErpApi.Pages.CUR
                     MasterTable = masterTableName,
                     MasterDict = master.TableName,
                     MasterApi = string.Empty,
-                    MasterTop = 500,
-                    MasterPkFields = masterPkFields
+                    MasterTop = 99999,
+                    MasterPkFields = masterPkFields,
+                    MasterFilterSql = string.IsNullOrWhiteSpace(master.FilterSql) ? null : master.FilterSql.Trim()
                 };
 
                 foreach (var d in details)

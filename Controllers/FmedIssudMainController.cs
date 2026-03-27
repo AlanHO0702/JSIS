@@ -42,7 +42,7 @@ namespace PcbErpApi.Controllers
 
             if (!string.IsNullOrWhiteSpace(PartNum))
             {
-                query = query.Where(x => x.PartNum.Contains(PartNum));
+                query = query.Where(x => x.PartNum != null && x.PartNum.Contains(PartNum));
                 cacheKey += $"_N_{PartNum}";
             }
 

@@ -117,6 +117,46 @@ else
   </div>
 </div>
 
+<!-- EditGrid Modal -->
+<div class="modal fade" id="editGridModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="false">
+  <div class="modal-dialog modal-xl edit-grid-dialog">
+    <div class="modal-content edit-grid-modal">
+      <div class="modal-header py-2" style="cursor:move;user-select:none;">
+        <h6 class="modal-title">維護資料表</h6>
+        <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-2" style="flex:1 1 auto;min-height:0;overflow:auto;">
+        <div class="eg-loading text-center py-4 text-muted">載入中...</div>
+        <div class="eg-grid" style="display:none;">
+          <div class="eg-toolbar mb-2 d-flex gap-2">
+            <button class="btn btn-sm btn-outline-primary eg-add-row">＋ 新增列</button>
+            <button class="btn btn-sm btn-outline-danger eg-del-row">－ 刪除選取列</button>
+          </div>
+          <div class="eg-scroll" style="max-height:calc(70vh - 100px);overflow:auto;border:1px solid #dee2e6;border-radius:4px;">
+            <table class="table table-sm table-striped table-bordered mb-0 eg-table">
+              <thead class="table-light"><tr></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer py-1">
+        <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-sm btn-primary eg-save">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  #editGridModal .edit-grid-dialog { --bs-modal-width: 900px; }
+  #editGridModal .edit-grid-modal { height: 80vh; display: flex; flex-direction: column; }
+  #editGridModal .eg-table th, #editGridModal .eg-table td { white-space: nowrap; font-size: .82rem; padding: 3px 6px; vertical-align: middle; }
+  #editGridModal .eg-table td input { border: 1px solid #ced4da; border-radius: 3px; padding: 1px 4px; font-size: .82rem; width: 100%; min-width: 60px; }
+  #editGridModal .eg-table tbody tr.eg-selected { background: #cce5ff !important; }
+  #editGridModal .eg-table tbody tr { cursor: pointer; }
+</style>
+
 <style>
   #condRunSpModal .cond-runsp-dialog { --bs-modal-width: 520px; }
   #condRunSpModal .cond-runsp-modal { display: flex; flex-direction: column; }
@@ -201,6 +241,18 @@ else
 
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
 <script>
+(function () {
+  const mdItemId = window._mdItemId;
+  if (mdItemId) {
+    const s = document.createElement('script');
+    s.src = `/js/masterdetail/${encodeURIComponent(mdItemId)}.js?v=${Date.now()}`;
+    s.async = true;
+    s.onerror = function () { console.debug('no custom masterdetail script for', mdItemId); };
+    document.head.appendChild(s);
+  }
+})();
+</script>
+<script>
 document.addEventListener('DOMContentLoaded', () => {
   const bar = document.getElementById('mdCustomButtonBar');
   const domId = '@(cfg?.DomId ?? string.Empty)';
@@ -244,6 +296,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (jwt) headers["X-JWTID"] = jwt;
       return { ...init, headers };
     };
+
+    const escHtml = s => { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; };
+    const escAttr = s => (s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
     const hasDateOnlyMask = (mask) => {
       const m = (mask || "").toString().toLowerCase();
@@ -1117,6 +1172,224 @@ document.addEventListener('DOMContentLoaded', () => {
       return { open };
     })();
 
+    // ── EditGrid (JSdEditGridDLL.dll) ──
+    const editGrid = (() => {
+      const modal = document.getElementById('editGridModal');
+      if (!modal) return { open: () => alert('editGridModal not found') };
+      const bsModal = new bootstrap.Modal(modal);
+      const titleEl = modal.querySelector('.modal-title');
+      const loadingEl = modal.querySelector('.eg-loading');
+      const gridEl = modal.querySelector('.eg-grid');
+      const thead = modal.querySelector('.eg-table thead tr');
+      const tbody = modal.querySelector('.eg-table tbody');
+      const btnSave = modal.querySelector('.eg-save');
+      const btnAdd = modal.querySelector('.eg-add-row');
+      const btnDel = modal.querySelector('.eg-del-row');
+
+      let columns = [];
+      let rows = [];
+      let deletedRows = [];
+      let tableName = '';
+      let selectedIdx = -1;
+
+      function renderTable() {
+        thead.innerHTML = columns.map(c =>
+          `<th>${escHtml(c)}</th>`
+        ).join('');
+        tbody.innerHTML = '';
+        rows.forEach((row, i) => {
+          const tr = document.createElement('tr');
+          if (i === selectedIdx) tr.classList.add('eg-selected');
+          tr.innerHTML =
+            columns.map(c => {
+              const val = row[c] ?? '';
+              return `<td><input type="text" value="${escAttr(String(val))}" data-col="${escAttr(c)}"></td>`;
+            }).join('');
+          tr.addEventListener('click', () => {
+            selectedIdx = i;
+            tbody.querySelectorAll('tr').forEach((r, ri) => r.classList.toggle('eg-selected', ri === i));
+          });
+          tbody.appendChild(tr);
+        });
+      }
+
+      function collectRows() {
+        const result = [];
+        tbody.querySelectorAll('tr').forEach(tr => {
+          const obj = {};
+          tr.querySelectorAll('input[data-col]').forEach(inp => {
+            obj[inp.dataset.col] = inp.value;
+          });
+          result.push(obj);
+        });
+        return result;
+      }
+
+      btnAdd?.addEventListener('click', () => {
+        const newRow = {};
+        columns.forEach(c => newRow[c] = '');
+        rows.push(newRow);
+        selectedIdx = rows.length - 1;
+        renderTable();
+        const lastInput = tbody.querySelector('tr:last-child td:first-child input');
+        if (lastInput) lastInput.focus();
+      });
+
+      btnDel?.addEventListener('click', () => {
+        if (selectedIdx < 0 || selectedIdx >= rows.length) {
+          alert('請先選取要刪除的列。');
+          return;
+        }
+        const removed = rows.splice(selectedIdx, 1);
+        if (removed[0] && removed[0].__existing) deletedRows.push(removed[0]);
+        if (selectedIdx >= rows.length) selectedIdx = rows.length - 1;
+        renderTable();
+      });
+
+      btnSave?.addEventListener('click', async () => {
+        const currentRows = collectRows();
+        try {
+          const jwt = localStorage.getItem("jwtId");
+          const headers = { 'Content-Type': 'application/json' };
+          if (jwt) headers['X-JWTID'] = jwt;
+
+          // Save (upsert)
+          if (currentRows.length > 0) {
+            const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+              method: 'POST', headers,
+              body: JSON.stringify({ TableName: tableName, Data: currentRows, KeyFields: columns })
+            });
+            const result = await resp.json();
+            if (!resp.ok) {
+              alert('儲存失敗: ' + JSON.stringify(result));
+              return;
+            }
+          }
+
+          // Delete removed rows
+          for (const dr of deletedRows) {
+            const keys = columns.filter(c => dr[c] !== undefined && dr[c] !== '');
+            if (keys.length === 0) continue;
+            const params = new URLSearchParams();
+            params.set('table', tableName);
+            keys.forEach(k => { params.append('keyNames', k); params.append('keyValues', String(dr[k])); });
+            await fetch('/api/CommonTable/DeleteByKeys?' + params.toString(), {
+              method: 'DELETE', headers
+            });
+          }
+
+          alert('儲存成功');
+          bsModal.hide();
+        } catch (err) {
+          alert('儲存失敗: ' + (err?.message || err));
+        }
+      });
+
+      async function open(ctx, meta) {
+        titleEl.textContent = meta?.dialogCaption || '維護資料表';
+        loadingEl.style.display = '';
+        gridEl.style.display = 'none';
+        thead.innerHTML = '';
+        tbody.innerHTML = '';
+        columns = [];
+        rows = [];
+        deletedRows = [];
+        selectedIdx = -1;
+        bsModal.show();
+
+        try {
+          const jwt = localStorage.getItem("jwtId");
+          const hdrs = {};
+          if (jwt) hdrs['X-JWTID'] = jwt;
+
+          // 1) Get config
+          const cfgUrl = `/api/CustomButtonExec/EditGridConfig?itemId=${encodeURIComponent(ctx.itemId)}&buttonName=${encodeURIComponent(ctx.buttonName)}&opKind=${window._mdEditing ? 1 : 0}`;
+          const cfgResp = await fetch(cfgUrl, { headers: hdrs });
+          const cfg = await cfgResp.json();
+          if (!cfgResp.ok || !cfg.ok) throw new Error(cfg.error || 'Config load failed');
+
+          if (cfg.dialogCaption) titleEl.textContent = cfg.dialogCaption;
+
+          // Resolve table name based on editGridType
+          if (cfg.editGridType === 2) {
+            // Type 2: dynamic — table name comes from master row field value
+            const field = cfg.editGridTableField;
+            if (!field) throw new Error('editGridTableField 未設定');
+            if (!ctx.masterRow) throw new Error('請先選取主檔資料列');
+            const fieldLc = field.toLowerCase();
+            const matchKey = Object.keys(ctx.masterRow).find(k => k.toLowerCase() === fieldLc);
+            tableName = matchKey ? (ctx.masterRow[matchKey] ?? '').toString().trim() : '';
+            if (!tableName) throw new Error(`主檔欄位 "${field}" 的值為空，無法決定資料表`);
+          } else {
+            tableName = cfg.tableName || cfg.ddTableName || '';
+          }
+          if (!tableName) throw new Error('找不到資料表名稱');
+
+          // Load data
+          const ddTable = (cfg.editGridType === 2 && cfg.ddTableName) ? cfg.ddTableName : '';
+          const queryTable = ddTable || tableName;
+          let dataResp = await fetch(`/api/CommonTable/TopRows?table=${encodeURIComponent(tableName)}&top=500`, { headers: hdrs });
+          if (!dataResp.ok && ddTable && ddTable !== tableName) {
+            tableName = ddTable;
+            dataResp = await fetch(`/api/CommonTable/TopRows?table=${encodeURIComponent(tableName)}&top=500`, { headers: hdrs });
+          }
+          if (!dataResp.ok) {
+            const errText = await dataResp.text();
+            throw new Error(errText || `HTTP ${dataResp.status}`);
+          }
+          const data = await dataResp.json();
+
+          if (Array.isArray(data) && data.length > 0) {
+            columns = Object.keys(data[0]);
+            rows = data.map(r => ({ ...r, __existing: true }));
+          } else {
+            // No data — fetch column schema so we can still show headers and add rows
+            const colResp = await fetch(`/api/CommonTable/Columns?table=${encodeURIComponent(tableName)}`, { headers: hdrs });
+            if (colResp.ok) {
+              const colData = await colResp.json();
+              columns = Array.isArray(colData) ? colData : [];
+            } else {
+              columns = [];
+            }
+            rows = [];
+          }
+
+          loadingEl.style.display = 'none';
+          gridEl.style.display = '';
+          renderTable();
+        } catch (err) {
+          loadingEl.textContent = '載入失敗: ' + (err?.message || err);
+        }
+      }
+
+      // make modal draggable
+      const header = modal.querySelector('.modal-header');
+      const dialog = modal.querySelector('.modal-dialog');
+      if (header && dialog) {
+        let dragging = false, startX = 0, startY = 0, origLeft = 0, origTop = 0;
+        header.addEventListener('mousedown', e => {
+          if (e.target.closest('button,input,select,textarea,a')) return;
+          dragging = true;
+          startX = e.clientX; startY = e.clientY;
+          const rect = dialog.getBoundingClientRect();
+          origLeft = rect.left; origTop = rect.top;
+          dialog.style.margin = '0';
+          dialog.style.position = 'fixed';
+          dialog.style.left = origLeft + 'px';
+          dialog.style.top = origTop + 'px';
+          e.preventDefault();
+        });
+        document.addEventListener('mousemove', e => {
+          if (!dragging) return;
+          dialog.style.left = (origLeft + e.clientX - startX) + 'px';
+          dialog.style.top = (origTop + e.clientY - startY) + 'px';
+        });
+        document.addEventListener('mouseup', () => { dragging = false; });
+      }
+
+      return { open };
+    })();
+
     const runCustomButton = async (btn) => {
       const name = btn.dataset.buttonName || btn.dataset.customBtn || "";
       if (!name) return;
@@ -1186,6 +1459,16 @@ document.addEventListener('DOMContentLoaded', () => {
           await paperSearch.open(ctx, meta);
         } catch (err) {
           console.error("paper search template error", err);
+          alert(`執行失敗: ${err?.message || err}`);
+        }
+        return;
+      }
+
+      if (searchTemplate === "jsdeditgriddll.dll" && designType === 1) {
+        try {
+          await editGrid.open(ctx, { dialogCaption: btn.dataset.dialogCaption || "" });
+        } catch (err) {
+          console.error("edit grid template error", err);
           alert(`執行失敗: ${err?.message || err}`);
         }
         return;

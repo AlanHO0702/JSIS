@@ -1,0 +1,1157 @@
+@page "/EMOdProdLayer/Detail"
+@model PcbErpApi.Pages.EMOdProdLayer.DetailModel
+@using System.Text.Json
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = Model.PageTitle;
+}
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", null, ViewData)
+<script src="~/js/editableGrid.js"></script>
+
+<script>
+    window._itemId          = '@(Model.IsViewOnly ? "EMO00060" : "EMO00059")';
+    window._headerTableName = 'EMOdProdLayer';
+</script>
+
+@if (Model.CustomButtons?.Count > 0)
+{
+    <style>
+    :root {
+      --fab-left: 12px;
+      --fab-width: 120px;
+      --fab-gap: 14px;
+      --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap));
+    }
+    .content-wrapper { padding-left: var(--rail-reserve) !important; }
+    #topToolbar {
+        margin-left: calc(-1 * var(--rail-reserve) + var(--fab-left)) !important;
+        width: calc(100% + var(--rail-reserve) - var(--fab-left) * 2) !important;
+        position: sticky; top: 4px; z-index: 1200;
+    }
+    .action-rail {
+      position: fixed; left: var(--fab-left); top: 80px;
+      box-sizing: border-box; display: flex; flex-direction: column;
+      gap: 2px; z-index: 900; overflow-y: auto; overflow-x: visible;
+      max-height: calc(100vh - 100px); background: transparent;
+    }
+    .fab {
+      position: relative; width: var(--fab-width); min-width: 0;
+      padding: 6px 8px; font-size: .92rem; white-space: normal;
+      word-break: break-word; background: #f8f9fb; color: #1f5fbf;
+      font-weight: 600; border-radius: 10px; cursor: pointer;
+      box-shadow: 0 2px 8px rgba(20,40,80,.12); border: 1px solid #cfd7e6;
+    }
+    .fab:hover { background: #e9f1ff; border-color: #9fbaf0; }
+    </style>
+}
+
+<style>
+/* ========== 工具列樣式（與 EMOdProdInfo 一致） ========== */
+.emo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  background: #f6f7f9;
+  border: 1px solid #d8dee8;
+  border-radius: 10px;
+  padding: 6px 8px;
+  box-sizing: border-box;
+  position: relative;
+  left: 8px;
+  margin: 4px 0 2px 0;
+  width: calc(100% - 16px);
+}
+.emo-toolbar .btn-toolbar {
+  flex: 1;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.emo-toolbar .toolbar-btn {
+  height: var(--top-toolbar-btn-height, 36px);
+  min-height: var(--top-toolbar-btn-height, 36px);
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.emo-toolbar .toolbar-icon-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.emo-toolbar .toolbar-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--top-toolbar-btn-height, 36px);
+  min-height: var(--top-toolbar-btn-height, 36px);
+  width: 36px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 20px;
+  line-height: 1;
+  background: #f3f5f8;
+  color: #5a6a82;
+  border: 1px solid #c9d2df;
+  box-shadow: none;
+  cursor: pointer;
+}
+.emo-toolbar .toolbar-btn-icon i { font-size: 16px; }
+.emo-toolbar .toolbar-btn-icon:disabled {
+  background: #f1f3f7; border-color: #c5ccd8; color: #9aa7bb;
+  cursor: not-allowed; opacity: 0.8;
+}
+.emo-toolbar .toolbar-btn-icon.toolbar-btn-add:not(:disabled) {
+  background: #f7fcf9; border-color: #7ccfa1; color: #1f7a45;
+}
+.emo-toolbar .toolbar-btn-icon.toolbar-btn-del:not(:disabled),
+.emo-toolbar .toolbar-btn-icon.toolbar-btn-cancel:not(:disabled) {
+  background: #fff4f4; border-color: #e08a8a; color: #b33939;
+}
+/* 計數框（參考 EMOdProdInfo，單行顯示） */
+.emo-toolbar .toolbar-count-box {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 36px;
+  min-width: 64px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: #fff;
+  user-select: none;
+}
+.emo-toolbar .toolbar-count-box.mode-view { background: #1e4db7; }
+.emo-toolbar .toolbar-count-box.mode-edit { background: #f00000; }
+.emo-toolbar .toolbar-count-box .count-line { font-size: 0.75rem; }
+/* 隱藏第二列 --（單身筆數），只顯示主檔計數 */
+.emo-toolbar #toolbarDetailCount { display: none; }
+/* modal 不參與 flex 排列（避免影響 toolbar 高度） */
+#topToolbar .modal { position: fixed; width: 0; height: 0; overflow: hidden; padding: 0; margin: 0; border: none; }
+
+#main-category-tabs { border-bottom: none; margin-bottom: 0; }
+#main-category-tabs .nav-link,
+#master-tabs .nav-link,
+#extra-tabs .nav-link {
+  --bs-nav-link-padding-y: 2px;
+  --bs-nav-link-padding-x: 8px;
+  font-size: 13px;
+  padding: 2px 8px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+:root { --field-label-size: 12px; --field-value-size: 12px; }
+.master-spec-tab { position: relative; box-sizing: border-box; padding-top: 6px; padding-bottom: 8px; }
+.spec-field-label {
+  position: absolute; display: flex; align-items: center; justify-content: flex-end;
+  text-align: right; font-size: var(--field-label-size); line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 0 4px 0 2px; pointer-events: none; color: #333;
+}
+.spec-draggable {
+  position: absolute; display: flex; flex-direction: row; align-items: center;
+  box-sizing: border-box; overflow: hidden; background: #fff;
+}
+.spec-draggable .master-field {
+  width: 100%; height: 100%; min-height: 20px; padding: 2px 6px;
+  font-size: var(--field-value-size); border: 1px solid #999; border-radius: 2px;
+  box-sizing: border-box; background: #fff; color: #333; outline: none;
+}
+#spec-content.spec-editing .master-field:not(.readonly-field):not([type="checkbox"]) {
+  border-color: #5b8def !important;
+  background: #f0f6ff !important;
+  cursor: text !important;
+}
+#spec-content.spec-editing .master-field:not(.readonly-field):not([type="checkbox"]):focus {
+  border-color: #2564b3 !important;
+  outline: 2px solid rgba(37,100,179,0.25) !important;
+  background: #fff !important;
+}
+#spec-content.spec-editing .master-field[type="checkbox"]:not(.readonly-field) {
+  cursor: pointer !important;
+  accent-color: #2564b3;
+}
+
+/* ── Detail 子頁籤 table：固定寬度 + 欄位分隔線 ── */
+.detail-tab-table {
+  table-layout: auto;
+  width: max-content;
+  border-collapse: collapse;
+}
+.detail-tab-table th,
+.detail-tab-table td {
+  white-space: nowrap;
+  border-right: 1px solid #d0d7e3 !important;
+  border-bottom: 1px solid #d0d7e3 !important;
+  padding: 2px 6px !important;
+  font-size: 12px !important;
+}
+.detail-tab-table thead th {
+  border-left: 1px solid #d0d7e3 !important;
+  border-top: 1px solid #d0d7e3 !important;
+  background: #f5f7fa !important;
+  font-weight: 600;
+  position: sticky; top: 0; z-index: 2;
+}
+.detail-tab-table tbody td:first-child {
+  border-left: 1px solid #d0d7e3 !important;
+}
+.route-split-pane.show.active {
+  display: flex !important;
+}
+</style>
+
+@if (!string.IsNullOrWhiteSpace(Model.ActionRailPartial))
+{
+    <div class="action-rail">
+        @await Html.PartialAsync(Model.ActionRailPartial, Model.CustomButtons, ViewData)
+    </div>
+    <script>
+    (function () {
+        function positionActionRail() {
+            var toolbar = document.getElementById('topToolbar');
+            var rail = document.querySelector('.action-rail');
+            if (!toolbar || !rail) return;
+            var bottom = toolbar.getBoundingClientRect().bottom;
+            rail.style.top = (bottom + 4) + 'px';
+            rail.style.maxHeight = 'calc(100vh - ' + (bottom + 8) + 'px)';
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', positionActionRail);
+        } else {
+            positionActionRail();
+        }
+        window.addEventListener('resize', positionActionRail);
+    })();
+    </script>
+}
+
+<div class="content-wrapper" style="display:flex; flex-direction:column; height:calc(100vh - 60px); overflow:visible;">
+
+<div id="topToolbar" class="emo-toolbar" data-dict-table="EMOdProdLayer">
+    <div class="toolbar-icon-row" role="group" aria-label="row-nav">
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnFirst" title="第一筆"><i class="bi bi-chevron-bar-left"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnPrev"  title="上一筆"><i class="bi bi-chevron-left"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnNext"  title="下一筆"><i class="bi bi-chevron-right"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnLast"  title="最後一筆"><i class="bi bi-chevron-bar-right"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add" id="btnAdd"    title="新增"    @(Model.IsViewOnly ? "disabled" : "")><span class="toolbar-icon">+</span></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-del" id="btnDelete" title="刪除"    @(Model.IsViewOnly ? "disabled" : "")><span class="toolbar-icon">-</span></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-add toolbar-btn-check" id="btnSave"   title="儲存"    disabled><span class="toolbar-icon">✓</span></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon toolbar-btn-del toolbar-btn-check" id="btnCancel" title="取消變更" disabled><span class="toolbar-icon">&times;</span></button>
+    </div>
+    @await Html.PartialAsync("~/Pages/Shared/_TableToolbar.cshtml", new TableToolbarModel {
+        SearchBtnId  = "btnSearch",
+        AddBtnId     = "btnAddNew",
+        DeleteBtnId  = "btnBatchDelete",
+        SearchText   = "查詢",
+        AddText      = "新增",
+        DeleteText   = "刪除",
+        ModalId      = "searchModal",
+        ReportSpName = ""
+    })
+</div>
+
+<!-- 主檔資訊區 -->
+<div id="layer-header" style="display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px;
+     background:#f0f4fa; border:1px solid #d0d8e8; border-radius:8px;
+     padding:4px 12px; margin:4px 8px 2px 8px; font-size:12px; min-height:28px;">
+    <span class="text-muted">載入中...</span>
+</div>
+
+<!-- 規格/表單 主頁籤 -->
+<div class="card shadow-sm border-0 rounded mt-2" style="flex:1; overflow:hidden; display:flex; flex-direction:column;">
+  <div class="card-body p-2" style="display:flex; flex-direction:column; min-height:0;">
+
+    <ul class="nav nav-tabs border-bottom-0 mb-0" role="tablist" id="main-category-tabs">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active fw-bold" id="spec-tab"
+                    data-bs-toggle="tab" data-bs-target="#spec-content"
+                    type="button" role="tab" aria-selected="true">規格</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link fw-bold" id="form-tab"
+                    data-bs-toggle="tab" data-bs-target="#form-content"
+                    type="button" role="tab" aria-selected="false">表單</button>
+        </li>
+    </ul>
+
+    <div class="tab-content pt-0" style="flex:1; overflow:auto;">
+
+      <!-- 規格頁籤：動態 Master 頁籤 -->
+      <div class="tab-pane fade show active" id="spec-content" role="tabpanel">
+        <ul class="nav nav-tabs flex-wrap" role="tablist" id="master-tabs" style="gap:1px;">
+          @for (int i = 0; i < Model.MasterTabs.Count; i++)
+          {
+              var tab = Model.MasterTabs[i];
+              var active = i == 0 ? "active" : "";
+              <li class="nav-item" role="presentation">
+                  <button class="nav-link @active"
+                          id="master-tab-@tab.Key"
+                          data-bs-toggle="tab"
+                          data-bs-target="#master-content-@tab.Key"
+                          type="button" role="tab"
+                          data-tab-key="@tab.Key"
+                          data-tab-show-where="@tab.ShowWhere">
+                      @tab.Title
+                  </button>
+              </li>
+          }
+        </ul>
+        <div class="tab-content" style="overflow-x:auto;">
+          @for (int i = 0; i < Model.MasterTabs.Count; i++)
+          {
+              var tab = Model.MasterTabs[i];
+              var active = i == 0 ? "show active" : "";
+              <div class="tab-pane fade @active"
+                   id="master-content-@tab.Key"
+                   role="tabpanel" style="padding:12px;">
+                  <ul class="list-unstyled master-spec-tab"
+                      data-tab-key="@tab.Key"
+                      data-show-where="@tab.ShowWhere"
+                      style="position:relative; min-height:300px; margin:0; padding:0;"></ul>
+              </div>
+          }
+        </div>
+      </div>
+
+      <!-- 表單頁籤：Detail 子頁籤 -->
+      <div class="tab-pane fade" id="form-content" role="tabpanel">
+        <ul class="nav nav-tabs flex-wrap" role="tablist" id="extra-tabs">
+          @for (int i = 0; i < Model.ExtraTabs.Count; i++)
+          {
+              var tab = Model.ExtraTabs[i];
+              var active = i == 0 ? "active" : "";
+              <li class="nav-item" role="presentation">
+                  <button class="nav-link @active"
+                          id="tab-@tab.Key-tab"
+                          data-bs-toggle="tab"
+                          data-bs-target="#tab-@tab.Key"
+                          aria-controls="tab-@tab.Key"
+                          type="button" role="tab"
+                          data-table="@tab.TableName"
+                          data-dict="@tab.DictName"
+                          data-keyfields="@string.Join(",", tab.KeyFields ?? Enumerable.Empty<string>())">
+                      @tab.Title
+                  </button>
+              </li>
+          }
+        </ul>
+        <div class="tab-content">
+          @for (int i = 0; i < Model.ExtraTabs.Count; i++)
+          {
+              var tab = Model.ExtraTabs[i];
+              var active = i == 0 ? "show active" : "";
+              @if (i == 0)
+              {
+              <!-- 途程明細：左右分割（可拖拉） -->
+              <div class="tab-pane fade @active route-split-pane" id="tab-@tab.Key" role="tabpanel"
+                   style="flex-direction:row;height:100%;min-height:300px;overflow:hidden;position:relative;">
+                <!-- 左側：途程表 -->
+                <div id="route-left" style="width:65%;min-width:200px;overflow:auto;box-sizing:border-box;">
+                  <table class="table table-sm table-hover align-middle mb-0 detail-tab-table"
+                         id="grid-@tab.Key"
+                         data-table-name="@tab.TableName"
+                         data-dict-name="@tab.DictName"
+                         data-dict-table="@tab.DictName"
+                         data-key-fields="@string.Join(",", tab.KeyFields ?? Enumerable.Empty<string>())">
+                    <thead class="table-light sticky-top">
+                      <tr><th class="text-center text-muted">載入中...</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr><td class="text-center text-muted py-3">請點選上方主檔資料</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <!-- 分割線（可拖拉） -->
+                <div id="route-splitter"
+                     style="width:6px;cursor:col-resize;background:#dee2e6;flex-shrink:0;
+                            display:flex;align-items:center;justify-content:center;user-select:none;
+                            transition:background .15s;"
+                     title="拖拉調整寬度">
+                  <div style="width:2px;height:32px;background:#adb5bd;border-radius:2px;"></div>
+                </div>
+                <!-- 右側：BOM + 備註 -->
+                <div id="route-right" style="flex:1;min-width:160px;display:flex;flex-direction:column;overflow:hidden;">
+                  <!-- BOM 表 -->
+                  <div style="flex:1;overflow:auto;border-bottom:1px solid #dee2e6;">
+                    <table class="table table-sm table-hover align-middle mb-0 detail-tab-table" id="grid-route-bom">
+                      <thead class="table-light sticky-top">
+                        <tr><th colspan="3" class="text-muted" style="font-size:12px;">材料（選取途程列）</th></tr>
+                      </thead>
+                      <tbody id="bom-tbody">
+                        <tr><td class="text-center text-muted py-2" colspan="3">—</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <!-- 備註 -->
+                  <div style="padding:6px 8px;background:#f8f9fa;border-top:1px solid #dee2e6;">
+                    <div style="font-size:11px;color:#666;margin-bottom:2px;">備註</div>
+                    <textarea id="route-notes" readonly rows="4"
+                      style="width:100%;font-size:12px;border:1px solid #c8d0dc;border-radius:3px;
+                             padding:4px 6px;background:#fff;resize:none;box-sizing:border-box;"></textarea>
+                  </div>
+                </div>
+              </div>
+              }
+              else
+              {
+              <!-- 一般頁籤 -->
+              <div class="tab-pane fade @active" id="tab-@tab.Key" role="tabpanel">
+                  <div style="overflow:auto;">
+                      <table class="table table-sm table-hover align-middle mb-0 detail-tab-table"
+                             id="grid-@tab.Key"
+                             data-table-name="@tab.TableName"
+                             data-dict-name="@tab.DictName"
+                             data-dict-table="@tab.DictName"
+                             data-key-fields="@string.Join(",", tab.KeyFields ?? Enumerable.Empty<string>())">
+                          <thead class="table-light">
+                              <tr><th class="text-center text-muted">載入中...</th></tr>
+                          </thead>
+                          <tbody>
+                              <tr><td class="text-center text-muted py-3">請點選上方主檔資料</td></tr>
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
+              }
+          }
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+window._masterKeyValues = @Html.Raw(JsonSerializer.Serialize(
+    Model.MasterKeyValues.ToDictionary(kv => kv.Key, kv => kv.Value)
+));
+window._masterTabs = @Html.Raw(JsonSerializer.Serialize(
+    Model.MasterTabs.Select(t => new { key = t.Key, title = t.Title, fieldNames = t.FieldNames, showWhere = t.ShowWhere })
+));
+window._extraTabs = @Html.Raw(JsonSerializer.Serialize(
+    Model.ExtraTabs.Select(t => new { key = t.Key, title = t.Title, tableName = t.TableName, dictName = t.DictName, keyFields = t.KeyFields, isForm = t.IsForm })
+));
+window._isViewOnly    = @(Model.IsViewOnly ? "true" : "false");
+window._dictTableName = 'EMOdProdLayer';
+window._masterTable   = 'EMOdProdLayer';
+window._masterApi     = '@Html.Raw(Model.MasterApi ?? "")';
+</script>
+<script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+<script src="~/js/erpDetailNav.js" asp-append-version="true"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  let currentMasterKeys = window._masterKeyValues || {};
+  let masterDict = null;
+  let masterData = null;
+  const tabState = {};
+
+  // ── 工具函數 ──────────────────────────────────────────────
+
+  function getDict(dictName) {
+    return fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictName)}`)
+      .then(r => r.json());
+  }
+
+  function calcTabMinHeight(fields) {
+    let max = 300;
+    fields.forEach(f => {
+      const bottom = (f.iFieldTop || 0) + (f.iFieldHeight || 22) + 6;
+      if (bottom > max) max = bottom;
+    });
+    return max;
+  }
+
+  function calcTabMinWidth(fields) {
+    let max = 400;
+    fields.forEach(f => {
+      const right = (f.iFieldLeft || 0) + (f.iFieldWidth || 160);
+      if (right > max) max = right;
+    });
+    return max;
+  }
+
+  // ── 規格頁籤渲染 ──────────────────────────────────────────
+
+  const LOOKUP_CACHE = {};
+
+  async function loadLookup(field) {
+    if (!field.LookupTable || !field.LookupKeyField || !field.LookupResultField) return null;
+    const key = `${field.LookupTable}|${field.LookupKeyField}|${field.LookupResultField}`;
+    if (LOOKUP_CACHE[key]) return LOOKUP_CACHE[key];
+    try {
+      const url = `/api/TableFieldLayout/LookupData`
+        + `?table=${encodeURIComponent(field.LookupTable)}`
+        + `&key=${encodeURIComponent(field.LookupKeyField)}`
+        + `&result=${encodeURIComponent(field.LookupResultField)}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const rows = await response.json();
+      const map = {};
+      rows.forEach(r => { map[r.key] = r.result0; });
+      LOOKUP_CACHE[key] = map;
+      return map;
+    } catch {
+      LOOKUP_CACHE[key] = null;
+      return null;
+    }
+  }
+
+  async function renderMasterTab(tabKey, dict, row) {
+    const tabBtn = document.querySelector(`[data-tab-key="${tabKey}"]`);
+    if (!tabBtn) return;
+    const showWhere = parseInt(tabBtn.dataset.tabShowWhere || '0', 10);
+    const container = document.querySelector(`#master-content-${tabKey} .master-spec-tab`);
+    if (!container) return;
+
+    const fields = (dict || [])
+      .filter(f => (f.IShowWhere ?? f.iShowWhere ?? 0) === showWhere)
+      .filter(f => (f.Visible ?? 1) != 0)
+      .sort((a, b) => (a.SerialNum ?? 9999) - (b.SerialNum ?? 9999));
+
+    if (fields.length === 0) {
+      container.innerHTML = '<li class="text-muted p-3">此頁籤暫無欄位資料</li>';
+      return;
+    }
+
+    const hasCoords = fields.some(f => (f.iFieldTop ?? 0) > 0 || (f.iFieldLeft ?? 0) > 0);
+    const headerTopPad = 6;
+    let html = '';
+
+    if (hasCoords) {
+      const minH = calcTabMinHeight(fields);
+      const minW = calcTabMinWidth(fields);
+      container.style.minHeight = minH + 'px';
+      const spacer = document.createElement('div');
+      spacer.style.cssText = `position:absolute;top:0;left:0;width:${minW}px;height:${minH}px;pointer-events:none;`;
+      container.appendChild(spacer);
+      container.parentElement.style.overflowX = 'auto';
+      let labelHtml = '';
+      let inputHtml2 = '';
+      for (const f of fields) {
+        const fn = f.FieldName ?? '';
+        const hideInput = (f.iFieldWidth ?? -1) === 0;
+        let val = row[fn] ?? row[fn.toLowerCase()] ?? '';
+        const isDate = /^(date|datetime|smalldatetime)/i.test(f.DataType ?? '') || /^\d{4}-\d{2}-\d{2}T/.test(String(val));
+        if (isDate && val) {
+          const d = new Date(val);
+          if (!isNaN(d) && d.getFullYear() <= 1899) val = '';
+          else if (!isNaN(d)) val = d.toLocaleDateString('zh-TW');
+        }
+        const isReadOnly = (f.ReadOnly ?? 0) !== 0;
+        const isNumber = /^(number|int|smallint|tinyint|bigint|decimal|numeric|money|float|real)/i.test(f.DataType ?? '');
+        const isCheckbox = (f.ComboStyle ?? 0) === 1;
+        const lookupMap = f.LookupTable ? await loadLookup(f) : null;
+        const itemsList = (!lookupMap && f.Items) ? f.Items.split(';').filter(s => s.trim()) : null;
+        const top = (f.iFieldTop || 0) + headerTopPad;
+        const left = f.iFieldLeft || 0;
+        const width = f.iFieldWidth || 160;
+        const height = f.iFieldHeight || 22;
+        const labTop = (f.iLabTop || 0) + headerTopPad;
+        const labLeft = f.iLabLeft || 0;
+        const labWidth = f.iLabWidth || 80;
+        const labHeight = f.iLabHeight || 22;
+        const label = f.DisplayLabel || fn;
+        if ((f.iLabWidth ?? -1) !== 0) {
+          labelHtml += `<li class="spec-field-label" data-field="${fn}" data-show-where="${showWhere}"
+            style="top:${labTop}px; left:${labLeft}px; width:${labWidth}px; height:${labHeight}px;">${label}</li>`;
+        }
+        if (!hideInput) {
+          const fieldClass = `spec-draggable${isNumber ? ' field-number' : ' field-text'}`;
+          let inp = '';
+          if (lookupMap) {
+            let opts = `<option value=""></option>`;
+            Object.entries(lookupMap).forEach(([k, v]) => {
+              const sel = String(k) === String(val) ? ' selected' : '';
+              opts += `<option value="${k}"${sel}>${v}</option>`;
+            });
+            inp = `<select class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" data-original="${val}" disabled style="width:100%;height:100%;font-size:12px;background:#fff;box-sizing:border-box;">${opts}</select>`;
+          } else if (itemsList) {
+            let opts = `<option value=""></option>`;
+            itemsList.forEach(item => {
+              const sel = item.trim() === String(val) ? ' selected' : '';
+              opts += `<option value="${item.trim()}"${sel}>${item.trim()}</option>`;
+            });
+            inp = `<select class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" data-original="${val}" disabled style="width:100%;height:100%;font-size:12px;background:#fff;box-sizing:border-box;">${opts}</select>`;
+          } else if (isCheckbox) {
+            const checked = (val == 1 || val === true || val === 'true') ? 'checked' : '';
+            inp = `<input type="checkbox" class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" value="1" ${checked} data-original="${(val == 1 || val === true || val === 'true') ? '1' : '0'}" disabled>`;
+          } else {
+            inp = `<input type="text" class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" value="${val}" data-original="${val}" readonly>`;
+          }
+          inputHtml2 += `<li class="${fieldClass}" data-field="${fn}" data-show-where="${showWhere}"
+            style="top:${top}px; left:${left}px; width:${width}px; height:${height}px;">${inp}</li>`;
+        }
+      }
+      html = labelHtml + inputHtml2;
+    } else {
+      container.style.minHeight = '';
+      container.style.display = 'flex';
+      container.style.flexWrap = 'wrap';
+      container.style.gap = '8px';
+      container.style.padding = '8px';
+      for (const f of fields) {
+        const fn = f.FieldName ?? '';
+        const val = row[fn] ?? row[fn.toLowerCase()] ?? '';
+        const isReadOnly = (f.ReadOnly ?? 0) !== 0;
+        const w = f.iFieldWidth ? `${f.iFieldWidth}px` : '150px';
+        const label = f.DisplayLabel || fn;
+        const lookupMap = f.LookupTable ? await loadLookup(f) : null;
+        const itemsList = (!lookupMap && f.Items) ? f.Items.split(';').filter(s => s.trim()) : null;
+        let inputEl = '';
+        if (lookupMap) {
+          let opts = `<option value=""></option>`;
+          Object.entries(lookupMap).forEach(([k, v]) => {
+            const sel = String(k) === String(val) ? ' selected' : '';
+            opts += `<option value="${k}"${sel}>${v}</option>`;
+          });
+          inputEl = `<select class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" data-original="${val}"
+            style="width:${w};font-size:12px;border:1px solid #999;border-radius:2px;padding:2px 4px;background:#fff;box-sizing:border-box;" disabled>${opts}</select>`;
+        } else if (itemsList) {
+          let opts = `<option value=""></option>`;
+          itemsList.forEach(item => {
+            const sel = item.trim() === String(val) ? ' selected' : '';
+            opts += `<option value="${item.trim()}"${sel}>${item.trim()}</option>`;
+          });
+          inputEl = `<select class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" data-original="${val}"
+            style="width:${w};font-size:12px;border:1px solid #999;border-radius:2px;padding:2px 4px;background:#fff;box-sizing:border-box;" disabled>${opts}</select>`;
+        } else {
+          inputEl = `<input type="text" class="master-field${isReadOnly ? ' readonly-field' : ''}" name="${fn}" value="${val}" data-original="${val}"
+            style="width:${w};font-size:12px;border:1px solid #999;border-radius:2px;padding:2px 6px;background:#fff;box-sizing:border-box;" readonly>`;
+        }
+        html += `<div class="d-flex align-items-center gap-1" style="white-space:nowrap;">
+          <label class="mb-0 me-1" style="font-size:12px;font-weight:600;color:#0066cc;">${label}</label>
+          ${inputEl}
+        </div>`;
+      }
+    }
+    container.innerHTML = html;
+
+    // 若目前處於編輯模式，對新渲染的欄位立即套用編輯狀態
+    if (typeof _layerEditMode !== 'undefined' && _layerEditMode) {
+      container.querySelectorAll('.master-field:not(.readonly-field)').forEach(el => {
+        if (el.type === 'checkbox') el.disabled = false;
+        else if (el.tagName === 'SELECT') el.disabled = false;
+        else el.removeAttribute('readonly');
+      });
+    }
+  }
+
+  // ── 子頁籤表格建立 ────────────────────────────────────────
+
+  function renderRows(tbody, visibleFields, rows) {
+    if (!rows || rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="100" class="text-center text-muted py-3">無資料</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(row => {
+      const cells = visibleFields.map(f => {
+        const val = row[f.FieldName] ?? row[f.FieldName?.toLowerCase()] ?? '';
+        let display = val;
+        const isDate = /^(date|datetime)/i.test(f.DataType ?? '');
+        if (isDate && val) {
+          const d = new Date(val);
+          if (!isNaN(d) && d.getFullYear() > 1899) display = d.toLocaleDateString('zh-TW');
+          else display = '';
+        }
+        return `<td data-field="${f.FieldName}">${display ?? ''}</td>`;
+      }).join('');
+      return `<tr data-row='${JSON.stringify(row).replace(/'/g,"&#39;")}'>${cells}</tr>`;
+    }).join('');
+  }
+
+  async function buildTable(tabKey, dict, rows) {
+    const table = document.getElementById(`grid-${tabKey}`);
+    if (!table) return;
+    const thead = table.querySelector('thead');
+    const tbody = table.querySelector('tbody');
+    if (!thead || !tbody) return;
+
+    const visibleFields = dict.filter(f => (f.Visible ?? 1) == 1).sort((a, b) => (a.SerialNum || 0) - (b.SerialNum || 0));
+    thead.innerHTML = '<tr>' + visibleFields.map(f => {
+      const width = Number(f.DisplaySize || f.iFieldWidth || 0);
+      const widthPx = width > 0 ? width * 10 : 100;
+      return `<th style="width:${widthPx}px;min-width:${widthPx}px;" data-field="${f.FieldName}">${f.DisplayLabel || f.FieldName}</th>`;
+    }).join('') + '</tr>';
+
+    renderRows(tbody, visibleFields, rows);
+    updateDetailCount(rows ? rows.length : 0);
+  }
+
+  // ── 途程明細右側：BOM + 備註 ─────────────────────────────
+
+  let bomDict = null;
+
+  async function loadRouteBomAndNotes(routeRow) {
+    const procCode = routeRow['ProcCode'] ?? routeRow['proccode'] ?? '';
+    const notes = routeRow['Notes'] ?? routeRow['notes'] ?? '';
+
+    // 備註
+    const notesEl = document.getElementById('route-notes');
+    if (notesEl) notesEl.value = notes;
+
+    // BOM
+    const bomTbody = document.getElementById('bom-tbody');
+    if (!bomTbody) return;
+    bomTbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-2">載入中...</td></tr>';
+
+    const keys = currentMasterKeys;
+    const qs = new URLSearchParams();
+    [['PartNum', keys['PartNum']], ['Revision', keys['Revision']], ['LayerId', keys['LayerId']], ['ProcCode', procCode]]
+      .forEach(([k, v]) => { if (v) { qs.append('keyNames', k); qs.append('keyValues', v); } });
+
+    try {
+      if (!bomDict) bomDict = await getDict('EMOdLayerBOM');
+      const rows = await fetch(`/api/CommonTable/ByKeys?table=EMOdLayerBOM&${qs}`).then(r => r.json());
+
+      const visFields = bomDict.filter(f => (f.Visible ?? 1) == 1).sort((a, b) => (a.SerialNum || 0) - (b.SerialNum || 0));
+      const bomTable = document.getElementById('grid-route-bom');
+      if (bomTable) {
+        bomTable.querySelector('thead').innerHTML = '<tr>' + visFields.map(f => {
+          const w = Number(f.DisplaySize || f.iFieldWidth || 0);
+          return `<th style="width:${w > 0 ? w*10 : 80}px;min-width:${w > 0 ? w*10 : 80}px;">${f.DisplayLabel || f.FieldName}</th>`;
+        }).join('') + '</tr>';
+      }
+
+      if (!rows || rows.length === 0) {
+        bomTbody.innerHTML = '<tr><td colspan="100" class="text-center text-muted py-2">無材料資料</td></tr>';
+        return;
+      }
+      bomTbody.innerHTML = rows.map(r => {
+        return '<tr>' + visFields.map(f => {
+          const v = r[f.FieldName] ?? r[f.FieldName?.toLowerCase()] ?? '';
+          return `<td>${v}</td>`;
+        }).join('') + '</tr>';
+      }).join('');
+    } catch (e) {
+      bomTbody.innerHTML = `<tr><td colspan="3" class="text-danger py-2">載入失敗: ${e.message}</td></tr>`;
+    }
+  }
+
+  async function buildRouteTable(tabKey, dict, rows) {
+    const table = document.getElementById(`grid-${tabKey}`);
+    if (!table) return;
+    const thead = table.querySelector('thead');
+    const tbody = table.querySelector('tbody');
+    if (!thead || !tbody) return;
+
+    const visibleFields = dict.filter(f => (f.Visible ?? 1) == 1).sort((a, b) => (a.SerialNum || 0) - (b.SerialNum || 0));
+    thead.innerHTML = '<tr>' + visibleFields.map(f => {
+      const width = Number(f.DisplaySize || f.iFieldWidth || 0);
+      const widthPx = width > 0 ? width * 10 : 100;
+      return `<th style="width:${widthPx}px;min-width:${widthPx}px;" data-field="${f.FieldName}">${f.DisplayLabel || f.FieldName}</th>`;
+    }).join('') + '</tr>';
+
+    renderRows(tbody, visibleFields, rows);
+    updateDetailCount(rows ? rows.length : 0);
+
+    // 點選途程列 → 載右側 BOM + 備註
+    tbody.querySelectorAll('tr').forEach(tr => {
+      tr.style.cursor = 'pointer';
+      tr.addEventListener('click', () => {
+        tbody.querySelectorAll('tr').forEach(r => r.classList.remove('table-primary'));
+        tr.classList.add('table-primary');
+        try {
+          const row = JSON.parse(tr.dataset.row.replace(/&#39;/g, "'"));
+          loadRouteBomAndNotes(row);
+        } catch {}
+      });
+    });
+
+    // 自動選第一列
+    const firstTr = tbody.querySelector('tr[data-row]');
+    if (firstTr) firstTr.click();
+  }
+
+  // ── 子頁籤載入 ────────────────────────────────────────────
+
+  function loadDetailTab(tabBtn) {
+    const tabKey = tabBtn.getAttribute('aria-controls')?.replace('tab-', '');
+    if (!tabKey) return;
+    const tableName = tabBtn.dataset.table;
+    const dictName  = tabBtn.dataset.dict;
+    if (!tableName || !dictName) return;
+
+    const keyFields = (tabBtn.dataset.keyfields || '').split(',').filter(k => k.trim());
+    const qs = new URLSearchParams();
+    keyFields.forEach(k => {
+      const val = currentMasterKeys[k] ?? currentMasterKeys[k.toLowerCase()] ?? '';
+      if (val) { qs.append('keyNames', k); qs.append('keyValues', val); }
+    });
+
+    const url = `/api/CommonTable/ByKeys?table=${encodeURIComponent(tableName)}&${qs.toString()}`;
+
+    // 途程明細（detail1）用左右分割版
+    const isRouteTab = tabKey === (window._extraTabs?.[0]?.key);
+    const builder = isRouteTab ? buildRouteTable : buildTable;
+
+    Promise.all([getDict(dictName), fetch(url).then(r => r.json())])
+      .then(([dict, rows]) => builder(tabKey, dict, rows))
+      .catch(err => {
+        const tbl = document.getElementById(`grid-${tabKey}`);
+        if (tbl) {
+          const tb = tbl.querySelector('tbody');
+          if (tb) tb.innerHTML = `<tr><td colspan="100" class="text-center text-danger py-3">載入失敗: ${err.message}</td></tr>`;
+        }
+      });
+  }
+
+  // ── 主檔資料載入 ──────────────────────────────────────────
+
+  const masterApiUrl = window._masterApi || '';
+  const dictName     = window._dictTableName || 'EMOdProdLayer';
+
+  // 渲染主檔資訊區（品號、版序、LayerId 等關鍵欄位）
+  function renderLayerHeader(dict, row) {
+    const header = document.getElementById('layer-header');
+    if (!header) return;
+    const showFields = ['PartNum', 'Revision', 'LayerId', 'LayerName'];
+    const dictMap = Object.fromEntries((dict || []).map(f => [f.FieldName, f]));
+    header.innerHTML = showFields.map(fn => {
+      const f = dictMap[fn] || {};
+      const label = f.DisplayLabel || fn;
+      const val = row[fn] ?? row[fn.toLowerCase()] ?? '';
+      return `<span style="display:inline-flex;align-items:center;gap:3px;white-space:nowrap;">
+        <span style="color:#0055aa;font-weight:600;">${label}</span>
+        <input type="text" value="${val}" readonly
+          style="border:1px solid #b0bcd0;border-radius:3px;padding:1px 5px;font-size:12px;
+                 background:#fff;color:#222;min-width:60px;max-width:180px;height:22px;">
+      </span>`;
+    }).join('');
+  }
+
+  if (masterApiUrl && dictName) {
+    Promise.all([
+      getDict(dictName),
+      fetch(masterApiUrl).then(r => r.json())
+    ]).then(async ([dict, rows]) => {
+      masterDict = dict;
+      masterData = (rows && rows.length > 0) ? rows[0] : {};
+      // 渲染主檔資訊區
+      renderLayerHeader(dict, masterData);
+      // 填入所有規格頁籤
+      for (const tab of document.querySelectorAll('#master-tabs [data-tab-key]')) {
+        await renderMasterTab(tab.dataset.tabKey, dict, masterData);
+      }
+    }).catch(() => {});
+  }
+
+  // ── 表單頁籤：切換時載入子頁籤資料 ──────────────────────
+
+  let formTabLoaded = false;
+  const detailTabBtns = Array.from(document.querySelectorAll('#extra-tabs [data-table][data-dict]'));
+
+  document.getElementById('form-tab')?.addEventListener('shown.bs.tab', () => {
+    if (!formTabLoaded && detailTabBtns.length > 0) {
+      formTabLoaded = true;
+      setTimeout(() => loadDetailTab(detailTabBtns[0]), 100);
+    }
+  });
+
+  detailTabBtns.forEach(btn => {
+    btn.addEventListener('shown.bs.tab', () => loadDetailTab(btn));
+  });
+
+  // ── Toolbar 計數框 & 上一筆/下一筆導航（使用共用模組） ────────
+  const nav = new DetailNavigator({
+    tableName:      'EMOdProdLayer',
+    keyFields:      ['PartNum', 'Revision', 'LayerId'],
+    detailPath:     '/EMOdProdLayer/Detail',
+    dataHandlerUrl: '/EMOdProdLayer?handler=Data',
+    extraParams:    {},
+    currentKeys: {
+      PartNum:  (window._masterKeyValues?.PartNum  ?? '').trim(),
+      Revision: (window._masterKeyValues?.Revision ?? '').trim(),
+      LayerId:  (window._masterKeyValues?.LayerId  ?? '').trim()
+    },
+    onNavigate: async (keys) => {
+      // 更新全域主鍵
+      currentMasterKeys.PartNum  = keys.PartNum;
+      currentMasterKeys.Revision = keys.Revision;
+      currentMasterKeys.LayerId  = keys.LayerId;
+
+      // 動態組裝 API URL
+      const apiUrl = `/api/CommonTable/ByKeys?table=EMOdProdLayer&keyNames=PartNum&keyValues=${encodeURIComponent(keys.PartNum)}&keyNames=Revision&keyValues=${encodeURIComponent(keys.Revision)}&keyNames=LayerId&keyValues=${encodeURIComponent(keys.LayerId)}`;
+
+      // 重新載入 master 資料
+      const [dict, rows] = await Promise.all([
+        getDict(dictName),
+        fetch(apiUrl).then(r => r.json())
+      ]);
+      masterDict = dict;
+      masterData = (rows && rows.length > 0) ? rows[0] : {};
+
+      // 重新渲染
+      renderLayerHeader(dict, masterData);
+      for (const tab of document.querySelectorAll('#master-tabs [data-tab-key]')) {
+        await renderMasterTab(tab.dataset.tabKey, dict, masterData);
+      }
+
+      // 重設表單頁籤 guard
+      formTabLoaded = false;
+
+      // 重新載入當前顯示的單身頁籤
+      const activeDetailTab = document.querySelector('#extra-tabs [data-table][data-dict].active');
+      if (activeDetailTab) loadDetailTab(activeDetailTab);
+    }
+  });
+  nav.init();
+
+  // ── btnSwitch → 返回 Index ────────────────────────────────
+  const btnSwitch = document.getElementById('btnSwitch');
+  if (btnSwitch) {
+    const anchor = document.createElement('a');
+    anchor.className = btnSwitch.className;
+    anchor.innerHTML = btnSwitch.innerHTML;
+    anchor.style.cssText = btnSwitch.style.cssText;
+    anchor.style.textDecoration = 'none';
+    anchor.style.display = 'inline-flex';
+    anchor.style.alignItems = 'center';
+    anchor.style.justifyContent = 'center';
+    anchor.id = 'btnSwitch';
+
+    const savedPage = localStorage.getItem(`orderListQueryPage:emodprodlayer`) || '1';
+    if (window._isViewOnly) {
+      anchor.href = `/EMOdProdLayer?mode=view&itemId=EMO00060&page=${savedPage}`;
+    } else {
+      anchor.href = `/EMOdProdLayer?page=${savedPage}`;
+    }
+    btnSwitch.parentNode.replaceChild(anchor, btnSwitch);
+  }
+
+  // ── Q4: 父級 Status 檢查 + 編輯模式切換 ──────────────────────
+  const _STATUS_LABELS = { '0': '設計中', '1': '設計完成', '2': '已審核', '3': '已核准' };
+  let _parentStatus = null;
+  let _layerEditMode = false;
+
+  async function fetchParentStatus() {
+    const partNum  = (CURRENT_KEYS.PartNum  || '').trim();
+    const revision = (CURRENT_KEYS.Revision || '').trim();
+    if (!partNum) return null;
+    try {
+      const resp = await fetch(`/api/PaperAction/GetEMOdProdStatus?partNum=${encodeURIComponent(partNum)}&revision=${encodeURIComponent(revision)}`);
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      return data.success ? String(data.status) : null;
+    } catch { return null; }
+  }
+
+  // ── 儲存規格欄位變更 ──────────────────────────────────────
+  async function saveLayerChanges() {
+    const partNum  = (CURRENT_KEYS.PartNum  || '').trim();
+    const revision = (CURRENT_KEYS.Revision || '').trim();
+    const layerId  = (CURRENT_KEYS.LayerId  || '').trim();
+    const changes  = {};
+
+    document.querySelectorAll('#spec-content .master-field:not(.readonly-field)').forEach(inp => {
+      const orig = inp.dataset.original ?? '';
+      if (inp.type === 'checkbox') {
+        const val = inp.checked ? '1' : '0';
+        if (val !== orig) changes[inp.name] = val;
+      } else {
+        if (inp.value !== orig) changes[inp.name] = inp.value;
+      }
+    });
+
+    if (Object.keys(changes).length === 0) return { ok: true, skipped: true };
+
+    changes.PartNum  = partNum;
+    changes.Revision = revision;
+    changes.LayerId  = layerId;
+
+    try {
+      const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          TableName: 'EMOdProdLayer',
+          Data: [changes],
+          KeyFields: ['PartNum', 'Revision', 'LayerId']
+        })
+      });
+      const txt = await resp.text();
+      let result = null;
+      try { result = txt ? JSON.parse(txt) : null; } catch {}
+
+      if (resp.ok && result?.success !== false) {
+        // 更新 data-original，避免重複儲存
+        document.querySelectorAll('#spec-content .master-field:not(.readonly-field)').forEach(inp => {
+          inp.dataset.original = inp.type === 'checkbox' ? (inp.checked ? '1' : '0') : inp.value;
+        });
+        return { ok: true, skipped: false };
+      } else {
+        return { ok: false, text: result?.message || result?.error || txt || '儲存失敗' };
+      }
+    } catch (err) {
+      return { ok: false, text: err.message };
+    }
+  }
+
+  function setLayerEditMode(enable) {
+    _layerEditMode = enable;
+
+    // ── 規格欄位 readonly / 藍底切換 ──
+    const specContent = document.getElementById('spec-content');
+    if (specContent) {
+      specContent.classList.toggle('spec-editing', enable);
+      specContent.querySelectorAll('.master-field:not(.readonly-field)').forEach(inp => {
+        if (inp.type === 'checkbox') {
+          inp.disabled = !enable;
+        } else {
+          if (enable) inp.removeAttribute('readonly');
+          else {
+            if (inp.dataset.original !== undefined) inp.value = inp.dataset.original;
+            inp.setAttribute('readonly', 'readonly');
+          }
+        }
+      });
+    }
+
+    // ── 修改 ↔ 瀏覽 按鈕文字切換 ──
+    const btnToggle = document.getElementById('btnViewEditToggle');
+    if (btnToggle) {
+      btnToggle.innerHTML = enable
+        ? '<i class="bi bi-eye"></i>瀏覽'
+        : '<i class="bi bi-pencil-square"></i>修改';
+    }
+    const countBox = document.getElementById('toolbarCountBox');
+    if (countBox) {
+      countBox.classList.toggle('mode-edit', enable);
+      countBox.classList.toggle('mode-view', !enable);
+    }
+
+    // ── ✓ / × 按鈕 ──
+    const btnSave   = document.getElementById('btnSave');
+    const btnCancel = document.getElementById('btnCancel');
+    if (btnSave)   btnSave.disabled   = !enable;
+    if (btnCancel) btnCancel.disabled = !enable;
+
+    // ── + / - 按鈕 ──
+    if (!window._isViewOnly) {
+      const btnAdd = document.getElementById('btnAdd');
+      const btnDel = document.getElementById('btnDelete');
+      if (btnAdd) btnAdd.disabled = !enable;
+      if (btnDel) btnDel.disabled = !enable;
+    }
+  }
+
+  // ── ✓ 儲存 ────────────────────────────────────────────────
+  document.getElementById('btnSave')?.addEventListener('click', async function () {
+    const result = await saveLayerChanges();
+    if (result.skipped || result.ok) {
+      setLayerEditMode(false);
+      if (!result.skipped)
+        Swal.fire({ icon: 'success', title: '儲存成功', timer: 900, showConfirmButton: false });
+    } else {
+      Swal.fire({ icon: 'error', title: '儲存失敗', text: result.text || '' });
+    }
+  });
+
+  // ── × 取消 ────────────────────────────────────────────────
+  document.getElementById('btnCancel')?.addEventListener('click', function () {
+    setLayerEditMode(false);
+  });
+
+  // ── blur 自動儲存（離開欄位時） ──────────────────────────
+  document.getElementById('spec-content')?.addEventListener('focusout', async function (e) {
+    if (!_layerEditMode) return;
+    const inp = e.target;
+    if (!inp.matches('.master-field:not(.readonly-field)')) return;
+    // 只有值有變化才送
+    const orig = inp.dataset.original ?? '';
+    const cur  = inp.type === 'checkbox' ? (inp.checked ? '1' : '0') : inp.value;
+    if (cur === orig) return;
+    await saveLayerChanges();
+  });
+
+  // 切換子頁籤時繼承 spec-editing 狀態
+  document.querySelectorAll('#master-tabs [data-bs-toggle="tab"]').forEach(btn => {
+    btn.addEventListener('shown.bs.tab', () => {
+      if (!_layerEditMode) return;
+      const targetId = btn.dataset.bsTarget;
+      if (targetId) {
+        document.querySelectorAll(`${targetId} .master-field:not(.readonly-field)`).forEach(inp => {
+          if (inp.type === 'checkbox') inp.disabled = false;
+          else inp.removeAttribute('readonly');
+        });
+      }
+    });
+  });
+
+  if (!window._isViewOnly) {
+    // 預設禁用，等使用者點「修改」確認後才開放
+    setLayerEditMode(false);
+    // 預載父級狀態
+    fetchParentStatus().then(s => { _parentStatus = s; });
+  }
+
+  document.getElementById('btnViewEditToggle')?.addEventListener('click', async function () {
+    if (window._isViewOnly) {
+      Swal.fire({ icon: 'warning', title: '查詢模式下無法修改' });
+      return;
+    }
+    const s = _parentStatus ?? await fetchParentStatus();
+    _parentStatus = s;
+    if (s !== '0') {
+      Swal.fire({
+        icon: 'warning',
+        title: '無法修改',
+        text: `此料號/版序目前狀態為「${_STATUS_LABELS[s] || '未知'}」，只有「設計中」才能修改。`
+      });
+      return;
+    }
+    const entering = !_layerEditMode;
+    setLayerEditMode(entering);
+    if (entering) {
+      Swal.fire({ icon: 'success', title: '已進入編輯模式', timer: 800, showConfirmButton: false });
+    } else {
+      Swal.fire({ icon: 'info', title: '已退出編輯模式', timer: 800, showConfirmButton: false });
+    }
+  }, true);
+
+  // ── 途程明細分割線拖拉 ────────────────────────────────────
+  (function () {
+    const splitter = document.getElementById('route-splitter');
+    if (!splitter) return;
+    let dragging = false, startX = 0, startLeftW = 0;
+
+    splitter.addEventListener('mousedown', e => {
+      dragging = true;
+      startX = e.clientX;
+      const left = document.getElementById('route-left');
+      startLeftW = left ? left.getBoundingClientRect().width : 0;
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      splitter.style.background = '#adb5bd';
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const left = document.getElementById('route-left');
+      const container = left?.parentElement;
+      if (!left || !container) return;
+      const delta = e.clientX - startX;
+      const containerW = container.getBoundingClientRect().width;
+      const splitterW = 6;
+      const newW = Math.max(150, Math.min(startLeftW + delta, containerW - splitterW - 150));
+      left.style.width = newW + 'px';
+      left.style.flex = 'none';
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      splitter.style.background = '#dee2e6';
+    });
+  })();
+});
+</script>

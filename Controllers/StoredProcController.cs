@@ -391,6 +391,11 @@ public class StoredProcController : ControllerBase
 
             var tableMap = await LoadTableMapAsync(conn, tx, req.ItemId);
 
+            if (IsSpName(spNameNorm, "MPHdSendOrderPrice"))
+            {
+                await EnsureSendOrderSourceFlagsAsync(conn, tx, tableMap, req.PaperNum);
+            }
+
             var systemId = await LoadSystemIdAsync(conn, tx, req.ItemId);
             var userId = User?.Identity?.Name ?? string.Empty;
 
@@ -1596,6 +1601,91 @@ SELECT TableKind, TableName
             if (!map.ContainsKey(kind)) map[kind] = table;
         }
         return map;
+    }
+
+    private async Task EnsureSendOrderSourceFlagsAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        Dictionary<string, string> tableMap,
+        string paperNum)
+    {
+        if (string.IsNullOrWhiteSpace(paperNum)) return;
+
+        var masterTable = ResolveTableName(tableMap, "Master1");
+        if (string.IsNullOrWhiteSpace(masterTable))
+            masterTable = ResolveTableName(tableMap, "Master");
+        if (string.IsNullOrWhiteSpace(masterTable)) return;
+
+        var actualTable = await ResolveRealTableNameAsync(conn, tx, masterTable) ?? masterTable;
+        var safeTable = QuoteIdentifier(actualTable);
+        if (string.IsNullOrWhiteSpace(safeTable)) return;
+
+        var cols = await LoadTableColumnsAsync(conn, tx, actualTable);
+        if (!cols.Contains("PaperNum") ||
+            !cols.Contains("UseRecent") ||
+            !cols.Contains("UseQuota") ||
+            !cols.Contains("UseTable") ||
+            !cols.Contains("IsPost"))
+        {
+            return;
+        }
+
+        var where = @"
+[PaperNum] = @paperNum
+AND ISNULL([UseRecent], 0) = 0
+AND ISNULL([UseTable], 0) = 0";
+        if (cols.Contains("Finished"))
+            where += "\nAND ISNULL([Finished], 0) = 0";
+
+        var sql = $@"
+UPDATE {safeTable}
+   SET [UseRecent] = CASE WHEN ISNULL([UseRecent], 0) = 0 THEN 1 ELSE [UseRecent] END,
+       [UseQuota] = CASE WHEN ISNULL([UseQuota], 0) = 0 THEN 1 ELSE [UseQuota] END,
+       [UseTable] = CASE WHEN ISNULL([UseTable], 0) = 0 THEN 1 ELSE [UseTable] END,
+       [IsPost] = CASE WHEN ISNULL([IsPost], 0) = 0 THEN 1 ELSE [IsPost] END
+ WHERE {where};";
+
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@paperNum", paperNum);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<HashSet<string>> LoadTableColumnsAsync(SqlConnection conn, SqlTransaction tx, string tableName)
+    {
+        static string Normalize(string s)
+        {
+            return (s ?? string.Empty).Trim().Replace("[", string.Empty).Replace("]", string.Empty);
+        }
+
+        static async Task<HashSet<string>> QueryAsync(SqlConnection c, SqlTransaction t, string objName)
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            const string sql = "SELECT name FROM sys.columns WITH (NOLOCK) WHERE object_id = OBJECT_ID(@objName);";
+            await using var cmd = new SqlCommand(sql, c, t);
+            cmd.Parameters.AddWithValue("@objName", objName ?? string.Empty);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var col = rd["name"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(col)) set.Add(col);
+            }
+            return set;
+        }
+
+        var normalized = Normalize(tableName);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var set1 = await QueryAsync(conn, tx, normalized);
+        if (set1.Count > 0) return set1;
+
+        if (!normalized.Contains('.'))
+        {
+            var set2 = await QueryAsync(conn, tx, "dbo." + normalized);
+            if (set2.Count > 0) return set2;
+        }
+
+        return set1;
     }
 
     private async Task<string?> LoadSystemIdAsync(SqlConnection conn, SqlTransaction tx, string itemId)
