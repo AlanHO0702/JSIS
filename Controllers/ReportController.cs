@@ -71,7 +71,7 @@ namespace PcbErpApi.Controllers
             var reportParams = resolvedParams.Count > 0
                 ? resolvedParams.ToDictionary(
                     kv => kv.Key,
-                    kv => kv.Value == DBNull.Value ? null : kv.Value)
+                    kv => kv.Value == DBNull.Value ? null : kv.Value)!
                 : (req.Params ?? new Dictionary<string, object>());
             var renderPayload = new {
                 reportName = req.ReportName,
