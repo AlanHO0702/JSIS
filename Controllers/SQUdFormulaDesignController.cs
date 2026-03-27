@@ -108,7 +108,7 @@ public class SQUdFormulaDesignController : ControllerBase
 
     /// <summary>載入 DataType 下拉選項</summary>
     [HttpGet("DataTypes")]
-    public async Task<IActionResult> DataTypes()
+    public IActionResult DataTypes()
     {
         return Ok(new[]
         {
@@ -120,7 +120,7 @@ public class SQUdFormulaDesignController : ControllerBase
 
     /// <summary>載入 ProcCount 下拉選項</summary>
     [HttpGet("ProcCounts")]
-    public async Task<IActionResult> ProcCounts()
+    public IActionResult ProcCounts()
     {
         return Ok(new[]
         {
