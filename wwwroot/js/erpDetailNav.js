@@ -52,6 +52,21 @@ class DetailNavigator {
     const st = localStorage.getItem(`orderListQueryTotal:${this._tn}`);
     if (el) el.textContent = (si && st) ? `${si} / ${st}` : '載入中...';
 
+    const cacheKey = `navKeys:${this._tn}`;
+
+    // 1. 先嘗試從 sessionStorage 讀取快取 → 按鈕立即可用
+    let cacheUsed = false;
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        this._navKeys = JSON.parse(cached);
+        this._navIndex = this._findCurrentIndex();
+        this._updateNavButtons();
+        cacheUsed = true;
+      }
+    } catch (_) { /* 快取無效，忽略 */ }
+
+    // 2. 背景 fetch 完整資料（不論有無快取都要刷新）
     try {
       const sep = this.dataHandlerUrl.includes('?') ? '&' : '?';
       const url = `${this.dataHandlerUrl}${sep}pageIndex=1&pageSize=999999`;
@@ -62,31 +77,43 @@ class DetailNavigator {
                  : (Array.isArray(json) ? json : []);
 
       // 建立 key 清單
-      this._navKeys = rows.map(r => {
-        const keyObj = {};
-        this.keyFields.forEach(kf => {
-          keyObj[kf] = (r[kf] || r[kf.toLowerCase()] || r[kf.charAt(0).toLowerCase() + kf.slice(1)] || '').toString().trim();
-        });
-        return keyObj;
-      }).filter(k => {
-        // 至少一個 key 有值
-        return this.keyFields.some(kf => k[kf]);
-      });
+      this._navKeys = this._extractKeys(rows);
 
       // 找出目前這筆的位置
-      this._navIndex = this._navKeys.findIndex(k =>
-        this.keyFields.every(kf =>
-          (k[kf] || '').toLowerCase() === (this.currentKeys[kf] || '').toLowerCase()
-        )
-      );
+      this._navIndex = this._findCurrentIndex();
+
+      // 存入 sessionStorage 供下次使用
+      try { sessionStorage.setItem(cacheKey, JSON.stringify(this._navKeys)); } catch (_) {}
 
       this._updateNavButtons();
     } catch (e) {
       console.error('DetailNavigator init failed:', e);
-      if (this._btnPrev) this._btnPrev.disabled = true;
-      if (this._btnNext) this._btnNext.disabled = true;
+      if (!cacheUsed) {
+        if (this._btnPrev) this._btnPrev.disabled = true;
+        if (this._btnNext) this._btnNext.disabled = true;
+      }
       this._updateHeaderCount();
     }
+  }
+
+  // ── 從資料列提取 key 清單 ──────────────────────────────────
+  _extractKeys(rows) {
+    return rows.map(r => {
+      const keyObj = {};
+      this.keyFields.forEach(kf => {
+        keyObj[kf] = (r[kf] || r[kf.toLowerCase()] || r[kf.charAt(0).toLowerCase() + kf.slice(1)] || '').toString().trim();
+      });
+      return keyObj;
+    }).filter(k => this.keyFields.some(kf => k[kf]));
+  }
+
+  // ── 找出目前記錄在 _navKeys 中的位置 ──────────────────────────
+  _findCurrentIndex() {
+    return this._navKeys.findIndex(k =>
+      this.keyFields.every(kf =>
+        (k[kf] || '').toLowerCase() === (this.currentKeys[kf] || '').toLowerCase()
+      )
+    );
   }
 
   // ── AJAX 切換記錄 ─────────────────────────────────────────
