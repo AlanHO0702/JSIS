@@ -594,22 +594,13 @@ where t3.PaperNum=@SourNum
                 if (val is string s && string.IsNullOrWhiteSpace(s))
                     val = null;
 
-                // Delphi behavior for this inquiry effectively passes 3-char UseId.
-                // MPHdOutInq can raise truncation when a 4-char UseId (e.g. A001) is sent.
-                if (val is string useIdVal
-                    && string.Equals(procName, "MPHdOutInq", StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(p, "sUseId", StringComparison.OrdinalIgnoreCase)
-                    && useIdVal.Length > 3)
-                {
-                    val = useIdVal.Substring(0, 3);
-                }
-
                 // Keep resolved values; nullable entries may be omitted to preserve SP default behavior.
                 paramValues.Add((p, val));
             }
 
-            // Keep parameter list complete (including NULLs) to match Delphi inquiry execution behavior.
-            var execParamValues = paramValues.ToList();
+            var execParamValues = paramValues
+                .Where(p => p.Value != null)
+                .ToList();
 
             var execText = execParamValues.Count == 0
                 ? $"exec {procName}"
