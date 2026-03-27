@@ -157,14 +157,14 @@ namespace PcbErpApi.Controllers
 
                     if (isDelete)
                     {
-                        var delWhereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Col.Name}] = @K_{p.Col.Name}"));
+                        var delWhereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Col.Name}] = @K_{SafeParamName(p.Col.Name)}"));
                         var delSql = $"DELETE FROM [{actualTable}] WHERE {delWhereSql}";
                         using var delCmd = conn.CreateCommand();
                         delCmd.Transaction = (System.Data.Common.DbTransaction)tx;
                         delCmd.CommandText = delSql;
                         foreach (var kp in keyPairs)
                         {
-                            AddTypedParameter(delCmd, $"@K_{kp.Col.Name}", kp.Value, kp.Col);
+                            AddTypedParameter(delCmd, $"@K_{SafeParamName(kp.Col.Name)}", kp.Value, kp.Col);
                         }
                         var delAffected = await delCmd.ExecuteNonQueryAsync();
                         results.Add(new { ok = delAffected > 0, affected = delAffected, deleted = true, sql = delSql });
@@ -174,13 +174,13 @@ namespace PcbErpApi.Controllers
                     if (setPairs.Count == 0)
                     {
                         // ★ 先檢查資料是否已存在，避免既有資料被重複 INSERT
-                        var checkWhereSql0 = string.Join(" AND ", keyPairs.Select(p => $"[{p.Col.Name}] = @K_{p.Col.Name}"));
+                        var checkWhereSql0 = string.Join(" AND ", keyPairs.Select(p => $"[{p.Col.Name}] = @K_{SafeParamName(p.Col.Name)}"));
                         var checkSql0 = $"SELECT COUNT(*) FROM [{actualTable}] WHERE {checkWhereSql0}";
                         using var checkCmd0 = conn.CreateCommand();
                         checkCmd0.Transaction = (System.Data.Common.DbTransaction)tx;
                         checkCmd0.CommandText = checkSql0;
                         foreach (var kp in keyPairs)
-                            AddTypedParameter(checkCmd0, $"@K_{kp.Col.Name}", kp.Value, kp.Col);
+                            AddTypedParameter(checkCmd0, $"@K_{SafeParamName(kp.Col.Name)}", kp.Value, kp.Col);
                         var existsCount = (int)(await checkCmd0.ExecuteScalarAsync() ?? 0);
                         if (existsCount > 0)
                         {
@@ -199,13 +199,13 @@ namespace PcbErpApi.Controllers
                         if (insertPairs0.Count > 0)
                         {
                             var colsSql0 = string.Join(", ", insertPairs0.Select(p => $"[{p.Col.Name}]"));
-                            var valsSql0 = string.Join(", ", insertPairs0.Select(p => $"@I_{p.Col.Name}"));
+                            var valsSql0 = string.Join(", ", insertPairs0.Select(p => $"@I_{SafeParamName(p.Col.Name)}"));
                             var insertSql0 = $"INSERT INTO [{actualTable}] ({colsSql0}) VALUES ({valsSql0})";
                             using var insertCmd0 = conn.CreateCommand();
                             insertCmd0.Transaction = (System.Data.Common.DbTransaction)tx;
                             insertCmd0.CommandText = insertSql0;
                             foreach (var p in insertPairs0)
-                                AddTypedParameter(insertCmd0, $"@I_{p.Col.Name}", p.Value, p.Col);
+                                AddTypedParameter(insertCmd0, $"@I_{SafeParamName(p.Col.Name)}", p.Value, p.Col);
                             var insAffected = await insertCmd0.ExecuteNonQueryAsync();
                             results.Add(new { ok = insAffected > 0, affected = insAffected, sql = insertSql0, inserted = true, skipped });
                             continue;
@@ -217,8 +217,8 @@ namespace PcbErpApi.Controllers
                         continue;
                     }
 
-                    var setSql   = string.Join(", ", setPairs.Select(p => $"[{p.Col.Name}] = @{p.Col.Name}"));
-                    var whereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Col.Name}] = @K_{p.Col.Name}"));
+                    var setSql   = string.Join(", ", setPairs.Select(p => $"[{p.Col.Name}] = @{SafeParamName(p.Col.Name)}"));
+                    var whereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Col.Name}] = @K_{SafeParamName(p.Col.Name)}"));
                     var sql      = $"UPDATE [{actualTable}] SET {setSql} WHERE {whereSql}";
 
                     using var cmd = conn.CreateCommand();
@@ -227,11 +227,11 @@ namespace PcbErpApi.Controllers
 
                     // Set ?嚗? binary ?? SqlDbType嚗?
                     foreach (var p in setPairs)
-                        AddTypedParameter(cmd, $"@{p.Col.Name}", p.Value, p.Col);
+                        AddTypedParameter(cmd, $"@{SafeParamName(p.Col.Name)}", p.Value, p.Col);
 
                     // Key ?嚗? 銋?閬??雿??亥???
                     foreach (var p in keyPairs)
-                        AddTypedParameter(cmd, $"@K_{p.Col.Name}", p.Value, p.Col);
+                        AddTypedParameter(cmd, $"@K_{SafeParamName(p.Col.Name)}", p.Value, p.Col);
 
                     var affected = await cmd.ExecuteNonQueryAsync();
                     // ?交銝鞈?嚗?閰?INSERT ?啣?
@@ -257,13 +257,13 @@ namespace PcbErpApi.Controllers
                         if (insertPairs.Count > 0)
                         {
                             var colsSql = string.Join(", ", insertPairs.Select(p => $"[{p.Col.Name}]"));
-                            var valsSql = string.Join(", ", insertPairs.Select(p => $"@I_{p.Col.Name}"));
+                            var valsSql = string.Join(", ", insertPairs.Select(p => $"@I_{SafeParamName(p.Col.Name)}"));
                             var insertSql = $"INSERT INTO [{actualTable}] ({colsSql}) VALUES ({valsSql})";
                             using var insertCmd = conn.CreateCommand();
                             insertCmd.Transaction = (System.Data.Common.DbTransaction)tx;
                             insertCmd.CommandText = insertSql;
                             foreach (var p in insertPairs)
-                                AddTypedParameter(insertCmd, $"@I_{p.Col.Name}", p.Value, p.Col);
+                                AddTypedParameter(insertCmd, $"@I_{SafeParamName(p.Col.Name)}", p.Value, p.Col);
 
                             affected = await insertCmd.ExecuteNonQueryAsync();
                             results.Add(new { ok = affected > 0, affected, sql = insertSql, inserted = true, skipped, attemptedUpdateSql = sql });
@@ -414,6 +414,12 @@ ORDER BY idx.index_id, ic.key_ordinal";
         // ===== ?????=====
 
         // ??靘?雿??亙遣蝡??賂?binary ?? SqlDbType嚗征?賢?銝脰? NULL嚗???澈?頧??詨潘?
+        private static string SafeParamName(string raw)
+        {
+            // SQL parameter names cannot contain dots or other special chars
+            return System.Text.RegularExpressions.Regex.Replace(raw ?? "", @"[^A-Za-z0-9_\u4e00-\u9fff]", "_");
+        }
+
         private static void AddTypedParameter(DbCommand cmd, string name, object? value, ColumnInfo? col)
         {
             var dbType = col?.DbType ?? string.Empty;
@@ -717,7 +723,7 @@ ORDER BY idx.index_id, ic.key_ordinal";
 
        // ?Ｘ?嚗opRows(table, top, orderBy?, orderDir?)
     [HttpGet]
-    public async Task<IActionResult> TopRows([FromQuery] string table, [FromQuery] int top = 100, [FromQuery] string? orderBy = null, [FromQuery] string? orderDir = "ASC")
+    public async Task<IActionResult> TopRows([FromQuery] string table, [FromQuery] int top = 100, [FromQuery] string? orderBy = null, [FromQuery] string? orderDir = "ASC", [FromQuery] string? filter = null)
     {
         if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required");
         var actualTable = await ResolveActualTableNameAsync(table);
@@ -727,7 +733,16 @@ ORDER BY idx.index_id, ic.key_ordinal";
 
         var orderSql = await BuildOrderBySqlAsync(actualTable, orderBy, orderDir);
 
-        var sql = $"SELECT TOP (@top) * FROM [{actualTable}]{orderSql}";
+        // 處理 FilterSQL（來自功能設定，非使用者輸入）
+        var whereSql = "";
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            var f = NormalizeFilterSql(filter);
+            if (!string.IsNullOrWhiteSpace(f))
+                whereSql = $" WHERE {f}";
+        }
+
+        var sql = $"SELECT TOP (@top) * FROM [{actualTable}]{whereSql}{orderSql}";
         var pTop = new SqlParameter("@top", top);
 
         var dt = new DataTable();
@@ -851,6 +866,20 @@ ORDER BY idx.index_id, ic.key_ordinal";
         return Task.CompletedTask;
     }
 
+    /// <summary>正規化 FilterSQL：移除前導 WHERE/AND、移除表格別名 t0./t1. 等</summary>
+    private static string NormalizeFilterSql(string? raw)
+    {
+        var f = (raw ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(f)) return "";
+        if (f.StartsWith("where", StringComparison.OrdinalIgnoreCase))
+            f = f.Substring(5).Trim();
+        if (f.StartsWith("and", StringComparison.OrdinalIgnoreCase))
+            f = f.Substring(3).Trim();
+        // 移除表格別名 t0. t1. 等（功能設定的 FilterSQL 常帶別名，但單表查詢不需要）
+        f = System.Text.RegularExpressions.Regex.Replace(f, @"\bt\d+\.", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return f.Trim();
+    }
+
     private async Task<string> BuildOrderBySqlAsync(string table, string? orderByRaw, string? defaultDir = "ASC")
     {
         if (string.IsNullOrWhiteSpace(orderByRaw)) return "";
@@ -943,17 +972,41 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         return candidate;
     }
 
-    // 新增：Query(table, top, orderBy?, orderDir?, 其他欄位參數) → 支援動態查詢條件
     [HttpGet]
-    public async Task<IActionResult> Query([FromQuery] string table, [FromQuery] int top = 200, [FromQuery] string? orderBy = null, [FromQuery] string? orderDir = "ASC")
+    public async Task<IActionResult> Columns([FromQuery] string table)
     {
         if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required");
-
-        var tblOk = await TableExistsAsync(table);
+        var actualTable = await ResolveActualTableNameAsync(table);
+        var tblOk = await TableExistsAsync(actualTable);
         if (!tblOk) return NotFound($"Table '{table}' not found.");
 
-        // 收集其他查詢參數（排除 table, top, orderBy, orderDir）
-        var excludeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "table", "top", "orderBy", "orderDir" };
+        var cols = new List<string>();
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var cmd = new SqlCommand(@"
+            SELECT c.name
+              FROM sys.columns c
+              JOIN sys.objects o ON o.object_id = c.object_id
+             WHERE o.name = @t AND o.type IN ('U','V')
+             ORDER BY c.column_id", conn);
+        cmd.Parameters.AddWithValue("@t", actualTable);
+        await using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync()) cols.Add(rd.GetString(0));
+        return Ok(cols);
+    }
+
+    // 新增：Query(table, top, orderBy?, orderDir?, 其他欄位參數) → 支援動態查詢條件
+    [HttpGet]
+    public async Task<IActionResult> Query([FromQuery] string table, [FromQuery] int top = 200, [FromQuery] string? orderBy = null, [FromQuery] string? orderDir = "ASC", [FromQuery] string? filter = null)
+    {
+        if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required");
+        var actualTable = await ResolveActualTableNameAsync(table);
+
+        var tblOk = await TableExistsAsync(actualTable);
+        if (!tblOk) return NotFound($"Table '{table}' not found.");
+
+        // 收集其他查詢參數（排除 table, top, orderBy, orderDir, filter）
+        var excludeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "table", "top", "orderBy", "orderDir", "filter" };
         var filterParams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var qp in Request.Query)
@@ -975,7 +1028,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             var col = kv.Key;
             var val = kv.Value;
 
-            var colOk = await ColumnExistsAsync(table, col);
+            var colOk = await ColumnExistsAsync(actualTable, col);
             if (!colOk) continue; // 忽略不存在的欄位
 
             var pName = $"@p{paramIdx++}";
@@ -993,9 +1046,17 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             }
         }
 
+        // 合併 FilterSQL（來自功能設定）
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            var f = NormalizeFilterSql(filter);
+            if (!string.IsNullOrWhiteSpace(f))
+                whereParts.Insert(0, f);
+        }
+
         var whereSql = whereParts.Count > 0 ? " WHERE " + string.Join(" AND ", whereParts) : "";
-        var orderSql = await BuildOrderBySqlAsync(table, orderBy, orderDir);
-        var sql = $"SELECT TOP (@top) * FROM [{table}]{whereSql}{orderSql}";
+        var orderSql = await BuildOrderBySqlAsync(actualTable, orderBy, orderDir);
+        var sql = $"SELECT TOP (@top) * FROM [{actualTable}]{whereSql}{orderSql}";
 
         var dt = new DataTable();
         await using var conn = (SqlConnection)_context.Database.GetDbConnection();
