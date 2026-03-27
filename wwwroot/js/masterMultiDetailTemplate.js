@@ -5,6 +5,33 @@
   // ==============================================================================
   const LOOKUP_CACHE = {};
   const OCX_CACHE = {};
+  const COMPOSITE_KEY_SEP = '\x1f'; // 複合鍵分隔符（與後端一致）
+
+  // 同步讀取已快取的 Lookup 資料（供 addRowTo 等非 async 場景使用）
+  function getCachedLookup(f) {
+    const key = `${f.LookupTable}|${f.LookupKeyField}|${f.LookupResultField}`;
+    return LOOKUP_CACHE[key] || null;
+  }
+  function getCachedOCXLookup(f) {
+    const composite = parseKeyMaps(f);
+    const compositeKeyFields = composite ? composite.keyFieldNames.join(',') : null;
+    const effectiveKeyField = compositeKeyFields || f.KeyFieldName;
+    const key = `${f.OCXLKTableName}|${effectiveKeyField}|${f.OCXLKResultName}`;
+    return OCX_CACHE[key] || null;
+  }
+
+  /// 解析 KeyMapsJson，取得所有 key 欄位名稱陣列
+  function parseKeyMaps(f) {
+    if (!f.KeyMapsJson) return null;
+    try {
+      const maps = JSON.parse(f.KeyMapsJson);
+      if (!Array.isArray(maps) || maps.length <= 1) return null;
+      return {
+        keyFieldNames: maps.map(m => m.KeyFieldName).filter(Boolean),
+        keySelfNames:  maps.map(m => m.KeySelfName).filter(Boolean)
+      };
+    } catch { return null; }
+  }
 
   async function loadLookup(f) {
     const key = `${f.LookupTable}|${f.LookupKeyField}|${f.LookupResultField}`;
@@ -29,15 +56,20 @@
   }
 
   async function loadOCXLookup(f) {
-    const key = `${f.OCXLKTableName}|${f.KeyFieldName}|${f.OCXLKResultName}`;
+    // ★ 檢查是否有複合鍵設定
+    const composite = parseKeyMaps(f);
+    const compositeKeyFields = composite ? composite.keyFieldNames.join(',') : null;
+    const effectiveKeyField = compositeKeyFields || f.KeyFieldName;
+
+    const key = `${f.OCXLKTableName}|${effectiveKeyField}|${f.OCXLKResultName}`;
     if (OCX_CACHE[key]) return OCX_CACHE[key];
 
-    if (!f.OCXLKTableName || !f.KeyFieldName || !f.OCXLKResultName)
+    if (!f.OCXLKTableName || !effectiveKeyField || !f.OCXLKResultName)
       return OCX_CACHE[key] = null;
 
     const url = `/api/TableFieldLayout/LookupData`
       + `?table=${encodeURIComponent(f.OCXLKTableName)}`
-      + `&key=${encodeURIComponent(f.KeyFieldName)}`
+      + `&key=${encodeURIComponent(effectiveKeyField)}`
       + `&result=${encodeURIComponent(f.OCXLKResultName)}`;
 
     const rows = await fetch(url).then(r => r.json());
@@ -47,7 +79,13 @@
       cell[k]     = (r.result0 ?? "").toString().trim();
       dropdown[k] = combineResults(r);
     });
-    return OCX_CACHE[key] = { cell, dropdown };
+
+    const result = { cell, dropdown };
+    // ★ 記錄複合鍵資訊，供 cell rendering 時使用
+    if (composite) {
+      result._compositeKeySelfNames = composite.keySelfNames;
+    }
+    return OCX_CACHE[key] = result;
   }
 
   // 將 result0, result1, ... 合併成顯示字串
@@ -82,7 +120,7 @@
     document.head.appendChild(style);
   }
 
-  function showLookupDropdown(inp, td, lookupMap, readOnly) {
+  function showLookupDropdown(inp, td, lookupMap, readOnly, onSelect) {
     ensureLookupDropdownCss();
     const existing = document.getElementById('mmd-lookup-dd');
     if (existing) existing.remove();
@@ -110,12 +148,42 @@
     list.className = 'mmd-lookup-list';
     dd.appendChild(list);
 
+    // ── 模糊比對：判斷 query 的每個字元是否依序出現在 text 中 ──
+    const fuzzyMatch = (text, query) => {
+      let ti = 0;
+      for (let qi = 0; qi < query.length; qi++) {
+        const idx = text.indexOf(query[qi], ti);
+        if (idx < 0) return false;
+        ti = idx + 1;
+      }
+      return true;
+    };
+
+    // ── 匹配等級：0=前綴, 1=包含, 2=模糊, -1=不符 ──
+    const matchRank = (text, key, q) => {
+      const tL = text.toLowerCase(), kL = key.toLowerCase();
+      if (tL.startsWith(q) || kL.startsWith(q)) return 0;
+      if (tL.includes(q) || kL.includes(q)) return 1;
+      if (fuzzyMatch(tL, q) || fuzzyMatch(kL, q)) return 2;
+      return -1;
+    };
+
+    // ── 渲染下拉項目（含搜尋過濾＋依匹配程度排序） ──
     const renderItems = (filter) => {
       list.innerHTML = '';
       const q = (filter || '').toLowerCase();
+      let matched = [];
       entries.forEach(([key, label]) => {
         const text = `${label}`;
-        if (q && !text.toLowerCase().includes(q) && !key.toLowerCase().includes(q)) return;
+        if (!q) {
+          matched.push({ key, label, text, rank: 0 });
+        } else {
+          const rank = matchRank(text, String(key), q);
+          if (rank >= 0) matched.push({ key, label, text, rank });
+        }
+      });
+      if (q) matched.sort((a, b) => a.rank - b.rank);
+      matched.forEach(({ key, label, text }) => {
         const item = document.createElement('div');
         item.className = 'mmd-lookup-item';
         item.tabIndex = -1;
@@ -125,12 +193,16 @@
         if (!readOnly) {
           item.addEventListener('mousedown', (e) => {
             e.preventDefault();
-            inp.value = key;
-            inp.dataset.raw = key;
-            const span = td.querySelector('.cell-view');
-            if (span) span.textContent = label;
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-            inp.dispatchEvent(new Event('change', { bubbles: true }));
+            if (onSelect) {
+              onSelect(key, label);
+            } else {
+              inp.value = key;
+              inp.dataset.raw = key;
+              const span = td.querySelector('.cell-view');
+              if (span) span.textContent = label;
+              inp.dispatchEvent(new Event('input', { bubbles: true }));
+              inp.dispatchEvent(new Event('change', { bubbles: true }));
+            }
             dd.remove();
           });
         }
@@ -214,9 +286,10 @@
    * @param {number} top - 抓取筆數，預設 200
    * @returns {Promise<Array>} 資料列陣列
    */
-  const fetchTopRows = async (tableName, top = 200) => {
+  const fetchTopRows = async (tableName, top = 200, filter = '') => {
     if (!tableName) return [];
-    const url = `/api/CommonTable/TopRows?table=${encodeURIComponent(tableName)}&top=${top}`;
+    let url = `/api/CommonTable/TopRows?table=${encodeURIComponent(tableName)}&top=${top}`;
+    if (filter) url += `&filter=${encodeURIComponent(filter)}`;
     return await fetch(url).then(r => r.json());
   };
 
@@ -234,7 +307,18 @@
       + keyValues.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("")
       + (orderBy ? `&orderBy=${encodeURIComponent(orderBy)}` : "")
       + (orderBy ? `&orderDir=${encodeURIComponent(orderDir || "ASC")}` : "");
-    return await fetch(url).then(r => r.json());
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => res.statusText);
+        console.error(`[MMD] fetchByKeys 失敗: ${tableName}`, { keyNames, keyValues, status: res.status, error: errText });
+        return [];
+      }
+      return await res.json();
+    } catch (err) {
+      console.error(`[MMD] fetchByKeys 例外: ${tableName}`, { keyNames, keyValues, error: err.message });
+      return [];
+    }
   };
 
   // ==============================================================================
@@ -807,8 +891,18 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
       if (raw === "" && f.KeySelfName) raw = getRowValue(row, f.KeySelfName);
 
       let display = raw;
-      if (oc[f.FieldName]?.cell?.[raw] != null) display = oc[f.FieldName].cell[raw];
-      else if (lk[f.FieldName]?.cell?.[raw] != null) display = lk[f.FieldName].cell[raw];
+      // ★ 複合鍵支援：若 OCX lookup 有 _compositeKeySelfNames，用多欄位組成複合鍵查找
+      const ocxData = oc[f.FieldName];
+      if (ocxData?._compositeKeySelfNames) {
+        const parts = ocxData._compositeKeySelfNames.map(n => String(getRowValue(row, n) ?? "").trim());
+        if (parts.every(p => p !== "")) {
+          const compositeKey = parts.join(COMPOSITE_KEY_SEP);
+          if (ocxData.cell?.[compositeKey] != null) display = ocxData.cell[compositeKey];
+        }
+      } else if (ocxData?.cell?.[raw] != null) {
+        display = ocxData.cell[raw];
+      }
+      if (display === raw && lk[f.FieldName]?.cell?.[raw] != null) display = lk[f.FieldName].cell[raw];
 
       // ★ 是否顯示為勾選框 (ComboStyle==1)
       const isCheckbox = String(f.ComboStyle ?? "").trim() === "1";
@@ -849,20 +943,101 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
         inp.addEventListener("change", syncCheckbox);
         inp.addEventListener("click", syncCheckbox);
       } else {
-        span.textContent = fmtCell(display, DICT.fmt(f), DICT.type(f));
-        inp.value = display == null ? "" : display;
-        inp.dataset.raw = raw == null ? "" : raw;
-
+        const formatted = fmtCell(display, DICT.fmt(f), DICT.type(f));
+        span.textContent = formatted;
+        inp.dataset.raw = raw == null ? "" : String(raw);
+        // 日期欄位：input 也顯示格式化值，raw 留存原始值供儲存
+        inp.value = isDateType(DICT.type(f)) && formatted
+          ? formatted
+          : (display == null ? "" : String(display));
         // ★ 若有 lookup 對照表，記錄並綁定雙擊下拉（編輯模式可選取，瀏覽模式唯讀）
         const fieldLookupMap = oc[f.FieldName]?.dropdown || lk[f.FieldName]?.dropdown;
         const fieldCellMap   = oc[f.FieldName]?.cell    || lk[f.FieldName]?.cell;
         if (fieldLookupMap && Object.keys(fieldLookupMap).length > 0) {
           inp._lookupMap     = fieldLookupMap;  // 下拉用（含所有顯示欄位合併）
           inp._lookupCellMap = fieldCellMap;    // 儲存格顯示用（只用 result0）
-          td.addEventListener('dblclick', (e) => {
+          // ★ 記錄條件過濾欄位資訊
+          const cond1Field  = (f.LookupCond1Field || '').trim();
+          const cond1Source = (f.LookupCond1ResultField || '').trim();
+          const cond2Field  = (f.LookupCond2Field || '').trim();
+          const cond2Source = (f.LookupCond2ResultField || '').trim();
+          const hasCondition = !!(cond1Field || cond2Field);
+          const lookupTable  = f.LookupTable || f.OCXLKTableName || '';
+          const lookupKey    = f.LookupKeyField || f.KeyFieldName || '';
+          const lookupResult = f.LookupResultField || f.OCXLKResultName || '';
+          // ★ 非實體 lookup 欄位（有 KeySelfName）：編輯模式下允許從下拉選單選取，
+          //   選取後同步更新 key 欄位並觸發 change 事件刷新其他依賴欄位
+          const keySelfName = (f.KeySelfName || '').trim();
+          td.addEventListener('dblclick', async (e) => {
             e.stopPropagation();
-            const isReadOnly = !window._mmdEditing || inp.readOnly || inp.disabled;
-            showLookupDropdown(inp, td, inp._lookupMap, isReadOnly);
+            let isReadOnly = !window._mmdEditing || inp.readOnly || inp.disabled;
+            let onSelect = null;
+            if (isReadOnly && window._mmdEditing && keySelfName && !inp.disabled) {
+              isReadOnly = false;
+              onSelect = (key, label) => {
+                inp.value = label;
+                inp.dataset.raw = key;
+                const span = td.querySelector('.cell-view');
+                if (span) { span.textContent = label; span.dataset.raw = key; }
+                const tr = td.closest('tr');
+                if (tr) {
+                  const kfLower = keySelfName.toLowerCase();
+                  const keyInp = Array.from(tr.querySelectorAll('input'))
+                    .find(i => (i.name || '').toLowerCase() === kfLower);
+                  if (keyInp) {
+                    keyInp.value = key;
+                    keyInp.dataset.raw = key;
+                    const keyTd = keyInp.closest('td');
+                    const keyView = keyTd?.querySelector('.cell-view');
+                    if (keyView) { keyView.textContent = key; keyView.dataset.raw = key; }
+                    keyInp.dispatchEvent(new Event('input', { bubbles: true }));
+                    keyInp.dispatchEvent(new Event('change', { bubbles: true }));
+                  }
+                }
+              };
+            }
+            // ★ 有條件過濾時，即時查詢 API 取得過濾後的資料
+            if (hasCondition && lookupTable && lookupKey && lookupResult) {
+              const currentTr = td.closest('tr');
+              const getCondVal = (sourceField) => {
+                if (!sourceField || !currentTr) return '';
+                const sfLower = sourceField.toLowerCase();
+                // ★ 優先從 td[data-field] 找 cell-edit 的 dataset.raw（原始 key 值）
+                //   因為 inp.value 可能是 lookup 翻譯後的顯示文字，不是實際的 key
+                const tdCell = Array.from(currentTr.querySelectorAll('td[data-field]'))
+                  .find(t => (t.dataset.field || '').toLowerCase() === sfLower);
+                if (tdCell) {
+                  const cellInp = tdCell.querySelector('.cell-edit');
+                  if (cellInp) return (cellInp.dataset?.raw ?? cellInp.value ?? '').trim();
+                }
+                // 再找隱藏 input（PK/FK hidden）
+                const found = Array.from(currentTr.querySelectorAll('input[type="hidden"]'))
+                  .find(i => (i.name || '').toLowerCase() === sfLower);
+                if (found) return (found.value ?? '').trim();
+                return '';
+              };
+              const c1Val = getCondVal(cond1Source);
+              const c2Val = getCondVal(cond2Source);
+              let url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(lookupTable)}&key=${encodeURIComponent(lookupKey)}&result=${encodeURIComponent(lookupResult)}`;
+              if (cond1Field && c1Val) url += `&cond1Field=${encodeURIComponent(cond1Field)}&cond1Value=${encodeURIComponent(c1Val)}`;
+              if (cond2Field && c2Val) url += `&cond2Field=${encodeURIComponent(cond2Field)}&cond2Value=${encodeURIComponent(c2Val)}`;
+              try {
+                const res = await fetch(url);
+                if (!res.ok) return;
+                const data = await res.json();
+                const filteredMap = {};
+                (data || []).forEach(row => {
+                  const k = String(row.key ?? '');
+                  if (!k) return;
+                  filteredMap[k] = combineResults(row);
+                });
+                if (Object.keys(filteredMap).length > 0) {
+                  showLookupDropdown(inp, td, filteredMap, isReadOnly, onSelect);
+                }
+              } catch { }
+              return;
+            }
+            showLookupDropdown(inp, td, inp._lookupMap, isReadOnly, onSelect);
           });
         }
       }
@@ -886,6 +1061,28 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
     }
     tbody.appendChild(tr);
   });
+
+  // ★ 建立反向索引：key 欄位 → 依賴它的 lookup 結果欄位（供動態刷新用）
+  const _keyToLookup = {};
+  for (const f of fields) {
+    const ocxData = oc[f.FieldName];
+    const lkData = lk[f.FieldName];
+    if (!ocxData && !lkData) continue;
+    const keySelfNames = ocxData?._compositeKeySelfNames
+      || (f.KeySelfName ? [f.KeySelfName] : (f.LookupKeyField ? [f.LookupKeyField] : []));
+    for (const kn of keySelfNames) {
+      const knLower = kn.toLowerCase();
+      if (!_keyToLookup[knLower]) _keyToLookup[knLower] = [];
+      _keyToLookup[knLower].push({
+        resultFieldName: f.FieldName,
+        ocxData: ocxData || lkData,
+        compositeKeySelfNames: ocxData?._compositeKeySelfNames || null,
+        keySelf: f.KeySelfName || f.LookupKeyField || null
+      });
+    }
+  }
+  tbody._keyToLookup = _keyToLookup;
+  tbody._ocxMaps = oc;
 
   // ★ 套用已儲存的排序狀態
   const table = tbody.closest('table');
@@ -1021,13 +1218,32 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
     buildHead(mHead, masterDict);
     const masterGrid = document.getElementById(`${cfg.DomId}-masterGrid`);
     enableColumnResize(masterGrid, cfg.MasterTable || cfg.MasterDict);
+    if (window.initColumnDragSort && mHead) {
+      initColumnDragSort({ headerRow: mHead, tbody: masterGrid?.querySelector('tbody'), scrollWrap: masterGrid?.closest('.table-responsive') || masterGrid?.parentElement, tableName: cfg.MasterDict || cfg.MasterTable || '', onSaved: null });
+    }
 
     const uniq = (arr) => [...new Set((arr || []).filter(Boolean).map(s => String(s)))];
 
-    // === Master 資料 ===
-    const masterRows = cfg.MasterApi
-      ? await fetch(cfg.MasterApi).then(r => r.json())
-      : await fetchTopRows(cfg.MasterTable, cfg.MasterTop || 200);
+    // === Master 資料（若 URL 帶有查詢參數則走 Query endpoint 篩選）===
+    const masterFilterSql = cfg.MasterFilterSql || '';
+    const masterRows = await (async () => {
+      if (cfg.MasterApi) return fetch(cfg.MasterApi).then(r => r.json());
+      const urlParams = new URLSearchParams(window.location.search);
+      const excludeKeys = new Set(['pageIndex', 'pageindex']);
+      const filterParams = [];
+      for (const [k, v] of urlParams.entries()) {
+        if (!excludeKeys.has(k) && v) filterParams.push([k, v]);
+      }
+      if (filterParams.length > 0) {
+        const qp = new URLSearchParams();
+        qp.set('table', cfg.MasterTable);
+        qp.set('top', String(cfg.MasterTop || 200));
+        if (masterFilterSql) qp.set('filter', masterFilterSql);
+        filterParams.forEach(([k, v]) => qp.set(k, v));
+        return fetch(`/api/CommonTable/Query?${qp}`).then(r => r.json());
+      }
+      return fetchTopRows(cfg.MasterTable, cfg.MasterTop || 200, masterFilterSql);
+    })();
 
     // Master key fields: prefer cfg.MasterPkFields, fallback to dict IsKey
     const masterKeyFields = uniq([
@@ -1036,6 +1252,18 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
     ]);
     // Let buildBody inject hidden keys even if not visible
     mBody._keyFields = masterKeyFields;
+
+    // ★ 從 FilterSQL 解析預設值（如 "and t0.FactorType=104" → {FactorType: "104"}）
+    if (masterFilterSql) {
+      const filterDefaults = {};
+      // 匹配 field=value 模式（支援 t0.Field=Value 或 Field=Value）
+      const re = /(?:t\d+\.)?(\w+)\s*=\s*(\d+|'[^']*')/gi;
+      let m;
+      while ((m = re.exec(masterFilterSql)) !== null) {
+        filterDefaults[m[1]] = m[2].replace(/^'|'$/g, '');
+      }
+      mBody._filterDefaults = filterDefaults;
+    }
 
     // === Detail 辭典 ===
     const detailDicts = [];
@@ -1049,6 +1277,9 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
       if (headTr) buildHead(headTr, dict);
       const detailGrid = document.getElementById(`${cfg.DomId}-detail-${i}-grid`);
       enableColumnResize(detailGrid, d.DetailTable || d.DetailDict);
+      if (window.initColumnDragSort && headTr) {
+        initColumnDragSort({ headerRow: headTr, tbody: detailGrid?.querySelector('tbody'), scrollWrap: detailGrid?.closest('.mmd-detail-scroll') || detailGrid?.parentElement, tableName: d.DetailDict || d.DetailTable || '', onSaved: null });
+      }
       detailDicts[i] = dict;
     }
 
@@ -1067,26 +1298,73 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
 // ======================================================================
 //   切換 Master → 重新載入全部明細
 // ======================================================================
+let _detailGen = 0;   // ★ generation counter 防止重複載入
+// DetailCascadeMode: 0/未設定=全部從 Master 取 key, 1=串聯式(Detail[N]←Detail[N-1]), 2=扇出式(Detail[1]+←Detail[0])
+const cascadeMode = cfg.DetailCascadeMode || 0;
 const loadAllDetails = async (row) => {
+  const gen = ++_detailGen;   // 取得本次呼叫的 generation
+  let prevDetailRows = null;  // 級聯模式下，記錄上一層 Detail 的查詢結果
 
   for (let i = 0; i < (cfg.Details || []).length; i++) {
+    if (gen !== _detailGen) return;   // ★ 已有更新的呼叫，放棄本次
     const d = cfg.Details[i];
     const tbody = document.getElementById(`${cfg.DomId}-detail-${i}-body`);
     if (!tbody) continue;
+
+    // ⭐ 根據 DetailCascadeMode 決定 key 值的來源
+    //    mode 0: 全部從 Master row 取值（原始行為）
+    //    mode 1: Detail[0]←Master, Detail[N]←Detail[N-1] 的第一筆
+    //    mode 2: Detail[0]←Master, Detail[1]+←Detail[0] 的第一筆
+    let sourceRow = row; // 預設從 Master 取值
+    if (i > 0 && cascadeMode > 0) {
+      const parentRows = prevDetailRows;
+      if (!parentRows || parentRows.length === 0) {
+        // 上層沒有資料 → 本層及後續層都不查詢，顯示空白
+        tbody._lastQueryCtx = {};
+        tbody.innerHTML = "";
+        const dict = detailDicts[i] || [];
+        const visibleCols = dict.filter(f => (f.Visible ?? 1) === 1).length || 1;
+        const placeholderTr = document.createElement("tr");
+        placeholderTr.className = "mmd-placeholder-row";
+        placeholderTr.style.cursor = "pointer";
+        placeholderTr.dataset.placeholder = "1";
+        const td = document.createElement("td");
+        td.colSpan = visibleCols;
+        td.className = "text-center text-muted";
+        td.style.padding = "8px";
+        td.innerHTML = "<small>（點擊此處後可使用上方 + 按鈕新增資料）</small>";
+        placeholderTr.appendChild(td);
+        const detailIndex = i;
+        placeholderTr.addEventListener("click", () => {
+          activeTarget.type = "detail";
+          activeTarget.index = detailIndex;
+          tbody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
+          placeholderTr.classList.add("selected");
+          updateCountPanel();
+        });
+        tbody.appendChild(placeholderTr);
+        if (cascadeMode === 1) prevDetailRows = null; // 串聯式：本層無資料，後續層也無
+        continue;
+      }
+      sourceRow = parentRows[0];
+    }
 
     const names = [];
     const values = [];
     const ctx = {};
 
-    // ⭐ 正確作法：查詢明細只用 Master → Detail 的 KeyMap.Master 來查！
     (d.KeyMap || []).forEach(k => {
       names.push(k.Detail);               // 用明細的欄位當查詢欄位
-      values.push(row[k.Master]);         // 值取 Master 的欄位值
-      ctx[k.Detail] = row[k.Master];
+      values.push(sourceRow[k.Master]);    // 值取來源列的欄位值
+      ctx[k.Detail] = sourceRow[k.Master];
     });
     tbody._lastQueryCtx = ctx;
 
     const rows = await fetchByKeys(d.DetailTable, names, values, d.OrderByField);
+    if (gen !== _detailGen) return;   // ★ await 後再檢查一次
+    // 級聯模式：記錄本層結果供下一層使用
+    if (cascadeMode === 1) prevDetailRows = rows;           // 串聯式：下一層用本層
+    else if (cascadeMode === 2 && i === 0) prevDetailRows = rows; // 扇出式：只記 Detail[0]
 
     // ★ 為 Detail 表格添加 row click 事件處理，實現 Focus 功能
     await buildBody(tbody, detailDicts[i], rows, (row, tr) => {
@@ -1103,13 +1381,11 @@ const loadAllDetails = async (row) => {
       selectedBucket.lastDetailIndex = i;
 
       // ★★★ Detail Focus 聯動功能 ★★★
+      //   自動串聯只載入資料，不會改寫 activeTarget，所以 activeTarget 保持在使用者點擊的層級
       if (cfg.EnableDetailFocusCascade) {
-        // BalanceSheet 佈局（Layout = 3）使用平行式聯動，其他佈局使用串聯式聯動
         if (layoutMode === 3) {
-          // 平行式：點擊 Detail[0] → 同時載入 Detail[1], Detail[2], ...
           loadAllSubDetailsFromFocus(i, row);
         } else {
-          // 串聯式：點擊 Detail[i] → 載入 Detail[i+1] → 載入 Detail[i+2] → ...
           loadNextDetailFromFocus(i, row);
         }
       }
@@ -1193,18 +1469,25 @@ const loadAllDetails = async (row) => {
       // 載入下一層 Detail 的資料，同時保留 Focus 聯動功能
       await buildBody(tbody, detailDicts[nextIndex], rows, (row, tr) => {
         tbody.querySelectorAll('tr').forEach(x => x.classList.remove("selected"));
-      tr.classList.add("selected");
-      activeTarget.type = "detail";
-      activeTarget.index = nextIndex;
-      updateCountPanel();
+        tr.classList.add("selected");
+        activeTarget.type = "detail";
+        activeTarget.index = nextIndex;
+        updateCountPanel();
+        selectedBucket.details[nextIndex] = row;
+        selectedBucket.lastDetailRow = row;
+        selectedBucket.lastDetailIndex = nextIndex;
 
         // 遞迴：如果還有下一層，繼續聯動
+        //   自動串聯只載入資料，不會改寫 activeTarget
         if (cfg.EnableDetailFocusCascade) {
           loadNextDetailFromFocus(nextIndex, row);
         }
       }, true);
 
-      // ★ 當 detail 沒有資料時，放一列空白佔位列
+      const detailGridEl = document.getElementById(`${cfg.DomId}-detail-${nextIndex}-grid`);
+      buildFooter(detailGridEl, detailDicts[nextIndex], rows);
+
+      // ★ 當 detail 沒有資料時，放一列空白佔位列（與 loadAllDetails 一致）
       if (rows.length === 0 && tbody.querySelectorAll("tr").length === 0) {
         const dict = detailDicts[nextIndex] || [];
         const visibleCols = dict.filter(f => (f.Visible ?? 1) === 1).length || 1;
@@ -1236,6 +1519,21 @@ const loadAllDetails = async (row) => {
           tbody._pendingRebind = false;
         } else {
           tbody._pendingRebind = true;
+        }
+      }
+
+      // ★ 自動串聯後續層級：有資料時用第一筆繼續載入下一層，無資料時清除後續層並顯示 placeholder
+      if (rows.length > 0) {
+        // 自動選取第一筆，串聯載入下一層
+        const firstTr = tbody.querySelector("tr");
+        if (firstTr && cfg.EnableDetailFocusCascade) {
+          firstTr.classList.add("selected");
+          // ★ 不在自動串聯中改寫 activeTarget，讓它只由使用者的實際點擊來設定
+          //    這樣按 + 時 getActive() 才能正確回傳使用者真正選取的層級
+          selectedBucket.details[nextIndex] = rows[0];
+          selectedBucket.lastDetailRow = rows[0];
+          selectedBucket.lastDetailIndex = nextIndex;
+          await loadNextDetailFromFocus(nextIndex, rows[0]);
         }
       }
     };
@@ -1598,6 +1896,10 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
         }
         Object.assign(defaults, ctx);
       }
+      // ★ Master 新增時從 FilterSQL 解析預設值（如 FactorType=104）
+      if (target.type === "master" && tbody._filterDefaults) {
+        Object.assign(defaults, tbody._filterDefaults);
+      }
 
       // 系統慣例：UseId 缺值時預設帶 A001（或由全域覆蓋）
       const hasUseIdKey = (keyFields || []).some(k => String(k).toLowerCase() === "useid");
@@ -1673,6 +1975,25 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
         tr.append(fk);
       });
 
+      // ★ FilterSQL 預設欄位：建立 hidden input（如 FactorType=104）
+      if (tbody._filterDefaults) {
+        const coveredFields = new Set([
+          ...pkNames.map(n => n.toLowerCase()),
+          ...keyMap.map(k => k.Detail.toLowerCase()),
+          ...fields.map(f => f.FieldName.toLowerCase())
+        ]);
+        Object.entries(tbody._filterDefaults).forEach(([name, val]) => {
+          if (!coveredFields.has(name.toLowerCase())) {
+            const hid = document.createElement("input");
+            hid.type = "hidden";
+            hid.name = name;
+            hid.value = val;
+            hid.className = "cell-edit";
+            tr.append(hid);
+          }
+        });
+      }
+
       fields.forEach(f => {
         const td = document.createElement("td");
         const raw = defaults[f.FieldName] ?? "";
@@ -1718,6 +2039,121 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
           inp.className = "form-control form-control-sm cell-edit";
           inp.value = (raw ?? "").toString();
           inp.dataset.raw = (raw ?? "").toString();
+
+          // ★ 從快取綁定雙擊下拉選單（與 buildBody 一致）
+          const ocxData = getCachedOCXLookup(f);
+          const lkData  = getCachedLookup(f);
+          const fieldLookupMap = ocxData?.dropdown || lkData?.dropdown;
+          const fieldCellMap   = ocxData?.cell    || lkData?.cell;
+          if (fieldLookupMap && Object.keys(fieldLookupMap).length > 0) {
+            inp._lookupMap     = fieldLookupMap;
+            inp._lookupCellMap = fieldCellMap;
+            // ★ 記錄條件過濾欄位資訊
+            const cond1Field  = (f.LookupCond1Field || '').trim();
+            const cond1Source = (f.LookupCond1ResultField || '').trim();
+            const cond2Field  = (f.LookupCond2Field || '').trim();
+            const cond2Source = (f.LookupCond2ResultField || '').trim();
+            const hasCondition = !!(cond1Field || cond2Field);
+            const lookupTable  = f.LookupTable || f.OCXLKTableName || '';
+            const lookupKey    = f.LookupKeyField || f.KeyFieldName || '';
+            const lookupResult = f.LookupResultField || f.OCXLKResultName || '';
+            // ★ 非實體 lookup 欄位（有 KeySelfName）：編輯模式下允許從下拉選單選取
+            const keySelfName2 = (f.KeySelfName || '').trim();
+            td.addEventListener('dblclick', async (e) => {
+              e.stopPropagation();
+              let isReadOnly = !window._mmdEditing || inp.readOnly || inp.disabled;
+              let onSelect = null;
+              if (isReadOnly && window._mmdEditing && keySelfName2 && !inp.disabled) {
+                isReadOnly = false;
+                onSelect = (key, label) => {
+                  inp.value = label;
+                  inp.dataset.raw = key;
+                  const span = td.querySelector('.cell-view');
+                  if (span) { span.textContent = label; span.dataset.raw = key; }
+                  const tr = td.closest('tr');
+                  if (tr) {
+                    const kfLower = keySelfName2.toLowerCase();
+                    const keyInp = Array.from(tr.querySelectorAll('input'))
+                      .find(i => (i.name || '').toLowerCase() === kfLower);
+                    if (keyInp) {
+                      keyInp.value = key;
+                      keyInp.dataset.raw = key;
+                      const keyTd = keyInp.closest('td');
+                      const keyView = keyTd?.querySelector('.cell-view');
+                      if (keyView) { keyView.textContent = key; keyView.dataset.raw = key; }
+                      keyInp.dispatchEvent(new Event('input', { bubbles: true }));
+                      keyInp.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                  }
+                };
+              }
+              // ★ 有條件過濾時，即時查詢 API 取得過濾後的資料
+              if (hasCondition && lookupTable && lookupKey && lookupResult) {
+                const currentTr = td.closest('tr');
+                const getCondVal = (sourceField) => {
+                  if (!sourceField || !currentTr) return '';
+                  const sfLower = sourceField.toLowerCase();
+                  // ★ 從當前行的 td[data-field] 找 cell-edit 的 dataset.raw（原始 key 值）
+                  const tdCell = Array.from(currentTr.querySelectorAll('td[data-field]'))
+                    .find(t => (t.dataset.field || '').toLowerCase() === sfLower);
+                  if (tdCell) {
+                    const cellInp = tdCell.querySelector('.cell-edit');
+                    if (cellInp) {
+                      const v = (cellInp.dataset?.raw ?? cellInp.value ?? '').trim();
+                      if (v) return v;
+                    }
+                  }
+                  // 再找隱藏 input（PK/FK hidden）
+                  const found = Array.from(currentTr.querySelectorAll('input[type="hidden"]'))
+                    .find(i => (i.name || '').toLowerCase() === sfLower);
+                  if (found && (found.value ?? '').trim()) return found.value.trim();
+                  // ★ 從當前行的 cell-edit input 找 dataset.raw（新增行沒有 data-field，用 name 找）
+                  const anyInp = Array.from(currentTr.querySelectorAll('input.cell-edit'))
+                    .find(i => (i.name || '').toLowerCase() === sfLower);
+                  if (anyInp) {
+                    const v = (anyInp.dataset?.raw ?? anyInp.value ?? '').trim();
+                    if (v) return v;
+                  }
+                  // ★ 從 selectedBucket 已選取行取值（同層 → 父層 → Master）
+                  const lookupInRow = (rowData) => {
+                    if (!rowData) return '';
+                    const rk = Object.keys(rowData).find(k => k.toLowerCase() === sfLower);
+                    return rk && rowData[rk] != null ? String(rowData[rk]).trim() : '';
+                  };
+                  const selfVal = lookupInRow(selectedBucket.details[target.index]);
+                  if (selfVal) return selfVal;
+                  for (let pi = (target.index ?? 0) - 1; pi >= 0; pi--) {
+                    const pv = lookupInRow(selectedBucket.details[pi]);
+                    if (pv) return pv;
+                  }
+                  const mv = lookupInRow(selectedBucket.master);
+                  if (mv) return mv;
+                  return '';
+                };
+                const c1Val = getCondVal(cond1Source);
+                const c2Val = getCondVal(cond2Source);
+                let url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(lookupTable)}&key=${encodeURIComponent(lookupKey)}&result=${encodeURIComponent(lookupResult)}`;
+                if (cond1Field && c1Val) url += `&cond1Field=${encodeURIComponent(cond1Field)}&cond1Value=${encodeURIComponent(c1Val)}`;
+                if (cond2Field && c2Val) url += `&cond2Field=${encodeURIComponent(cond2Field)}&cond2Value=${encodeURIComponent(c2Val)}`;
+                try {
+                  const res = await fetch(url);
+                  if (!res.ok) return;
+                  const data = await res.json();
+                  const filteredMap = {};
+                  (data || []).forEach(row => {
+                    const k = String(row.key ?? '');
+                    if (!k) return;
+                    filteredMap[k] = combineResults(row);
+                  });
+                  if (Object.keys(filteredMap).length > 0) {
+                    showLookupDropdown(inp, td, filteredMap, isReadOnly, onSelect);
+                  }
+                } catch { }
+                return;
+              }
+              showLookupDropdown(inp, td, inp._lookupMap, isReadOnly, onSelect);
+            });
+          }
         }
 
         if (DICT.readonly(f) || f.KeySelfName || (DICT.isKey(f) && tr.dataset.state !== "added")) {
@@ -1745,7 +2181,12 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
 
       clearSelected(tbody);
       tr.classList.add("selected");
-      tbody.appendChild(tr);
+      // ★ Master 新增列插入在最前面，Detail 仍 append 在最後
+      if (target.type === "master") {
+        tbody.prepend(tr);
+      } else {
+        tbody.appendChild(tr);
+      }
       updateCountPanel();
       pendingAddedRow = tr;
       pendingAddedTarget = { type: target.type, index: target.index };
@@ -1794,20 +2235,47 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       }
     }
 
-    const saveAll = async () => {
-      const focusTarget = pendingAddedRow && pendingAddedTarget
-        ? {
-            type: pendingAddedTarget.type,
-            index: pendingAddedTarget.index,
-            keyValues: captureKeyValues(
-              pendingAddedRow,
-              pendingAddedTarget.type === "detail"
-                ? (detailKeyFields[pendingAddedTarget.index] || [])
-                : masterPK
-            )
-          }
-        : null;
+    // ★ 儲存/刪除後動態刷新資料，並選回前幾階的資料
+    //   根據 cascadeMode 決定刷新策略：
+    //   Mode 0（預設）：所有 Detail 都從 Master 取 key → 重新載入所有明細即可
+    //   Mode 1（串聯）：Detail[N]←Detail[N-1] → 從前一階的已選資料重新載入
+    //   Mode 2（扇出）：Detail[1]+←Detail[0] → Detail[0]變更時全部重載，其他時從 Detail[0] 重載
+    const reloadAfterChange = async (changedDetailIndex) => {
+      if (!lastMasterRow) return;
+      if (changedDetailIndex < 0) { location.reload(); return; }
 
+      // 串聯式 (Mode 1) 且非第一階：從前一階重新載入即可，前幾階保持選取
+      if (cascadeMode === 1 && changedDetailIndex > 0) {
+        const parentRow = selectedBucket.details[changedDetailIndex - 1];
+        if (parentRow) {
+          await loadNextDetailFromFocus(changedDetailIndex - 1, parentRow);
+          activeTarget.type = "detail";
+          activeTarget.index = changedDetailIndex - 1;
+          updateCountPanel();
+          return;
+        }
+      }
+
+      // 扇出式 (Mode 2) 且非 Detail[0]：從 Detail[0] 的已選資料重新載入
+      if (cascadeMode === 2 && changedDetailIndex > 0) {
+        const detail0Row = selectedBucket.details[0];
+        if (detail0Row) {
+          await loadAllSubDetailsFromFocus(0, detail0Row);
+          activeTarget.type = "detail";
+          activeTarget.index = 0;
+          updateCountPanel();
+          return;
+        }
+      }
+
+      // 其他情況（Mode 0、第一階變更、或找不到前一階資料）：重新載入所有明細
+      await loadAllDetails(lastMasterRow);
+      activeTarget.type = "master";
+      activeTarget.index = -1;
+      updateCountPanel();
+    };
+
+    const saveAll = async () => {
       const rMaster = await masterEditor.saveChanges();
       const rDetails = await Promise.all(detailEditors.map(ed => ed.saveChanges()));
 
@@ -1818,50 +2286,43 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
 
       const ok = rMaster.ok && rDetails.every(r => r.ok);
       if (!ok) {
-        Swal?.fire({ icon: "error", title: "儲存失敗", text: "部分明細未成功" });
+        const errMsgs = [];
+        if (!rMaster.ok && rMaster.text) errMsgs.push(rMaster.text);
+        rDetails.forEach(r => {
+          if (!r.ok && r.text) errMsgs.push(r.text);
+        });
+        const errText = errMsgs.length ? errMsgs.join("\n") : "部分明細未成功";
+        Swal?.fire({ icon: "error", title: "儲存失敗", html: `<pre style="text-align:left;white-space:pre-wrap;font-size:20px;">${errText}</pre>` });
         return { ok: false, skipped: false };
       }
 
       Swal?.fire({ icon: "success", title: "儲存完成", timer: 900, showConfirmButton: false });
+      // ★ 儲存成功後：退出編輯模式、清除異動狀態
+      const savedTarget = pendingAddedTarget;
+      // ★ 若有新增 Master 列，在 reload 前先捕捉 PK 值以便重新選取
+      const addedMasterKeys = (pendingAddedRow && (!savedTarget || savedTarget.type === "master"))
+        ? captureKeyValues(pendingAddedRow, masterPK)
+        : null;
+      masterEditor.cancelChanges();
+      detailEditors.forEach(ed => ed.cancelChanges());
       setEditMode(false);
+      setDirty(false);
       pendingAddedRow = null;
       pendingAddedTarget = null;
 
-      if (focusTarget?.keyValues && Object.keys(focusTarget.keyValues).length) {
-        if (focusTarget.type === "master") {
-          const rows = cfg.MasterApi
-            ? await fetch(cfg.MasterApi).then(r => r.json())
-            : await fetchTopRows(cfg.MasterTable, cfg.MasterTop || 200);
-          const sortedRows = sortRowsByItemIfNeeded(rows, masterPK);
-          await buildBody(mBody, masterDict, sortedRows, async (row, tr) => {
-            Array.from(mBody.children).forEach(x => x.classList.remove("selected"));
-            tr.classList.add("selected");
-            activeTarget.type = "master";
-            activeTarget.index = -1;
-            updateCountPanel();
-            lastMasterRow = row;
-            selectedBucket.master = row;
-            await loadAllDetails(row);
-          }, false);
-
-          const tr = findRowByKeys(mBody, focusTarget.keyValues);
-          if (tr) {
-            tr.click();
-            try { tr.scrollIntoView({ block: "center", behavior: "auto" }); } catch { }
-          }
-        } else if (focusTarget.type === "detail") {
-          const masterRow = selectedBucket.master || lastMasterRow;
-          if (masterRow) {
-            await loadAllDetails(masterRow);
-            const tbody = document.getElementById(`${cfg.DomId}-detail-${focusTarget.index}-body`);
-            const tr = findRowByKeys(tbody, focusTarget.keyValues);
-            if (tr) {
-              tr.click();
-              try { tr.scrollIntoView({ block: "center", behavior: "auto" }); } catch { }
-            }
-          }
+      // ★ 動態刷新資料並選回前幾階
+      if (savedTarget && savedTarget.type === "detail") {
+        await reloadAfterChange(savedTarget.index);
+      } else if (!rMaster.skipped) {
+        // Master 資料有異動，重新載入頁面（帶上新增列的 PK 以便重新選取）
+        const url = new URL(location.href);
+        if (addedMasterKeys && Object.keys(addedMasterKeys).length) {
+          Object.entries(addedMasterKeys).forEach(([k, v]) => url.searchParams.set(k, v));
+          url.searchParams.set("pageIndex", "1");
         }
+        location.href = url.toString();
       }
+
       return { ok: true, skipped: false };
     };
 
@@ -1953,7 +2414,12 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       await notify("success", "刪除完成");
       setDirty(false);
       updateCountPanel();
-      if (target.type === "master") location.reload();
+      // ★ 動態刷新資料並選回前幾階
+      if (target.type === "master") {
+        location.reload();
+      } else if (target.type === "detail") {
+        await reloadAfterChange(target.index);
+      }
     };
 
     const addSubDetailRow = () => {
@@ -2103,7 +2569,12 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
         customSave: async () => { await saveAll(); },
         onDelete: async () => { await deleteSelected(); },
         onCancelPending: (row) => { row?.remove?.(); },
-        onCancelEdit: async () => { location.reload(); }
+        onCancelEdit: async () => {
+          masterEditor.cancelChanges();
+          detailEditors.forEach(ed => ed.cancelChanges());
+          setEditMode(false);
+          setDirty(false);
+        }
       });
     } else {
       let pendingRow = null;
@@ -2126,7 +2597,10 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
           pendingRow = null;
           return;
         }
-        location.reload();
+        masterEditor.cancelChanges();
+        detailEditors.forEach(ed => ed.cancelChanges());
+        setEditMode(false);
+        setDirty(false);
       });
     }
 
@@ -2135,8 +2609,91 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       if (e.target.closest('.cell-edit')) setDirty(true);
     });
     root.addEventListener('change', (e) => {
-      if (e.target.closest('.cell-edit')) setDirty(true);
+      const inp = e.target.closest('.cell-edit');
+      if (inp) {
+        setDirty(true);
+        // ★ 動態刷新：當 key 欄位變更時，更新對應的 lookup 中文名稱
+        const tr = inp.closest('tr');
+        const tbody = tr?.closest('tbody');
+        const keyToLookup = tbody?._keyToLookup;
+        const changedField = (inp.name || '').toLowerCase();
+        if (tr && keyToLookup) {
+          const deps = keyToLookup[changedField];
+          if (deps && deps.length > 0) {
+            const getFieldVal = (fieldName) => {
+              const fn = fieldName.toLowerCase();
+              // 優先從 cell-edit input 取值（含剛修改的值），避免讀到 hidden PK 的舊值
+              const cellEdit = Array.from(tr.querySelectorAll('input.cell-edit'))
+                .find(i => (i.name || '').toLowerCase() === fn);
+              if (cellEdit) return (cellEdit.dataset?.raw ?? cellEdit.value ?? '').trim();
+              const target = Array.from(tr.querySelectorAll('input'))
+                .find(i => (i.name || '').toLowerCase() === fn);
+              return target ? (target.value ?? '').trim() : '';
+            };
+            for (const dep of deps) {
+              // 跳過自我參照（避免覆蓋使用者剛選的值）
+              if (dep.resultFieldName.toLowerCase() === changedField) continue;
+              let lookupKey = '';
+              if (dep.compositeKeySelfNames && dep.compositeKeySelfNames.length > 1) {
+                const parts = dep.compositeKeySelfNames.map(f => getFieldVal(f));
+                if (parts.every(p => p !== '')) lookupKey = parts.join(COMPOSITE_KEY_SEP);
+              } else if (dep.keySelf) {
+                lookupKey = getFieldVal(dep.keySelf);
+              }
+              const displayVal = lookupKey ? (dep.ocxData.cell[lookupKey] || dep.ocxData.cell[lookupKey.trim()] || dep.ocxData.cell[lookupKey.trim().toLowerCase()] || '') : '';
+              const resultInp = Array.from(tr.querySelectorAll('input'))
+                .find(i => (i.name || '').toLowerCase() === dep.resultFieldName.toLowerCase());
+              if (resultInp) {
+                resultInp.value = displayVal;
+                const td = resultInp.closest('td');
+                const view = td?.querySelector('.cell-view');
+                if (view) view.textContent = displayVal;
+              }
+            }
+          }
+        }
+      }
     });
+
+    // ★ 頁面載入後：依 URL pageIndex 或 PK 參數自動選取對應的 Master 列
+    {
+      const urlP = new URLSearchParams(window.location.search);
+      const pageIdx = parseInt(urlP.get("pageIndex") || urlP.get("pageindex") || "0", 10);
+      const rows = Array.from(mBody.querySelectorAll("tr"));
+      let targetRow = null;
+
+      // 優先用 PK 欄位值精確比對
+      if (masterKeyFields.length > 0) {
+        const pkVals = {};
+        masterKeyFields.forEach(k => {
+          const v = urlP.get(k);
+          if (v) pkVals[k] = v;
+        });
+        if (Object.keys(pkVals).length > 0) {
+          targetRow = rows.find(tr => {
+            return Object.entries(pkVals).every(([k, v]) => {
+              const inp = Array.from(tr.querySelectorAll("input")).find(i => (i.name || "").toLowerCase() === k.toLowerCase());
+              return inp && String(inp.value ?? "").trim() === String(v).trim();
+            });
+          }) || null;
+        }
+      }
+
+      // 否則用 pageIndex（1-based）
+      if (!targetRow && pageIdx > 0 && pageIdx <= rows.length) {
+        targetRow = rows[pageIdx - 1];
+      }
+
+      // 預設選第一列
+      if (!targetRow && rows.length > 0) {
+        targetRow = rows[0];
+      }
+
+      if (targetRow) {
+        targetRow.click();
+        try { targetRow.scrollIntoView({ block: "center", behavior: "auto" }); } catch {}
+      }
+    }
 
     setModePanel(false);
     setDirty(false);

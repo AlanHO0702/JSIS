@@ -20,6 +20,7 @@
   cfg.EnableTopToolbar = true;
   cfg.EnableSplitters = true;
   cfg.EnableGridCounts = true;
+  cfg.DetailCascadeMode = 1; // 串聯式：Detail[N] ← Detail[N-1]
 
   // ==========================================
   // 2. 從 Tabs 佈局搬移元素到 BalanceSheet 佈局

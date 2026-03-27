@@ -34,7 +34,9 @@ namespace PcbErpApi.Pages.CUR
             PageNumber = page;
             PageSize = pageSize;
 
-            var query = _db.CURdSysParams.AsNoTracking().OrderBy(x => x.SystemId);
+            var query = _db.CURdSysParams.AsNoTracking()
+                .Where(x => x.AllowUserUpdate == 1)
+                .OrderBy(x => x.SystemId);
             TotalCount = await query.CountAsync();
             Items = await query.Skip((PageNumber - 1) * PageSize).Take(PageSize).ToListAsync();
 

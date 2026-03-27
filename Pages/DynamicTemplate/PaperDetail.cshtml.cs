@@ -78,7 +78,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
 
             var sysItem = await _ctx.CurdSysItems.AsNoTracking()
                 .Where(x => x.ItemId == itemId)
-                .Select(x => new { x.ItemId, x.ItemName, x.SpecialUIType, x.SpecialUIConfig, x.SuperId })
+                .Select(x => new { x.ItemId, x.ItemName, x.SpecialUIType, x.SpecialUIConfig, x.SuperId, x.IAttachment })
                 .FirstOrDefaultAsync();
             ItemName = sysItem?.ItemName ?? string.Empty;
             SpecialUIType = sysItem?.SpecialUIType;
@@ -161,6 +161,10 @@ namespace PcbErpApi.Pages.DynamicTemplate
 
             ViewData["Tabs"] = tabs.ToArray();
             ViewData["TabFieldDicts"] = tabFieldDicts;
+
+            // 夾檔頁籤（放在單頭 header tabs）
+            ViewData["HasAttachment"] = (sysItem?.IAttachment == 1);
+            ViewData["AttachmentDictTable"] = "CURdMasAttachment";
 
             // 3) Field dictionaries
             var headerFields = _dictService.GetFieldDict(master.TableName ?? "", typeof(object));

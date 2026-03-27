@@ -193,6 +193,7 @@ SELECT ItemId, SerialNum, ButtonName,
                 sb.Append(" data-multi-select-dd='").Append(System.Net.WebUtility.HtmlEncode(b.MultiSelectDD ?? string.Empty)).Append('\'');
                 sb.Append(" data-allow-sel-count='").Append(System.Net.WebUtility.HtmlEncode(b.AllowSelCount?.ToString() ?? "0")).Append('\'');
                 sb.Append(" data-replace-exists='").Append(System.Net.WebUtility.HtmlEncode(b.ReplaceExists?.ToString() ?? "0")).Append('\'');
+                sb.Append(" data-ocx-name='").Append(System.Net.WebUtility.HtmlEncode(b.OCXName ?? string.Empty)).Append('\'');
                 sb.Append(" title='").Append(System.Net.WebUtility.HtmlEncode(hint)).Append("'>");
                 sb.Append(System.Net.WebUtility.HtmlEncode(caption));
                 sb.Append("</button>");

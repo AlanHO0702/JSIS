@@ -90,11 +90,11 @@
         const effectiveEdit = (typeof isEdit === 'boolean') ? isEdit : getHeaderEditState();
         const canEdit = !!effectiveEdit && allowEdit;
         document.querySelectorAll('.multi-tab-detail .erp-table .cell-view')
-            .forEach(el => el.classList.toggle('d-none', canEdit));
+            .forEach(el => { if (!el.closest('#attachmentGridContainer')) el.classList.toggle('d-none', canEdit); });
         document.querySelectorAll('.multi-tab-detail .erp-table .cell-edit')
-            .forEach(el => el.classList.toggle('d-none', !canEdit));
+            .forEach(el => { if (!el.closest('#attachmentGridContainer')) el.classList.toggle('d-none', !canEdit); });
         document.querySelectorAll('.multi-tab-detail .erp-table')
-            .forEach(el => el.classList.toggle('date-edit', canEdit));
+            .forEach(el => { if (!el.closest('#attachmentGridContainer')) el.classList.toggle('date-edit', canEdit); });
     }
 
     window.addEventListener('headerEditModeChanged', (e) => {
@@ -194,6 +194,7 @@
             const ocxResult = (r.ocxLKResultName || r.OCXLKResultName || '').toString();
             const ocxKeyField = (r.keyFieldName || r.KeyFieldName || '').toString();
             const ocxKeySelf = (r.keySelfName || r.KeySelfName || '').toString();
+            const keyMapsJson = (r.keyMapsJson || r.KeyMapsJson || '').toString();
             if (table && key && result) {
                 const cond1Field  = (r.lookupCond1Field  || r.LookupCond1Field  || '').toString().trim();
                 const cond1Source = (r.lookupCond1ResultField || r.LookupCond1ResultField || '').toString().trim();
@@ -204,7 +205,20 @@
                 return;
             }
             if (ocxTable && ocxKeyField && ocxResult) {
-                map.set(field.toLowerCase(), { field, table: ocxTable, key: ocxKeyField, result: ocxResult, keySelf: ocxKeySelf, source: 'ocx' });
+                // ★ 解析 KeyMapsJson 支援複合鍵
+                const keyMapsJson = (r.keyMapsJson || r.KeyMapsJson || '').toString();
+                let compositeKeySelfNames = null;
+                let effectiveKey = ocxKeyField;
+                if (keyMapsJson) {
+                    try {
+                        const maps = JSON.parse(keyMapsJson);
+                        if (Array.isArray(maps) && maps.length > 1) {
+                            effectiveKey = maps.map(m => m.KeyFieldName).filter(Boolean).join(',');
+                            compositeKeySelfNames = maps.map(m => m.KeySelfName).filter(Boolean);
+                        }
+                    } catch { }
+                }
+                map.set(field.toLowerCase(), { field, table: ocxTable, key: effectiveKey, result: ocxResult, keySelf: ocxKeySelf, source: 'ocx', compositeKeySelfNames });
             }
         });
         LOOKUP_META_CACHE.set(tn, map);
@@ -235,7 +249,8 @@
         const fieldMap = new Map();
         for (const [field, cfg] of meta.entries()) {
             try {
-                const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(cfg.table)}&key=${encodeURIComponent(cfg.key)}&result=${encodeURIComponent(cfg.result)}`;
+                const keyForLookup = cfg.lookupKey || cfg.key;
+                const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(cfg.table)}&key=${encodeURIComponent(keyForLookup)}&result=${encodeURIComponent(cfg.result)}`;
                 const res = await fetch(url);
                 if (!res.ok) continue;
                 const data = await res.json();
@@ -250,8 +265,11 @@
                         .map(v => String(v))
                         .join(' - ');
                     const trimmed = key.trim();
-                    map.set(key, label || key);
-                    if (trimmed && trimmed !== key) map.set(trimmed, label || trimmed);
+                    const lowered = trimmed.toLowerCase();
+                    const text = label || trimmed || key;
+                    map.set(key, text);
+                    if (trimmed && trimmed !== key) map.set(trimmed, text);
+                    if (lowered) map.set(lowered, text);
                 });
                 fieldMap.set(field, map);
             } catch { }
@@ -374,7 +392,16 @@
 
         if (allowLookup && lookupMap) {
             let key = lookupKeyOverride != null ? String(lookupKeyOverride) : s;
-            if ((!key || key.trim() === '') && (lookupMeta?.keySelf || lookupMeta?.key)) {
+            // Composite key: build from multiple fields
+            if ((!key || key.trim() === '') && lookupMeta?.compositeKeySelfNames && lookupMeta.compositeKeySelfNames.length > 1 && row) {
+                const parts = lookupMeta.compositeKeySelfNames.map(f => {
+                    const v = getValueCaseInsensitive(row, f);
+                    return v == null ? '' : String(v).trim();
+                });
+                if (parts.every(p => p !== '')) {
+                    key = parts.join('\x1f');
+                }
+            } else if ((!key || key.trim() === '') && (lookupMeta?.keySelf || lookupMeta?.key)) {
                 const fallbackKey = lookupMeta?.keySelf || lookupMeta?.key || '';
                 const fallback = getValueCaseInsensitive(row, fallbackKey);
                 key = fallback == null ? '' : String(fallback);
@@ -382,6 +409,8 @@
             if (key && lookupMap.has(key)) return lookupMap.get(key) ?? key;
             const trimmed = key ? key.trim() : '';
             if (trimmed && lookupMap.has(trimmed)) return lookupMap.get(trimmed) ?? trimmed;
+            const lowered = trimmed.toLowerCase();
+            if (lowered && lookupMap.has(lowered)) return lookupMap.get(lowered) ?? lowered;
         }
 
         if (s === '') return '';
@@ -445,47 +474,29 @@
         return dt.includes('date') || fmt.includes('yyyy/mm/dd') || fmt.includes('yyyy-mm-dd');
     }
 
-    const LOOKUP_EMPTY_LABEL = '--請選擇--';
-
-    function buildLookupList(field, lookupMap, currentKey) {
-        const list = document.createElement('div');
-        list.className = 'lookup-dropdown-list';
-        list.dataset.field = field;
-
-        const addItem = (key, label) => {
-            const item = document.createElement('button');
-            item.type = 'button';
-            item.className = 'lookup-dropdown-item';
-            item.dataset.key = key == null ? '' : String(key);
-            item.textContent = label == null ? String(key ?? '') : String(label);
-            if ((currentKey ?? '') === (key ?? '')) item.classList.add('is-selected');
-            list.appendChild(item);
-        };
-
-        addItem('', LOOKUP_EMPTY_LABEL);
-        for (const [key, label] of lookupMap.entries()) {
-            if (key == null || String(key) === '') continue;
-            addItem(String(key), label);
-        }
-        return list;
+    // ==============================================================================
+    //  Lookup Dropdown（雙擊下拉選單）— 與 masterMultiDetailTemplate.js 一致
+    // ==============================================================================
+    function ensureLookupDropdownCss() {
+        if (document.getElementById('multitab-lookup-dd-css')) return;
+        const style = document.createElement('style');
+        style.id = 'multitab-lookup-dd-css';
+        style.textContent = `
+.mmd-lookup-dd{background:#fff;border:1px solid #b0c4de;border-radius:6px;box-shadow:0 4px 18px rgba(0,0,0,.18);max-height:300px;display:flex;flex-direction:column;overflow:hidden;font-size:.85rem}
+.mmd-lookup-search{border:none;border-bottom:1px solid #dde6f0;padding:5px 9px;outline:none;font-size:.85rem;min-width:120px}
+.mmd-lookup-list{overflow-y:auto;max-height:252px}
+.mmd-lookup-item{padding:4px 10px;cursor:pointer;white-space:nowrap}
+.mmd-lookup-item:hover,.mmd-lookup-item:focus{background:#e8f0ff;outline:none}
+.mmd-lookup-item.selected{background:#d0e4ff;font-weight:500}
+.mmd-lookup-dd[data-readonly="1"] .mmd-lookup-item{cursor:default;color:#555}
+.mmd-lookup-dd[data-readonly="1"] .mmd-lookup-item:hover,.mmd-lookup-dd[data-readonly="1"] .mmd-lookup-item:focus{background:#f5f5f5}
+`;
+        document.head.appendChild(style);
     }
 
-    function positionDropdown(list, anchor) {
-        if (!list || !anchor) return;
-        const rect = anchor.getBoundingClientRect();
-        const spaceBelow = window.innerHeight - rect.bottom;
-        const maxHeight = Math.max(140, Math.min(260, spaceBelow - 8));
-        const placeBelow = spaceBelow >= 140;
-        list.style.position = 'fixed';
-        list.style.left = `${Math.max(6, rect.left)}px`;
-        list.style.top = placeBelow ? `${rect.bottom}px` : `${Math.max(6, rect.top - maxHeight)}px`;
-        list.style.minWidth = `${Math.max(120, rect.width)}px`;
-        list.style.maxHeight = `${maxHeight}px`;
-    }
-
-    function openLookupDropdown(td, field, lookupMap, opts) {
-        if (!td || !lookupMap || lookupMap.size === 0) return;
-        const existing = document.querySelector('.lookup-dropdown-list');
+    function showLookupDropdown(td, field, lookupMap, opts) {
+        ensureLookupDropdownCss();
+        const existing = document.getElementById('mmd-lookup-dd');
         if (existing) existing.remove();
 
         const edit = td.querySelector('.cell-edit[data-field]');
@@ -493,17 +504,35 @@
         if (!edit || !view) return;
 
         const isReadOnly = td.dataset.readonly === '1' || edit.dataset.readonly === '1';
-        if (isReadOnly) return;
         const canApply = allowEdit && getHeaderEditState() && !isReadOnly;
-        const currentKey = edit.type === 'checkbox' ? (edit.checked ? '1' : '0') : (edit.value ?? '');
-        const list = buildLookupList(field, lookupMap, currentKey);
 
-        const cleanup = () => {
-            list.remove();
-            document.removeEventListener('mousedown', onDocDown, true);
-            window.removeEventListener('resize', onResize, true);
-        };
+        // 將 Map 轉為 entries 陣列（相容 Map 和 Object）
+        const entries = (lookupMap instanceof Map)
+            ? Array.from(lookupMap.entries())
+            : Object.entries(lookupMap || {});
+        if (!entries.length) return;
 
+        // 取得目前的 raw key
+        const currentRaw = edit.type === 'checkbox'
+            ? (edit.checked ? '1' : '0')
+            : (view?.dataset?.raw ?? edit.dataset.raw ?? edit.value ?? '');
+
+        const dd = document.createElement('div');
+        dd.id = 'mmd-lookup-dd';
+        dd.className = 'mmd-lookup-dd';
+        if (!canApply) dd.dataset.readonly = '1';
+
+        const search = document.createElement('input');
+        search.type = 'text';
+        search.placeholder = canApply ? '搜尋…' : '搜尋（唯讀）…';
+        search.className = 'mmd-lookup-search';
+        dd.appendChild(search);
+
+        const list = document.createElement('div');
+        list.className = 'mmd-lookup-list';
+        dd.appendChild(list);
+
+        // ── 輔助函式：更新同行其他欄位 ──
         const setRowFieldValue = (tr, fieldName, value, viewText) => {
             if (!tr || !fieldName) return;
             const target = Array.from(tr.querySelectorAll('input.cell-edit[data-field]'))
@@ -526,21 +555,17 @@
         };
 
         const applySelection = (newKey, label) => {
-            if (!canApply) {
-                cleanup();
-                return;
-            }
+            if (!canApply) { dd.remove(); return; }
             const tr = td.closest('tr');
             const keyField = (td.dataset.lookupKeyField || '').toString();
             const keyValue = newKey ?? '';
-            edit.value = keyValue ?? '';
-            view.textContent = keyValue ?? '';
-            view.dataset.initView = keyValue ?? '';
+            edit.value = keyValue;
+            view.textContent = keyValue;
+            view.dataset.initView = keyValue;
             setRowFieldValue(tr, field, keyValue, keyValue);
-            // Force repaint even if view/edit toggles are out of sync
             requestAnimationFrame(() => {
-                if (view) view.textContent = keyValue ?? '';
-                if (edit) edit.value = keyValue ?? '';
+                if (view) view.textContent = keyValue;
+                if (edit) edit.value = keyValue;
             });
 
             if (keyField && keyField.toLowerCase() !== (field || '').toString().toLowerCase()) {
@@ -559,39 +584,122 @@
 
             if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
             window.__unsavedChanges = true;
+            edit._fromLookup = true;
             try {
                 edit.dispatchEvent(new Event('input', { bubbles: true }));
                 edit.dispatchEvent(new Event('change', { bubbles: true }));
             } catch {}
-            if (typeof window.__autoSaveDetail === 'function') {
-                window.__autoSaveDetail();
+            dd.remove();
+        };
+
+        // ── 模糊比對：判斷 query 的每個字元是否依序出現在 text 中 ──
+        const fuzzyMatch = (text, query) => {
+            let ti = 0;
+            for (let qi = 0; qi < query.length; qi++) {
+                const idx = text.indexOf(query[qi], ti);
+                if (idx < 0) return false;
+                ti = idx + 1;
             }
-            cleanup();
+            return true;
         };
 
-        const onDocDown = (e) => {
-            if (list.contains(e.target)) return;
-            cleanup();
+        // ── 匹配等級：0=前綴, 1=包含, 2=模糊, -1=不符 ──
+        const matchRank = (text, key, q) => {
+            const tL = text.toLowerCase(), kL = key.toLowerCase();
+            if (tL.startsWith(q) || kL.startsWith(q)) return 0;
+            if (tL.includes(q) || kL.includes(q)) return 1;
+            if (fuzzyMatch(tL, q) || fuzzyMatch(kL, q)) return 2;
+            return -1;
         };
-        const onResize = () => cleanup();
 
-        const onPick = (e) => {
-            const item = e.target.closest('.lookup-dropdown-item');
-            if (!item) return;
-            e.preventDefault();
-            e.stopPropagation();
-            const key = item.dataset.key ?? '';
-            const label = item.textContent ?? key;
-            applySelection(key, label);
+        // ── 渲染下拉項目（含搜尋過濾＋依匹配程度排序） ──
+        const renderItems = (filter) => {
+            list.innerHTML = '';
+            const q = (filter || '').toLowerCase();
+            let matched = [];
+            entries.forEach(([key, label]) => {
+                const text = `${label}`;
+                if (!q) {
+                    matched.push({ key, label, text, rank: 0 });
+                } else {
+                    const rank = matchRank(text, String(key), q);
+                    if (rank >= 0) matched.push({ key, label, text, rank });
+                }
+            });
+            // 有搜尋時依匹配等級排序：前綴 → 包含 → 模糊
+            if (q) matched.sort((a, b) => a.rank - b.rank);
+            matched.forEach(({ key, label, text }) => {
+                const item = document.createElement('div');
+                item.className = 'mmd-lookup-item';
+                item.tabIndex = -1;
+                item.textContent = text;
+                item.dataset.key = key;
+                if (String(currentRaw) === String(key)) item.classList.add('selected');
+                if (canApply) {
+                    item.addEventListener('mousedown', (e) => {
+                        e.preventDefault();
+                        applySelection(key, label);
+                    });
+                }
+                list.appendChild(item);
+            });
         };
-        list.addEventListener('pointerdown', onPick);
-        list.addEventListener('mousedown', onPick);
-        list.addEventListener('click', onPick);
 
-        document.body.appendChild(list);
-        positionDropdown(list, td);
-        document.addEventListener('mousedown', onDocDown, true);
-        window.addEventListener('resize', onResize, true);
+        renderItems('');
+        search.addEventListener('input', () => renderItems(search.value));
+
+        // ── 定位（避免超出視窗底部） ──
+        const rect = td.getBoundingClientRect();
+        dd.style.position = 'fixed';
+        dd.style.left = `${rect.left}px`;
+        dd.style.minWidth = `${Math.max(rect.width, 180)}px`;
+        dd.style.zIndex = '99999';
+        document.body.appendChild(dd);
+
+        const ddH = dd.offsetHeight || 300;
+        const below = window.innerHeight - rect.bottom;
+        dd.style.top = below >= ddH || below >= rect.top
+            ? `${rect.bottom + 1}px`
+            : `${rect.top - ddH - 1}px`;
+
+        requestAnimationFrame(() => search.focus());
+
+        // ── 點擊外部關閉 ──
+        const close = (e) => {
+            if (!dd.contains(e.target)) {
+                dd.remove();
+                document.removeEventListener('mousedown', close);
+            }
+        };
+        setTimeout(() => document.addEventListener('mousedown', close), 0);
+
+        // ── 鍵盤導航 ──
+        search.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { dd.remove(); edit.focus(); }
+            if (e.key === 'ArrowDown') {
+                const first = list.querySelector('.mmd-lookup-item');
+                if (first) first.focus();
+                e.preventDefault();
+            }
+        });
+
+        list.addEventListener('keydown', (e) => {
+            const focused = document.activeElement;
+            if (e.key === 'ArrowDown') {
+                const next = focused?.nextElementSibling;
+                if (next) next.focus();
+                e.preventDefault();
+            } else if (e.key === 'ArrowUp') {
+                const prev = focused?.previousElementSibling;
+                if (prev) prev.focus(); else search.focus();
+                e.preventDefault();
+            } else if (e.key === 'Enter') {
+                focused?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                e.preventDefault();
+            } else if (e.key === 'Escape') {
+                dd.remove(); edit.focus();
+            }
+        });
     }
 
     function initDatePickers(scope, tabId) {
@@ -804,12 +912,13 @@
     window._debugFieldDicts = fieldDicts;
     window._debugTabsData = tabsData;
 
-    // Tab 切換事件
-    document.querySelectorAll('[data-bs-toggle="tab"]').forEach(tab => {
+    // Tab 切換事件（只綁定有 data-tab-id 的單身頁籤，排除夾檔等非單身頁籤）
+    document.querySelectorAll('[data-bs-toggle="tab"][data-tab-id]').forEach(tab => {
         tab.addEventListener('shown.bs.tab', async function(e) {
             const tabId = this.dataset.tabId;
             const apiUrl = this.dataset.apiUrl;
             const contentPane = document.getElementById(`content-${tabId}`);
+            if (!contentPane) return;
 
             // 取得容器元素
             const container = contentPane.querySelector('.table-container');
@@ -920,12 +1029,27 @@
     window.__refreshMultiTab = async (opts = {}) => {
         const allTabs = Array.isArray(tabsData) ? tabsData : [];
         if (!allTabs.length) return;
+        // ★ 刷新前記住每個 tab 當前選取行的 key，刷新後還原
+        const savedSelection = {};
+        for (const t of allTabs) {
+            const tid = (t?.Id || '').toString();
+            if (!tid) continue;
+            const sel = window._multiTabSelectedRows?.[tid];
+            if (sel) {
+                savedSelection[tid] = {
+                    paperNum: (sel.PaperNum ?? sel.paperNum ?? '').toString(),
+                    item: (sel.Item ?? sel.item ?? '').toString()
+                };
+            }
+        }
+        window.__refreshRestoreKeys = savedSelection;
         for (const t of allTabs) {
             const tabId = (t?.Id || '').toString();
             if (!tabId) continue;
             loadedTabs.delete(tabId);
             await reloadTabById(tabId);
         }
+        window.__refreshRestoreKeys = null;
     };
 
     // 渲染表格函式
@@ -989,7 +1113,7 @@
         // 表頭 - 使用字典取得中文名稱
         fields.forEach(field => {
             const displayName = dict[field] || field;
-            html += `<th class="align-left" data-field="${field}"><span class="th-text">${displayName}</span><span class="col-resizer" draggable="false"></span></th>`;
+            html += `<th class="align-left" data-field="${field}"><span class="drag-handle">☰</span><span class="th-text">${displayName}</span><span class="col-resizer" draggable="false"></span></th>`;
         });
         html += '</tr></thead><tbody>';
 
@@ -1045,23 +1169,45 @@
                   }
                 let lookupKeyOverride = null;
                   if (allowLookup && metaLookup?.source === 'ocx') {
-                      const candidates = [];
-                      if (metaLookup?.keySelf) candidates.push(metaLookup.keySelf);
-                      if (metaLookup?.key) candidates.push(metaLookup.key);
-                    for (const alt of candidates) {
-                        const keyVal = getValueCaseInsensitive(row, alt);
-                        if (keyVal != null && String(keyVal).trim() !== '') {
-                            lookupKeyOverride = keyVal;
-                            break;
-                        }
-                    }
+                      // Composite key: build key from multiple fields joined by \x1f
+                      if (metaLookup.compositeKeySelfNames && metaLookup.compositeKeySelfNames.length > 1) {
+                          const parts = metaLookup.compositeKeySelfNames.map(f => {
+                              const v = getValueCaseInsensitive(row, f);
+                              return v == null ? '' : String(v).trim();
+                          });
+                          if (parts.every(p => p !== '')) {
+                              lookupKeyOverride = parts.join('\x1f');
+                          }
+                      } else {
+                          const candidates = [];
+                          if (metaLookup?.keySelf) candidates.push(metaLookup.keySelf);
+                          if (metaLookup?.key) candidates.push(metaLookup.key);
+                          for (const alt of candidates) {
+                              const keyVal = getValueCaseInsensitive(row, alt);
+                              if (keyVal != null && String(keyVal).trim() !== '') {
+                                  lookupKeyOverride = keyVal;
+                                  break;
+                              }
+                          }
+                      }
                 }
                     const keyStr = lookupKeyOverride == null ? '' : String(lookupKeyOverride).trim();
                     const keyIsEmpty = keyStr === '';
-                    const keyFieldName = metaLookup?.source === 'ocx' ? (metaLookup?.keySelf || metaLookup?.key || '') : '';
-                    const keyRawVal = keyFieldName ? getValueCaseInsensitive(row, keyFieldName) : null;
-                    const keyRawStr = keyRawVal == null ? '' : String(keyRawVal).trim();
-                    const keySourceMissing = !!keyFieldName && keyRawStr === '';
+                    let keySourceMissing = false;
+                    if (metaLookup?.source === 'ocx') {
+                        if (metaLookup.compositeKeySelfNames && metaLookup.compositeKeySelfNames.length > 1) {
+                            // For composite keys, check ALL key fields
+                            keySourceMissing = metaLookup.compositeKeySelfNames.some(f => {
+                                const v = getValueCaseInsensitive(row, f);
+                                return v == null || String(v).trim() === '';
+                            });
+                        } else {
+                            const keyFieldName = metaLookup?.keySelf || metaLookup?.key || '';
+                            const keyRawVal = keyFieldName ? getValueCaseInsensitive(row, keyFieldName) : null;
+                            const keyRawStr = keyRawVal == null ? '' : String(keyRawVal).trim();
+                            keySourceMissing = !!keyFieldName && keyRawStr === '';
+                        }
+                    }
                     if (keySourceMissing) {
                         rawValue = '';
                     }
@@ -1108,8 +1254,19 @@
             html += '</tr>';
         };
 
+        // ★ 還原選取：比對刷新前記住的 key
+        const restoreKey = window.__refreshRestoreKeys?.[tabId] || null;
+
         if (rows.length > 0) {
-            rows.forEach((row, index) => renderRow(row, index, { isAdded: false }));
+            rows.forEach((row, index) => {
+                let selected = false;
+                if (restoreKey) {
+                    const rp = (row.PaperNum || row.paperNum || '').toString();
+                    const ri = (row.Item ?? row.item ?? '').toString();
+                    if (rp === restoreKey.paperNum && ri === restoreKey.item) selected = true;
+                }
+                renderRow(row, index, { isAdded: false, selected });
+            });
         } else {
             const blank = {};
             blank.Item = "";
@@ -1245,6 +1402,20 @@
                 } catch {}
             }
             initColumnResize(table, dictTable, fields);
+
+            // 欄位拖曳排序
+            if (window.initColumnDragSort) {
+                const hRow = table.querySelector('thead tr');
+                if (hRow) {
+                    initColumnDragSort({
+                        headerRow: hRow,
+                        tbody: table.querySelector('tbody'),
+                        scrollWrap: table.closest('.erp-table-wrapper'),
+                        tableName: dictTable,
+                        onSaved: null
+                    });
+                }
+            }
         }
 
         // 綁定列選取事件（委派到 tbody，確保點擊/編輯儲存格也能選取整列）
@@ -1295,6 +1466,21 @@
                         window.__updateToolbarCounts();
                     }
                 });
+                // ★ 建立反向索引：key 欄位名稱 → 依賴它的 lookup 結果欄位清單
+                const keyToLookupFields = new Map();
+                for (const [resultField, cfg] of lookupMeta.entries()) {
+                    if (cfg.source !== 'ocx' && cfg.source !== 'lookup') continue;
+                    // lookup 來源：欄位本身就是 key，用欄位自身名稱作為觸發 key
+                    const keyNames = cfg.source === 'lookup'
+                        ? [resultField]
+                        : (cfg.compositeKeySelfNames || (cfg.keySelf ? [cfg.keySelf] : (cfg.key ? [cfg.key] : [])));
+                    for (const kn of keyNames) {
+                        const knLower = kn.toLowerCase();
+                        if (!keyToLookupFields.has(knLower)) keyToLookupFields.set(knLower, []);
+                        keyToLookupFields.get(knLower).push({ resultField, cfg });
+                    }
+                }
+
                 tbody.addEventListener('change', (e) => {
                     const inp = e.target;
                     if (!inp.classList.contains('cell-edit') || inp.classList.contains('cell-date-input')) return;
@@ -1302,7 +1488,50 @@
                     const tr = inp.closest('tr');
                     if (!tr || !tbody.contains(tr)) return;
                     if (tr.dataset.state !== 'added') tr.dataset.state = 'modified';
-                    if (typeof window.__autoSaveDetail === 'function') {
+
+                    // ★ 動態刷新：當 key 欄位變更時，更新對應的 lookup 中文名稱
+                    const changedField = (inp.dataset.field || inp.name || '').toLowerCase();
+                    const deps = keyToLookupFields.get(changedField);
+                    if (deps && deps.length > 0) {
+                        const getFieldVal = (fieldName) => {
+                            const fn = fieldName.toLowerCase();
+                            const target = Array.from(tr.querySelectorAll('input.cell-edit[data-field]'))
+                                .find(i => (i.dataset.field || '').toLowerCase() === fn);
+                            return target ? (target.value ?? '').trim() : '';
+                        };
+                        for (const { resultField, cfg } of deps) {
+                            const lkMap = lookupMaps.get(resultField);
+                            if (!lkMap) continue;
+                            let lookupKey = '';
+                            if (cfg.compositeKeySelfNames && cfg.compositeKeySelfNames.length > 1) {
+                                const parts = cfg.compositeKeySelfNames.map(f => getFieldVal(f));
+                                if (parts.every(p => p !== '')) lookupKey = parts.join('\x1f');
+                            } else {
+                                lookupKey = getFieldVal(cfg.keySelf || cfg.key || '');
+                            }
+                            const displayVal = lookupKey ? (lkMap.get(lookupKey) || lkMap.get(lookupKey.trim()) || lkMap.get(lookupKey.trim().toLowerCase()) || '') : '';
+                            // 更新結果欄位的顯示值
+                            const resultFieldName = cfg.result || resultField;
+                            const resultInp = Array.from(tr.querySelectorAll('input.cell-edit[data-field]'))
+                                .find(i => (i.dataset.field || '').toLowerCase() === resultFieldName.toLowerCase());
+                            if (resultInp) {
+                                resultInp.value = displayVal;
+                                const td = resultInp.closest('td');
+                                const view = td?.querySelector('.cell-view');
+                                if (view) view.textContent = displayVal;
+                            }
+                        }
+                    }
+
+                    // ★ lookup 選取後只刷新不儲存，一般手動輸入仍自動儲存
+                    //   旗標標記在 input 元素上，合成事件(isTrusted=false)不消耗旗標，
+                    //   原生事件(isTrusted=true, blur 觸發)消耗旗標後恢復正常行為
+                    // ★ 新增行（state='added'）也只刷新不儲存，等使用者手動存檔
+                    if (inp._fromLookup) {
+                        if (e.isTrusted) inp._fromLookup = false;
+                    } else if (tr.dataset.state === 'added') {
+                        // 新增行：只做動態刷新，不觸發自動儲存
+                    } else if (typeof window.__autoSaveDetail === 'function') {
                         window.__autoSaveDetail();
                     }
                 });
@@ -1358,15 +1587,29 @@
                                 const trimmed = k.trim();
                                 if (trimmed && trimmed !== k) filteredMap.set(trimmed, label || trimmed);
                             });
-                            if (filteredMap.size > 0) openLookupDropdown(td, field, filteredMap, { resultField: meta?.result || '' });
+                            if (filteredMap.size > 0) showLookupDropdown(td, field, filteredMap, { resultField: meta?.result || '' });
                         } catch { }
                         return;
                     }
                     const map = lookupMaps.get(fieldLower);
                     if (!map || map.size === 0) return;
-                    openLookupDropdown(td, field, map, { resultField: lookupMetaMap[fieldLower]?.result || '' });
+                    showLookupDropdown(td, field, map, { resultField: lookupMetaMap[fieldLower]?.result || '' });
                 });
 
+            }
+
+            // ★ 刷新後還原選取行：滾動到該行並觸發聯動事件
+            const restoredRow = tableWrapper.querySelector('tbody tr.row-selected');
+            if (restoredRow && restoreKey) {
+                try {
+                    const rowData = extractRowData(restoredRow);
+                    if (rowData) {
+                        window._multiTabSelectedRows = window._multiTabSelectedRows || {};
+                        window._multiTabSelectedRows[tabId] = rowData;
+                    }
+                    window.dispatchEvent(new CustomEvent('multiTabRowSelected', { detail: { tabId, rowData } }));
+                    restoredRow.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+                } catch {}
             }
 
             // 需要第三階聯動時：預設自動選取第一筆（例如 Paper3L）
@@ -1879,39 +2122,21 @@ body.resizing { cursor: col-resize !important; }
     background: #e9ecef !important;
 }
 
-.lookup-dropdown-list {
-    z-index: 2000;
-    background: #fff;
-    border: 1px solid #b6c2d9;
-    border-radius: 6px;
-    box-shadow: 0 8px 20px rgba(30, 41, 59, 0.18);
-    overflow: auto;
-}
-
-.lookup-dropdown-item {
-    display: block;
-    width: 100%;
-    border: 0;
-    background: transparent;
-    text-align: left;
-    padding: 6px 10px;
-    font-size: var(--field-value-size);
-    cursor: pointer;
-}
-
-.lookup-dropdown-item:hover,
-.lookup-dropdown-item:focus {
-    background: #e2e8f0;
-    outline: none;
-}
-
-.lookup-dropdown-item.is-selected {
-    background: #dbeafe;
-}
+/* Lookup dropdown CSS 已改為由 JS 動態注入（ensureLookupDropdownCss），與 masterMultiDetailTemplate.js 一致 */
 
 .multi-tab-detail .cell-view-checkbox{
     transform: scale(1.05);
     pointer-events: none;
+    display: block;
+    margin: 0 auto;
+}
+
+.multi-tab-detail .erp-table .cell-edit[type="checkbox"]{
+    display: block;
+    width: auto !important;
+    min-height: auto;
+    transform: scale(1.05);
+    margin: 0 auto;
 }
 
 /* 選取列的樣式 */
@@ -1947,4 +2172,3 @@ body.resizing { cursor: col-resize !important; }
     background-color: #e7f3ff !important;
 }
 </style>
-

@@ -102,13 +102,14 @@
               }
             }
 
-            // 記錄進入編輯時的 defaultValue
             inp.defaultValue = inp.type === "checkbox"
               ? (inp.checked ? "1" : "0")
               : inp.value;
             if (inp.type === "checkbox") {
               inp.defaultChecked = inp.checked;
             }
+            // ★ 記錄進入編輯時的原始 raw 值（供 __originalKeys 使用）
+            if (inp.dataset.raw != null) inp.dataset.rawDefault = inp.dataset.raw;
 
             span.classList.add("d-none");
             inp.classList.remove("d-none");
@@ -219,6 +220,7 @@
         if (!hasDiff) return;
         const rowAll = {};
         const isAdded = tr.dataset.state === "added";
+        const originalKeys = {};  // ★ 記錄被修改的 key field 原始值
 
         // 編輯欄位：只送 key fields + 真正有變更的欄位（避免 SQL trigger UPDATE() 誤判）
         tr.querySelectorAll(".cell-edit").forEach(inp => {
@@ -236,7 +238,16 @@
 
             if (isAdded || isKey) {
               // 新增列或 key 欄位：一律送出
-              rowAll[inp.name] = curVal;
+              // ★ key 欄位優先用 dataset.raw（原始 DB key），避免送出 lookup 翻譯後的顯示文字
+              const keyVal = isKey ? (inp.dataset.raw ?? curVal) : curVal;
+              rowAll[inp.name] = keyVal;
+              // ★ 非新增列：若 key field 被修改，記錄原始 raw 值供 UPDATE WHERE 使用
+              if (!isAdded && isKey) {
+                const origRaw = inp.dataset.rawDefault ?? inp.defaultValue ?? "";
+                if (String(origRaw) !== String(keyVal)) {
+                  originalKeys[inp.name] = origRaw;
+                }
+              }
             } else {
               // 既有列：比對 defaultValue，只送真正改過的欄位
               const origVal = (() => {
@@ -252,6 +263,11 @@
               }
             }
         });
+
+        // ★ 若有 key field 被修改，附上 __originalKeys
+        if (Object.keys(originalKeys).length > 0) {
+          rowAll.__originalKeys = originalKeys;
+        }
 
         // 補齊 keyFields
         keyFieldSet.forEach(k => {

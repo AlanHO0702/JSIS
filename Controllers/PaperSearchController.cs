@@ -301,6 +301,8 @@ public class PaperSearchController : ControllerBase
                 await cmd.ExecuteNonQueryAsync();
             }
 
+            await BackfillTransferPaperHeadersAsync(conn, (SqlTransaction)tx, req.ItemId, req.PaperNum);
+
             await tx.CommitAsync();
             return Ok(new { ok = true, rows = req.Rows.Count });
         }
@@ -587,7 +589,301 @@ public class PaperSearchController : ControllerBase
         return (userId, useId);
     }
 
-    private static int? TryToInt(object? o)
+
+    private sealed record LinkedPaperRef(string PaperId, string PaperNum);
+
+    private async Task BackfillTransferPaperHeadersAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        string itemId,
+        string paperNum)
+    {
+        if (string.IsNullOrWhiteSpace(itemId) || string.IsNullOrWhiteSpace(paperNum))
+            return;
+
+        var detailTables = await LoadDetailTablesAsync(conn, tx, itemId);
+        if (detailTables.Count == 0) return;
+
+        var refs = new Dictionary<string, LinkedPaperRef>(StringComparer.OrdinalIgnoreCase);
+        foreach (var dictTable in detailTables)
+        {
+            var realTable = await ResolveRealTableNameAsync(conn, tx, dictTable) ?? dictTable;
+            if (!IsSafeIdentifier(realTable)) continue;
+
+            var cols = await LoadTableColumnsAsync(conn, tx, realTable);
+            var paperNumCol = FindColumn(cols, "PaperNum");
+            var sourPaperIdCol = FindColumn(cols, "SourPaperId", "SourcePaperId");
+            var sourNumCol = FindColumn(cols, "SourNum", "SourceNum");
+            if (paperNumCol == null || sourPaperIdCol == null || sourNumCol == null) continue;
+
+            var sql = $@"
+SELECT DISTINCT
+       LTRIM(RTRIM(CONVERT(nvarchar(128), [{sourPaperIdCol}]))) AS SourPaperId,
+       LTRIM(RTRIM(CONVERT(nvarchar(64),  [{sourNumCol}])))     AS SourNum
+  FROM [{realTable}] WITH (NOLOCK)
+ WHERE [{paperNumCol}] = @paperNum
+   AND ISNULL(LTRIM(RTRIM(CONVERT(nvarchar(64),  [{sourNumCol}]))), '') <> ''
+   AND ISNULL(LTRIM(RTRIM(CONVERT(nvarchar(128), [{sourPaperIdCol}]))), '') <> '';";
+
+            await using var cmd = new SqlCommand(sql, conn, tx);
+            cmd.Parameters.AddWithValue("@paperNum", paperNum);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var linkPaperId = rd["SourPaperId"]?.ToString()?.Trim() ?? string.Empty;
+                var linkPaperNum = rd["SourNum"]?.ToString()?.Trim() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(linkPaperId) || string.IsNullOrWhiteSpace(linkPaperNum))
+                    continue;
+
+                refs[$"{linkPaperId}|{linkPaperNum}"] = new LinkedPaperRef(linkPaperId, linkPaperNum);
+            }
+        }
+
+        foreach (var link in refs.Values)
+        {
+            await BackfillSinglePaperHeaderTypeAsync(conn, tx, link.PaperId, link.PaperNum);
+        }
+    }
+
+    private async Task BackfillSinglePaperHeaderTypeAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        string paperId,
+        string paperNum)
+    {
+        if (string.IsNullOrWhiteSpace(paperId) || string.IsNullOrWhiteSpace(paperNum))
+            return;
+
+        var realTable = await ResolveRealTableNameAsync(conn, tx, paperId) ?? paperId;
+        if (!IsSafeIdentifier(realTable)) return;
+
+        var cols = await LoadTableColumnsAsync(conn, tx, realTable);
+        var paperNumCol = FindColumn(cols, "PaperNum");
+        var dllPaperTypeCol = FindColumn(cols, "dllPaperType");
+        var dllPaperTypeNameCol = FindColumn(cols, "dllPaperTypeName");
+        var dllHeadFirstCol = FindColumn(cols, "dllHeadFirst");
+        if (paperNumCol == null || dllPaperTypeCol == null) return;
+
+        if (!await CanBackfillPaperHeaderAsync(conn, tx, realTable, paperNumCol, paperNum, cols))
+            return;
+
+        var defaultPaperType = await LoadDefaultPaperTypeAsync(conn, tx, paperId, realTable);
+        if (!defaultPaperType.HasValue) return;
+
+        var defaultPaperTypeName = string.Empty;
+        var defaultHeadFirst = string.Empty;
+
+        await using (var cmdPaperType = new SqlCommand(@"
+SELECT TOP 1 PaperTypeName, HeadFirst
+  FROM CURdPaperType WITH (NOLOCK)
+ WHERE LOWER(PaperId) = LOWER(@paperId)
+   AND PaperType = @paperType;", conn, tx))
+        {
+            cmdPaperType.Parameters.AddWithValue("@paperId", paperId);
+            cmdPaperType.Parameters.AddWithValue("@paperType", defaultPaperType.Value);
+            await using var rd = await cmdPaperType.ExecuteReaderAsync();
+            if (await rd.ReadAsync())
+            {
+                defaultPaperTypeName = rd["PaperTypeName"]?.ToString() ?? string.Empty;
+                defaultHeadFirst = rd["HeadFirst"]?.ToString() ?? string.Empty;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(defaultHeadFirst))
+        {
+            await using var cmdHeadFirst = new SqlCommand(@"
+SELECT TOP 1 HeadFirst
+  FROM CURdPaperInfo WITH (NOLOCK)
+ WHERE LOWER(PaperId) = LOWER(@paperId);", conn, tx);
+            cmdHeadFirst.Parameters.AddWithValue("@paperId", paperId);
+            var headObj = await cmdHeadFirst.ExecuteScalarAsync();
+            defaultHeadFirst = headObj == null || headObj == DBNull.Value ? string.Empty : (headObj?.ToString() ?? string.Empty);
+        }
+
+        var setClauses = new List<string>
+        {
+            $"[{dllPaperTypeCol}] = CASE WHEN [{dllPaperTypeCol}] IS NULL THEN @paperType ELSE [{dllPaperTypeCol}] END"
+        };
+
+        if (dllPaperTypeNameCol != null)
+        {
+            setClauses.Add(
+                $"[{dllPaperTypeNameCol}] = CASE WHEN [{dllPaperTypeNameCol}] IS NULL OR LTRIM(RTRIM(CONVERT(nvarchar(200), [{dllPaperTypeNameCol}]))) = '' THEN @paperTypeName ELSE [{dllPaperTypeNameCol}] END");
+        }
+
+        if (dllHeadFirstCol != null && !string.IsNullOrWhiteSpace(defaultHeadFirst))
+        {
+            setClauses.Add(
+                $"[{dllHeadFirstCol}] = CASE WHEN [{dllHeadFirstCol}] IS NULL OR LTRIM(RTRIM(CONVERT(nvarchar(50), [{dllHeadFirstCol}]))) = '' THEN @headFirst ELSE [{dllHeadFirstCol}] END");
+        }
+
+        if (setClauses.Count == 0) return;
+
+        var updateSql = $@"
+UPDATE t
+   SET {string.Join("," + Environment.NewLine + "       ", setClauses)}
+  FROM [{realTable}] t
+ WHERE [{paperNumCol}] = @paperNum;";
+
+        await using var cmdUpdate = new SqlCommand(updateSql, conn, tx);
+        cmdUpdate.Parameters.AddWithValue("@paperNum", paperNum);
+        cmdUpdate.Parameters.AddWithValue("@paperType", defaultPaperType.Value);
+        cmdUpdate.Parameters.AddWithValue("@paperTypeName", defaultPaperTypeName);
+        cmdUpdate.Parameters.AddWithValue("@headFirst", defaultHeadFirst);
+        await cmdUpdate.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<bool> CanBackfillPaperHeaderAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        string realTable,
+        string paperNumCol,
+        string paperNum,
+        HashSet<string> cols)
+    {
+        var finishedCol = FindColumn(cols, "Finished");
+        var statusCol = FindColumn(cols, "Status");
+        if (finishedCol == null && statusCol == null)
+            return true;
+
+        var pickCols = new List<string>();
+        if (finishedCol != null) pickCols.Add($"[{finishedCol}] AS FinishedVal");
+        if (statusCol != null) pickCols.Add($"[{statusCol}] AS StatusVal");
+
+        var sql = $@"SELECT TOP 1 {string.Join(",", pickCols)} FROM [{realTable}] WITH (NOLOCK) WHERE [{paperNumCol}] = @paperNum;";
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@paperNum", paperNum);
+        await using var rd = await cmd.ExecuteReaderAsync();
+        if (!await rd.ReadAsync()) return true;
+
+        if (finishedCol != null)
+        {
+            var fObj = rd["FinishedVal"];
+            if (fObj != null && fObj != DBNull.Value && int.TryParse(fObj.ToString(), out var finished))
+            {
+                if (finished != 0) return false;
+            }
+        }
+
+        if (statusCol != null)
+        {
+            var sObj = rd["StatusVal"];
+            if (sObj != null && sObj != DBNull.Value && int.TryParse(sObj.ToString(), out var status))
+            {
+                if (status != 0) return false;
+            }
+        }
+
+        return true;
+    }
+
+    private async Task<int?> LoadDefaultPaperTypeAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        string paperId,
+        string realTable)
+    {
+        await using (var cmdByPaperId = new SqlCommand(@"
+SELECT TOP 1 PaperType
+  FROM CURdSysItems WITH (NOLOCK)
+ WHERE LOWER(PaperId) = LOWER(@paperId)
+ ORDER BY ItemId;", conn, tx))
+        {
+            cmdByPaperId.Parameters.AddWithValue("@paperId", paperId);
+            var obj = await cmdByPaperId.ExecuteScalarAsync();
+            if (obj != null && obj != DBNull.Value && int.TryParse(obj.ToString(), out var n1))
+                return n1;
+        }
+
+        await using (var cmdByTable = new SqlCommand(@"
+SELECT TOP 1 s.PaperType
+  FROM CURdOCXTableSetUp t WITH (NOLOCK)
+  JOIN CURdSysItems s WITH (NOLOCK) ON s.ItemId = t.ItemId
+ WHERE t.TableKind LIKE 'Master%'
+   AND (LOWER(t.TableName) = LOWER(@paperId) OR LOWER(t.TableName) = LOWER(@realTable))
+ ORDER BY CASE WHEN t.TableKind = 'Master1' THEN 0 ELSE 1 END, t.ItemId;", conn, tx))
+        {
+            cmdByTable.Parameters.AddWithValue("@paperId", paperId ?? string.Empty);
+            cmdByTable.Parameters.AddWithValue("@realTable", realTable ?? string.Empty);
+            var obj = await cmdByTable.ExecuteScalarAsync();
+            if (obj != null && obj != DBNull.Value && int.TryParse(obj.ToString(), out var n2))
+                return n2;
+        }
+
+        return null;
+    }
+
+    private static async Task<List<string>> LoadDetailTablesAsync(SqlConnection conn, SqlTransaction tx, string itemId)
+    {
+        var tables = new List<string>();
+        await using var cmd = new SqlCommand(@"
+SELECT TableName
+  FROM CURdOCXTableSetUp WITH (NOLOCK)
+ WHERE ItemId = @itemId
+   AND TableKind LIKE 'Detail%';", conn, tx);
+        cmd.Parameters.AddWithValue("@itemId", itemId);
+        await using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            var table = rd["TableName"]?.ToString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(table))
+                tables.Add(table);
+        }
+        return tables;
+    }
+
+    private static async Task<HashSet<string>> LoadTableColumnsAsync(SqlConnection conn, SqlTransaction tx, string tableName)
+    {
+        var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using var cmd = new SqlCommand(@"
+SELECT COLUMN_NAME
+  FROM INFORMATION_SCHEMA.COLUMNS
+ WHERE TABLE_NAME = @tableName;", conn, tx);
+        cmd.Parameters.AddWithValue("@tableName", tableName);
+        await using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            var col = rd["COLUMN_NAME"]?.ToString();
+            if (!string.IsNullOrWhiteSpace(col))
+                cols.Add(col);
+        }
+        return cols;
+    }
+
+    private async Task<string?> ResolveRealTableNameAsync(SqlConnection conn, SqlTransaction tx, string dictTableName)
+    {
+        await using var cmd = new SqlCommand(@"
+SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
+  FROM CURdTableName WITH (NOLOCK)
+ WHERE TableName = @tbl;", conn, tx);
+        cmd.Parameters.AddWithValue("@tbl", dictTableName ?? string.Empty);
+        var obj = await cmd.ExecuteScalarAsync();
+        return obj == null || obj == DBNull.Value ? null : obj.ToString();
+    }
+
+    private static bool IsSafeIdentifier(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        foreach (var c in name)
+        {
+            if (!(char.IsLetterOrDigit(c) || c == '_'))
+                return false;
+        }
+        return true;
+    }
+
+    private static string? FindColumn(HashSet<string> cols, params string[] candidates)
+    {
+        foreach (var wanted in candidates)
+        {
+            foreach (var col in cols)
+            {
+                if (string.Equals(col, wanted, StringComparison.OrdinalIgnoreCase))
+                    return col;
+            }
+        }
+        return null;
+    }    private static int? TryToInt(object? o)
     {
         if (o == null || o == DBNull.Value) return null;
         return int.TryParse(o.ToString(), out var n) ? n : null;

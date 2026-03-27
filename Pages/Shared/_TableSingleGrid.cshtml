@@ -9,9 +9,20 @@
 @model dynamic
 
 @{
-    var tableName     = (string)(Model.TableName ?? "");
-    var items         = (IEnumerable<object>)(Model.Items ?? new List<object>());
-    var fields        = (IEnumerable<dynamic>)(Model.TableFields ?? new List<object>());
+    object modelObj = Model;
+    object? GetModelValue(string name)
+    {
+        if (modelObj == null) return null;
+        if (modelObj is IDictionary<string, object> dict && dict.TryGetValue(name, out var v))
+            return v;
+        var p = modelObj.GetType().GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+        return p?.GetValue(modelObj);
+    }
+
+    var tableName     = GetModelValue("TableName")?.ToString() ?? "";
+    var items         = (IEnumerable<object>)(GetModelValue("Items") as IEnumerable<object> ?? new List<object>());
+    var fields        = (IEnumerable<dynamic>)(GetModelValue("TableFields") as IEnumerable<dynamic> ?? new List<object>());
+    var fieldsJson    = JsonSerializer.Serialize(fields);
     var customButtons = ViewData["CustomButtons"] as HtmlString;
     var customButtonMeta = ViewData["CustomButtonMeta"] as IEnumerable<dynamic>;
     var hasServerButtons = customButtons != null && !string.IsNullOrWhiteSpace(customButtons.ToString());
@@ -53,9 +64,6 @@
     var showBtnInq = IsToolbarVisible("btnInq");
     var showBtnToExcel = IsToolbarVisible("btnToExcel");
     var showBtnUpdate = IsToolbarVisible("btnUpdate");
-    var hidePager = (ViewData["HideSingleGridPager"] as bool?)
-        ?? string.Equals(ViewData["HideSingleGridPager"]?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
-
     // OpenNoRecord 模式：開啟時不自動載入資料
     var openNoRecord = ViewData["OpenNoRecord"] as bool? ?? false;
     var hasQueryParams = ViewData["HasQueryParams"] as bool? ?? false;
@@ -64,9 +72,9 @@
     int pageNumber = 1;
     int pageSize = 0;
     int totalCount = 0;
-    try { pageNumber = (int)(Model.PageNumber ?? 1); } catch { }
-    try { pageSize = (int)(Model.PageSize ?? 0); } catch { }
-    try { totalCount = (int)(Model.TotalCount ?? 0); } catch { }
+    try { pageNumber = Convert.ToInt32(GetModelValue("PageNumber") ?? 1); } catch { }
+    try { pageSize = Convert.ToInt32(GetModelValue("PageSize") ?? 0); } catch { }
+    try { totalCount = Convert.ToInt32(GetModelValue("TotalCount") ?? 0); } catch { }
     if (pageSize <= 0) pageSize = Math.Max(1, items.Count());
     if (totalCount <= 0) totalCount = items.Count();
     var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
@@ -539,9 +547,24 @@
                 <tr class="sg-empty-row">
                   @foreach (var f in fields)
                   {
+                    string? name = Convert.ToString(f.FieldName);
+                    var dictField = dictFields.FirstOrDefault(df =>
+                        string.Equals(Convert.ToString(df.FieldName), name, StringComparison.OrdinalIgnoreCase));
                     bool isHidden = !ToBool(f.Visible, defaultValue: true);
+                    bool isReadOnly = ToBool(f.ReadOnly, defaultValue: false);
                     var hiddenStyle = isHidden ? "display:none;" : "";
-                    <td class="text-nowrap" style="@hiddenStyle"><span class="cell-view">&nbsp;</span></td>
+                    var cellClass = IsNumberDataType(dictField ?? f) ? "cell-number" : "cell-text";
+                    <td class="text-nowrap @cellClass @(isReadOnly ? "readonly-td" : "")" data-field="@name" style="@hiddenStyle" tabindex="-1">
+                      <span class="cell-view @(isReadOnly ? "readonly-cell" : "")" data-raw="" data-lookupkey="">&nbsp;</span>
+                      <input class="form-control form-control-sm cell-edit d-none @(isReadOnly ? "readonly-cell" : "")"
+                             type="text"
+                             name="@name"
+                             value=""
+                             data-raw=""
+                             data-lookupkey=""
+                             data-readonly="@(isReadOnly ? "1" : "0")"
+                             @(isReadOnly ? "readonly" : "") />
+                    </td>
                   }
                 </tr>
               }
@@ -592,10 +615,10 @@
 
                       // 標準 Lookup key（非實體欄位用）：若 lookupKey 仍為空，從 LookupKeyField 取同列值
                       if (string.IsNullOrWhiteSpace(lookupKey) && dictField != null
-                          && !string.IsNullOrWhiteSpace(dictField.LookupTable)
-                          && !string.IsNullOrWhiteSpace(dictField.LookupKeyField))
+                          && !string.IsNullOrWhiteSpace(dictField!.LookupTable)
+                          && !string.IsNullOrWhiteSpace(dictField!.LookupKeyField))
                       {
-                          var stdKeyVal = GetValue(item, dictField.LookupKeyField);
+                          var stdKeyVal = GetValue(item, dictField!.LookupKeyField);
                           if (stdKeyVal != null)
                               lookupKey = stdKeyVal.ToString() ?? "";
                       }
@@ -642,7 +665,6 @@
           </tbody>
         </table>
       </div>
-
       @if (hideToolbar)
       {
         <div id="customButtonBarBottom" class="d-flex gap-2 flex-wrap my-2" data-auto-build="@(autoBuildCustomButtons ? "1" : "0")">
@@ -691,7 +713,7 @@
  #mainGrid.table{table-layout:fixed!important;border-collapse:collapse!important;font-size:.85rem;width:1px!important;max-width:none!important}
  #mainGrid th,#mainGrid td{vertical-align:middle!important;border:1px solid #dee2e6!important;padding:0!important;white-space:nowrap;overflow:hidden;min-width:0!important}
   #mainGrid th{padding:2px 4px!important}
-  #mainGrid th .header-label{display:block;min-width:0;overflow:hidden;text-overflow:clip;white-space:nowrap}
+  #mainGrid th .header-label{display:inline;min-width:0;overflow:hidden;text-overflow:clip;white-space:nowrap}
  .table-hover tbody tr:hover{background:#f1f5ff!important}
 .cell-view,.cell-edit{display:block;width:100%;min-width:0!important;height:20px!important;min-height:20px!important;max-height:20px!important;font-size:.85rem;line-height:16px!important;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:clip;padding:2px 3px!important}
 .cell-view{text-align:inherit;border:none!important;background:transparent!important}
@@ -704,14 +726,12 @@
 #mainGrid tbody td:last-child{border-right:1px solid #c4cede!important}
 #mainGrid tbody td.readonly-td{background:silver!important}
 /* 勾選框欄位：view/edit 模式切換 */
-#mainGrid tbody td[data-checkbox] .sg-chk-view{display:block!important;margin:auto;width:16px;height:16px;cursor:default}
-#mainGrid tbody td[data-checkbox] .sg-chk-edit{display:none!important}
+#mainGrid tbody td[data-checkbox] .sg-chk-view{display:block!important;margin:auto;width:16px;height:16px;cursor:default;border:3px solid #000000!important}
+#mainGrid tbody td[data-checkbox] .sg-chk-edit{display:none!important;border:3px solid #000000!important}
 .edit-mode #mainGrid tbody td[data-checkbox]:not(.readonly-td) .sg-chk-view{display:none!important}
-.edit-mode #mainGrid tbody td[data-checkbox]:not(.readonly-td) .sg-chk-edit{display:block!important;margin:auto;width:16px;height:16px}
+.edit-mode #mainGrid tbody td[data-checkbox]:not(.readonly-td) .sg-chk-edit{display:block!important;margin:auto;width:16px;height:16px;border:3px solid #000000!important}
 #mainGrid thead th{user-select:none}
-#mainGrid thead th.col-dragging{opacity:.55}
-#mainGrid thead th.col-drag-over-left{box-shadow:inset 3px 0 0 #3b82f6}
-#mainGrid thead th.col-drag-over-right{box-shadow:inset -3px 0 0 #3b82f6}
+/* 欄位拖曳排序樣式已移至 columnDragSort.css */
 .readonly-cell{color:#555!important;border:none!important;cursor:not-allowed!important;pointer-events:none!important;user-select:none!important}
 .sg-lookup-dropdown-list{
   z-index:2000;
@@ -793,13 +813,13 @@
   .singlegrid-custom-btn{
     position:relative;
     padding:6px 10px;
-    font-size:.92rem;
+    font-size:var(--top-toolbar-font-size, 14px);
     letter-spacing:0;
     white-space:normal;
     word-break:break-word;
     background:#f8f9fb;
     color:#1f5fbf;
-    font-weight:600;
+    font-weight:500;
     border-radius:10px;
     cursor:pointer;
     box-shadow:0 2px 8px rgba(20,40,80,.12);
@@ -842,7 +862,7 @@
     cursor: pointer;
     /* Bootstrap 樣式 */
     border-radius: 0.25em;
-    border: 1px solid #dee2e6;
+    border: 3px solid #000000;
     background-color: #fff;
     background-repeat: no-repeat;
     background-position: center;
@@ -2747,6 +2767,7 @@
     const pagerNext = document.getElementById("pagerNext");
     const pagerLast = document.getElementById("pagerLast");
     const pagerFirst = document.getElementById("pagerFirst");
+    const pagerInfo = document.getElementById("pagerInfo");
     const pagerPageSize = document.getElementById("pagerPageSize");
     const pagerCurrentEl = document.getElementById("pagerCurrent");
     const pagerTotalEl = document.getElementById("pagerTotal");
@@ -2780,6 +2801,9 @@
       if (pagerGoInput) {
         pagerGoInput.value = currentPage;
         pagerGoInput.max = totalPages;
+      }
+      if (pagerInfo) {
+        pagerInfo.textContent = `第 ${currentPage} / ${totalPages} 頁，共 ${totalCountAll} 筆`;
       }
 
       // 更新按鈕狀態
@@ -2834,10 +2858,10 @@
       }
 
       // 更新表格
-      const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+      const fields = @Html.Raw(fieldsJson);
       const emptyMessage = getEmptyMessage(!!data.openNoRecord, !!data.hasQueryParams);
       updateTableBody(data.items, fields, emptyMessage);
-      loadSavedColumnOrder();
+      syncTbodyToHeaderOrder();
       await loadStandardLookups();
       applyLookupToTable(); // 套用 lookup 顯示
       applyLookupDropdowns();
@@ -3005,7 +3029,7 @@
     const tbody = table.querySelector("tbody");
     if (!tbody) return;
     const append = !!options.append;
-    const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+    const fields = @Html.Raw(fieldsJson);
     const placeholderRows = Array.from(tbody.querySelectorAll("tr.sg-empty-row"));
     if (placeholderRows.length > 0) {
       placeholderRows.forEach(r => r.remove());
@@ -3488,7 +3512,22 @@
       html += '<tr class="sg-empty-row">';
       cols.forEach(f => {
         const hidden = !isFieldVisibleForEmpty(f);
-        html += '<td class="text-nowrap"' + (hidden ? ' style="display:none;"' : '') + '><span class="cell-view">&nbsp;</span></td>';
+        const fieldName = (f?.FieldName ?? '').toString();
+        const dt = (f?.DataType || '').toString().toLowerCase();
+        const isNumber = dt.includes('number') || dt.startsWith('decimal') || dt.startsWith('numeric')
+          || dt.startsWith('money') || dt.startsWith('smallmoney') || dt.startsWith('float') || dt.startsWith('real')
+          || dt.startsWith('int') || dt.startsWith('smallint') || dt.startsWith('tinyint') || dt.startsWith('bigint');
+        const cellClass = isNumber ? 'cell-number' : 'cell-text';
+        const readOnly = !(f?.ReadOnly == null || f?.ReadOnly == 0 || f?.ReadOnly === false || String(f?.ReadOnly) === '');
+        const tdClass = 'text-nowrap ' + cellClass + (readOnly ? ' readonly-td' : '');
+        const roClass = readOnly ? ' readonly-cell' : '';
+        const roAttr = readOnly ? ' readonly' : '';
+        html += '<td class="' + tdClass + '" data-field="' + fieldName + '" tabindex="-1"'
+          + (hidden ? ' style="display:none;"' : '')
+          + '><span class="cell-view' + roClass + '" data-raw="" data-lookupkey="">&nbsp;</span>'
+          + '<input class="form-control form-control-sm cell-edit d-none' + roClass + '" type="text"'
+          + ' name="' + fieldName + '" value="" data-raw="" data-lookupkey="" data-readonly="' + (readOnly ? '1' : '0') + '"' + roAttr + ' />'
+          + '</td>';
       });
       html += "</tr>";
     }
@@ -3670,166 +3709,23 @@
   // 將函式暴露到 window，供外部 JS（如 singlegrid/*.js）呼叫
   window._sgUpdateTableBody = updateTableBody;
   window._sgApplyLookup = applyLookupToTable;
-  window._sgTableFields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+  window._sgTableFields = @Html.Raw(fieldsJson);
 
   let suppressSortClickUntil = 0;
-  let draggingHeaderField = "";
+  /* 欄位拖曳排序改用共用模組 columnDragSort.js */
 
-  const getFieldKey = (el) => (el?.getAttribute("data-field") || "").toLowerCase();
-  const getHeaderCells = () => Array.from(table.querySelectorAll("thead th[data-field]"));
-  const COL_ORDER_KEY = tableName ? `singlegrid:colOrder:${String(tableName).toLowerCase()}` : "";
-  const clearHeaderDragMarks = () => {
-    getHeaderCells().forEach(h => h.classList.remove("col-dragging", "col-drag-over-left", "col-drag-over-right"));
-  };
-
-  const moveColumnByField = (dragFieldKey, targetFieldKey, placeAfter) => {
+  // 資料刷新後，依 thead 順序重排 tbody 每列的 td
+  const syncTbodyToHeaderOrder = () => {
     const headerRow = table.querySelector("thead tr");
-    const colGroup = table.querySelector("colgroup");
-    if (!headerRow || !colGroup) return false;
-
-    const headerCells = Array.from(headerRow.querySelectorAll("th[data-field]"));
-    const fromTh = headerCells.find(th => getFieldKey(th) === dragFieldKey);
-    const toTh = headerCells.find(th => getFieldKey(th) === targetFieldKey);
-    if (!fromTh || !toTh || fromTh === toTh) return false;
-    headerRow.insertBefore(fromTh, placeAfter ? toTh.nextSibling : toTh);
-
-    const cols = Array.from(colGroup.querySelectorAll("col[data-field]"));
-    const fromCol = cols.find(c => getFieldKey(c) === dragFieldKey);
-    const toCol = cols.find(c => getFieldKey(c) === targetFieldKey);
-    if (fromCol && toCol && fromCol !== toCol) {
-      colGroup.insertBefore(fromCol, placeAfter ? toCol.nextSibling : toCol);
-    }
-
-    table.querySelectorAll("tbody tr").forEach(tr => {
-      const cells = Array.from(tr.querySelectorAll("td[data-field]"));
-      const fromTd = cells.find(td => getFieldKey(td) === dragFieldKey);
-      const toTd = cells.find(td => getFieldKey(td) === targetFieldKey);
-      if (!fromTd || !toTd || fromTd === toTd) return;
-      tr.insertBefore(fromTd, placeAfter ? toTd.nextSibling : toTd);
-    });
-
-    syncTableWidthFromCols();
-    return true;
-  };
-
-  const getCurrentColumnOrder = () =>
-    getHeaderCells()
-      .map(th => th.getAttribute("data-field") || "")
-      .filter(Boolean);
-
-  const saveColumnOrder = () => {
-    if (!COL_ORDER_KEY) return;
-    try {
-      localStorage.setItem(COL_ORDER_KEY, JSON.stringify(getCurrentColumnOrder()));
-    } catch { }
-  };
-
-  const applyColumnOrder = (order) => {
-    if (!Array.isArray(order) || order.length === 0) return false;
-    const headerRow = table.querySelector("thead tr");
-    const colGroup = table.querySelector("colgroup");
-    if (!headerRow || !colGroup) return false;
-
-    const headerMap = new Map(Array.from(headerRow.querySelectorAll("th[data-field]"))
-      .map(th => [String(th.getAttribute("data-field") || "").toLowerCase(), th]));
-    const colMapLive = new Map(Array.from(colGroup.querySelectorAll("col[data-field]"))
-      .map(col => [String(col.getAttribute("data-field") || "").toLowerCase(), col]));
-
-    const orderedKeys = order.map(x => String(x || "").toLowerCase()).filter(k => headerMap.has(k));
-    const remainingKeys = Array.from(headerMap.keys()).filter(k => !orderedKeys.includes(k));
-    const finalKeys = [...orderedKeys, ...remainingKeys];
-    if (!finalKeys.length) return false;
-
-    finalKeys.forEach(k => {
-      const th = headerMap.get(k);
-      if (th) headerRow.appendChild(th);
-    });
-    finalKeys.forEach(k => {
-      const col = colMapLive.get(k);
-      if (col) colGroup.appendChild(col);
-    });
-    table.querySelectorAll("tbody tr").forEach(tr => {
+    const tbody = table.querySelector("tbody");
+    if (!headerRow || !tbody) return;
+    const fieldOrder = Array.from(headerRow.querySelectorAll("th[data-field]"))
+      .map(th => (th.getAttribute("data-field") || "").toLowerCase());
+    if (!fieldOrder.length) return;
+    Array.from(tbody.rows).forEach(tr => {
       const tdMap = new Map(Array.from(tr.querySelectorAll("td[data-field]"))
-        .map(td => [String(td.getAttribute("data-field") || "").toLowerCase(), td]));
-      finalKeys.forEach(k => {
-        const td = tdMap.get(k);
-        if (td) tr.appendChild(td);
-      });
-    });
-    syncTableWidthFromCols();
-    return true;
-  };
-
-  const loadSavedColumnOrder = () => {
-    if (!COL_ORDER_KEY) return;
-    try {
-      const raw = localStorage.getItem(COL_ORDER_KEY);
-      if (!raw) return;
-      const order = JSON.parse(raw);
-      applyColumnOrder(order);
-    } catch { }
-  };
-
-  const bindHeaderDragReorder = () => {
-    getHeaderCells().forEach(th => {
-      if (th.dataset.dragBound === "1") return;
-      th.dataset.dragBound = "1";
-      th.setAttribute("draggable", "true");
-
-      th.addEventListener("dragstart", (e) => {
-        if (e.target?.closest?.(".col-resizer")) {
-          e.preventDefault();
-          return;
-        }
-        const field = getFieldKey(th);
-        if (!field) return;
-        draggingHeaderField = field;
-        clearHeaderDragMarks();
-        th.classList.add("col-dragging");
-        if (e.dataTransfer) {
-          e.dataTransfer.effectAllowed = "move";
-          try { e.dataTransfer.setData("text/plain", field); } catch { }
-        }
-      });
-
-      th.addEventListener("dragover", (e) => {
-        if (!draggingHeaderField) return;
-        const targetField = getFieldKey(th);
-        if (!targetField || targetField === draggingHeaderField) return;
-        e.preventDefault();
-        const rect = th.getBoundingClientRect();
-        const placeAfter = e.clientX >= rect.left + rect.width / 2;
-        th.classList.toggle("col-drag-over-left", !placeAfter);
-        th.classList.toggle("col-drag-over-right", placeAfter);
-        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-      });
-
-      th.addEventListener("dragleave", () => {
-        th.classList.remove("col-drag-over-left", "col-drag-over-right");
-      });
-
-      th.addEventListener("drop", (e) => {
-        if (!draggingHeaderField) return;
-        e.preventDefault();
-        const targetField = getFieldKey(th);
-        if (!targetField || targetField === draggingHeaderField) {
-          clearHeaderDragMarks();
-          suppressSortClickUntil = Date.now() + 260;
-          return;
-        }
-        const rect = th.getBoundingClientRect();
-        const placeAfter = e.clientX >= rect.left + rect.width / 2;
-        moveColumnByField(draggingHeaderField, targetField, placeAfter);
-        saveColumnOrder();
-        clearHeaderDragMarks();
-        suppressSortClickUntil = Date.now() + 260;
-      });
-
-      th.addEventListener("dragend", () => {
-        draggingHeaderField = "";
-        clearHeaderDragMarks();
-        suppressSortClickUntil = Date.now() + 220;
-      });
+        .map(td => [(td.getAttribute("data-field") || "").toLowerCase(), td]));
+      fieldOrder.forEach(k => { const td = tdMap.get(k); if (td) tr.appendChild(td); });
     });
   };
 
@@ -3837,7 +3733,7 @@
   async function handleSort(fieldName) {
     if (isSorting) return;
 
-    const fields = @Html.Raw(JsonSerializer.Serialize(Model.TableFields));
+    const fields = @Html.Raw(fieldsJson);
     const ocxLookupPayload = @Html.Raw(JsonSerializer.Serialize(ocxLookupPayload));
 
     // 計算實際要排序的欄位名稱
@@ -3927,7 +3823,7 @@
       // 更新表格
       const emptyMessage = getEmptyMessage(!!data.openNoRecord, !!data.hasQueryParams);
       updateTableBody(data.items, fields, emptyMessage);
-      loadSavedColumnOrder();
+      syncTbodyToHeaderOrder();
       await loadStandardLookups();
       applyLookupToTable(); // 套用 lookup 顯示
       applyLookupDropdowns();
@@ -3946,14 +3842,25 @@
     }
   }
 
-  bindHeaderDragReorder();
-  loadSavedColumnOrder();
+  // 使用共用模組初始化欄位拖曳排序
+  if (window.initColumnDragSort) {
+    const hRow = table.querySelector('thead tr');
+    if (hRow) {
+      initColumnDragSort({
+        headerRow: hRow,
+        tbody: table.querySelector('tbody'),
+        scrollWrap: table.closest('.table-responsive') || table.parentElement,
+        tableName: tableName,
+        onSaved: function () { syncTbodyToHeaderOrder(); }
+      });
+    }
+  }
 
-  // 綁定點擊排序
+  // 綁定雙擊排序（避免與拖曳排序衝突）
   headers.forEach(headerLabel => {
-    headerLabel.addEventListener("click", (e) => {
-      e.stopPropagation(); // 防止觸發 col-resizer
-      if (Date.now() < suppressSortClickUntil) return;
+    headerLabel.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      if (e.target.closest('.drag-handle') || e.target.closest('.col-resizer')) return;
       const th = headerLabel.closest("th");
       const fieldName = th?.getAttribute("data-field");
       if (fieldName) handleSort(fieldName);

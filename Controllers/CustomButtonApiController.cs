@@ -4,6 +4,7 @@ using System.Data;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System;
+using System.Text.Json;
 
 [Route("api/[controller]")]
 [ApiController]
@@ -98,6 +99,13 @@ SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CURdOCXItemCustBut
         public string? EditGridTableField { get; set; }
         public int? NeediFlag { get; set; }
         public int? NeediSeqNum { get; set; }
+    }
+
+    public class SaveCustomButtonsDto
+    {
+        public string? ItemId { get; set; }
+        public List<CustomButtonRow> Rows { get; set; } = new();
+        public List<string> DeletedButtonNames { get; set; } = new();
     }
 
     // ===== GET =====
@@ -198,12 +206,39 @@ ORDER BY SerialNum, ButtonName;";
     // ===== POST：同 ItemId 先刪後增 =====
     // POST /api/CustomButtonApi/Save
     [HttpPost("Save")]
-    public async Task<IActionResult> Save([FromBody] List<CustomButtonRow> rows)
+    public async Task<IActionResult> Save([FromBody] JsonElement payload)
     {
-        if (rows == null || rows.Count == 0)
+        var jsonOpts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        List<CustomButtonRow>? rows = null;
+        var deletedButtonNames = new List<string>();
+        string? requestItemId = null;
+        var isLegacyArrayPayload = false;
+
+        try
+        {
+            if (payload.ValueKind == JsonValueKind.Array)
+            {
+                isLegacyArrayPayload = true;
+                rows = JsonSerializer.Deserialize<List<CustomButtonRow>>(payload.GetRawText(), jsonOpts);
+            }
+            else if (payload.ValueKind == JsonValueKind.Object)
+            {
+                var dto = JsonSerializer.Deserialize<SaveCustomButtonsDto>(payload.GetRawText(), jsonOpts) ?? new SaveCustomButtonsDto();
+                rows = dto.Rows;
+                deletedButtonNames = dto.DeletedButtonNames ?? new List<string>();
+                requestItemId = dto.ItemId;
+            }
+        }
+        catch
+        {
+            return BadRequest(new { success = false, message = "invalid payload" });
+        }
+
+        rows ??= new List<CustomButtonRow>();
+        if (rows.Count == 0 && deletedButtonNames.Count == 0)
             return BadRequest(new { success = false, message = "no payload" });
 
-        var itemId = rows[0].ItemId?.Trim();
+        var itemId = rows.Count > 0 ? rows[0].ItemId?.Trim() : requestItemId?.Trim();
         if (string.IsNullOrEmpty(itemId))
             return BadRequest(new { success = false, message = "ItemId required" });
 
@@ -215,21 +250,14 @@ ORDER BY SerialNum, ButtonName;";
         {
             var schema = await DetectSchema(conn, (SqlTransaction)tx);
 
-            // 刪現有
-            var del = new SqlCommand(@"DELETE FROM CURdOCXItemCustButton WHERE ItemId=@itemId;", conn, (SqlTransaction)tx);
-            del.Parameters.AddWithValue("@itemId", itemId);
-            await del.ExecuteNonQueryAsync();
-
-            // 動態 INSERT 欄位
             var cols = new List<string>{
                 "ItemId","SerialNum","ButtonName",
                 "CustCaption","CustHint","OCXName","CoClassName","SpName",
                 "bVisible", schema.ChkCanUpdateCol, "bNeedNum","DesignType"
             };
-            if (schema.HasCaptionE) cols.Insert(4, "CustCaptionE"); // 放在 CustCaption 後
-            if (schema.HasHintE) cols.Insert(schema.HasCaptionE ? 6 : 5, "CustHintE"); // 放在 CustHint 後
+            if (schema.HasCaptionE) cols.Insert(4, "CustCaptionE");
+            if (schema.HasHintE) cols.Insert(schema.HasCaptionE ? 6 : 5, "CustHintE");
 
-            // 擴充欄位（依 schema 動態加入）
             var extStr = new[]{"SearchTemplate","MultiSelectDD","ExecSpName","DialogCaption",
                 "PrintSQL","PrintSp","PrintRptName","GetPohtoSQL","NewPohtoName",
                 "MultiSelDtlSQL","MultiSelDtlDDName","MultiSelDtlKeyName",
@@ -242,86 +270,184 @@ ORDER BY SerialNum, ButtonName;";
             var pCols = new List<string>();
             foreach (var c in cols) pCols.Add("@" + c);
 
+            var setCols = new List<string>();
+            foreach (var c in cols)
+            {
+                if (string.Equals(c, "ItemId", StringComparison.OrdinalIgnoreCase)) continue;
+                if (string.Equals(c, "ButtonName", StringComparison.OrdinalIgnoreCase)) continue;
+                setCols.Add(c);
+            }
+            var setExpr = new List<string>();
+            foreach (var c in setCols) setExpr.Add($"{c}=@{c}");
+
+            var updateSql = $@"
+UPDATE CURdOCXItemCustButton
+   SET {string.Join(",", setExpr)}
+ WHERE ItemId=@ItemId AND ButtonName=@ButtonName;";
             var insertSql = $"INSERT INTO CURdOCXItemCustButton({string.Join(",", cols)}) VALUES({string.Join(",", pCols)});";
+
+            var upd = new SqlCommand(updateSql, conn, (SqlTransaction)tx);
             var ins = new SqlCommand(insertSql, conn, (SqlTransaction)tx);
 
-            // 建參數
-            void Add(string name, SqlDbType type, int size = 0)
+            void Add(SqlCommand cmd, string name, SqlDbType type, int size = 0)
             {
-                if (size > 0) ins.Parameters.Add("@" + name, type, size);
-                else ins.Parameters.Add("@" + name, type);
+                if (size > 0) cmd.Parameters.Add("@" + name, type, size);
+                else cmd.Parameters.Add("@" + name, type);
             }
 
-            Add("ItemId", SqlDbType.VarChar, 16);
-            Add("SerialNum", SqlDbType.Int);
-            Add("ButtonName", SqlDbType.VarChar, 64);
-            Add("CustCaption", SqlDbType.NVarChar, 200);
-            if (schema.HasCaptionE) Add("CustCaptionE", SqlDbType.NVarChar, 200);
-            Add("CustHint", SqlDbType.NVarChar, -1);
-            if (schema.HasHintE) Add("CustHintE", SqlDbType.NVarChar, -1);
-            Add("OCXName", SqlDbType.VarChar, 128);
-            Add("CoClassName", SqlDbType.VarChar, 128);
-            Add("SpName", SqlDbType.VarChar, 128);
-            Add("bVisible", SqlDbType.Int);
-            Add(schema.ChkCanUpdateCol, SqlDbType.Int);
-            Add("bNeedNum", SqlDbType.Int);
-            Add("DesignType", SqlDbType.Int);
-            // 擴充 string 參數
-            foreach (var c in extStr) { if (schema.Has(c)) Add(c, SqlDbType.NVarChar, -1); }
-            // 擴充 int 參數
-            foreach (var c in extInt) { if (schema.Has(c)) Add(c, SqlDbType.Int); }
+            void BuildParams(SqlCommand cmd)
+            {
+                Add(cmd, "ItemId", SqlDbType.VarChar, 16);
+                Add(cmd, "SerialNum", SqlDbType.Int);
+                Add(cmd, "ButtonName", SqlDbType.VarChar, 64);
+                Add(cmd, "CustCaption", SqlDbType.NVarChar, 200);
+                if (schema.HasCaptionE) Add(cmd, "CustCaptionE", SqlDbType.NVarChar, 200);
+                Add(cmd, "CustHint", SqlDbType.NVarChar, -1);
+                if (schema.HasHintE) Add(cmd, "CustHintE", SqlDbType.NVarChar, -1);
+                Add(cmd, "OCXName", SqlDbType.VarChar, 128);
+                Add(cmd, "CoClassName", SqlDbType.VarChar, 128);
+                Add(cmd, "SpName", SqlDbType.VarChar, 128);
+                Add(cmd, "bVisible", SqlDbType.Int);
+                Add(cmd, schema.ChkCanUpdateCol, SqlDbType.Int);
+                Add(cmd, "bNeedNum", SqlDbType.Int);
+                Add(cmd, "DesignType", SqlDbType.Int);
+                foreach (var c in extStr) { if (schema.Has(c)) Add(cmd, c, SqlDbType.NVarChar, -1); }
+                foreach (var c in extInt) { if (schema.Has(c)) Add(cmd, c, SqlDbType.Int); }
+            }
+
+            BuildParams(upd);
+            BuildParams(ins);
+
+            void BindParams(SqlCommand cmd, CustomButtonRow r)
+            {
+                cmd.Parameters["@ItemId"].Value = string.IsNullOrWhiteSpace(r.ItemId) ? itemId : r.ItemId!.Trim();
+                cmd.Parameters["@SerialNum"].Value = (object?)r.SerialNum ?? DBNull.Value;
+                cmd.Parameters["@ButtonName"].Value = (r.ButtonName ?? "").Trim();
+
+                cmd.Parameters["@CustCaption"].Value = DbNull(r.CustCaption);
+                if (schema.HasCaptionE) cmd.Parameters["@CustCaptionE"].Value = DbNull(r.CustCaptionE);
+
+                cmd.Parameters["@CustHint"].Value = DbNull(r.CustHint);
+                if (schema.HasHintE) cmd.Parameters["@CustHintE"].Value = DbNull(r.CustHintE);
+
+                cmd.Parameters["@OCXName"].Value = DbNull(r.OCXName);
+                cmd.Parameters["@CoClassName"].Value = DbNull(r.CoClassName);
+                cmd.Parameters["@SpName"].Value = DbNull(r.SpName);
+
+                cmd.Parameters["@bVisible"].Value = (object?)r.bVisible ?? 0;
+                cmd.Parameters["@" + schema.ChkCanUpdateCol].Value = (object?)r.ChkCanUpdate ?? 0;
+                cmd.Parameters["@bNeedNum"].Value = (object?)r.bNeedNum ?? 0;
+                var designType = r.DesignType ?? 0;
+                cmd.Parameters["@DesignType"].Value = designType;
+
+                if (schema.Has("SearchTemplate")) cmd.Parameters["@SearchTemplate"].Value = designType == 3 ? "" : (r.SearchTemplate ?? "");
+                if (schema.Has("MultiSelectDD")) cmd.Parameters["@MultiSelectDD"].Value = r.MultiSelectDD ?? "";
+                if (schema.Has("ExecSpName")) cmd.Parameters["@ExecSpName"].Value = r.ExecSpName ?? "";
+                if (schema.Has("DialogCaption")) cmd.Parameters["@DialogCaption"].Value = r.DialogCaption ?? "";
+                if (schema.Has("PrintSQL")) cmd.Parameters["@PrintSQL"].Value = r.PrintSQL ?? "";
+                if (schema.Has("PrintSp")) cmd.Parameters["@PrintSp"].Value = r.PrintSp ?? "";
+                if (schema.Has("PrintRptName")) cmd.Parameters["@PrintRptName"].Value = r.PrintRptName ?? "";
+                if (schema.Has("GetPohtoSQL")) cmd.Parameters["@GetPohtoSQL"].Value = r.GetPohtoSQL ?? "";
+                if (schema.Has("NewPohtoName")) cmd.Parameters["@NewPohtoName"].Value = r.NewPohtoName ?? "";
+                if (schema.Has("MultiSelDtlSQL")) cmd.Parameters["@MultiSelDtlSQL"].Value = r.MultiSelDtlSQL ?? "";
+                if (schema.Has("MultiSelDtlDDName")) cmd.Parameters["@MultiSelDtlDDName"].Value = r.MultiSelDtlDDName ?? "";
+                if (schema.Has("MultiSelDtlKeyName")) cmd.Parameters["@MultiSelDtlKeyName"].Value = r.MultiSelDtlKeyName ?? "";
+                if (schema.Has("EditGridTableKind")) cmd.Parameters["@EditGridTableKind"].Value = r.EditGridTableKind ?? "";
+                if (schema.Has("EditGridTableField")) cmd.Parameters["@EditGridTableField"].Value = r.EditGridTableField ?? "";
+                if (schema.Has("bSpHasResult")) cmd.Parameters["@bSpHasResult"].Value = r.bSpHasResult ?? 0;
+                if (schema.Has("AllowSelCount")) cmd.Parameters["@AllowSelCount"].Value = r.AllowSelCount ?? 0;
+                if (schema.Has("ReplaceExists")) cmd.Parameters["@ReplaceExists"].Value = r.ReplaceExists ?? 0;
+                if (schema.Has("bTranByGlobalId")) cmd.Parameters["@bTranByGlobalId"].Value = r.bTranByGlobalId ?? 0;
+                if (schema.Has("iMultiSelUseDtl")) cmd.Parameters["@iMultiSelUseDtl"].Value = r.iMultiSelUseDtl ?? 0;
+                if (schema.Has("iEditGridType")) cmd.Parameters["@iEditGridType"].Value = r.iEditGridType ?? 0;
+                if (schema.Has("NeediFlag")) cmd.Parameters["@NeediFlag"].Value = r.NeediFlag ?? 0;
+                if (schema.Has("NeediSeqNum")) cmd.Parameters["@NeediSeqNum"].Value = r.NeediSeqNum ?? 0;
+            }
+
+            var updated = 0;
+            var inserted = 0;
+            var keepButtonNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var r in rows)
             {
-                ins.Parameters["@ItemId"].Value = r.ItemId ?? itemId;
-                ins.Parameters["@SerialNum"].Value = (object?)r.SerialNum ?? DBNull.Value;
-                ins.Parameters["@ButtonName"].Value = r.ButtonName ?? "";
+                var buttonName = (r.ButtonName ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(buttonName))
+                    continue;
 
-                ins.Parameters["@CustCaption"].Value = DbNull(r.CustCaption);
-                if (schema.HasCaptionE) ins.Parameters["@CustCaptionE"].Value = DbNull(r.CustCaptionE);
+                keepButtonNames.Add(buttonName);
 
-                ins.Parameters["@CustHint"].Value = DbNull(r.CustHint);
-                if (schema.HasHintE) ins.Parameters["@CustHintE"].Value = DbNull(r.CustHintE);
+                BindParams(upd, r);
+                var affected = await upd.ExecuteNonQueryAsync();
+                if (affected > 0)
+                {
+                    updated += affected;
+                    continue;
+                }
 
-                ins.Parameters["@OCXName"].Value = DbNull(r.OCXName);
-                ins.Parameters["@CoClassName"].Value = DbNull(r.CoClassName);
-                ins.Parameters["@SpName"].Value = DbNull(r.SpName);
-
-                ins.Parameters["@bVisible"].Value = (object?)r.bVisible ?? 0;
-                ins.Parameters["@" + schema.ChkCanUpdateCol].Value = (object?)r.ChkCanUpdate ?? 0;
-                ins.Parameters["@bNeedNum"].Value = (object?)r.bNeedNum ?? 0;
-                ins.Parameters["@DesignType"].Value = r.DesignType ?? 0;
-
-                // 擴充 string 欄位賦值（資料庫不允許 NULL，預設空字串）
-                if (schema.Has("SearchTemplate")) ins.Parameters["@SearchTemplate"].Value = r.SearchTemplate ?? "";
-                if (schema.Has("MultiSelectDD")) ins.Parameters["@MultiSelectDD"].Value = r.MultiSelectDD ?? "";
-                if (schema.Has("ExecSpName")) ins.Parameters["@ExecSpName"].Value = r.ExecSpName ?? "";
-                if (schema.Has("DialogCaption")) ins.Parameters["@DialogCaption"].Value = r.DialogCaption ?? "";
-                if (schema.Has("PrintSQL")) ins.Parameters["@PrintSQL"].Value = r.PrintSQL ?? "";
-                if (schema.Has("PrintSp")) ins.Parameters["@PrintSp"].Value = r.PrintSp ?? "";
-                if (schema.Has("PrintRptName")) ins.Parameters["@PrintRptName"].Value = r.PrintRptName ?? "";
-                if (schema.Has("GetPohtoSQL")) ins.Parameters["@GetPohtoSQL"].Value = r.GetPohtoSQL ?? "";
-                if (schema.Has("NewPohtoName")) ins.Parameters["@NewPohtoName"].Value = r.NewPohtoName ?? "";
-                if (schema.Has("MultiSelDtlSQL")) ins.Parameters["@MultiSelDtlSQL"].Value = r.MultiSelDtlSQL ?? "";
-                if (schema.Has("MultiSelDtlDDName")) ins.Parameters["@MultiSelDtlDDName"].Value = r.MultiSelDtlDDName ?? "";
-                if (schema.Has("MultiSelDtlKeyName")) ins.Parameters["@MultiSelDtlKeyName"].Value = r.MultiSelDtlKeyName ?? "";
-                if (schema.Has("EditGridTableKind")) ins.Parameters["@EditGridTableKind"].Value = r.EditGridTableKind ?? "";
-                if (schema.Has("EditGridTableField")) ins.Parameters["@EditGridTableField"].Value = r.EditGridTableField ?? "";
-                // 擴充 int 欄位賦值（資料庫不允許 NULL，預設 0）
-                if (schema.Has("bSpHasResult")) ins.Parameters["@bSpHasResult"].Value = r.bSpHasResult ?? 0;
-                if (schema.Has("AllowSelCount")) ins.Parameters["@AllowSelCount"].Value = r.AllowSelCount ?? 0;
-                if (schema.Has("ReplaceExists")) ins.Parameters["@ReplaceExists"].Value = r.ReplaceExists ?? 0;
-                if (schema.Has("bTranByGlobalId")) ins.Parameters["@bTranByGlobalId"].Value = r.bTranByGlobalId ?? 0;
-                if (schema.Has("iMultiSelUseDtl")) ins.Parameters["@iMultiSelUseDtl"].Value = r.iMultiSelUseDtl ?? 0;
-                if (schema.Has("iEditGridType")) ins.Parameters["@iEditGridType"].Value = r.iEditGridType ?? 0;
-                if (schema.Has("NeediFlag")) ins.Parameters["@NeediFlag"].Value = r.NeediFlag ?? 0;
-                if (schema.Has("NeediSeqNum")) ins.Parameters["@NeediSeqNum"].Value = r.NeediSeqNum ?? 0;
-
+                BindParams(ins, r);
                 await ins.ExecuteNonQueryAsync();
+                inserted++;
+            }
+
+            var deleted = 0;
+            if (isLegacyArrayPayload)
+            {
+                var del = new SqlCommand();
+                del.Connection = conn;
+                del.Transaction = (SqlTransaction)tx;
+                del.Parameters.AddWithValue("@itemId", itemId);
+
+                var deleteSql = "DELETE FROM CURdOCXItemCustButton WHERE ItemId=@itemId";
+                if (keepButtonNames.Count > 0)
+                {
+                    var inParams = new List<string>();
+                    var idx = 0;
+                    foreach (var b in keepButtonNames)
+                    {
+                        var p = "@k" + idx++;
+                        inParams.Add(p);
+                        del.Parameters.Add(p, SqlDbType.VarChar, 64).Value = b;
+                    }
+                    deleteSql += $" AND ButtonName NOT IN ({string.Join(",", inParams)})";
+                }
+                del.CommandText = deleteSql;
+                deleted = await del.ExecuteNonQueryAsync();
+            }
+            else
+            {
+                var deleteSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var name in deletedButtonNames)
+                {
+                    var n = (name ?? "").Trim();
+                    if (!string.IsNullOrWhiteSpace(n))
+                        deleteSet.Add(n);
+                }
+                foreach (var kept in keepButtonNames)
+                    deleteSet.Remove(kept);
+
+                if (deleteSet.Count > 0)
+                {
+                    var del = new SqlCommand();
+                    del.Connection = conn;
+                    del.Transaction = (SqlTransaction)tx;
+                    del.Parameters.AddWithValue("@itemId", itemId);
+
+                    var inParams = new List<string>();
+                    var idx = 0;
+                    foreach (var b in deleteSet)
+                    {
+                        var p = "@d" + idx++;
+                        inParams.Add(p);
+                        del.Parameters.Add(p, SqlDbType.VarChar, 64).Value = b;
+                    }
+
+                    del.CommandText = $"DELETE FROM CURdOCXItemCustButton WHERE ItemId=@itemId AND ButtonName IN ({string.Join(",", inParams)});";
+                    deleted = await del.ExecuteNonQueryAsync();
+                }
             }
 
             await tx.CommitAsync();
-            return Ok(new { success = true, count = rows.Count });
+            return Ok(new { success = true, count = rows.Count, updated, inserted, deleted });
         }
         catch (Exception ex)
         {
@@ -489,11 +615,192 @@ UPDATE CURdOCXSearchParams
         }
     }
 
+    [HttpPost("SaveInsertKeys")]
+    public async Task<IActionResult> SaveInsertKeys([FromBody] SaveInsertKeysBatchDto batch)
+    {
+        if (batch == null || string.IsNullOrWhiteSpace(batch.ItemId)
+            || string.IsNullOrWhiteSpace(batch.ButtonName)
+            || batch.Rows == null)
+            return BadRequest(new { success = false, message = "ItemId, ButtonName, Rows required" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+        try
+        {
+            var del = new SqlCommand(
+                "DELETE FROM CURdOCXItmCusBtnInsKey WHERE ItemId=@id AND ButtonName=@btn;",
+                conn, (SqlTransaction)tx);
+            del.Parameters.AddWithValue("@id", batch.ItemId);
+            del.Parameters.AddWithValue("@btn", batch.ButtonName);
+            await del.ExecuteNonQueryAsync();
+
+            if (batch.Rows.Count > 0)
+            {
+                var ins = new SqlCommand(@"
+INSERT INTO CURdOCXItmCusBtnInsKey(ItemId,ButtonName,KeyFieldName,SeqNum,PositionType)
+VALUES(@ItemId,@ButtonName,@KeyFieldName,@SeqNum,@PositionType);", conn, (SqlTransaction)tx);
+                ins.Parameters.Add("@ItemId", SqlDbType.VarChar, 16);
+                ins.Parameters.Add("@ButtonName", SqlDbType.VarChar, 64);
+                ins.Parameters.Add("@KeyFieldName", SqlDbType.NVarChar, 128);
+                ins.Parameters.Add("@SeqNum", SqlDbType.Int);
+                ins.Parameters.Add("@PositionType", SqlDbType.Int);
+
+                foreach (var r in batch.Rows)
+                {
+                    ins.Parameters["@ItemId"].Value = batch.ItemId;
+                    ins.Parameters["@ButtonName"].Value = batch.ButtonName;
+                    ins.Parameters["@KeyFieldName"].Value = r.KeyFieldName ?? "";
+                    ins.Parameters["@SeqNum"].Value = r.SeqNum ?? 0;
+                    ins.Parameters["@PositionType"].Value = r.PositionType ?? 0;
+                    await ins.ExecuteNonQueryAsync();
+                }
+            }
+
+            await tx.CommitAsync();
+            return Ok(new { success = true, count = batch.Rows.Count });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPost("SaveCallSpParams")]
+    public async Task<IActionResult> SaveCallSpParams([FromBody] SaveCallSpParamsBatchDto batch)
+    {
+        if (batch == null || string.IsNullOrWhiteSpace(batch.ItemId)
+            || string.IsNullOrWhiteSpace(batch.ButtonName)
+            || batch.Rows == null)
+            return BadRequest(new { success = false, message = "ItemId, ButtonName, Rows required" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+        try
+        {
+            var del = new SqlCommand(
+                "DELETE FROM CURdOCXItmCusBtnParam WHERE ItemId=@id AND ButtonName=@btn;",
+                conn, (SqlTransaction)tx);
+            del.Parameters.AddWithValue("@id", batch.ItemId);
+            del.Parameters.AddWithValue("@btn", batch.ButtonName);
+            await del.ExecuteNonQueryAsync();
+
+            if (batch.Rows.Count > 0)
+            {
+                var ins = new SqlCommand(@"
+INSERT INTO CURdOCXItmCusBtnParam(ItemId,ButtonName,SeqNum,TableKind,ParamFieldName,ParamType)
+VALUES(@ItemId,@ButtonName,@SeqNum,@TableKind,@ParamFieldName,@ParamType);", conn, (SqlTransaction)tx);
+                ins.Parameters.Add("@ItemId", SqlDbType.VarChar, 16);
+                ins.Parameters.Add("@ButtonName", SqlDbType.VarChar, 64);
+                ins.Parameters.Add("@SeqNum", SqlDbType.Int);
+                ins.Parameters.Add("@TableKind", SqlDbType.NVarChar, 128);
+                ins.Parameters.Add("@ParamFieldName", SqlDbType.NVarChar, 128);
+                ins.Parameters.Add("@ParamType", SqlDbType.Int);
+
+                foreach (var r in batch.Rows)
+                {
+                    ins.Parameters["@ItemId"].Value = batch.ItemId;
+                    ins.Parameters["@ButtonName"].Value = batch.ButtonName;
+                    ins.Parameters["@SeqNum"].Value = r.SeqNum ?? 0;
+                    ins.Parameters["@TableKind"].Value = r.TableKind ?? "";
+                    ins.Parameters["@ParamFieldName"].Value = r.ParamFieldName ?? "";
+                    ins.Parameters["@ParamType"].Value = r.ParamType ?? 0;
+                    await ins.ExecuteNonQueryAsync();
+                }
+            }
+
+            await tx.CommitAsync();
+            return Ok(new { success = true, count = batch.Rows.Count });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPost("SaveTranParams")]
+    public async Task<IActionResult> SaveTranParams([FromBody] SaveTranParamsBatchDto batch)
+    {
+        if (batch == null || string.IsNullOrWhiteSpace(batch.ItemId)
+            || string.IsNullOrWhiteSpace(batch.ButtonName)
+            || batch.Rows == null)
+            return BadRequest(new { success = false, message = "ItemId, ButtonName, Rows required" });
+
+        await using var conn = new SqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+        try
+        {
+            var del = new SqlCommand(
+                "DELETE FROM CURdOCXItmCusBtnTranPm WHERE ItemId=@id AND ButtonName=@btn;",
+                conn, (SqlTransaction)tx);
+            del.Parameters.AddWithValue("@id", batch.ItemId);
+            del.Parameters.AddWithValue("@btn", batch.ButtonName);
+            await del.ExecuteNonQueryAsync();
+
+            if (batch.Rows.Count > 0)
+            {
+                var ins = new SqlCommand(@"
+INSERT INTO CURdOCXItmCusBtnTranPm(ItemId,ButtonName,SeqNum,TableKind,ParamFieldName,ParamType)
+VALUES(@ItemId,@ButtonName,@SeqNum,@TableKind,@ParamFieldName,@ParamType);", conn, (SqlTransaction)tx);
+                ins.Parameters.Add("@ItemId", SqlDbType.VarChar, 16);
+                ins.Parameters.Add("@ButtonName", SqlDbType.VarChar, 64);
+                ins.Parameters.Add("@SeqNum", SqlDbType.Int);
+                ins.Parameters.Add("@TableKind", SqlDbType.NVarChar, 128);
+                ins.Parameters.Add("@ParamFieldName", SqlDbType.NVarChar, 128);
+                ins.Parameters.Add("@ParamType", SqlDbType.Int);
+
+                foreach (var r in batch.Rows)
+                {
+                    ins.Parameters["@ItemId"].Value = batch.ItemId;
+                    ins.Parameters["@ButtonName"].Value = batch.ButtonName;
+                    ins.Parameters["@SeqNum"].Value = r.SeqNum ?? 0;
+                    ins.Parameters["@TableKind"].Value = r.TableKind ?? "";
+                    ins.Parameters["@ParamFieldName"].Value = r.ParamFieldName ?? "";
+                    ins.Parameters["@ParamType"].Value = r.ParamType ?? 0;
+                    await ins.ExecuteNonQueryAsync();
+                }
+            }
+
+            await tx.CommitAsync();
+            return Ok(new { success = true, count = batch.Rows.Count });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
     public class SaveSearchParamsBatchDto
     {
         public string? ItemId { get; set; }
         public string? ButtonName { get; set; }
         public List<SearchParamRow> Rows { get; set; } = new();
+    }
+
+    public class SaveInsertKeysBatchDto
+    {
+        public string? ItemId { get; set; }
+        public string? ButtonName { get; set; }
+        public List<InsKeyRow> Rows { get; set; } = new();
+    }
+
+    public class SaveCallSpParamsBatchDto
+    {
+        public string? ItemId { get; set; }
+        public string? ButtonName { get; set; }
+        public List<CallSpParamRow> Rows { get; set; } = new();
+    }
+
+    public class SaveTranParamsBatchDto
+    {
+        public string? ItemId { get; set; }
+        public string? ButtonName { get; set; }
+        public List<TranParamRow> Rows { get; set; } = new();
     }
 
     // ====== DTOs ======

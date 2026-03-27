@@ -52,24 +52,30 @@
     private string DisplayVal(IDictionary<string, object?> row, CURdTableField field, IDictionary<string, TableDictionaryService.OCXLookupMap> lookupMap)
     {
         var raw = GetValue(row, field.FieldName);
-        var rawStr = raw?.ToString() ?? "";
 
         if (field.FieldName != null && lookupMap.TryGetValue(field.FieldName, out var lk))
         {
-            var key = rawStr;
-            if (!string.IsNullOrWhiteSpace(lk.KeyFieldName))
+            if (lk.IsCompositeKey)
             {
-                var other = GetValue(row, lk.KeyFieldName);
-                if (other != null) key = other.ToString() ?? key;
+                // 複合鍵：用 Unit Separator 串接各 key 欄位值來查找
+                var compositeKey = string.Join("\x1f",
+                    lk.KeySelfNames.Select(k => GetValue(row, k)?.ToString()?.Trim() ?? ""));
+                if (lk.CompositeLookupValues.TryGetValue(compositeKey, out var compositeDisplay))
+                    return compositeDisplay;
             }
-            if (!string.IsNullOrWhiteSpace(lk.KeySelfName))
+            else
             {
-                var other = GetValue(row, lk.KeySelfName);
-                if (other != null) key = other.ToString() ?? key;
+                // 單一鍵：先用欄位本身的值查找
+                var keyVal = raw?.ToString()?.Trim() ?? "";
+                // 若欄位本身無值（非實體欄位），改用 KeySelfName 欄位的值查找
+                if (string.IsNullOrEmpty(keyVal) && !string.IsNullOrWhiteSpace(lk.KeySelfName))
+                {
+                    var keySelfVal = GetValue(row, lk.KeySelfName);
+                    keyVal = keySelfVal?.ToString()?.Trim() ?? "";
+                }
+                if (lk.LookupValues.TryGetValue(keyVal, out var display))
+                    return display;
             }
-
-            if (!string.IsNullOrWhiteSpace(key) && lk.LookupValues != null && lk.LookupValues.TryGetValue(key, out var mapped))
-                return mapped ?? rawStr;
         }
 
         return FormatValue(raw);
@@ -343,10 +349,10 @@
         applyWidth(drag.idx, newW, drag.field);
     });
 
-    // 排序：點擊表頭
+    // 排序：雙擊表頭（動態刷新，不整頁重載）
     grid.querySelectorAll('thead th.sortable-header').forEach(th => {
-        th.addEventListener('click', (e) => {
-            if (e.target.closest('.col-resizer')) return;
+        th.addEventListener('dblclick', async (e) => {
+            if (e.target.closest('.col-resizer') || e.target.closest('.drag-handle')) return;
             const field = th.dataset.field;
             const dir = th.dataset.sortDir || 'asc';
             const tabKey = th.dataset.tabKey;
@@ -356,30 +362,52 @@
             url.searchParams.set(`sortBy_${tabKey}`, field);
             url.searchParams.set(`sortDir_${tabKey}`, dir);
             url.searchParams.set(`pageIndex_${tabKey}`, '1');
-            window.location.href = url.toString();
+            // 動態刷新：fetch 頁面後抽取對應 tab-pane 的內容替換
+            try {
+                const resp = await fetch(url.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                if (!resp.ok) { window.location.href = url.toString(); return; }
+                const html = await resp.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                const newPane = doc.querySelector(`#tab-${tabKey}`);
+                const currentPane = document.getElementById(`tab-${tabKey}`);
+                if (newPane && currentPane) {
+                    currentPane.innerHTML = newPane.innerHTML;
+                    // 更新 URL 但不重載
+                    history.replaceState({}, '', url.toString());
+                    // 重新執行 tab 內的 script
+                    currentPane.querySelectorAll('script').forEach(oldScript => {
+                        const newScript = document.createElement('script');
+                        newScript.textContent = oldScript.textContent;
+                        oldScript.parentNode.replaceChild(newScript, oldScript);
+                    });
+                } else {
+                    window.location.href = url.toString();
+                }
+            } catch {
+                window.location.href = url.toString();
+            }
         });
     });
 
-    document.addEventListener('mouseup', async () => {
+    document.addEventListener('mouseup', () => {
         if (!drag) return;
         document.body.style.cursor = '';
-        const width = drag.th.getBoundingClientRect().width;
-        const field = drag.field;
         drag = null;
-        if (!tableName || !field) return;
-        try {
-            await fetch("/api/DictSetupApi/FieldWidth/Save", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    tableName: tableName,
-                    fieldName: field,
-                    widthPx: Math.round(width)
-                })
-            });
-        } catch (err) {
-            console.warn("save width failed", err);
-        }
+        // 欄寬不自動儲存，按 F9 統一儲存順序及寬度
     });
+    // 欄位拖曳排序
+    if (window.initColumnDragSort) {
+        const hRow = grid.querySelector('thead tr');
+        if (hRow) {
+            initColumnDragSort({
+                headerRow: hRow,
+                tbody: grid.querySelector('tbody'),
+                scrollWrap: grid.closest('.table-responsive') || grid.parentElement,
+                tableName: tableName,
+                onSaved: null
+            });
+        }
+    }
 })();
 </script>

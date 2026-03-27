@@ -199,7 +199,7 @@ namespace PcbErpApi.Pages.EMOdProdLayer
                 ViewData["LookupDisplayMap"] = LookupDisplayHelper.BuildLookupDisplayMap(
                     Items,
                     lookupMaps,
-                    item => GetDictValue(item, "PartNum")
+                    item => GetDictValue(item, "PartNum") ?? ""
                 );
             }
             catch (Exception ex)

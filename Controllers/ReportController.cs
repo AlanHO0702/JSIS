@@ -37,6 +37,10 @@ namespace PcbErpApi.Controllers
             {
                 cmd.CommandType = CommandType.StoredProcedure;
                 cmd.CommandText = req.SpName;
+                await conn.OpenAsync();
+                // 確保日期格式為 ymd，避免 yyyy/MM/dd 被錯誤解讀
+                using (var dfCmd = new SqlCommand("SET DATEFORMAT ymd", conn))
+                    await dfCmd.ExecuteNonQueryAsync();
                 if (req.Params != null)
                 {
                     var spParamTypes = GetSpParamTypes(connStr, req.SpName);
@@ -44,10 +48,12 @@ namespace PcbErpApi.Controllers
                     {
                         var value = ToDbValue(kv.Value);
                         if (value is string s && s == "" &&
-                            spParamTypes.TryGetValue("@" + kv.Key, out var typeName) &&
-                            IsIntegerType(typeName))
+                            spParamTypes.TryGetValue("@" + kv.Key, out var typeName))
                         {
-                            value = 255;
+                            if (IsIntegerType(typeName))
+                                value = 255;
+                            else if (IsDateType(typeName))
+                                value = DBNull.Value;
                         }
                         cmd.Parameters.Add(new SqlParameter("@" + kv.Key, value ?? DBNull.Value));
                         resolvedParams[kv.Key] = value ?? DBNull.Value;
@@ -56,13 +62,17 @@ namespace PcbErpApi.Controllers
                 else if (!string.IsNullOrWhiteSpace(req.PaperNum))
                     cmd.Parameters.Add(new SqlParameter("@PaperNum", ToDbValue(req.PaperNum)));
 
-                await conn.OpenAsync();
                 await cmd.ExecuteNonQueryAsync();
             }
 
             // 2) POST 到 CrystalReportsAPI，拿 PDF blob 回來
             // 使用已套用 255 轉換的參數，確保報表與資料畫面條件一致
-            var reportParams = resolvedParams.Count > 0 ? resolvedParams : (req.Params ?? new Dictionary<string, object>());
+            // DBNull 轉 null（避免序列化成 {} 導致 CrystalReports 型別不符）
+            var reportParams = resolvedParams.Count > 0
+                ? resolvedParams.ToDictionary(
+                    kv => kv.Key,
+                    kv => kv.Value == DBNull.Value ? null : kv.Value)!
+                : (req.Params ?? new Dictionary<string, object>());
             var renderPayload = new {
                 reportName = req.ReportName,
                 format = "pdf",
@@ -162,6 +172,10 @@ SELECT SerialNum, ItemName, Enabled, ClassName, ObjectName
             using var conn = new SqlConnection(connStr);
             await conn.OpenAsync();
 
+            // 確保日期格式為 ymd，避免 yyyy/MM/dd 被錯誤解讀
+            using (var dfCmd = new SqlCommand("SET DATEFORMAT ymd", conn))
+                await dfCmd.ExecuteNonQueryAsync();
+
             using var cmd = new SqlCommand(req.SpName, conn)
             {
                 CommandType = CommandType.StoredProcedure,
@@ -177,12 +191,14 @@ SELECT SerialNum, ItemName, Enabled, ClassName, ObjectName
                 foreach (var kv in req.Params)
                 {
                     var value = ToDbValue(kv.Value);
-                    // 空字串 + 數值型別 → 255
+                    // 空字串 + 數值型別 → 255；空字串 + 日期型別 → DBNull
                     if (value is string s && s == "" &&
-                        spParamTypes.TryGetValue("@" + kv.Key, out var typeName) &&
-                        IsIntegerType(typeName))
+                        spParamTypes.TryGetValue("@" + kv.Key, out var typeName))
                     {
-                        value = 255;
+                        if (IsIntegerType(typeName))
+                            value = 255;
+                        else if (IsDateType(typeName))
+                            value = DBNull.Value;
                     }
                     var p = new SqlParameter("@" + kv.Key, value ?? DBNull.Value);
                     cmd.Parameters.Add(p);
@@ -501,6 +517,11 @@ WHERE ItemId = @itemId AND UserId = @userId AND SubName = @subName;", itemId, us
 
         private static bool IsIntegerType(string typeName) => _integerTypes.Contains(typeName);
 
+        private static readonly HashSet<string> _dateTypes = new(StringComparer.OrdinalIgnoreCase)
+            { "Date", "DateTime", "DateTime2", "SmallDateTime", "DateTimeOffset" };
+
+        private static bool IsDateType(string typeName) => _dateTypes.Contains(typeName);
+
         private static Dictionary<string, string> GetSpParamTypes(string connStr, string spName)
         {
             var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -544,10 +565,10 @@ WHERE ItemId = @itemId AND UserId = @userId AND SubName = @subName;", itemId, us
                 case System.Text.Json.JsonValueKind.String:
                 {
                     var s = je.GetString() ?? string.Empty;        // ← 保留空字串
-                    // 日期欄位前端已經送 null（不是空字串），所以這裡只要能 parse 再轉 DateTime
-                    if (!string.IsNullOrEmpty(s) && DateTime.TryParse(s, out var dt))
-                        return dt;
-                    return s; // 其餘當成 nvarchar 傳入（包括空字串）
+                    // HTML <input type="date"> 送 yyyy-MM-dd，但 SP 期望 yyyy/MM/dd
+                    if (System.Text.RegularExpressions.Regex.IsMatch(s, @"^\d{4}-\d{2}-\d{2}$"))
+                        return s.Replace('-', '/');
+                    return s;
                 }
 
                 case System.Text.Json.JsonValueKind.Number:

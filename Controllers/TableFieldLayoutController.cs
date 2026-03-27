@@ -303,6 +303,13 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         if (!string.IsNullOrWhiteSpace(cond2Field) && (!IsValidCol(cond2Field) || cond2Field.Contains(',')))
             return BadRequest("Invalid column!");
 
+        var keyFields = key.Split(',')
+            .Select(x => x.Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToArray();
+        if (keyFields.Length == 0)
+            return BadRequest("Invalid column!");
+
         var resultFields = result.Split(',').Select(x => $"[{x.Trim()}]").ToArray();
         string selectResult = string.Join(", ", resultFields.Select((col, idx) => $"{col} as [result{idx}]"));
         var whereList = new List<string>();
@@ -311,7 +318,23 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         if (!string.IsNullOrWhiteSpace(cond2Field) && !string.IsNullOrWhiteSpace(cond2Value))
             whereList.Add($"[{cond2Field.Trim()}] = @cond2Value");
         var whereSql = whereList.Count > 0 ? $" WHERE {string.Join(" AND ", whereList)}" : "";
-        var sql = $"SELECT [{key.Trim()}] as [key], {selectResult} FROM [{table.Trim()}]{whereSql}";
+
+        // ★ 支援複合鍵：key 可以是逗號分隔的多個欄位（如 "AccId,SubAccId"）
+        bool isCompositeKey = keyFields.Length > 1;
+        string selectKey;
+
+        if (isCompositeKey)
+        {
+            // 複合鍵：各欄位用 CHAR(31)（Unit Separator）串接成一個 key
+            var concatParts = string.Join($" + CHAR(31) + ", keyFields.Select(k => $"ISNULL(RTRIM([{k}]),'')"));
+            selectKey = $"({concatParts}) as [key]";
+        }
+        else
+        {
+            selectKey = $"[{keyFields[0]}] as [key]";
+        }
+
+        var sql = $"SELECT {selectKey}, {selectResult} FROM [{table.Trim()}]{whereSql}";
 
         var list = new List<Dictionary<string, object>>();
         using (var conn = new SqlConnection(_connStr))
@@ -327,7 +350,18 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
                 while (await reader.ReadAsync())
                 {
                     var row = new Dictionary<string, object>();
-                    row["key"] = reader["key"];
+                    if (keyFields.Length == 1)
+                    {
+                        row["key"] = reader["key"];
+                    }
+                    else
+                    {
+                        // 複合鍵：SQL 已用 CHAR(31) 串接成單一 [key] 欄位，直接讀取即可
+                        var compositeKey = reader["key"]?.ToString() ?? "";
+                        if (string.IsNullOrWhiteSpace(compositeKey))
+                            continue;
+                        row["key"] = compositeKey;
+                    }
                     for (int i = 0; i < resultFields.Length; i++)
                         row[$"result{i}"] = reader[$"result{i}"];
                     list.Add(row);

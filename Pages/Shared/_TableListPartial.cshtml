@@ -31,7 +31,7 @@
     .table-list-page .container { max-width: 100%; }
     .table-list-page .title-row { display: flex; justify-content: space-between; align-items: flex-end; }
     .table-list-page .order-count { font-size: var(--field-value-size); color: #666; margin-bottom: 6px; }
-    .table-list-page .table { box-shadow: 0 2px 12px 0 #c3d4e6; border-radius: 16px; overflow: hidden; background: #fff; }
+    .table-list-page .table { box-shadow: 0 2px 12px 0 #c3d4e6; border-radius: 16px; overflow: hidden; background: #fff; table-layout: fixed; }
     .table-list-page .table th, .table-list-page .table td {
         vertical-align: middle !important;
         white-space: nowrap;
@@ -46,6 +46,18 @@
         background: linear-gradient(90deg, #e8f2fe 0%, #f3f8ff 100%);
         color: #2056ac; letter-spacing: 2px; font-weight: 600; font-size: var(--field-label-size);
         border-bottom: 2px solid #bdd2f7; padding: 2px 10px;
+        user-select: none;
+    }
+    .table-list-page .table th .sort-indicator {
+        font-size: 0.75em; color: #3a72d9; vertical-align: middle;
+    }
+    .table-list-page .table th { position: relative; }
+    .table-list-page .table th .col-resizer {
+        position: absolute; right: 0; top: 0; bottom: 0; width: 5px;
+        cursor: col-resize; z-index: 2;
+    }
+    .table-list-page .table th .col-resizer:hover {
+        background: rgba(58,114,217,0.3);
     }
     .table-list-page .table td { font-size: var(--field-value-size); }
     .table-list-page .table tbody tr { transition: background .15s; }
@@ -59,12 +71,28 @@
     .table-list-page .pagination .page-item.active .page-link { background: #3a72d9; color: #fff; border: none; }
     .table-list-page .pagination .page-item.disabled .page-link { color: #aaa; pointer-events: none; background: #f1f4f8; }
     .table-list-page .table-wrap {
-        max-width: 100%; /* 不會超過container寬 */
-        overflow-x: auto; /* 超過寬度自動出現橫向捲軸 */
-        margin: 0 auto; /* 水平置中 */
-        background: #fff; /* 可視需求 */
+        max-width: 100%;
+        overflow-x: auto;
+        margin: 0 auto;
+        background: #fff;
         border-radius: 16px;
         box-shadow: 0 2px 12px 0 #c3d4e6;
+        scrollbar-width: none;           /* Firefox 隱藏原生捲軸 */
+    }
+    .table-list-page .table-wrap::-webkit-scrollbar {
+        display: none;                   /* Chrome/Safari 隱藏原生捲軸 */
+    }
+    .table-list-page .table-hscroll-bottom {
+        position: sticky;
+        bottom: 0;
+        z-index: 100;
+        overflow-x: auto;
+        overflow-y: hidden;
+        background: #fff;
+        border-top: 1px solid #eaeef4;
+    }
+    .table-list-page .table-hscroll-bottom .hscroll-spacer {
+        height: 1px;
     }
     .table-list-page .table {
         min-width: 1200px; /* 最小寬，根據欄位數量調整 */
@@ -75,6 +103,8 @@
     }
     .table-list-page .highlight { background-color: #ffd !important; }
     .table-list-page .ghost { opacity: 0.5; }
+
+    /* 拖曳排序樣式由 columnDragSort.css 提供 */
     .table-list-page #search-panel {
     background: #f8fafb;
     border-radius: 10px;
@@ -88,22 +118,6 @@
         font-size: 0.93em;
         color: #286bb5;
     }
-    .table-list-page .table-hscroll-proxy{
-    position: sticky; /* 黏在視窗頂端 */
-    top: 0;               /* 如果上面有固定工具列，改成相對高度 */
-    z-index: 100; /* 比表頭更高，避免被蓋住 */
-    background: #fff;     /* 看起來乾淨 */
-    }
-
-    .table-list-page .hscroll-track{
-    height: 14px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-gutter: stable both-edges; /* 留出滾動條空間，避免忽隱忽現 */
-    border-bottom: 1px solid #eaeef4;
-    }
-
-    .table-list-page .hscroll-spacer{ height: 1px; }  /* 只負責撐寬度 */
 
     .table-list-page .toolbar-count-box{
         display: inline-flex;
@@ -149,20 +163,27 @@
         </span>
     </div>
 
-    <div class="table-hscroll-proxy" id="tableHScrollTop">
-    <div class="hscroll-track" id="hscrollTop">
-        <div class="hscroll-spacer" id="hscrollSpacer"></div>
-    </div>
-    </div>
-
     <div class="table-wrap">
         <table class="table table-hover align-middle text-center">
             <thead>
                 <tr id="table-header-row">
                     @foreach (var field in fields)
                     {
-                         <th class="sortable" draggable="true" data-field="@field.FieldName" data-serial="@field.SerialNum">
-                            @(string.IsNullOrWhiteSpace(field.DisplayLabel) ? field.FieldName : field.DisplayLabel)
+                        var widthPx = field.DisplaySize.HasValue && field.DisplaySize.Value > 0
+                            ? field.DisplaySize.Value * 10 : (int?)null;
+                        var widthStyle = widthPx.HasValue
+                            ? $"width:{widthPx}px;min-width:{widthPx}px;max-width:{widthPx}px;" : "";
+                        var dtLower = (field.DataType ?? "").Trim().ToLowerInvariant();
+                        var isNum = dtLower == "number"
+                            || dtLower.StartsWith("decimal") || dtLower.StartsWith("numeric")
+                            || dtLower.StartsWith("money") || dtLower.StartsWith("smallmoney")
+                            || dtLower.StartsWith("float") || dtLower.StartsWith("real")
+                            || dtLower.StartsWith("int") || dtLower.StartsWith("smallint")
+                            || dtLower.StartsWith("tinyint") || dtLower.StartsWith("bigint");
+                        var alignStyle = isNum ? "text-align:right;" : "text-align:left;";
+                         <th class="sortable" data-field="@field.FieldName" data-serial="@field.SerialNum" style="@widthStyle">
+                            <span class="drag-handle">☰</span>@(string.IsNullOrWhiteSpace(field.DisplayLabel) ? field.FieldName : field.DisplayLabel)
+                            <span class="col-resizer"></span>
                         </th>
                     }
                 </tr>
@@ -170,16 +191,18 @@
             <tbody id="dataTbody">
                 </tbody>
         </table>
-    <div class="pagination-bar" id="paginationBar"> 
+    </div>
+    <div class="table-hscroll-bottom" id="hscrollBottom">
+        <div class="hscroll-spacer" id="hscrollSpacer"></div>
+    </div>
+    <div class="pagination-bar" id="paginationBar">
         @if (paginationVm != null) { @await Html.PartialAsync("_Pagination", paginationVm) }
     </div>
-</div>
 </div>
 </div>
 
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
 <script>
   (function () {
@@ -236,6 +259,10 @@
 let selectedPaperNum = null;
 const addApiUrl = '@addApiUrl';
 const detailRouteTemplate = '@detailRouteTemplate';
+
+// 排序狀態
+let currentSortField = null;
+let currentSortDir = null;
 const http = (url, init, msg) =>
   (window.busyFetch ? window.busyFetch(url, init, msg) : fetch(url, init));
 
@@ -427,6 +454,7 @@ function renderTable(data) {
     tr.setAttribute('data-paper-num', keyValue);
 
     fields.forEach(field => {
+      const isCheckbox = (field.ComboStyle ?? 0) === 1;
       let valStr = "";
       if (keyValue && lookupMapData?.[keyValue]?.[field.FieldName]) {
         valStr = lookupMapData[keyValue][field.FieldName];
@@ -435,7 +463,35 @@ function renderTable(data) {
         valStr = formatCell(field, raw);
       }
       const td = document.createElement('td');
-      td.innerHTML = valStr ?? "";
+
+      if (isCheckbox) {
+        const raw = item[field.FieldName];
+        const checked = String(raw) === '1' || raw === true;
+        td.style.textAlign = 'center';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'form-check-input checkbox-dark';
+        cb.disabled = true;
+        cb.tabIndex = -1;
+        if (checked) cb.checked = true;
+        td.appendChild(cb);
+      } else {
+        td.innerHTML = valStr ?? "";
+      }
+
+      // 數值欄位靠右，字串欄位靠左
+      const dt = (field.DataType || '').toLowerCase();
+      if (!isCheckbox) {
+        if (dt === 'number' || dt.startsWith('decimal') || dt.startsWith('numeric')
+            || dt.startsWith('money') || dt.startsWith('smallmoney')
+            || dt.startsWith('float') || dt.startsWith('real')
+            || dt.startsWith('int') || dt.startsWith('smallint')
+            || dt.startsWith('tinyint') || dt.startsWith('bigint')) {
+          td.style.textAlign = 'right';
+        } else {
+          td.style.textAlign = 'left';
+        }
+      }
 
       // 根據辭典的 FieldLen 設定欄位寬度
       if (field.FieldLen && field.FieldLen > 0) {
@@ -648,7 +704,9 @@ function doQuery(page = 1, direction = null) {
     table: tableName,
     itemId: itemId,
     filters: filters,
-    skipLookup: skipLookup
+    skipLookup: skipLookup,
+    sortBy: currentSortField || null,
+    sortDir: currentSortDir || null
   };
 
   // 🔥 如果有 Cursor 快取，使用 Keyset Pagination
@@ -660,12 +718,22 @@ function doQuery(page = 1, direction = null) {
     requestBody.direction = direction;
   }
 
+  if (requestBody.sortBy) {
+    console.log('[排序] sortBy:', requestBody.sortBy, 'sortDir:', requestBody.sortDir);
+  }
+
   http('/api/DynamicTable/PagedQuery', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(requestBody)
   }, '讀取資料中…')
-    .then(r => r.json())
+    .then(r => {
+      if (!r.ok) return r.json().catch(() => r.text()).then(body => {
+        const msg = (body && body.error) ? body.error : (typeof body === 'string' ? body : '查詢失敗');
+        throw new Error(msg);
+      });
+      return r.json();
+    })
     .then(result => {
       // 如果後端有回傳 lookup 資料，存入快取（含完整資料）
       if (result.lookupMapData && Object.keys(result.lookupMapData).length > 0) {
@@ -814,25 +882,135 @@ document.addEventListener("DOMContentLoaded", function () {
       if (formEl && Array.isArray(saved) && saved.length) restoreSearchFormSafe(formEl, saved);
   });
 
+  /* ========= 欄位拖曳排序（使用共用模組） ========= */
   const headerRow = document.getElementById("table-header-row");
-  if (headerRow && window.Sortable) {
-    Sortable.create(headerRow, {
-      animation: 150,
-      swap: true,
-      swapClass: 'highlight',
-      ghostClass: 'ghost',
-      onEnd: function () {
-        const newOrder = Array.from(headerRow.children).map((th, index) => ({
-          fieldName: th.dataset.field, serialNum: index + 1
-        }));
-        http('/api/TableFieldLayout/SaveSerialOrder', {
-           method: 'POST',
+  if (headerRow && window.initColumnDragSort) {
+    initColumnDragSort({
+      headerRow:   headerRow,
+      tbody:       document.getElementById('dataTbody'),
+      scrollWrap:  headerRow.closest('.table-wrap'),
+      scrollSync:  document.getElementById('hscrollBottom'),
+      tableName:   window._tableName,
+      fieldsArray: window._tableFields,
+      onSaved:     () => doQuery(currentPage),
+      fetchFn:     http
+    });
+  }
+
+  // 解析虛擬欄位對應的實體排序欄位
+  function resolveSortField(fieldName) {
+    const fields = window._tableFields || [];
+    const fieldDef = fields.find(f => f.FieldName === fieldName);
+    if (!fieldDef) return fieldName;
+
+    // 有 DataType 表示是實體欄位，可直接排序
+    const dt = (fieldDef.DataType || '').trim();
+    if (dt) return fieldName;
+
+    // 虛擬欄位：嘗試從 LookupCond1Field 找到對應的實體欄位
+    if (fieldDef.LookupCond1Field) {
+      const keyField = fields.find(f => f.FieldName === fieldDef.LookupCond1Field);
+      if (keyField && (keyField.DataType || '').trim()) return fieldDef.LookupCond1Field;
+    }
+
+    // 嘗試去掉 Name 後綴找到對應的實體欄位
+    if (fieldName.endsWith('Name')) {
+      const baseName = fieldName.substring(0, fieldName.length - 4);
+      const baseField = fields.find(f => f.FieldName === baseName);
+      if (baseField && (baseField.DataType || '').trim()) return baseName;
+    }
+
+    return fieldName; // 找不到時送原始欄位名，由後端處理解析
+  }
+
+  // 雙擊欄位標題排序
+  if (headerRow) {
+    headerRow.querySelectorAll('th.sortable').forEach(th => {
+      th.style.cursor = 'pointer';
+      th.addEventListener('dblclick', (e) => {
+        if (e.target.closest('.col-resizer')) return; // 排除拖曳把手
+        e.preventDefault();
+        e.stopPropagation();
+        const field = th.dataset.field;
+        if (!field) return;
+
+        // 解析實際排序欄位（虛擬欄位轉換為對應的實體欄位）
+        const actualSortField = resolveSortField(field);
+
+        // 切換排序方向
+        if (currentSortField === actualSortField) {
+          currentSortDir = currentSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          currentSortField = actualSortField;
+          currentSortDir = 'asc';
+        }
+
+        // 清除 Keyset 快取（排序改變後 cursor 無效）
+        pageCursorCache = {};
+
+        // 更新排序指標
+        headerRow.querySelectorAll('th.sortable .sort-indicator').forEach(s => s.remove());
+        const indicator = document.createElement('span');
+        indicator.className = 'sort-indicator';
+        indicator.style.marginLeft = '4px';
+        indicator.textContent = currentSortDir === 'asc' ? '▲' : '▼';
+        th.appendChild(indicator);
+
+        // 重新查詢（回到第一頁）
+        doQuery(1);
+      });
+    });
+  }
+
+  // 欄位寬度拖曳調整
+  if (headerRow) {
+    const tableName = window._tableName || '';
+    let colDrag = null;
+
+    headerRow.addEventListener('mousedown', (e) => {
+      const handle = e.target.closest('.col-resizer');
+      if (!handle) return;
+      const th = handle.parentElement;
+      if (!th) return;
+      e.preventDefault();
+      e.stopPropagation();
+      colDrag = {
+        th,
+        field: th.dataset.field || '',
+        startX: e.clientX,
+        startW: th.getBoundingClientRect().width
+      };
+      document.body.style.cursor = 'col-resize';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!colDrag) return;
+      const newW = Math.max(60, colDrag.startW + (e.clientX - colDrag.startX));
+      const px = `${newW}px`;
+      colDrag.th.style.width = px;
+      colDrag.th.style.minWidth = px;
+      colDrag.th.style.maxWidth = px;
+    });
+
+    document.addEventListener('mouseup', async () => {
+      if (!colDrag) return;
+      document.body.style.cursor = '';
+      const width = colDrag.th.getBoundingClientRect().width;
+      const field = colDrag.field;
+      colDrag = null;
+      if (!tableName || !field) return;
+      try {
+        await fetch('/api/DictSetupApi/FieldWidth/Save', {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tableName: window._tableName, fieldOrders: newOrder })
-        }, '儲存欄位順序…')
-          .then(res => { if (!res.ok) throw new Error("更新失敗"); return res.json(); })
-          .then(() => location.reload())
-          .catch(() => Swal.fire({ icon: 'error', title: '欄位順序儲存失敗！' }));
+          body: JSON.stringify({
+            tableName: tableName,
+            fieldName: field,
+            widthPx: Math.round(width)
+          })
+        });
+      } catch (err) {
+        console.warn('[欄寬儲存失敗]', err);
       }
     });
   }
@@ -844,7 +1022,9 @@ document.addEventListener("DOMContentLoaded", function () {
   const urlParams = new URLSearchParams(window.location.search);
   const urlPageParam = urlParams.get('page');
   const useStoredQuery = urlParams.get('useStoredQuery') === '1';
-  const initialPage = urlPageParam ? parseInt(urlPageParam, 10) : 1;
+  // 從 localStorage 還原已儲存的頁碼（從單身頁切換回來時使用）
+  const savedPage = state.pageNumber && state.pageNumber > 0 ? state.pageNumber : 1;
+  const initialPage = urlPageParam ? parseInt(urlPageParam, 10) : (useStoredQuery ? savedPage : 1);
 
   // 獲取查詢欄位配置（用於讀取默認比對條件）
   const queryFieldsConfig = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(ViewData["QueryFields"] as List<QueryFieldViewModel> ?? new List<QueryFieldViewModel>()));
@@ -979,24 +1159,24 @@ document.addEventListener("DOMContentLoaded", function () {
   });
 });
 
-(function initTopHScroll(){
+(function initBottomHScroll(){
   const wrap   = document.querySelector('.table-wrap');
   if (!wrap) return;
   const table  = wrap.querySelector('table');
-  const topBar = document.getElementById('hscrollTop');
-  const spacer = topBar?.querySelector('.hscroll-spacer');
-  if (!table || !topBar || !spacer) return;
+  const botBar = document.getElementById('hscrollBottom');
+  const spacer = botBar?.querySelector('.hscroll-spacer');
+  if (!table || !botBar || !spacer) return;
 
   function measure(){
     spacer.style.width = table.scrollWidth + 'px';
-    topBar.scrollLeft = wrap.scrollLeft;
+    botBar.scrollLeft = wrap.scrollLeft;
   }
   let syncing = false;
-  topBar.addEventListener('scroll', () => {
-    if (syncing) return; syncing = true; wrap.scrollLeft = topBar.scrollLeft; syncing = false;
+  botBar.addEventListener('scroll', () => {
+    if (syncing) return; syncing = true; wrap.scrollLeft = botBar.scrollLeft; syncing = false;
   });
   wrap.addEventListener('scroll', () => {
-    if (syncing) return; syncing = true; topBar.scrollLeft = wrap.scrollLeft; syncing = false;
+    if (syncing) return; syncing = true; botBar.scrollLeft = wrap.scrollLeft; syncing = false;
   });
   window.addEventListener('resize', measure);
   window.refreshHScrollWidth = measure;
