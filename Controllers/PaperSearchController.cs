@@ -443,8 +443,10 @@ public class PaperSearchController : ControllerBase
                 var inputVal = GetInput(inputs, p.ParamName);
                 if (inputVal is string s && string.IsNullOrWhiteSpace(s)) inputVal = null;
                 if (inputVal != null) return inputVal;
-                if (TryGetDefaultValue(defaultMap, p.ParamName, out var defVal))
+                if (TryGetDefaultValue(defaultMap, p.ParamName, out var defVal) && !string.IsNullOrWhiteSpace(defVal))
                     return defVal;
+                if (!string.IsNullOrWhiteSpace(p.ParamValue)) return p.ParamValue;
+                if (!string.IsNullOrWhiteSpace(p.DefaultValue)) return p.DefaultValue;
                 return p.ParamValue ?? p.DefaultValue ?? string.Empty;
             }
             case 2:

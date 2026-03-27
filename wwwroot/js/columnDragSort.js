@@ -78,25 +78,17 @@
       headerRow.querySelectorAll('.drag-over').forEach(function (el) { el.classList.remove('drag-over'); });
     }
 
-    // ---- 確保每個 th 都有 drag-handle ----
-    Array.from(headerRow.children).forEach(function (th) {
-      if (th.querySelector('.drag-handle')) return;
-      var handle = document.createElement('span');
-      handle.className = 'drag-handle';
-      handle.textContent = '☰';
-      th.insertBefore(handle, th.firstChild);
-    });
-
     // ---- SortableJS ----
     Sortable.create(headerRow, {
       animation: 150,
-      handle: '.drag-handle',
+      forceFallback: true,
       ghostClass: 'col-dragging',
       filter: '.col-resizer',
       preventOnFilter: false,
 
       onStart: function () {
         originalOrder = Array.from(headerRow.children).map(function (h) { return h.dataset.field; });
+        document.body.classList.add('col-sorting');
         startAutoScroll();
       },
 
@@ -108,6 +100,7 @@
       },
 
       onEnd: function (evt) {
+        document.body.classList.remove('col-sorting');
         stopAutoScroll();
         clearDragOver();
 

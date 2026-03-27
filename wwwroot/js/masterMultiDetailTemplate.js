@@ -2384,7 +2384,9 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
     window._mmdApi = window._mmdApi || {};
     window._mmdApi[cfg.DomId] = {
       addSubDetailRow,
-      deleteSubDetailRow
+      deleteSubDetailRow,
+      saveAll,
+      get isDirty() { return isDirty; }
     };
 
     btnFirst?.addEventListener("click", () => navigateRow("first"));
