@@ -600,13 +600,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const saveChanges = async (onlyAdded = false, includeDeleted = false) => {
+    const saveChanges = async (onlyAdded = false, includeDeleted = false, opts = {}) => {
+        const noReload = !!opts.noReload;
         const grid = getActiveGrid();
-        if (!grid) return;
+        if (!grid) return { ok: true, skipped: true };
         const changes = collectChanges(grid, onlyAdded, includeDeleted);
-        if (changes.length === 0) { if (!onlyAdded) toggleEdit(); return; }
+        if (changes.length === 0) { if (!onlyAdded && !noReload) toggleEdit(); return { ok: true, skipped: true }; }
         const tableName = grid.dataset.tableName || grid.dataset.dictTable;
-        if (!tableName) { alert('缺少 TableName'); return; }
+        if (!tableName) { alert('缺少 TableName'); return { ok: false }; }
         const resp = await fetch('/api/CommonTable/SaveTableChanges', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -614,10 +615,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (resp.ok) {
             setDirty(false);
-            // 重新載入頁面以刷新資料
-            window.location.reload();
+            if (!noReload) {
+                // 重新載入頁面以刷新資料
+                window.location.reload();
+            }
+            return { ok: true };
         } else {
             alert('儲存失敗: ' + await resp.text());
+            return { ok: false };
         }
     };
 
@@ -1064,6 +1069,18 @@ document.addEventListener('DOMContentLoaded', () => {
         if (needInEdit === "1" && !isEdit) {
             alert("此按鈕僅能在編輯模式使用，請先點「修改」切換到編輯模式。");
             return;
+        }
+
+        // 按自訂按鈕前，若有未儲存的變更，先自動儲存
+        if (isDirty) {
+            try {
+                const saveResult = await saveChanges(false, false, { noReload: true });
+                if (!saveResult || !saveResult.ok) return;
+            } catch (err) {
+                console.error('自訂按鈕前自動儲存失敗', err);
+                alert(`儲存失敗: ${err?.message || err}`);
+                return;
+            }
         }
 
         const searchTemplate = (btn.dataset.searchTemplate || "").toString().trim().toLowerCase();

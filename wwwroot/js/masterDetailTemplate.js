@@ -901,7 +901,8 @@
     const setAddMode = (on) => {
       addMode = !!on;
       confirmBtn?.classList.toggle("d-none", !addMode);
-      cancelBtn?.classList.toggle("d-none", !addMode);
+      // cancel 按鈕在編輯模式下由 toolbar 的 disabled 狀態控制，不用 d-none 隱藏
+      if (addMode && cancelBtn) cancelBtn.disabled = false;
     };
 
     // 追蹤「最後點擊/聚焦」區域（決定新增要落在哪），避免滑過就被判定
@@ -1153,6 +1154,28 @@
       (cfg.DetailKeyFields || []).forEach(k => {
         if (row[k] == null) row[k] = "";
       });
+
+      // 序號自動 +1：DetailKeyFields 扣掉 KeyMap 對應欄位後，若剩一個且為數值型態則自動遞增
+      const mdDetailKeys = new Set((cfg.KeyMap || []).map(k => k.Detail.toLowerCase()));
+      const seqCandidates = (cfg.DetailKeyFields || []).filter(k => !mdDetailKeys.has(k.toLowerCase()));
+      if (seqCandidates.length === 1) {
+        const seqField = seqCandidates[0];
+        const col = dDict.find(d => (d.FieldName || "").toLowerCase() === seqField.toLowerCase());
+        const dt = (col?.DataType || "").toLowerCase();
+        if (dt.includes("int") || dt.includes("number")) {
+          const maxVal = detailData
+            .filter(r => r !== row)
+            .reduce((mx, r) => Math.max(mx, Number(r[seqField]) || 0), 0);
+          row[seqField] = maxVal + 1;
+        }
+      }
+
+      // UseId 自動帶入登入公司別
+      const useIdCol = dDict.find(d => (d.FieldName || "").toLowerCase() === "useid");
+      if (useIdCol && (row[useIdCol.FieldName] == null || row[useIdCol.FieldName] === "")) {
+        row[useIdCol.FieldName] = window._useId || window.DEFAULT_USEID || localStorage.getItem("erpUseId") || "";
+      }
+
       detailData.push(row);
       await renderDetail();
       const allTrs = Array.from(dBody.querySelectorAll("tr"));
@@ -1168,18 +1191,8 @@
 
     const cancelAdd = async () => {
       if (!addMode) return;   // 非新增模式時不執行，交給 toolbar 的取消 handler 處理
-      masterData = masterData.filter(r => r.__state !== "added");
-      detailData = detailData.filter(r => r.__state !== "added");
-      currentMasterRow = masterData[0] || null;
-      await renderMaster();
-      if (currentMasterRow) {
-        const tr = mBody.querySelector("tr");
-        tr?.click();
-      } else {
-        dBody.innerHTML = `<tr><td class="text-center text-muted p-3">請點選上方一筆資料</td></tr>`;
-      }
       setAddMode(false);
-      renderDetail(); // 確保單身的暫存新增列被清掉
+      // 清除 addMode 後交給 toolbar 的取消 handler 統一執行 refreshData
     };
 
     let savingAdd = false;

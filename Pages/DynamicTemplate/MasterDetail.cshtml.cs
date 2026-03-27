@@ -34,6 +34,7 @@ namespace PcbErpApi.Pages.CUR
         public List<CURdTableField> FieldDictList { get; private set; } = new();
         public List<CustomButtonRow> CustomButtons { get; private set; } = new();
         public HtmlString CustomButtonsHtml { get; private set; } = HtmlString.Empty;
+        public string CurrentUseId { get; private set; } = string.Empty;
 
         public async Task<IActionResult> OnGetAsync(string itemId)
         {
@@ -91,7 +92,54 @@ namespace PcbErpApi.Pages.CUR
                 _logger.LogError(ex, "Load toolbar button visibility failed for {ItemId}", ItemId);
             }
 
+            try
+            {
+                CurrentUseId = await ResolveUseIdAsync();
+            }
+            catch (System.Exception ex)
+            {
+                _logger.LogError(ex, "Resolve UseId failed");
+            }
+
             return Page();
+        }
+
+        private async Task<string> ResolveUseIdAsync()
+        {
+            var cs = _ctx.Database.GetConnectionString();
+            if (string.IsNullOrWhiteSpace(cs)) return "A001";
+
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            var userId = string.Empty;
+            var jwtHeader = Request?.Headers["X-JWTID"].ToString();
+            if (!string.IsNullOrWhiteSpace(jwtHeader) && System.Guid.TryParse(jwtHeader, out var jwtId))
+            {
+                await using var cmd = new SqlCommand(
+                    "SELECT UserId FROM CURdUserOnline WITH (NOLOCK) WHERE JwtId = @jwtId", conn);
+                cmd.Parameters.AddWithValue("@jwtId", jwtId);
+                userId = (await cmd.ExecuteScalarAsync())?.ToString() ?? string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(userId))
+                userId = User?.Identity?.Name ?? string.Empty;
+
+            userId = userId.Trim();
+            if (!string.IsNullOrWhiteSpace(userId))
+            {
+                await using var cmd = new SqlCommand(
+                    "SELECT UseId FROM CURdUsers WITH (NOLOCK) WHERE UserId = @userId", conn);
+                cmd.Parameters.AddWithValue("@userId", userId);
+                var result = (await cmd.ExecuteScalarAsync())?.ToString() ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(result)) return result.Trim();
+            }
+
+            var claim = User?.Claims?.FirstOrDefault(c =>
+                string.Equals(c.Type, "UseId", System.StringComparison.OrdinalIgnoreCase))?.Value;
+            if (!string.IsNullOrWhiteSpace(claim)) return claim.Trim();
+
+            return "A001";
         }
 
         private async Task<List<CustomButtonRow>> LoadCustomButtonsAsync(string itemId)

@@ -1405,9 +1405,31 @@
         return { handled: true, ok: false, reason: 'delete-failed', error: errorMessage };
       }
 
+      // ★ 刪除成功後重新排序序號
+      if (typeof window.resequenceDetail === 'function') {
+        try {
+          const filterKeys = {};
+          (cfg.KeyMap || []).forEach(km => {
+            const child = km.ChildField || km.childField || km.Detail || km.Child;
+            if (child && row[child] != null && row[child] !== '') {
+              filterKeys[child] = row[child];
+            }
+          });
+          if (Object.keys(filterKeys).length > 0) {
+            await window.resequenceDetail(cfg.DictTable, filterKeys);
+          }
+        } catch (e) { console.warn('resequence after delete:', e); }
+      }
+
       const next = selected.nextElementSibling || selected.previousElementSibling;
       selected.remove();
       if (next) next.classList.add('row-selected');
+
+      // 刪除後重新載入以反映新序號
+      if (typeof window.__paper3lSubDetailRefresh === 'function') {
+        try { await window.__paper3lSubDetailRefresh(); } catch {}
+      }
+
       return { handled: true, ok: true };
     };
   }
