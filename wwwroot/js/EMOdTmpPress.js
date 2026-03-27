@@ -1053,20 +1053,23 @@
         const box = document.getElementById('modeStatusBox');
         const label = document.getElementById('modeStatusLabel');
         const btn = document.getElementById('btnModeToggle');
-        const btnAdd = document.getElementById('btnAddRow');
         const btnDel = document.getElementById('btnDelRow');
+        const btnChange = document.getElementById('btnChange');
+        const btnChangeRoute = document.getElementById('btnChangeRoute');
         if (isEditMode) {
             if (box) box.classList.add('edit-mode');
             if (label) label.textContent = '編輯模式';
             if (btn) { btn.textContent = '瀏覽'; btn.title = '切換至瀏覽模式'; }
-            if (btnAdd) btnAdd.disabled = false;
             if (btnDel) btnDel.disabled = false;
+            if (btnChange) btnChange.disabled = false;
+            if (btnChangeRoute) btnChangeRoute.disabled = false;
         } else {
             if (box) box.classList.remove('edit-mode');
             if (label) label.textContent = '瀏覽模式';
             if (btn) { btn.textContent = '修改'; btn.title = '切換至編輯模式'; }
-            if (btnAdd) btnAdd.disabled = true;
             if (btnDel) btnDel.disabled = true;
+            if (btnChange) btnChange.disabled = true;
+            if (btnChangeRoute) btnChangeRoute.disabled = true;
         }
         renderDetailGrid();
     }
@@ -1099,6 +1102,9 @@
 
             const modalEl = document.getElementById('addMasterModal');
             bootstrap.Modal.getInstance(modalEl)?.hide();
+
+            // 新增成功後自動進入編輯模式
+            if (!isEditMode) toggleEditMode();
 
             await loadMasterGrid();
             const newIdx = masterRows.findIndex(r => String(r.TmpId || '').trim() === id);
