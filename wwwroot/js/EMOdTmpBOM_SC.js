@@ -425,22 +425,22 @@
         const box = document.getElementById('modeStatusBox');
         const label = document.getElementById('modeStatusLabel');
         const btn = document.getElementById('btnModeToggle');
-        const btnAdd = document.getElementById('btnAddRow');
         const btnDel = document.getElementById('btnDelRow');
+        const btnChange = document.getElementById('btnChange');
         if (edit) {
             box.classList.add('edit-mode');
             label.textContent = '編輯模式';
             btn.textContent = '瀏覽';
             btn.title = '切換至瀏覽模式';
-            btnAdd.disabled = false;
             btnDel.disabled = false;
+            btnChange.disabled = false;
         } else {
             box.classList.remove('edit-mode');
             label.textContent = '瀏覽模式';
             btn.textContent = '修改';
             btn.title = '切換至編輯模式';
-            btnAdd.disabled = true;
             btnDel.disabled = true;
+            btnChange.disabled = true;
         }
     }
 
@@ -478,7 +478,6 @@
 
     // ==================== Add / Delete Master Row ====================
     function handleAddRow() {
-        if (!isEditMode) return;
         // 清空欄位
         const idInput = document.getElementById('addTmpId');
         const notesInput = document.getElementById('addTmpNotes');
@@ -509,6 +508,9 @@
             // 關閉 modal
             const modalEl = document.getElementById('addMasterModal');
             bootstrap.Modal.getInstance(modalEl)?.hide();
+
+            // 新增成功後自動進入編輯模式
+            if (!isEditMode) setMode(true);
 
             await loadMasterGrid();
             const newRow = masterRows.find(r => r.TmpId === id);

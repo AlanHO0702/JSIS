@@ -312,21 +312,21 @@
         const box = document.getElementById('modeStatusBox');
         const label = document.getElementById('modeStatusLabel');
         const btn = document.getElementById('btnModeToggle');
-        const btnAdd = document.getElementById('btnAddRow');
         const btnDel = document.getElementById('btnDelRow');
+        const btnChange = document.getElementById('btnChange');
 
         if (editOn) {
             if (box) box.classList.add('edit-mode');
             if (label) label.textContent = '編輯模式';
             if (btn) { btn.textContent = '瀏覽'; btn.title = '切換至瀏覽模式'; }
-            if (btnAdd) btnAdd.disabled = false;
             if (btnDel) btnDel.disabled = false;
+            if (btnChange) btnChange.disabled = false;
         } else {
             if (box) box.classList.remove('edit-mode');
             if (label) label.textContent = '瀏覽模式';
             if (btn) { btn.textContent = '修改'; btn.title = '切換至編輯模式'; }
-            if (btnAdd) btnAdd.disabled = true;
             if (btnDel) btnDel.disabled = true;
+            if (btnChange) btnChange.disabled = true;
         }
 
         // 備註區塊 readonly 狀態
@@ -591,6 +591,8 @@
             const res = await apiPost('/api/EMOdTmpRoute/InsertMaster', { TmpId: newTmpId, Notes: notes });
             if (res.ok) {
                 insertModal.hide();
+                // 新增成功後自動進入編輯模式
+                if (!isEditMode) setEditMode(true);
                 await loadMaster(true);
                 const newIdx = masterRows.findIndex(r => r.TmpId === newTmpId);
                 if (newIdx >= 0) await selectMasterRow(newIdx);

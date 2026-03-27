@@ -1,0 +1,1162 @@
+@page "/EMOdProdECNMain/Detail"
+@model PcbErpApi.Pages.EMOdProdECNMain.DetailModel
+@using System.Text.Json
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = Model.PageTitle;
+}
+
+@await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", null, ViewData)
+
+<script>
+    window._itemId          = 'EMO00019';
+    window._headerTableName = 'EMOdProdECNMain';
+</script>
+
+@if (Model.CustomButtons?.Count > 0)
+{
+    <style>
+    :root {
+      --fab-left: 12px;
+      --fab-width: 120px;
+      --fab-gap: 14px;
+      --rail-reserve: calc(var(--fab-left) + var(--fab-width) + var(--fab-gap));
+    }
+    .content-wrapper { padding-left: var(--rail-reserve) !important; }
+    #topToolbar {
+        margin-left: calc(-1 * var(--rail-reserve) + var(--fab-left)) !important;
+        width: calc(100% + var(--rail-reserve) - var(--fab-left) * 2) !important;
+        position: sticky; top: 4px; z-index: 1200;
+    }
+    .action-rail {
+      position: fixed; left: var(--fab-left); top: 80px;
+      box-sizing: border-box; display: flex; flex-direction: column;
+      gap: 2px; z-index: 900; overflow-y: auto; overflow-x: visible;
+      max-height: calc(100vh - 100px); background: transparent;
+    }
+    .fab {
+      position: relative; width: var(--fab-width); min-width: 0;
+      padding: 6px 8px; font-size: .92rem; white-space: normal;
+      word-break: break-word; background: #f8f9fb; color: #1f5fbf;
+      font-weight: 600; border-radius: 10px; cursor: pointer;
+      box-shadow: 0 2px 8px rgba(20,40,80,.12); border: 1px solid #cfd7e6;
+    }
+    .fab:hover { background: #e9f1ff; border-color: #9fbaf0; }
+    </style>
+}
+
+<style>
+/* ========== 工具列樣式 ========== */
+.emo-toolbar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  background: #f6f7f9; border: 1px solid #d8dee8; border-radius: 10px;
+  padding: 6px 8px; box-sizing: border-box;
+  position: relative; left: 8px; margin: 4px 0 2px 0;
+  width: calc(100% - 16px);
+}
+.emo-toolbar .btn-toolbar { flex: 1; min-width: 0; flex-wrap: nowrap; }
+.emo-toolbar .toolbar-btn {
+  height: var(--top-toolbar-btn-height, 36px);
+  min-height: var(--top-toolbar-btn-height, 36px);
+  box-sizing: border-box; padding-top: 0; padding-bottom: 0;
+}
+.emo-toolbar .toolbar-icon-row { display: flex; gap: 4px; align-items: center; }
+.emo-toolbar .toolbar-btn-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: var(--top-toolbar-btn-height, 36px);
+  min-height: var(--top-toolbar-btn-height, 36px);
+  width: 36px; padding: 0; border-radius: 8px; font-size: 20px; line-height: 1;
+  background: #f3f5f8; color: #5a6a82; border: 1px solid #c9d2df;
+  box-shadow: none; cursor: pointer;
+}
+.emo-toolbar .toolbar-btn-icon i { font-size: 16px; }
+.emo-toolbar .toolbar-btn-icon:disabled {
+  background: #f1f3f7; border-color: #c5ccd8; color: #9aa7bb;
+  cursor: not-allowed; opacity: 0.8;
+}
+.emo-toolbar .toolbar-count-box {
+  display: inline-flex; flex-direction: column; justify-content: center;
+  align-items: center; height: 36px; min-width: 64px; padding: 0 10px;
+  border-radius: 8px; font-weight: 700; font-size: 0.82rem; color: #fff; user-select: none;
+}
+.emo-toolbar .toolbar-count-box.mode-view { background: #1e4db7; }
+.emo-toolbar .toolbar-count-box.mode-edit { background: #f00000; }
+.emo-toolbar .toolbar-count-box .count-line { font-size: 0.75rem; }
+.emo-toolbar #toolbarDetailCount { display: none; }
+#topToolbar .modal { position: fixed; width: 0; height: 0; overflow: hidden; padding: 0; margin: 0; border: none; }
+
+/* ========== Master 頁籤區 ========== */
+#master-section .nav-link {
+  --bs-nav-link-padding-y: 2px; --bs-nav-link-padding-x: 8px;
+  font-size: 13px; padding: 2px 8px; line-height: 1.4; white-space: nowrap;
+}
+.master-spec-tab {
+  position: relative; box-sizing: border-box; padding-top: 6px; padding-bottom: 8px;
+}
+.spec-field-label {
+  position: absolute; display: flex; align-items: center; justify-content: flex-end;
+  text-align: right; font-size: 12px; line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 0 4px 0 2px; pointer-events: none; color: #333;
+}
+.spec-draggable {
+  position: absolute; display: flex; flex-direction: row; align-items: center;
+  box-sizing: border-box; overflow: hidden; background: #fff;
+}
+.spec-draggable .master-field {
+  width: 100%; height: 100%; min-height: 20px; padding: 2px 6px;
+  font-size: 12px; border: 1px solid #999; border-radius: 2px;
+  box-sizing: border-box; background: #fff; color: #333; outline: none;
+}
+
+/* ========== Detail 明細表單區 ========== */
+#detail-section .nav-link {
+  --bs-nav-link-padding-y: 2px; --bs-nav-link-padding-x: 8px;
+  font-size: 13px; padding: 2px 8px; line-height: 1.4; white-space: nowrap;
+}
+.ecn-detail-form {
+  padding: 8px 12px; overflow: auto;
+}
+.ecn-detail-form label.ecn-lbl {
+  font-size: 12px; font-weight: 600; color: #333; white-space: nowrap;
+  display: inline-block; text-align: right; min-width: 60px;
+}
+.ecn-detail-form input.ecn-input,
+.ecn-detail-form textarea.ecn-input,
+.ecn-detail-form select.ecn-input {
+  font-size: 12px; border: 1px solid #999; border-radius: 2px;
+  padding: 2px 6px; background: #fff; color: #333; box-sizing: border-box;
+}
+.ecn-detail-form input.ecn-input:read-only {
+  background: #f0f0f0;
+}
+.ecn-detail-form .ecn-row {
+  display: flex; align-items: flex-start; gap: 6px; margin-bottom: 4px; flex-wrap: wrap;
+}
+.ecn-detail-form .ecn-field {
+  display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+}
+.ecn-detail-form .ecn-groupbox {
+  border: 1px solid #999; border-radius: 4px; padding: 6px 10px 8px; margin: 4px 0 4px 0;
+  min-width: 0;
+}
+.ecn-detail-form .ecn-groupbox > legend {
+  all: revert;
+  float: none; display: inline; width: auto;
+  font-size: 12px; font-weight: 600;
+  padding: 0 6px; margin: 0; line-height: 1;
+  border: 0;
+}
+.ecn-detail-form .ecn-grid {
+  border: 1px solid #c8d0dc; border-collapse: collapse; font-size: 12px; margin: 4px 0;
+}
+.ecn-detail-form .ecn-grid th,
+.ecn-detail-form .ecn-grid td {
+  border: 1px solid #d0d7e3; padding: 2px 6px; white-space: nowrap;
+}
+.ecn-detail-form .ecn-grid thead th {
+  background: #f5f7fa; font-weight: 600; position: sticky; top: 0;
+}
+
+/* ========== 編輯模式樣式 ========== */
+.ecn-detail-form [data-editable="1"]:not([readonly]):not([disabled]) {
+  background: #fffde7 !important;
+  border-color: #e6c300 !important;
+}
+.ecn-detail-form [data-editable="1"]:not([readonly]):not([disabled]):focus {
+  background: #fff9c4 !important;
+  border-color: #f9a825 !important;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(249,168,37,.25);
+}
+.ecn-detail-form input[type="checkbox"][data-editable="1"]:not([disabled]) {
+  accent-color: #f9a825;
+}
+</style>
+
+@if (!string.IsNullOrWhiteSpace(Model.ActionRailPartial))
+{
+    <div class="action-rail">
+        @await Html.PartialAsync(Model.ActionRailPartial, Model.CustomButtons, ViewData)
+    </div>
+    <script>
+    (function () {
+        function positionActionRail() {
+            var toolbar = document.getElementById('topToolbar');
+            var rail = document.querySelector('.action-rail');
+            if (!toolbar || !rail) return;
+            var bottom = toolbar.getBoundingClientRect().bottom;
+            rail.style.top = (bottom + 4) + 'px';
+            rail.style.maxHeight = 'calc(100vh - ' + (bottom + 8) + 'px)';
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', positionActionRail);
+        } else {
+            positionActionRail();
+        }
+        window.addEventListener('resize', positionActionRail);
+    })();
+    </script>
+}
+
+<div class="content-wrapper" style="display:flex; flex-direction:column; height:calc(100vh - 60px); overflow:visible;">
+
+<!-- ============ Toolbar ============ -->
+<div id="topToolbar" class="emo-toolbar" data-dict-table="EMOdProdECNMain">
+    <div class="toolbar-icon-row" role="group" aria-label="row-nav">
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnFirst" title="第一筆"><i class="bi bi-chevron-bar-left"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnPrev"  title="上一筆"><i class="bi bi-chevron-left"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnNext"  title="下一筆"><i class="bi bi-chevron-right"></i></button>
+        <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnLast"  title="最後一筆"><i class="bi bi-chevron-bar-right"></i></button>
+    </div>
+    @await Html.PartialAsync("~/Pages/Shared/_TableToolbar.cshtml", new TableToolbarModel {
+        SearchBtnId  = "btnSearch",
+        AddBtnId     = "btnAddNew",
+        DeleteBtnId  = "btnBatchDelete",
+        SearchText   = "查詢",
+        AddText      = "新增",
+        DeleteText   = "作廢",
+        ModalId      = "searchModal",
+        ReportSpName = ""
+    })
+</div>
+
+<!-- ============ Master 區域（工程變更主檔 / 主檔2） ============ -->
+<div id="master-section" class="card shadow-sm border-0 rounded mt-1"
+     style="margin:0 8px; flex-shrink:0;">
+  <div class="card-body p-1" style="min-height:0;">
+    <ul class="nav nav-tabs border-bottom-0 mb-0" role="tablist" id="master-tabs" style="gap:1px;">
+      @for (int i = 0; i < Model.MasterTabs.Count; i++)
+      {
+          var tab = Model.MasterTabs[i];
+          var active = i == 0 ? "active" : "";
+          <li class="nav-item" role="presentation">
+              <button class="nav-link @active"
+                      id="master-tab-@tab.Key"
+                      data-bs-toggle="tab"
+                      data-bs-target="#master-content-@tab.Key"
+                      type="button" role="tab"
+                      data-tab-key="@tab.Key"
+                      data-tab-show-where="@tab.ShowWhere">
+                  @tab.Title
+              </button>
+          </li>
+      }
+    </ul>
+    <div class="tab-content" style="overflow-x:auto;">
+      @for (int i = 0; i < Model.MasterTabs.Count; i++)
+      {
+          var tab = Model.MasterTabs[i];
+          var active = i == 0 ? "show active" : "";
+          <div class="tab-pane fade @active"
+               id="master-content-@tab.Key"
+               role="tabpanel" style="padding:4px 8px;">
+              <ul class="list-unstyled master-spec-tab"
+                  data-tab-key="@tab.Key"
+                  data-show-where="@tab.ShowWhere"
+                  style="position:relative; min-height:80px; margin:0; padding:0;"></ul>
+          </div>
+      }
+    </div>
+  </div>
+</div>
+
+<!-- ============ Detail 區域（工程變更明細） ============ -->
+<div id="detail-section" class="card shadow-sm border-0 rounded mt-1"
+     style="margin:0 8px; flex:1; overflow:hidden; display:flex; flex-direction:column;">
+  <div class="card-body p-1" style="display:flex; flex-direction:column; min-height:0; flex:1;">
+    <ul class="nav nav-tabs border-bottom-0 mb-0" role="tablist" id="detail-tabs" style="gap:1px;">
+      @for (int i = 0; i < Model.ExtraTabs.Count; i++)
+      {
+          var tab = Model.ExtraTabs[i];
+          var active = i == 0 ? "active" : "";
+          <li class="nav-item" role="presentation">
+              <button class="nav-link @active"
+                      id="tab-@tab.Key-tab"
+                      data-bs-toggle="tab"
+                      data-bs-target="#tab-@tab.Key"
+                      aria-controls="tab-@tab.Key"
+                      type="button" role="tab"
+                      data-table="@tab.TableName"
+                      data-dict="@tab.DictName"
+                      data-keyfields="@string.Join(",", tab.KeyFields ?? Enumerable.Empty<string>())">
+                  @tab.Title
+              </button>
+          </li>
+      }
+    </ul>
+    <div class="tab-content" style="flex:1; overflow:auto;">
+      @for (int i = 0; i < Model.ExtraTabs.Count; i++)
+      {
+          var tab = Model.ExtraTabs[i];
+          var active = i == 0 ? "show active" : "";
+          <div class="tab-pane fade @active" id="tab-@tab.Key" role="tabpanel">
+              <div class="ecn-detail-form" id="ecn-detail-form-@tab.Key">
+                  <span class="text-muted">載入中...</span>
+              </div>
+          </div>
+      }
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+window._masterKeyValues = @Html.Raw(JsonSerializer.Serialize(
+    Model.MasterKeyValues.ToDictionary(kv => kv.Key, kv => kv.Value)
+));
+window._masterTabs = @Html.Raw(JsonSerializer.Serialize(
+    Model.MasterTabs.Select(t => new { key = t.Key, title = t.Title, fieldNames = t.FieldNames, showWhere = t.ShowWhere })
+));
+window._extraTabs = @Html.Raw(JsonSerializer.Serialize(
+    Model.ExtraTabs.Select(t => new { key = t.Key, title = t.Title, tableName = t.TableName, dictName = t.DictName, keyFields = t.KeyFields, isForm = t.IsForm })
+));
+window._isViewOnly    = @(Model.IsViewOnly ? "true" : "false");
+window._dictTableName = 'EMOdProdECNMain';
+window._masterTable   = 'EMOdProdECNMain';
+window._masterApi     = '@Html.Raw(Model.MasterApi ?? "")';
+window._detailApi     = '@Html.Raw(Model.DetailApi ?? "")';
+</script>
+<script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
+<script src="~/js/erpDetailNav.js" asp-append-version="true"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // 隱藏不需要的按鈕
+  document.getElementById('btnPaperTrace')?.remove();
+  document.getElementById('btnPaperLog')?.remove();
+
+  const currentMasterKeys = window._masterKeyValues || {};
+  let masterDict = null;
+  let masterData = null;
+
+  // 設定 selectedPaperNum 供 toolbar 送審/退審/作廢使用
+  window.selectedPaperNum = (currentMasterKeys['PaperNum'] || currentMasterKeys['papernum'] || '').trim();
+
+  // ── 工具函數 ──────────────────────────────────────────────
+
+  function getDict(dictName) {
+    return fetch(`/api/TableFieldLayout/GetTableFieldsFull?table=${encodeURIComponent(dictName)}`)
+      .then(r => r.json());
+  }
+
+  const LOOKUP_CACHE = {};
+
+  // 回傳 { map, keySelf } — keySelf 為 OCX 時指定用哪個欄位值當 key
+  async function loadLookup(field) {
+    // 標準 Lookup
+    if (field.LookupTable && field.LookupKeyField && field.LookupResultField) {
+      const cacheKey = `${field.LookupTable}|${field.LookupKeyField}|${field.LookupResultField}`;
+      if (LOOKUP_CACHE[cacheKey]) return { map: LOOKUP_CACHE[cacheKey], keySelf: null };
+      try {
+        const url = `/api/TableFieldLayout/LookupData`
+          + `?table=${encodeURIComponent(field.LookupTable)}`
+          + `&key=${encodeURIComponent(field.LookupKeyField)}`
+          + `&result=${encodeURIComponent(field.LookupResultField)}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error();
+        const rows = await resp.json();
+        const map = {};
+        rows.forEach(r => { map[String(r.key)] = r.result0; });
+        LOOKUP_CACHE[cacheKey] = map;
+        return { map, keySelf: null };
+      } catch {
+        LOOKUP_CACHE[cacheKey] = null;
+        return null;
+      }
+    }
+    // OCX Lookup（如 CURdPaperFinished → FinishedName）
+    if (field.OCXLKTableName && field.OCXLKResultName && field.KeyFieldName) {
+      const cacheKey = `ocx|${field.OCXLKTableName}|${field.KeyFieldName}|${field.OCXLKResultName}`;
+      const keySelf = field.KeySelfName || field.KeyFieldName;
+      if (LOOKUP_CACHE[cacheKey]) return { map: LOOKUP_CACHE[cacheKey], keySelf };
+      try {
+        const url = `/api/TableFieldLayout/LookupData`
+          + `?table=${encodeURIComponent(field.OCXLKTableName)}`
+          + `&key=${encodeURIComponent(field.KeyFieldName)}`
+          + `&result=${encodeURIComponent(field.OCXLKResultName)}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error();
+        const rows = await resp.json();
+        const map = {};
+        rows.forEach(r => { map[String(r.key)] = r.result0; });
+        LOOKUP_CACHE[cacheKey] = map;
+        return { map, keySelf };
+      } catch {
+        LOOKUP_CACHE[cacheKey] = null;
+        return null;
+      }
+    }
+    return null;
+  }
+
+  function fmtDate(val) {
+    if (!val) return '';
+    const d = new Date(val);
+    if (isNaN(d) || d.getFullYear() <= 1899) return '';
+    return d.toLocaleDateString('zh-TW');
+  }
+
+  // ── Master 頁籤渲染（用 DB 座標佈局） ─────────────────────
+
+  async function renderMasterTab(tabKey, dict, row) {
+    const tabBtn = document.querySelector(`[data-tab-key="${tabKey}"]`);
+    if (!tabBtn) return;
+    const showWhere = parseInt(tabBtn.dataset.tabShowWhere || '0', 10);
+    const container = document.querySelector(`#master-content-${tabKey} .master-spec-tab`);
+    if (!container) return;
+
+    const fields = (dict || [])
+      .filter(f => (f.IShowWhere ?? f.iShowWhere ?? 0) === showWhere)
+      .filter(f => (f.Visible ?? 1) != 0)
+      .sort((a, b) => (a.SerialNum ?? 9999) - (b.SerialNum ?? 9999));
+
+    if (fields.length === 0) {
+      container.innerHTML = '<li class="text-muted p-2">暫無欄位</li>';
+      return;
+    }
+
+    const hasCoords = fields.some(f => (f.iFieldTop ?? 0) > 0 || (f.iFieldLeft ?? 0) > 0);
+    const pad = 6;
+    let html = '';
+
+    if (hasCoords) {
+      let maxH = 80, maxW = 400;
+      fields.forEach(f => {
+        const b = (f.iFieldTop || 0) + (f.iFieldHeight || 22) + pad;
+        const r = (f.iFieldLeft || 0) + (f.iFieldWidth || 140);
+        if (b > maxH) maxH = b;
+        if (r > maxW) maxW = r;
+      });
+      container.style.minHeight = maxH + 'px';
+      const spacer = document.createElement('div');
+      spacer.style.cssText = `position:absolute;top:0;left:0;width:${maxW}px;height:${maxH}px;pointer-events:none;`;
+      container.appendChild(spacer);
+
+      let labelHtml = '', inputHtml = '';
+      for (const f of fields) {
+        const fn = f.FieldName ?? '';
+        if ((f.iFieldWidth ?? -1) === 0) continue;
+        let val = row[fn] ?? row[fn.toLowerCase()] ?? '';
+        const isDate = /^(date|datetime)/i.test(f.DataType ?? '') || /^\d{4}-\d{2}-\d{2}T/.test(String(val));
+        if (isDate && val) val = fmtDate(val);
+        const isReadOnly = true; // master 全唯讀
+        const lookupResult = (f.LookupTable || f.OCXLKTableName) ? await loadLookup(f) : null;
+
+        const top = (f.iFieldTop || 0) + pad;
+        const left = f.iFieldLeft || 0;
+        const width = f.iFieldWidth || 140;
+        const height = f.iFieldHeight || 22;
+        const labTop = (f.iLabTop || 0) + pad;
+        const labLeft = f.iLabLeft || 0;
+        const labWidth = f.iLabWidth || 90;
+        const labHeight = f.iLabHeight || 22;
+        const label = f.DisplayLabel || fn;
+
+        if ((f.iLabWidth ?? -1) !== 0) {
+          labelHtml += `<li class="spec-field-label" style="top:${labTop}px;left:${labLeft}px;width:${labWidth}px;height:${labHeight}px;">${label}</li>`;
+        }
+
+        let displayVal = val;
+        if (lookupResult && lookupResult.map) {
+          const lkKey = lookupResult.keySelf
+            ? String(row[lookupResult.keySelf] ?? row[lookupResult.keySelf?.toLowerCase()] ?? '')
+            : String(val);
+          if (lookupResult.map[lkKey] !== undefined) displayVal = lookupResult.map[lkKey];
+        }
+
+        inputHtml += `<li class="spec-draggable field-text" style="top:${top}px;left:${left}px;width:${width}px;height:${height}px;">
+          <input type="text" class="master-field readonly-field" name="${fn}" value="${displayVal}" readonly></li>`;
+      }
+      html = labelHtml + inputHtml;
+    } else {
+      container.style.display = 'flex';
+      container.style.flexWrap = 'wrap';
+      container.style.gap = '6px 16px';
+      container.style.padding = '4px 8px';
+      container.style.minHeight = '';
+      for (const f of fields) {
+        const fn = f.FieldName ?? '';
+        let val = row[fn] ?? row[fn.toLowerCase()] ?? '';
+        const isDate = /^(date|datetime)/i.test(f.DataType ?? '') || /^\d{4}-\d{2}-\d{2}T/.test(String(val));
+        if (isDate && val) val = fmtDate(val);
+        const label = f.DisplayLabel || fn;
+        let displayVal = val;
+        const lkr = (f.LookupTable || f.OCXLKTableName) ? await loadLookup(f) : null;
+        if (lkr && lkr.map) {
+          const lkKey = lkr.keySelf ? String(row[lkr.keySelf] ?? row[lkr.keySelf?.toLowerCase()] ?? '') : String(val);
+          if (lkr.map[lkKey] !== undefined) displayVal = lkr.map[lkKey];
+        }
+        html += `<span style="display:inline-flex;align-items:center;gap:3px;white-space:nowrap;">
+          <span style="color:#0055aa;font-weight:600;font-size:12px;">${label}</span>
+          <input type="text" value="${displayVal}" readonly
+            style="border:1px solid #b0bcd0;border-radius:3px;padding:1px 5px;font-size:12px;
+                   background:#f0f0f0;color:#222;min-width:60px;max-width:200px;height:22px;">
+        </span>`;
+      }
+    }
+    container.innerHTML = html;
+  }
+
+  // ── Detail 明細表單渲染（EMOdProdECNSub） ─────────────────
+
+  function renderEcnDetailForm(container, row) {
+    const isEmpty = !row || Object.keys(row).length === 0;
+
+    function v(field) {
+      if (isEmpty) return '';
+      return row[field] ?? row[field?.toLowerCase()] ?? '';
+    }
+
+    const html = `
+      <div style="display:flex; gap:18px; align-items:flex-start;">
+        <!-- ── 左欄 ── -->
+        <div style="flex:1; min-width:0;">
+          <div class="ecn-row">
+            <span class="ecn-field">
+              <label class="ecn-lbl" style="min-width:50px;">品號</label>
+              <input class="ecn-input" type="text" value="${v('PartNum')}" readonly data-field="PartNum" data-editable="1" style="width:180px;">
+            </span>
+            <span class="ecn-field">
+              <label class="ecn-lbl" style="min-width:50px;">原版序</label>
+              <input class="ecn-input" type="text" value="${v('Revision')}" readonly data-field="Revision" data-editable="1" style="width:80px;">
+            </span>
+          </div>
+
+          <fieldset class="ecn-groupbox">
+            <legend>屬性明細</legend>
+            <div class="ecn-row">
+              <span class="ecn-field">
+                <label class="ecn-lbl" style="min-width:30px;">分類</label>
+                <input class="ecn-input" type="text" value="${v('MatClass')}" readonly data-field="MatClass" style="width:80px;">
+              </span>
+            </div>
+            <div style="margin:2px 0;">
+              <table class="ecn-grid" id="ecn-adddata-grid">
+                <thead><tr><th>選號資料</th><th>名稱</th><th>屬性</th><th>屬性名稱</th></tr></thead>
+                <tbody><tr><td colspan="4" class="text-muted text-center">載入中...</td></tr></tbody>
+              </table>
+            </div>
+            <div class="ecn-row" style="margin-top:2px;">
+              <span class="ecn-field" style="width:100%;">
+                <label class="ecn-lbl" style="min-width:30px;">品名</label>
+                <input class="ecn-input" type="text" value="${v('MatName')}" readonly data-field="MatName" data-editable="1" style="flex:1; min-width:100px;">
+              </span>
+            </div>
+          </fieldset>
+
+        </div>
+
+        <!-- ── 右欄 ── -->
+        <div style="flex:1; min-width:0;">
+          <div class="ecn-row">
+            <span class="ecn-field">
+              <label class="ecn-lbl" style="min-width:50px;">新品號</label>
+              <input class="ecn-input" type="text" value="${v('NewPartNum')}" readonly data-field="NewPartNum" data-editable="1" style="width:180px;">
+            </span>
+            <span class="ecn-field">
+              <label class="ecn-lbl" style="min-width:50px;">新版序</label>
+              <input class="ecn-input" type="text" value="${v('NewRevision')}" readonly data-field="NewRevision" data-editable="1" style="width:80px;">
+            </span>
+          </div>
+
+          <div class="ecn-row">
+            <span class="ecn-field">
+              <label class="ecn-lbl" style="min-width:60px;">PCS數量</label>
+              <input class="ecn-input" type="text" value="${v('PCSCount')}" readonly data-field="PCSCount" data-editable="1" style="width:100px;">
+            </span>
+            <span class="ecn-field">
+              <label class="ecn-lbl" style="min-width:60px;">PNL數量</label>
+              <input class="ecn-input" type="text" value="${v('PNLCount')}" readonly data-field="PNLCount" data-editable="1" style="width:100px;">
+            </span>
+          </div>
+
+          <div class="ecn-row">
+            <span class="ecn-field" style="width:100%;">
+              <label class="ecn-lbl" style="min-width:60px;">修改主旨</label>
+              <input class="ecn-input" type="text" value="${v('leitmotif')}" readonly data-field="leitmotif" data-editable="1" style="flex:1; min-width:100px;">
+            </span>
+          </div>
+
+          <div class="ecn-row">
+            <span class="ecn-field" style="width:100%; align-items:flex-start;">
+              <label class="ecn-lbl" style="min-width:60px; margin-top:3px;">修改內容</label>
+              <textarea class="ecn-input" readonly rows="4" data-field="UpdateContent" data-editable="1" style="flex:1; min-width:100px; resize:vertical;">${v('UpdateContent')}</textarea>
+            </span>
+          </div>
+
+          <div class="ecn-row">
+            <span class="ecn-field" style="width:100%; align-items:flex-start;">
+              <label class="ecn-lbl" style="min-width:60px; margin-top:3px;">協辦內容</label>
+              <textarea class="ecn-input" readonly rows="4" data-field="HelpDictionary" data-editable="1" style="flex:1; min-width:100px; resize:vertical;">${v('HelpDictionary')}</textarea>
+            </span>
+          </div>
+
+          <div class="ecn-row">
+            <span class="ecn-field">
+              <label class="ecn-lbl" style="min-width:60px;">對應CCN</label>
+              <input class="ecn-input" type="text" value="${v('SourNum')}" readonly data-field="SourNum" style="width:121px; background:#e0e0e0;">
+            </span>
+          </div>
+          <div class="ecn-row">
+            <span class="ecn-field">
+              <label class="ecn-lbl" style="min-width:60px;">下料版本</label>
+              <input type="checkbox" ${(v('DefaultRev') == 1 || v('DefaultRev') === true) ? 'checked' : ''} disabled data-field="DefaultRev" data-editable="1" style="width:14px; height:14px;">
+            </span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    container.innerHTML = html;
+
+    // 載入屬性明細 grid（EMOdECNSetNumAddData）
+    loadAddDataGrid(v('PaperNum') || currentMasterKeys['PaperNum'] || currentMasterKeys['papernum'] || '');
+  }
+
+  async function loadAddDataGrid(paperNum) {
+    const tbody = document.querySelector('#ecn-adddata-grid tbody');
+    if (!tbody || !paperNum) return;
+    try {
+      const qs = `keyNames=PaperNum&keyValues=${encodeURIComponent(paperNum.toString().trim())}`;
+      const rows = await fetch(`/api/CommonTable/ByKeys?table=EMOdECNSetNumAddData&${qs}`).then(r => r.json());
+      if (!rows || rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">無資料</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(r => {
+        return `<tr>
+          <td>${r.DtlNumId ?? r.dtlNumId ?? ''}</td>
+          <td>${r.DtlNumName ?? r.dtlNumName ?? ''}</td>
+          <td>${r.NumId ?? r.numId ?? ''}</td>
+          <td>${r.NumName ?? r.numName ?? ''}</td>
+        </tr>`;
+      }).join('');
+    } catch {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-danger text-center">載入失敗</td></tr>';
+    }
+  }
+
+  // ── 資料載入（可重複呼叫） ───────────────────────────────
+
+  function buildByKeysApi(table, keyValues) {
+    const qs = Object.entries(keyValues)
+      .map(([k, v]) => `&keyNames=${encodeURIComponent(k)}&keyValues=${encodeURIComponent(v)}`)
+      .join('');
+    return `/api/CommonTable/ByKeys?table=${encodeURIComponent(table)}${qs}`;
+  }
+
+  async function loadMasterData(paperNum) {
+    const url = buildByKeysApi('EMOdProdECNMain', { PaperNum: paperNum });
+    if (!masterDict) masterDict = await getDict('EMOdProdECNMain');
+    const rows = await fetch(url).then(r => r.json());
+    masterData = (rows && rows.length > 0) ? rows[0] : {};
+    for (const tab of document.querySelectorAll('#master-tabs [data-tab-key]')) {
+      await renderMasterTab(tab.dataset.tabKey, masterDict, masterData);
+    }
+  }
+
+  async function loadDetailData(paperNum) {
+    const url = buildByKeysApi('EMOdProdECNSub', { PaperNum: paperNum });
+    const rows = await fetch(url).then(r => r.json());
+    const firstTab = window._extraTabs?.[0];
+    if (!firstTab) return;
+    const container = document.getElementById(`ecn-detail-form-${firstTab.key}`);
+    if (!container) return;
+    const row = (rows && rows.length > 0) ? rows[0] : {};
+    renderEcnDetailForm(container, row);
+    window.dispatchEvent(new CustomEvent('ecnDetailLoaded', { detail: { row } }));
+  }
+
+  // 初次載入
+  const masterApiUrl = window._masterApi || '';
+  const detailApiUrl = window._detailApi || '';
+  const initPaperNum = (currentMasterKeys['PaperNum'] || currentMasterKeys['papernum'] || '').trim();
+
+  if (masterApiUrl) {
+    Promise.all([
+      getDict('EMOdProdECNMain'),
+      fetch(masterApiUrl).then(r => r.json())
+    ]).then(async ([dict, rows]) => {
+      masterDict = dict;
+      masterData = (rows && rows.length > 0) ? rows[0] : {};
+      for (const tab of document.querySelectorAll('#master-tabs [data-tab-key]')) {
+        await renderMasterTab(tab.dataset.tabKey, dict, masterData);
+      }
+    }).catch(err => console.error('Master load failed:', err));
+  }
+
+  if (detailApiUrl) {
+    fetch(detailApiUrl)
+      .then(r => r.json())
+      .then(rows => {
+        const firstTab = window._extraTabs?.[0];
+        if (!firstTab) return;
+        const container = document.getElementById(`ecn-detail-form-${firstTab.key}`);
+        if (!container) return;
+        const row = (rows && rows.length > 0) ? rows[0] : {};
+        renderEcnDetailForm(container, row);
+        window.dispatchEvent(new CustomEvent('ecnDetailLoaded', { detail: { row } }));
+      })
+      .catch(err => {
+        const firstTab = window._extraTabs?.[0];
+        if (firstTab) {
+          const c = document.getElementById(`ecn-detail-form-${firstTab.key}`);
+          if (c) c.innerHTML = `<span class="text-danger">載入失敗: ${err.message}</span>`;
+        }
+      });
+  }
+
+  // ── Toolbar 計數框 & 上一筆/下一筆導航（使用共用模組） ────────
+  const nav = new DetailNavigator({
+    tableName:      'EMOdProdECNMain',
+    keyFields:      ['PaperNum'],
+    detailPath:     '/EMOdProdECNMain/Detail',
+    dataHandlerUrl: '/EMOdProdECNMain?handler=Data',
+    extraParams:    { itemId: 'EMO00019' },
+    currentKeys:    { PaperNum: (window._masterKeyValues?.PaperNum ?? '').trim() },
+    onNavigate:     async (keys) => {
+      currentMasterKeys['PaperNum'] = keys.PaperNum;
+      currentMasterKeys['papernum'] = keys.PaperNum;
+      window.selectedPaperNum = keys.PaperNum;
+      _prevPartNum = '';
+      _currentItem = 1;
+      await loadMasterData(keys.PaperNum);
+      await loadDetailData(keys.PaperNum);
+    }
+  });
+  nav.init();
+
+  // ── btnSwitch → 返回 Index ────────────────────────────────
+  const btnSwitch = document.getElementById('btnSwitch');
+  if (btnSwitch) {
+    const anchor = document.createElement('a');
+    anchor.className = btnSwitch.className;
+    anchor.innerHTML = btnSwitch.innerHTML;
+    anchor.style.cssText = btnSwitch.style.cssText;
+    anchor.style.textDecoration = 'none';
+    anchor.style.display = 'inline-flex';
+    anchor.style.alignItems = 'center';
+    anchor.style.justifyContent = 'center';
+    anchor.id = 'btnSwitch';
+    const savedPage = localStorage.getItem(`orderListQueryPage:emodprodecnmain`) || '1';
+    anchor.href = `/EMOdProdECNMain?page=${savedPage}`;
+    btnSwitch.parentNode.replaceChild(anchor, btnSwitch);
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  編輯模式（修改 / 保留）
+  // ══════════════════════════════════════════════════════════
+
+  let isEditMode = false;
+  let _detailRowData = null;   // 目前載入的明細資料（用於 blur 比對）
+  let _prevPartNum = '';       // 上一次的品號，用於判斷是否需要觸發 InsOldData
+  let _currentItem = 1;        // 目前明細 Item 序號
+
+  const btnEdit = document.getElementById('btnViewEditToggle');
+  const DETAIL_FORM_SELECTOR = '.ecn-detail-form';
+
+  // 記住目前 detail 載入的資料
+  window.addEventListener('ecnDetailLoaded', e => {
+    _detailRowData = e.detail?.row || null;
+    _prevPartNum = (_detailRowData?.PartNum ?? _detailRowData?.partNum ?? '').toString().trim().toUpperCase();
+    _currentItem = parseInt(_detailRowData?.Item ?? _detailRowData?.item ?? 1, 10) || 1;
+  });
+
+  function setEcnEditMode(editing) {
+    isEditMode = editing;
+    window.__headerIsEdit = editing;
+
+    const form = document.querySelector(DETAIL_FORM_SELECTOR);
+    if (!form) return;
+
+    // 切換可編輯欄位
+    form.querySelectorAll('[data-editable="1"]').forEach(el => {
+      if (el.type === 'checkbox') {
+        el.disabled = !editing;
+      } else {
+        if (editing) {
+          el.removeAttribute('readonly');
+        } else {
+          el.setAttribute('readonly', '');
+        }
+      }
+    });
+
+    // 品號 / 原版序 blur 事件
+    const partNumInput = form.querySelector('[data-field="PartNum"]');
+    const revisionInput = form.querySelector('[data-field="Revision"]');
+    if (editing) {
+      if (partNumInput) partNumInput.addEventListener('blur', onPartNumBlur);
+      if (revisionInput) revisionInput.addEventListener('blur', onPartNumBlur);
+    } else {
+      if (partNumInput) partNumInput.removeEventListener('blur', onPartNumBlur);
+      if (revisionInput) revisionInput.removeEventListener('blur', onPartNumBlur);
+    }
+
+    // 切換 toolbar 按鈕文字
+    if (btnEdit) {
+      btnEdit.innerHTML = editing
+        ? '<i class="bi bi-save"></i>保留'
+        : '<i class="bi bi-pencil-square"></i>修改';
+    }
+
+    // 導航按鈕：編輯中禁用
+    nav.setEditMode(editing);
+
+    // toolbar count box 樣式
+    const countBox = document.getElementById('toolbarCountBox');
+    if (countBox) {
+      countBox.classList.toggle('mode-edit', editing);
+      countBox.classList.toggle('mode-view', !editing);
+    }
+  }
+
+  // ── 修改 / 保留 按鈕點擊 ────────────────────────────────
+  if (btnEdit) {
+    btnEdit.addEventListener('click', async () => {
+      if (!isEditMode) {
+        // 檢查單頭 Finished 狀態：只有「作業中」(0) 才允許修改
+        const finished = masterData?.Finished ?? masterData?.finished ?? null;
+        if (finished !== null && finished !== 0) {
+          const statusMap = {0:'作業中', 1:'已確認', 2:'已作廢', 3:'審核中', 4:'已結案'};
+          const statusName = statusMap[finished] || `狀態 ${finished}`;
+          if (typeof Swal !== 'undefined') {
+            Swal.fire({ icon: 'warning', title: '無法修改', text: `單據狀態為「${statusName}」，僅「作業中」狀態可進行修改。` });
+          } else {
+            alert(`單據狀態為「${statusName}」，僅「作業中」狀態可進行修改。`);
+          }
+          return;
+        }
+        setEcnEditMode(true);
+      } else {
+        // 保留（儲存）
+        await saveDetailChanges();
+      }
+    });
+  }
+
+  // ── 新增按鈕（AJAX 不跳頁） ──────────────────────────────
+  const btnAdd = document.getElementById('btnAddNew');
+  if (btnAdd) {
+    btnAdd.addEventListener('click', async () => {
+      // 如果正在編輯中，不允許新增
+      if (isEditMode) {
+        if (typeof Swal !== 'undefined') {
+          Swal.fire({ icon: 'warning', title: '請先儲存或取消目前的修改' });
+        }
+        return;
+      }
+
+      const confirmResult = typeof Swal !== 'undefined'
+        ? await Swal.fire({ icon: 'question', title: '確定要新增單據？', showCancelButton: true, confirmButtonText: '確定', cancelButtonText: '取消' })
+        : { isConfirmed: confirm('確定要新增單據？') };
+      if (!confirmResult.isConfirmed) return;
+
+      try {
+        btnAdd.disabled = true;
+        const userId = (window._userId || localStorage.getItem('erpLoginUserId') || 'admin').toString().trim();
+        const useId = (window._useId || window.DEFAULT_USEID || 'A001').toString().trim();
+        const itemId = window._itemId || 'EMO00019';
+
+        const resp = await fetch('/api/DynamicTable/AddPaper/EMOdProdECNMain', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ itemId, userId, useId })
+        });
+
+        if (!resp.ok) {
+          const errText = await resp.text();
+          throw new Error(errText);
+        }
+
+        const result = await resp.json();
+        const newPaperNum = result.paperNum || result.PaperNum;
+        if (!newPaperNum) throw new Error('未取得新單據編號');
+
+        // ── AJAX 更新：不跳頁，就地切換到新單據 ──
+        // 1. 更新網址列（不重載）
+        const newUrl = `/EMOdProdECNMain/Detail?PaperNum=${encodeURIComponent(newPaperNum)}&itemId=${itemId}`;
+        history.pushState({ paperNum: newPaperNum }, '', newUrl);
+
+        // 2. 更新全域 key
+        currentMasterKeys['PaperNum'] = newPaperNum;
+        currentMasterKeys['papernum'] = newPaperNum;
+        window.selectedPaperNum = newPaperNum;
+        window._masterKeyValues = { PaperNum: newPaperNum };
+
+        // 3. 重新載入 master + detail 資料
+        await loadMasterData(newPaperNum);
+        await loadDetailData(newPaperNum);
+
+        // 4. 更新導航（新單據會在最後）
+        _prevPartNum = '';
+        _currentItem = 1;
+        nav.currentKeys.PaperNum = newPaperNum;
+        nav.reinit();
+
+        // 5. 自動進入編輯模式
+        setEcnEditMode(true);
+
+      } catch (err) {
+        console.error('AddPaper failed:', err);
+        if (typeof Swal !== 'undefined') {
+          Swal.fire({ icon: 'error', title: '新增失敗', text: err.message });
+        } else {
+          alert('新增失敗: ' + err.message);
+        }
+      } finally {
+        btnAdd.disabled = false;
+      }
+    });
+  }
+
+  // ── 作廢按鈕 ──────────────────────────────────────────────
+  const btnDel = document.getElementById('btnBatchDelete');
+  if (btnDel) {
+    btnDel.addEventListener('click', async () => {
+      if (isEditMode) {
+        Swal.fire({ icon: 'warning', title: '請先儲存或取消目前的修改' });
+        return;
+      }
+
+      const paperNum = window.selectedPaperNum;
+      if (!paperNum) {
+        Swal.fire({ icon: 'warning', title: '查無單號！' });
+        return;
+      }
+
+      // 檢查是否已審核（finished == 1 已確認）
+      const finished = masterData?.Finished ?? masterData?.finished ?? null;
+      if (finished === 1) {
+        Swal.fire({ icon: 'warning', title: '該單據已審核，不能作廢' });
+        return;
+      }
+
+      const confirm = await Swal.fire({
+        title: '確定要作廢此單據？',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: '確定作廢',
+        cancelButtonText: '取消'
+      });
+      if (!confirm.isConfirmed) return;
+
+      const userId = (window._userId || localStorage.getItem('erpLoginUserId') || 'admin').toString().trim();
+      const tableName = window._headerTableName || 'EMOdProdECNMain';
+
+      const runVoid = async (extra = {}) => {
+        try {
+          const resp = await fetch('/api/PaperAction/DoAction', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              paperId: tableName,
+              paperNum: paperNum,
+              userId: userId,
+              eoc: 1,
+              aftFinished: 2,
+              itemId: window._itemId || 'EMO00019',
+              useId: window._useId || window.DEFAULT_USEID || 'A001',
+              ...extra
+            })
+          });
+
+          if (!resp.ok) {
+            let msg = '作廢失敗';
+            try {
+              const err = await resp.json();
+              msg = err.message || err.Message || msg;
+            } catch {
+              try { msg = await resp.text() || msg; } catch {}
+            }
+            Swal.fire({ icon: 'error', title: msg });
+            return;
+          }
+
+          const data = await resp.json().catch(() => ({}));
+
+          // 後端要求輸入作廢原因
+          if (data?.code === 'NEED_VOID_REASON') {
+            const reasonResp = await Swal.fire({
+              icon: 'question',
+              title: '請輸入作廢原因',
+              input: 'textarea',
+              inputPlaceholder: '請輸入原因...',
+              showCancelButton: true,
+              confirmButtonText: '確定作廢',
+              cancelButtonText: '取消',
+              inputValidator: v => { if (!v || !v.trim()) return '請輸入作廢原因'; }
+            });
+            if (!reasonResp.isConfirmed) return;
+            await runVoid({ ...extra, voidReason: reasonResp.value });
+            return;
+          }
+
+          Swal.fire({ icon: 'success', title: data.message || '作廢成功', timer: 1500, showConfirmButton: false });
+
+          // 如果是直接刪除（最新單據），回到 Index
+          if (data.deleted) {
+            setTimeout(() => { window.location.href = '/EMOdProdECNMain?itemId=EMO00019'; }, 1500);
+          } else {
+            // Finished 變更為已作廢，重新載入畫面
+            setTimeout(() => { location.reload(); }, 1500);
+          }
+        } catch (err) {
+          Swal.fire({ icon: 'error', title: '作廢錯誤', text: err.message });
+        }
+      };
+
+      await runVoid();
+    });
+  }
+
+  // ── 品號 / 原版序 離開欄位 → InsOldData ──────────────────
+  async function onPartNumBlur() {
+    const form = document.querySelector(DETAIL_FORM_SELECTOR);
+    if (!form || !isEditMode) return;
+
+    const partNumEl = form.querySelector('[data-field="PartNum"]');
+    const revisionEl = form.querySelector('[data-field="Revision"]');
+    if (!partNumEl || !revisionEl) return;
+
+    const newPartNum = (partNumEl.value || '').trim().toUpperCase();
+    const revision = (revisionEl.value || '').trim().toUpperCase();
+    if (!newPartNum || !revision) return;
+
+    // 品號沒變就不觸發
+    if (newPartNum === _prevPartNum) return;
+
+    // 強制大寫
+    partNumEl.value = newPartNum;
+    revisionEl.value = revision;
+
+    const paperNum = (currentMasterKeys['PaperNum'] || currentMasterKeys['papernum'] || '').trim();
+    if (!paperNum) return;
+
+    try {
+      partNumEl.style.opacity = '0.6';
+      const resp = await fetch('/api/Ecn/InsOldData', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paperNum, partNum: newPartNum, item: _currentItem })
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const result = await resp.json();
+
+      // 自動填入 MatClass + MatName
+      const matClassEl = form.querySelector('[data-field="MatClass"]');
+      const matNameEl = form.querySelector('[data-field="MatName"]');
+      if (matClassEl) matClassEl.value = result.matClass || '';
+      if (matNameEl) matNameEl.value = result.matName || '';
+
+      // 重新載入屬性明細 grid
+      const tbody = document.querySelector('#ecn-adddata-grid tbody');
+      if (tbody) {
+        if (result.addDataRows && result.addDataRows.length > 0) {
+          tbody.innerHTML = result.addDataRows.map(r =>
+            `<tr>
+              <td>${r.DtlNumId ?? r.dtlNumId ?? ''}</td>
+              <td>${r.DtlNumName ?? r.dtlNumName ?? ''}</td>
+              <td>${r.NumId ?? r.numId ?? ''}</td>
+              <td>${r.NumName ?? r.numName ?? ''}</td>
+            </tr>`
+          ).join('');
+        } else {
+          tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">無資料</td></tr>';
+        }
+      }
+
+      _prevPartNum = newPartNum;
+    } catch (err) {
+      console.error('InsOldData failed:', err);
+      if (typeof Swal !== 'undefined') {
+        Swal.fire({ icon: 'error', title: '帶入資料失敗', text: err.message });
+      } else {
+        alert('帶入資料失敗: ' + err.message);
+      }
+    } finally {
+      partNumEl.style.opacity = '';
+    }
+  }
+
+  // ── 保留（儲存明細） ─────────────────────────────────────
+  async function saveDetailChanges() {
+    const form = document.querySelector(DETAIL_FORM_SELECTOR);
+    if (!form) return;
+
+    const paperNum = (currentMasterKeys['PaperNum'] || currentMasterKeys['papernum'] || '').trim();
+    if (!paperNum) {
+      alert('缺少 PaperNum');
+      return;
+    }
+
+    // 收集欄位值
+    const data = { PaperNum: paperNum, Item: _currentItem };
+    form.querySelectorAll('[data-field]').forEach(el => {
+      const fn = el.dataset.field;
+      if (el.type === 'checkbox') {
+        data[fn] = el.checked ? 1 : 0;
+      } else {
+        let val = (el.value || '').trim();
+        // PartNum / Revision / NewRevision 強制大寫
+        if (['PartNum', 'Revision', 'NewRevision'].includes(fn)) {
+          val = val.toUpperCase();
+        }
+        data[fn] = val;
+      }
+    });
+
+    try {
+      btnEdit.disabled = true;
+
+      const resp = await fetch('/api/CommonTable/SaveTableChanges', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          TableName: 'EMOdProdECNSub',
+          Data: [data],
+          KeyFields: ['PaperNum', 'Item']
+        })
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(errText);
+      }
+
+      // 儲存成功 → 退出編輯模式
+      setEcnEditMode(false);
+      btnEdit.disabled = false;
+
+      // 靜默儲存成功，不跳提示
+
+      // 重新載入明細資料（載入剛儲存的 Item）
+      const paperNum2 = (currentMasterKeys['PaperNum'] || currentMasterKeys['papernum'] || '').trim();
+      const reloadUrl = `/api/CommonTable/ByKeys?table=EMOdProdECNSub&keyNames=PaperNum&keyValues=${encodeURIComponent(paperNum2)}&keyNames=Item&keyValues=${_currentItem}`;
+      try {
+        const rows = await fetch(reloadUrl).then(r => r.json());
+        const firstTab = window._extraTabs?.[0];
+        if (firstTab) {
+          const container = document.getElementById(`ecn-detail-form-${firstTab.key}`);
+          if (container) {
+            const row = (rows && rows.length > 0) ? rows[0] : {};
+            renderEcnDetailForm(container, row);
+            window.dispatchEvent(new CustomEvent('ecnDetailLoaded', { detail: { row } }));
+          }
+        }
+      } catch {}
+    } catch (err) {
+      console.error('Save failed:', err);
+      btnEdit.disabled = false;
+      btnEdit.innerHTML = '<i class="bi bi-save"></i>保留';
+      if (typeof Swal !== 'undefined') {
+        Swal.fire({ icon: 'error', title: '儲存失敗', text: err.message });
+      } else {
+        alert('儲存失敗: ' + err.message);
+      }
+    }
+  }
+});
+</script>
