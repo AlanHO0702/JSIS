@@ -243,12 +243,16 @@ SELECT c.name
             SqlConnection conn,
             string table,
             string paperNum,
-            HashSet<string> columns)
+            HashSet<string> columns,
+            IEnumerable<string>? extraColumns = null)
         {
             var selectCols = new List<string>();
+            var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             void Add(string col)
             {
-                if (columns.Contains(col)) selectCols.Add($"[{col}]");
+                if (!columns.Contains(col)) return;
+                if (!selected.Add(col)) return;
+                selectCols.Add($"[{col}]");
             }
 
             Add("Finished");
@@ -258,6 +262,14 @@ SELECT c.name
             Add("dllHeadFirst");
             Add("Notes");
             Add("FlowStatus");
+            if (extraColumns != null)
+            {
+                foreach (var col in extraColumns)
+                {
+                    if (string.IsNullOrWhiteSpace(col)) continue;
+                    Add(col.Trim());
+                }
+            }
 
             if (selectCols.Count == 0) return null;
 
@@ -523,6 +535,13 @@ UPDATE [{table}]
             }
 
             var required = await GetRequiredFieldsAsync(conn, req.PaperId);
+            if (required.Count > 0)
+            {
+                var requiredCols = required.Select(f => f.FieldName).Where(s => !string.IsNullOrWhiteSpace(s));
+                var rowWithRequired = await LoadPaperRowAsync(conn, safePaperId, paperNum, columns, requiredCols);
+                if (rowWithRequired != null)
+                    row = rowWithRequired;
+            }
             foreach (var f in required)
             {
                 if (!columns.Contains(f.FieldName)) continue;
