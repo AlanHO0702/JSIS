@@ -70,6 +70,12 @@ public class StoredProcController : ControllerBase
             RequiredParams: new[] { "PaperNum" }
         ),
 
+            // FQC00004 複製檢驗規格（Delphi: btnCopySpec）
+            ["FQCdFMEOutCopySpec"] = new StoredProcDef(
+            ProcName: "dbo.FQCdFMEOutCopySpec",
+            RequiredParams: new[] { "PaperNum", "SubItem", "QCTypeItem", "QCType", "SerialNum" }
+        ),
+
             // LA201 樣品報價單 - 確認/審核前檢查
             ["SQUdQuotaChkData"] = new StoredProcDef(
             ProcName: "dbo.SQUdQuotaChkData",
@@ -1988,3 +1994,4 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         };
     }
 }
+
