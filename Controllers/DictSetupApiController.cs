@@ -140,21 +140,21 @@ UPDATE CURdOCXTableSetUp
     // ===== A-2. TableName 詳細資訊（CURdTableName）=====
     public class TableNameRow
     {
-        public string TableName { get; set; }
-        public string DisplayLabel { get; set; }
-        public string TableNote { get; set; }
+        public string TableName { get; set; } = null!;
+        public string? DisplayLabel { get; set; }
+        public string? TableNote { get; set; }
         public int? SerialNum { get; set; }
         public int? TableType { get; set; }
         public int? LevelNo { get; set; }
-        public string SystemId { get; set; }
-        public string SuperId { get; set; }
-        public string RealTableName { get; set; }
-        public string OrderByField { get; set; }
-        public string DisplayLabelCn { get; set; }
-        public string DisplayLabelEn { get; set; }
-        public string DisplayLabelJp { get; set; }
-        public string DisplayLabelTh { get; set; }
-        public string LogKeildFieldName { get; set; }
+        public string? SystemId { get; set; }
+        public string? SuperId { get; set; }
+        public string? RealTableName { get; set; }
+        public string? OrderByField { get; set; }
+        public string? DisplayLabelCn { get; set; }
+        public string? DisplayLabelEn { get; set; }
+        public string? DisplayLabelJp { get; set; }
+        public string? DisplayLabelTh { get; set; }
+        public string? LogKeildFieldName { get; set; }
     }
 
     // GET /api/DictSetupApi/TableName/{tableName}
@@ -209,46 +209,64 @@ UPDATE CURdOCXTableSetUp
         if (input == null || string.IsNullOrWhiteSpace(input.TableName))
             return BadRequest(new { success = false, message = "Invalid input" });
 
-        await using var conn = new SqlConnection(_connStr);
-        await conn.OpenAsync();
+        try
+        {
+            await using var conn = new SqlConnection(_connStr);
+            await conn.OpenAsync();
 
-        var cmd = new SqlCommand(@"
-UPDATE CURdTableName
-   SET DisplayLabel = @DisplayLabel,
-       TableNote = @TableNote,
-       SerialNum = @SerialNum,
-       TableType = @TableType,
-       LevelNo = @LevelNo,
-       SystemId = @SystemId,
-       SuperId = @SuperId,
-       RealTableName = @RealTableName,
-       OrderByField = @OrderByField,
-       DisplayLabelCn = @DisplayLabelCn,
-       DisplayLabelEn = @DisplayLabelEn,
-       DisplayLabelJp = @DisplayLabelJp,
-       DisplayLabelTh = @DisplayLabelTh,
-       LogKeildFieldName = @LogKeildFieldName
- WHERE TableName = @TableName;", conn);
+            var cmd = new SqlCommand(@"
+SET NOCOUNT ON;
+MERGE CURdTableName AS tgt
+USING (SELECT @TableName AS TableName) AS src
+   ON tgt.TableName = src.TableName
+WHEN MATCHED THEN
+    UPDATE SET DisplayLabel = @DisplayLabel,
+               TableNote    = @TableNote,
+               SerialNum    = @SerialNum,
+               TableType    = @TableType,
+               LevelNo      = @LevelNo,
+               SystemId     = @SystemId,
+               SuperId      = @SuperId,
+               RealTableName     = @RealTableName,
+               OrderByField      = @OrderByField,
+               DisplayLabelCn    = @DisplayLabelCn,
+               DisplayLabelEn    = @DisplayLabelEn,
+               DisplayLabelJp    = @DisplayLabelJp,
+               DisplayLabelTh    = @DisplayLabelTh,
+               LogKeildFieldName = @LogKeildFieldName
+WHEN NOT MATCHED THEN
+    INSERT (TableName, DisplayLabel, TableNote, SerialNum, TableType,
+            LevelNo, SystemId, SuperId, RealTableName, OrderByField,
+            DisplayLabelCn, DisplayLabelEn, DisplayLabelJp, DisplayLabelTh, LogKeildFieldName)
+    VALUES (@TableName, @DisplayLabel, @TableNote, @SerialNum, @TableType,
+            @LevelNo, @SystemId, @SuperId, @RealTableName, @OrderByField,
+            @DisplayLabelCn, @DisplayLabelEn, @DisplayLabelJp, @DisplayLabelTh, @LogKeildFieldName);
+SELECT @@ROWCOUNT AS Affected;", conn);
 
-        cmd.Parameters.AddWithValue("@TableName", input.TableName);
-        cmd.Parameters.AddWithValue("@DisplayLabel", (object?)input.DisplayLabel ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@TableNote", (object?)input.TableNote ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@SerialNum", (object?)input.SerialNum ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@TableType", (object?)input.TableType ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@LevelNo", (object?)input.LevelNo ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@SystemId", (object?)input.SystemId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@SuperId", (object?)input.SuperId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@RealTableName", (object?)input.RealTableName ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@OrderByField", (object?)input.OrderByField ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@DisplayLabelCn", (object?)input.DisplayLabelCn ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@DisplayLabelEn", (object?)input.DisplayLabelEn ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@DisplayLabelJp", (object?)input.DisplayLabelJp ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@DisplayLabelTh", (object?)input.DisplayLabelTh ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@LogKeildFieldName", (object?)input.LogKeildFieldName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@TableName", input.TableName);
+            cmd.Parameters.AddWithValue("@DisplayLabel", (object?)input.DisplayLabel ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@TableNote", (object?)input.TableNote ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SerialNum", (object?)input.SerialNum ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@TableType", (object?)input.TableType ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LevelNo", (object?)input.LevelNo ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SystemId", (object?)input.SystemId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SuperId", (object?)input.SuperId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@RealTableName", (object?)input.RealTableName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@OrderByField", (object?)input.OrderByField ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@DisplayLabelCn", (object?)input.DisplayLabelCn ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@DisplayLabelEn", (object?)input.DisplayLabelEn ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@DisplayLabelJp", (object?)input.DisplayLabelJp ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@DisplayLabelTh", (object?)input.DisplayLabelTh ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LogKeildFieldName", (object?)input.LogKeildFieldName ?? DBNull.Value);
 
-        var affected = await cmd.ExecuteNonQueryAsync();
+            var affected = Convert.ToInt32(await cmd.ExecuteScalarAsync() ?? 0);
 
-        return Ok(new { success = affected > 0, affected });
+            return Ok(new { success = true, affected });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
     }
 
     // ===== B. 自訂按鈕（CURdOCXItemCustButton）=====

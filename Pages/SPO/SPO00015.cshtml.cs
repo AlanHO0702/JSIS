@@ -35,8 +35,15 @@ namespace PcbErpApi.Pages.SPO
         public int TotalPages { get; set; }
         public List<Dictionary<string, object?>> Items { get; set; } = new();
         public List<CURdTableField> FieldDictList { get; set; } = new();
+        public List<QueryOption> CustomerOptions { get; set; } = new();
         public string CurrentUserId { get; set; } = "";
         public string CurrentUseId { get; set; } = "";
+
+        public sealed class QueryOption
+        {
+            public string Value { get; set; } = "";
+            public string Text { get; set; } = "";
+        }
 
         private static readonly string[] FallbackFields = new[]
         {
@@ -71,22 +78,21 @@ namespace PcbErpApi.Pages.SPO
             try
             {
                 var allowed = await GetAllowedColumnsAsync(conn);
-                var orderBy = BuildOrderBy(sortBy, sortDir, allowed);
-                var hasQuery = HasEffectiveQuery(Request.Query);
-                if (hasQuery)
+                if (HasEffectiveQuery(Request.Query))
                 {
+                    var orderBy = BuildOrderBy(sortBy, sortDir, allowed);
                     var (whereSql, parameters) = BuildWhere(Request.Query, allowed);
                     Items = await LoadRowsAllAsync(conn, whereSql, orderBy, parameters);
                     TotalCount = Items.Count;
-                    TotalPages = 1;
                 }
                 else
                 {
-                    TotalCount = 0;
-                    TotalPages = 1;
                     Items = new List<Dictionary<string, object?>>();
+                    TotalCount = 0;
                 }
+                TotalPages = 1;
                 FieldDictList = await LoadFieldDictAsync(conn, "SPOdV_InvoiceInq");
+                CustomerOptions = await LoadCustomerOptionsAsync(conn);
 
                 CurrentUserId = ResolveUserId();
                 CurrentUseId = ResolveUseId();
@@ -214,6 +220,35 @@ namespace PcbErpApi.Pages.SPO
             {
                 return new List<CURdTableField>();
             }
+        }
+
+        private static async Task<List<QueryOption>> LoadCustomerOptionsAsync(DbConnection conn)
+        {
+            var list = new List<QueryOption>();
+            try
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+select distinct top 500 t0.CustomerId, t0.ShortName
+  from SPOdV_InvoiceInq t0 with (nolock)
+ where isnull(t0.CustomerId,'') <> ''
+ order by t0.CustomerId";
+                await using var rd = await cmd.ExecuteReaderAsync();
+                while (await rd.ReadAsync())
+                {
+                    var id = rd.IsDBNull(0) ? "" : rd.GetValue(0)?.ToString() ?? "";
+                    if (string.IsNullOrWhiteSpace(id)) continue;
+                    var name = rd.FieldCount > 1 && !rd.IsDBNull(1) ? rd.GetValue(1)?.ToString() ?? "" : "";
+                    var value = id.Trim();
+                    var text = string.IsNullOrWhiteSpace(name) ? value : $"{value} {name.Trim()}";
+                    list.Add(new QueryOption { Value = value, Text = text });
+                }
+            }
+            catch
+            {
+                return new List<QueryOption>();
+            }
+            return list;
         }
 
         private static (string WhereSql, List<DbParameter> Params) BuildWhere(Microsoft.AspNetCore.Http.IQueryCollection query, HashSet<string> allowed)

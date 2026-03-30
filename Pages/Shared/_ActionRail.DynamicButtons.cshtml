@@ -492,6 +492,39 @@
     return value;
   };
 
+  const getParamEditMask = (p) => {
+    const candidates = [
+      p?.EditMask, p?.editMask,
+      p?.ParamFormat, p?.paramFormat,
+      p?.ParamFmt, p?.paramFmt,
+      p?.FormatStr, p?.formatStr
+    ];
+    for (const c of candidates) {
+      const v = (c ?? "").toString().trim();
+      if (v) return v;
+    }
+    return "";
+  };
+
+  const isDateParam = (p) => {
+    const mask = getParamEditMask(p);
+    if (hasDateOnlyMask(mask)) return true;
+
+    const flag = Number(p?.iDateTime ?? p?.IDateTime ?? p?.isDateTime ?? p?.IsDateTime ?? 0);
+    if (flag === 1) return true;
+
+    const controlType = Number(p?.ControlType ?? p?.controlType ?? 0);
+    if (controlType === 1) return false;
+
+    const paramName = (p?.ParamName ?? p?.paramName ?? "").toString().toLowerCase();
+    const displayName = (p?.DisplayName ?? p?.displayName ?? "").toString().toLowerCase();
+
+    if (paramName.includes("date")) return true;
+    if (displayName.includes("日期")) return true;
+
+    return false;
+  };
+
   const paperSearch = (() => {
     const modalEl = document.getElementById("paperSearchModal");
     window.__paperSearchLoaded = true;
@@ -1037,7 +1070,7 @@
           await loadOptions();
           const defVal = headerDefault || (p.DefaultValue ?? p.defaultValue);
           if (defVal != null && defVal !== "") {
-            const masked = applyEditMask(defVal, p.EditMask ?? p.editMask);
+            const masked = applyEditMask(defVal, getParamEditMask(p));
             if (masked !== "" && !Array.from(select.options).some(o => o.value === masked)) {
               const o = document.createElement("option");
               o.value = masked;
@@ -1059,8 +1092,8 @@
         } else {
           const input = document.createElement("input");
           input.className = "form-control form-control-sm ps-control";
-          const editMask = p.EditMask ?? p.editMask ?? "";
-          const isDate = hasDateOnlyMask(editMask);
+          const editMask = getParamEditMask(p);
+          const isDate = isDateParam(p);
           input.type = isDate ? "date" : "text";
           input.setAttribute("data-param", name);
           if (isDate) input.setAttribute("data-edit-mask", editMask);
@@ -1482,7 +1515,7 @@
           }
           const defVal = headerDefault || (p.DefaultValue ?? p.defaultValue);
           if (defVal != null && defVal !== "") {
-            select.value = applyEditMask(defVal, p.EditMask ?? p.editMask);
+            select.value = applyEditMask(defVal, getParamEditMask(p));
             if (!select.value) {
               const o = document.createElement("option");
               o.value = defVal;
@@ -1529,8 +1562,8 @@
         } else {
           const input = document.createElement("input");
           input.className = "form-control form-control-sm crs-control";
-          const editMask = p.EditMask ?? p.editMask ?? "";
-          const isDate = hasDateOnlyMask(editMask);
+          const editMask = getParamEditMask(p);
+          const isDate = isDateParam(p);
           input.type = isDate ? "date" : "text";
           input.setAttribute("data-param", name);
           if (isDate) input.setAttribute("data-edit-mask", editMask);

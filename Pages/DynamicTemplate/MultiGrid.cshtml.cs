@@ -24,6 +24,7 @@ namespace PcbErpApi.Pages.CUR
         private readonly ITableDictionaryService _dictService;
         private readonly IBreadcrumbService _breadcrumbService;
         private readonly ILogger<MultiGridModel> _logger;
+        private readonly Dictionary<string, HashSet<string>> _tableColumnCache = new(StringComparer.OrdinalIgnoreCase);
 
         public MultiGridModel(PcbErpContext ctx, ITableDictionaryService dictService, IBreadcrumbService breadcrumbService, ILogger<MultiGridModel> logger)
         {
@@ -155,7 +156,8 @@ namespace PcbErpApi.Pages.CUR
                     tabVm.QueryFields = await LoadQueryFieldsAsync(itemId, tabVm.TableName, "TW");
                     var filterParams = new List<SqlParameter>();
                     var filterSql = BuildFilterSql(tabVm.QueryFields, Request.Query, filterParams);
-                    var combinedFilter = CombineFilter(setup.FilterSql, filterSql);
+                    var itemFilterSql = await BuildItemSpecificFilterAsync(itemId, tabVm.TableName, Request.Query, filterParams);
+                    var combinedFilter = CombineFilter(CombineFilter(setup.FilterSql, filterSql), itemFilterSql);
 
                     tabVm.TotalCount = await CountRowsAsync(tabVm.TableName, combinedFilter, filterParams);
                     tabVm.Items = await LoadRowsAsync(tabVm.TableName, combinedFilter, tabVm.OrderBy, tabVm.PageNumber, tabVm.PageSize, filterParams);
@@ -525,6 +527,97 @@ SELECT TOP 1 c.name
             if (!string.IsNullOrWhiteSpace(f2)) parts.Add(f2);
             if (parts.Count == 0) return string.Empty;
             return "WHERE " + string.Join(" AND ", parts);
+        }
+
+        private async Task<string> BuildItemSpecificFilterAsync(string itemId, string tableName, IQueryCollection query, List<SqlParameter> parameters)
+        {
+            if (!string.Equals(itemId, "FQC00057", StringComparison.OrdinalIgnoreCase))
+                return string.Empty;
+
+            var columns = await GetTableColumnsAsync(tableName);
+            if (columns.Count == 0) return string.Empty;
+
+            var parts = new List<string>();
+
+            var status = (query["status"].ToString() ?? string.Empty).Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(status)) status = "active";
+
+            var hasEffectDate = columns.Contains("EffectDate");
+            var hasDelDate = columns.Contains("DelDate");
+            if (hasEffectDate && hasDelDate)
+            {
+                if (status is "active" or "1")
+                {
+                    parts.Add("((t0.[EffectDate] <= GETDATE()) OR t0.[EffectDate] IS NULL) AND ((t0.[DelDate] >= GETDATE()) OR t0.[DelDate] IS NULL)");
+                }
+                else if (status is "inactive" or "0")
+                {
+                    parts.Add("((t0.[EffectDate] >= GETDATE()) OR (t0.[DelDate] <= GETDATE()))");
+                }
+            }
+
+            var bProcCode = (query["bProcCode"].ToString() ?? string.Empty).Trim();
+            if (columns.Contains("BProcCode") && !string.IsNullOrWhiteSpace(bProcCode))
+            {
+                var mode = (query["bProcMode"].ToString() ?? string.Empty).Trim().ToLowerInvariant();
+                var parameterName = $"@p{parameters.Count}";
+                if (mode == "like")
+                {
+                    parts.Add($"t0.[BProcCode] LIKE {parameterName}");
+                    parameters.Add(new SqlParameter(parameterName, $"%{bProcCode}%"));
+                }
+                else
+                {
+                    parts.Add($"t0.[BProcCode] = {parameterName}");
+                    parameters.Add(new SqlParameter(parameterName, bProcCode));
+                }
+            }
+
+            return string.Join(" AND ", parts);
+        }
+
+        private async Task<HashSet<string>> GetTableColumnsAsync(string tableName)
+        {
+            var normalized = NormalizeTableName(tableName);
+            if (string.IsNullOrWhiteSpace(normalized))
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (_tableColumnCache.TryGetValue(normalized, out var cached))
+                return cached;
+
+            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var cs = GetConnStr();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            const string sql = @"
+SELECT c.name
+  FROM sys.columns c
+  JOIN sys.tables t ON t.object_id = c.object_id
+ WHERE t.name = @tbl";
+
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@tbl", normalized);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var col = rd.GetString(0);
+                if (!string.IsNullOrWhiteSpace(col))
+                    columns.Add(col);
+            }
+
+            _tableColumnCache[normalized] = columns;
+            return columns;
+        }
+
+        private static string NormalizeTableName(string? raw)
+        {
+            var s = (raw ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+            s = s.Replace("[", string.Empty).Replace("]", string.Empty);
+            if (s.Contains('.'))
+                s = s.Split('.').Last().Trim();
+            return s;
         }
 
         private static IEnumerable<SqlParameter> CloneParams(IEnumerable<SqlParameter> source)

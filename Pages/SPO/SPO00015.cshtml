@@ -4,39 +4,198 @@
 @{
     Layout = "_InquiryTemplate";
     ViewData["Title"] = Model.PageTitle;
-    ViewData["ShowInqRail"] = false;
+    ViewData["ShowInqHeader"] = false;
+    ViewData["ShowInqRail"] = true;
+    ViewData["InqRailTitle"] = "查詢";
+    ViewData["InqRailWidth"] = "120px";
 }
 
-@section InqHeader {
-  <div class="spo15-toolbar">
-    <div class="btn-toolbar spo15-toolbar-actions" role="group" aria-label="銷貨發票查詢操作">
-      <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnSPO15First" title="第一筆" aria-label="第一筆"><i class="bi bi-chevron-bar-left"></i></button>
-      <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnSPO15Prev" title="上一筆" aria-label="上一筆"><i class="bi bi-chevron-left"></i></button>
-      <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnSPO15Next" title="下一筆" aria-label="下一筆"><i class="bi bi-chevron-right"></i></button>
-      <button type="button" class="btn toolbar-btn toolbar-btn-icon" id="btnSPO15Last" title="最後一筆" aria-label="最後一筆"><i class="bi bi-chevron-bar-right"></i></button>
-      <div id="spo15CountBox" class="toolbar-count-box mode-view">
-        <div id="spo15Mode" class="count-line">瀏覽模式</div>
-        <div id="spo15Count" class="count-line">@(Model.Items.Count > 0 ? 1 : 0) / @Model.TotalCount</div>
-      </div>
-      <button type="button" class="btn toolbar-btn" id="btnSPO15Query"><i class="bi bi-search"></i>查詢</button>
-      <button type="button" class="btn toolbar-btn" id="btnSPO15Switch"><i class="bi bi-arrow-left-right"></i>切換</button>
-      <button type="button" class="btn toolbar-btn" id="btnSPO15Excel"><i class="bi bi-file-earmark-excel"></i>Excel</button>
-    </div>
+@section InqRail {
+  <button type="submit" form="inqForm" class="inq-rail-btn" id="btnSPO15Query">查詢</button>
+  <button type="button" class="inq-rail-btn" id="btnSPO15Excel">匯出Excel</button>
+  <button type="button" class="inq-rail-btn" id="btnSPO15Switch">單據追蹤</button>
+  <button type="button" class="inq-rail-btn" id="btnEditDict">編輯辭典</button>
+  <button type="button" class="inq-rail-btn" id="btnClearInq">清除</button>
+  <div class="inq-rail-status">
+    <div>資料筆數：<span id="inqTotalCount">0</span></div>
+    <div>目前位置：<span id="inqCurrentPos">0</span></div>
   </div>
+}
+
+@{
+  string QVal(string name)
+  {
+      return Request.Query[name].ToString();
+  }
+
+  string QDateVal(string name)
+  {
+      var raw = Request.Query[name].ToString();
+      if (DateTime.TryParse(raw, out var dt)) return dt.ToString("yyyy-MM-dd");
+      return raw;
+  }
+}
+
+@section InqQuery {
+  <script>
+    (() => {
+      try {
+        if (sessionStorage.getItem("__inqPendingBusy")) {
+          document.documentElement.classList.add("inq-busy-pending");
+        }
+      } catch {}
+    })();
+  </script>
+  <form id="inqForm" method="get" class="inq-form inq-form--auto-grid-enabled">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="Cond_InvoiceNum" value=">=" />
+    <input type="hidden" name="Cond_InvoiceNum2" value="<=" />
+    <input type="hidden" name="Cond_CustomerId" value=">=" />
+    <input type="hidden" name="Cond_CustomerId2" value="<=" />
+    <input type="hidden" name="Cond_PartNum" value=">=" />
+    <input type="hidden" name="Cond_PartNum2" value="<=" />
+    <input type="hidden" name="Cond_PaperDate" value=">=" />
+    <input type="hidden" name="Cond_PaperDate2" value="<=" />
+    <input type="hidden" name="Cond_FinishedName" value="=" />
+    <input type="hidden" name="Cond_PayWayName" value="=" />
+    <input type="hidden" name="Cond_ShortName" value="like" />
+    <input type="hidden" name="Cond_PaperNum" value="=" />
+
+    <div class="inq-row">
+      <label class="inq-label">起始發票號</label>
+      <input type="text" name="InvoiceNum" class="form-control form-control-sm inq-input" value="@QVal("InvoiceNum")" />
+      <label class="inq-label">截止發票號</label>
+      <input type="text" name="InvoiceNum2" class="form-control form-control-sm inq-input" value="@QVal("InvoiceNum2")" />
+      <label class="inq-label">發票日期</label>
+      <input type="date" name="PaperDate" class="form-control form-control-sm inq-input inq-date" value="@QDateVal("PaperDate")" />
+      <label class="inq-to">至</label>
+      <input type="date" name="PaperDate2" class="form-control form-control-sm inq-input inq-date" value="@QDateVal("PaperDate2")" />
+    </div>
+
+    <div class="inq-row">
+      <label class="inq-label">起始客戶</label>
+      <span class="inq-select">
+        <input type="hidden" id="inq_CustomerId" name="CustomerId" class="inq-select-code-hidden" value="@QVal("CustomerId")" />
+        <input type="text" class="form-control form-control-sm inq-input inq-lookup-display"
+               value=""
+               autocomplete="off"
+               data-code-target="inq_CustomerId"
+               data-lookup-table="SPOdV_InvoiceInq"
+               data-lookup-key="CustomerId"
+               data-lookup-result="ShortName"
+               data-selected="@QVal("CustomerId")" />
+        <button type="button" class="inq-select-btn" aria-label="開啟清單">▾</button>
+      </span>
+      <label class="inq-label">截止客戶</label>
+      <span class="inq-select">
+        <input type="hidden" id="inq_CustomerId2" name="CustomerId2" class="inq-select-code-hidden" value="@QVal("CustomerId2")" />
+        <input type="text" class="form-control form-control-sm inq-input inq-lookup-display"
+               value=""
+               autocomplete="off"
+               data-code-target="inq_CustomerId2"
+               data-lookup-table="SPOdV_InvoiceInq"
+               data-lookup-key="CustomerId"
+               data-lookup-result="ShortName"
+               data-selected="@QVal("CustomerId2")" />
+        <button type="button" class="inq-select-btn" aria-label="開啟清單">▾</button>
+      </span>
+      <label class="inq-label">單據狀態</label>
+      <input type="text" name="FinishedName" class="form-control form-control-sm inq-input" value="@QVal("FinishedName")" />
+      <label class="inq-label">付款方式</label>
+      <input type="text" name="PayWayName" class="form-control form-control-sm inq-input" value="@QVal("PayWayName")" />
+    </div>
+
+    <div class="inq-row">
+      <label class="inq-label">起始品號</label>
+      <input type="text" name="PartNum" class="form-control form-control-sm inq-input" value="@QVal("PartNum")" />
+      <label class="inq-label">截止品號</label>
+      <input type="text" name="PartNum2" class="form-control form-control-sm inq-input" value="@QVal("PartNum2")" />
+      <label class="inq-label">客戶簡稱</label>
+      <input type="text" name="ShortName" class="form-control form-control-sm inq-input" value="@QVal("ShortName")" />
+      <label class="inq-label">銷貨單號</label>
+      <input type="text" name="PaperNum" class="form-control form-control-sm inq-input" value="@QVal("PaperNum")" />
+      <label class="inq-label"></label>
+      <input type="text" class="form-control form-control-sm inq-input inq-placeholder" tabindex="-1" aria-hidden="true" />
+    </div>
+
+    <input type="hidden" name="page" value="1" />
+    @if (!string.IsNullOrWhiteSpace(Request.Query["sortBy"]))
+    {
+      <input type="hidden" name="sortBy" value="@Request.Query["sortBy"]" />
+    }
+    @if (!string.IsNullOrWhiteSpace(Request.Query["sortDir"]))
+    {
+      <input type="hidden" name="sortDir" value="@Request.Query["sortDir"]" />
+    }
+  </form>
 }
 
 <script>
   window._itemId = "SPO00015";
   window._dictTableName = "SPOdV_InvoiceInq";
 </script>
+<script>
+  (() => {
+    let pendingMsg = "";
+    try {
+      pendingMsg = sessionStorage.getItem("__inqPendingBusy") || "";
+      if (pendingMsg) sessionStorage.removeItem("__inqPendingBusy");
+    } catch {}
+    if (!pendingMsg) return;
 
-<!-- Query Modal (same template as 銷售訂單) -->
-<div class="modal fade" id="queryModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    @await Html.PartialAsync("~/Pages/Shared/_QueryPanelPartial.cshtml", (object)(new List<object>()))
-  </div>
-</div>
-@await Html.PartialAsync("~/Pages/Shared/_QueryFieldModals.cshtml")
+    const docEl = document.documentElement;
+    docEl.classList.add("inq-busy-pending");
+
+    const overlay = document.createElement("div");
+    overlay.id = "inqBusyPendingOverlay";
+    overlay.className = "show";
+    overlay.innerHTML = `<div class="inq-busy-card"><div class="spinner-border text-primary" role="status" aria-hidden="true"></div><div class="inq-busy-text">${pendingMsg}</div></div>`;
+
+    const mount = () => {
+      if (!overlay.isConnected) document.body.appendChild(overlay);
+    };
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", mount, { once: true });
+    } else {
+      mount();
+    }
+
+    const clear = () => {
+      docEl.classList.remove("inq-busy-pending");
+      overlay.remove();
+      if (typeof window.hideBusy === "function") window.hideBusy();
+    };
+
+    const isQueryLayoutReady = () => {
+      const form = document.getElementById("inqForm");
+      if (!(form instanceof HTMLElement)) return true;
+      const rows = form.querySelectorAll(":scope > .inq-row");
+      if (!rows.length || rows.length <= 1) return true;
+      if (form.classList.contains("inq-form--auto-grid-active")) return true;
+      return false;
+    };
+
+    const triggerQueryAlign = () => {
+      try {
+        window.dispatchEvent(new Event("resize"));
+      } catch {}
+    };
+
+    const waitAndClear = (retry = 0) => {
+      triggerQueryAlign();
+      if (isQueryLayoutReady() || retry >= 120) {
+        clear();
+        return;
+      }
+      window.requestAnimationFrame(() => waitAndClear(retry + 1));
+    };
+
+    window.addEventListener("load", () => setTimeout(() => waitAndClear(), 120), { once: true });
+    window.addEventListener("pageshow", () => setTimeout(() => waitAndClear(), 120), { once: true });
+    setTimeout(clear, 9000);
+  })();
+</script>
+
 @await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", new List<CURdTableField>(), ViewData)
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
 
@@ -137,6 +296,38 @@
 }
 
 <style>
+  html.inq-busy-pending .inq-shell {
+    visibility: hidden !important;
+  }
+  #inqBusyPendingOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 4000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(247, 250, 255, 0.92);
+    opacity: 0;
+    transition: opacity 0.18s ease;
+  }
+  #inqBusyPendingOverlay.show {
+    opacity: 1;
+  }
+  #inqBusyPendingOverlay .inq-busy-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    animation: inqBusyPulse 0.9s ease-in-out infinite alternate;
+  }
+  #inqBusyPendingOverlay .inq-busy-text {
+    font-size: 14px;
+    color: #234;
+  }
+  @@keyframes inqBusyPulse {
+    from { transform: translateY(0); }
+    to { transform: translateY(-2px); }
+  }
   .inq-table-wrap {
     border: 1px solid #d8dee8;
     border-radius: 8px;
@@ -197,111 +388,485 @@
   .inq-table tbody tr.table-active td {
     background: var(--bs-table-active-bg);
   }
-
-  .spo15-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
+  .inq-rail-status {
+    margin-top: 4px;
+    padding: 6px 6px;
     border: 1px solid #d8dee8;
-    border-radius: 10px;
-    background: var(--section-bg-toolbar, #f6f7f9);
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #1f3a8a;
+    font-size: 0.8rem;
+    line-height: 1.4;
   }
-  .spo15-toolbar-actions {
+  .inq-rail-btn {
+    padding: 4px 6px;
+    font-size: 0.82rem;
+    border-radius: 8px;
+  }
+  #btnEditDict {
+    display: none;
+  }
+  .inq-form {
+    display: grid;
+    gap: 6px;
+  }
+  .inq-row {
     display: flex;
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
   }
-  .toolbar-count-box {
-    display: inline-flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    height: 30px;
-    min-width: 74px;
-    padding: 2px 8px;
-    border-radius: 6px;
-    font-weight: 700;
-    line-height: 1.05;
-    color: #fff;
-    background: #1e4db7;
-    user-select: none;
-    font-size: 0.85rem;
-  }
-  .toolbar-btn {
-    height: 32px;
-    padding: 0 8px;
+  .inq-label {
+    min-width: 68px;
+    text-align: right;
+    color: #1d3b6b;
     font-size: 0.82rem;
+  }
+  .inq-query .inq-input {
+    width: 160px;
+    min-width: 160px;
+    max-width: 160px;
+    height: 26px;
+    padding: 2px 6px;
+    font-size: 0.82rem;
+    line-height: 1.2;
+    box-sizing: border-box;
+  }
+  .inq-select {
+    position: relative;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    border: 1px solid #cfd7e6;
-    border-radius: 8px;
-    background: #fff;
-    color: #1f3a8a;
   }
-  .toolbar-btn:hover {
-    background: #e9f1ff;
-    border-color: #9fbaf0;
-  }
-  .toolbar-btn-icon {
-    width: 28px;
-    min-width: 28px;
+  .inq-select-btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 0;
+    background: transparent;
+    font-size: 0.75rem;
+    color: #4b5563;
+    line-height: 1;
     padding: 0;
-    justify-content: center;
+    cursor: pointer;
+  }
+  .inq-lookup-display {
+    padding-right: 18px;
+    background: #fff;
+    color: #374151;
+  }
+  .inq-suggest {
+    position: absolute;
+    background: #fff;
+    border: 1px solid #c9d2e3;
+    border-radius: 6px;
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 2000;
+  }
+  .inq-suggest-item {
+    display: flex;
+    gap: 6px;
+    padding: 4px 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+  }
+  .inq-suggest-item:hover {
+    background: #eef3ff;
+  }
+  .inq-suggest-code {
+    min-width: 40px;
+    font-weight: 600;
+    color: #1d3b6b;
+  }
+  .inq-suggest-label {
+    color: #4b5563;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .inq-query input.inq-input {
+    height: 26px;
+  }
+  .inq-date {
+    width: 160px;
+    min-width: 160px;
+    max-width: 160px;
+  }
+  .inq-to {
+    min-width: 24px;
+    text-align: center;
+    font-size: 0.82rem;
+    color: #1d3b6b;
+  }
+  .inq-placeholder {
+    visibility: hidden;
+    pointer-events: none;
+  }
+  @@media (max-width: 1280px) {
+    .inq-row {
+      row-gap: 3px;
+    }
   }
 </style>
 
 <script>
-  const queryModalEl = document.getElementById("queryModal");
-  const queryForm = document.getElementById("searchForm");
-  const queryFieldGrid = queryForm?.querySelector(".query-field-grid");
+  const inqForm = document.getElementById("inqForm");
+  window.requestAnimationFrame(() => {
+    try { window.dispatchEvent(new Event("resize")); } catch {}
+  });
+
+  const showPageBusy = (msg = "查詢中…") => {
+    try {
+      if (typeof window.showBusy === "function") {
+        window.showBusy(msg);
+        return;
+      }
+      const overlay = document.getElementById("loadingOverlay");
+      if (!overlay) return;
+      const msgEl = document.getElementById("loadingMsg");
+      if (msgEl) msgEl.textContent = msg;
+      overlay.classList.add("show");
+      overlay.style.display = "flex";
+    } catch { }
+  };
+  const navigateWithBusy = (url, msg) => {
+    try { sessionStorage.setItem("__inqPendingBusy", msg || "查詢中…"); } catch {}
+    showPageBusy(msg);
+    setTimeout(() => { window.location.href = url.toString(); }, 0);
+  };
 
   document.getElementById("btnSPO15Excel")?.addEventListener("click", () => {
     const url = new URL(window.location.href);
     url.searchParams.set("handler", "Export");
-    window.location.href = url.toString();
+    navigateWithBusy(url, "匯出中…");
   });
 
-  document.getElementById("btnSPO15Query")?.addEventListener("click", () => {
-    if (queryModalEl && window.bootstrap) {
-      const modal = bootstrap.Modal.getOrCreateInstance(queryModalEl);
-      modal.show();
-    }
+  document.getElementById("btnClearInq")?.addEventListener("click", () => {
+    window.location.href = "/SPO/SPO00015";
   });
 
-  queryForm?.addEventListener('submit', (e) => {
+  inqForm?.addEventListener("submit", (e) => {
     e.preventDefault();
-    const url = new URL(window.location.origin + window.location.pathname);
-    url.searchParams.set("queryAll", "1");
+    const fd = new FormData(inqForm);
+    const params = new URLSearchParams();
+    for (const [key, raw] of fd.entries()) {
+      const val = (raw ?? "").toString().trim();
+      if (key === "__RequestVerificationToken") continue;
+      if (key === "page") continue;
 
-    const currentPageSize = new URLSearchParams(window.location.search).get("pageSize");
-    if (currentPageSize) url.searchParams.set("pageSize", currentPageSize);
-    url.searchParams.set("page", "1");
-
-    queryFieldGrid?.querySelectorAll('.query-input').forEach(input => {
-      const val = input.value?.trim() ?? "";
-      const key = input.name || input.dataset.key || "";
-      if (!key) return;
-      if (val) url.searchParams.set(key, val);
-      else url.searchParams.delete(key);
-    });
-
-    queryFieldGrid?.querySelectorAll('.query-op').forEach(select => {
-      const op = select.value?.trim() ?? "";
-      const key = select.name?.replace(/^Cond_/, "") ?? "";
-      const input = key ? queryFieldGrid.querySelector(`.query-input[name="${CSS.escape(key)}"]`) : null;
-      const hasValue = !!(input && (input.value ?? "").toString().trim() !== "");
-      if (key && op && op !== "=" && hasValue) {
-        url.searchParams.set(`Cond_${key}`, op);
-      } else if (key) {
-        url.searchParams.delete(`Cond_${key}`);
+      if (key.startsWith("Cond_")) {
+        const field = key.substring(5);
+        const fieldVal = (fd.get(field) ?? "").toString().trim();
+        if (!fieldVal) continue;
+        if (!val || val === "=") continue;
+        params.set(key, val);
+        continue;
       }
+
+      if (!val) continue;
+      params.set(key, val);
+    }
+
+    params.set("page", "1");
+    params.set("queryAll", "1");
+    const old = new URLSearchParams(window.location.search);
+    const sortBy = old.get("sortBy");
+    const sortDir = old.get("sortDir");
+    if (sortBy && !params.has("sortBy")) params.set("sortBy", sortBy);
+    if (sortDir && !params.has("sortDir")) params.set("sortDir", sortDir);
+
+    const url = new URL(window.location.origin + "/SPO/SPO00015");
+    for (const [k, v] of params.entries()) {
+      url.searchParams.set(k, v);
+    }
+    navigateWithBusy(url, "查詢中…");
+  });
+
+  (function initLookupSuggest() {
+    const resolveCondValue = (name) => {
+      if (!name) return "";
+      const el = document.querySelector(`[name="${name}"]`);
+      if (!el) return "";
+      if (el.type === "checkbox") return el.checked ? "1" : "0";
+      return el.value || "";
+    };
+
+    const parseItems = (raw) => {
+      if (!raw) return [];
+      return raw.split(/[;,]/).map(p => p.trim()).filter(Boolean).map(p => {
+        const kv = p.split(/=|:/);
+        if (kv.length >= 2) {
+          const value = kv[0].trim();
+          const label = kv.slice(1).join(":").trim();
+          return { value, label };
+        }
+        return { value: p, label: p };
+      });
+    };
+
+    const escapeRegExp = (s) => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const normalizeLookupLabel = (value, label) => {
+      const v = String(value ?? "").trim();
+      const l = String(label ?? "").trim();
+      if (!l) return v;
+      if (!v) return l;
+      const re = new RegExp(`^${escapeRegExp(v)}\\s*[-:]\\s*`, "i");
+      const normalized = l.replace(re, "").trim();
+      return normalized || l;
+    };
+    const formatLookupDisplay = (value, label) => {
+      const v = String(value ?? "").trim();
+      const l = String(label ?? "").trim();
+      if (!v) return l;
+      if (!l) return v;
+      if (v.toLowerCase() === l.toLowerCase()) return v;
+      return `${v} - ${l}`;
+    };
+
+    const buildCondKey = (el) => {
+      const table = el.dataset.lookupTable || "";
+      const key = el.dataset.lookupKey || "";
+      const result = el.dataset.lookupResult || "";
+      const cond1Field = (el.dataset.cond1Field || "").trim();
+      const cond1Source = (el.dataset.cond1Source || "").trim();
+      const cond2Field = (el.dataset.cond2Field || "").trim();
+      const cond2Source = (el.dataset.cond2Source || "").trim();
+      const cond1ValueField = cond1Source || cond1Field;
+      const cond2ValueField = cond2Source || cond2Field;
+      const cond1Value = cond1ValueField ? resolveCondValue(cond1ValueField) : "";
+      const cond2Value = cond2ValueField ? resolveCondValue(cond2ValueField) : "";
+      const items = el.dataset.items || "";
+      return [table, key, result, cond1Field, cond1Value, cond2Field, cond2Value, items].join("|");
+    };
+
+    const fetchLookupOptions = async (el) => {
+      const items = parseItems(el.dataset.items || "");
+      const table = el.dataset.lookupTable || "";
+      const key = el.dataset.lookupKey || "";
+      const result = el.dataset.lookupResult || "";
+      const selected = el.dataset.selected || "";
+
+      let options = [...items];
+      if (table && key && result) {
+        const cond1Field = (el.dataset.cond1Field || "").trim();
+        const cond1Source = (el.dataset.cond1Source || "").trim();
+        const cond2Field = (el.dataset.cond2Field || "").trim();
+        const cond2Source = (el.dataset.cond2Source || "").trim();
+        const cond1ValueField = cond1Source || cond1Field;
+        const cond2ValueField = cond2Source || cond2Field;
+        const cond1Value = cond1ValueField ? resolveCondValue(cond1ValueField) : "";
+        const cond2Value = cond2ValueField ? resolveCondValue(cond2ValueField) : "";
+
+        const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(table)}&key=${encodeURIComponent(key)}&result=${encodeURIComponent(result)}`
+          + (cond1Field && cond1Value ? `&cond1Field=${encodeURIComponent(cond1Field)}&cond1Value=${encodeURIComponent(cond1Value)}` : "")
+          + (cond2Field && cond2Value ? `&cond2Field=${encodeURIComponent(cond2Field)}&cond2Value=${encodeURIComponent(cond2Value)}` : "");
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            const lookups = data.map(row => {
+              const value = String(row?.key ?? "").trim();
+              const rawLabel = Object.keys(row || {}).filter(k => k.startsWith("result")).map(k => row[k]).join(" - ");
+              const label = normalizeLookupLabel(value, rawLabel);
+              return { value, label: label || value };
+            });
+            options = options.concat(lookups);
+          }
+        }
+      }
+
+      const map = new Map();
+      options.forEach(o => {
+        const value = String(o?.value ?? "").trim();
+        if (!value) return;
+        const label = normalizeLookupLabel(value, o?.label ?? o?.value ?? "");
+        if (!map.has(value)) map.set(value, { value, label: label || value });
+      });
+
+      if (selected && !map.has(selected)) map.set(selected, { value: selected, label: selected });
+      return Array.from(map.values()).sort((a, b) => {
+        const av = String(a?.value ?? "");
+        const bv = String(b?.value ?? "");
+        const codeCmp = av.localeCompare(bv, "zh-Hant", { numeric: true, sensitivity: "base" });
+        if (codeCmp !== 0) return codeCmp;
+        const al = String(a?.label ?? "");
+        const bl = String(b?.label ?? "");
+        return al.localeCompare(bl, "zh-Hant", { numeric: true, sensitivity: "base" });
+      });
+    };
+
+    const getCodeInput = (el) => {
+      const id = el?.dataset?.codeTarget;
+      if (id) return document.getElementById(id);
+      return el?.closest(".inq-select")?.querySelector(".inq-select-code-hidden");
+    };
+
+    const syncDisplayValue = (displayEl, options) => {
+      if (!displayEl) return;
+      const codeInput = getCodeInput(displayEl);
+      const codeVal = (codeInput?.value || "").toString().trim();
+      if (!codeVal) {
+        displayEl.value = "";
+        return;
+      }
+      const hit = (options || []).find(o => String(o.value).trim() === codeVal);
+      displayEl.value = hit ? formatLookupDisplay(hit.value, hit.label) : codeVal;
+    };
+
+    const suggest = document.createElement("div");
+    suggest.className = "inq-suggest";
+    suggest.style.display = "none";
+    document.body.appendChild(suggest);
+    let suggestTarget = null;
+    let suggestOptions = [];
+    let keepSuggestUntil = 0;
+
+    const positionSuggest = (el) => {
+      const rect = el.getBoundingClientRect();
+      suggest.style.left = `${rect.left + window.scrollX}px`;
+      suggest.style.top = `${rect.bottom + window.scrollY}px`;
+      const width = Math.max(rect.width, 280);
+      suggest.style.width = `${width}px`;
+    };
+
+    const hideSuggest = () => {
+      if (Date.now() < keepSuggestUntil) return;
+      suggest.style.display = "none";
+      suggest.innerHTML = "";
+      suggestTarget = null;
+      suggestOptions = [];
+    };
+
+    const renderSuggest = (el, list, forceAll = false) => {
+      const q = forceAll ? "" : (el.value || "").trim().toLowerCase();
+      const filtered = q
+        ? list.filter(o => (o.value || "").toLowerCase().includes(q) || (o.label || "").toLowerCase().includes(q))
+        : list;
+
+      suggest.innerHTML = "";
+      if (filtered.length === 0) {
+        hideSuggest();
+        return;
+      }
+
+      filtered.slice(0, 200).forEach(o => {
+        const item = document.createElement("div");
+        item.className = "inq-suggest-item";
+        item.innerHTML = `<div class="inq-suggest-code">${o.value}</div><div class="inq-suggest-label">${o.label}</div>`;
+        item.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          const codeInput = getCodeInput(el);
+          if (codeInput) codeInput.value = o.value;
+          el.value = formatLookupDisplay(o.value, o.label);
+          hideSuggest();
+        });
+        suggest.appendChild(item);
+      });
+
+      positionSuggest(el);
+      suggest.style.display = "block";
+    };
+
+    const lookupCache = new Map();
+    const showSuggest = async (el, forceAll = true) => {
+      const key = buildCondKey(el);
+      if (!lookupCache.has(key)) {
+        const opts = await fetchLookupOptions(el);
+        lookupCache.set(key, opts);
+      }
+      suggestTarget = el;
+      suggestOptions = lookupCache.get(key) || [];
+      syncDisplayValue(el, suggestOptions);
+      renderSuggest(el, suggestOptions, forceAll);
+    };
+
+    document.querySelectorAll(".inq-select-btn").forEach(btn => {
+      btn.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        keepSuggestUntil = Date.now() + 250;
+        const input = btn.previousElementSibling;
+        if (input) {
+          input.focus();
+          showSuggest(input);
+        }
+      });
     });
 
-    window.location.href = url.toString();
-  });
+    document.addEventListener("click", (e) => {
+      if (!suggestTarget) return;
+      if (e.target === suggestTarget || suggest.contains(e.target)) return;
+      hideSuggest();
+    });
+
+    document.querySelectorAll(".inq-lookup-display[data-lookup-table], .inq-lookup-display[data-items]").forEach(el => {
+      el.addEventListener("focus", () => showSuggest(el, true));
+      el.addEventListener("input", () => {
+        if (suggestTarget !== el) return showSuggest(el, false);
+        renderSuggest(el, suggestOptions, false);
+      });
+      el.addEventListener("keydown", (e) => {
+        if (e.key !== "Backspace" && e.key !== "Delete") return;
+        const value = String(el.value || "");
+        if (!value) return;
+        const start = typeof el.selectionStart === "number" ? el.selectionStart : -1;
+        const end = typeof el.selectionEnd === "number" ? el.selectionEnd : -1;
+        const allSelected = start === 0 && end === value.length;
+        if (!allSelected) return;
+        e.preventDefault();
+        el.value = "";
+        const codeInput = getCodeInput(el);
+        if (codeInput) codeInput.value = "";
+        if (suggestTarget === el) renderSuggest(el, suggestOptions, false);
+        else showSuggest(el);
+      });
+      el.addEventListener("blur", () => {
+        setTimeout(() => {
+          if (!suggest.matches(":hover")) hideSuggest();
+        }, 120);
+        const codeInput = getCodeInput(el);
+        if (!codeInput) return;
+        const text = (el.value || "").trim();
+        const key = buildCondKey(el);
+        const opts = lookupCache.get(key) || [];
+        if (!text) {
+          codeInput.value = "";
+          return;
+        }
+        const hit = opts.find(o => {
+          const v = String(o.value ?? "").trim();
+          const l = String(o.label ?? "").trim();
+          const d = formatLookupDisplay(v, l);
+          return v === text || l === text || d === text;
+        });
+        if (hit) {
+          codeInput.value = hit.value;
+          el.value = formatLookupDisplay(hit.value, hit.label);
+        } else {
+          syncDisplayValue(el, opts);
+        }
+      });
+    });
+
+    (async () => {
+      const inputs = Array.from(document.querySelectorAll(".inq-lookup-display"));
+      for (const el of inputs) {
+        if (!(el instanceof HTMLInputElement)) continue;
+        const key = buildCondKey(el);
+        if (!lookupCache.has(key)) {
+          const opts = await fetchLookupOptions(el);
+          lookupCache.set(key, opts);
+        }
+        const opts = lookupCache.get(key) || [];
+        syncDisplayValue(el, opts);
+      }
+    })();
+
+    suggest.addEventListener("mousedown", () => {
+      keepSuggestUntil = Date.now() + 250;
+    });
+  })();
 
   const table = document.querySelector(".inq-table");
   const dictTableName = window._dictTableName || "";
@@ -391,17 +956,20 @@
   initColumnResize(table, dictTableName, fieldNames);
 
   (function initDictForInq() {
+    const dictForQuery = window._dictTableName || "";
     const dictForGrid = window._dictTableName || "";
-    let currentDict = dictForGrid;
+    let currentDict = dictForQuery;
 
     const setDict = (name) => {
       currentDict = name || currentDict;
       window._dictTableName = currentDict;
     };
 
-    setDict(dictForGrid);
-
+    setDict(dictForQuery);
+    const queryArea = document.getElementById("inqForm");
     const tableEl = document.querySelector(".inq-table");
+    queryArea?.addEventListener("focusin", () => setDict(dictForQuery));
+    queryArea?.addEventListener("click", () => setDict(dictForQuery));
     tableEl?.addEventListener("click", () => setDict(dictForGrid));
 
     const openFieldDict = () => {
@@ -417,6 +985,8 @@
       }
     };
 
+    document.getElementById("btnEditDict")?.addEventListener("click", openFieldDict);
+
     document.addEventListener("keydown", (e) => {
       if (e.key !== "F3") return;
       const target = e.target;
@@ -429,7 +999,11 @@
 
   const rows = Array.from(document.querySelectorAll(".inq-table tbody tr"))
     .filter(r => !r.querySelector("td[colspan]"));
-  let selectedIndex = rows.length > 0 ? 0 : -1;
+  let selectedIndex = -1;
+  const totalCount = @Model.TotalCount;
+  const totalEl = document.getElementById("inqTotalCount");
+  const posEl = document.getElementById("inqCurrentPos");
+  if (totalEl) totalEl.textContent = String(totalCount);
 
   const applyHeaderSort = () => {
     const url = new URL(window.location.href);
@@ -461,16 +1035,14 @@
         url.searchParams.set("sortBy", field);
         url.searchParams.set("sortDir", nextDir);
         url.searchParams.set("page", "1");
-        window.location.href = url.toString();
+        navigateWithBusy(url, "查詢中…");
       });
     });
   };
 
   const updateCount = () => {
-    const countEl = document.getElementById("spo15Count");
-    if (!countEl) return;
-    const cur = selectedIndex >= 0 ? (selectedIndex + 1) : 0;
-    countEl.textContent = `${cur} / @Model.TotalCount`;
+    if (!posEl) return;
+    posEl.textContent = totalCount === 0 || selectedIndex < 0 ? "0" : String(selectedIndex + 1);
   };
 
   const selectRow = (idx) => {
@@ -486,11 +1058,6 @@
   rows.forEach((tr, i) => {
     tr.addEventListener("click", () => selectRow(i));
   });
-
-  document.getElementById("btnSPO15First")?.addEventListener("click", () => selectRow(0));
-  document.getElementById("btnSPO15Prev")?.addEventListener("click", () => selectRow(selectedIndex - 1));
-  document.getElementById("btnSPO15Next")?.addEventListener("click", () => selectRow(selectedIndex + 1));
-  document.getElementById("btnSPO15Last")?.addEventListener("click", () => selectRow(rows.length - 1));
 
   bindHeaderSort();
   applyHeaderSort();
@@ -519,5 +1086,6 @@
     window.open(`/DynamicTemplate/Paper/${encodeURIComponent(pid)}/${encodeURIComponent(pnum)}`, "_blank");
   });
 
-  if (rows.length > 0) selectRow(0);
+  if (rows.length > 0 && totalCount > 0) selectRow(0);
+  else updateCount();
 </script>

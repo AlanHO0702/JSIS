@@ -1,0 +1,121 @@
+@*
+    SQ000006 (LA201 - 樣品報價單) 單據的確認、審核前後處理 Hook
+
+    這個檔案會在 PaperDetail.cshtml 中自動載入（如果 ItemId = SQ000006）
+    對應 Delphi: QuotaPaper.pas btnCompletedClick / btnExamClick -> ChkData
+
+    主要功能：
+    1. 確認前執行 SQUdQuotaChkData 檢查
+    2. 審核前執行 SQUdQuotaChkData 檢查
+    3. 客戶變更時自動帶入報價方式 (ComputeId)
+    4. ComputeId 變更時重新設定規格明細
+*@
+
+<script>
+window.InheritedActionHooks = window.InheritedActionHooks || {};
+
+/**
+ * 執行 SQUdQuotaChkData 檢查
+ * Delphi: QuotaPaper.pas ChkData()
+ *
+ * @@param {string} paperNum - 單據號碼
+ * @@returns {Promise<boolean>} - 成功返回 true，使用者取消返回 false
+ */
+async function squdQuotaChkData(paperNum) {
+    try {
+        const resp = await fetch('/api/SQ000006/ChkData', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ PaperNum: paperNum })
+        });
+
+        if (!resp.ok) {
+            const errText = await resp.text();
+            await Swal.fire({ icon: 'error', title: '檢查失敗', text: errText });
+            return false;
+        }
+
+        const data = await resp.json();
+        if (data.needConfirm) {
+            const result = await Swal.fire({
+                icon: 'warning',
+                title: '資料檢查',
+                text: data.message,
+                showCancelButton: true,
+                confirmButtonText: '是',
+                cancelButtonText: '否'
+            });
+            return result.isConfirmed;
+        }
+
+        return true;
+
+    } catch (err) {
+        console.error('[SQ000006] ChkData 執行錯誤:', err);
+        await Swal.fire({ icon: 'error', title: '執行錯誤', text: err.message });
+        return false;
+    }
+}
+
+// 為 SQ000006 註冊 Hooks
+window.InheritedActionHooks['SQ000006'] = {
+
+    /**
+     * 確認前執行 - 呼叫 SQUdQuotaChkData
+     * Delphi: QuotaPaper.pas btnCompletedClick -> ChkData -> inherited
+     *
+     * 參數 context: { tableName, paperNum, userId }
+     * 回傳: Promise<boolean> - 回傳 false 會中止確認操作
+     */
+    beforeConfirm: async (context) => {
+        return await squdQuotaChkData(context.paperNum);
+    },
+
+    /**
+     * 確認後執行
+     */
+    afterConfirm: async (context) => {
+        // 確認成功後可在此加額外處理
+        return true;
+    },
+
+    /**
+     * 審核前執行 - 呼叫 SQUdQuotaChkData
+     * Delphi: QuotaPaper.pas btnExamClick -> ChkData -> inherited
+     */
+    beforeExam: async (context) => {
+        return await squdQuotaChkData(context.paperNum);
+    },
+
+    /**
+     * 修改前執行
+     * Delphi: QuotaPaper.pas qryBrowseBeforeEdit
+     * 記錄原始 ComputeId 和 CompanyId
+     */
+    beforeUpdate: async (context) => {
+        // 記錄原始值供 afterUpdate 比對
+        const headerForm = document.querySelector('form.erp-header-form');
+        if (headerForm) {
+            window._squdOriComputeId = headerForm.querySelector('[data-field="ComputeId"]')?.value || '';
+            window._squdOriCompanyId = headerForm.querySelector('[data-field="CompanyId"]')?.value || '';
+        }
+        return true;
+    },
+
+    /**
+     * 作廢前執行
+     */
+    beforeDelete: async (context) => {
+        return true;
+    },
+
+    /**
+     * 退審前執行
+     */
+    beforeCancel: async (context) => {
+        return true;
+    }
+};
+
+console.log('[SQ000006] Inherited hooks 已載入');
+</script>
