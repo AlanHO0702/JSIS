@@ -755,13 +755,16 @@
         if (!name) return;
         const input = formEl?.querySelector(`[data-param="${name}"]`);
         if (input) {
-          values[name] = input.value ?? "";
+          let val = input.value ?? "";
+          const mask = input.getAttribute("data-edit-mask");
+          if (mask && val) val = applyEditMask(val, mask);
+          values[name] = val;
           return;
         }
         const tableKind = p.TableKind ?? p.tableKind;
         const paramValue = p.ParamValue ?? p.paramValue;
         const fromKind = paramValue ? getDefaultFromTableKind(tableKind, paramValue) : "";
-        const defVal = fromKind || (p.DefaultValue ?? p.defaultValue ?? p.ParamValue ?? p.paramValue);
+        const defVal = fromKind || p.DefaultValue || p.defaultValue || p.ParamValue || p.paramValue;
         values[name] = defVal == null ? "" : defVal;
       });
       if (values.useid != null && String(values.useid).trim() === "") {
@@ -1056,11 +1059,19 @@
         } else {
           const input = document.createElement("input");
           input.className = "form-control form-control-sm ps-control";
-          input.type = "text";
+          const editMask = p.EditMask ?? p.editMask ?? "";
+          const isDate = hasDateOnlyMask(editMask);
+          input.type = isDate ? "date" : "text";
           input.setAttribute("data-param", name);
+          if (isDate) input.setAttribute("data-edit-mask", editMask);
           const defVal = headerDefault || (p.DefaultValue ?? p.defaultValue);
           if (defVal != null && defVal !== "") {
-            input.value = applyEditMask(defVal, p.EditMask ?? p.editMask);
+            if (isDate) {
+              const dt = parseDateValue(defVal);
+              input.value = dt ? `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}` : defVal;
+            } else {
+              input.value = applyEditMask(defVal, editMask);
+            }
           }
           const readOnly = Number(p.iReadOnly ?? p.IReadOnly ?? 0) === 1;
           if (readOnly) input.readOnly = true;
@@ -1518,11 +1529,19 @@
         } else {
           const input = document.createElement("input");
           input.className = "form-control form-control-sm crs-control";
-          input.type = "text";
+          const editMask = p.EditMask ?? p.editMask ?? "";
+          const isDate = hasDateOnlyMask(editMask);
+          input.type = isDate ? "date" : "text";
           input.setAttribute("data-param", name);
+          if (isDate) input.setAttribute("data-edit-mask", editMask);
           const defVal = headerDefault || (p.DefaultValue ?? p.defaultValue);
           if (defVal != null && defVal !== "") {
-            input.value = applyEditMask(defVal, p.EditMask ?? p.editMask);
+            if (isDate) {
+              const dt = parseDateValue(defVal);
+              input.value = dt ? `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}` : defVal;
+            } else {
+              input.value = applyEditMask(defVal, editMask);
+            }
           }
           const readOnly = Number(p.iReadOnly ?? p.IReadOnly ?? 0) === 1;
           if (readOnly) input.readOnly = true;
@@ -1540,13 +1559,16 @@
         if (!name) return;
         const input = formEl?.querySelector(`[data-param="${name}"]`);
         if (input) {
-          values[name] = input.value ?? "";
+          let val = input.value ?? "";
+          const mask = input.getAttribute("data-edit-mask");
+          if (mask && val) val = applyEditMask(val, mask);
+          values[name] = val;
           return;
         }
         const tableKind = p.TableKind ?? p.tableKind;
         const paramValue = p.ParamValue ?? p.paramValue;
         const fromKind = paramValue ? getDefaultFromTableKind(tableKind, paramValue) : "";
-        const defVal = fromKind || (p.DefaultValue ?? p.defaultValue ?? p.ParamValue ?? p.paramValue);
+        const defVal = fromKind || p.DefaultValue || p.defaultValue || p.ParamValue || p.paramValue;
         values[name] = defVal == null ? "" : defVal;
       });
       if (values.useid != null && String(values.useid).trim() === "") {
@@ -1579,8 +1601,18 @@
         const raw = await res.text();
         let data; try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
         if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
-        localStorage.setItem("afterSave", "1");
-        location.reload();
+        if (modalEl) {
+          try { bootstrap.Modal.getOrCreateInstance(modalEl).hide(); } catch {}
+        }
+        if (typeof window.__refreshHeaderData === "function") {
+          try { await window.__refreshHeaderData(); } catch {}
+        }
+        if (typeof window.__refreshMultiTab === "function") {
+          try { await window.__refreshMultiTab(); } catch {}
+        }
+        if (typeof window.__paper3lSubDetailRefresh === "function") {
+          try { await window.__paper3lSubDetailRefresh(); } catch {}
+        }
       } catch (err) {
         alert(`執行失敗: ${err?.message || err}`);
       } finally {
@@ -2057,8 +2089,18 @@
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || "執行失敗");
-        localStorage.setItem("afterSave", "1");
-        location.reload();
+        if (modalEl) {
+          try { bootstrap.Modal.getOrCreateInstance(modalEl).hide(); } catch {}
+        }
+        if (typeof window.__refreshHeaderData === "function") {
+          try { await window.__refreshHeaderData(); } catch {}
+        }
+        if (typeof window.__refreshMultiTab === "function") {
+          try { await window.__refreshMultiTab(); } catch {}
+        }
+        if (typeof window.__paper3lSubDetailRefresh === "function") {
+          try { await window.__paper3lSubDetailRefresh(); } catch {}
+        }
       } catch (err) {
         alert(`執行失敗: ${err?.message || err}`);
       }
@@ -2098,6 +2140,19 @@
       alert("此按鈕僅能在編輯模式使用，請先點「修改」切換到編輯模式。");
       return;
     }
+
+    // 按自訂按鈕前，若有未儲存的變更，先自動儲存
+    if (window.__unsavedChanges && typeof window.saveHeaderForm === 'function') {
+      try {
+        const saveResult = await window.saveHeaderForm();
+        if (!saveResult || !saveResult.ok) return; // 儲存失敗，不開啟自訂按鈕
+      } catch (err) {
+        console.error('自訂按鈕前自動儲存失敗', err);
+        alert(`儲存失敗: ${err?.message || err}`);
+        return;
+      }
+    }
+
     const { meta, ctx } = buildCustomButtonContext(btn, ctxOverride);
     if (!ctx.buttonName) return;
 
@@ -2160,6 +2215,21 @@
     // 無自訂 handler → 嘗試依 DB 設定呼叫 SP (DesignType=3)
     try {
       const masterRow = (typeof window._getMasterRow === 'function') ? window._getMasterRow() : null;
+      // 取得目前選中的 detail row（從 MultiTabDetail 的選取狀態）
+      const detailRow = (() => {
+        const sel = window._multiTabSelectedRows;
+        if (!sel) return null;
+        // 優先取得目前 active tab 的選中列
+        const activeTab = document.querySelector('.multi-tab-detail .nav-link.active');
+        const activeTabId = activeTab?.dataset?.tabId;
+        if (activeTabId && sel[activeTabId]) return sel[activeTabId];
+        // fallback: 取第一個有選中列的 tab
+        const firstKey = Object.keys(sel).find(k => sel[k]);
+        return firstKey ? sel[firstKey] : null;
+      })();
+      const args = {};
+      if (masterRow) args.masterRow = masterRow;
+      if (detailRow) args.detailRow = detailRow;
       const resp = await fetch('/api/StoredProc/execByButton', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2167,7 +2237,7 @@
           itemId: ctx.itemId,
           buttonName: ctx.buttonName,
           paperNum: ctx.paperNum,
-          args: masterRow ? { masterRow } : undefined
+          args: Object.keys(args).length > 0 ? args : undefined
         })
       });
       const raw = await resp.text();

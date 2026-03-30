@@ -88,6 +88,35 @@
     return { setPending, state };
   }
 
+  /**
+   * 刪除後重新排序明細序號（通用工具）
+   * 後端自動從 CURdOCXTableSetUp.LocateKeys（依 ItemId + TableName）取得排序欄位
+   * 例：原本 1,2,3,4,5 刪除 2,3 後變成 1,2,3 而不是 1,4,5
+   * @param {string} tableName  - 資料表名稱
+   * @param {Object} filterKeys - 篩選條件（如 { PaperNum: "P001" }），限定重排範圍
+   * @returns {Promise<{success:boolean, affected:number}>}
+   */
+  async function resequenceDetail(tableName, filterKeys) {
+    if (!tableName || !filterKeys) return;
+    const itemId = (window._itemId || window._singleItemId || '').toString().trim();
+    if (!itemId) { console.warn('resequenceDetail: 無法取得 itemId'); return; }
+    try {
+      const resp = await fetch('/api/CommonTable/ResequenceDetail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tableName, itemId, filterKeys })
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        console.warn('resequenceDetail failed:', data.message || resp.status);
+      }
+      return data;
+    } catch (e) {
+      console.warn('resequenceDetail error:', e);
+    }
+  }
+
   w.createGridController = setupGridController;
   w.setupGridController = setupGridController;
+  w.resequenceDetail = resequenceDetail;
 })(window);

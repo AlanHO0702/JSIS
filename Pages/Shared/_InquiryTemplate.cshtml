@@ -36,8 +36,10 @@
   .inq-shell {
     display: flex;
     gap: 12px;
-    padding: 8px 12px 16px 12px;
+    padding: 8px 12px 0 12px;
     align-items: stretch;
+    height: calc(100vh - var(--inq-shell-top, 48px));
+    overflow: hidden;
   }
   .inq-rail {
     width: var(--inq-rail-width, 120px);
@@ -45,6 +47,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+    overflow-y: auto;
   }
   .inq-rail-title {
     font-weight: 700;
@@ -74,11 +77,13 @@
   .inq-main {
     flex: 1 1 auto;
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 10px;
   }
   .inq-header {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -118,25 +123,56 @@
     font-size: 0.85rem;
   }
   .inq-section {
+    flex: 0 0 auto;
     border: 1px solid #d8dee8;
     border-radius: 10px;
     background: #fff;
     padding: 8px;
   }
+  .inq-body {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: auto;
+  }
+  .inq-body > .inq-table-wrap {
+    overflow: visible;
+  }
+  .inq-body .inq-table {
+    font-size: .85rem;
+  }
+  .inq-body .inq-table th {
+    padding: 3px 6px;
+    line-height: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+  .inq-body .inq-table td {
+    padding: 2px 3px;
+    line-height: 16px;
+  }
+  .inq-body .inq-table input,
+  .inq-body .inq-table select {
+    height: 20px;
+    padding: 2px 3px;
+    line-height: 16px;
+    font-size: inherit;
+  }
   .inq-query .inq-form {
-    gap: 2px;
+    gap: 1px;
   }
   .inq-query .inq-row {
-    gap: 2px;
+    gap: 1px;
   }
   .inq-query .inq-label {
     min-width: 52px;
     font-size: 0.72rem;
   }
   .inq-query .inq-input {
-    height: 22px;
+    height: auto;
     font-size: 0.72rem;
     padding: 0 4px;
+    line-height: 1;
   }
   .inq-query .compact-check .form-check-input {
     width: 11px;
@@ -248,8 +284,44 @@
   </main>
 </div>
 
+@{
+    // 取得 GridDictFields 中的 bFooter / FormatStr，輸出給前端合計列使用
+    var footerDict = new Dictionary<string, object>();
+    try
+    {
+        var gridFields = (IEnumerable<dynamic>)Model.GridDictFields;
+        if (gridFields != null)
+        {
+            foreach (var f in gridFields)
+            {
+                string fn = f.FieldName?.ToString() ?? "";
+                if (string.IsNullOrWhiteSpace(fn)) continue;
+                int footer = 0;
+                try { footer = (int)(f.bFooter ?? 0); } catch { }
+                if (footer == 1)
+                {
+                    footerDict[fn] = new { footer = 1, format = f.FormatStr?.ToString() ?? "" };
+                }
+            }
+        }
+    }
+    catch { }
+}
+
 <script>
   (function () {
+    const _inqFooterDict = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(footerDict));
+    const shell = document.querySelector('.inq-shell');
+    if (shell) {
+      const setShellHeight = () => {
+        const top = shell.getBoundingClientRect().top;
+        shell.style.setProperty('--inq-shell-top', top + 'px');
+        shell.style.height = 'calc(100vh - ' + top + 'px)';
+      };
+      setShellHeight();
+      window.addEventListener('resize', setShellHeight);
+    }
+
     const isTypingElement = (el) => {
       if (!el) return false;
       const tag = (el.tagName || "").toUpperCase();
@@ -414,6 +486,59 @@
     document.querySelectorAll(".inq-table").forEach(bindCellNavigation);
     queueAlign();
     window.addEventListener("resize", queueAlign);
+
+    // --- 合計列 (bFooter) ---
+    const buildInqFooter = (table) => {
+      if (!(table instanceof HTMLTableElement)) return;
+      if (!Object.keys(_inqFooterDict).length) return;
+
+      const old = table.querySelector('tfoot.inq-footer');
+      if (old) old.remove();
+
+      const ths = Array.from(table.querySelectorAll('thead th'));
+      const footerCols = ths.map(th => {
+        const field = (th.dataset.field || '').trim();
+        return _inqFooterDict[field] || null;
+      });
+      if (!footerCols.some(c => c)) return;
+
+      const tbody = table.tBodies[0];
+      if (!tbody) return;
+      const dataRows = Array.from(tbody.querySelectorAll('tr'))
+        .filter(r => !r.querySelector('td[colspan]'));
+      if (!dataRows.length) return;
+
+      const tfoot = document.createElement('tfoot');
+      tfoot.className = 'inq-footer';
+      const tr = document.createElement('tr');
+
+      ths.forEach((th, idx) => {
+        const td = document.createElement('td');
+        const col = footerCols[idx];
+        if (col) {
+          let sum = 0;
+          dataRows.forEach(row => {
+            const cell = row.children[idx];
+            if (!cell) return;
+            const num = parseFloat((cell.textContent || '').replace(/,/g, ''));
+            if (Number.isFinite(num)) sum += num;
+          });
+          const fmt = col.format || '';
+          if (fmt.includes('.000')) td.textContent = sum.toFixed(3).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+          else if (fmt.includes('.00')) td.textContent = sum.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+          else td.textContent = Math.round(sum).toLocaleString();
+          td.style.textAlign = 'right';
+          td.style.fontWeight = '600';
+          td.style.background = '#f0f4ff';
+        }
+        tr.appendChild(td);
+      });
+
+      tfoot.appendChild(tr);
+      table.appendChild(tfoot);
+    };
+
+    document.querySelectorAll('.inq-body .inq-table').forEach(buildInqFooter);
   })();
 </script>
 

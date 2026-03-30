@@ -219,23 +219,38 @@ namespace PcbErpApi.Controllers
 
                     var setSql   = string.Join(", ", setPairs.Select(p => $"[{p.Col.Name}] = @{SafeParamName(p.Col.Name)}"));
                     var whereSql = string.Join(" AND ", keyPairs.Select(p => $"[{p.Col.Name}] = @K_{SafeParamName(p.Col.Name)}"));
-                    var sql      = $"UPDATE [{actualTable}] SET {setSql} WHERE {whereSql}";
 
-                    using var cmd = conn.CreateCommand();
-                    cmd.Transaction = (System.Data.Common.DbTransaction)tx;
-                    cmd.CommandText = sql;
+                    // ★ 先檢查資料是否已存在，避免對不存在的資料執行 UPDATE 而誤觸空的 UPDATE trigger
+                    bool rowExists;
+                    {
+                        var existsSql = $"SELECT COUNT(*) FROM [{actualTable}] WHERE {whereSql}";
+                        using var existsCmd = conn.CreateCommand();
+                        existsCmd.Transaction = (System.Data.Common.DbTransaction)tx;
+                        existsCmd.CommandText = existsSql;
+                        foreach (var kp in keyPairs)
+                            AddTypedParameter(existsCmd, $"@K_{kp.Col.Name}", kp.Value, kp.Col);
+                        rowExists = (int)(await existsCmd.ExecuteScalarAsync() ?? 0) > 0;
+                    }
 
-                    // Set ?嚗? binary ?? SqlDbType嚗?
-                    foreach (var p in setPairs)
-                        AddTypedParameter(cmd, $"@{SafeParamName(p.Col.Name)}", p.Value, p.Col);
+                    var affected = 0;
+                    var sql = $"UPDATE [{actualTable}] SET {setSql} WHERE {whereSql}";
 
-                    // Key ?嚗? 銋?閬??雿??亥???
-                    foreach (var p in keyPairs)
-                        AddTypedParameter(cmd, $"@K_{SafeParamName(p.Col.Name)}", p.Value, p.Col);
+                    if (rowExists)
+                    {
+                        using var cmd = conn.CreateCommand();
+                        cmd.Transaction = (System.Data.Common.DbTransaction)tx;
+                        cmd.CommandText = sql;
 
-                    var affected = await cmd.ExecuteNonQueryAsync();
-                    // ?交銝鞈?嚗?閰?INSERT ?啣?
-                    if (affected == 0)
+                        foreach (var p in setPairs)
+                            AddTypedParameter(cmd, $"@{SafeParamName(p.Col.Name)}", p.Value, p.Col);
+                        foreach (var p in keyPairs)
+                            AddTypedParameter(cmd, $"@K_{SafeParamName(p.Col.Name)}", p.Value, p.Col);
+
+                        affected = await cmd.ExecuteNonQueryAsync();
+                    }
+
+                    // 資料不存在 → 直接 INSERT（不經過 UPDATE，避免觸發空的 UPDATE trigger）
+                    if (!rowExists)
                     {
                         var insertSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         var insertPairs = new List<(ColumnInfo Col, object? Value)>();
@@ -247,7 +262,6 @@ namespace PcbErpApi.Controllers
                         foreach (var sp in setPairs)
                         {
                             if (!insertSeen.Add(sp.Col.Name)) continue;
-                            // ★ INSERT 時跳過空值欄位（非 Key 欄位），讓 SQL Server 使用預設值
                             var isKey = keyNames?.Contains(sp.Col.Name, StringComparer.OrdinalIgnoreCase) ?? false;
                             if (!isKey && (sp.Value == null || sp.Value == DBNull.Value || (sp.Value is string s && string.IsNullOrEmpty(s))))
                                 continue;
@@ -266,7 +280,7 @@ namespace PcbErpApi.Controllers
                                 AddTypedParameter(insertCmd, $"@I_{SafeParamName(p.Col.Name)}", p.Value, p.Col);
 
                             affected = await insertCmd.ExecuteNonQueryAsync();
-                            results.Add(new { ok = affected > 0, affected, sql = insertSql, inserted = true, skipped, attemptedUpdateSql = sql });
+                            results.Add(new { ok = affected > 0, affected, sql = insertSql, inserted = true, skipped });
                             continue;
                         }
                     }
