@@ -70,6 +70,18 @@ public class StoredProcController : ControllerBase
             RequiredParams: new[] { "PaperNum" }
         ),
 
+            // LA201 樣品報價單 - 確認/審核前檢查
+            ["SQUdQuotaChkData"] = new StoredProcDef(
+            ProcName: "dbo.SQUdQuotaChkData",
+            RequiredParams: new[] { "PaperNum" }
+        ),
+
+            // LA201 樣品報價單 - 設定規格明細
+            ["SQUdGenSetNumTable"] = new StoredProcDef(
+            ProcName: "dbo.SQUdGenSetNumTable",
+            RequiredParams: new[] { "PaperNum" }
+        ),
+
             // APR00002 確認前檢查
             ["SPOdEInvTypeChk"] = new StoredProcDef(
             ProcName: "dbo.SPOdEInvTypeChk",

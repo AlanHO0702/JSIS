@@ -339,4 +339,194 @@ public sealed class CompanyAttachFileController : ControllerBase
         public string? ItemId { get; set; }
         public string? UserId { get; set; }
     }
+
+    /// <summary>
+    /// 明細表檔案載入：上傳檔案後，在指定的 detail table 新增一筆（FileName + FilePath）
+    /// 對應 Delphi: MeetingPaper.pas btnProdMapSetClick
+    /// </summary>
+    [HttpPost("DetailFileUpload")]
+    [RequestSizeLimit(50 * 1024 * 1024)]
+    public async Task<IActionResult> DetailFileUpload([FromForm] DetailFileUploadRequest request)
+    {
+        var file = request?.File;
+        var detailTable = request?.DetailTable;
+        var paperNum = request?.PaperNum;
+
+        if (file is null || file.Length == 0)
+            return BadRequest("請選擇檔案");
+        if (string.IsNullOrWhiteSpace(detailTable) || string.IsNullOrWhiteSpace(paperNum))
+            return BadRequest("DetailTable 與 PaperNum 為必填");
+
+        if (!System.Text.RegularExpressions.Regex.IsMatch(detailTable, @"^[A-Za-z0-9_]+$"))
+            return BadRequest("DetailTable 不合法");
+        if (!System.Text.RegularExpressions.Regex.IsMatch(paperNum, @"^[A-Za-z0-9_\-]+$"))
+            return BadRequest("PaperNum 不合法");
+
+        var originalName = Path.GetFileName(file.FileName ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(originalName))
+            return BadRequest("無效的檔案名稱");
+
+        // 儲存檔案到 BaseDir/{detailTable}/{paperNum}/
+        var folder = Path.Combine(BaseDir, detailTable, paperNum);
+        var dest = Path.Combine(folder, originalName);
+        var fullFolder = Path.GetFullPath(folder);
+        var fullDest = Path.GetFullPath(dest);
+        if (!fullDest.StartsWith(fullFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(fullDest, fullFolder, StringComparison.OrdinalIgnoreCase))
+            return BadRequest("無效的路徑");
+
+        try
+        {
+            Directory.CreateDirectory(folder);
+            await using var fs = System.IO.File.Create(dest);
+            await file.CopyToAsync(fs);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "DetailFileUpload file save failed: {File}", originalName);
+            return StatusCode(500, "檔案傳送失敗");
+        }
+
+        // 在 detail table 新增一列（FileName + FilePath）
+        try
+        {
+            var cs = _ctx.Database.GetConnectionString();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            // 辭典表名 → 實際表名
+            var realTable = detailTable;
+            await using (var cmdResolve = conn.CreateCommand())
+            {
+                cmdResolve.CommandText = @"
+                    SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName)
+                    FROM CURdTableName WITH (NOLOCK)
+                    WHERE TableName = @tbl";
+                cmdResolve.Parameters.AddWithValue("@tbl", detailTable);
+                var resolved = await cmdResolve.ExecuteScalarAsync();
+                if (resolved != null && resolved != DBNull.Value)
+                    realTable = resolved.ToString()!;
+            }
+
+            // 動態查詢表的欄位名稱，找出項次欄位（Item 或 NumId 等）
+            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using (var cmdCols = conn.CreateCommand())
+            {
+                cmdCols.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=@t";
+                cmdCols.Parameters.AddWithValue("@t", realTable);
+                await using var rd = await cmdCols.ExecuteReaderAsync();
+                while (await rd.ReadAsync())
+                    columns.Add(rd.GetString(0));
+            }
+
+            // 找項次欄位：嘗試多種常見命名
+            string? itemCol = null;
+            foreach (var candidate in new[] { "Item", "NumId", "Seq", "SeqNo", "ItemNo", "SortOrder", "Idx" })
+            {
+                if (columns.Contains(candidate)) { itemCol = candidate; break; }
+            }
+
+            if (itemCol == null)
+            {
+                _logger.LogWarning("DetailFileUpload: 表 {Table}(實際:{Real}) 找不到項次欄位，所有欄位: {Cols}",
+                    detailTable, realTable, string.Join(", ", columns));
+                return StatusCode(500, $"明細表 {realTable} 找不到項次欄位，欄位: {string.Join(", ", columns)}");
+            }
+
+            // 取下一個項次
+            await using var cmdMax = conn.CreateCommand();
+            cmdMax.CommandText = $"SELECT ISNULL(MAX([{itemCol}]),0)+1 FROM [{realTable}] WHERE [PaperNum]=@PaperNum";
+            cmdMax.Parameters.AddWithValue("@PaperNum", paperNum);
+            var nextItem = Convert.ToInt32(await cmdMax.ExecuteScalarAsync());
+
+            // 動態組 INSERT（只插入存在的欄位）
+            var cols = new List<string> { "PaperNum", $"{itemCol}" };
+            var pars = new List<string> { "@PaperNum", "@ItemVal" };
+            await using var cmdIns = conn.CreateCommand();
+            cmdIns.Parameters.AddWithValue("@PaperNum", paperNum);
+            cmdIns.Parameters.AddWithValue("@ItemVal", nextItem);
+
+            if (columns.Contains("FileName"))
+            {
+                cols.Add("FileName");
+                pars.Add("@FileName");
+                cmdIns.Parameters.AddWithValue("@FileName", originalName);
+            }
+            if (columns.Contains("FilePath"))
+            {
+                cols.Add("FilePath");
+                pars.Add("@FilePath");
+                cmdIns.Parameters.AddWithValue("@FilePath", fullFolder + Path.DirectorySeparatorChar);
+            }
+
+            cmdIns.CommandText = $"INSERT INTO [{realTable}] ({string.Join(",", cols.Select(c => $"[{c}]"))}) VALUES ({string.Join(",", pars)})";
+            await cmdIns.ExecuteNonQueryAsync();
+
+            return Ok(new { fileName = originalName, item = nextItem, message = "上傳成功" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "DetailFileUpload DB insert failed: {File}", originalName);
+            return StatusCode(500, "寫入明細失敗：" + ex.Message);
+        }
+    }
+
+    public sealed class DetailFileUploadRequest
+    {
+        public IFormFile? File { get; set; }
+        public string? DetailTable { get; set; }
+        public string? PaperNum { get; set; }
+    }
+
+    /// <summary>
+    /// 明細表檔案檢視：回傳 DetailFileUpload 存放的檔案
+    /// </summary>
+    [HttpGet("DetailFileView")]
+    public IActionResult DetailFileView([FromQuery] string? detailTable, [FromQuery] string? paperNum, [FromQuery] string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(detailTable) || string.IsNullOrWhiteSpace(paperNum) || string.IsNullOrWhiteSpace(fileName))
+            return BadRequest("參數不完整");
+
+        if (!System.Text.RegularExpressions.Regex.IsMatch(detailTable, @"^[A-Za-z0-9_]+$"))
+            return BadRequest("detailTable 不合法");
+        if (!System.Text.RegularExpressions.Regex.IsMatch(paperNum, @"^[A-Za-z0-9_\-]+$"))
+            return BadRequest("paperNum 不合法");
+
+        var safeFileName = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(safeFileName))
+            return BadRequest("fileName 不合法");
+
+        var filePath = Path.Combine(BaseDir, detailTable, paperNum, safeFileName);
+        var fullPath = Path.GetFullPath(filePath);
+        var fullFolder = Path.GetFullPath(Path.Combine(BaseDir, detailTable, paperNum));
+        if (!fullPath.StartsWith(fullFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(fullPath, fullFolder, StringComparison.OrdinalIgnoreCase))
+            return BadRequest("無效的路徑");
+
+        if (!System.IO.File.Exists(filePath))
+            return NotFound("檔案不存在");
+
+        var ext = Path.GetExtension(safeFileName).ToLowerInvariant();
+        var contentType = ext switch
+        {
+            ".pdf" => "application/pdf",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".bmp" => "image/bmp",
+            ".txt" => "text/plain",
+            ".csv" => "text/csv",
+            ".xls" => "application/vnd.ms-excel",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".doc" => "application/msword",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            _ => "application/octet-stream"
+        };
+
+        var inline = ext is ".pdf" or ".png" or ".jpg" or ".jpeg" or ".gif" or ".bmp";
+        var disposition = inline ? "inline" : "attachment";
+        Response.Headers.ContentDisposition = $"{disposition}; filename=\"{Uri.EscapeDataString(safeFileName)}\"";
+        var stream = System.IO.File.OpenRead(filePath);
+        return File(stream, contentType);
+    }
 }
