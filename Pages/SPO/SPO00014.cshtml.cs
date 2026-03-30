@@ -70,21 +70,19 @@ namespace PcbErpApi.Pages.SPO
             try
             {
                 var allowed = await GetAllowedColumnsAsync(conn);
-                var orderBy = BuildOrderBy(sortBy, sortDir, allowed);
-                var hasQuery = HasEffectiveQuery(Request.Query);
-                if (hasQuery)
+                if (HasEffectiveQuery(Request.Query))
                 {
+                    var orderBy = BuildOrderBy(sortBy, sortDir, allowed);
                     var (whereSql, parameters) = BuildWhere(Request.Query, allowed);
                     Items = await LoadRowsAllAsync(conn, whereSql, orderBy, parameters);
                     TotalCount = Items.Count;
-                    TotalPages = 1;
                 }
                 else
                 {
-                    TotalCount = 0;
-                    TotalPages = 1;
                     Items = new List<Dictionary<string, object?>>();
+                    TotalCount = 0;
                 }
+                TotalPages = 1;
                 FieldDictList = await LoadFieldDictAsync(conn, "SPOdV_MPSRejectInq");
 
                 CurrentUserId = ResolveUserId();
