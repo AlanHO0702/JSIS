@@ -393,7 +393,7 @@ SELECT ItemId, SerialNum, ButtonName,
             while (await rd.ReadAsync())
             {
                 var visible = TryToInt(rd["bVisible"]);
-                if (visible.HasValue && visible.Value != 1) continue;
+                if (!visible.HasValue || visible.Value != 1) continue;
 
                 var buttonName = rd["ButtonName"]?.ToString() ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(buttonName)) continue;
