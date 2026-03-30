@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
@@ -131,6 +132,7 @@ namespace PcbErpApi.Pages.CUR
             var filterParams = new List<SqlParameter>();
             var filterSql = BuildFilterSql(QueryFields, Request.Query, filterParams);
             var combinedFilter = CombineFilter(setup.FilterSql, filterSql);
+            EnsureBuiltInFilterParams(combinedFilter, filterParams);
 
             // 如果是 OpenNoRecord 模式且沒有查詢參數，則不載入資料
             if (openNoRecord && !hasQueryParams)
@@ -272,6 +274,7 @@ namespace PcbErpApi.Pages.CUR
                 var filterParams = new List<SqlParameter>();
                 var filterSql = BuildFilterSql(QueryFields, Request.Query, filterParams);
                 var combinedFilter = CombineFilter(setup.FilterSql, filterSql);
+                EnsureBuiltInFilterParams(combinedFilter, filterParams);
 
                 // 處理排序
                 string orderBy;
@@ -362,6 +365,7 @@ namespace PcbErpApi.Pages.CUR
             var filterParams = new List<SqlParameter>();
             var filterSql = BuildFilterSql(QueryFields, Request.Query, filterParams);
             var combinedFilter = CombineFilter(setup.FilterSql, filterSql);
+            EnsureBuiltInFilterParams(combinedFilter, filterParams);
 
             var rows = await LoadAllRowsAsync(TableName, combinedFilter, orderBy, filterParams);
 
@@ -734,6 +738,19 @@ SELECT TOP 1 c.name
             return "WHERE " + string.Join(" AND ", parts);
         }
 
+
+        private static void EnsureBuiltInFilterParams(string? combinedFilter, List<SqlParameter> parameters)
+        {
+            EnsureFilterParam(combinedFilter, parameters, "@UseId", "A001");
+        }
+
+        private static void EnsureFilterParam(string? filterSql, List<SqlParameter> parameters, string paramName, object value)
+        {
+            if (string.IsNullOrWhiteSpace(filterSql)) return;
+            if (parameters.Any(p => string.Equals(p.ParameterName, paramName, StringComparison.OrdinalIgnoreCase))) return;
+            if (!Regex.IsMatch(filterSql, $@"(?<!\w){Regex.Escape(paramName)}(?!\w)", RegexOptions.IgnoreCase)) return;
+            parameters.Add(new SqlParameter(paramName, value));
+        }
         private static IEnumerable<SqlParameter> CloneParams(IEnumerable<SqlParameter> source)
         {
             foreach (var p in source)

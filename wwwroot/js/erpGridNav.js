@@ -24,6 +24,11 @@
   outline: 2px solid #0d6efd !important;
   outline-offset: -2px !important;
   box-shadow: inset 0 0 0 2px #0d6efd !important;
+}
+.erp-grid-nav td .cell-view,
+.erp-grid-nav td .cell-edit {
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }`;
     document.head.appendChild(style);
   })();
@@ -178,13 +183,14 @@
       if (e.target.closest('select, input[type="checkbox"], input[type="date"], button')) return;
       const currentActive = tbody.querySelector('td.active-cell');
       if (currentActive === td) {
-        // 已是 active-cell → 進入編輯模式，全選文字
-        e.preventDefault();
-        mtSetActiveCell(td, true);
+        // 已是 active-cell：保留原生文字選取；雙擊時才進入編輯模式
+        if (isEditMode() && e.detail >= 2) {
+          e.preventDefault();
+          mtSetActiveCell(td, true);
+        }
         return;
       }
       // 第一次點擊 → 導航模式
-      e.preventDefault();
       if (onRowSelect) onRowSelect(td.closest('tr'));
       mtSetActiveCell(td, false);
       if (typeof window.__activeDetailGrid !== 'undefined') {
