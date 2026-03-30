@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using PcbErpApi.Data;
 using PcbErpApi.Services;
 using PcbErpApi.Services.MapData;
+using System.Data;
 using System.IO;
 
 namespace PcbErpApi.Controllers
@@ -300,6 +302,91 @@ namespace PcbErpApi.Controllers
                 _logger.LogError(ex, "Error finding Stackup data: {Message}", ex.Message);
                 return StatusCode(500, new { error = ex.Message });
             }
+        }
+
+        /// <summary>
+        /// 產生裁版圖 MapData（呼叫 EMOdGenMapXFlow 寫入 EMOdProdMap）
+        /// POST /api/mappreview/generateMapData
+        /// </summary>
+        [HttpPost("generateMapData")]
+        public async Task<IActionResult> GenerateMapData([FromBody] GenerateMapDataRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req?.PartNum))
+                return BadRequest(new { ok = false, error = "PartNum 為必填" });
+
+            var connStr = _context.Database.GetConnectionString();
+            await using var conn = new SqlConnection(connStr);
+            await conn.OpenAsync();
+
+            // 先清空舊資料
+            await using (var delCmd = new SqlCommand(
+                "DELETE FROM EMOdProdMap WHERE PartNum=@PartNum AND Revision=@Revision", conn))
+            {
+                delCmd.Parameters.AddWithValue("@PartNum", req.PartNum.Trim());
+                delCmd.Parameters.AddWithValue("@Revision", (req.Revision ?? "").Trim());
+                await delCmd.ExecuteNonQueryAsync();
+            }
+
+            // 產生 MapKind = 1(裁板圖), 3(排板圖), 9(PP裁切圖)
+            foreach (var mapKind in new[] { 1, 3, 9 })
+            {
+                try
+                {
+                    string mapDataStr = "";
+                    using (var mapCmd = new SqlCommand("EMOdGenMapXFlow", conn))
+                    {
+                        mapCmd.CommandType = CommandType.StoredProcedure;
+                        mapCmd.CommandTimeout = 60;
+                        mapCmd.Parameters.AddWithValue("@PartNum", req.PartNum.Trim());
+                        mapCmd.Parameters.AddWithValue("@Revision", (req.Revision ?? "").Trim());
+                        mapCmd.Parameters.AddWithValue("@MapKind", mapKind);
+                        using var reader = await mapCmd.ExecuteReaderAsync(CommandBehavior.SingleResult);
+                        if (await reader.ReadAsync())
+                        {
+                            mapDataStr =
+                                (reader["MapData"]  as string ?? "") +
+                                (reader["StrMap"]   as string ?? "") +
+                                (reader["StrMap2"]  as string ?? "") +
+                                (reader["MapData2"] as string ?? "");
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(mapDataStr))
+                    {
+                        using var updCmd = new SqlCommand(
+                            "UPDATE EMOdProdMap SET MapData=@MapData WHERE PartNum=@PartNum AND Revision=@Revision AND MapKindNo=@MapKindNo", conn);
+                        updCmd.Parameters.AddWithValue("@MapData",   mapDataStr);
+                        updCmd.Parameters.AddWithValue("@PartNum",   req.PartNum.Trim());
+                        updCmd.Parameters.AddWithValue("@Revision",  (req.Revision ?? "").Trim());
+                        updCmd.Parameters.AddWithValue("@MapKindNo", mapKind);
+                        var affected = await updCmd.ExecuteNonQueryAsync();
+
+                        // 若 UPDATE 影響 0 列，表示 SP 沒有先 INSERT，手動 INSERT
+                        if (affected == 0)
+                        {
+                            using var insCmd = new SqlCommand(
+                                "INSERT INTO EMOdProdMap (PartNum, Revision, MapKindNo, SerialNum, MapData) VALUES (@PartNum, @Revision, @MapKindNo, 1, @MapData)", conn);
+                            insCmd.Parameters.AddWithValue("@PartNum",   req.PartNum.Trim());
+                            insCmd.Parameters.AddWithValue("@Revision",  (req.Revision ?? "").Trim());
+                            insCmd.Parameters.AddWithValue("@MapKindNo", mapKind);
+                            insCmd.Parameters.AddWithValue("@MapData",   mapDataStr);
+                            await insCmd.ExecuteNonQueryAsync();
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "GenerateMapData MapKind={MapKind} failed for {PartNum}", mapKind, req.PartNum);
+                }
+            }
+
+            return Ok(new { ok = true });
+        }
+
+        public class GenerateMapDataRequest
+        {
+            public string PartNum  { get; set; } = "";
+            public string? Revision { get; set; }
         }
 
         private MapType? ParseMapType(string type)

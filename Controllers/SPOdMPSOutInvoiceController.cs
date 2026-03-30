@@ -184,16 +184,23 @@ select InvoiceNum, InvoiceType,
         await using var conn = new SqlConnection(_cs);
         await conn.OpenAsync();
 
-        var sql = "exec SPOdMPSOutInvoice @PaperNum, @InvoiceNum, @InvoiceType, @InvoiceDate, @ExpectDate, @Flag, @UserId";
-        await using var cmd = new SqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("@PaperNum", body.paperNum ?? "");
-        cmd.Parameters.AddWithValue("@InvoiceNum", body.invoiceNum ?? "");
-        cmd.Parameters.AddWithValue("@InvoiceType", body.invoiceType ?? "");
-        cmd.Parameters.AddWithValue("@InvoiceDate", body.invoiceDate ?? "");
-        cmd.Parameters.AddWithValue("@ExpectDate", body.expectDate ?? "");
-        cmd.Parameters.AddWithValue("@Flag", "1");
-        cmd.Parameters.AddWithValue("@UserId", body.userId ?? "");
-        await cmd.ExecuteNonQueryAsync();
+        try
+        {
+            var sql = "exec SPOdMPSOutInvoice @PaperNum, @InvoiceNum, @InvoiceType, @InvoiceDate, @ExpectDate, @Flag, @UserId";
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@PaperNum", body.paperNum ?? "");
+            cmd.Parameters.AddWithValue("@InvoiceNum", body.invoiceNum ?? "");
+            cmd.Parameters.AddWithValue("@InvoiceType", body.invoiceType ?? "");
+            cmd.Parameters.AddWithValue("@InvoiceDate", body.invoiceDate ?? "");
+            cmd.Parameters.AddWithValue("@ExpectDate", body.expectDate ?? "");
+            cmd.Parameters.AddWithValue("@Flag", "1");
+            cmd.Parameters.AddWithValue("@UserId", body.userId ?? "");
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (SqlException ex)
+        {
+            return Ok(new { ok = false, error = ex.Message });
+        }
 
         bool outInvAct = await HasSysParam(conn, "SPO", "OutInvAct");
         return Ok(new { ok = true, outInvAct });

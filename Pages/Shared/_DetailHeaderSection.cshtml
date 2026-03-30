@@ -2783,6 +2783,41 @@ async function saveMultiTabChanges(options) {
         if (v != null && v !== '') rowData[k] = v;
       });
 
+      // ★ 若 key 欄位被修改，附上 __originalKeys 讓後端用原始值做 WHERE
+      if (!isAdded) {
+        const originalKeys = {};
+        keyCandidates.forEach(k => {
+          if (rowData[k] === undefined) return;
+          // 從 input 的 data-init 取得原始值
+          const inp = Array.from(row.querySelectorAll('.cell-edit[data-field]'))
+            .find(el => (el.dataset.field || '').toLowerCase() === k.toLowerCase());
+          if (!inp) return;
+          const initVal = (inp.dataset.init ?? '').toString().trim();
+          const curVal = (inp.value ?? '').toString().trim();
+          if (initVal !== '' && initVal !== curVal) {
+            // key 欄位值有變更，記錄原始值
+            const numberFieldPatterns = /Qnty|Item|Serial|Amount|Price|Qty|Num|Count|Weight|Rate|Pop|Pcs$/i;
+            if (numberFieldPatterns.test(k)) {
+              const num = Number(initVal.replace(/,/g, ''));
+              originalKeys[k] = !isNaN(num) ? num : initVal;
+            } else {
+              originalKeys[k] = initVal;
+            }
+          }
+        });
+        // 也檢查 data-item vs rowData.Item（data-item 保存的是載入時的原始 Item）
+        if (rowData.Item !== undefined && row.dataset.item) {
+          const origItem = Number(row.dataset.item);
+          const newItem = Number(rowData.Item);
+          if (!isNaN(origItem) && !isNaN(newItem) && origItem !== newItem && !originalKeys.Item) {
+            originalKeys.Item = origItem;
+          }
+        }
+        if (Object.keys(originalKeys).length > 0) {
+          rowData.__originalKeys = originalKeys;
+        }
+      }
+
       // 確保有資料再加入，並且顯示完整的 rowData 內容
       if (Object.keys(rowData).length > 0) {
         changes.push(rowData);
@@ -2871,6 +2906,14 @@ async function saveMultiTabChanges(options) {
         if (container) {
           container.querySelectorAll('tr[data-state="modified"], tr[data-state="added"]').forEach(tr => {
             tr.dataset.state = 'unchanged';
+
+            // ★ 儲存成功後同步更新 data-item，讓下次修改 key 時能正確取得原始值
+            const itemInput = Array.from(tr.querySelectorAll('.cell-edit[data-field]'))
+              .find(el => (el.dataset.field || '').toLowerCase() === 'item');
+            if (itemInput) {
+              const newItem = (itemInput.value ?? '').trim();
+              if (newItem) tr.dataset.item = newItem;
+            }
 
             // ? 同步更新 view 顯示值：將 input 的值複製到對應的 cell-view，並更新 init 基準值
             tr.querySelectorAll('.cell-edit').forEach(input => {
@@ -5072,9 +5115,21 @@ window.__updateToolbarCounts = updateToolbarCounts;
       return { ok: false, reason: 'delete-failed', error: errorMessage };
     }
 
-    const next = selectedRow.nextElementSibling || selectedRow.previousElementSibling;
-    selectedRow.remove();
-    if (next) next.classList.add('row-selected');
+    // ★ 刪除成功後重新排序序號（通用 resequenceDetail）
+    if (typeof window.resequenceDetail === 'function' && paperNum) {
+      try {
+        await window.resequenceDetail(safeTable, { PaperNum: paperNum });
+      } catch (e) { console.warn('resequence after delete:', e); }
+    }
+
+    // 重新載入明細以反映新序號
+    if (typeof window.__refreshMultiTab === 'function') {
+      try { await window.__refreshMultiTab(); } catch {}
+    } else {
+      const next = selectedRow.nextElementSibling || selectedRow.previousElementSibling;
+      selectedRow.remove();
+      if (next) next.classList.add('row-selected');
+    }
     if (typeof window.__updateToolbarCounts === 'function') window.__updateToolbarCounts();
     window.__unsavedChanges = false;
     if (typeof window.updateSaveCheckButtons === 'function') window.updateSaveCheckButtons();

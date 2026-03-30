@@ -22,6 +22,7 @@ else
     <script>
         window._mdItemId = '@Model.ItemId';
         window._mdTableName = '@(cfg.MasterTable ?? "")';
+        window._useId = '@Model.CurrentUseId';
     </script>
     <div id="mdCustomButtonBar" class="d-flex gap-2 flex-wrap">@Model.CustomButtonsHtml</div>
     @await Html.PartialAsync("_MasterDetailTemplate", cfg)
@@ -1407,6 +1408,20 @@ document.addEventListener('DOMContentLoaded', () => {
         alert("此按鈕僅能在編輯模式使用，請先點「修改」切換到編輯模式。");
         return;
       }
+
+      // 按自訂按鈕前，若有未儲存的變更，先自動儲存
+      const mdApi = window._mdSave?.[domId];
+      if (mdApi?.isDirty && typeof mdApi?.save === 'function') {
+        try {
+          const saveResult = await mdApi.save();
+          if (!saveResult || !saveResult.ok) return;
+        } catch (err) {
+          console.error('自訂按鈕前自動儲存失敗', err);
+          alert(`儲存失敗: ${err?.message || err}`);
+          return;
+        }
+      }
+
       if (typeof handler === 'function') {
         try {
           handler(ctx);

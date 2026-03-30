@@ -29,6 +29,47 @@
   window._itemId = "SPO00015";
   window._dictTableName = "SPOdV_InvoiceInq";
 </script>
+<script>
+  (() => {
+    let pendingMsg = "";
+    try {
+      pendingMsg = sessionStorage.getItem("__inqPendingBusy") || "";
+      if (pendingMsg) sessionStorage.removeItem("__inqPendingBusy");
+    } catch {}
+    if (!pendingMsg) return;
+
+    const docEl = document.documentElement;
+    docEl.classList.add("inq-busy-pending");
+
+    const style = document.createElement("style");
+    style.id = "inqBusyPendingStyle";
+    style.textContent = "html.inq-busy-pending .inq-body{visibility:hidden !important;}";
+    document.head.appendChild(style);
+
+    const overlay = document.createElement("div");
+    overlay.id = "inqBusyPendingOverlay";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:4000;display:flex;align-items:center;justify-content:center;background:rgba(247,250,255,0.92);";
+    overlay.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;gap:10px;"><div class="spinner-border text-primary" role="status" aria-hidden="true"></div><div style="font-size:14px;color:#234;">${pendingMsg}</div></div>`;
+
+    const mount = () => {
+      if (!overlay.isConnected) document.body.appendChild(overlay);
+    };
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", mount, { once: true });
+    } else {
+      mount();
+    }
+
+    const clear = () => {
+      docEl.classList.remove("inq-busy-pending");
+      style.remove();
+      overlay.remove();
+      if (typeof window.hideBusy === "function") window.hideBusy();
+    };
+    window.addEventListener("load", () => setTimeout(clear, 120), { once: true });
+    window.addEventListener("pageshow", () => setTimeout(clear, 120), { once: true });
+  })();
+</script>
 
 <!-- Query Modal (same template as 銷售訂單) -->
 <div class="modal fade" id="queryModal" tabindex="-1" aria-hidden="true">
@@ -257,11 +298,30 @@
   const queryModalEl = document.getElementById("queryModal");
   const queryForm = document.getElementById("searchForm");
   const queryFieldGrid = queryForm?.querySelector(".query-field-grid");
+  const showPageBusy = (msg = "查詢中…") => {
+    try {
+      if (typeof window.showBusy === "function") {
+        window.showBusy(msg);
+        return;
+      }
+      const overlay = document.getElementById("loadingOverlay");
+      if (!overlay) return;
+      const msgEl = document.getElementById("loadingMsg");
+      if (msgEl) msgEl.textContent = msg;
+      overlay.classList.add("show");
+      overlay.style.display = "flex";
+    } catch { }
+  };
+  const navigateWithBusy = (url, msg) => {
+    try { sessionStorage.setItem("__inqPendingBusy", msg || "查詢中…"); } catch {}
+    showPageBusy(msg);
+    setTimeout(() => { window.location.href = url.toString(); }, 0);
+  };
 
   document.getElementById("btnSPO15Excel")?.addEventListener("click", () => {
     const url = new URL(window.location.href);
     url.searchParams.set("handler", "Export");
-    window.location.href = url.toString();
+    navigateWithBusy(url, "匯出中…");
   });
 
   document.getElementById("btnSPO15Query")?.addEventListener("click", () => {
@@ -300,7 +360,7 @@
       }
     });
 
-    window.location.href = url.toString();
+    navigateWithBusy(url, "查詢中…");
   });
 
   const table = document.querySelector(".inq-table");
@@ -461,7 +521,7 @@
         url.searchParams.set("sortBy", field);
         url.searchParams.set("sortDir", nextDir);
         url.searchParams.set("page", "1");
-        window.location.href = url.toString();
+        navigateWithBusy(url, "查詢中…");
       });
     });
   };

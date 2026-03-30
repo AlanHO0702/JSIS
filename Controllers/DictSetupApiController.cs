@@ -84,16 +84,16 @@ public class DictSetupApiController : ControllerBase
 
     public class DocxSetupUpdateInput
     {
-        public string ItemId { get; set; }        // key
-        public string TableName { get; set; }     // key
-        public int? IsUpdateMoney { get; set; }   // 停用，但 DB 不允許 NULL -> 預設 0
-        public string TableKind { get; set; }
-        public int? FixColCount { get; set; }
-        public string MDKey { get; set; }
-        public string LocateKeys { get; set; }
-        public string OrderByField { get; set; }
-        public string FilterSQL { get; set; }
-        public string RunSQLAfterAdd { get; set; }
+        public string ItemId { get; set; }         // key, NOT NULL
+        public string TableName { get; set; }      // key, NOT NULL
+        public int IsUpdateMoney { get; set; }     // NOT NULL, 預設 0
+        public string TableKind { get; set; }      // NOT NULL
+        public int? FixColCount { get; set; }      // nullable
+        public string? MDKey { get; set; }         // nullable
+        public string? LocateKeys { get; set; }    // nullable
+        public string? OrderByField { get; set; }  // nullable
+        public string? FilterSQL { get; set; }     // nullable
+        public string? RunSQLAfterAdd { get; set; } // nullable
     }
 
     // POST /api/DictSetupApi/Table/UpdateByItem

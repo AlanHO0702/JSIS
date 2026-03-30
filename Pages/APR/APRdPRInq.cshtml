@@ -1,6 +1,6 @@
-﻿@page "/MPH/MPH00016"
+@page "/APR/APRdPRInq"
 @using PcbErpApi.Models
-@model PcbErpApi.Pages.MPH.MPH00016Model
+@model PcbErpApi.Pages.APR.APRdPRInqModel
 @{
     Layout = "_InquiryTemplate";
     ViewData["Title"] = Model.PageTitle;
@@ -8,302 +8,6 @@
     ViewData["ShowInqRail"] = true;
     ViewData["InqRailTitle"] = "查詢";
     ViewData["InqRailWidth"] = "120px";
-}
-
-@section InqRail {
-    <button type="submit" form="inqForm" class="inq-rail-btn">查詢</button>
-    <button type="button" class="inq-rail-btn" id="btnExportExcel">匯出Excel</button>
-    <button type="button" class="inq-rail-btn" id="btnPaperTrace">單據追蹤</button>
-    <button type="button" class="inq-rail-btn" id="btnSaveHeight">儲存高度設定</button>
-    <button type="button" class="inq-rail-btn" id="btnEditDict">編輯辭典</button>
-    <button type="button" class="inq-rail-btn" id="btnResetParams">重設參數</button>
-    <button type="button" class="inq-rail-btn" id="btnClearInq">清除</button>
-    <div class="inq-rail-status">
-      <div>資料筆數：<span id="inqTotalCount">0</span></div>
-      <div>目前位置：<span id="inqCurrentPos">0</span></div>
-    </div>
-}
-
-@{
-  var qDict = Model.QueryDictFields ?? new List<CURdTableField>();
-  var qFields = qDict
-      .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
-      .Where(f => f.FieldName!.StartsWith("@"))
-      .Where(f => (f.Visible ?? 1) != 0)
-      .OrderBy(f => f.iLayRow ?? int.MaxValue)
-      .ThenBy(f => f.iLayColumn ?? int.MaxValue)
-      .ThenBy(f => f.SerialNum ?? int.MaxValue)
-      .ToList();
-
-  string QLabel(CURdTableField f)
-      => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName!.TrimStart('@') : f.DisplayLabel!;
-
-  string QInputName(CURdTableField f)
-  {
-      return f.FieldName?.TrimStart('@') ?? "";
-  }
-
-
-  string QInputType(CURdTableField f)
-  {
-      var dt = (f.DataType ?? "").ToLowerInvariant();
-      if (dt.Contains("date")) return "date";
-      var fname = (f.FieldName ?? "").ToLowerInvariant();
-      if (fname.Contains("date")) return "date";
-      var label = (f.DisplayLabel ?? "");
-      if (label.Contains("日期")) return "date";
-      return "text";
-  }
-
-  object? QDefault(string fieldName)
-  {
-      if (Model.DefaultQueryValues.TryGetValue(fieldName, out var v)) return v;
-      if (Model.ParamNameByField.TryGetValue(fieldName, out var p)
-          && Model.DefaultQueryValues.TryGetValue(p, out var v2)) return v2;
-      return null;
-  }
-
-  string QValue(string name, string type)
-  {
-      var qs = Request.Query[name].ToString();
-      if (!string.IsNullOrWhiteSpace(qs)) return qs;
-      var dv = QDefault(name);
-      if (dv == null) return "";
-      if (dv is DateTime dt) return type == "date" ? dt.ToString("yyyy-MM-dd") : dt.ToString("yyyy/MM/dd");
-      return dv.ToString() ?? "";
-  }
-
-  bool QChecked(string name)
-  {
-      var qs = Request.Query[name].ToString();
-      if (!string.IsNullOrWhiteSpace(qs))
-      {
-          return qs == "1" || qs.Equals("true", StringComparison.OrdinalIgnoreCase) || qs.Equals("y", StringComparison.OrdinalIgnoreCase);
-      }
-      var dv = QDefault(name);
-      if (dv is bool b) return b;
-      if (dv is int i) return i == 1;
-      if (dv is short s) return s == 1;
-      if (dv is byte by) return by == 1;
-      var str = dv?.ToString();
-      return str == "1" || string.Equals(str, "true", StringComparison.OrdinalIgnoreCase) || string.Equals(str, "y", StringComparison.OrdinalIgnoreCase);
-  }
-
-  bool IsCheckbox(CURdTableField f)
-  {
-      if ((f.ComboStyle ?? 0) == 1) return true;
-      var dt = (f.DataType ?? "").ToLowerInvariant();
-      if (dt.Contains("bit")) return true;
-      return false;
-  }
-
-  bool IsSelect(CURdTableField f)
-  {
-      return !string.IsNullOrWhiteSpace(f.Items) || !string.IsNullOrWhiteSpace(f.LookupTable);
-  }
-
-  bool DisableLookup(CURdTableField f)
-  {
-      var n = (f.FieldName ?? "").TrimStart('@');
-      return n.Equals("sPartNum", StringComparison.OrdinalIgnoreCase)
-          || n.Equals("sEPartNum", StringComparison.OrdinalIgnoreCase);
-  }
-
-}
-
-@section InqQuery {
-  <form id="inqForm" method="get" class="inq-form inq-form--auto-grid-enabled">
-    @Html.AntiForgeryToken()
-    @foreach (var row in qFields.GroupBy(f => f.iLayRow ?? int.MaxValue).OrderBy(g => g.Key))
-    {
-      <div class="inq-row">
-        @foreach (var f in row)
-        {
-          var name = QInputName(f);
-          var type = QInputType(f);
-          var cur = QValue(name, type);
-          var codeId = $"inq_{name}";
-          <label class="inq-label">@QLabel(f)</label>
-          @if (IsCheckbox(f))
-          {
-            <div class="form-check form-check-inline compact-check">
-              <input class="form-check-input" type="checkbox" name="@name" value="1" @(QChecked(name) ? "checked" : "") />
-            </div>
-          }
-          else if (IsSelect(f) && !DisableLookup(f))
-          {
-            <span class="inq-select">
-              <input type="hidden" id="@codeId" name="@name" class="inq-select-code-hidden" value="@cur" />
-              <input type="text" class="form-control form-control-sm inq-input inq-lookup-display"
-                     value=""
-                     autocomplete="off"
-                     data-code-target="@codeId"
-                     data-items="@f.Items"
-                     data-lookup-table="@f.LookupTable"
-                     data-lookup-key="@((f.LookupKeyField ?? "").Replace(" ", ""))"
-                     data-lookup-result="@((f.LookupResultField ?? "").Replace(" ", ""))"
-                     data-cond1-field="@f.LookupCond1Field"
-                     data-cond1-source="@f.LookupCond1ResultField"
-                     data-cond2-field="@f.LookupCond2Field"
-                     data-cond2-source="@f.LookupCond2ResultField"
-                     data-selected="@cur" />
-              <button type="button" class="inq-select-btn" aria-label="開啟清單">▾</button>
-            </span>
-          }
-          else
-          {
-            <input type="@type" name="@name" class="form-control form-control-sm inq-input"
-                   value="@cur" />
-          }
-        }
-      </div>
-    }
-
-    <input type="hidden" name="page" value="1" />
-    <input type="hidden" name="pageSize" value="@Model.PageSize" />
-    <input type="hidden" name="spId" value="@Model.SpId" />
-  </form>
-}
-
-@{
-  var gDict = Model.GridDictFields ?? new List<CURdTableField>();
-  var gFields = gDict
-      .Where(f => (f.Visible ?? 1) != 0)
-      .OrderBy(f => f.SerialNum ?? int.MaxValue)
-      .ToList();
-
-  string GLabel(CURdTableField f) => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel!;
-
-  object? GVal(object? row, string? name)
-  {
-      if (row == null || string.IsNullOrWhiteSpace(name)) return null;
-      if (row is IDictionary<string, object?> dict)
-      {
-          if (dict.TryGetValue(name, out var v)) return v;
-          var key = dict.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
-          return key != null ? dict[key] : null;
-      }
-      var prop = row.GetType().GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-      return prop?.GetValue(row);
-  }
-
-  string GFormat(object? v, CURdTableField f)
-  {
-      return FormatHelper.FormatValue(v, f.DataType, f.FormatStr);
-  }
-
-}
-
-<div class="inq-table-wrap">
-  <table class="table table-sm table-hover align-middle inq-table">
-    <thead>
-      <tr>
-        @foreach (var f in gFields)
-        {
-          <th class="inq-sortable" data-field="@f.FieldName">
-            <span class="th-text">@GLabel(f)</span>
-            <span class="col-resizer" draggable="false"></span>
-          </th>
-        }
-      </tr>
-    </thead>
-    <tbody>
-    @if (Model.Items.Count == 0)
-    {
-      <tr>
-        <td colspan="@(Math.Max(1, gFields.Count))" class="text-center text-muted py-2">沒有資料</td>
-      </tr>
-    }
-    else
-    {
-      foreach (var row in Model.Items)
-      {
-        var paperId = GVal(row, "PaperId")?.ToString() ?? "";
-        var paperNum = GVal(row, "PaperNum")?.ToString() ?? "";
-        var sourNum = GVal(row, "SourNum")?.ToString() ?? "";
-        var sourItem = GVal(row, "SourItem")?.ToString() ?? "";
-        var shortName = GVal(row, "ShortName")?.ToString() ?? "";
-        var payWayName = GVal(row, "PayWayName")?.ToString() ?? "";
-        var invoiceTypeName = GVal(row, "InvoiceTypeName")?.ToString() ?? "";
-        var invoiceNum = GVal(row, "InvoiceNum")?.ToString() ?? "";
-        var expectDate = GVal(row, "ExpectDate")?.ToString() ?? "";
-        var invoiceDate = GVal(row, "InvoiceDate")?.ToString() ?? "";
-        <tr data-paper-id="@paperId"
-            data-paper-num="@paperNum"
-            data-sour-num="@sourNum"
-            data-sour-item="@sourItem"
-            data-short-name="@shortName"
-            data-pay-way-name="@payWayName"
-            data-invoice-type-name="@invoiceTypeName"
-            data-invoice-num="@invoiceNum"
-            data-expect-date="@expectDate"
-            data-invoice-date="@invoiceDate">
-          @foreach (var f in gFields)
-          {
-            var val = GVal(row, f.FieldName);
-            <td>@GFormat(val, f)</td>
-          }
-        </tr>
-      }
-    }
-    </tbody>
-  </table>
-</div>
-
-<div id="outInqDetailPanel" class="outinq-detail-panel" style="display:none;">
-  <ul class="nav nav-tabs outinq-tabs" id="outInqTabs" role="tablist">
-    <li class="nav-item" role="presentation">
-      <button class="nav-link active" id="outinq-info-tab" data-bs-toggle="tab" data-bs-target="#outinq-tab-info" type="button" role="tab" aria-controls="outinq-tab-info" aria-selected="true">單據資料</button>
-    </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" id="outinq-order-tab" data-bs-toggle="tab" data-bs-target="#outinq-tab-order" type="button" role="tab" aria-controls="outinq-tab-order" aria-selected="false">採購明細</button>
-    </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" id="outinq-out-tab" data-bs-toggle="tab" data-bs-target="#outinq-tab-out" type="button" role="tab" aria-controls="outinq-tab-out" aria-selected="false">進貨明細</button>
-    </li>
-  </ul>
-  <div class="tab-content outinq-tab-content">
-    <div class="tab-pane fade show active" id="outinq-tab-info" role="tabpanel" aria-labelledby="outinq-info-tab">
-      <div class="outinq-info-grid">
-        <label class="outinq-label">供應商名稱</label><span class="outinq-value" id="detShortName"></span>
-        <label class="outinq-label">發票號碼</label><span class="outinq-value" id="detInvoiceNum"></span>
-        <label class="outinq-label">付款方式</label><span class="outinq-value" id="detPayWayName"></span>
-        <label class="outinq-label">付款日期</label><span class="outinq-value" id="detExpectDate"></span>
-        <label class="outinq-label">發票種類</label><span class="outinq-value" id="detInvoiceTypeName"></span>
-        <label class="outinq-label">發票日期</label><span class="outinq-value" id="detInvoiceDate"></span>
-      </div>
-    </div>
-    <div class="tab-pane fade" id="outinq-tab-order" role="tabpanel" aria-labelledby="outinq-order-tab">
-      <div class="outinq-sub-wrap">
-        <table class="table table-sm table-hover align-middle inq-table" id="orderSubTable" data-inq-cell-nav="0">
-          <thead><tr id="orderSubHead"><th class="text-muted">載入中...</th></tr></thead>
-          <tbody id="orderSubBody"><tr><td class="text-muted">請先選擇主檔資料</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="tab-pane fade" id="outinq-tab-out" role="tabpanel" aria-labelledby="outinq-out-tab">
-      <div class="outinq-sub-wrap">
-        <table class="table table-sm table-hover align-middle inq-table" id="outSubTable" data-inq-cell-nav="0">
-          <thead><tr id="outSubHead"><th class="text-muted">載入中...</th></tr></thead>
-          <tbody id="outSubBody"><tr><td class="text-muted">請先選擇主檔資料</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</div>
-
-@if (Model.TotalPages > 1)
-{
-  <div class="d-flex justify-content-between align-items-center flex-wrap gap-1">
-    <div class="d-flex align-items-center gap-1">
-      <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber <= 1 ? "disabled" : "")"
-         href="@(Model.PageNumber <= 1 ? "#" : Model.BuildPageUrl(Model.PageNumber - 1))">上一頁</a>
-      <span>Page: <strong>@Model.PageNumber</strong> / <span>@Model.TotalPages</span></span>
-      <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber >= Model.TotalPages ? "disabled" : "")"
-         href="@(Model.PageNumber >= Model.TotalPages ? "#" : Model.BuildPageUrl(Model.PageNumber + 1))">下一頁</a>
-    </div>
-    <div class="text-muted">Total: @Model.TotalCount</div>
-  </div>
 }
 
 <style>
@@ -336,7 +40,8 @@
     flex-wrap: wrap;
   }
   .inq-label {
-    min-width: 68px;
+    width: 90px;
+    flex-shrink: 0;
     text-align: right;
     color: #1d3b6b;
     font-size: 0.82rem;
@@ -411,8 +116,8 @@
     height: 18px;
   }
   .compact-check {
-    width: auto;
-    min-width: 0;
+    width: 160px;
+    min-width: 160px;
     display: inline-flex;
     align-items: center;
     margin: 0;
@@ -467,117 +172,535 @@
     user-select: none;
     z-index: 2;
   }
-  .inq-table th.inq-sort-asc::after,
+  .inq-table th.inq-sort-asc::after {
+    content: " \25B2";
+    font-size: 0.7rem;
+    color: #1d3b6b;
+  }
   .inq-table th.inq-sort-desc::after {
-    content: none;
-  }
-  .outinq-detail-panel {
-    border: 1px solid #d8dee8;
-    border-radius: 8px;
-    background: #fff;
-    margin-top: 6px;
-    overflow: hidden;
-  }
-  .outinq-tabs {
-    border-bottom: 1px solid #d8dee8;
-    margin: 0;
-    padding: 0 6px;
-    background: #f8fafc;
-  }
-  .outinq-tabs .nav-link {
-    font-size: 0.82rem;
-    padding: 4px 10px;
-    border: 1px solid transparent;
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
+    content: " \25BC";
+    font-size: 0.7rem;
     color: #1d3b6b;
   }
-  .outinq-tabs .nav-link.active {
-    color: #1f5fbf;
-    border-color: #d8dee8 #d8dee8 #fff;
-    background: #fff;
-    font-weight: 600;
+  /* 50/50 split */
+  .inq-split-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
   }
-  .outinq-tab-content {
-    padding: 6px;
-  }
-  .outinq-info-grid {
-    display: grid;
-    grid-template-columns: 90px minmax(170px, 1fr) 90px minmax(170px, 1fr);
-    gap: 6px 8px;
-    align-items: center;
-  }
-  .outinq-label {
-    text-align: right;
-    color: #1d3b6b;
-    font-size: 0.82rem;
-    white-space: nowrap;
-  }
-  .outinq-value {
-    min-height: 24px;
-    border: 1px solid #e1e7f0;
-    border-radius: 4px;
-    background: #f8fafc;
-    padding: 2px 6px;
-    color: #374151;
-    font-size: 0.82rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .outinq-sub-wrap {
-    border: 1px solid #e1e7f0;
-    border-radius: 6px;
+  .inq-split-master {
+    flex: 1 1 50%;
+    min-height: 80px;
     overflow: auto;
-    max-height: 220px;
   }
-  .outinq-sub-wrap .inq-table {
-    margin: 0;
+  .inq-split-resizer {
+    flex: 0 0 6px;
+    background: #e1e7f0;
+    cursor: row-resize;
+    position: relative;
+    z-index: 10;
+    transition: background 0.15s;
+    border-radius: 3px;
+    margin: 2px 0;
   }
-  @@media (max-width: 1024px) {
-    .outinq-info-grid {
-      grid-template-columns: 90px minmax(160px, 1fr);
-    }
+  .inq-split-resizer:hover,
+  .inq-split-resizer.active {
+    background: #5b8def;
+  }
+  .inq-split-resizer::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 30px;
+    height: 2px;
+    background: #fff;
+    border-radius: 1px;
+    opacity: 0.7;
+  }
+  .inq-split-detail {
+    flex: 1 1 50%;
+    min-height: 80px;
+  }
+  /* Detail tabs */
+  .detail-section {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .detail-tabs {
+    flex: 0 0 auto;
+  }
+  .detail-tabs .nav-link {
+    font-size: 0.82rem;
+    padding: 4px 12px;
+  }
+  .detail-tab-content {
+    border: 1px solid #d8dee8;
+    border-top: 0;
+    border-radius: 0 0 8px 8px;
+    background: #fff;
+    padding: 0;
+    overflow: auto;
+    min-height: 0;
+  }
+  .detail-section > .tab-content {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .detail-section > .tab-content > .tab-pane.active {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: auto;
+  }
+  .detail-toolbar {
+    padding: 4px 8px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e1e7f0;
+  }
+  .detail-toolbar .btn {
+    font-size: 0.78rem;
+    padding: 2px 10px;
   }
 </style>
 
+@section InqRail {
+    <button type="submit" form="inqForm" class="inq-rail-btn">查詢</button>
+    <button type="button" class="inq-rail-btn" id="btnExportExcel">匯出Excel</button>
+    <button type="button" class="inq-rail-btn" id="btnPaperTrace">單據追蹤</button>
+    <button type="button" class="inq-rail-btn" id="btnCertifTrace">憑證來源追蹤</button>
+    <button type="button" class="inq-rail-btn" id="btnSaveHeight">儲存高度設定</button>
+    <button type="button" class="inq-rail-btn" id="btnEditDict">編輯辭典</button>
+    <button type="button" class="inq-rail-btn" id="btnResetParams">重設參數</button>
+    <button type="button" class="inq-rail-btn" id="btnClearInq">清除</button>
+    <div class="inq-rail-status">
+      <div>資料筆數：<span id="inqTotalCount">0</span></div>
+      <div>目前位置：<span id="inqCurrentPos">0</span></div>
+    </div>
+}
+
+@{
+  var qDict = Model.QueryDictFields ?? new List<CURdTableField>();
+  var qFields = qDict
+      .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
+      .Where(f => f.FieldName!.StartsWith("@"))
+      .Where(f => (f.Visible ?? 1) != 0)
+      .OrderBy(f => f.iLayRow ?? int.MaxValue)
+      .ThenBy(f => f.iLayColumn ?? int.MaxValue)
+      .ThenBy(f => f.SerialNum ?? int.MaxValue)
+      .ToList();
+
+  string QLabel(CURdTableField f)
+      => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName!.TrimStart('@') : f.DisplayLabel!;
+
+  string QInputName(CURdTableField f)
+  {
+      return f.FieldName?.TrimStart('@') ?? "";
+  }
+
+  string QInputType(CURdTableField f)
+  {
+      var dt = (f.DataType ?? "").ToLowerInvariant();
+      if (dt.Contains("date")) return "date";
+      var fname = (f.FieldName ?? "").ToLowerInvariant();
+      if (fname.Contains("date")) return "date";
+      var label = (f.DisplayLabel ?? "");
+      if (label.Contains("日期")) return "date";
+      return "text";
+  }
+
+  object? QDefault(string fieldName)
+  {
+      if (Model.DefaultQueryValues.TryGetValue(fieldName, out var v)) return v;
+      if (Model.ParamNameByField.TryGetValue(fieldName, out var p)
+          && Model.DefaultQueryValues.TryGetValue(p, out var v2)) return v2;
+      return null;
+  }
+
+  string QValue(string name, string type)
+  {
+      var qs = Request.Query[name].ToString();
+      if (!string.IsNullOrWhiteSpace(qs)) return qs;
+      var dv = QDefault(name);
+      if (dv == null) return "";
+      if (dv is DateTime dt) return type == "date" ? dt.ToString("yyyy-MM-dd") : dt.ToString("yyyy/MM/dd");
+      return dv.ToString() ?? "";
+  }
+
+  bool QChecked(string name)
+  {
+      var qs = Request.Query[name].ToString();
+      if (!string.IsNullOrWhiteSpace(qs))
+      {
+          return qs == "1" || qs.Equals("true", StringComparison.OrdinalIgnoreCase) || qs.Equals("y", StringComparison.OrdinalIgnoreCase);
+      }
+      var dv = QDefault(name);
+      if (dv is bool b) return b;
+      if (dv is int i) return i == 1;
+      if (dv is short s) return s == 1;
+      if (dv is byte by) return by == 1;
+      var str = dv?.ToString();
+      return str == "1" || string.Equals(str, "true", StringComparison.OrdinalIgnoreCase) || string.Equals(str, "y", StringComparison.OrdinalIgnoreCase);
+  }
+
+  bool IsCheckbox(CURdTableField f)
+  {
+      if ((f.ComboStyle ?? 0) == 1) return true;
+      var dt = (f.DataType ?? "").ToLowerInvariant();
+      if (dt.Contains("bit")) return true;
+      if (dt.Contains("tinyint") || dt.Contains("int"))
+      {
+          var n = f.FieldName?.TrimStart('@') ?? "";
+          if (n.StartsWith("i", StringComparison.OrdinalIgnoreCase) || n.StartsWith("b", StringComparison.OrdinalIgnoreCase))
+              return true;
+      }
+      return false;
+  }
+
+  bool IsSelect(CURdTableField f)
+  {
+      return !string.IsNullOrWhiteSpace(f.Items) || !string.IsNullOrWhiteSpace(f.LookupTable);
+  }
+
+  bool DisableLookup(CURdTableField f)
+  {
+      var n = (f.FieldName ?? "").TrimStart('@');
+      return n.Equals("sPartNum", StringComparison.OrdinalIgnoreCase)
+          || n.Equals("sEPartNum", StringComparison.OrdinalIgnoreCase);
+  }
+}
+
+@section InqQuery {
+  <form id="inqForm" method="get" class="inq-form">
+    @Html.AntiForgeryToken()
+    @foreach (var row in qFields.GroupBy(f => f.iLayRow ?? int.MaxValue).OrderBy(g => g.Key))
+    {
+      <div class="inq-row">
+        @foreach (var f in row)
+        {
+          var name = QInputName(f);
+          var type = QInputType(f);
+          var cur = QValue(name, type);
+          var codeId = $"inq_{name}";
+          <label class="inq-label">@QLabel(f)</label>
+          if (IsCheckbox(f))
+          {
+            <div class="form-check form-check-inline compact-check">
+              <input class="form-check-input" type="checkbox" name="@name" value="1" @(QChecked(name) ? "checked" : "") />
+            </div>
+          }
+          else if (IsSelect(f) && !DisableLookup(f))
+          {
+            <span class="inq-select">
+              <input type="hidden" id="@codeId" name="@name" class="inq-select-code-hidden" value="@cur" />
+              <input type="text" class="form-control form-control-sm inq-input inq-lookup-display"
+                     value=""
+                     autocomplete="off"
+                     data-code-target="@codeId"
+                     data-items="@f.Items"
+                     data-lookup-table="@f.LookupTable"
+                     data-lookup-key="@((f.LookupKeyField ?? "").Replace(" ", ""))"
+                     data-lookup-result="@((f.LookupResultField ?? "").Replace(" ", ""))"
+                     data-cond1-field="@f.LookupCond1Field"
+                     data-cond1-source="@f.LookupCond1ResultField"
+                     data-cond2-field="@f.LookupCond2Field"
+                     data-cond2-source="@f.LookupCond2ResultField"
+                     data-selected="@cur" />
+              <button type="button" class="inq-select-btn" aria-label="開啟清單">&#9662;</button>
+            </span>
+          }
+          else
+          {
+            <input type="@type" name="@name" class="form-control form-control-sm inq-input"
+                   value="@cur" />
+          }
+        }
+      </div>
+    }
+
+    <input type="hidden" name="page" value="1" />
+    <input type="hidden" name="pageSize" value="@Model.PageSize" />
+    <input type="hidden" name="spId" value="@Model.SpId" />
+    <input type="hidden" name="itemId" value="@Model.ResolvedItemId" />
+  </form>
+}
+
+@{
+  var gDict = Model.GridDictFields ?? new List<CURdTableField>();
+  var gFields = gDict
+      .Where(f => (f.Visible ?? 1) != 0)
+      .OrderBy(f => f.SerialNum ?? int.MaxValue)
+      .ToList();
+
+  string GLabel(CURdTableField f) => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel!;
+
+  object? GVal(object? row, string? name)
+  {
+      if (row == null || string.IsNullOrWhiteSpace(name)) return null;
+      if (row is IDictionary<string, object?> dict)
+      {
+          if (dict.TryGetValue(name, out var v)) return v;
+          var key = dict.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
+          return key != null ? dict[key] : null;
+      }
+      var prop = row.GetType().GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
+      return prop?.GetValue(row);
+  }
+
+  string GFormat(object? v, CURdTableField f)
+  {
+      return FormatHelper.FormatValue(v, f.DataType, f.FormatStr);
+  }
+
+  // Detail dict helpers
+  List<CURdTableField> VisibleFields(List<CURdTableField> fields)
+      => fields.Where(f => (f.Visible ?? 1) != 0).OrderBy(f => f.SerialNum ?? int.MaxValue).ToList();
+
+  var detailFields = VisibleFields(Model.DetailDictFields);
+  var certifFields = VisibleFields(Model.CertifDictFields);
+  var strikeFields = VisibleFields(Model.StrikeDictFields);
+}
+
+<!-- Master + Detail 50/50 layout -->
+<div class="inq-split-container">
+
+<!-- Master Grid -->
+<div class="inq-table-wrap inq-split-master">
+  <table class="table table-sm table-hover align-middle inq-table" id="masterGrid">
+    <thead>
+      <tr>
+        @foreach (var f in gFields)
+        {
+          <th class="inq-sortable" data-field="@f.FieldName">
+            <span class="th-text">@GLabel(f)</span>
+            <span class="col-resizer" draggable="false"></span>
+          </th>
+        }
+      </tr>
+    </thead>
+    <tbody>
+    @if (Model.Items.Count == 0)
+    {
+      <tr>
+        <td colspan="@(Math.Max(1, gFields.Count))" class="text-center text-muted py-2">沒有資料</td>
+      </tr>
+    }
+    else
+    {
+      foreach (var row in Model.Items)
+      {
+        var paperId = GVal(row, "PaperId")?.ToString() ?? "";
+        var paperNum = GVal(row, "PaperNum")?.ToString() ?? "";
+        <tr data-paper-id="@paperId" data-paper-num="@paperNum">
+          @foreach (var f in gFields)
+          {
+            var val = GVal(row, f.FieldName);
+            <td>@GFormat(val, f)</td>
+          }
+        </tr>
+      }
+    }
+    </tbody>
+  </table>
+</div>
+
+<!-- Split Resizer -->
+<div class="inq-split-resizer" id="splitResizer" title="拖曳調整上下比例"></div>
+
+<!-- Detail Tabs (Delphi PageControl1: 3 tabs) -->
+<div class="detail-section inq-split-detail">
+  <ul class="nav nav-tabs detail-tabs" role="tablist">
+    <li class="nav-item">
+      <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabDetail" type="button" role="tab">單據資料</button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabCertif" type="button" role="tab">憑證明細</button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabStrike" type="button" role="tab">沖帳明細</button>
+    </li>
+  </ul>
+  <div class="tab-content">
+    <!-- Tab1: 單據資料 (Delphi dbgSub / qryDetail) -->
+    <div class="tab-pane fade show active detail-tab-content" id="tabDetail" role="tabpanel">
+      <table class="table table-sm table-hover align-middle inq-table" id="gridDetail">
+        <thead>
+          <tr>
+            @foreach (var f in detailFields)
+            {
+              <th data-field="@f.FieldName"><span class="th-text">@GLabel(f)</span></th>
+            }
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="@(Math.Max(1, detailFields.Count))" class="text-center text-muted py-2">請選擇主檔資料</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <!-- Tab2: 憑證明細 (Delphi dbgCertif / qryOrderSub) -->
+    <div class="tab-pane fade detail-tab-content" id="tabCertif" role="tabpanel">
+      <div class="detail-toolbar">
+        <button type="button" class="btn btn-outline-primary btn-sm" id="btnCertifTraceInTab">憑證來源追蹤</button>
+      </div>
+      <table class="table table-sm table-hover align-middle inq-table" id="gridCertif">
+        <thead>
+          <tr>
+            @foreach (var f in certifFields)
+            {
+              <th data-field="@f.FieldName"><span class="th-text">@GLabel(f)</span></th>
+            }
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="@(Math.Max(1, certifFields.Count))" class="text-center text-muted py-2">請選擇主檔資料</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <!-- Tab3: 沖帳明細 (Delphi dbgStrike / qryOutSubInq) -->
+    <div class="tab-pane fade detail-tab-content" id="tabStrike" role="tabpanel">
+      <table class="table table-sm table-hover align-middle inq-table" id="gridStrike">
+        <thead>
+          <tr>
+            @foreach (var f in strikeFields)
+            {
+              <th data-field="@f.FieldName"><span class="th-text">@GLabel(f)</span></th>
+            }
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="@(Math.Max(1, strikeFields.Count))" class="text-center text-muted py-2">請選擇主檔資料</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+</div><!-- end inq-split-container -->
+
+@if (Model.TotalPages > 1)
+{
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-1">
+    <div class="d-flex align-items-center gap-1">
+      <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber <= 1 ? "disabled" : "")"
+         href="@(Model.PageNumber <= 1 ? "#" : Model.BuildPageUrl(Model.PageNumber - 1))">上一頁</a>
+      <span>Page: <strong>@Model.PageNumber</strong> / <span>@Model.TotalPages</span></span>
+      <a class="btn btn-outline-secondary btn-sm @(Model.PageNumber >= Model.TotalPages ? "disabled" : "")"
+         href="@(Model.PageNumber >= Model.TotalPages ? "#" : Model.BuildPageUrl(Model.PageNumber + 1))">下一頁</a>
+    </div>
+    <div class="text-muted">Total: @Model.TotalCount</div>
+  </div>
+}
+
 <script>
+  const pageItemId = "@Model.ResolvedItemId";
+  const basePath = "/APR/APRdPRInq";
   const totalCount = @Model.TotalCount;
   const totalEl = document.getElementById("inqTotalCount");
   const posEl = document.getElementById("inqCurrentPos");
   if (totalEl) totalEl.textContent = String(totalCount);
 
-  const mainTable = document.querySelector(".inq-table-wrap .inq-table");
-  const rows = Array.from(mainTable?.querySelectorAll("tbody tr") || [])
-    .filter(r => !r.querySelector("td[colspan]"));
-
-  const detailPanel = document.getElementById("outInqDetailPanel");
+  const masterRows = Array.from(document.querySelectorAll("#masterGrid tbody tr"));
   let selectedRow = null;
-  let selectedOrderSubRow = null;
-  let selectedOutSubRow = null;
-  let activeTraceGrid = "main";
+  let selectedCertifRow = null;
 
   const setPos = (idx) => {
     if (!posEl) return;
     posEl.textContent = totalCount === 0 ? "0" : String(idx);
   };
 
-  const setDetailValue = (id, value) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = String(value || "");
-  };
+  // Show summary if rows have summary fields
+  if (totalCount > 0) {
+    const firstRow = masterRows[0];
+    if (firstRow) {
+      setPos(1);
+      selectedRow = firstRow;
+      firstRow.classList.add("table-active");
+      loadDetailForRow(firstRow);
+    }
+  }
 
-  const renderMainDetail = (tr) => {
-    if (!tr || !detailPanel) return;
-    detailPanel.style.display = "block";
-    setDetailValue("detShortName", tr.dataset.shortName);
-    setDetailValue("detPayWayName", tr.dataset.payWayName);
-    setDetailValue("detInvoiceTypeName", tr.dataset.invoiceTypeName);
-    setDetailValue("detInvoiceNum", tr.dataset.invoiceNum);
-    setDetailValue("detExpectDate", tr.dataset.expectDate);
-    setDetailValue("detInvoiceDate", tr.dataset.invoiceDate);
-  };
+  masterRows.forEach((tr, i) => {
+    tr.addEventListener("click", () => {
+      masterRows.forEach(r => r.classList.remove("table-active"));
+      tr.classList.add("table-active");
+      selectedRow = tr;
+      setPos(i + 1);
+      loadDetailForRow(tr);
+    });
+  });
 
+
+  // Detail dict field names for rendering
+  const detailFieldNames = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(detailFields.Select(f => f.FieldName ?? "")));
+  const certifFieldNames = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(certifFields.Select(f => f.FieldName ?? "")));
+  const strikeFieldNames = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(strikeFields.Select(f => f.FieldName ?? "")));
+
+  // Format helpers for detail grid values
+  function formatDetailVal(v) {
+    if (v == null) return "";
+    if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
+      return v.substring(0, 10);
+    }
+    return String(v);
+  }
+
+  function renderDetailGrid(tbodySelector, fields, rows) {
+    const tbody = document.querySelector(tbodySelector);
+    if (!tbody) return;
+    if (!rows || rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="${Math.max(1, fields.length)}" class="text-center text-muted py-2">沒有資料</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map(row => {
+      const cells = fields.map(f => {
+        const key = Object.keys(row).find(k => k.toLowerCase() === f.toLowerCase()) || f;
+        return `<td>${formatDetailVal(row[key])}</td>`;
+      }).join("");
+      const pnum = row.PaperNum || row.paperNum || "";
+      const pid = row.PaperId || row.paperId || "";
+      return `<tr data-paper-num="${pnum}" data-paper-id="${pid}">${cells}</tr>`;
+    }).join("");
+  }
+
+  async function loadDetailForRow(tr) {
+    const pnum = tr.getAttribute("data-paper-num");
+    if (!pnum) return;
+
+    // Load all 3 detail tabs in parallel
+    const [detailRes, certifRes, strikeRes] = await Promise.all([
+      fetch(`${basePath}?handler=Detail&paperNum=${encodeURIComponent(pnum)}&itemId=${encodeURIComponent(pageItemId)}`).then(r => r.json()).catch(() => ({ rows: [] })),
+      fetch(`${basePath}?handler=Certif&paperNum=${encodeURIComponent(pnum)}&itemId=${encodeURIComponent(pageItemId)}`).then(r => r.json()).catch(() => ({ rows: [] })),
+      fetch(`${basePath}?handler=Strike&paperNum=${encodeURIComponent(pnum)}&itemId=${encodeURIComponent(pageItemId)}`).then(r => r.json()).catch(() => ({ rows: [] }))
+    ]);
+
+    renderDetailGrid("#gridDetail tbody", detailFieldNames, detailRes.rows || []);
+    renderDetailGrid("#gridCertif tbody", certifFieldNames, certifRes.rows || []);
+    renderDetailGrid("#gridStrike tbody", strikeFieldNames, strikeRes.rows || []);
+
+    // Bind certif row selection
+    const certifRows = Array.from(document.querySelectorAll("#gridCertif tbody tr"));
+    selectedCertifRow = certifRows.length > 0 ? certifRows[0] : null;
+    if (selectedCertifRow) selectedCertifRow.classList.add("table-active");
+    certifRows.forEach(cr => {
+      cr.addEventListener("click", () => {
+        certifRows.forEach(r => r.classList.remove("table-active"));
+        cr.classList.add("table-active");
+        selectedCertifRow = cr;
+      });
+    });
+  }
+
+  // Clear
+  document.getElementById("btnClearInq")?.addEventListener("click", () => {
+    window.location.href = `${basePath}?itemId=${encodeURIComponent(pageItemId)}`;
+  });
+
+  // Sort
   const parseSortValue = (text) => {
     if (text == null) return "";
     const t = String(text).trim();
@@ -592,10 +715,10 @@
   const sortTableByColumn = (table, colIndex, asc) => {
     const tbody = table.querySelector("tbody");
     if (!tbody) return;
-    const bodyRows = Array.from(tbody.querySelectorAll("tr"))
+    const rows = Array.from(tbody.querySelectorAll("tr"))
       .filter(r => !r.querySelector("td[colspan]"));
     const dir = asc ? 1 : -1;
-    bodyRows.sort((a, b) => {
+    rows.sort((a, b) => {
       const aText = a.children[colIndex]?.textContent ?? "";
       const bText = b.children[colIndex]?.textContent ?? "";
       const av = parseSortValue(aText);
@@ -604,11 +727,12 @@
       if (av > bv) return 1 * dir;
       return 0;
     });
-    bodyRows.forEach(r => tbody.appendChild(r));
+    rows.forEach(r => tbody.appendChild(r));
   };
 
-  if (mainTable) {
-    const headers = Array.from(mainTable.querySelectorAll("thead th"));
+  const masterTable = document.getElementById("masterGrid");
+  if (masterTable) {
+    const headers = Array.from(masterTable.querySelectorAll("thead th"));
     headers.forEach((th, idx) => {
       th.addEventListener("click", (e) => {
         if (e.target && e.target.classList?.contains("col-resizer")) return;
@@ -616,11 +740,12 @@
         const isAsc = !th.classList.contains("inq-sort-asc");
         headers.forEach(h => h.classList.remove("inq-sort-asc", "inq-sort-desc"));
         th.classList.add(isAsc ? "inq-sort-asc" : "inq-sort-desc");
-        sortTableByColumn(mainTable, idx, isAsc);
+        sortTableByColumn(masterTable, idx, isAsc);
       });
     });
   }
 
+  // Column resize
   const dictTableName = "@(Model.DictTableName ?? "")";
   const fieldNames = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(gFields.Select(f => f.FieldName ?? "")));
 
@@ -631,10 +756,7 @@
     th.style.width = `${w}px`;
     th.style.minWidth = `${w}px`;
     Array.from(table.querySelectorAll(`tbody tr td:nth-child(${index + 1})`))
-      .forEach(td => {
-        td.style.width = `${w}px`;
-        td.style.minWidth = `${w}px`;
-      });
+      .forEach(td => { td.style.width = `${w}px`; td.style.minWidth = `${w}px`; });
   }
 
   function applySavedWidths(table, dictTable, fields) {
@@ -644,9 +766,9 @@
       const raw = localStorage.getItem(`colwidth:${tn}`);
       if (!raw) return;
       const cols = JSON.parse(raw) || [];
-      const ths = Array.from(table.querySelectorAll("thead th"));
+      const ths = Array.from(table.querySelectorAll('thead th'));
       cols.forEach(c => {
-        const f = (c.fieldName || "").toString();
+        const f = (c.fieldName || '').toString();
         const w = Number(c.width);
         if (!f || !Number.isFinite(w)) return;
         const idx = fields.findIndex(x => x.toLowerCase() === f.toLowerCase());
@@ -657,7 +779,7 @@
 
   function initColumnResize(tableEl, dictTable, fields) {
     if (!tableEl) return;
-    const ths = Array.from(tableEl.querySelectorAll("thead th"));
+    const ths = Array.from(tableEl.querySelectorAll('thead th'));
     applySavedWidths(tableEl, dictTable, fields);
 
     let isResizing = false;
@@ -666,223 +788,59 @@
     let thIndex = -1;
 
     ths.forEach((th, idx) => {
-      const handle = th.querySelector(".col-resizer");
+      const handle = th.querySelector('.col-resizer');
       if (!handle) return;
-      handle.addEventListener("mousedown", (e) => {
+      handle.addEventListener('mousedown', (e) => {
         e.preventDefault();
         isResizing = true;
         startX = e.pageX;
         startWidth = th.getBoundingClientRect().width;
         thIndex = idx;
-        document.body.classList.add("resizing");
+        document.body.classList.add('resizing');
       });
     });
 
-    document.addEventListener("mousemove", (e) => {
+    document.addEventListener('mousemove', (e) => {
       if (!isResizing || thIndex < 0) return;
       const dx = e.pageX - startX;
       const newW = Math.max(20, startWidth + dx);
       applyColumnWidth(tableEl, ths, thIndex, newW);
     });
 
-    document.addEventListener("mouseup", () => {
+    document.addEventListener('mouseup', () => {
       if (!isResizing) return;
       isResizing = false;
-      document.body.classList.remove("resizing");
+      document.body.classList.remove('resizing');
       const tn = (dictTable || "").trim();
       if (tn) {
         const payload = ths.map(th => ({ fieldName: th.dataset.field, width: Math.round(th.getBoundingClientRect().width) }));
-        try {
-          localStorage.setItem(`colwidth:${tn}`, JSON.stringify(payload));
-        } catch { }
+        try { localStorage.setItem(`colwidth:${tn}`, JSON.stringify(payload)); } catch { }
       }
       thIndex = -1;
     });
   }
 
-  initColumnResize(mainTable, dictTableName, fieldNames);
+  initColumnResize(masterTable, dictTableName, fieldNames);
 
-  const getFieldValue = (row, name) => {
-    if (!row || !name) return "";
-    if (Object.prototype.hasOwnProperty.call(row, name)) return row[name] ?? "";
-    const key = Object.keys(row).find(k => k.toLowerCase() === name.toLowerCase());
-    return key ? (row[key] ?? "") : "";
-  };
-
-  const buildSubFieldDefs = (payload, items) => {
-    if (Array.isArray(payload?.fields) && payload.fields.length > 0) {
-      return payload.fields.map(f => ({
-        fieldName: String(f?.fieldName || ""),
-        displayLabel: String(f?.displayLabel || f?.fieldName || "")
-      })).filter(f => f.fieldName);
-    }
-    if (items.length > 0) {
-      return Object.keys(items[0]).map(k => ({ fieldName: k, displayLabel: k }));
-    }
-    return [];
-  };
-
-  const renderSubTable = (opts) => {
-    const headEl = document.getElementById(opts.headId);
-    const bodyEl = document.getElementById(opts.bodyId);
-    if (!headEl || !bodyEl) return;
-
-    const items = Array.isArray(opts.payload?.items) ? opts.payload.items : [];
-    const fields = buildSubFieldDefs(opts.payload, items);
-
-    headEl.innerHTML = "";
-    if (fields.length === 0) {
-      headEl.innerHTML = "<th class=\"text-muted\">沒有欄位</th>";
-      bodyEl.innerHTML = "<tr><td class=\"text-muted\">沒有資料</td></tr>";
-      if (opts.key === "order") selectedOrderSubRow = null;
-      else selectedOutSubRow = null;
-      return;
-    }
-
-    const headRow = document.createElement("tr");
-    fields.forEach(f => {
-      const th = document.createElement("th");
-      th.textContent = f.displayLabel;
-      headRow.appendChild(th);
-    });
-    headEl.appendChild(headRow);
-
-    bodyEl.innerHTML = "";
-    if (items.length === 0) {
-      const tr = document.createElement("tr");
-      const td = document.createElement("td");
-      td.colSpan = fields.length;
-      td.className = "text-center text-muted py-2";
-      td.textContent = "沒有資料";
-      tr.appendChild(td);
-      bodyEl.appendChild(tr);
-      if (opts.key === "order") selectedOrderSubRow = null;
-      else selectedOutSubRow = null;
-      return;
-    }
-
-    let firstDataRow = null;
-    items.forEach(item => {
-      const tr = document.createElement("tr");
-      const paperId = String(getFieldValue(item, "PaperId") || "");
-      const paperNum = String(getFieldValue(item, "PaperNum") || "");
-      tr.dataset.paperId = paperId;
-      tr.dataset.paperNum = paperNum;
-      fields.forEach(f => {
-        const td = document.createElement("td");
-        const raw = getFieldValue(item, f.fieldName);
-        td.textContent = raw == null ? "" : String(raw);
-        tr.appendChild(td);
-      });
-      tr.addEventListener("click", () => {
-        Array.from(bodyEl.querySelectorAll("tr")).forEach(r => r.classList.remove("table-active"));
-        tr.classList.add("table-active");
-        if (opts.key === "order") {
-          selectedOrderSubRow = tr;
-          activeTraceGrid = "order";
-        } else {
-          selectedOutSubRow = tr;
-          activeTraceGrid = "out";
-        }
-      });
-      bodyEl.appendChild(tr);
-      if (!firstDataRow) firstDataRow = tr;
-    });
-
-    if (firstDataRow) {
-      firstDataRow.classList.add("table-active");
-      if (opts.key === "order") selectedOrderSubRow = firstDataRow;
-      else selectedOutSubRow = firstDataRow;
-    }
-  };
-
-  const loadSubTables = async (tr) => {
-    const sourNum = tr?.dataset?.sourNum || "";
-    const sourItem = tr?.dataset?.sourItem || "";
-    const key = `${sourNum}|${sourItem}`;
-    if (detailPanel) detailPanel.dataset.loadKey = key;
-    if (!sourNum || !sourItem) {
-      renderSubTable({ key: "order", payload: { items: [], fields: [] }, headId: "orderSubHead", bodyId: "orderSubBody" });
-      renderSubTable({ key: "out", payload: { items: [], fields: [] }, headId: "outSubHead", bodyId: "outSubBody" });
-      return;
-    }
-
-    try {
-      const [orderRes, outRes] = await Promise.all([
-        fetch(`?handler=OrderSub&sourNum=${encodeURIComponent(sourNum)}&sourItem=${encodeURIComponent(sourItem)}`),
-        fetch(`?handler=OutSub&sourNum=${encodeURIComponent(sourNum)}&sourItem=${encodeURIComponent(sourItem)}`)
-      ]);
-
-      if (detailPanel?.dataset?.loadKey !== key) return;
-
-      const orderData = orderRes.ok ? await orderRes.json() : { items: [], fields: [] };
-      const outData = outRes.ok ? await outRes.json() : { items: [], fields: [] };
-      renderSubTable({ key: "order", payload: orderData, headId: "orderSubHead", bodyId: "orderSubBody" });
-      renderSubTable({ key: "out", payload: outData, headId: "outSubHead", bodyId: "outSubBody" });
-    } catch {
-      renderSubTable({ key: "order", payload: { items: [], fields: [] }, headId: "orderSubHead", bodyId: "orderSubBody" });
-      renderSubTable({ key: "out", payload: { items: [], fields: [] }, headId: "outSubHead", bodyId: "outSubBody" });
-    }
-  };
-
-  const setMainSelection = (tr, pos) => {
-    rows.forEach(r => r.classList.remove("table-active"));
-    tr.classList.add("table-active");
-    selectedRow = tr;
-    activeTraceGrid = "main";
-    setPos(pos);
-    renderMainDetail(tr);
-    loadSubTables(tr);
-  };
-
-  if (rows.length > 0 && totalCount > 0) {
-    setMainSelection(rows[0], 1);
-  }
-
-  rows.forEach((tr, i) => {
-    tr.addEventListener("click", () => setMainSelection(tr, i + 1));
-  });
-
-  document.querySelectorAll("#outInqTabs .nav-link").forEach(tab => {
-    tab.addEventListener("shown.bs.tab", (ev) => {
-      const id = ev.target?.id || "";
-      if (id === "outinq-order-tab") activeTraceGrid = "order";
-      else if (id === "outinq-out-tab") activeTraceGrid = "out";
-      else activeTraceGrid = "main";
-    });
-  });
-
-  document.getElementById("btnClearInq")?.addEventListener("click", () => {
-    window.location.href = "/MPH/MPH00016";
-  });
-
+  // Form submit
   const inqForm = document.getElementById("inqForm");
   inqForm?.addEventListener("submit", (e) => {
     e.preventDefault();
     const fd = new FormData(inqForm);
     const params = new URLSearchParams();
     for (const [k, v] of fd.entries()) {
-      if (!k || k === "__RequestVerificationToken" || k === "spId") continue;
       const val = (v ?? "").toString().trim();
       if (!val) continue;
       params.append(k, val);
     }
-    // Checkboxes are absent in FormData when unchecked; send explicit 0/1 to avoid falling back to defaults.
-    inqForm.querySelectorAll('input[type="checkbox"][name]').forEach(chk => {
-      const key = (chk.getAttribute("name") || "").trim();
-      if (!key) return;
-      params.set(key, chk.checked ? "1" : "0");
-    });
     if (new URLSearchParams(window.location.search).has("debug")) {
       params.set("debug", "1");
     }
-    const useId = (localStorage.getItem("erpLoginBUId") || currentUseId || "").toString().trim();
-    if (useId) params.set("sUseId", useId);
-    params.set("search", "1");
     const qs = params.toString();
-    window.location.href = qs ? (`/MPH/MPH00016?${qs}`) : "/MPH/MPH00016";
+    window.location.href = qs ? (`${basePath}?${qs}`) : `${basePath}?itemId=${encodeURIComponent(pageItemId)}`;
   });
 
+  // Export Excel
   document.getElementById("btnExportExcel")?.addEventListener("click", () => {
     const url = new URL(window.location.href);
     url.searchParams.set("handler", "Export");
@@ -892,53 +850,104 @@
   const currentUserId = "@Model.CurrentUserId";
   const currentUseId = "@Model.CurrentUseId";
 
-  const getTraceRow = () => {
-    if (activeTraceGrid === "order" && selectedOrderSubRow?.dataset?.paperId && selectedOrderSubRow?.dataset?.paperNum)
-      return selectedOrderSubRow;
-    if (activeTraceGrid === "out" && selectedOutSubRow?.dataset?.paperId && selectedOutSubRow?.dataset?.paperNum)
-      return selectedOutSubRow;
-    return selectedRow;
-  };
-
+  // Delphi btnPaperTraceClick: trace based on focused grid
   document.getElementById("btnPaperTrace")?.addEventListener("click", async () => {
-    const traceRow = getTraceRow();
-    if (!traceRow) return alert("請先選擇一筆資料");
+    // Determine which sub-grid has focus, or use master grid
+    let tracePaperId = "";
+    let tracePaperNum = "";
 
-    const pid = traceRow.dataset.paperId || "";
-    const pnum = traceRow.dataset.paperNum || "";
-    if (!pid || !pnum) return alert("找不到單據資訊");
+    const activeDetail = document.querySelector("#gridDetail tbody tr.table-active");
+    const activeCertif = document.querySelector("#gridCertif tbody tr.table-active");
+    const activeStrike = document.querySelector("#gridStrike tbody tr.table-active");
+    const activeTab = document.querySelector(".detail-tabs .nav-link.active");
+    const tabTarget = activeTab?.getAttribute("data-bs-target") || "";
+
+    if (tabTarget === "#tabDetail" && activeDetail) {
+      tracePaperId = activeDetail.getAttribute("data-paper-id") || "";
+      tracePaperNum = activeDetail.getAttribute("data-paper-num") || "";
+    } else if (tabTarget === "#tabCertif" && activeCertif) {
+      tracePaperId = activeCertif.getAttribute("data-paper-id") || "";
+      tracePaperNum = activeCertif.getAttribute("data-paper-num") || "";
+    } else if (tabTarget === "#tabStrike" && activeStrike) {
+      tracePaperId = activeStrike.getAttribute("data-paper-id") || "";
+      tracePaperNum = activeStrike.getAttribute("data-paper-num") || "";
+    } else if (selectedRow) {
+      tracePaperId = selectedRow.getAttribute("data-paper-id") || "";
+      tracePaperNum = selectedRow.getAttribute("data-paper-num") || "";
+    }
+
+    if (!tracePaperId || !tracePaperNum) return alert("請先選擇一筆資料");
 
     try {
       const res = await fetch("/api/Flow/ResolveItemIdByFromType", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paperId: pid, paperNum: pnum, userId: currentUserId, useId: currentUseId })
+        body: JSON.stringify({ paperId: tracePaperId, paperNum: tracePaperNum, userId: currentUserId, useId: currentUseId })
       });
       if (res.ok) {
         const data = await res.json();
-        const itemId = data.itemId || pid;
-        window.open(`/DynamicTemplate/Paper/${encodeURIComponent(itemId)}/${encodeURIComponent(pnum)}`, "_blank");
+        const itemId = data.itemId || tracePaperId;
+        window.open(`/DynamicTemplate/Paper/${encodeURIComponent(itemId)}/${encodeURIComponent(tracePaperNum)}`, "_blank");
         return;
       }
-    } catch { }
-    window.open(`/DynamicTemplate/Paper/${encodeURIComponent(pid)}/${encodeURIComponent(pnum)}`, "_blank");
+    } catch {}
+    window.open(`/DynamicTemplate/Paper/${encodeURIComponent(tracePaperId)}/${encodeURIComponent(tracePaperNum)}`, "_blank");
   });
 
+  // Delphi btnCertifTraceClick: trace certif source via qryCertifId
+  async function doCertifTrace() {
+    const certifRow = selectedCertifRow || document.querySelector("#gridCertif tbody tr.table-active");
+    if (!certifRow) return alert("請先在憑證明細頁籤選擇一筆資料");
+    const pnum = certifRow.getAttribute("data-paper-num") || "";
+    if (!pnum) return alert("找不到憑證單號");
+
+    try {
+      const res = await fetch(`${basePath}?handler=CertifTrace&certifPaperNum=${encodeURIComponent(pnum)}&itemId=${encodeURIComponent(pageItemId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.paperNum && data.paperId) {
+          let itemId = data.paperId;
+          try {
+            const r2 = await fetch("/api/Flow/ResolveItemIdByFromType", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ paperId: data.paperId, paperNum: data.paperNum, userId: currentUserId, useId: currentUseId })
+            });
+            if (r2.ok) {
+              const d2 = await r2.json();
+              itemId = d2.itemId || data.paperId;
+            }
+          } catch {}
+          window.open(`/DynamicTemplate/Paper/${encodeURIComponent(itemId)}/${encodeURIComponent(data.paperNum)}`, "_blank");
+          return;
+        }
+        alert(data.message || "找不到憑證來源單據");
+        return;
+      }
+    } catch {}
+    alert("憑證來源追蹤查詢失敗");
+  }
+
+  document.getElementById("btnCertifTrace")?.addEventListener("click", doCertifTrace);
+  document.getElementById("btnCertifTraceInTab")?.addEventListener("click", doCertifTrace);
+
+  // Save height
   document.getElementById("btnSaveHeight")?.addEventListener("click", async () => {
     const h = document.querySelector(".inq-body")?.clientHeight || 0;
     const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
     const res = await fetch("/api/MatInfoUtility/SaveBrowseHeight", {
       method: "POST",
       headers: { "Content-Type": "application/json", "RequestVerificationToken": token },
-      body: JSON.stringify({ itemId: "MPH00016", height: h })
+      body: JSON.stringify({ itemId: pageItemId, height: h })
     });
     if (!res.ok) return alert("儲存失敗");
     alert("已儲存高度設定");
   });
 
+  // Reset params
   document.getElementById("btnResetParams")?.addEventListener("click", async () => {
     const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
-    const res = await fetch("?handler=ResetParams", {
+    const res = await fetch(`${basePath}?handler=ResetParams&itemId=${encodeURIComponent(pageItemId)}`, {
       method: "POST",
       headers: { "RequestVerificationToken": token }
     });
@@ -947,6 +956,7 @@
     window.location.reload();
   });
 
+  // Lookup suggest (same as AJNdJourInq)
   const resolveCondValue = (name) => {
     if (!name) return "";
     const el = document.querySelector(`[name="${name}"]`);
@@ -959,34 +969,9 @@
     if (!raw) return [];
     return raw.split(/[;,]/).map(p => p.trim()).filter(Boolean).map(p => {
       const kv = p.split(/=|:/);
-      if (kv.length >= 2) {
-        const value = kv[0].trim();
-        const label = kv.slice(1).join(":").trim();
-        return { value, label };
-      }
+      if (kv.length >= 2) return { value: kv[0].trim(), label: kv.slice(1).join(":").trim() };
       return { value: p, label: p };
     });
-  };
-
-  const escapeRegExp = (s) => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-  const normalizeLookupLabel = (value, label) => {
-    const v = String(value ?? "").trim();
-    const l = String(label ?? "").trim();
-    if (!l) return v;
-    if (!v) return l;
-    const re = new RegExp(`^${escapeRegExp(v)}\\s*[-:]\\s*`, "i");
-    const normalized = l.replace(re, "").trim();
-    return normalized || l;
-  };
-
-  const formatLookupDisplay = (value, label) => {
-    const v = String(value ?? "").trim();
-    const l = String(label ?? "").trim();
-    if (!v) return l;
-    if (!l) return v;
-    if (v.toLowerCase() === l.toLowerCase()) return v;
-    return `${v} - ${l}`;
   };
 
   const buildCondKey = (el) => {
@@ -1032,10 +1017,9 @@
         const data = await res.json();
         if (Array.isArray(data)) {
           const lookups = data.map(row => {
-            const value = String(row?.key ?? "").trim();
-            const rawLabel = Object.keys(row || {}).filter(k => k.startsWith("result")).map(k => row[k]).join(" - ");
-            const label = normalizeLookupLabel(value, rawLabel);
-            return { value, label: label || value };
+            const val = row?.key ?? "";
+            const label = Object.keys(row || {}).filter(k => k.startsWith("result")).map(k => row[k]).join(" - ");
+            return { value: String(val), label: label || String(val) };
           });
           options = options.concat(lookups);
         }
@@ -1043,15 +1027,8 @@
     }
 
     const map = new Map();
-    options.forEach(o => {
-      const value = String(o?.value ?? "").trim();
-      if (!value) return;
-      const label = normalizeLookupLabel(value, o?.label ?? o?.value ?? "");
-      if (!map.has(value)) map.set(value, { value, label: label || value });
-    });
-
+    options.forEach(o => { if (!o.value) return; if (!map.has(o.value)) map.set(o.value, o); });
     if (selected && !map.has(selected)) map.set(selected, { value: selected, label: selected });
-
     return Array.from(map.values());
   };
 
@@ -1065,12 +1042,9 @@
     if (!displayEl) return;
     const codeInput = getCodeInput(displayEl);
     const codeVal = (codeInput?.value || "").toString().trim();
-    if (!codeVal) {
-      displayEl.value = "";
-      return;
-    }
+    if (!codeVal) { displayEl.value = ""; return; }
     const hit = (options || []).find(o => String(o.value).trim() === codeVal);
-    displayEl.value = hit ? formatLookupDisplay(hit.value, hit.label) : codeVal;
+    displayEl.value = hit ? (hit.label || hit.value) : codeVal;
   };
 
   const suggest = document.createElement("div");
@@ -1097,17 +1071,14 @@
     suggestOptions = [];
   };
 
-  const renderSuggest = (el, list, forceAll = false) => {
-    const q = forceAll ? "" : (el.value || "").trim().toLowerCase();
+  const renderSuggest = (el, list) => {
+    const q = (el.value || "").trim().toLowerCase();
     const filtered = q
       ? list.filter(o => (o.value || "").toLowerCase().includes(q) || (o.label || "").toLowerCase().includes(q))
       : list;
 
     suggest.innerHTML = "";
-    if (filtered.length === 0) {
-      hideSuggest();
-      return;
-    }
+    if (filtered.length === 0) { hideSuggest(); return; }
 
     filtered.slice(0, 200).forEach(o => {
       const item = document.createElement("div");
@@ -1117,7 +1088,7 @@
         e.preventDefault();
         const codeInput = getCodeInput(el);
         if (codeInput) codeInput.value = o.value;
-        el.value = formatLookupDisplay(o.value, o.label);
+        el.value = o.label || o.value;
         hideSuggest();
       });
       suggest.appendChild(item);
@@ -1129,7 +1100,7 @@
 
   const lookupCache = new Map();
 
-  const showSuggest = async (el, forceAll = true) => {
+  const showSuggest = async (el) => {
     const key = buildCondKey(el);
     if (!lookupCache.has(key)) {
       const opts = await fetchLookupOptions(el);
@@ -1138,7 +1109,7 @@
     suggestTarget = el;
     suggestOptions = lookupCache.get(key) || [];
     syncDisplayValue(el, suggestOptions);
-    renderSuggest(el, suggestOptions, forceAll);
+    renderSuggest(el, suggestOptions);
   };
 
   document.querySelectorAll(".inq-select-btn").forEach(btn => {
@@ -1146,10 +1117,7 @@
       e.preventDefault();
       keepSuggestUntil = Date.now() + 250;
       const input = btn.previousElementSibling;
-      if (input) {
-        input.focus();
-        showSuggest(input);
-      }
+      if (input) { input.focus(); showSuggest(input); }
     });
   });
 
@@ -1160,51 +1128,26 @@
   });
 
   document.querySelectorAll(".inq-lookup-display[data-lookup-table], .inq-lookup-display[data-items]").forEach(el => {
-    el.addEventListener("focus", () => showSuggest(el, true));
+    el.addEventListener("focus", () => showSuggest(el));
     el.addEventListener("input", () => {
-      if (suggestTarget !== el) return showSuggest(el, false);
-      renderSuggest(el, suggestOptions, false);
-    });
-    el.addEventListener("keydown", (e) => {
-      if (e.key !== "Backspace" && e.key !== "Delete") return;
-      const value = String(el.value || "");
-      if (!value) return;
-      const start = typeof el.selectionStart === "number" ? el.selectionStart : -1;
-      const end = typeof el.selectionEnd === "number" ? el.selectionEnd : -1;
-      const allSelected = start === 0 && end === value.length;
-      if (!allSelected) return;
-      e.preventDefault();
-      el.value = "";
-      const codeInput = getCodeInput(el);
-      if (codeInput) codeInput.value = "";
-      if (suggestTarget === el) renderSuggest(el, suggestOptions, false);
-      else showSuggest(el);
+      if (suggestTarget !== el) return showSuggest(el);
+      renderSuggest(el, suggestOptions);
     });
     el.addEventListener("blur", () => {
-      setTimeout(() => {
-        if (!suggest.matches(":hover")) hideSuggest();
-      }, 120);
+      setTimeout(() => { if (!suggest.matches(":hover")) hideSuggest(); }, 120);
       const codeInput = getCodeInput(el);
       if (!codeInput) return;
       const text = (el.value || "").trim();
       const key = buildCondKey(el);
       const opts = lookupCache.get(key) || [];
-      if (!text) {
-        codeInput.value = "";
-        return;
-      }
+      if (!text) { codeInput.value = ""; return; }
       const hit = opts.find(o => {
         const v = String(o.value ?? "").trim();
         const l = String(o.label ?? "").trim();
-        const d = formatLookupDisplay(v, l);
-        return v === text || l === text || d === text;
+        return v === text || l === text;
       });
-      if (hit) {
-        codeInput.value = hit.value;
-        el.value = formatLookupDisplay(hit.value, hit.label);
-      } else {
-        syncDisplayValue(el, opts);
-      }
+      if (hit) { codeInput.value = hit.value; el.value = hit.label || hit.value; }
+      else { syncDisplayValue(el, opts); }
     });
   });
 
@@ -1222,9 +1165,7 @@
     }
   })();
 
-  suggest.addEventListener("mousedown", () => {
-    keepSuggestUntil = Date.now() + 250;
-  });
+  suggest.addEventListener("mousedown", () => { keepSuggestUntil = Date.now() + 250; });
 </script>
 
 @await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", new List<CURdTableField>(), ViewData)
@@ -1235,15 +1176,11 @@
     const dictForGrid = "@Model.DictTableName";
     let currentDict = dictForQuery;
 
-    const setDict = (name) => {
-      currentDict = name || currentDict;
-      window._dictTableName = currentDict;
-    };
-
+    const setDict = (name) => { currentDict = name || currentDict; window._dictTableName = currentDict; };
     setDict(dictForQuery);
 
     const queryArea = document.getElementById("inqForm");
-    const table = document.querySelector(".inq-table");
+    const table = document.getElementById("masterGrid");
 
     queryArea?.addEventListener("focusin", () => setDict(dictForQuery));
     queryArea?.addEventListener("click", () => setDict(dictForQuery));
@@ -1253,17 +1190,13 @@
       if (typeof window.initFieldDictModal === "function") {
         window.initFieldDictModal(currentDict, "fieldDictModal");
         const el = document.getElementById("fieldDictModal");
-        if (el) {
-          const md = bootstrap.Modal.getOrCreateInstance(el);
-          md.show();
-        }
+        if (el) { const md = bootstrap.Modal.getOrCreateInstance(el); md.show(); }
       } else if (typeof window.loadFieldDict === "function") {
         window.loadFieldDict(currentDict);
       }
     };
 
     document.getElementById("btnEditDict")?.addEventListener("click", openFieldDict);
-
     document.addEventListener("keydown", (e) => {
       if (e.key !== "F3") return;
       const target = e.target;
@@ -1274,7 +1207,6 @@
     });
   })();
 </script>
-
 
 @if (Request.Query.ContainsKey("debug"))
 {
@@ -1296,7 +1228,3 @@
     </ul>
   </div>
 }
-
-
-
-

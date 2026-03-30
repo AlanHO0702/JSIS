@@ -264,8 +264,8 @@ document.addEventListener('DOMContentLoaded', () => {
     window.dispatchEvent(evt);
   });
 
-  // 儲存
-  saveBtn?.addEventListener('click', async () => {
+  // 儲存（提取為具名函式，供自訂按鈕前自動儲存呼叫）
+  const saveMasterDetail = async () => {
     // ★ 儲存前記住選中列的 key 值，以便重載後定位
     const getSelectedKeys = (tbody, keyFields) => {
       const selected = tbody?.querySelector('tr.selected');
@@ -290,7 +290,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const hasChanges = !(r1.skipped && r2.skipped);
     if (!hasChanges) {
-      return;
+      return { ok: true, skipped: true };
     }
 
     if (!r1.ok || !r2.ok) {
@@ -300,7 +300,7 @@ document.addEventListener('DOMContentLoaded', () => {
         title: '儲存失敗',
         text: err.text || '其中一個表格儲存失敗'
       });
-      return;
+      return { ok: false };
     }
 
     setDirty(false);
@@ -313,7 +313,14 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       window.location.reload();
     }
-  });
+    return { ok: true };
+  };
+
+  // 暴露儲存函式及狀態供自訂按鈕使用
+  window._mdSave = window._mdSave || {};
+  window._mdSave[domId] = { save: saveMasterDetail, get isDirty() { return isDirty; } };
+
+  saveBtn?.addEventListener('click', () => saveMasterDetail());
 
   // 取消（動態刷新，保持編輯模式）
   cancelBtn?.addEventListener('click', async () => {
@@ -446,7 +453,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const masterTable = cfg.MasterTable || window._mdTableName || '';
   const itemId = cfg.ItemId || window._mdItemId || '';
 
-  console.log('[MasterDetail Query] itemId:', itemId, 'masterTable:', masterTable);
   window._itemId = itemId;
   window._dictTableName = masterTable;
   window._tableName = masterTable;
@@ -471,13 +477,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (selected.length) {
           allQueryFields = allFields.length ? allFields : selected;
           selectedQueryFields = selected;
-          console.log('[MasterDetail] Query fields loaded (PaperSelectedList):', selected);
           return selected;
         }
       }
 
       const url = `/api/DictSetupApi/QueryFields?itemId=${encodeURIComponent(itemId)}&table=${encodeURIComponent(masterTable)}&lang=TW`;
-      console.log('[MasterDetail] Loading query fields from:', url);
       const res = await fetch(url);
       if (!res.ok) {
         const errorText = await res.text();
@@ -485,11 +489,9 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error(errorText);
       }
       const data = await res.json();
-      console.log('[MasterDetail] Query fields loaded:', data);
       allQueryFields = Array.isArray(data) && data.length ? data : [];
       // API data may not include Visible; treat missing as visible
       selectedQueryFields = allQueryFields.filter(f => (f.Visible ?? f.visible ?? f.IVisible ?? f.iVisible ?? 1) === 1);
-      console.log('[MasterDetail] Selected query fields:', selectedQueryFields);
       return allQueryFields;
     } catch (err) {
       console.error('[MasterDetail] Load query fields failed:', err);
