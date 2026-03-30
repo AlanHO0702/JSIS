@@ -78,18 +78,65 @@
             }
         }
 
-        return FormatValue(raw);
+        return FormatValue(raw, field);
     }
 
-    private static string FormatValue(object? v) => v switch
+    private static bool HasDateOnlyMask(string? mask)
     {
-        DateTime dt => dt.ToString("yyyy/MM/dd HH:mm"),
-        decimal dec => dec.ToString("#,##0.##"),
-        double d => d.ToString("#,##0.##"),
-        float f => f.ToString("#,##0.##"),
-        IFormattable fm => fm.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
-        _ => v?.ToString() ?? ""
-    };
+        var m = (mask ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(m)) return false;
+        var isDate = m.Contains("yyyy") && m.Contains("mm") && m.Contains("dd");
+        var hasTime = m.Contains("hh") || m.Contains("ss") || m.Contains("tt");
+        return isDate && !hasTime;
+    }
+
+    private static string FormatDateByMask(DateTime dt, string? mask)
+    {
+        var m = (mask ?? "").Trim();
+        if (m.Contains("-")) return dt.ToString("yyyy-MM-dd");
+        return dt.ToString("yyyy/MM/dd");
+    }
+
+    private static string FormatValue(object? v, CURdTableField field)
+    {
+        var dataType = (field.DataType ?? "").Trim().ToLowerInvariant();
+        var editMask = field.FormatStr;
+        var showDateOnly = HasDateOnlyMask(editMask)
+            || (dataType.Contains("date") && !dataType.Contains("time"));
+
+        if (v is DateTime dt)
+            return showDateOnly ? FormatDateByMask(dt, editMask) : dt.ToString("yyyy/MM/dd HH:mm");
+        if (v is DateTimeOffset dto)
+            return showDateOnly ? FormatDateByMask(dto.DateTime, editMask) : dto.ToString("yyyy/MM/dd HH:mm");
+        if (v is decimal dec)
+            return dec.ToString("#,##0.##");
+        if (v is double d)
+            return d.ToString("#,##0.##");
+        if (v is float f)
+            return f.ToString("#,##0.##");
+        if (v is IFormattable fm)
+            return fm.ToString(null, System.Globalization.CultureInfo.InvariantCulture);
+
+        var s = v?.ToString() ?? "";
+        if (showDateOnly && !string.IsNullOrWhiteSpace(s) && DateTime.TryParse(s, out var parsed))
+            return FormatDateByMask(parsed, editMask);
+
+        return s;
+    }
+    private static string FormatEditValue(object? v, CURdTableField field)
+    {
+        var s = v?.ToString() ?? "";
+        if (string.IsNullOrWhiteSpace(s)) return "";
+
+        var dataType = (field.DataType ?? "").Trim().ToLowerInvariant();
+        var editMask = field.FormatStr;
+        var hasDateSemantics = HasDateOnlyMask(editMask)
+            || (dataType.Contains("date") && !dataType.Contains("time"));
+
+        if (!hasDateSemantics) return s;
+        if (!DateTime.TryParse(s, out var dt)) return s;
+        return FormatDateByMask(dt, editMask);
+    }
 
     private string BuildPageUrl(string path, IDictionary<string, string?> baseQuery, string pageParam, string sizeParam, int page, int pageSize)
     {
@@ -173,6 +220,7 @@
                         {
                             var rawObj = GetValue(row, f.FieldName);
                             var raw = rawObj?.ToString() ?? "";
+                            var editVal = FormatEditValue(rawObj, f);
                             bool isReadOnly = f.ReadOnly != null && (int)f.ReadOnly != 0;
                             bool isCheckbox = (f.ComboStyle ?? 0) == 1;
                             var cellClass = IsNumberDataType(f) ? "cell-number" : "cell-text";
@@ -202,7 +250,7 @@
                                 {
                                     <input class="form-control form-control-sm cell-edit d-none @(isReadOnly ? "readonly-cell" : "")"
                                            name="@f.FieldName"
-                                           value="@raw"
+                                           value="@editVal"
                                            data-raw="@raw"
                                            data-readonly="@(isReadOnly ? "1" : "0")"
                                            @(isReadOnly ? "readonly" : "") />

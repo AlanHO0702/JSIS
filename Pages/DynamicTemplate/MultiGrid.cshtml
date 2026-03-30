@@ -320,6 +320,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const countBox = document.getElementById('multiGridCountBox');
     let isEdit = false;
     let isDirty = false;
+    window.__multiGridRuntime = window.__multiGridRuntime || {};
+    window.__multiGridRuntime.getIsDirty = () => isDirty;
 
     // 查詢按鈕處理
     if (queryBtn) {
@@ -376,6 +378,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const setDirty = (dirty) => {
         isDirty = !!dirty;
+        if (window.__multiGridRuntime) window.__multiGridRuntime.getIsDirty = () => isDirty;
         if (!isEdit) return;
         if (mgSave) mgSave.disabled = !isDirty;
         if (mgCancel) mgCancel.disabled = !isDirty;
@@ -626,6 +629,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    window.__multiGridRuntime.saveChanges = saveChanges;
+
     const getSelectedRow = () => {
         const grid = getActiveGrid();
         if (!grid) return null;
@@ -804,6 +809,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return value;
     };
 
+    const toDateInputValue = (value) => {
+        const dt = parseDateValue(value);
+        if (!dt) return "";
+        const y = dt.getFullYear();
+        const m = String(dt.getMonth() + 1).padStart(2, "0");
+        const d = String(dt.getDate()).padStart(2, "0");
+        return `${y}-${m}-${d}`;
+    };
+
     const normalizeKey = (name) => (name || "").replace(/^@@+/, "").toLowerCase();
 
     const getActiveGrid = () => document.querySelector('.tab-pane.show.active table[id^="grid-"]');
@@ -959,11 +973,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     const input = document.createElement("input");
                     input.className = "form-control form-control-sm crs-control";
-                    input.type = "text";
+                    const editMask = p.EditMask ?? p.editMask;
+                    const isDateField = hasDateOnlyMask(editMask);
+                    input.type = isDateField ? "date" : "text";
                     input.setAttribute("data-param", name);
+                    if (isDateField) {
+                        input.setAttribute("data-edit-mask", (editMask || "").toString());
+                    }
                     const defVal = headerDefault || (p.DefaultValue ?? p.defaultValue);
                     if (defVal != null && defVal !== "") {
-                        input.value = applyEditMask(defVal, p.EditMask ?? p.editMask);
+                        input.value = isDateField
+                            ? toDateInputValue(defVal)
+                            : applyEditMask(defVal, editMask);
                     }
                     const readOnly = Number(p.iReadOnly ?? p.IReadOnly ?? 0) === 1;
                     if (readOnly) input.readOnly = true;
@@ -981,7 +1002,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!name) return;
                 const input = formEl?.querySelector(`[data-param="${name}"]`);
                 if (input) {
-                    values[name] = input.value ?? "";
+                    const editMask = p.EditMask ?? p.editMask;
+                    if (input instanceof HTMLInputElement && input.type === "date") {
+                        values[name] = applyEditMask(input.value ?? "", editMask);
+                    } else {
+                        values[name] = input.value ?? "";
+                    }
                     return;
                 }
                 const tableKind = p.TableKind ?? p.tableKind;
@@ -1064,6 +1090,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!name) return;
         const selected = extractRowData(getSelectedRow());
         const paperNum = pickPaperNum(selected || {});
+        const runtime = window.__multiGridRuntime || null;
         const needInEdit = (btn.dataset.bNeedInEdit || "").toString();
         const isEdit = document.querySelector('.table-wrapper')?.classList.contains('edit-mode');
         if (needInEdit === "1" && !isEdit) {
@@ -1072,9 +1099,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // 按自訂按鈕前，若有未儲存的變更，先自動儲存
-        if (isDirty) {
+        const hasPendingChanges = typeof runtime?.getIsDirty === "function" ? !!runtime.getIsDirty() : false;
+        if (hasPendingChanges) {
             try {
-                const saveResult = await saveChanges(false, false, { noReload: true });
+                if (typeof runtime?.saveChanges !== "function") {
+                    alert("系統無法取得儲存狀態，請先按工具列「儲存」後再執行。");
+                    return;
+                }
+                const saveResult = await runtime.saveChanges(false, false, { noReload: true });
                 if (!saveResult || !saveResult.ok) return;
             } catch (err) {
                 console.error('自訂按鈕前自動儲存失敗', err);
