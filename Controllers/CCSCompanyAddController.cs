@@ -229,6 +229,68 @@ order by SubSystemId;", conn))
         }
     }
 
+    [HttpGet("query-first")]
+    public async Task<IActionResult> QueryFirst([FromQuery] string itemId, [FromQuery] int? systemId = null)
+    {
+        itemId = (itemId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(itemId))
+            return BadRequest(new { success = false, message = "itemId is required." });
+
+        var context = await LoadContextAsync(itemId, systemId);
+        if (context == null)
+            return NotFound(new { success = false, message = $"Item {itemId} not found." });
+
+        try
+        {
+            await using var conn = new SqlConnection(GetConnStr());
+            await conn.OpenAsync();
+
+            var querySystemId = (context.SystemId == 103 || context.SystemId == 104) ? 1 : context.SystemId;
+            var whereParts = new List<string>
+            {
+                @"EXISTS (
+                    SELECT 1
+                    FROM AJNdCompanySystem s WITH (NOLOCK)
+                    WHERE s.CompanyId = c.CompanyId
+                      AND s.SystemId = @sysId
+                )"
+            };
+            var parameters = new List<SqlParameter>
+            {
+                new("@sysId", SqlDbType.Int) { Value = querySystemId }
+            };
+
+            AppendCompanySearchFilters(whereParts, parameters, Request.Query, querySystemId);
+
+            var whereSql = whereParts.Count > 0
+                ? " WHERE " + string.Join(" AND ", whereParts)
+                : string.Empty;
+
+            var sql = $@"
+SELECT TOP 1 c.CompanyId
+FROM AJNdCompany c WITH (NOLOCK)
+{whereSql}
+ORDER BY c.CompanyId;";
+
+            await using var cmd = new SqlCommand(sql, conn);
+            foreach (var p in parameters) cmd.Parameters.Add(p);
+
+            var companyId = (await cmd.ExecuteScalarAsync())?.ToString()?.Trim() ?? string.Empty;
+            return Ok(new
+            {
+                success = true,
+                companyId,
+                found = !string.IsNullOrWhiteSpace(companyId),
+                systemId = context.SystemId
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "CCSCompanyAdd query-first failed for {ItemId}", itemId);
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
     [HttpGet("next-company-id")]
     public async Task<IActionResult> NextCompanyId([FromQuery] string itemId, [FromQuery] int? systemId = null)
     {
@@ -758,6 +820,89 @@ where CompanyId = @CompanyId
         var item = HttpContext.Items["UserId"]?.ToString();
         var header = Request.Headers["X-UserId"].FirstOrDefault();
         return (claim ?? item ?? header ?? "Admin").Trim();
+    }
+
+    private static void AppendCompanySearchFilters(List<string> whereParts, List<SqlParameter> parameters, Microsoft.AspNetCore.Http.IQueryCollection query, int systemId)
+    {
+        static string Get(Microsoft.AspNetCore.Http.IQueryCollection q, string key) => (q[key].ToString() ?? string.Empty).Trim();
+        static void AddLike(List<string> parts, List<SqlParameter> ps, string field, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return;
+            var pn = $"@p{ps.Count}";
+            parts.Add($"{field} LIKE {pn}");
+            ps.Add(new SqlParameter(pn, $"%{value}%"));
+        }
+
+        var companyLike = Get(query, "cs_companyLike");
+        if (!string.IsNullOrWhiteSpace(companyLike))
+        {
+            var pn = $"@p{parameters.Count}";
+            whereParts.Add($"c.CompanyId LIKE {pn}");
+            parameters.Add(new SqlParameter(pn, $"%{companyLike}%"));
+        }
+
+        var companyStart = Get(query, "cs_companyStart");
+        if (!string.IsNullOrWhiteSpace(companyStart))
+        {
+            var pn = $"@p{parameters.Count}";
+            whereParts.Add($"c.CompanyId >= {pn}");
+            parameters.Add(new SqlParameter(pn, companyStart));
+        }
+
+        var companyEnd = Get(query, "cs_companyEnd");
+        if (!string.IsNullOrWhiteSpace(companyEnd))
+        {
+            var pn = $"@p{parameters.Count}";
+            whereParts.Add($"c.CompanyId <= {pn}");
+            parameters.Add(new SqlParameter(pn, companyEnd));
+        }
+
+        AddLike(whereParts, parameters, "c.ShortName", Get(query, "cs_shortName"));
+        AddLike(whereParts, parameters, "c.UniFormId", Get(query, "cs_uniFormId"));
+        AddLike(whereParts, parameters, "c.CompanyName", Get(query, "cs_companyName"));
+        AddLike(whereParts, parameters, "c.CompanyAddr", Get(query, "cs_companyAddr"));
+        AddLike(whereParts, parameters, "c.BnsItem", Get(query, "cs_bnsItem"));
+
+        var phone = Get(query, "cs_phone");
+        if (!string.IsNullOrWhiteSpace(phone))
+        {
+            var cond = Get(query, "cs_phoneCond");
+            var pn = $"@p{parameters.Count}";
+            var keyword = string.Equals(cond, "1", StringComparison.OrdinalIgnoreCase)
+                ? $"%{phone}%"
+                : $"{phone}%";
+            whereParts.Add($"(c.Phone1 LIKE {pn} OR c.Phone2 LIKE {pn})");
+            parameters.Add(new SqlParameter(pn, keyword));
+        }
+
+        var fax = Get(query, "cs_fax");
+        if (!string.IsNullOrWhiteSpace(fax))
+        {
+            var cond = Get(query, "cs_faxCond");
+            var pn = $"@p{parameters.Count}";
+            var keyword = string.Equals(cond, "1", StringComparison.OrdinalIgnoreCase)
+                ? $"%{fax}%"
+                : $"{fax}%";
+            whereParts.Add($"(c.Fax1 LIKE {pn} OR c.Fax2 LIKE {pn})");
+            parameters.Add(new SqlParameter(pn, keyword));
+        }
+
+        var subClass = Get(query, "cs_subClass");
+        if (!string.IsNullOrWhiteSpace(subClass) && systemId >= 1 && systemId <= 9)
+        {
+            var field = $"CustomerSubClass{systemId}";
+            var pn = $"@p{parameters.Count}";
+            whereParts.Add($"c.[{field}] = {pn}");
+            parameters.Add(new SqlParameter(pn, subClass));
+        }
+
+        var salesId = Get(query, "cs_salesId");
+        if (!string.IsNullOrWhiteSpace(salesId))
+        {
+            var pn = $"@p{parameters.Count}";
+            whereParts.Add($"c.SalesId = {pn}");
+            parameters.Add(new SqlParameter(pn, salesId));
+        }
     }
 
     private string GetConnStr()

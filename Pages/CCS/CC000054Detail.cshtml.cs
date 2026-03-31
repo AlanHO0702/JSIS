@@ -367,14 +367,14 @@ namespace PcbErpApi.Pages.CCS
             }
             if (systemId == 2)
             {
-                tableName = "MPHdPriceTable_CCS";
-                title = "客戶品號";
+                tableName = "MPHdPriceTable";
+                title = "廠商品號";
                 return true;
             }
             if (systemId == 8)
             {
                 tableName = "MPHdPriceRecycleTable_CCS";
-                title = "客戶品號";
+                title = "廠商品號";
                 return true;
             }
 
