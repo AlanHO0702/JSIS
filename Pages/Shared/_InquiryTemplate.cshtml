@@ -15,6 +15,7 @@
         && !actionPartial.EndsWith("_ActionRail.Empty.cshtml", StringComparison.OrdinalIgnoreCase);
     var showHeader = (ViewData["ShowInqHeader"] as bool?) ?? true;
     var showRail = (ViewData["ShowInqRail"] as bool?) ?? (hasRailSection || hasActionRail);
+    var bodyFill = (ViewData["InqBodyFill"] as bool?) ?? false;
 
     if (ViewData["Breadcrumbs"] == null)
     {
@@ -150,13 +151,17 @@
     padding: 8px;
   }
   .inq-body {
-    flex: 0 1 auto;
+    flex: 0 0 auto;
+    overflow: auto;
+  }
+  .inq-body--fill {
+    flex: 1 1 0;
     min-height: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
+    height: 0;
   }
   .inq-body > .inq-table-wrap {
-    overflow-x: auto;
+    min-width: 100%;
+    width: max-content;
   }
 
   /* === 表單元件（共用查詢頁） === */
@@ -182,6 +187,12 @@
     font-size: 0.82rem;
     height: 26px;
     padding: 2px 6px;
+  }
+  .inq-input-wide {
+    width: 240px;
+  }
+  .inq-input-short {
+    width: 80px;
   }
   .inq-select {
     position: relative;
@@ -262,7 +273,6 @@
     border-radius: 8px;
     background: #fff;
     padding: 0;
-    overflow-x: auto;
   }
   .inq-table {
     border-collapse: separate;
@@ -324,6 +334,7 @@
     position: sticky;
     top: 0;
     z-index: 2;
+    background: #f3f7ff;
   }
   .inq-body .inq-table td {
     padding: 2px 3px;
@@ -353,6 +364,12 @@
     font-size: 0.72rem;
     padding: 0 4px;
     line-height: 1;
+  }
+  .inq-input-wide {
+    width: 240px;
+  }
+  .inq-input-short {
+    width: 80px;
   }
   .inq-query .compact-check .form-check-input {
     width: 18px;
@@ -522,7 +539,7 @@
       </section>
     }
 
-    <section class="inq-body">
+    <section class="inq-body@(bodyFill ? " inq-body--fill" : "")">
       @RenderBody()
     </section>
   </main>
@@ -564,10 +581,19 @@
     const _inqFooterDict = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(footerDict));
     const shell = document.querySelector('.inq-shell');
     if (shell) {
+      const adjustInqBody = () => {
+        const body = document.querySelector('.inq-body');
+        if (!body || body.classList.contains('inq-body--fill')) return;
+        body.style.maxHeight = '0';
+        const top = body.getBoundingClientRect().top;
+        body.style.maxHeight = Math.max(window.innerHeight - top, 0) + 'px';
+      };
+
       const setShellHeight = () => {
         const top = shell.getBoundingClientRect().top;
         shell.style.setProperty('--inq-shell-top', top + 'px');
         shell.style.height = 'calc(100vh - ' + top + 'px)';
+        adjustInqBody();
       };
       setShellHeight();
       window.addEventListener('resize', setShellHeight);
@@ -791,20 +817,8 @@
 
     document.querySelectorAll('.inq-body .inq-table').forEach(buildInqFooter);
 
-    /* ========== 共用查詢頁功能（所有使用此模板的頁面皆適用） ========== */
+    /* ========== Loading 遮罩（所有使用此模板的頁面皆適用） ========== */
 
-    const cfg = window._inqPageData || {};
-    const totalCount = cfg.totalCount || 0;
-    const dictTableName = cfg.dictTableName || "";
-    const paramTableName = cfg.paramTableName || "";
-    const currentUserId = cfg.currentUserId || "";
-    const currentUseId = cfg.currentUseId || "";
-    const itemId = (cfg.itemId || "").trim();
-
-    const fieldNames = Array.from(document.querySelectorAll('.inq-table thead th[data-field]'))
-      .map(th => th.dataset.field || '');
-
-    // --- Loading 遮罩控制 ---
     const overlay = document.getElementById("inqLoadingOverlay");
     const elapsedEl = document.getElementById("inqLoadingElapsed");
     const cancelWrap = document.getElementById("inqLoadingCancel");
@@ -843,6 +857,30 @@
     // 處理瀏覽器返回 (bfcache) 時的遮罩殘留
     window.addEventListener("pageshow", (e) => { if (e.persisted) hideLoading(); });
 
+    // 沒有 cfg 的頁面（自行處理 JS）送出時顯示 Loading；有 cfg 的頁面由下方的 cfg 區塊處理
+    const _inqFormForLoading = document.getElementById("inqForm");
+    if (_inqFormForLoading) {
+      _inqFormForLoading.addEventListener("submit", () => { if (!window._inqPageData) showLoading(); });
+    }
+
+    // 對外公開 Loading 控制
+    window._inq = { showLoading, hideLoading };
+
+    /* ========== 以下需要頁面提供 _inqPageData 才啟用（避免與自行處理 JS 的頁面衝突） ========== */
+
+    const cfg = window._inqPageData;
+    if (!cfg) return;
+
+    const totalCount = cfg.totalCount || 0;
+    const dictTableName = cfg.dictTableName || "";
+    const paramTableName = cfg.paramTableName || "";
+    const currentUserId = cfg.currentUserId || "";
+    const currentUseId = cfg.currentUseId || "";
+    const itemId = (cfg.itemId || "").trim();
+
+    const fieldNames = Array.from(document.querySelectorAll('.inq-table thead th[data-field]'))
+      .map(th => th.dataset.field || '');
+
     // --- 列選取 & 位置追蹤 ---
     const totalEl = document.getElementById("inqTotalCount");
     const posEl = document.getElementById("inqCurrentPos");
@@ -871,14 +909,11 @@
       });
     });
 
-    // 對外公開，供頁面專屬腳本使用（例如 AJN 的「來源追蹤」）
-    window._inq = {
-      get selectedRow() { return selectedRow; },
-      currentUserId,
-      currentUseId,
-      showLoading,
-      hideLoading
-    };
+    // 擴充對外公開介面
+    window._inq.selectedRow = null;
+    Object.defineProperty(window._inq, 'selectedRow', { get() { return selectedRow; } });
+    window._inq.currentUserId = currentUserId;
+    window._inq.currentUseId = currentUseId;
 
     // --- 清除 ---
     document.getElementById("btnClearInq")?.addEventListener("click", () => {
@@ -1009,11 +1044,12 @@
 
     initColumnResize(table, dictTableName, fieldNames);
 
-    // --- 表單送出（含 Loading 遮罩 & 防重複送出） ---
+    // --- 表單送出（防重複送出 + 導航） ---
     const inqForm = document.getElementById("inqForm");
     inqForm?.addEventListener("submit", (e) => {
       e.preventDefault();
       if (isLoading) return;
+      showLoading();
       const fd = new FormData(inqForm);
       const params = new URLSearchParams();
       for (const [k, v] of fd.entries()) {
@@ -1025,7 +1061,6 @@
         params.set("debug", "1");
       }
       const qs = params.toString();
-      showLoading();
       window.location.href = qs
         ? (window.location.pathname + "?" + qs)
         : window.location.pathname;

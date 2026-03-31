@@ -118,11 +118,13 @@ namespace PcbErpApi.Pages.SPO
                     if (!DefaultQueryValues.ContainsKey(field) && DefaultQueryValues.TryGetValue(param, out var v))
                         DefaultQueryValues[field] = v;
                 }
-                var rows = await ExecInqAsync(conn, paramStr, SpId, item, DefaultQueryValues);
-
-                TotalCount = rows.Count;
-                TotalPages = 1;
-                Items = rows;
+                if (HasEffectiveQuery(Request.Query))
+                {
+                    var rows = await ExecInqAsync(conn, paramStr, SpId, item, DefaultQueryValues);
+                    TotalCount = rows.Count;
+                    TotalPages = 1;
+                    Items = rows;
+                }
 
                 CurrentUserId = ResolveUserId();
                 CurrentUseId = ResolveUseId();
