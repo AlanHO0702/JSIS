@@ -198,7 +198,7 @@ public class DictApiController : ControllerBase
                 {
                     var langSql = $@"
 IF EXISTS (
-    SELECT 1 FROM CURdTableFieldLang 
+    SELECT 1 FROM CURdTableFieldLang
     WHERE TableName=@TableName AND FieldName=@FieldName AND LanguageId=@Lang
 )
 BEGIN
