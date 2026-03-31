@@ -200,17 +200,70 @@ public class AdvanceDtlController : ControllerBase
             cmd.Parameters.AddWithValue("@paperNum", paperNum);
 
             var rows = new List<Dictionary<string, object?>>();
-            await using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            await using (var reader = await cmd.ExecuteReaderAsync())
             {
-                var row = new Dictionary<string, object?>();
-                for (int i = 0; i < reader.FieldCount; i++)
+                while (await reader.ReadAsync())
                 {
-                    var name = reader.GetName(i);
-                    var value = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                    row[name] = value;
+                    var row = new Dictionary<string, object?>();
+                    for (int i = 0; i < reader.FieldCount; i++)
+                    {
+                        var name = reader.GetName(i);
+                        var value = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        row[name] = value;
+                    }
+                    rows.Add(row);
                 }
-                rows.Add(row);
+            } // reader 在此關閉，才能在同一連線上執行 INSERT
+
+            // 新增單據時，若來源帳款無資料，自動插入一筆預設 0 的資料
+            if (rows.Count == 0)
+            {
+                var mt = (moduleType ?? "advance").ToLower();
+                string insertSql;
+                Dictionary<string, object?> defaultRow;
+
+                if (mt == "recv")
+                {
+                    // SPOdRecvSource 沒有 OtherAmount / OtherAmountOg 欄位
+                    insertSql = $@"
+                        INSERT INTO [{cfg.SourceTable}] (PaperNum, Item, CashAmount, BankAmount, BillAmount, CashAmountOg, BankAmountOg, BillAmountOg)
+                        VALUES (@p1, 1, 0, 0, 0, 0, 0, 0)";
+                    defaultRow = new Dictionary<string, object?>
+                    {
+                        ["PaperNum"] = paperNum,
+                        ["Item"] = 1,
+                        ["CashAmount"] = 0m,
+                        ["BankAmount"] = 0m,
+                        ["BillAmount"] = 0m,
+                        ["CashAmountOg"] = 0m,
+                        ["BankAmountOg"] = 0m,
+                        ["BillAmountOg"] = 0m
+                    };
+                }
+                else
+                {
+                    insertSql = $@"
+                        INSERT INTO [{cfg.SourceTable}] (PaperNum, Item, CashAmount, BankAmount, BillAmount, OtherAmount, CashAmountOg, BankAmountOg, BillAmountOg, OtherAmountOg)
+                        VALUES (@p1, 1, 0, 0, 0, 0, 0, 0, 0, 0)";
+                    defaultRow = new Dictionary<string, object?>
+                    {
+                        ["PaperNum"] = paperNum,
+                        ["Item"] = 1,
+                        ["CashAmount"] = 0m,
+                        ["BankAmount"] = 0m,
+                        ["BillAmount"] = 0m,
+                        ["OtherAmount"] = 0m,
+                        ["CashAmountOg"] = 0m,
+                        ["BankAmountOg"] = 0m,
+                        ["BillAmountOg"] = 0m,
+                        ["OtherAmountOg"] = 0m
+                    };
+                }
+
+                await using var insertCmd = new SqlCommand(insertSql, conn);
+                insertCmd.Parameters.AddWithValue("@p1", paperNum);
+                await insertCmd.ExecuteNonQueryAsync();
+                rows.Add(defaultRow);
             }
 
             return Ok(new { ok = true, rows });
@@ -815,9 +868,19 @@ public class AdvanceDtlController : ControllerBase
             string insertSql;
             if (req.TableType?.ToLower() == "source")
             {
-                insertSql = $@"
-                    INSERT INTO [{tableName}] (PaperNum, Item, CashAmount, BankAmount, BillAmount, OtherAmount, CashAmountOg, BankAmountOg, BillAmountOg, OtherAmountOg)
-                    VALUES (@paperNum, @item, 0, 0, 0, 0, 0, 0, 0, 0)";
+                if ((req.ModuleType ?? "advance").ToLower() == "recv")
+                {
+                    // SPOdRecvSource 沒有 OtherAmount / OtherAmountOg 欄位
+                    insertSql = $@"
+                        INSERT INTO [{tableName}] (PaperNum, Item, CashAmount, BankAmount, BillAmount, CashAmountOg, BankAmountOg, BillAmountOg)
+                        VALUES (@paperNum, @item, 0, 0, 0, 0, 0, 0)";
+                }
+                else
+                {
+                    insertSql = $@"
+                        INSERT INTO [{tableName}] (PaperNum, Item, CashAmount, BankAmount, BillAmount, OtherAmount, CashAmountOg, BankAmountOg, BillAmountOg, OtherAmountOg)
+                        VALUES (@paperNum, @item, 0, 0, 0, 0, 0, 0, 0, 0)";
+                }
             }
             else if (req.TableType?.ToLower() == "bill")
             {

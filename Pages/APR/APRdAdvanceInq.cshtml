@@ -1,12 +1,11 @@
-@page "/SPO/SPO00003"
+@page "/APR/APRdAdvanceInq"
 @using PcbErpApi.Models
-@model PcbErpApi.Pages.SPO.SPO00003Model
+@model PcbErpApi.Pages.APR.APRdAdvanceInqModel
 @{
     Layout = "_InquiryTemplate";
     ViewData["Title"] = Model.PageTitle;
     ViewData["ShowInqHeader"] = false;
     ViewData["ShowInqRail"] = true;
-    ViewData["InqRailTitle"] = "查詢";
     ViewData["InqRailWidth"] = "120px";
 }
 
@@ -14,8 +13,6 @@
     <button type="submit" form="inqForm" class="inq-rail-btn">查詢</button>
     <button type="button" class="inq-rail-btn" id="btnExportExcel">匯出Excel</button>
     <button type="button" class="inq-rail-btn" id="btnPaperTrace">單據追蹤</button>
-    <button type="button" class="inq-rail-btn" id="btnCustomerMulti">客戶多選</button>
-    <button type="button" class="inq-rail-btn" id="btnSaveHeight">儲存高度設定</button>
     <button type="button" class="inq-rail-btn" id="btnEditDict">編輯辭典</button>
     <button type="button" class="inq-rail-btn" id="btnResetParams">重設參數</button>
     <button type="button" class="inq-rail-btn" id="btnClearInq">清除</button>
@@ -43,7 +40,6 @@
   {
       return f.FieldName?.TrimStart('@') ?? "";
   }
-
 
   string QInputType(CURdTableField f)
   {
@@ -115,11 +111,10 @@
       return n.Equals("sPartNum", StringComparison.OrdinalIgnoreCase)
           || n.Equals("sEPartNum", StringComparison.OrdinalIgnoreCase);
   }
-
 }
 
 @section InqQuery {
-  <form id="inqForm" method="get" class="inq-form inq-form--auto-grid-enabled">
+  <form id="inqForm" method="get" class="inq-form">
     @Html.AntiForgeryToken()
     @foreach (var row in qFields.GroupBy(f => f.iLayRow ?? int.MaxValue).OrderBy(g => g.Key))
     {
@@ -154,7 +149,7 @@
                      data-cond2-field="@f.LookupCond2Field"
                      data-cond2-source="@f.LookupCond2ResultField"
                      data-selected="@cur" />
-              <button type="button" class="inq-select-btn" aria-label="開啟清單">▾</button>
+              <button type="button" class="inq-select-btn" aria-label="開啟清單">&#9662;</button>
             </span>
           }
           else
@@ -169,6 +164,7 @@
     <input type="hidden" name="page" value="1" />
     <input type="hidden" name="pageSize" value="@Model.PageSize" />
     <input type="hidden" name="spId" value="@Model.SpId" />
+    <input type="hidden" name="itemId" value="@Model.ResolvedItemId" />
   </form>
 }
 
@@ -198,10 +194,11 @@
   {
       return FormatHelper.FormatValue(v, f.DataType, f.FormatStr);
   }
+
 }
 
 <div class="inq-table-wrap">
-  <table class="table table-sm table-hover align-middle inq-table">
+  <table class="table table-sm table-hover align-middle inq-table" id="masterGrid">
     <thead>
       <tr>
         @foreach (var f in gFields)
@@ -253,149 +250,46 @@
   </div>
 }
 
-<div class="modal fade" id="customerMultiModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg" style="max-width:920px;">
-    <div class="modal-content customer-multi-modal" style="font-size:12px;">
-      <div class="modal-header" style="background:#f3f7ff;">
-        <h5 class="modal-title">客戶多選</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <div class="text-muted mb-2">用左邊挑選、右邊已選；支援搜尋。</div>
-        <div class="row g-2 align-items-stretch customer-dual-row">
-          <div class="col-md-5 customer-dual-side customer-dual-side-left">
-            <div class="d-flex justify-content-between align-items-center mb-1">
-              <div class="fw-semibold">可選客戶</div>
-              <div class="small text-muted">總數 <span id="cusAvailCount">0</span></div>
-            </div>
-            <input id="customerAvailFilter" class="form-control form-control-sm mb-2" placeholder="搜尋客戶代碼/名稱" style="font-size:12px;padding:3px 6px;">
-            <div class="border rounded p-2 customer-dual-list" id="customerAvailList" style="height:420px;font-size:12px;"></div>
-          </div>
-          <div class="col-md-2 d-flex flex-column gap-2 align-items-center justify-content-center customer-dual-actions">
-            <button type="button" class="btn cus-move-btn cus-move-primary" id="cusMoveRight" style="width:50px !important;height:22px !important;padding:0 !important;line-height:1 !important;border-radius:8px;font-size:12px;">▶</button>
-            <button type="button" class="btn cus-move-btn cus-move-primary" id="cusMoveAllRight" style="width:50px !important;height:22px !important;padding:0 !important;line-height:1 !important;border-radius:8px;font-size:12px;">▶▶</button>
-            <button type="button" class="btn cus-move-btn cus-move-secondary" id="cusMoveLeft" style="width:50px !important;height:22px !important;padding:0 !important;line-height:1 !important;border-radius:8px;font-size:12px;">◀</button>
-            <button type="button" class="btn cus-move-btn cus-move-secondary" id="cusMoveAllLeft" style="width:50px !important;height:22px !important;padding:0 !important;line-height:1 !important;border-radius:8px;font-size:12px;">◀◀</button>
-          </div>
-          <div class="col-md-5 customer-dual-side customer-dual-side-right">
-            <div class="d-flex justify-content-between align-items-center mb-1">
-              <div class="fw-semibold">已選客戶</div>
-              <div class="small text-muted">總數 <span id="cusChosenCount">0</span></div>
-            </div>
-            <input id="customerChosenFilter" class="form-control form-control-sm mb-2" placeholder="搜尋客戶代碼/名稱" style="font-size:12px;padding:3px 6px;">
-            <div class="border rounded p-2 customer-dual-list" id="customerChosenList" style="height:420px;font-size:12px;"></div>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
-        <button type="button" class="btn btn-primary btn-sm" id="btnCustomerMultiSave">套用</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<style>
-  .customer-multi-modal .customer-dual-list {
-    height: 420px !important;
-    overflow: auto;
-    background: #fff;
-  }
-  .customer-multi-modal .customer-dual-list table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.78rem !important;
-  }
-  .customer-multi-modal .customer-dual-list th,
-  .customer-multi-modal .customer-dual-list td {
-    border-bottom: 1px solid #eef2f7;
-    padding: 3px 6px !important;
-    white-space: nowrap;
-  }
-  .customer-multi-modal .customer-dual-list th {
-    position: sticky;
-    top: 0;
-    background: #f7f9fc;
-    z-index: 1;
-    color: #1d3b6b;
-    font-weight: 600;
-  }
-  .customer-multi-modal .customer-dual-list tr:hover td {
-    background: #f1f5ff;
-  }
-  #customerMultiModal .modal-dialog {
-    max-width: 980px !important;
-  }
-  .customer-multi-modal .modal-title {
-    font-size: 0.88rem !important;
-    font-weight: 600;
-  }
-  .customer-multi-modal .modal-body {
-    font-size: 0.78rem !important;
-    padding: 10px 14px !important;
-  }
-  .customer-multi-modal .form-control,
-  .customer-multi-modal .form-control-sm {
-    font-size: 0.76rem !important;
-    padding: 3px 6px !important;
-  }
-  .customer-multi-modal .fw-semibold {
-    font-size: 0.78rem !important;
-  }
-  .customer-multi-modal .small {
-    font-size: 0.7rem !important;
-  }
-  .customer-multi-modal .cus-move-btn {
-    width: 30px !important;
-    height: 24px !important;
-    padding: 0;
-    border-radius: 6px !important;
-    font-size: 0.7rem !important;
-    font-weight: 700;
-    line-height: 1;
-  }
-  .customer-multi-modal .cus-move-primary {
-    background: #e8f0ff;
-    border-color: #b9cdf5;
-    color: #1f4fbf;
-  }
-  .customer-multi-modal .cus-move-secondary {
-    background: #f2f4f8;
-    border-color: #c9d2e3;
-    color: #46526a;
-  }
-  .customer-multi-modal .cus-move-primary:hover {
-    background: #d9e6ff;
-  }
-  .customer-multi-modal .cus-move-secondary:hover {
-    background: #e6ebf3;
-  }
-</style>
-
 <script>
+  const pageItemId = "@Model.ResolvedItemId";
+  const basePath = "/APR/APRdAdvanceInq";
   const totalCount = @Model.TotalCount;
   const totalEl = document.getElementById("inqTotalCount");
   const posEl = document.getElementById("inqCurrentPos");
   if (totalEl) totalEl.textContent = String(totalCount);
-  const rows = Array.from(document.querySelectorAll(".inq-table tbody tr"));
+
+  const masterRows = Array.from(document.querySelectorAll("#masterGrid tbody tr"));
   let selectedRow = null;
   const setPos = (idx) => {
     if (!posEl) return;
     posEl.textContent = totalCount === 0 ? "0" : String(idx);
   };
-  if (rows.length > 0 && totalCount > 0) setPos(1);
-  rows.forEach((tr, i) => {
+
+  // Select first row on load
+  if (totalCount > 0) {
+    const firstRow = masterRows[0];
+    if (firstRow) {
+      setPos(1);
+      selectedRow = firstRow;
+      firstRow.classList.add("table-active");
+    }
+  }
+
+  masterRows.forEach((tr, i) => {
     tr.addEventListener("click", () => {
-      rows.forEach(r => r.classList.remove("table-active"));
+      masterRows.forEach(r => r.classList.remove("table-active"));
       tr.classList.add("table-active");
       selectedRow = tr;
       setPos(i + 1);
     });
   });
+
+  // Clear
   document.getElementById("btnClearInq")?.addEventListener("click", () => {
-    window.location.href = "/SPO/SPO00003";
+    window.location.href = `${basePath}?itemId=${encodeURIComponent(pageItemId)}`;
   });
 
+  // Sort
   const parseSortValue = (text) => {
     if (text == null) return "";
     const t = String(text).trim();
@@ -425,9 +319,9 @@
     rows.forEach(r => tbody.appendChild(r));
   };
 
-  const table = document.querySelector(".inq-table");
-  if (table) {
-    const headers = Array.from(table.querySelectorAll("thead th"));
+  const masterTable = document.getElementById("masterGrid");
+  if (masterTable) {
+    const headers = Array.from(masterTable.querySelectorAll("thead th"));
     headers.forEach((th, idx) => {
       th.addEventListener("click", (e) => {
         if (e.target && e.target.classList?.contains("col-resizer")) return;
@@ -435,11 +329,12 @@
         const isAsc = !th.classList.contains("inq-sort-asc");
         headers.forEach(h => h.classList.remove("inq-sort-asc", "inq-sort-desc"));
         th.classList.add(isAsc ? "inq-sort-asc" : "inq-sort-desc");
-        sortTableByColumn(table, idx, isAsc);
+        sortTableByColumn(masterTable, idx, isAsc);
       });
     });
   }
 
+  // Column resize
   const dictTableName = "@(Model.DictTableName ?? "")";
   const fieldNames = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(gFields.Select(f => f.FieldName ?? "")));
 
@@ -450,10 +345,7 @@
     th.style.width = `${w}px`;
     th.style.minWidth = `${w}px`;
     Array.from(table.querySelectorAll(`tbody tr td:nth-child(${index + 1})`))
-      .forEach(td => {
-        td.style.width = `${w}px`;
-        td.style.minWidth = `${w}px`;
-      });
+      .forEach(td => { td.style.width = `${w}px`; td.style.minWidth = `${w}px`; });
   }
 
   function applySavedWidths(table, dictTable, fields) {
@@ -511,23 +403,40 @@
       const tn = (dictTable || "").trim();
       if (tn) {
         const payload = ths.map(th => ({ fieldName: th.dataset.field, width: Math.round(th.getBoundingClientRect().width) }));
-        try {
-          localStorage.setItem(`colwidth:${tn}`, JSON.stringify(payload));
-        } catch { }
+        try { localStorage.setItem(`colwidth:${tn}`, JSON.stringify(payload)); } catch { }
       }
       thIndex = -1;
     });
   }
 
-  initColumnResize(table, dictTableName, fieldNames);
+  initColumnResize(masterTable, dictTableName, fieldNames);
 
+  // Column drag reorder (SortableJS)
+  if (window.initColumnDragSort) {
+    const initDrag = (tableEl, tableName, fieldsArr) => {
+      if (!tableEl) return;
+      const hRow = tableEl.querySelector("thead tr");
+      if (hRow) {
+        initColumnDragSort({
+          headerRow: hRow,
+          tbody: tableEl.querySelector("tbody"),
+          scrollWrap: tableEl.closest(".inq-table-wrap") || tableEl.parentElement,
+          tableName: tableName,
+          fieldsArray: fieldsArr,
+          onSaved: null
+        });
+      }
+    };
+    initDrag(masterTable, dictTableName, null);
+  }
+
+  // Form submit
   const inqForm = document.getElementById("inqForm");
   inqForm?.addEventListener("submit", (e) => {
     e.preventDefault();
     const fd = new FormData(inqForm);
     const params = new URLSearchParams();
     for (const [k, v] of fd.entries()) {
-      if (k === "__RequestVerificationToken" || k === "spId") continue;
       const val = (v ?? "").toString().trim();
       if (!val) continue;
       params.append(k, val);
@@ -536,9 +445,10 @@
       params.set("debug", "1");
     }
     const qs = params.toString();
-    window.location.href = qs ? (`/SPO/SPO00003?${qs}`) : "/SPO/SPO00003";
+    window.location.href = qs ? (`${basePath}?${qs}`) : `${basePath}?itemId=${encodeURIComponent(pageItemId)}`;
   });
 
+  // Export Excel
   document.getElementById("btnExportExcel")?.addEventListener("click", () => {
     const url = new URL(window.location.href);
     url.searchParams.set("handler", "Export");
@@ -548,162 +458,34 @@
   const currentUserId = "@Model.CurrentUserId";
   const currentUseId = "@Model.CurrentUseId";
 
+  // Delphi btnPaperTraceClick: trace based on focused grid (dbgSub or grid_Browse)
   document.getElementById("btnPaperTrace")?.addEventListener("click", async () => {
     if (!selectedRow) return alert("請先選擇一筆資料");
-    const pid = selectedRow.getAttribute("data-paper-id");
-    const pnum = selectedRow.getAttribute("data-paper-num");
-    if (!pid || !pnum) return alert("找不到單據資訊");
+    const tracePaperId = selectedRow.getAttribute("data-paper-id") || "";
+    const tracePaperNum = selectedRow.getAttribute("data-paper-num") || "";
+
+    if (!tracePaperId || !tracePaperNum) return alert("請先選擇一筆資料");
+
     try {
       const res = await fetch("/api/Flow/ResolveItemIdByFromType", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paperId: pid, paperNum: pnum, userId: currentUserId, useId: currentUseId })
+        body: JSON.stringify({ paperId: tracePaperId, paperNum: tracePaperNum, userId: currentUserId, useId: currentUseId })
       });
       if (res.ok) {
         const data = await res.json();
-        const itemId = data.itemId || pid;
-        window.open(`/DynamicTemplate/Paper/${encodeURIComponent(itemId)}/${encodeURIComponent(pnum)}`, "_blank");
+        const itemId = data.itemId || tracePaperId;
+        window.open(`/DynamicTemplate/Paper/${encodeURIComponent(itemId)}/${encodeURIComponent(tracePaperNum)}`, "_blank");
         return;
       }
     } catch {}
-    window.open(`/DynamicTemplate/Paper/${encodeURIComponent(pid)}/${encodeURIComponent(pnum)}`, "_blank");
+    window.open(`/DynamicTemplate/Paper/${encodeURIComponent(tracePaperId)}/${encodeURIComponent(tracePaperNum)}`, "_blank");
   });
 
-  document.getElementById("btnCustomerMulti")?.addEventListener("click", () => {
-    const el = document.getElementById("customerMultiModal");
-    if (!el) return;
-    loadCustomerDual();
-    const md = bootstrap.Modal.getOrCreateInstance(el);
-    md.show();
-  });
-
-  document.getElementById("btnCustomerMultiSave")?.addEventListener("click", async () => {
-    const ids = Array.from(customerChosen || []);
-    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
-    const res = await fetch("?handler=SaveCustomers", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "RequestVerificationToken": token
-      },
-      body: JSON.stringify({ spId: @Model.SpId, customerIds: ids })
-    });
-    if (!res.ok) return alert("儲存失敗");
-    bootstrap.Modal.getOrCreateInstance(document.getElementById("customerMultiModal")).hide();
-    const url = new URL(window.location.href);
-    url.searchParams.delete("sCompanyId");
-    url.searchParams.delete("sECompanyId");
-    url.searchParams.set("page", "1");
-    if (@Model.SpId > 0) url.searchParams.set("spId", "@Model.SpId");
-    window.location.href = url.toString();
-  });
-
-  let customerCache = null;
-  let customerChosen = new Set();
-
-  const renderCustomerDual = () => {
-    const availRoot = document.getElementById("customerAvailList");
-    const chosenRoot = document.getElementById("customerChosenList");
-    if (!availRoot || !chosenRoot) return;
-    const fAvail = (document.getElementById("customerAvailFilter")?.value || "").toLowerCase();
-    const fChosen = (document.getElementById("customerChosenFilter")?.value || "").toLowerCase();
-
-    const avail = [];
-    const chosen = [];
-    (customerCache || []).forEach(c => {
-      if (customerChosen.has(c.value)) chosen.push(c);
-      else avail.push(c);
-    });
-
-    const filterList = (list, q) => list.filter(c => !q || c.value.toLowerCase().includes(q) || c.text.toLowerCase().includes(q));
-    const availFiltered = filterList(avail, fAvail);
-    const chosenFiltered = filterList(chosen, fChosen);
-
-    const renderTable = (list, root, name) => {
-      root.innerHTML = "";
-      const table = document.createElement("table");
-      table.innerHTML = `
-        <thead><tr><th style="width:26px"></th><th>客戶代碼</th><th>客戶名稱</th></tr></thead>
-        <tbody></tbody>`;
-      const tbody = table.querySelector("tbody");
-      list.forEach(c => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td><input type="checkbox" data-name="${name}" value="${c.value}"></td>
-          <td>${c.value}</td>
-          <td>${c.text}</td>`;
-        tbody.appendChild(tr);
-      });
-      root.appendChild(table);
-    };
-
-    renderTable(availFiltered, availRoot, "avail");
-    renderTable(chosenFiltered, chosenRoot, "chosen");
-    document.getElementById("cusAvailCount").textContent = String(avail.length);
-    document.getElementById("cusChosenCount").textContent = String(chosen.length);
-  };
-
-  const loadCustomerDual = async () => {
-    if (!customerCache) {
-      const res = await fetch("/api/report/lookup/customer");
-      if (!res.ok) return;
-      const data = await res.json();
-      customerCache = (data || []).map(x => ({
-        value: (x.value ?? "").toString(),
-        text: (x.text ?? "").toString()
-      })).filter(x => x.value);
-    }
-    if (@Model.SpId > 0) {
-      const resSel = await fetch(`?handler=CustomerSelected&spId=@Model.SpId`);
-      if (resSel.ok) {
-        const dataSel = await resSel.json();
-        customerChosen = new Set((dataSel?.items || []).map(x => (x || "").toString()));
-      }
-    }
-    renderCustomerDual();
-  };
-
-  const moveChecked = (from, to) => {
-    const boxes = Array.from(document.querySelectorAll(`input[type="checkbox"][data-name="${from}"]:checked`));
-    boxes.forEach(b => {
-      const id = b.value;
-      if (to === "chosen") customerChosen.add(id);
-      else customerChosen.delete(id);
-    });
-    renderCustomerDual();
-  };
-
-  const moveAll = (to) => {
-    if (to === "chosen") {
-      (customerCache || []).forEach(c => customerChosen.add(c.value));
-    } else {
-      customerChosen = new Set();
-    }
-    renderCustomerDual();
-  };
-
-  document.getElementById("cusMoveRight")?.addEventListener("click", () => moveChecked("avail", "chosen"));
-  document.getElementById("cusMoveLeft")?.addEventListener("click", () => moveChecked("chosen", "avail"));
-  document.getElementById("cusMoveAllRight")?.addEventListener("click", () => moveAll("chosen"));
-  document.getElementById("cusMoveAllLeft")?.addEventListener("click", () => moveAll("avail"));
-  document.getElementById("customerAvailFilter")?.addEventListener("input", renderCustomerDual);
-  document.getElementById("customerChosenFilter")?.addEventListener("input", renderCustomerDual);
-
-  document.getElementById("btnSaveHeight")?.addEventListener("click", async () => {
-    const h = document.querySelector(".inq-body")?.clientHeight || 0;
-    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
-    const res = await fetch("/api/MatInfoUtility/SaveBrowseHeight", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "RequestVerificationToken": token },
-      body: JSON.stringify({ itemId: "SPO00003", height: h })
-    });
-    if (!res.ok) return alert("儲存失敗");
-    alert("已儲存高度設定");
-  });
-
+  // Reset params
   document.getElementById("btnResetParams")?.addEventListener("click", async () => {
     const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
-    const res = await fetch("?handler=ResetParams", {
+    const res = await fetch(`${basePath}?handler=ResetParams&itemId=${encodeURIComponent(pageItemId)}`, {
       method: "POST",
       headers: { "RequestVerificationToken": token }
     });
@@ -712,6 +494,7 @@
     window.location.reload();
   });
 
+  // Lookup suggest
   const resolveCondValue = (name) => {
     if (!name) return "";
     const el = document.querySelector(`[name="${name}"]`);
@@ -724,34 +507,9 @@
     if (!raw) return [];
     return raw.split(/[;,]/).map(p => p.trim()).filter(Boolean).map(p => {
       const kv = p.split(/=|:/);
-      if (kv.length >= 2) {
-        const value = kv[0].trim();
-        const label = kv.slice(1).join(":").trim();
-        return { value, label };
-      }
+      if (kv.length >= 2) return { value: kv[0].trim(), label: kv.slice(1).join(":").trim() };
       return { value: p, label: p };
     });
-  };
-
-  const escapeRegExp = (s) => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-  const normalizeLookupLabel = (value, label) => {
-    const v = String(value ?? "").trim();
-    const l = String(label ?? "").trim();
-    if (!l) return v;
-    if (!v) return l;
-    const re = new RegExp(`^${escapeRegExp(v)}\\s*[-:]\\s*`, "i");
-    const normalized = l.replace(re, "").trim();
-    return normalized || l;
-  };
-
-  const formatLookupDisplay = (value, label) => {
-    const v = String(value ?? "").trim();
-    const l = String(label ?? "").trim();
-    if (!v) return l;
-    if (!l) return v;
-    if (v.toLowerCase() === l.toLowerCase()) return v;
-    return `${v} - ${l}`;
   };
 
   const buildCondKey = (el) => {
@@ -797,10 +555,9 @@
         const data = await res.json();
         if (Array.isArray(data)) {
           const lookups = data.map(row => {
-            const value = String(row?.key ?? "").trim();
-            const rawLabel = Object.keys(row || {}).filter(k => k.startsWith("result")).map(k => row[k]).join(" - ");
-            const label = normalizeLookupLabel(value, rawLabel);
-            return { value, label: label || value };
+            const val = row?.key ?? "";
+            const label = Object.keys(row || {}).filter(k => k.startsWith("result")).map(k => row[k]).join(" - ");
+            return { value: String(val), label: label || String(val) };
           });
           options = options.concat(lookups);
         }
@@ -808,15 +565,8 @@
     }
 
     const map = new Map();
-    options.forEach(o => {
-      const value = String(o?.value ?? "").trim();
-      if (!value) return;
-      const label = normalizeLookupLabel(value, o?.label ?? o?.value ?? "");
-      if (!map.has(value)) map.set(value, { value, label: label || value });
-    });
-
+    options.forEach(o => { if (!o.value) return; if (!map.has(o.value)) map.set(o.value, o); });
     if (selected && !map.has(selected)) map.set(selected, { value: selected, label: selected });
-
     return Array.from(map.values());
   };
 
@@ -830,12 +580,9 @@
     if (!displayEl) return;
     const codeInput = getCodeInput(displayEl);
     const codeVal = (codeInput?.value || "").toString().trim();
-    if (!codeVal) {
-      displayEl.value = "";
-      return;
-    }
+    if (!codeVal) { displayEl.value = ""; return; }
     const hit = (options || []).find(o => String(o.value).trim() === codeVal);
-    displayEl.value = hit ? formatLookupDisplay(hit.value, hit.label) : codeVal;
+    displayEl.value = hit ? (hit.label || hit.value) : codeVal;
   };
 
   const suggest = document.createElement("div");
@@ -862,17 +609,14 @@
     suggestOptions = [];
   };
 
-  const renderSuggest = (el, list, forceAll = false) => {
-    const q = forceAll ? "" : (el.value || "").trim().toLowerCase();
+  const renderSuggest = (el, list) => {
+    const q = (el.value || "").trim().toLowerCase();
     const filtered = q
       ? list.filter(o => (o.value || "").toLowerCase().includes(q) || (o.label || "").toLowerCase().includes(q))
       : list;
 
     suggest.innerHTML = "";
-    if (filtered.length === 0) {
-      hideSuggest();
-      return;
-    }
+    if (filtered.length === 0) { hideSuggest(); return; }
 
     filtered.slice(0, 200).forEach(o => {
       const item = document.createElement("div");
@@ -882,7 +626,7 @@
         e.preventDefault();
         const codeInput = getCodeInput(el);
         if (codeInput) codeInput.value = o.value;
-        el.value = formatLookupDisplay(o.value, o.label);
+        el.value = o.label || o.value;
         hideSuggest();
       });
       suggest.appendChild(item);
@@ -894,7 +638,7 @@
 
   const lookupCache = new Map();
 
-  const showSuggest = async (el, forceAll = true) => {
+  const showSuggest = async (el) => {
     const key = buildCondKey(el);
     if (!lookupCache.has(key)) {
       const opts = await fetchLookupOptions(el);
@@ -903,7 +647,7 @@
     suggestTarget = el;
     suggestOptions = lookupCache.get(key) || [];
     syncDisplayValue(el, suggestOptions);
-    renderSuggest(el, suggestOptions, forceAll);
+    renderSuggest(el, suggestOptions);
   };
 
   document.querySelectorAll(".inq-select-btn").forEach(btn => {
@@ -911,10 +655,7 @@
       e.preventDefault();
       keepSuggestUntil = Date.now() + 250;
       const input = btn.previousElementSibling;
-      if (input) {
-        input.focus();
-        showSuggest(input);
-      }
+      if (input) { input.focus(); showSuggest(input); }
     });
   });
 
@@ -925,51 +666,26 @@
   });
 
   document.querySelectorAll(".inq-lookup-display[data-lookup-table], .inq-lookup-display[data-items]").forEach(el => {
-    el.addEventListener("focus", () => showSuggest(el, true));
+    el.addEventListener("focus", () => showSuggest(el));
     el.addEventListener("input", () => {
-      if (suggestTarget !== el) return showSuggest(el, false);
-      renderSuggest(el, suggestOptions, false);
-    });
-    el.addEventListener("keydown", (e) => {
-      if (e.key !== "Backspace" && e.key !== "Delete") return;
-      const value = String(el.value || "");
-      if (!value) return;
-      const start = typeof el.selectionStart === "number" ? el.selectionStart : -1;
-      const end = typeof el.selectionEnd === "number" ? el.selectionEnd : -1;
-      const allSelected = start === 0 && end === value.length;
-      if (!allSelected) return;
-      e.preventDefault();
-      el.value = "";
-      const codeInput = getCodeInput(el);
-      if (codeInput) codeInput.value = "";
-      if (suggestTarget === el) renderSuggest(el, suggestOptions, false);
-      else showSuggest(el);
+      if (suggestTarget !== el) return showSuggest(el);
+      renderSuggest(el, suggestOptions);
     });
     el.addEventListener("blur", () => {
-      setTimeout(() => {
-        if (!suggest.matches(":hover")) hideSuggest();
-      }, 120);
+      setTimeout(() => { if (!suggest.matches(":hover")) hideSuggest(); }, 120);
       const codeInput = getCodeInput(el);
       if (!codeInput) return;
       const text = (el.value || "").trim();
       const key = buildCondKey(el);
       const opts = lookupCache.get(key) || [];
-      if (!text) {
-        codeInput.value = "";
-        return;
-      }
+      if (!text) { codeInput.value = ""; return; }
       const hit = opts.find(o => {
         const v = String(o.value ?? "").trim();
         const l = String(o.label ?? "").trim();
-        const d = formatLookupDisplay(v, l);
-        return v === text || l === text || d === text;
+        return v === text || l === text;
       });
-      if (hit) {
-        codeInput.value = hit.value;
-        el.value = formatLookupDisplay(hit.value, hit.label);
-      } else {
-        syncDisplayValue(el, opts);
-      }
+      if (hit) { codeInput.value = hit.value; el.value = hit.label || hit.value; }
+      else { syncDisplayValue(el, opts); }
     });
   });
 
@@ -987,9 +703,8 @@
     }
   })();
 
-  suggest.addEventListener("mousedown", () => {
-    keepSuggestUntil = Date.now() + 250;
-  });
+  suggest.addEventListener("mousedown", () => { keepSuggestUntil = Date.now() + 250; });
+
 </script>
 
 <script>
@@ -998,15 +713,11 @@
     const dictForGrid = "@Model.DictTableName";
     let currentDict = dictForQuery;
 
-    const setDict = (name) => {
-      currentDict = name || currentDict;
-      window._dictTableName = currentDict;
-    };
-
+    const setDict = (name) => { currentDict = name || currentDict; window._dictTableName = currentDict; };
     setDict(dictForQuery);
 
     const queryArea = document.getElementById("inqForm");
-    const table = document.querySelector(".inq-table");
+    const table = document.getElementById("masterGrid");
 
     queryArea?.addEventListener("focusin", () => setDict(dictForQuery));
     queryArea?.addEventListener("click", () => setDict(dictForQuery));
@@ -1016,17 +727,13 @@
       if (typeof window.initFieldDictModal === "function") {
         window.initFieldDictModal(currentDict, "fieldDictModal");
         const el = document.getElementById("fieldDictModal");
-        if (el) {
-          const md = bootstrap.Modal.getOrCreateInstance(el);
-          md.show();
-        }
+        if (el) { const md = bootstrap.Modal.getOrCreateInstance(el); md.show(); }
       } else if (typeof window.loadFieldDict === "function") {
         window.loadFieldDict(currentDict);
       }
     };
 
     document.getElementById("btnEditDict")?.addEventListener("click", openFieldDict);
-
     document.addEventListener("keydown", (e) => {
       if (e.key !== "F3") return;
       const target = e.target;
@@ -1037,7 +744,6 @@
     });
   })();
 </script>
-
 
 @if (Request.Query.ContainsKey("debug"))
 {
