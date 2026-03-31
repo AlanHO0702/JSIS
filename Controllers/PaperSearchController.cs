@@ -546,9 +546,9 @@ public class PaperSearchController : ControllerBase
     private static string? GetDefaultDateRange(string? paramName)
     {
         var name = (paramName ?? string.Empty).Trim().TrimStart('@').ToLowerInvariant();
-        if (name.Contains("begindate") || name.Contains("startdate") || name.Contains("bscribedate"))
+        if (name.Contains("begindate") || name.Contains("startdate") || name.Contains("bscribedate") || name.Contains("bpaperdate"))
             return "1999-01-01";
-        if (name.Contains("enddate") || name.Contains("escribedate"))
+        if (name.Contains("enddate") || name.Contains("escribedate") || name.Contains("epaperdate"))
             return "9999-01-01";
         return null;
     }
