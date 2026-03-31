@@ -26,41 +26,128 @@
     </div>
 </form>
 
+<!-- 查詢條件 Lookup 篩選 Modal -->
+<div class="modal fade" id="queryLookupModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="false" style="pointer-events:none;">
+  <div class="modal-dialog modal-dialog-scrollable" style="max-width:420px; pointer-events:all;">
+    <div class="modal-content" style="font-size:0.78rem;">
+      <div class="modal-header py-1 px-2">
+        <span class="modal-title fw-bold" id="queryLookupModalTitle" style="font-size:0.8rem;">名稱查詢</span>
+        <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal" style="font-size:0.6rem;"></button>
+      </div>
+      <div class="modal-body p-1">
+        <div class="d-flex gap-1 mb-1">
+          <input type="text" class="form-control form-control-sm" id="queryLookupSearchCode" placeholder="代碼篩選" style="font-size:0.75rem;">
+          <input type="text" class="form-control form-control-sm" id="queryLookupSearchName" placeholder="名稱篩選" style="font-size:0.75rem;">
+        </div>
+        <div style="max-height:280px; overflow-y:auto;">
+          <table class="table table-sm table-hover mb-0" style="font-size:0.75rem;">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th style="width:38%; padding:2px 6px;">代碼</th>
+                <th style="padding:2px 6px;">名稱</th>
+              </tr>
+            </thead>
+            <tbody id="queryLookupBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer py-1 px-2">
+        <button type="button" class="btn btn-primary btn-sm py-0 px-2" id="queryLookupConfirm" style="font-size:0.75rem;">確定</button>
+        <button type="button" class="btn btn-secondary btn-sm py-0 px-2" data-bs-dismiss="modal" style="font-size:0.75rem;">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <style>
     .query-modal-content .modal-header { cursor: move; user-select: none; padding: 6px 12px; }
     .query-modal-content .modal-header :is(button, input, select, textarea, a) { cursor: default; }
-    .query-modal-content .query-op { flex: 0 0 76px; min-width: 76px; max-width: 76px; }
-    .query-modal-content .query-input { flex: 0 0 140px; min-width: 140px; max-width: 140px; }
-    .query-modal-content .modal-body { padding: 10px 12px; max-height: 50vh; overflow-y: auto; }
+    /* 視窗寬度：讓包含查詢面板的 modal-dialog 變寬 */
+    .modal-dialog:has(.query-modal-content) { max-width: 980px; }
+    .query-modal-content .query-op { flex: 0 0 72px; min-width: 72px; max-width: 72px; }
+    .query-modal-content .query-input { flex: 0 0 160px; min-width: 160px; max-width: 160px; }
+    .query-modal-content .query-lookup-wrap { flex: 0 0 160px; min-width: 160px; max-width: 160px; display: flex; align-items: stretch; }
+    .query-modal-content .modal-body { padding: 10px 16px; height: 64vh; overflow-y: auto; }
     .query-modal-content .modal-header { display: flex; align-items: center; gap: 10px; }
     .query-modal-content .modal-title { margin: 0; }
     .query-modal-content .query-footer { display: flex; align-items: center; justify-content: space-between; }
     .query-modal-content .query-footer-left { display: flex; gap: 6px; }
     .query-modal-content .query-footer-right { display: flex; gap: 8px; }
-    .query-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; }
+    .query-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; row-gap: 2px; }
     .query-field-grid > .query-item { box-sizing: border-box; }
     .query-field-grid .query-item { display: flex; }
-    .query-field-grid .query-row { display: flex; align-items: center; gap: 8px; }
+    .query-field-grid .query-row { display: flex; align-items: center; gap: 6px; }
     .query-field-grid .col-md-6:nth-child(2n) .query-row { justify-content: flex-end; }
     .query-field-grid .col-md-6:nth-child(2n+1) .query-row { justify-content: flex-start; }
     .query-field-grid .query-label {
-        flex: 0 0 110px;
+        flex: 0 0 96px;
         text-align: right;
         font-size: var(--field-label-size);
         line-height: 1.2;
         margin: 0;
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     @@media (max-width: 991.98px) {
         .query-field-grid { grid-template-columns: 1fr; }
     }
     .query-field-grid .query-input,
     .query-field-grid .query-op {
-        height: 24px;
+        height: 26px;
         padding-top: 2px;
         padding-bottom: 2px;
         font-size: var(--field-value-size);
     }
+    /* --- 查詢 Lookup：完全自給自足，不依賴 _DetailHeaderSection.cshtml --- */
+    .query-lookup-wrap {
+        display: flex; align-items: stretch; box-sizing: border-box;
+    }
+    .query-lookup-wrap .lookup-code-wrap {
+        position: relative;
+        width: 82px !important; min-width: 60px !important; max-width: 82px !important;
+        align-self: stretch; display: flex; align-items: stretch; flex: 0 0 auto;
+    }
+    .query-lookup-wrap .lookup-code-wrap input {
+        flex: 1 1 auto !important; width: 100% !important;
+        height: 26px !important; padding-top: 2px !important; padding-bottom: 2px !important;
+        font-size: var(--field-value-size) !important; padding-right: 22px !important;
+        box-sizing: border-box !important;
+    }
+    .query-lookup-wrap .lookup-toggle {
+        position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+        width: 18px; height: 18px; border: 0; background: transparent; cursor: pointer; z-index: 6;
+        flex-shrink: 0;
+    }
+    .query-lookup-wrap .lookup-toggle::before {
+        content: ""; display: block; width: 0; height: 0;
+        border-left: 5px solid transparent; border-right: 5px solid transparent;
+        border-top: 6px solid #6b7280; margin: 0 auto;
+    }
+    .query-lookup-wrap .lookup-name-btn {
+        flex: 1 1 auto; min-width: 0; align-self: stretch;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        padding: 0 6px;
+        background: var(--bs-body-bg, #fff);
+        border: 1px solid #ced4da; border-left: none;
+        border-radius: 0 4px 4px 0;
+        font-size: var(--field-value-size); line-height: 26px;
+        cursor: pointer; color: var(--bs-body-color, #495057);
+        box-sizing: border-box; display: block; text-align: left;
+    }
+    .query-lookup-wrap .lookup-name-btn:hover { background: #f8f9fa; }
+    /* 行內下拉清單 */
+    .query-lookup-panel {
+        display: none; position: absolute; top: 100%; left: 0; z-index: 9999;
+        background: #fff; border: 1px solid #b9c7de; border-radius: 0 0 6px 6px;
+        box-shadow: 0 4px 12px rgba(0,0,0,.15); max-height: 180px; overflow-y: auto;
+        min-width: 100%; width: max-content; max-width: 280px;
+    }
+    .query-lookup-panel.open { display: block; }
+    .query-lookup-panel-item {
+        padding: 2px 8px; cursor: pointer; font-size: var(--field-value-size); white-space: nowrap;
+    }
+    .query-lookup-panel-item:hover, .query-lookup-panel-item.active { background: #2d5fa8; color: #fff; }
 </style>
 
 <script>
@@ -75,6 +162,11 @@
     const modalEl = formEl.closest(".modal");
     if (modalEl && modalEl.parentElement !== document.body) {
         document.body.appendChild(modalEl);
+    }
+    // queryLookupModal 需獨立掛在 body，避免巢狀在 searchModal 裡導致 Bootstrap 互相干擾
+    const qlModalDom = document.getElementById('queryLookupModal');
+    if (qlModalDom && qlModalDom.parentElement !== document.body) {
+        document.body.appendChild(qlModalDom);
     }
 
     const fallbackFields = @Html.Raw(fieldsJson);
@@ -308,6 +400,255 @@
         if (defaultValue != null) selectEl.value = defaultValue;
     };
 
+    // ---- 查詢 Lookup Modal（單例，由所有 lookup 欄位共用）----
+    let _qlTargetInput = null;
+    let _qlSelectedKey = null;
+    let _qlModalInst = null;
+
+    const _qlModalEl = () => document.getElementById('queryLookupModal');
+
+    const _qlGetItems = (inp) => inp._lookupItems || [];
+
+    const _qlGetName = (items, key) => {
+        if (!key) return "";
+        const hit = items.find(i => i.key === key);
+        return hit ? hit.label : key;
+    };
+
+    const _qlRenderRows = (items, filterCode, filterName, currentKey) => {
+        const tbody = document.getElementById('queryLookupBody');
+        if (!tbody) return;
+        const lc = (filterCode || "").toLowerCase();
+        const ln = (filterName || "").toLowerCase();
+        tbody.innerHTML = "";
+        items.forEach(item => {
+            if (lc && !item.key.toLowerCase().includes(lc)) return;
+            if (ln && !item.label.toLowerCase().includes(ln)) return;
+            const tr = document.createElement('tr');
+            tr.dataset.key = item.key;
+            tr.style.cursor = 'pointer';
+            if (item.key === currentKey) {
+                tr.classList.add('table-primary');
+                _qlSelectedKey = item.key;
+            }
+            const tdCode = document.createElement('td');
+            tdCode.style.cssText = 'padding:2px 6px;';
+            tdCode.textContent = item.key;
+            // 名稱欄去掉 "代碼 " 前綴
+            const tdName = document.createElement('td');
+            tdName.style.cssText = 'padding:2px 6px;';
+            const prefix = item.key + " ";
+            tdName.textContent = item.label.startsWith(prefix) ? item.label.slice(prefix.length) : item.label;
+            tr.appendChild(tdCode);
+            tr.appendChild(tdName);
+            tr.addEventListener('click', () => {
+                tbody.querySelectorAll('tr').forEach(r => r.classList.remove('table-primary'));
+                tr.classList.add('table-primary');
+                _qlSelectedKey = item.key;
+            });
+            tr.addEventListener('dblclick', () => {
+                _qlSelectedKey = item.key;
+                _qlApply();
+            });
+            tbody.appendChild(tr);
+        });
+    };
+
+    const _qlApply = () => {
+        if (!_qlTargetInput || !_qlSelectedKey) return;
+        const inp = _qlTargetInput;
+        const items = _qlGetItems(inp);
+        const name = _qlGetName(items, _qlSelectedKey);
+        inp.value = _qlSelectedKey;
+        const nameBtn = inp.closest('.query-lookup-wrap')?.querySelector('.lookup-name-btn');
+        if (nameBtn) {
+            const prefix = _qlSelectedKey + " ";
+            nameBtn.textContent = name.startsWith(prefix) ? name.slice(prefix.length) : name;
+        }
+        inp.dispatchEvent(new Event('change', { bubbles: true }));
+        _qlModalInst?.hide();
+    };
+
+    const _qlOpen = (codeInput, caption) => {
+        _qlTargetInput = codeInput;
+        _qlSelectedKey = null;
+        const items = _qlGetItems(codeInput);
+        const currentKey = codeInput.value || '';
+        const titleEl = document.getElementById('queryLookupModalTitle');
+        if (titleEl) titleEl.textContent = caption ? `${caption} 查詢` : '名稱查詢';
+        const codeFilterEl = document.getElementById('queryLookupSearchCode');
+        const nameFilterEl = document.getElementById('queryLookupSearchName');
+        if (codeFilterEl) codeFilterEl.value = '';
+        if (nameFilterEl) nameFilterEl.value = '';
+        _qlRenderRows(items, '', '', currentKey);
+        if (codeFilterEl) codeFilterEl.oninput = () => _qlRenderRows(items, codeFilterEl.value, nameFilterEl?.value || '', currentKey);
+        if (nameFilterEl) nameFilterEl.oninput = () => _qlRenderRows(items, codeFilterEl?.value || '', nameFilterEl.value, currentKey);
+        const confirmBtn = document.getElementById('queryLookupConfirm');
+        if (confirmBtn) confirmBtn.onclick = _qlApply;
+        _qlModalInst = bootstrap.Modal.getOrCreateInstance(_qlModalEl(), { backdrop: false, keyboard: true });
+        _qlModalInst.show();
+        setTimeout(() => { if (codeFilterEl) codeFilterEl.focus(); }, 300);
+    };
+
+    // ---- convertToLookup：把 codeInput 包成 Lookup 控件 ----
+    const convertToLookup = (codeInput, colName, superId, initialOptions, caption) => {
+        // 存選項在元素上（key = code, label = "code name" 或 "code"）
+        codeInput._lookupItems = (initialOptions || []).map(o => {
+            const key = (o.value ?? o.Value ?? "").toString();
+            const text = (o.text ?? o.Text ?? "").toString();
+            return { key, label: text ? `${key} ${text}` : key };
+        });
+        codeInput.dataset.isLookup = "1";
+
+        // 外框（lookup-split-field 複用單頭結構）
+        const wrap = document.createElement("div");
+        wrap.className = "query-lookup-wrap";
+        codeInput.parentNode.insertBefore(wrap, codeInput);
+
+        // 代碼 wrap（同單頭 lookup-code-wrap）
+        const codeWrap = document.createElement("div");
+        codeWrap.className = "lookup-code-wrap";
+        wrap.appendChild(codeWrap);
+
+        // 把 codeInput 移進 codeWrap，套用同單頭的 class
+        codeInput.className = "form-control lookup-dropdown lookup-code-input";
+        codeWrap.appendChild(codeInput);
+
+        // ▼ Toggle 按鈕（同單頭）
+        const toggleBtn = document.createElement("button");
+        toggleBtn.type = "button";
+        toggleBtn.className = "lookup-toggle";
+        toggleBtn.tabIndex = -1;
+        toggleBtn.setAttribute("aria-label", "展開查詢");
+        codeWrap.appendChild(toggleBtn);
+
+        // 名稱按鈕（同單頭 lookup-name-btn）
+        const nameBtn = document.createElement("button");
+        nameBtn.type = "button";
+        nameBtn.className = "lookup-name-btn";
+        nameBtn.tabIndex = -1;
+        nameBtn.title = "點擊搜尋";
+        wrap.appendChild(nameBtn);
+
+        // 行內下拉清單（附在 codeWrap 下方）
+        const dropPanel = document.createElement("div");
+        dropPanel.className = "query-lookup-panel";
+        codeWrap.appendChild(dropPanel);
+
+        // 輔助：取名稱顯示文字（去掉 "code " 前綴，只留名稱部分）
+        const getNameOnly = (key, label) => {
+            if (!label || !key) return label || "";
+            const prefix = key + " ";
+            return label.startsWith(prefix) ? label.slice(prefix.length) : label;
+        };
+
+        // 設定選取值
+        const applyItem = (key, label) => {
+            codeInput.value = key;
+            nameBtn.textContent = getNameOnly(key, label);
+            dropPanel.classList.remove("open");
+            codeInput.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+
+        // 設定初始名稱顯示
+        const setNameFromCode = (code) => {
+            const item = codeInput._lookupItems.find(i => i.key === code);
+            nameBtn.textContent = item ? getNameOnly(code, item.label) : "";
+        };
+        if (codeInput.value) setNameFromCode(codeInput.value);
+
+        // 渲染行內下拉清單
+        const renderDropPanel = (filter) => {
+            const lc = (filter || "").toLowerCase();
+            const items = codeInput._lookupItems;
+            const matched = lc ? items.filter(i =>
+                i.key.toLowerCase().includes(lc) || i.label.toLowerCase().includes(lc)
+            ) : items;
+            dropPanel.innerHTML = "";
+            matched.slice(0, 200).forEach(item => {
+                const div = document.createElement("div");
+                div.className = "query-lookup-panel-item" + (item.key === codeInput.value ? " active" : "");
+                div.textContent = item.label;
+                div.addEventListener("mousedown", e => { e.preventDefault(); applyItem(item.key, item.label); });
+                dropPanel.appendChild(div);
+            });
+            dropPanel.classList.toggle("open", matched.length > 0);
+        };
+
+        // ▼ Toggle 按鈕 → 行內下拉
+        toggleBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            if (dropPanel.classList.contains("open")) {
+                dropPanel.classList.remove("open");
+                return;
+            }
+            renderDropPanel(codeInput.value);
+        });
+
+        // 代碼 input 輸入時過濾行內下拉
+        codeInput.addEventListener('input', () => {
+            if (codeInput._lookupItems.length) renderDropPanel(codeInput.value);
+        });
+
+        // 代碼 input blur 時同步名稱
+        codeInput.addEventListener('blur', () => {
+            setTimeout(() => { dropPanel.classList.remove("open"); }, 150);
+            setNameFromCode(codeInput.value);
+            codeInput.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+
+        // Delete / Backspace 在空白時清除名稱
+        codeInput.addEventListener('keydown', e => {
+            if ((e.key === 'Delete' || e.key === 'Backspace') && codeInput.value === '') {
+                nameBtn.textContent = '';
+                dropPanel.classList.remove("open");
+                codeInput.dispatchEvent(new Event('change', { bubbles: true }));
+            } else if (e.key === 'Escape') {
+                dropPanel.classList.remove("open");
+            }
+        });
+
+        // 名稱按鈕點擊 → 開啟 Lookup Modal
+        const openLookup = () => {
+            dropPanel.classList.remove("open");
+            if (!codeInput._lookupLoaded && superId) {
+                const superValue = readSuperValue(superId);
+                loadOptions(colName, superValue).then(opts => {
+                    codeInput._lookupItems = opts.map(o => {
+                        const key = (o.value ?? o.Value ?? "").toString();
+                        const text = (o.text ?? o.Text ?? "").toString();
+                        return { key, label: text ? `${key} ${text}` : key };
+                    });
+                    codeInput._lookupLoaded = true;
+                    _qlOpen(codeInput, caption);
+                });
+            } else {
+                _qlOpen(codeInput, caption);
+            }
+        };
+        nameBtn.addEventListener('click', openLookup);
+
+        // 點選外部關閉下拉
+        document.addEventListener('pointerdown', e => {
+            if (!wrap.contains(e.target)) dropPanel.classList.remove("open");
+        }, { capture: true });
+
+        // 暴露介面供 wireSuperChange 使用
+        codeInput._lookup = {
+            setOptions: (opts) => {
+                codeInput._lookupItems = opts.map(o => {
+                    const key = (o.value ?? o.Value ?? "").toString();
+                    const text = (o.text ?? o.Text ?? "").toString();
+                    return { key, label: text ? `${key} ${text}` : key };
+                });
+                codeInput._lookupLoaded = true;
+                codeInput.value = "";
+                nameBtn.textContent = "";
+                dropPanel.classList.remove("open");
+            }
+        };
+    };
+
     const buildField = async (field, equals, index) => {
         const colName = field.columnName || field.ColumnName || "";
         if (!colName) return;
@@ -358,12 +699,15 @@
 
         let input;
         if (controlType === 1 || controlType === 2 || commandText) {
-            const select = document.createElement("select");
-            select.className = "form-select query-input";
-            select.dataset.param = normalizeKey(colName);
-            select.dataset.column = colName;
-            if (superId) select.dataset.super = normalizeKey(superId);
-            input = select;
+            // Lookup 欄位：用 text input（name 屬性讓表單收集代碼值）
+            const inp = document.createElement("input");
+            inp.type = "text";
+            inp.className = "form-control query-input";
+            inp.dataset.param = normalizeKey(colName);
+            inp.dataset.column = colName;
+            inp.autocomplete = "off";
+            if (superId) inp.dataset.super = normalizeKey(superId);
+            input = inp;
         } else {
             const inp = document.createElement("input");
             inp.className = "form-control query-input";
@@ -403,23 +747,15 @@
         if (input.type === "date" && isDatePlaceholder(defaultVal)) {
             defaultVal = "";
         }
-        if (input.tagName === "SELECT") {
+        if (controlType === 1 || controlType === 2 || commandText) {
             const superValue = superId ? readSuperValue(superId) : "";
             const opts = await loadOptions(colName, superValue);
-            buildOptionList(input, opts, defaultVal);
+            if (defaultVal) input.value = defaultVal;
+            convertToLookup(input, colName, superId, opts, caption);
         } else if (defaultVal) {
             input.value = defaultVal;
         } else if (input.type === "date") {
-            // 蝣箔??交?甈?皜征雿?蝚?
             input.value = "";
-        }
-
-        if (input.tagName === "SELECT") {
-            input.addEventListener("focus", async () => {
-                const superValue = superId ? readSuperValue(superId) : "";
-                const opts = await loadOptions(colName, superValue);
-                buildOptionList(input, opts, input.value || defaultVal);
-            });
         }
     };
 
@@ -434,7 +770,7 @@
     };
 
     const wireSuperChange = () => {
-        const selects = Array.from(formEl.querySelectorAll("select[data-super]"));
+        const selects = Array.from(formEl.querySelectorAll("[data-super]"));
         const bySuper = new Map();
         selects.forEach(sel => {
             const key = sel.dataset.super || "";
@@ -450,7 +786,11 @@
                 for (const child of children) {
                     const col = child.dataset.column || "";
                     const opts = await loadOptions(col, superEl.value || "");
-                    buildOptionList(child, opts, "");
+                    if (child._lookup) {
+                        child._lookup.setOptions(opts);
+                    } else {
+                        buildOptionList(child, opts, "");
+                    }
                 }
             });
         });
