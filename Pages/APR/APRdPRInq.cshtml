@@ -131,69 +131,15 @@
     </div>
 }
 
+
 @{
-  var qDict = Model.QueryDictFields ?? new List<CURdTableField>();
-  var qFields = qDict
-      .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
-      .Where(f => f.FieldName!.StartsWith("@"))
+  var gDict = Model.GridDictFields ?? new List<CURdTableField>();
+  var gFields = gDict
       .Where(f => (f.Visible ?? 1) != 0)
-      .OrderBy(f => f.iLayRow ?? int.MaxValue)
-      .ThenBy(f => f.iLayColumn ?? int.MaxValue)
-      .ThenBy(f => f.SerialNum ?? int.MaxValue)
+      .OrderBy(f => f.SerialNum ?? int.MaxValue)
       .ToList();
 
-  string QLabel(CURdTableField f)
-      => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName!.TrimStart('@') : f.DisplayLabel!;
-
-  string QInputName(CURdTableField f)
-  {
-      return f.FieldName?.TrimStart('@') ?? "";
-  }
-
-  string QInputType(CURdTableField f)
-  {
-      var dt = (f.DataType ?? "").ToLowerInvariant();
-      if (dt.Contains("date")) return "date";
-      var fname = (f.FieldName ?? "").ToLowerInvariant();
-      if (fname.Contains("date")) return "date";
-      var label = (f.DisplayLabel ?? "");
-      if (label.Contains("日期")) return "date";
-      return "text";
-  }
-
-  object? QDefault(string fieldName)
-  {
-      if (Model.DefaultQueryValues.TryGetValue(fieldName, out var v)) return v;
-      if (Model.ParamNameByField.TryGetValue(fieldName, out var p)
-          && Model.DefaultQueryValues.TryGetValue(p, out var v2)) return v2;
-      return null;
-  }
-
-  string QValue(string name, string type)
-  {
-      var qs = Request.Query[name].ToString();
-      if (!string.IsNullOrWhiteSpace(qs)) return qs;
-      var dv = QDefault(name);
-      if (dv == null) return "";
-      if (dv is DateTime dt) return type == "date" ? dt.ToString("yyyy-MM-dd") : dt.ToString("yyyy/MM/dd");
-      return dv.ToString() ?? "";
-  }
-
-  bool QChecked(string name)
-  {
-      var qs = Request.Query[name].ToString();
-      if (!string.IsNullOrWhiteSpace(qs))
-      {
-          return qs == "1" || qs.Equals("true", StringComparison.OrdinalIgnoreCase) || qs.Equals("y", StringComparison.OrdinalIgnoreCase);
-      }
-      var dv = QDefault(name);
-      if (dv is bool b) return b;
-      if (dv is int i) return i == 1;
-      if (dv is short s) return s == 1;
-      if (dv is byte by) return by == 1;
-      var str = dv?.ToString();
-      return str == "1" || string.Equals(str, "true", StringComparison.OrdinalIgnoreCase) || string.Equals(str, "y", StringComparison.OrdinalIgnoreCase);
-  }
+  string GLabel(CURdTableField f) => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel!;
 
   bool IsCheckbox(CURdTableField f)
   {
@@ -208,83 +154,6 @@
       }
       return false;
   }
-
-  bool IsSelect(CURdTableField f)
-  {
-      return !string.IsNullOrWhiteSpace(f.Items) || !string.IsNullOrWhiteSpace(f.LookupTable);
-  }
-
-  bool DisableLookup(CURdTableField f)
-  {
-      var n = (f.FieldName ?? "").TrimStart('@');
-      return n.Equals("sPartNum", StringComparison.OrdinalIgnoreCase)
-          || n.Equals("sEPartNum", StringComparison.OrdinalIgnoreCase);
-  }
-}
-
-@section InqQuery {
-  <form id="inqForm" method="get" class="inq-form">
-    @Html.AntiForgeryToken()
-    @foreach (var row in qFields.GroupBy(f => f.iLayRow ?? int.MaxValue).OrderBy(g => g.Key))
-    {
-      <div class="inq-row">
-        @foreach (var f in row)
-        {
-          var name = QInputName(f);
-          var type = QInputType(f);
-          var cur = QValue(name, type);
-          var codeId = $"inq_{name}";
-          <label class="inq-label">@QLabel(f)</label>
-          if (IsCheckbox(f))
-          {
-            <div class="form-check form-check-inline compact-check">
-              <input class="form-check-input" type="checkbox" name="@name" value="1" @(QChecked(name) ? "checked" : "") />
-            </div>
-          }
-          else if (IsSelect(f) && !DisableLookup(f))
-          {
-            <span class="inq-select">
-              <input type="hidden" id="@codeId" name="@name" class="inq-select-code-hidden" value="@cur" />
-              <input type="text" class="form-control form-control-sm inq-input inq-lookup-display"
-                     value=""
-                     autocomplete="off"
-                     data-code-target="@codeId"
-                     data-items="@f.Items"
-                     data-lookup-table="@f.LookupTable"
-                     data-lookup-key="@((f.LookupKeyField ?? "").Replace(" ", ""))"
-                     data-lookup-result="@((f.LookupResultField ?? "").Replace(" ", ""))"
-                     data-cond1-field="@f.LookupCond1Field"
-                     data-cond1-source="@f.LookupCond1ResultField"
-                     data-cond2-field="@f.LookupCond2Field"
-                     data-cond2-source="@f.LookupCond2ResultField"
-                     data-selected="@cur" />
-              <button type="button" class="inq-select-btn" aria-label="開啟清單">&#9662;</button>
-            </span>
-          }
-          else
-          {
-            <input type="@type" name="@name" class="form-control form-control-sm inq-input"
-                   value="@cur" />
-          }
-        }
-      </div>
-    }
-
-    <input type="hidden" name="page" value="1" />
-    <input type="hidden" name="pageSize" value="@Model.PageSize" />
-    <input type="hidden" name="spId" value="@Model.SpId" />
-    <input type="hidden" name="itemId" value="@Model.ResolvedItemId" />
-  </form>
-}
-
-@{
-  var gDict = Model.GridDictFields ?? new List<CURdTableField>();
-  var gFields = gDict
-      .Where(f => (f.Visible ?? 1) != 0)
-      .OrderBy(f => f.SerialNum ?? int.MaxValue)
-      .ToList();
-
-  string GLabel(CURdTableField f) => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel!;
 
   object? GVal(object? row, string? name)
   {
@@ -908,7 +777,7 @@
     window.location.reload();
   });
 
-  // Lookup suggest (same as AJNdJourInq)
+  // Lookup suggest (aligned with shared _InquiryTemplate behavior)
   const resolveCondValue = (name) => {
     if (!name) return "";
     const el = document.querySelector(`[name="${name}"]`);
@@ -924,6 +793,12 @@
       if (kv.length >= 2) return { value: kv[0].trim(), label: kv.slice(1).join(":").trim() };
       return { value: p, label: p };
     });
+  };
+
+  const nameFromLabel = (val, lbl) => {
+    if (!lbl) return val || "";
+    const pfx = String(val || "").trim() + " - ";
+    return lbl.startsWith(pfx) ? lbl.slice(pfx.length) : lbl;
   };
 
   const buildCondKey = (el) => {
@@ -994,9 +869,18 @@
     if (!displayEl) return;
     const codeInput = getCodeInput(displayEl);
     const codeVal = (codeInput?.value || "").toString().trim();
-    if (!codeVal) { displayEl.value = ""; return; }
+    if (!codeVal) {
+      displayEl.value = "";
+      const emptyNameBtn = displayEl.closest(".inq-lookup-wrapper")?.querySelector(".inq-name-btn");
+      if (emptyNameBtn) emptyNameBtn.textContent = "";
+      return;
+    }
     const hit = (options || []).find(o => String(o.value).trim() === codeVal);
-    displayEl.value = hit ? (hit.label || hit.value) : codeVal;
+    const fullLabel = hit ? (hit.label || hit.value) : codeVal;
+    const inWrapper = !!displayEl.dataset.codeTarget;
+    displayEl.value = inWrapper ? codeVal : fullLabel;
+    const nameBtn = displayEl.closest(".inq-lookup-wrapper")?.querySelector(".inq-name-btn");
+    if (nameBtn) nameBtn.textContent = nameFromLabel(codeVal, fullLabel);
   };
 
   const suggest = document.createElement("div");
@@ -1032,15 +916,19 @@
     suggest.innerHTML = "";
     if (filtered.length === 0) { hideSuggest(); return; }
 
+    const inWrapper = !!el.dataset.codeTarget;
     filtered.slice(0, 200).forEach(o => {
+      const displayLabel = nameFromLabel(o.value, o.label);
       const item = document.createElement("div");
       item.className = "inq-suggest-item";
-      item.innerHTML = `<div class="inq-suggest-code">${o.value}</div><div class="inq-suggest-label">${o.label}</div>`;
+      item.innerHTML = `<div class="inq-suggest-code">${o.value}</div><div class="inq-suggest-label">${displayLabel}</div>`;
       item.addEventListener("mousedown", (e) => {
         e.preventDefault();
         const codeInput = getCodeInput(el);
         if (codeInput) codeInput.value = o.value;
-        el.value = o.label || o.value;
+        el.value = inWrapper ? o.value : (o.label || o.value);
+        const nameBtn = el.closest(".inq-lookup-wrapper")?.querySelector(".inq-name-btn");
+        if (nameBtn) nameBtn.textContent = nameFromLabel(o.value, o.label);
         hideSuggest();
       });
       suggest.appendChild(item);
@@ -1092,14 +980,26 @@
       const text = (el.value || "").trim();
       const key = buildCondKey(el);
       const opts = lookupCache.get(key) || [];
-      if (!text) { codeInput.value = ""; return; }
+      if (!text) {
+        codeInput.value = "";
+        const nameBtn = el.closest(".inq-lookup-wrapper")?.querySelector(".inq-name-btn");
+        if (nameBtn) nameBtn.textContent = "";
+        return;
+      }
       const hit = opts.find(o => {
         const v = String(o.value ?? "").trim();
         const l = String(o.label ?? "").trim();
         return v === text || l === text;
       });
-      if (hit) { codeInput.value = hit.value; el.value = hit.label || hit.value; }
-      else { syncDisplayValue(el, opts); }
+      if (hit) {
+        codeInput.value = hit.value;
+        const inWrapper = !!el.dataset.codeTarget;
+        el.value = inWrapper ? hit.value : (hit.label || hit.value);
+        const nameBtn = el.closest(".inq-lookup-wrapper")?.querySelector(".inq-name-btn");
+        if (nameBtn) nameBtn.textContent = nameFromLabel(hit.value, hit.label);
+      } else {
+        syncDisplayValue(el, opts);
+      }
     });
   });
 
@@ -1118,6 +1018,133 @@
   })();
 
   suggest.addEventListener("mousedown", () => { keepSuggestUntil = Date.now() + 250; });
+  // Name-search modal for lookup (same data source as suggest)
+  let _inqNsAllRows = [];
+  let _inqNsFilteredRows = [];
+  let _inqNsCodeInput = null;
+  let _inqNsNameBtn = null;
+
+  const bindNameSearchModal = (inqNsModal) => {
+    if (!inqNsModal) return false;
+    if (inqNsModal.dataset.lookupInit === "1") return true;
+
+    const pickInModal = (idBase) =>
+      inqNsModal.querySelector(`#${idBase}`)
+      || inqNsModal.querySelector(`[id^="${idBase}"]`);
+
+    const inqNsCodeFilter = pickInModal("inqNameSearchCode");
+    const inqNsNameFilter = pickInModal("inqNameSearchName");
+    const inqNsBody = pickInModal("inqNameSearchBody");
+    const inqNsConfirm = pickInModal("inqNameSearchConfirm");
+
+    if (!inqNsBody || !inqNsConfirm) return false;
+
+    inqNsModal.dataset.lookupInit = "1";
+
+    const renderInqNsRows = () => {
+      const cq = (inqNsCodeFilter?.value || "").toLowerCase();
+      const nq = (inqNsNameFilter?.value || "").toLowerCase();
+      _inqNsFilteredRows = _inqNsAllRows.filter(r =>
+        (!cq || (r.value || "").toLowerCase().includes(cq)) &&
+        (!nq || (r.label || "").toLowerCase().includes(nq))
+      );
+      inqNsBody.innerHTML = _inqNsFilteredRows.map((r, i) =>
+        '<tr data-idx="' + i + '" style="cursor:pointer;">'
+        + '<td style="padding:2px 4px;">' + (r.value || '') + '</td>'
+        + '<td style="padding:2px 4px;">' + nameFromLabel(r.value, r.label) + '</td>'
+        + '</tr>'
+      ).join("");
+
+      inqNsBody.querySelectorAll("tr").forEach(tr => {
+        tr.addEventListener("click", () => {
+          const idx = Number(tr.dataset.idx);
+          if (Number.isFinite(idx) && idx >= 0) applyInqNsRow(_inqNsFilteredRows[idx]);
+          bootstrap.Modal.getInstance(inqNsModal)?.hide();
+        });
+        tr.addEventListener("mouseover", () => {
+          inqNsBody.querySelectorAll("tr").forEach(r => r.classList.remove("table-active"));
+          tr.classList.add("table-active");
+        });
+      });
+    };
+
+    const applyInqNsRow = (row) => {
+      if (!row) return;
+      const value = row.value || "";
+      if (_inqNsCodeInput) _inqNsCodeInput.value = value;
+      if (_inqNsNameBtn) _inqNsNameBtn.textContent = nameFromLabel(value, row.label);
+
+      let displayEl = _inqNsNameBtn?.closest(".inq-lookup-wrapper")?.querySelector(".inq-lookup-display");
+      if (!displayEl && _inqNsCodeInput) {
+        displayEl = _inqNsCodeInput.parentElement?.querySelector(".inq-lookup-display");
+      }
+      if (!displayEl) return;
+
+      const inWrapper = !!displayEl.dataset.codeTarget;
+      displayEl.value = inWrapper ? value : (row.label || value);
+      displayEl.dataset.selected = value;
+    };
+
+    inqNsConfirm.addEventListener("click", () => {
+      const tr = inqNsBody.querySelector("tr.table-active");
+      if (tr) {
+        const idx = Number(tr.dataset.idx);
+        if (Number.isFinite(idx) && idx >= 0) applyInqNsRow(_inqNsFilteredRows[idx]);
+      }
+      bootstrap.Modal.getInstance(inqNsModal)?.hide();
+    });
+
+    inqNsCodeFilter?.addEventListener("input", renderInqNsRows);
+    inqNsNameFilter?.addEventListener("input", renderInqNsRows);
+
+    inqNsModal.addEventListener("show.bs.modal", async (e) => {
+      const btn = e.relatedTarget;
+      if (!btn) return;
+      _inqNsNameBtn = btn;
+      const codeTarget = btn.dataset.codeTarget;
+      _inqNsCodeInput = codeTarget ? document.getElementById(codeTarget) : null;
+
+      let displayEl = btn.closest(".inq-lookup-wrapper")?.querySelector(".inq-lookup-display");
+      if (!displayEl && _inqNsCodeInput) {
+        displayEl = _inqNsCodeInput.parentElement?.querySelector(".inq-lookup-display");
+      }
+      if (!displayEl) {
+        _inqNsAllRows = [];
+        _inqNsFilteredRows = [];
+        renderInqNsRows();
+        return;
+      }
+
+      if (inqNsCodeFilter) inqNsCodeFilter.value = "";
+      if (inqNsNameFilter) inqNsNameFilter.value = "";
+
+      try {
+        const key = buildCondKey(displayEl);
+        if (!lookupCache.has(key)) {
+          lookupCache.set(key, await fetchLookupOptions(displayEl));
+        }
+        _inqNsAllRows = lookupCache.get(key) || [];
+      } catch {
+        _inqNsAllRows = [];
+      }
+
+      renderInqNsRows();
+    });
+
+    return true;
+  };
+
+  const initNameSearchModal = () => {
+    const modals = Array.from(document.querySelectorAll('.modal[id^="inqNameSearchModal"]'));
+    if (!modals.length) return false;
+    let ok = false;
+    modals.forEach(m => { if (bindNameSearchModal(m)) ok = true; });
+    return ok;
+  };
+
+  if (!initNameSearchModal()) {
+    window.addEventListener("DOMContentLoaded", () => { initNameSearchModal(); }, { once: true });
+  }
 
   // Split resizer drag
   (() => {
@@ -1249,3 +1276,7 @@
     </ul>
   </div>
 }
+
+
+
+
