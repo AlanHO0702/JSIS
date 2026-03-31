@@ -415,7 +415,7 @@ public class StoredProcController : ControllerBase
             }
 
             var systemId = await LoadSystemIdAsync(conn, tx, req.ItemId);
-            var userId = User?.Identity?.Name ?? string.Empty;
+            var userId = ResolveExecUserId(req.Args);
 
             if (IsSpName(spNameNorm, "CURdReportOrderRunNow"))
             {
@@ -1715,6 +1715,30 @@ UPDATE {safeTable}
         return obj == null || obj == DBNull.Value ? null : obj.ToString();
     }
 
+    private string ResolveExecUserId(Dictionary<string, object>? args)
+    {
+        var candidates = new List<string?>
+        {
+            User?.Identity?.Name,
+            User?.Claims?.FirstOrDefault(c => string.Equals(c.Type, "UserId", StringComparison.OrdinalIgnoreCase))?.Value,
+            HttpContext?.Items["UserId"]?.ToString(),
+            Request?.Headers["X-USERID"].ToString(),
+            Request?.Headers["X-UserId"].ToString(),
+            Convert.ToString(GetArgValue(args ?? new Dictionary<string, object>(), "UserId")),
+            Convert.ToString(GetArgValue(args ?? new Dictionary<string, object>(), "userId")),
+            Convert.ToString(ReadFieldFromArgs(args, "masterRow", "Master1", "UserId")),
+            Convert.ToString(ReadFieldFromArgs(args, "detailRow", "Detail1", "UserId"))
+        };
+
+        foreach (var c in candidates)
+        {
+            var s = (c ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(s)) return s;
+        }
+
+        return string.Empty;
+    }
+
     private async Task<object?> ResolveParamValueAsync(
         SqlConnection conn,
         SqlTransaction tx,
@@ -1742,7 +1766,7 @@ UPDATE {safeTable}
             case 1: // 常數
                 return p.ParamFieldName ?? string.Empty;
             case 2: // 登入者工號
-                return string.IsNullOrWhiteSpace(userId) ? null : userId;
+                return string.IsNullOrWhiteSpace(userId) ? string.Empty : userId;
             case 3: // 公司別
                 return "A001";
             case 4: // 系統別
