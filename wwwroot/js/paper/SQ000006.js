@@ -427,23 +427,26 @@
     // Delphi: QuotaPaper.pas cboComputeIdChange
     // ==========================================
     function bindComputeIdChange() {
-        const computeField = document.querySelector('[data-field="ComputeId"]');
-        if (!computeField) return;
+        // ComputeId 欄位是動態渲染的，用事件委派監聽 document
+        document.addEventListener('change', async function (e) {
+            const target = e.target;
+            if (!target || target.dataset.field !== 'ComputeId') return;
 
-        computeField.addEventListener('change', async function () {
             const paperNum = getPaperNum();
-            const partNum = getFieldValue('PartNum');
-            if (!paperNum || !partNum) return;
+            if (!paperNum) return;
 
             try {
+                // __autoSaveHeader 會在 change 後 200ms 自動儲存 ComputeId
+                // 此處等待 800ms 確保 autoSave 完成後再執行 SetupAddData
+                await new Promise(resolve => setTimeout(resolve, 800));
                 await fetch(`${API_BASE}/SetupAddData`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ PaperNum: paperNum })
                 });
-                // 重新載入 Detail1 區塊
-                if (typeof window.reloadDetailTab === 'function') {
-                    window.reloadDetailTab(0);
+                // 重新載入所有單身頁籤
+                if (typeof window.__refreshMultiTab === 'function') {
+                    await window.__refreshMultiTab();
                 }
             } catch (err) {
                 console.error('SetupAddData 失敗:', err);
