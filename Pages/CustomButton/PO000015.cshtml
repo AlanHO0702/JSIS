@@ -1,0 +1,746 @@
+@model dynamic
+
+<script>
+(() => {
+  window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+  const MSG_NO_PAPER = "\u8acb\u5148\u9078\u64c7\u55ae\u865f";
+  const MSG_LOAD_FAIL = "\u8f09\u5165\u5931\u6557";
+  const MSG_SAVE_FAIL = "\u5132\u5b58\u5931\u6557";
+  const MSG_OK = "\u78ba\u5b9a";
+  const MSG_CANCEL = "\u53d6\u6d88";
+
+  const withJwtHeaders = (init = {}) => {
+    const jwt = localStorage.getItem("jwtId");
+    const headers = Object.assign({}, init.headers || {});
+    if (jwt) headers["X-JWTID"] = jwt;
+    return { ...init, headers };
+  };
+
+  const readPaperNum = (ctx) => {
+    const v = (ctx?.paperNum || window._paperNum || "").toString().trim();
+    if (v) return v;
+    if (typeof window.getPaperNum === "function") {
+      try { return (window.getPaperNum() || "").toString().trim(); } catch {}
+    }
+    return "";
+  };
+
+  const readUserId = () =>
+    (localStorage.getItem("erpLoginUserId") || window._userId || "admin").toString().trim();
+
+  const readUseId = () =>
+    (localStorage.getItem("erpLoginBUId") || window.DEFAULT_USEID || window._useId || "A001").toString().trim();
+
+  const readSelectedDetailItem = () => {
+    const fromSelectedRows = (() => {
+      const sel = window._multiTabSelectedRows;
+      if (!sel || typeof sel !== "object") return "";
+      const activeTab = document.querySelector(".multi-tab-detail .nav-link.active");
+      const activeTabId = activeTab?.dataset?.tabId;
+      if (activeTabId && sel[activeTabId]) return sel[activeTabId];
+      const firstKey = Object.keys(sel).find(k => sel[k]);
+      return firstKey ? sel[firstKey] : null;
+    })();
+
+    const row = fromSelectedRows
+      || (typeof window._getSelectedDetailRow === "function" ? window._getSelectedDetailRow() : null)
+      || null;
+
+    if (!row || typeof row !== "object") return "";
+    return String(
+      row.Item ?? row.item ?? row.SourItem ?? row.sourItem ?? ""
+    ).trim();
+  };
+
+  const toDateInputValue = (v) => {
+    const s = (v || "").toString().trim();
+    if (!s) return "";
+    const m = s.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    if (!m) return "";
+    return `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}`;
+  };
+
+  const toSpDate = (v) => {
+    const s = (v || "").toString().trim();
+    if (!s) return "";
+    return s.replace(/-/g, "/");
+  };
+
+  const toInt = (v, d = 0) => {
+    const n = parseInt((v ?? "").toString().trim(), 10);
+    return Number.isFinite(n) ? n : d;
+  };
+
+  const toNum = (v, d = null) => {
+    const n = Number((v ?? "").toString().trim());
+    return Number.isFinite(n) ? n : d;
+  };
+
+  const escapeHtml = (v) => String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+  const fetchJson = async (url, init) => {
+    const resp = await fetch(url, withJwtHeaders(init || {}));
+    const raw = await resp.text();
+    let data;
+    try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw || `HTTP ${resp.status}` }; }
+    if (!resp.ok) return { ok: false, error: data?.error || `HTTP ${resp.status}` };
+    return data;
+  };
+
+  const optionHtml = (rows, valueKey, textKey, value) => {
+    const cur = (value ?? "").toString();
+    const list = Array.isArray(rows) ? rows : [];
+    const opts = ['<option value=""></option>'];
+    for (const r of list) {
+      const v = (r?.[valueKey] ?? "").toString();
+      const t = (r?.[textKey] ?? "").toString();
+      const sel = v === cur ? " selected" : "";
+      opts.push(`<option value="${escapeHtml(v)}"${sel}>${escapeHtml(v)} - ${escapeHtml(t)}</option>`);
+    }
+    return opts.join("");
+  };
+
+  const buildComboOptions = (col) => {
+    const rows = Array.isArray(col?.options) ? col.options : [];
+    return rows.map((r) => {
+      const key = (r?.[col.valueKey] ?? "").toString().trim();
+      const name = (r?.[col.textKey] ?? "").toString().trim();
+      return { key, name, label: `${key} - ${name}` };
+    }).filter(x => x.key !== "");
+  };
+
+  const buildColumns = (iType, lookups, ctxData) => {
+    const chargeTypes = lookups?.chargeTypes || [];
+    const customers = lookups?.customers || [];
+    const assessedTypes = lookups?.assessedTypes || [];
+
+    if (iType === 0) {
+      return [
+        { key: "Item", label: "\u9805\u6b21", type: "number", readonly: true },
+        { key: "CompanyId", label: "\u5c0d\u8c61", type: "select", options: customers, valueKey: "customerId", textKey: "shortName" },
+        { key: "ChargeType", label: "\u8cbb\u7528\u7a2e\u985e", type: "select", options: chargeTypes, valueKey: "chargeType", textKey: "chargeTypeName" },
+        { key: "SubTotal", label: "\u8cbb\u7528", type: "number", step: "0.0001" },
+        { key: "AssessedType", label: "\u5206\u6524\u57fa\u790e", type: "select", options: assessedTypes, valueKey: "assessedType", textKey: "assessedName" },
+        { key: "InvoiceNum", label: "\u767c\u7968\u865f\u78bc", type: "text", maxLength: 16 }
+      ];
+    }
+    if (iType === 1) {
+      return [
+        { key: "Item", label: "\u9805\u6b21", type: "number", readonly: true },
+        { key: "SourItem", label: "\u4f86\u6e90\u9805\u6b21", type: "number", readonly: true, fixed: ctxData?.iItem ?? 0 },
+        { key: "ChargeType", label: "\u8cbb\u7528\u7a2e\u985e", type: "select", options: chargeTypes, valueKey: "chargeType", textKey: "chargeTypeName" },
+        { key: "Charge2", label: "\u5206\u914d\u6bd4\u4f8b", type: "number", step: "0.0001" },
+        { key: "Charge", label: "\u5206\u914d\u91d1\u984d", type: "number", step: "0.0001" },
+        { key: "IsCome", label: "\u9032\u8ca8", type: "checkbox" }
+      ];
+    }
+    return [
+      { key: "SourItem", label: "\u4f86\u6e90\u9805\u6b21", type: "number", readonly: true, fixed: ctxData?.iItem ?? 0 },
+      { key: "Item", label: "\u5e8f\u865f", type: "number", readonly: true },
+      { key: "ChargeType", label: "\u8cbb\u7528\u7a2e\u985e", type: "select", options: chargeTypes, valueKey: "chargeType", textKey: "chargeTypeName" },
+      { key: "Charge", label: "\u5206\u914d\u6bd4\u4f8b", type: "number", step: "0.0001" },
+      { key: "IsCome", label: "\u9032\u8ca8", type: "checkbox" }
+    ];
+  };
+
+  const getColumnWidth = (key) => {
+    const map = {
+      Item: 64,
+      SourItem: 74,
+      CompanyId: 116,
+      ChargeType: 116,
+      SubTotal: 96,
+      AssessedType: 116,
+      InvoiceNum: 130,
+      Charge2: 92,
+      Charge: 92,
+      IsCome: 68
+    };
+    return map[key] || 100;
+  };
+
+  const outCostSpare = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: "info", title: MSG_NO_PAPER });
+
+    const detailItem = readSelectedDetailItem();
+    const init = await fetchJson("/api/PO000015OutCostSpare/Init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        itemId: ctx?.itemId || "PO000015",
+        buttonName: ctx?.buttonName || "btnC2",
+        paperNum,
+        detailItem
+      })
+    });
+    if (!init.ok) return Swal.fire({ icon: "error", title: MSG_LOAD_FAIL, text: init.error || "" });
+
+    const data = init.data || {};
+    const iType = toInt(data.iType, 0);
+    const ctxData = {
+      iType,
+      paperNum: (data.paperNum || paperNum).toString(),
+      iItem: toInt(data.iItem, 0),
+      iAllItem: toInt(data.iAllItem, 0)
+    };
+    const lookups = init.lookups || {};
+    const columns = buildColumns(iType, lookups, ctxData);
+    const modeTitle = iType === 0 ? "\u8cbb\u7528\u6524\u7b97" : "\u5206\u671f\u4ed8\u6b3e";
+
+    const rows = Array.isArray(data.rows) ? data.rows.map(r => ({ ...r })) : [];
+    let selectedIndex = -1;
+
+    const nextItem = () => {
+      let max = 0;
+      rows.forEach(r => { max = Math.max(max, toInt(r.Item, 0)); });
+      return max + 1;
+    };
+
+    const createRow = () => {
+      const r = {};
+      if (iType === 0) r.Item = nextItem();
+      if (iType === 1) {
+        r.Item = nextItem();
+        r.SourItem = ctxData.iItem;
+      }
+      if (iType === 2) {
+        r.SourItem = ctxData.iItem;
+        r.Item = nextItem();
+      }
+      r.IsCome = 0;
+      return r;
+    };
+
+    const getCell = (col, value) => {
+      if (col.type === "checkbox") {
+        const checked = toInt(value, 0) === 1 ? " checked" : "";
+        return `<input type="checkbox" data-col="${col.key}"${checked}>`;
+      }
+      if (col.type === "select") {
+        const v = value == null ? "" : String(value).trim();
+        const readOnly = col.readonly ? " readonly" : "";
+        return `<input type="text" class="form-control form-control-sm combo-select" data-col="${col.key}" data-combo="1" value="${escapeHtml(v)}" autocomplete="off"${readOnly}>`;
+      }
+      const type = col.type === "number" ? "number" : "text";
+      const v = value == null ? "" : String(value);
+      const readonly = col.readonly ? " readonly" : "";
+      const step = col.step ? ` step="${col.step}"` : "";
+      const maxLength = col.maxLength ? ` maxlength="${col.maxLength}"` : "";
+      return `<input type="${type}" class="form-control form-control-sm" data-col="${col.key}" value="${escapeHtml(v)}"${readonly}${step}${maxLength}>`;
+    };
+
+    const render = () => {
+      const body = document.getElementById("ocspRows");
+      if (!body) return;
+      if (rows.length === 0) {
+        body.innerHTML = `<tr><td colspan="${columns.length}" class="text-center text-muted py-3">\u7121\u8cc7\u6599</td></tr>`;
+        return;
+      }
+      body.innerHTML = rows.map((r, i) => {
+        const cls = i === selectedIndex ? " class=\"table-primary\"" : "";
+        const tds = columns.map(col => {
+          const v = col.fixed != null ? col.fixed : r[col.key];
+          if (col.fixed != null) r[col.key] = col.fixed;
+          return `<td style="width:${getColumnWidth(col.key)}px; min-width:${getColumnWidth(col.key)}px;">${getCell(col, v)}</td>`;
+        }).join("");
+        return `<tr data-idx="${i}"${cls}>${tds}</tr>`;
+      }).join("");
+    };
+
+    const bindEvents = () => {
+      const wrap = document.getElementById("ocspWrap");
+      if (!wrap) return;
+      const colMap = new Map(columns.map(c => [c.key, c]));
+      let comboDd = null;
+      let comboAnchor = null;
+
+      const closeComboDropdown = () => {
+        if (comboDd?.root) {
+          comboDd.root.remove();
+          comboDd = null;
+        }
+        comboAnchor = null;
+      };
+
+      const renderComboItems = (inputEl, filterText = "") => {
+        if (!comboDd?.list || !inputEl) return;
+        const colKey = (inputEl.dataset.col || "").trim();
+        const col = colMap.get(colKey);
+        if (!col || col.type !== "select") {
+          comboDd.list.innerHTML = "";
+          return;
+        }
+        const all = buildComboOptions(col);
+        const q = (filterText || "").trim().toLowerCase();
+        const list = q
+          ? all.filter(x =>
+              x.key.toLowerCase().startsWith(q) ||
+              x.name.toLowerCase().startsWith(q) ||
+              x.label.toLowerCase().includes(q))
+          : all;
+        comboDd.list.innerHTML = list.length
+          ? list.map(x => `<div class="ocsp-dd-item" tabindex="-1" data-key="${escapeHtml(x.key)}">${escapeHtml(x.label)}</div>`).join("")
+          : `<div class="ocsp-dd-empty">\u7121\u7b26\u5408\u9078\u9805</div>`;
+      };
+
+      const openComboDropdown = (inputEl) => {
+        if (!inputEl || inputEl.readOnly) return;
+        closeComboDropdown();
+        comboAnchor = inputEl;
+
+        const rect = inputEl.getBoundingClientRect();
+        const root = document.createElement("div");
+        root.className = "ocsp-combo-dd";
+        root.style.left = `${Math.round(rect.left + window.scrollX)}px`;
+        root.style.top = `${Math.round(rect.bottom + window.scrollY)}px`;
+        root.style.width = `${Math.max(180, Math.round(rect.width))}px`;
+
+        const search = document.createElement("input");
+        search.type = "text";
+        search.className = "ocsp-dd-search";
+        search.placeholder = "\u7be9\u9078...";
+        search.value = (inputEl.value || "").trim();
+
+        const list = document.createElement("div");
+        list.className = "ocsp-dd-list";
+
+        root.appendChild(search);
+        root.appendChild(list);
+
+        root.addEventListener("mousedown", (e) => {
+          const item = e.target.closest(".ocsp-dd-item");
+          if (!item || !comboAnchor) return;
+          e.preventDefault();
+          comboAnchor.value = (item.dataset.key || "").trim();
+          updateRowField(comboAnchor);
+          closeComboDropdown();
+          comboAnchor.dispatchEvent(new Event("change", { bubbles: true }));
+          comboAnchor.focus();
+        });
+
+        search.addEventListener("input", () => renderComboItems(inputEl, search.value));
+        search.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            closeComboDropdown();
+            inputEl.focus();
+            return;
+          }
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            const first = list.querySelector(".ocsp-dd-item");
+            if (first) first.focus();
+          }
+        });
+
+        list.addEventListener("keydown", (e) => {
+          const focused = document.activeElement;
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            const next = focused?.nextElementSibling;
+            if (next?.classList?.contains("ocsp-dd-item")) next.focus();
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            const prev = focused?.previousElementSibling;
+            if (prev?.classList?.contains("ocsp-dd-item")) prev.focus();
+            else search.focus();
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+            focused?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            closeComboDropdown();
+            inputEl.focus();
+          }
+        });
+
+        document.body.appendChild(root);
+        comboDd = { root, search, list };
+        renderComboItems(inputEl, search.value);
+        requestAnimationFrame(() => search.focus());
+      };
+
+      const applySelection = () => {
+        wrap.querySelectorAll("tr[data-idx]").forEach((rowEl) => {
+          const idx = toInt(rowEl.dataset.idx, -1);
+          rowEl.classList.toggle("table-primary", idx === selectedIndex);
+        });
+      };
+
+      const updateRowField = (target) => {
+        const tr = target?.closest?.("tr[data-idx]");
+        const col = target?.dataset?.col;
+        if (!tr || !col) return;
+        const idx = toInt(tr.dataset.idx, -1);
+        if (idx < 0 || idx >= rows.length) return;
+
+        if (target.type === "checkbox") {
+          rows[idx][col] = target.checked ? 1 : 0;
+        } else if (target.type === "number") {
+          const raw = target.value;
+          rows[idx][col] = raw === "" ? null : toNum(raw, null);
+        } else {
+          rows[idx][col] = (target.value || "").trim();
+        }
+      };
+
+      wrap.addEventListener("click", (ev) => {
+        const tr = ev.target?.closest?.("tr[data-idx]");
+        if (!tr) return;
+        const idx = toInt(tr.dataset.idx, -1);
+        if (idx === selectedIndex) return;
+        selectedIndex = idx;
+        const isInteractive = !!ev.target?.closest?.("input,select,textarea,button,label,option");
+        if (isInteractive) {
+          applySelection();
+          return;
+        }
+        render();
+      });
+
+      wrap.addEventListener("change", (ev) => {
+        updateRowField(ev.target);
+        if (ev.target?.matches?.("input[data-combo='1']")) closeComboDropdown();
+      });
+
+      wrap.addEventListener("input", (ev) => {
+        const t = ev.target;
+        if (!t?.matches?.("input[data-col], textarea[data-col]")) return;
+        updateRowField(t);
+        if (t.matches("input[data-combo='1']")) {
+          if (!comboDd || comboAnchor !== t) openComboDropdown(t);
+          else {
+            comboDd.search.value = t.value || "";
+            renderComboItems(t, comboDd.search.value);
+          }
+        }
+      });
+
+      wrap.addEventListener("focusin", (ev) => {
+        const t = ev.target;
+        if (!t?.matches?.("input[data-combo='1']")) return;
+        openComboDropdown(t);
+      });
+
+      wrap.addEventListener("keydown", (ev) => {
+        const t = ev.target;
+        if (!t?.matches?.("input[data-combo='1']")) return;
+        if (ev.key === "Escape") {
+          closeComboDropdown();
+          return;
+        }
+        if (ev.key === "ArrowDown" && (!comboDd || comboAnchor !== t)) {
+          openComboDropdown(t);
+        }
+      });
+
+      wrap.addEventListener("focusout", (ev) => {
+        const t = ev.target;
+        if (!t?.matches?.("input[data-combo='1']")) return;
+        setTimeout(() => {
+          if (document.activeElement && comboDd?.contains(document.activeElement)) return;
+          closeComboDropdown();
+        }, 120);
+      });
+
+      document.getElementById("ocspAdd")?.addEventListener("click", () => {
+        closeComboDropdown();
+        rows.push(createRow());
+        selectedIndex = rows.length - 1;
+        render();
+      });
+
+      document.getElementById("ocspDelete")?.addEventListener("click", () => {
+        closeComboDropdown();
+        if (selectedIndex < 0 || selectedIndex >= rows.length) return;
+        rows.splice(selectedIndex, 1);
+        selectedIndex = Math.min(selectedIndex, rows.length - 1);
+        render();
+      });
+
+      document.getElementById("ocspReload")?.addEventListener("click", () => {
+        closeComboDropdown();
+        location.reload();
+      });
+
+      document.addEventListener("scroll", () => {
+        if (!comboDd?.root || !comboAnchor) return;
+        const r = comboAnchor.getBoundingClientRect();
+        comboDd.root.style.left = `${Math.round(r.left + window.scrollX)}px`;
+        comboDd.root.style.top = `${Math.round(r.bottom + window.scrollY)}px`;
+      }, true);
+
+      document.addEventListener("mousedown", (ev) => {
+        if (!comboDd?.root) return;
+        const hitInput = ev.target?.closest?.("input[data-combo='1']");
+        if (hitInput) return;
+        if (comboDd.root.contains(ev.target)) return;
+        closeComboDropdown();
+      });
+    };
+
+    const html = `
+      <style>
+        .ocsp-container { align-items: flex-start !important; padding-top: 20px; }
+        .ocsp-popup { width: min(calc(100vw - 24px), 860px) !important; }
+        .ocsp-wrap { text-align: left; }
+        .ocsp-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+        .ocsp-note { margin-left: auto; color: #64748b; font-size: 12px; }
+        .ocsp-grid-wrap { max-height: 52vh; overflow: auto; border: 1px solid #dbe2ea; border-radius: 6px; }
+        .ocsp-grid { margin: 0; white-space: nowrap; table-layout: fixed; }
+        .ocsp-grid thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; font-size: 12px; }
+        .ocsp-grid td { vertical-align: middle; padding: 3px 4px; }
+        .ocsp-grid th { padding: 4px 6px; }
+        .ocsp-grid td .form-control, .ocsp-grid td .form-select {
+          min-width: 0;
+          width: 100%;
+          padding: 2px 6px;
+          height: 28px;
+        }
+        .ocsp-combo-dd {
+          position: absolute;
+          z-index: 20000;
+          background: #fff;
+          border: 1px solid #b0c4de;
+          border-radius: 6px;
+          box-shadow: 0 4px 18px rgba(0,0,0,.18);
+          max-height: 300px;
+          overflow: hidden;
+          font-size: .85rem;
+          display: flex;
+          flex-direction: column;
+        }
+        .ocsp-dd-search {
+          border: none;
+          border-bottom: 1px solid #dde6f0;
+          padding: 5px 9px;
+          outline: none;
+          font-size: .85rem;
+          min-width: 120px;
+        }
+        .ocsp-dd-list {
+          overflow-y: auto;
+          max-height: 252px;
+        }
+        .ocsp-dd-item {
+          padding: 4px 10px;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+        .ocsp-dd-item:hover,
+        .ocsp-dd-item:focus {
+          background: #eaf3ff;
+          outline: none;
+        }
+        .ocsp-dd-empty {
+          padding: 6px 8px;
+          color: #64748b;
+          font-size: 12px;
+        }
+      </style>
+      <div id="ocspWrap" class="ocsp-wrap">
+        <div class="ocsp-toolbar">
+          <button type="button" id="ocspAdd" class="btn btn-sm btn-outline-primary">\u65b0\u589e</button>
+          <button type="button" id="ocspDelete" class="btn btn-sm btn-outline-danger">\u522a\u9664</button>
+          <button type="button" id="ocspReload" class="btn btn-sm btn-outline-secondary">\u91cd\u8f09\u756b\u9762</button>
+          <div class="ocsp-note">PaperNum: ${escapeHtml(ctxData.paperNum)} / Item: ${escapeHtml(String(ctxData.iItem))} / AllItem: ${escapeHtml(String(ctxData.iAllItem))}</div>
+        </div>
+        <div class="ocsp-grid-wrap">
+          <table class="table table-sm table-bordered ocsp-grid">
+            <thead><tr>${columns.map(c => `<th style="width:${getColumnWidth(c.key)}px; min-width:${getColumnWidth(c.key)}px;">${escapeHtml(c.label)}</th>`).join("")}</tr></thead>
+            <tbody id="ocspRows"></tbody>
+          </table>
+        </div>
+      </div>`;
+
+    const result = await Swal.fire({
+      title: modeTitle,
+      html,
+      width: Math.min(window.innerWidth - 32, 860),
+      customClass: {
+        container: "ocsp-container",
+        popup: "ocsp-popup"
+      },
+      showCancelButton: true,
+      confirmButtonText: MSG_OK,
+      cancelButtonText: MSG_CANCEL,
+      focusConfirm: false,
+      didOpen: () => {
+        render();
+        bindEvents();
+      },
+      preConfirm: async () => {
+        const save = await fetchJson("/api/PO000015OutCostSpare/Save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            iType: ctxData.iType,
+            paperNum: ctxData.paperNum,
+            iItem: ctxData.iItem,
+            iAllItem: ctxData.iAllItem,
+            rows
+          })
+        });
+        if (!save.ok) {
+          Swal.showValidationMessage(`${MSG_SAVE_FAIL}: ${save.error || ""}`);
+          return false;
+        }
+        return save;
+      }
+    });
+
+    if (!result.isConfirmed || !result.value) return;
+    const saveMsg = (result.value.message || "").toString().trim();
+    await Swal.fire({ icon: "success", title: saveMsg || "\u5132\u5b58\u5b8c\u6210" });
+    if (typeof window.__refreshHeaderData === "function") {
+      try { await window.__refreshHeaderData(); } catch {}
+    }
+    if (typeof window.__refreshMultiTab === "function") {
+      try { await window.__refreshMultiTab(); } catch {}
+    }
+  };
+
+  const outVendorInvoice = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: "info", title: MSG_NO_PAPER });
+
+    const init = await fetchJson(`/api/MPHdOutInvoice/Init?paperNum=${encodeURIComponent(paperNum)}`);
+    if (!init.ok) return Swal.fire({ icon: "error", title: MSG_LOAD_FAIL, text: init.error || "" });
+
+    const payWays = Array.isArray(init.payWays) ? init.payWays : [];
+    const invoiceTypes = Array.isArray(init.invoiceTypes) ? init.invoiceTypes : [];
+    const data = init.data || {};
+
+    const customerId = (data.customerId || "").toString().trim();
+    const payWayCode = toInt(data.payWayCode, 0);
+    const invoiceType = toInt(data.invoiceType, 0);
+    const payWayText = (() => {
+      const hit = payWays.find(x => toInt(x.payWayCode) === payWayCode);
+      return hit ? `${hit.payWayCode} - ${hit.payWayName}` : String(payWayCode || "");
+    })();
+
+    const invoiceTypeOptions = invoiceTypes.map(x => {
+      const code = toInt(x.invoiceType, 0);
+      const name = (x.invoiceTypeName || "").toString();
+      const sel = code === invoiceType ? " selected" : "";
+      return `<option value="${code}"${sel}>${code} - ${escapeHtml(name)}</option>`;
+    }).join("");
+
+    const showHint = !!init.showToNtdHint;
+    const html = `
+      <style>
+        .mph-outinv-wrap { text-align: left; }
+        .mph-outinv-grid {
+          display: grid;
+          grid-template-columns: 96px minmax(220px, 1fr);
+          gap: 8px 10px;
+          align-items: center;
+        }
+        .mph-outinv-grid label { margin: 0; text-align: right; font-size: 13px; color: #334155; }
+        .mph-outinv-grid .form-control, .mph-outinv-grid .form-select { height: 32px; font-size: 13px; }
+        .mph-outinv-hint { margin-top: 10px; font-size: 13px; color: #b91c1c; }
+      </style>
+      <div class="mph-outinv-wrap">
+        <div class="mph-outinv-grid">
+          <label>\u5c0d\u8c61</label>
+          <input id="oiCustomerId" class="form-control" value="${escapeHtml(customerId)}" readonly />
+          <label>\u4ed8\u6b3e\u689d\u4ef6</label>
+          <input id="oiPayWayCode" class="form-control" value="${escapeHtml(payWayText)}" readonly />
+          <label>\u767c\u7968\u865f\u78bc</label>
+          <input id="oiInvoiceNum" class="form-control" value="${escapeHtml(data.invoiceNum || "")}" />
+          <label>\u767c\u7968\u7a2e\u985e</label>
+          <select id="oiInvoiceType" class="form-select" disabled>${invoiceTypeOptions}</select>
+          <label>\u767c\u7968\u65e5\u671f</label>
+          <input id="oiInvoiceDate" type="date" class="form-control" value="${toDateInputValue(data.invoiceDate)}" />
+          <label>\u9810\u8a08\u4ed8\u6b3e\u65e5</label>
+          <input id="oiExpectDate" type="date" class="form-control" value="${toDateInputValue(data.expectDate)}" />
+        </div>
+        ${showHint ? '<div class="mph-outinv-hint">\u672c\u5ee0\u5546\u672a\u8a2d\u5b9a\u300cToNTD=0\u300d</div>' : ""}
+      </div>`;
+
+    const result = await Swal.fire({
+      title: "\u5916\u5ee0\u767c\u7968\u8f38\u5165",
+      html,
+      width: 520,
+      showCancelButton: true,
+      confirmButtonText: MSG_OK,
+      cancelButtonText: MSG_CANCEL,
+      focusConfirm: false,
+      didOpen: () => {
+        const invDate = document.getElementById("oiInvoiceDate");
+        const expDate = document.getElementById("oiExpectDate");
+        const recalcExpectDate = async () => {
+          const useId = readUseId();
+          const v = invDate?.value || "";
+          if (!useId || !customerId || !payWayCode || !v) return;
+          const url = `/api/MPHdOutInvoice/ExpectDate?useId=${encodeURIComponent(useId)}&invoiceDate=${encodeURIComponent(toSpDate(v))}&payWayCode=${encodeURIComponent(String(payWayCode))}&customerId=${encodeURIComponent(customerId)}`;
+          const r = await fetchJson(url);
+          if (r.ok && r.expectDate && expDate) expDate.value = toDateInputValue(r.expectDate);
+        };
+        invDate?.addEventListener("change", () => { recalcExpectDate().catch(() => {}); });
+      },
+      preConfirm: () => {
+        const invoiceNumEl = document.getElementById("oiInvoiceNum");
+        const invoiceTypeEl = document.getElementById("oiInvoiceType");
+        const invoiceDateEl = document.getElementById("oiInvoiceDate");
+        const expectDateEl = document.getElementById("oiExpectDate");
+        const invoiceNum = (invoiceNumEl?.value || "").trim();
+        const invoiceDate = (invoiceDateEl?.value || "").trim();
+        const expectDate = (expectDateEl?.value || "").trim();
+        if (!invoiceNum) {
+          Swal.showValidationMessage("\u8acb\u8f38\u5165\u767c\u7968\u865f\u78bc");
+          return false;
+        }
+        if (!invoiceDate) {
+          Swal.showValidationMessage("\u8acb\u8f38\u5165\u767c\u7968\u65e5\u671f");
+          return false;
+        }
+        if (!expectDate) {
+          Swal.showValidationMessage("\u8acb\u8f38\u5165\u9810\u8a08\u4ed8\u6b3e\u65e5");
+          return false;
+        }
+        return {
+          invoiceNum,
+          invoiceType: (invoiceTypeEl?.value || "").trim() || String(invoiceType || ""),
+          invoiceDate: toSpDate(invoiceDate),
+          expectDate: toSpDate(expectDate)
+        };
+      }
+    });
+    if (!result.isConfirmed || !result.value) return;
+
+    const save = await fetchJson("/api/MPHdOutInvoice/Save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        paperNum,
+        invoiceNum: result.value.invoiceNum,
+        invoiceType: result.value.invoiceType,
+        invoiceDate: result.value.invoiceDate,
+        expectDate: result.value.expectDate,
+        userId: readUserId()
+      })
+    });
+    if (!save.ok) return Swal.fire({ icon: "error", title: MSG_SAVE_FAIL, text: save.error || "" });
+
+    await Swal.fire({ icon: "success", title: `\u5132\u5b58\u5b8c\u6210: ${result.value.invoiceNum}` });
+    if (typeof window.__refreshHeaderData === "function") {
+      try { await window.__refreshHeaderData(); } catch {}
+    }
+    if (typeof window.__refreshMultiTab === "function") {
+      try { await window.__refreshMultiTab(); } catch {}
+    }
+  };
+
+  window.ActionRailCustomHandlers["PO000015"] = window.ActionRailCustomHandlers["PO000015"] || {};
+  window.ActionRailCustomHandlers["PO000015"]["btnC2"] = outCostSpare;
+  window.ActionRailCustomHandlers["PO000015"]["btnC4"] = outVendorInvoice;
+})();
+</script>

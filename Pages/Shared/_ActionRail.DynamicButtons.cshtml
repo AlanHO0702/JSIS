@@ -507,22 +507,8 @@
   };
 
   const isDateParam = (p) => {
-    const mask = getParamEditMask(p);
-    if (hasDateOnlyMask(mask)) return true;
-
-    const flag = Number(p?.iDateTime ?? p?.IDateTime ?? p?.isDateTime ?? p?.IsDateTime ?? 0);
-    if (flag === 1) return true;
-
-    const controlType = Number(p?.ControlType ?? p?.controlType ?? 0);
-    if (controlType === 1) return false;
-
-    const paramName = (p?.ParamName ?? p?.paramName ?? "").toString().toLowerCase();
-    const displayName = (p?.DisplayName ?? p?.displayName ?? "").toString().toLowerCase();
-
-    if (paramName.includes("date")) return true;
-    if (displayName.includes("日期")) return true;
-
-    return false;
+    // 只依據 CURdOCXSearchParams.EditMask 是否含 yyyy/mm/dd 判斷
+    return hasDateOnlyMask(getParamEditMask(p));
   };
 
   const paperSearch = (() => {
@@ -1924,10 +1910,11 @@
     };
 
     const runCount = async (row) => {
+      const needQnty = (needQntyEl?.value ?? state.needQnty ?? "").toString().trim();
       const payload = {
         spId: state.spId,
         lotNum: getRowValue(row, "LotNum"),
-        needQnty: state.needQnty,
+        needQnty,
         stockId: getRowValue(row, "StockId"),
         posId: getRowValue(row, "PosId"),
         roundToUom: roundEl?.checked ? 1 : 0
@@ -1940,9 +1927,10 @@
     };
 
     const runAutoCount = async () => {
+      const needQnty = (needQntyEl?.value ?? state.needQnty ?? "").toString().trim();
       const payload = {
         spId: state.spId,
-        needQnty: state.needQnty,
+        needQnty,
         stockId: (stockEl?.value || "").trim(),
         posId: (posEl?.value || "").trim(),
         uom: (uomEl?.value || "").trim(),
@@ -2067,6 +2055,7 @@
           await fetchRows();
           return;
         }
+        await saveRow(row, { inUse: 1 });
         await runCount(row);
         await fetchRows();
         return;
@@ -2263,7 +2252,11 @@
       const args = {};
       if (masterRow) args.masterRow = masterRow;
       if (detailRow) args.detailRow = detailRow;
-      const resp = await fetch('/api/StoredProc/execByButton', {
+      const currentUserId = (window._userId || localStorage.getItem("erpLoginUserId") || localStorage.getItem("userId") || "").toString().trim();
+      const currentUseId = (window._useId || localStorage.getItem("erpUseId") || localStorage.getItem("useId") || window.DEFAULT_USEID || "").toString().trim();
+      if (currentUserId) args.userId = currentUserId;
+      if (currentUseId) args.useId = currentUseId;
+      const resp = await fetch('/api/StoredProc/execByButton', withJwtHeaders({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2272,7 +2265,7 @@
           paperNum: ctx.paperNum,
           args: Object.keys(args).length > 0 ? args : undefined
         })
-      });
+      }));
       const raw = await resp.text();
       let data; try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
       if (resp.ok && data.ok) {

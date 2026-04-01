@@ -176,6 +176,10 @@
         const table = (r.lookupTable || r.LookupTable || '').toString();
         const key = (r.lookupKeyField || r.LookupKeyField || '').toString();
         const result = (r.lookupResultField || r.LookupResultField || '').toString();
+        const cond1Field = (r.lookupCond1Field || r.LookupCond1Field || '').toString().trim();
+        const cond1Source = (r.lookupCond1ResultField || r.LookupCond1ResultField || '').toString().trim();
+        const cond2Field = (r.lookupCond2Field || r.LookupCond2Field || '').toString().trim();
+        const cond2Source = (r.lookupCond2ResultField || r.LookupCond2ResultField || '').toString().trim();
         const ocxTable = (r.ocxLKTableName || r.OCXLKTableName || '').toString();
         const ocxResult = (r.ocxLKResultName || r.OCXLKResultName || '').toString();
         const ocxKeyField = (r.keyFieldName || r.KeyFieldName || '').toString();
@@ -186,7 +190,10 @@
           try { keyMaps = JSON.parse(keyMapsRaw) || []; } catch { keyMaps = []; }
         }
         if (table && key && result) {
-          map.set(field.toLowerCase(), { field, table, key, result, keySelf: '', source: 'lookup', keyMaps });
+          map.set(field.toLowerCase(), {
+            field, table, key, result, keySelf: '', source: 'lookup', keyMaps,
+            cond1Field, cond1Source, cond2Field, cond2Source
+          });
           return;
         }
         if (ocxTable && ocxKeyField && ocxResult) {
@@ -413,6 +420,12 @@
       filters.push({ Field: child, Op: '=', Value: String(v) });
     });
 
+    const hasPaperNumFilter = filters.some(f => normalizeFieldKey(f.Field) === 'papernum');
+    const paperNumFromRow = getValueCaseInsensitive(rowData, 'PaperNum');
+    if (!hasPaperNumFilter && paperNumFromRow !== undefined && paperNumFromRow !== null && String(paperNumFromRow).trim() !== '') {
+      filters.push({ Field: 'PaperNum', Op: '=', Value: String(paperNumFromRow) });
+    }
+
     // 若 mdKey 沒設定，至少用 PaperNum 兜底（避免整表撈）
     if (filters.length === 0) {
       const pn = getValueCaseInsensitive(rowData, 'PaperNum');
@@ -582,6 +595,66 @@
     return !!btn && (btn.textContent || '').trim() === '保留';
   }
 
+  const DEFAULT_KEY_CANDIDATES = ['PaperNum', 'Item', 'SeqNum', 'Seq', 'SerialNum', 'LineNum', 'LineId', 'RowNo'];
+
+  function hasMeaningfulValue(v) {
+    if (v === undefined || v === null) return false;
+    if (typeof v === 'string') return v.trim() !== '';
+    return true;
+  }
+
+  function getParentRowData() {
+    const parentTabId = (cfg.ParentTabId || '').toString();
+    if (!parentTabId) return null;
+    return window._multiTabSelectedRows?.[parentTabId] || null;
+  }
+
+  function getConfiguredChildKeyFields() {
+    const names = [];
+    (cfg.KeyMap || []).forEach(km => {
+      const child = km.ChildField || km.childField || km.Detail || km.Child;
+      if (child) names.push(child);
+    });
+    return Array.from(new Set(names));
+  }
+
+  function fillMissingKeyFromSource(targetRow, sourceRow, keyName) {
+    if (!targetRow || !sourceRow || !keyName) return;
+    if (hasMeaningfulValue(targetRow[keyName])) return;
+    const v = getValueCaseInsensitive(sourceRow, keyName);
+    if (hasMeaningfulValue(v)) targetRow[keyName] = v;
+  }
+
+  function enrichRowWithKnownKeys(targetRow, sourceRow, parentRow) {
+    if (!targetRow) return;
+
+    getConfiguredChildKeyFields().forEach(key => {
+      fillMissingKeyFromSource(targetRow, sourceRow, key);
+    });
+
+    DEFAULT_KEY_CANDIDATES.forEach(key => {
+      fillMissingKeyFromSource(targetRow, sourceRow, key);
+    });
+
+    (cfg.KeyMap || []).forEach(km => {
+      const parent = km.ParentField || km.parentField || km.Parent || km.Master;
+      const child = km.ChildField || km.childField || km.Detail || km.Child;
+      if (!parent || !child) return;
+      if (hasMeaningfulValue(targetRow[child])) return;
+      const v = getValueCaseInsensitive(parentRow, parent);
+      if (hasMeaningfulValue(v)) targetRow[child] = v;
+    });
+
+    if (!hasMeaningfulValue(targetRow.PaperNum)) {
+      const parentPn = getValueCaseInsensitive(parentRow, 'PaperNum');
+      if (hasMeaningfulValue(parentPn)) targetRow.PaperNum = parentPn;
+    }
+    if (!hasMeaningfulValue(targetRow.PaperNum)) {
+      const winPn = (window._paperNum || '').toString().trim();
+      if (winPn) targetRow.PaperNum = winPn;
+    }
+  }
+
   const LOOKUP_EMPTY_LABEL = '--請選擇--';
 
   function buildLookupList(field, lookupMap, currentKey) {
@@ -594,7 +667,7 @@
       item.type = 'button';
       item.className = 'lookup-dropdown-item';
       item.dataset.key = key == null ? '' : String(key);
-      item.textContent = label == null ? String(key ?? '') : String(label);
+      item.textContent = (key == null || key === '') ? String(label ?? '') : (label == null ? String(key) : `${key} ${label}`);
       if ((currentKey ?? '') === (key ?? '')) item.classList.add('is-selected');
       list.appendChild(item);
     };
@@ -686,6 +759,7 @@
 
       if (tr && tr.dataset.state !== 'added') tr.dataset.state = 'modified';
       window.__unsavedChanges = true;
+      if (typeof window.updateSaveCheckButtons === 'function') window.updateSaveCheckButtons();
       try {
         edit.dispatchEvent(new Event('input', { bubbles: true }));
         edit.dispatchEvent(new Event('change', { bubbles: true }));
@@ -716,6 +790,58 @@
     positionDropdown(list, td);
     document.addEventListener('mousedown', onDocDown, true);
     window.addEventListener('resize', onResize, true);
+  }
+
+  function readRowLookupSourceValue(tr, sourceField) {
+    if (!tr || !sourceField) return '';
+    const inp = Array.from(tr.querySelectorAll('input.cell-edit[data-field]'))
+      .find(i => (i.dataset.field || '').toLowerCase() === sourceField.toLowerCase());
+    return (inp?.value ?? '').toString().trim();
+  }
+
+  function buildLookupMapFromRows(data) {
+    const map = new Map();
+    (data || []).forEach(row => {
+      const key = row.key == null ? '' : String(row.key);
+      if (key === '') return;
+      const labelParts = Object.keys(row)
+        .filter(p => p.startsWith('result'))
+        .map(p => row[p])
+        .filter(v => v != null && typeof v !== 'object' && String(v).trim() !== '')
+        .map(v => String(v));
+      const deduped = labelParts.filter(v => v.trim() !== key.trim());
+      const label = (deduped.length ? deduped : labelParts).join(' - ');
+      const trimmed = key.trim();
+      map.set(key, label || key);
+      if (trimmed && trimmed !== key) map.set(trimmed, label || trimmed);
+    });
+    return map;
+  }
+
+  async function resolveLookupMapForCell(td, fieldLower, lookupMeta, lookupMaps) {
+    const fallbackMap = lookupMaps.get(fieldLower);
+    const meta = lookupMeta.get(fieldLower);
+    if (!meta || (!meta.cond1Field && !meta.cond2Field)) return fallbackMap;
+
+    const tr = td?.closest('tr');
+    if (!tr) return fallbackMap;
+
+    const cond1Value = readRowLookupSourceValue(tr, meta.cond1Source);
+    const cond2Value = readRowLookupSourceValue(tr, meta.cond2Source);
+
+    let url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(meta.table)}&key=${encodeURIComponent(meta.key)}&result=${encodeURIComponent(meta.result)}`;
+    if (meta.cond1Field && cond1Value) url += `&cond1Field=${encodeURIComponent(meta.cond1Field)}&cond1Value=${encodeURIComponent(cond1Value)}`;
+    if (meta.cond2Field && cond2Value) url += `&cond2Field=${encodeURIComponent(meta.cond2Field)}&cond2Value=${encodeURIComponent(cond2Value)}`;
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return fallbackMap;
+      const data = await res.json();
+      const filteredMap = buildLookupMapFromRows(data);
+      return filteredMap.size > 0 ? filteredMap : fallbackMap;
+    } catch {
+      return fallbackMap;
+    }
   }
 
   function initDatePickers(scope) {
@@ -773,8 +899,12 @@
   }
 
   function buildKeyFieldsFromRow(row) {
-    const candidates = ['PaperNum', 'Item', 'SeqNum', 'Seq', 'SerialNum', 'LineNum', 'LineId', 'RowNo'];
-    return candidates.filter(k => row && row[k] !== undefined);
+    const ordered = [
+      ...getConfiguredChildKeyFields(),
+      ...DEFAULT_KEY_CANDIDATES
+    ];
+    return ordered.filter((k, idx) => ordered.findIndex(x => x.toLowerCase() === k.toLowerCase()) === idx)
+      .filter(k => row && hasMeaningfulValue(row[k]));
   }
 
   function isBlankRow(tr) {
@@ -932,13 +1062,13 @@
             window.__updateToolbarCounts();
           }
         });
-        tbody.addEventListener('dblclick', (e) => {
+        tbody.addEventListener('dblclick', async (e) => {
           const td = e.target.closest('td');
           if (!td || !tbody.contains(td)) return;
           const field = td.dataset.lookupField;
           if (!field) return;
           const fieldLower = field.toLowerCase();
-          const map = lookupMaps.get(fieldLower);
+          const map = await resolveLookupMapForCell(td, fieldLower, lookupMeta, lookupMaps);
           if (!map || map.size === 0) return;
           openLookupDropdown(td, field, map);
         });
@@ -1182,13 +1312,13 @@
           window.__updateToolbarCounts();
         }
       });
-      tbody.addEventListener('dblclick', (e) => {
+      tbody.addEventListener('dblclick', async (e) => {
         const td = e.target.closest('td');
         if (!td || !tbody.contains(td)) return;
         const field = td.dataset.lookupField;
         if (!field) return;
         const fieldLower = field.toLowerCase();
-        const map = lookupMaps.get(fieldLower);
+        const map = await resolveLookupMapForCell(td, fieldLower, lookupMeta, lookupMaps);
         if (!map || map.size === 0) return;
         openLookupDropdown(td, field, map);
       });
@@ -1243,19 +1373,29 @@
       const t = container?.querySelector('tbody');
       if (!t) return null;
       const changes = [];
+      const parentRow = getParentRowData();
+      const configuredChildKeySet = new Set(getConfiguredChildKeyFields().map(k => k.toLowerCase()));
       t.querySelectorAll('tr[data-state="modified"], tr[data-state="added"]').forEach(tr => {
+        const idx = parseInt(tr.dataset.idx || '-1', 10);
+        const sourceRow = (!Number.isNaN(idx) && rows[idx]) ? rows[idx] : null;
         const row = {};
-        const keyCandidates = new Set(['papernum', 'item', 'seqnum', 'seq', 'serialnum', 'linenum', 'lineid', 'rowno']);
+        enrichRowWithKnownKeys(row, sourceRow, parentRow);
+        const keyCandidates = new Set(DEFAULT_KEY_CANDIDATES.map(x => x.toLowerCase()));
         const isAdded = (tr.dataset.state || '').toString().toLowerCase() === 'added';
+        let changed = !!isAdded;
         tr.querySelectorAll('input.cell-edit[data-field]').forEach(inp => {
           const field = inp.dataset.field || '';
           if (!field) return;
           const currentValue = getEditorValue(inp);
           const initValue = (inp.dataset.init ?? '').toString().trim();
-          const isKey = keyCandidates.has(field.toLowerCase());
+          const fieldLower = field.toLowerCase();
+          const isKey = keyCandidates.has(fieldLower) || configuredChildKeySet.has(fieldLower);
           if (!isAdded && !isKey && currentValue === initValue) return;
+          if (!isAdded && currentValue !== initValue) changed = true;
           row[field] = currentValue;
         });
+        enrichRowWithKnownKeys(row, sourceRow, parentRow);
+        if (!changed) return;
         if (Object.keys(row).length > 0) changes.push(row);
       });
       if (changes.length === 0) return null;
@@ -1364,13 +1504,9 @@
       });
 
       const cached = window._paper3lSubDetailSelectedRows?.["1"];
+      const parentRow = getParentRowData();
+      enrichRowWithKnownKeys(row, cached, parentRow);
       let keyFields = buildKeyFieldsFromRow(row);
-      if (keyFields.length === 0 && cached) {
-        keyFields = buildKeyFieldsFromRow(cached);
-        keyFields.forEach(k => {
-          if (row[k] == null || row[k] === '') row[k] = cached[k];
-        });
-      }
       if (keyFields.length === 0) return { handled: true, ok: false, reason: 'no-keys' };
 
       const { isConfirmed } = await Swal.fire({

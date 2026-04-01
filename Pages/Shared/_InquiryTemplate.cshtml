@@ -52,12 +52,7 @@
     gap: 6px;
     overflow-y: auto;
   }
-  .inq-rail-title {
-    font-weight: 700;
-    color: #1d3b6b;
-    font-size: 0.9rem;
-    padding: 4px 2px;
-  }
+
   .inq-rail .fab,
   .inq-rail-btn {
     width: 100%;
@@ -114,12 +109,7 @@
     border-radius: 10px;
     background: var(--section-bg-toolbar, #f6f7f9);
   }
-  .inq-title {
-    font-weight: 700;
-    color: #1d3b6b;
-    letter-spacing: 1px;
-    margin-right: 6px;
-  }
+
   .inq-header .inq-toolbar {
     margin-left: auto;
     display: flex;
@@ -216,6 +206,51 @@
     padding-right: 18px;
     background: #fff;
     color: #374151;
+  }
+  .inq-lookup-wrapper {
+    display: flex;
+    align-items: stretch;
+    overflow: hidden;
+  }
+  .inq-lookup-wrapper .inq-select {
+    flex: 0 0 auto;
+    position: relative;
+    display: inline-flex;
+    align-items: stretch;
+    height: 100%;
+    overflow: hidden;
+    margin: 0;
+  }
+  .inq-lookup-wrapper .inq-lookup-display {
+    height: 100%;
+    margin: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    box-sizing: border-box;
+  }
+  .inq-name-btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    background: #fff;
+    border: 1px solid #ced4da;
+    border-left: 0;
+    border-radius: 0 4px 4px 0;
+    font-size: 0.72rem;
+    line-height: normal;
+    color: #374151;
+    text-align: left;
+    padding: 0 6px;
+    margin: 0;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    align-self: stretch;
+  }
+  .inq-name-btn:hover {
+    background: #f3f7ff;
   }
   .compact-check .form-check-input {
     width: 18px;
@@ -356,14 +391,15 @@
     gap: 1px;
   }
   .inq-query .inq-label {
-    min-width: 52px;
+    min-width: 0;
     font-size: 0.72rem;
   }
   .inq-query .inq-input {
     height: auto;
     font-size: 0.72rem;
     padding: 0 4px;
-    line-height: 1;
+    line-height: normal;
+    margin: 0;
   }
   .inq-input-wide {
     width: 240px;
@@ -398,6 +434,13 @@
   .inq-query .inq-form.inq-form--auto-grid-active .inq-row > .inq-select,
   .inq-query .inq-form.inq-form--auto-grid-active .inq-row > .compact-check {
     min-width: 0;
+  }
+
+  .inq-query .form-control {
+    min-height: 0;
+  }
+  .inq-query input[type="date"][value=""]::-webkit-datetime-edit {
+    color: transparent;
   }
 
   /* === Loading 遮罩 === */
@@ -485,10 +528,7 @@
   @if (showRail)
   {
     <aside class="inq-rail">
-      @if (!string.IsNullOrWhiteSpace(railTitle))
-      {
-        <div class="inq-rail-title">@railTitle</div>
-      }
+
       @if (hasRailSection)
       {
         @RenderSection("InqRail", required: false)
@@ -510,10 +550,7 @@
       else
       {
         <div class="inq-header">
-          @if (!string.IsNullOrWhiteSpace(title))
-          {
-            <div class="inq-title">@title</div>
-          }
+
           <div id="singleGridCountBox" class="inq-count-box mode-view">
             <div id="singleGridMode" class="count-line">瀏覽模式</div>
             <div id="singleGridCount" class="count-line">0 / 0</div>
@@ -525,10 +562,173 @@
       }
     }
 
+    @{
+      // 自動渲染查詢表單（用絕對定位座標）
+      List<CURdTableField> autoQFields = new();
+      Dictionary<string, object?> autoDefaults = new(StringComparer.OrdinalIgnoreCase);
+      Dictionary<string, string> autoParamMap = new(StringComparer.OrdinalIgnoreCase);
+      int autoFormHeight = 22;
+      string autoPageSize = "", autoSpId = "", autoItemId = "";
+      if (!IsSectionDefined("InqQuery"))
+      {
+        try
+        {
+          var rawQ = (IEnumerable<CURdTableField>)(Model.QueryDictFields ?? new List<CURdTableField>());
+          autoQFields = rawQ
+              .Where(f => !string.IsNullOrWhiteSpace(f.FieldName) && f.FieldName!.StartsWith("@") && (f.Visible ?? 1) != 0)
+              .OrderBy(f => f.iLayRow ?? int.MaxValue).ThenBy(f => f.iLayColumn ?? int.MaxValue).ThenBy(f => f.SerialNum ?? int.MaxValue)
+              .ToList();
+          autoDefaults = (Dictionary<string, object?>)Model.DefaultQueryValues;
+          autoParamMap = (Dictionary<string, string>)Model.ParamNameByField;
+          if (autoQFields.Count > 0)
+            autoFormHeight = autoQFields.Max(f => Math.Max(
+                (f.iLabTop ?? 0) + (f.iLabHeight ?? 22),
+                (f.iFieldTop ?? 0) + (f.iFieldHeight ?? 22)));
+        }
+        catch { }
+        try { autoPageSize = Model.PageSize?.ToString() ?? ""; } catch { }
+        try { autoSpId = Model.SpId?.ToString() ?? ""; } catch { }
+        try { autoItemId = (Model.ResolvedItemId ?? Model.ItemIdParam ?? "").ToString(); } catch { }
+      }
+
+      string AutoQLabel(CURdTableField f) =>
+          string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName!.TrimStart('@') : f.DisplayLabel!;
+
+      string AutoQInputType(CURdTableField f)
+      {
+          if ((f.DataType ?? "").ToLowerInvariant().Contains("date")) return "date";
+          if ((f.FieldName ?? "").ToLowerInvariant().Contains("date")) return "date";
+          if ((f.DisplayLabel ?? "").Contains("日期")) return "date";
+          return "text";
+      }
+
+      object? AutoQDefault(string name)
+      {
+          if (autoDefaults.TryGetValue(name, out var v)) return v;
+          if (autoParamMap.TryGetValue(name, out var p) && autoDefaults.TryGetValue(p, out var v2)) return v2;
+          return null;
+      }
+
+      string AutoQValue(string name, string type)
+      {
+          var qs = Context.Request.Query[name].ToString();
+          if (!string.IsNullOrWhiteSpace(qs)) return qs;
+          var dv = AutoQDefault(name);
+          if (dv == null) return "";
+          if (dv is DateTime dt) return type == "date" ? dt.ToString("yyyy-MM-dd") : dt.ToString("yyyy/MM/dd");
+          return dv.ToString() ?? "";
+      }
+
+      bool AutoQChecked(string name)
+      {
+          var qs = Context.Request.Query[name].ToString();
+          if (!string.IsNullOrWhiteSpace(qs))
+              return qs == "1" || qs.Equals("true", StringComparison.OrdinalIgnoreCase) || qs.Equals("y", StringComparison.OrdinalIgnoreCase);
+          var dv = AutoQDefault(name);
+          if (dv is bool b) return b;
+          if (dv is int i) return i == 1;
+          if (dv is short s) return s == 1;
+          if (dv is byte by) return by == 1;
+          var str = dv?.ToString();
+          return str == "1" || string.Equals(str, "true", StringComparison.OrdinalIgnoreCase) || string.Equals(str, "y", StringComparison.OrdinalIgnoreCase);
+      }
+
+      bool AutoIsCheckbox(CURdTableField f)
+      {
+          if ((f.ComboStyle ?? 0) == 1) return true;
+          var dt = (f.DataType ?? "").ToLowerInvariant();
+          if (dt.Contains("bit")) return true;
+          if (dt.Contains("tinyint") || dt.Contains("int"))
+          {
+              var n = f.FieldName?.TrimStart('@') ?? "";
+              if (n.StartsWith("i", StringComparison.OrdinalIgnoreCase) || n.StartsWith("b", StringComparison.OrdinalIgnoreCase))
+                  return true;
+          }
+          return false;
+      }
+
+      bool AutoIsSelect(CURdTableField f) =>
+          !string.IsNullOrWhiteSpace(f.Items) || !string.IsNullOrWhiteSpace(f.LookupTable);
+
+      bool AutoDisableLookup(CURdTableField f)
+      {
+          var n = (f.FieldName ?? "").TrimStart('@');
+          return n.Equals("sPartNum", StringComparison.OrdinalIgnoreCase) || n.Equals("sEPartNum", StringComparison.OrdinalIgnoreCase);
+      }
+    }
+
     @if (IsSectionDefined("InqQuery"))
     {
       <section class="inq-section inq-query">
         @RenderSection("InqQuery", required: false)
+      </section>
+    }
+    else if (autoQFields.Count > 0)
+    {
+      <section class="inq-section inq-query">
+        <form id="inqForm" method="get" style="display:block;">
+          @Html.AntiForgeryToken()
+          <div style="position:relative; height:@(autoFormHeight)px;">
+            @foreach (var f in autoQFields)
+            {
+              var name = f.FieldName?.TrimStart('@') ?? "";
+              var type = AutoQInputType(f);
+              var cur = AutoQValue(name, type);
+              var codeId = $"inq_{name}";
+              var labTop    = f.iLabTop    ?? 0;
+              var labLeft   = f.iLabLeft   ?? 0;
+              var labWidth  = f.iLabWidth  ?? 90;
+              var labHeight = f.iLabHeight ?? 22;
+              var fldTop    = f.iFieldTop    ?? 0;
+              var fldLeft   = f.iFieldLeft   ?? 0;
+              var fldWidth  = f.iFieldWidth  ?? 160;
+              var fldHeight = f.iFieldHeight ?? 22;
+              <label class="inq-label" style="position:absolute; top:@(labTop)px; left:@(labLeft)px; width:@(labWidth)px; height:@(labHeight)px; line-height:@(labHeight)px;">@AutoQLabel(f)</label>
+              if (AutoIsCheckbox(f))
+              {
+                <div class="form-check compact-check" style="position:absolute; top:@(fldTop)px; left:@(fldLeft)px; width:@(fldWidth)px; height:@(fldHeight)px; display:flex; align-items:center;">
+                  <input class="form-check-input" type="checkbox" name="@name" value="1" @(AutoQChecked(name) ? "checked" : "") />
+                </div>
+              }
+              else if (AutoIsSelect(f) && !AutoDisableLookup(f))
+              {
+                var lookupTop = Math.Max(fldTop, labTop);
+                var codeW = (f.ComboTextSize.HasValue && f.ComboTextSize.Value > 0) ? f.ComboTextSize.Value : (int)(fldWidth * 0.45);
+                <div class="inq-lookup-wrapper" style="position:absolute; top:@(lookupTop)px; left:@(fldLeft)px; width:@(fldWidth)px; height:@(fldHeight)px;">
+                  <input type="hidden" id="@codeId" name="@name" class="inq-select-code-hidden" value="@cur" />
+                  <span class="inq-select" style="width:@(codeW)px; height:@(fldHeight)px;">
+                    <input type="text" class="form-control form-control-sm inq-input inq-lookup-display"
+                           style="width:100%; height:@(fldHeight)px;"
+                           value="" autocomplete="off"
+                           data-code-target="@codeId"
+                           data-items="@f.Items"
+                           data-lookup-table="@f.LookupTable"
+                           data-lookup-key="@((f.LookupKeyField ?? "").Replace(" ", ""))"
+                           data-lookup-result="@((f.LookupResultField ?? "").Replace(" ", ""))"
+                           data-cond1-field="@f.LookupCond1Field"
+                           data-cond1-source="@f.LookupCond1ResultField"
+                           data-cond2-field="@f.LookupCond2Field"
+                           data-cond2-source="@f.LookupCond2ResultField"
+                           data-selected="@cur" />
+                    <button type="button" class="inq-select-btn" aria-label="開啟清單">&#9662;</button>
+                  </span>
+                  <button type="button" class="inq-name-btn" data-code-target="@codeId"
+                          data-bs-toggle="modal" data-bs-target="#inqNameSearchModal"
+                          style="height:@(fldHeight)px;"></button>
+                </div>
+              }
+              else
+              {
+                <input type="@type" name="@name" class="form-control form-control-sm inq-input"
+                       style="position:absolute; top:@(fldTop)px; left:@(fldLeft)px; width:@(fldWidth)px; height:@(fldHeight)px;"
+                       value="@cur" />
+              }
+            }
+          </div>
+          @if (!string.IsNullOrWhiteSpace(autoPageSize)) { <input type="hidden" name="page" value="1" /><input type="hidden" name="pageSize" value="@autoPageSize" /> }
+          @if (!string.IsNullOrWhiteSpace(autoSpId)) { <input type="hidden" name="spId" value="@autoSpId" /> }
+          @if (!string.IsNullOrWhiteSpace(autoItemId)) { <input type="hidden" name="itemId" value="@autoItemId" /> }
+        </form>
       </section>
     }
 
@@ -568,6 +768,39 @@
     }
     catch { }
 }
+
+<!-- Lookup 名稱查詢 Modal -->
+<div class="modal fade" id="inqNameSearchModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable" style="max-width:400px;">
+    <div class="modal-content" style="font-size:0.78rem;">
+      <div class="modal-header py-1 px-2">
+        <span class="modal-title fw-bold" style="font-size:0.8rem;">名稱查詢</span>
+        <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal" style="font-size:0.6rem;"></button>
+      </div>
+      <div class="modal-body p-1">
+        <div class="d-flex gap-1 mb-1">
+          <input type="text" class="form-control form-control-sm" id="inqNameSearchCode" placeholder="代碼篩選" style="font-size:0.75rem;">
+          <input type="text" class="form-control form-control-sm" id="inqNameSearchName" placeholder="名稱篩選" style="font-size:0.75rem;">
+        </div>
+        <div style="max-height:280px; overflow-y:auto;">
+          <table class="table table-sm table-hover mb-0" id="inqNameSearchTable" style="font-size:0.75rem;">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th style="width:35%; padding:2px 4px;">代碼</th>
+                <th style="padding:2px 4px;">名稱</th>
+              </tr>
+            </thead>
+            <tbody id="inqNameSearchBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer py-1 px-2">
+        <button type="button" class="btn btn-primary btn-sm py-0 px-2" id="inqNameSearchConfirm" style="font-size:0.75rem;">確定</button>
+        <button type="button" class="btn btn-secondary btn-sm py-0 px-2" data-bs-dismiss="modal" style="font-size:0.75rem;">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 @await Html.PartialAsync("~/Pages/Shared/_FieldDictModal.cshtml", new List<CURdTableField>(), ViewData)
 <script src="~/js/fieldDictModal.js" asp-append-version="true"></script>
@@ -1138,6 +1371,13 @@
       });
     };
 
+    // 從 "code - name" 格式的 label 中取出名稱部分
+    const nameFromLabel = (val, lbl) => {
+      if (!lbl) return val || "";
+      const pfx = String(val || "").trim() + " - ";
+      return lbl.startsWith(pfx) ? lbl.slice(pfx.length) : lbl;
+    };
+
     const buildCondKey = (el) => {
       const tbl = el.dataset.lookupTable || "";
       const key = el.dataset.lookupKey || "";
@@ -1216,7 +1456,11 @@
         return;
       }
       const hit = (options || []).find(o => String(o.value).trim() === codeVal);
-      displayEl.value = hit ? (hit.label || hit.value) : codeVal;
+      const fullLabel = hit ? (hit.label || hit.value) : codeVal;
+      const inWrapper = !!displayEl.dataset.codeTarget;
+      displayEl.value = inWrapper ? codeVal : fullLabel;
+      const nameBtn = displayEl.closest(".inq-lookup-wrapper")?.querySelector(".inq-name-btn");
+      if (nameBtn) nameBtn.textContent = nameFromLabel(codeVal, fullLabel);
     };
 
     // --- 建議下拉元件 ---
@@ -1256,15 +1500,19 @@
         return;
       }
 
+      const inWrapper = !!el.dataset.codeTarget;
       filtered.slice(0, 200).forEach(o => {
+        const displayLabel = nameFromLabel(o.value, o.label);
         const itm = document.createElement("div");
         itm.className = "inq-suggest-item";
-        itm.innerHTML = '<div class="inq-suggest-code">' + o.value + '</div><div class="inq-suggest-label">' + o.label + '</div>';
+        itm.innerHTML = '<div class="inq-suggest-code">' + o.value + '</div><div class="inq-suggest-label">' + displayLabel + '</div>';
         itm.addEventListener("mousedown", (ev) => {
           ev.preventDefault();
           const codeInput = getCodeInput(el);
           if (codeInput) codeInput.value = o.value;
-          el.value = o.label || o.value;
+          el.value = inWrapper ? o.value : (o.label || o.value);
+          const nameBtn = el.closest(".inq-lookup-wrapper")?.querySelector(".inq-name-btn");
+          if (nameBtn) nameBtn.textContent = nameFromLabel(o.value, o.label);
           hideSuggest();
         });
         suggest.appendChild(itm);
@@ -1332,7 +1580,10 @@
         });
         if (hit) {
           codeInput.value = hit.value;
-          el.value = hit.label || hit.value;
+          const inWrapper = !!el.dataset.codeTarget;
+          el.value = inWrapper ? hit.value : (hit.label || hit.value);
+          const nameBtn = el.closest(".inq-lookup-wrapper")?.querySelector(".inq-name-btn");
+          if (nameBtn) nameBtn.textContent = nameFromLabel(hit.value, hit.label);
         } else {
           syncDisplayValue(el, opts);
         }
@@ -1356,6 +1607,79 @@
 
     suggest.addEventListener("mousedown", () => {
       keepSuggestUntil = Date.now() + 250;
+    });
+
+    // --- Lookup 名稱查詢 Modal ---
+    let _inqNsAllRows = [], _inqNsCodeInput = null, _inqNsNameBtn = null;
+
+    const inqNsModal = document.getElementById("inqNameSearchModal");
+    const inqNsCodeFilter = document.getElementById("inqNameSearchCode");
+    const inqNsNameFilter = document.getElementById("inqNameSearchName");
+    const inqNsBody = document.getElementById("inqNameSearchBody");
+
+    const renderInqNsRows = () => {
+      const cq = (inqNsCodeFilter?.value || "").toLowerCase();
+      const nq = (inqNsNameFilter?.value || "").toLowerCase();
+      const rows = _inqNsAllRows.filter(r =>
+        (!cq || (r.value || "").toLowerCase().includes(cq)) &&
+        (!nq || (r.label || "").toLowerCase().includes(nq))
+      );
+      if (!inqNsBody) return;
+      inqNsBody.innerHTML = rows.map((r, i) =>
+        `<tr data-idx="${i}" style="cursor:pointer;"><td style="padding:2px 4px;">${r.value}</td><td style="padding:2px 4px;">${nameFromLabel(r.value, r.label)}</td></tr>`
+      ).join("");
+      inqNsBody.querySelectorAll("tr").forEach(tr => {
+        tr.addEventListener("click", () => {
+          applyInqNsRow(_inqNsAllRows[parseInt(tr.dataset.idx)]);
+          bootstrap.Modal.getInstance(inqNsModal)?.hide();
+        });
+        tr.addEventListener("mouseover", () => {
+          inqNsBody.querySelectorAll("tr").forEach(r => r.classList.remove("table-active"));
+          tr.classList.add("table-active");
+        });
+      });
+    };
+
+    const applyInqNsRow = (row) => {
+      if (!row) return;
+      if (_inqNsCodeInput) _inqNsCodeInput.value = row.value || "";
+      if (_inqNsNameBtn) _inqNsNameBtn.textContent = nameFromLabel(row.value, row.label);
+      const displayEl = _inqNsNameBtn?.closest(".inq-lookup-wrapper")?.querySelector(".inq-lookup-display");
+      if (displayEl) { displayEl.value = row.value || ""; displayEl.dataset.selected = row.value || ""; }
+    };
+
+    document.getElementById("inqNameSearchConfirm")?.addEventListener("click", () => {
+      const tr = inqNsBody?.querySelector("tr.table-active");
+      if (tr) applyInqNsRow(_inqNsAllRows[parseInt(tr.dataset.idx)]);
+      bootstrap.Modal.getInstance(inqNsModal)?.hide();
+    });
+
+    inqNsCodeFilter?.addEventListener("input", renderInqNsRows);
+    inqNsNameFilter?.addEventListener("input", renderInqNsRows);
+
+    inqNsModal?.addEventListener("show.bs.modal", async e => {
+      const btn = e.relatedTarget;
+      if (!btn) return;
+      _inqNsNameBtn = btn;
+      const codeTarget = btn.dataset.codeTarget;
+      _inqNsCodeInput = codeTarget ? document.getElementById(codeTarget) : null;
+      // 找 display input：先從 wrapper 找，沒有的話從 codeTarget 的前一個兄弟找
+      let displayEl = btn.closest(".inq-lookup-wrapper")?.querySelector(".inq-lookup-display");
+      if (!displayEl && _inqNsCodeInput) {
+        displayEl = _inqNsCodeInput.parentElement?.querySelector(".inq-lookup-display");
+      }
+      if (!displayEl) return;
+      if (inqNsCodeFilter) inqNsCodeFilter.value = "";
+      if (inqNsNameFilter) inqNsNameFilter.value = "";
+      try {
+        const key = buildCondKey(displayEl);
+        if (!lookupCache.has(key)) lookupCache.set(key, await fetchLookupOptions(displayEl));
+        _inqNsAllRows = lookupCache.get(key) || [];
+      } catch(err) {
+        console.error("inqNsModal fetch error:", err);
+        _inqNsAllRows = [];
+      }
+      renderInqNsRows();
     });
 
     // --- 辭典編輯 ---
@@ -1404,3 +1728,13 @@
     })();
   })();
 </script>
+
+
+
+
+
+
+
+
+
+

@@ -1465,33 +1465,28 @@ function enableFormLayoutEditing(container, dictName) {
         if (val) url.searchParams.set(key, val);
       };
       try {
-        const listBase = document.getElementById('btnBackList')?.getAttribute('href') || '';
-        const dataUrl = new URL(listBase || '@Url.Page("CC000054", new { itemId = Model.ItemId, systemId = Model.SystemId })', window.location.origin);
-        dataUrl.searchParams.set('handler', 'Data');
-        dataUrl.searchParams.set('pageIndex', '1');
-        dataUrl.searchParams.set('pageSize', '1');
-        setParam(dataUrl, 'cs_companyLike', 'dqCompanyLike');
-        setParam(dataUrl, 'cs_companyStart', 'dqCompanyStart');
-        setParam(dataUrl, 'cs_companyEnd', 'dqCompanyEnd');
-        setParam(dataUrl, 'cs_shortName', 'dqShortName');
-        setParam(dataUrl, 'cs_phoneCond', 'dqPhoneCond');
-        setParam(dataUrl, 'cs_phone', 'dqPhone');
-        setParam(dataUrl, 'cs_faxCond', 'dqFaxCond');
-        setParam(dataUrl, 'cs_fax', 'dqFax');
-        setParam(dataUrl, 'cs_uniFormId', 'dqUniFormId');
-        setParam(dataUrl, 'cs_companyName', 'dqCompanyName');
-        setParam(dataUrl, 'cs_companyAddr', 'dqCompanyAddr');
-        setParam(dataUrl, 'cs_bnsItem', 'dqBnsItem');
-        setParam(dataUrl, 'cs_subClass', 'dqSubClass');
-        if (showSales) setParam(dataUrl, 'cs_salesId', 'dqSalesId');
+        const queryUrl = new URL('/api/CCSCompanyAdd/query-first', window.location.origin);
+        queryUrl.searchParams.set('itemId', ('@Model.ItemId' || 'CC000054').toString());
+        queryUrl.searchParams.set('systemId', String(detailSystemId || 1));
+        setParam(queryUrl, 'cs_companyLike', 'dqCompanyLike');
+        setParam(queryUrl, 'cs_companyStart', 'dqCompanyStart');
+        setParam(queryUrl, 'cs_companyEnd', 'dqCompanyEnd');
+        setParam(queryUrl, 'cs_shortName', 'dqShortName');
+        setParam(queryUrl, 'cs_phoneCond', 'dqPhoneCond');
+        setParam(queryUrl, 'cs_phone', 'dqPhone');
+        setParam(queryUrl, 'cs_faxCond', 'dqFaxCond');
+        setParam(queryUrl, 'cs_fax', 'dqFax');
+        setParam(queryUrl, 'cs_uniFormId', 'dqUniFormId');
+        setParam(queryUrl, 'cs_companyName', 'dqCompanyName');
+        setParam(queryUrl, 'cs_companyAddr', 'dqCompanyAddr');
+        setParam(queryUrl, 'cs_bnsItem', 'dqBnsItem');
+        setParam(queryUrl, 'cs_subClass', 'dqSubClass');
+        if (showSales) setParam(queryUrl, 'cs_salesId', 'dqSalesId');
 
-        const resp = await fetch(dataUrl.toString());
+        const resp = await fetch(queryUrl.toString());
         const json = await resp.json().catch(() => ({}));
         if (!resp.ok || !json?.success) throw new Error(json?.error || json?.message || resp.statusText || 'query failed');
-        const first = Array.isArray(json.items) ? json.items[0] : null;
-        if (!first) { window.ccsPrompt('查無資料'); return; }
-        const cidKey = Object.keys(first).find(k => String(k).toLowerCase() === 'companyid');
-        const cid = cidKey ? String(first[cidKey] || '').trim() : '';
+        const cid = String(json.companyId || '').trim();
         if (!cid) { window.ccsPrompt('查無公司代碼'); return; }
         modal.hide();
         const u = new URL('@Url.Page("CC000054Detail", new { itemId = Model.ItemId, systemId = Model.SystemId })', window.location.origin);
@@ -1803,13 +1798,59 @@ function enableFormLayoutEditing(container, dictName) {
       applySubGridWidths(table);
       attachSubGridResizers(table);
     });
+    fitActiveSubGridHeight();
+  }
+
+  function fitActiveSubGridHeight() {
+    const formHost = document.querySelector('.ccs-detail-page .ccs-form');
+    if (!(formHost instanceof HTMLElement)) return;
+    const activePane = formHost.querySelector('.tab-pane.active');
+    if (!(activePane instanceof HTMLElement)) return;
+    const activeTabKey = (activePane.id || '').replace(/^tab-/, '').toLowerCase();
+    const isCustPartTab = activeTabKey === 'custpart';
+
+    formHost.querySelectorAll('.tab-pane').forEach((pane) => {
+      if (!(pane instanceof HTMLElement)) return;
+      if (pane !== activePane) {
+        pane.style.removeProperty('max-height');
+        pane.style.removeProperty('overflow-y');
+      }
+    });
+
+    const hostHeight = Math.max(0, Math.floor(formHost.clientHeight));
+    if (hostHeight > 0) {
+      activePane.style.maxHeight = `${hostHeight}px`;
+    }
+
+    const isFormPane = activePane.getAttribute('data-form') === '1';
+    activePane.style.overflowY = isFormPane ? 'auto' : 'hidden';
+
+    activePane.querySelectorAll('.ccs-subgrid-wrap').forEach((wrap) => {
+      if (!(wrap instanceof HTMLElement)) return;
+      if (isFormPane) {
+        wrap.style.removeProperty('max-height');
+        return;
+      }
+      const paneRect = activePane.getBoundingClientRect();
+      const wrapRect = wrap.getBoundingClientRect();
+      const fitH = Math.max(220, Math.floor(paneRect.bottom - wrapRect.top - 8));
+      const scrollBarH = Math.max(0, wrap.offsetHeight - wrap.clientHeight - 2);
+      const custPartBuffer = Math.max(18, scrollBarH + 12);
+      const custPartH = Math.max(220, fitH - custPartBuffer);
+      const maxH = isCustPartTab ? custPartH : fitH;
+      wrap.style.maxHeight = `${maxH}px`;
+    });
   }
 
   function getSubGridWidthStorageKey(table) {
     if (!table) return null;
     const tabKey = table.id ? table.id.replace('grid-', '') : 'tab';
     const itemId = String('@Model.ItemId' || 'CC000054').trim();
-    return `ccs:subgrid:width:${itemId}:${tabKey}`;
+    const systemId = String('@Model.SystemId' || '1').trim();
+    const tableName = String(table.dataset.tableName || table.dataset.dictName || '')
+      .trim()
+      .toLowerCase();
+    return `ccs:subgrid:width:v2:${itemId}:${systemId}:${tabKey}:${tableName}`;
   }
 
   function loadSubGridWidthMap(table) {
@@ -2085,6 +2126,7 @@ function enableFormLayoutEditing(container, dictName) {
       || tabTitle.includes('出貨地址')
       || tabTitle.includes('銀行資料')
       || tabTitle.includes('客戶品號')
+      || tabTitle.includes('廠商品號')
       || tabTitle.includes('銀行授信')
       || tabTitle.includes('銀行保證')
       || tabTitle.toUpperCase().includes('FORWARDER')
@@ -2778,6 +2820,8 @@ function enableFormLayoutEditing(container, dictName) {
       const tbody = table?.querySelector('tbody');
       if (thead) thead.innerHTML = '<tr><th class="text-center text-muted">載入失敗</th></tr>';
       if (tbody) tbody.innerHTML = '<tr><td class="text-center text-danger py-3">分頁資料載入失敗，請確認主檔鍵值或稍後再試。</td></tr>';
+    } finally {
+      requestAnimationFrame(() => requestAnimationFrame(() => fitActiveSubGridHeight()));
     }
   }
 
@@ -2812,6 +2856,7 @@ function enableFormLayoutEditing(container, dictName) {
           applySubGridWidths(table);
           attachSubGridResizers(table);
         }
+        fitActiveSubGridHeight();
         if (formEditMode) {
           toggleGridEdit(tabKey, true);
         } else {
@@ -3597,6 +3642,10 @@ function enableFormLayoutEditing(container, dictName) {
     }
   });
 
+  window.addEventListener('resize', () => {
+    fitActiveSubGridHeight();
+  });
+
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Delete') return;
     const el = ev.target;
@@ -3811,11 +3860,14 @@ function enableFormLayoutEditing(container, dictName) {
   margin-top: 2px;
   margin-bottom: 0;
   display: flex !important;
+  flex: 0 0 auto;
   gap: 2px;
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
   white-space: nowrap;
+  position: relative;
+  z-index: 5;
   border: 1px solid #cfd7e6;
   border-bottom: none;
   border-radius: 8px 8px 0 0;
@@ -3849,8 +3901,11 @@ function enableFormLayoutEditing(container, dictName) {
 .ccs-detail-page .ccs-form {
   flex: 1 1 auto;
   min-height: 0;
+  position: relative;
+  z-index: 1;
+  scrollbar-gutter: stable;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: hidden;
   border: 1px solid #cfd7e6;
   border-top: none;
   border-radius: 0 0 8px 8px;
@@ -4207,9 +4262,11 @@ function enableFormLayoutEditing(container, dictName) {
 }
 /* Sub-grid style aligned with MatInfo customer-part table */
 .ccs-detail-page .ccs-subgrid-wrap {
+  box-sizing: border-box;
   border: 1px solid #d8e0ee;
   border-radius: 0;
   background: #fff;
+  scrollbar-gutter: stable;
   overflow: auto;
 }
 .ccs-detail-page .ccs-subgrid-table {
