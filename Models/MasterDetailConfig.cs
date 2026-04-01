@@ -45,7 +45,11 @@ namespace WebRazor.Models
         public string? DetailOrderBy { get; set; }
         public string? DetailOrderDir { get; set; } = "ASC";
 
-        
+        /// <summary>來自 CURdOCXTableSetUp.FilterSQL：主檔固定過濾條件</summary>
+        public string? MasterFilterSql { get; set; }
+
+        /// <summary>來自 CURdOCXTableSetUp.FilterSQL：明細固定過濾條件</summary>
+        public string? DetailFilterSql { get; set; }
     }
 
     public sealed class KeyMap

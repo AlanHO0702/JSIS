@@ -774,7 +774,7 @@ ORDER BY idx.index_id, ic.key_ordinal";
 
     // ?啣?嚗yKeys(table, keyNames[], keyValues[]) ??憭?= 璇辣 (AND)
     [HttpGet]
-    public async Task<IActionResult> ByKeys([FromQuery] string table, [FromQuery] string[] keyNames, [FromQuery] string[] keyValues, [FromQuery] string? orderBy = null, [FromQuery] string? orderDir = "ASC")
+    public async Task<IActionResult> ByKeys([FromQuery] string table, [FromQuery] string[] keyNames, [FromQuery] string[] keyValues, [FromQuery] string? orderBy = null, [FromQuery] string? orderDir = "ASC", [FromQuery] string? filter = null)
     {
         if (string.IsNullOrWhiteSpace(table)) return BadRequest("table is required");
         var actualTable = await ResolveActualTableNameAsync(table);
@@ -799,6 +799,14 @@ ORDER BY idx.index_id, ic.key_ordinal";
             var p = new SqlParameter($"@p{i}", (object?)val ?? DBNull.Value);
             parameters.Add(p);
             whereParts.Add($"[{col}] = @p{i}");
+        }
+
+        // 合併 FilterSQL（來自功能設定）
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            var f = NormalizeFilterSql(filter);
+            if (!string.IsNullOrWhiteSpace(f))
+                whereParts.Insert(0, f);
         }
 
         var whereSql = string.Join(" AND ", whereParts);

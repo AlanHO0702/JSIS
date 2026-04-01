@@ -152,7 +152,7 @@ namespace PcbErpApi.Pages.DynamicTemplate
 
                 var tabId = $"d{i + 1}";
                 var title = await ResolveDisplayLabelAsync(dictTable) ?? dictTable;
-                var apiUrl = $"/api/DynamicTable/ByPaperNum?table={Uri.EscapeDataString(dictTable)}";
+                var apiUrl = $"/api/DynamicTable/ByPaperNum?table={Uri.EscapeDataString(dictTable)}&itemId={Uri.EscapeDataString(itemId)}";
 
                 tabs.Add(new TabInfoItem { Id = tabId, Title = title, ApiUrl = apiUrl, DictTable = dictTable });
 

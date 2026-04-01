@@ -82,6 +82,8 @@ namespace PcbErpApi.Pages.CUR
                     ? await GetDefaultOrderByAsync(connStr, cfg.DetailTable)
                     : detailOrder;
 
+                cfg.MasterFilterSql = string.IsNullOrWhiteSpace(master.FilterSql) ? null : master.FilterSql.Trim();
+                cfg.DetailFilterSql = string.IsNullOrWhiteSpace(detail.FilterSql) ? null : detail.FilterSql.Trim();
 
                 result.Config = cfg;
                 result.ItemName = item.ItemName;

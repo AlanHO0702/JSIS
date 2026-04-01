@@ -201,7 +201,7 @@
                 const cond1Source = (r.lookupCond1ResultField || r.LookupCond1ResultField || '').toString().trim();
                 const cond2Field  = (r.lookupCond2Field  || r.LookupCond2Field  || '').toString().trim();
                 const cond2Source = (r.lookupCond2ResultField || r.LookupCond2ResultField || '').toString().trim();
-                map.set(field.toLowerCase(), { field, table, key, result, keySelf: '', source: 'lookup',
+                map.set(field.toLowerCase(), { field, table, key, result, keySelf: ocxKeySelf, source: 'lookup',
                     cond1Field, cond1Source, cond2Field, cond2Source });
                 return;
             }
@@ -412,6 +412,8 @@
             if (trimmed && lookupMap.has(trimmed)) return lookupMap.get(trimmed) ?? trimmed;
             const lowered = trimmed.toLowerCase();
             if (lowered && lookupMap.has(lowered)) return lookupMap.get(lowered) ?? lowered;
+            // OCX 非實體欄位：lookup 找不到時回傳空字串，而非原始 key 值
+            if (lookupMeta?.source === 'ocx') return '';
         }
 
         if (s === '') return '';
@@ -1169,7 +1171,7 @@
                       };
                   }
                 let lookupKeyOverride = null;
-                  if (allowLookup && metaLookup?.source === 'ocx') {
+                  if (allowLookup && (metaLookup?.source === 'ocx' || metaLookup?.keySelf)) {
                       // Composite key: build key from multiple fields joined by \x1f
                       if (metaLookup.compositeKeySelfNames && metaLookup.compositeKeySelfNames.length > 1) {
                           const parts = metaLookup.compositeKeySelfNames.map(f => {
@@ -1195,7 +1197,7 @@
                     const keyStr = lookupKeyOverride == null ? '' : String(lookupKeyOverride).trim();
                     const keyIsEmpty = keyStr === '';
                     let keySourceMissing = false;
-                    if (metaLookup?.source === 'ocx') {
+                    if (metaLookup?.source === 'ocx' || metaLookup?.keySelf) {
                         if (metaLookup.compositeKeySelfNames && metaLookup.compositeKeySelfNames.length > 1) {
                             // For composite keys, check ALL key fields
                             keySourceMissing = metaLookup.compositeKeySelfNames.some(f => {
@@ -1215,8 +1217,18 @@
                     const rawStr = rawValue == null ? '' : String(rawValue);
                     const canLookup = allowLookup && !canDropdown && !keySourceMissing && (rawStr !== '' || !keyIsEmpty);
                     const value = formatCellValue(rawValue, meta, lookupMap, row, metaLookup, canLookup, lookupKeyOverride);
-                    const inputValue = (isReadOnly || !allowLookup) ? value : rawValue;
-                    const viewText = (value == null ? '' : String(value)).trim();
+                    // 非實體欄位（有 keySelf）：以 lookup 結果為準，找不到則顯示空字串（不顯示原始 key 值）
+                    let displayValue = value;
+                    if (metaLookup?.keySelf) {
+                        const lkKey = lookupKeyOverride != null ? String(lookupKeyOverride).trim() : String(rawValue ?? '').trim();
+                        if (lkKey && lookupMap) {
+                            displayValue = lookupMap.get(lkKey) ?? lookupMap.get(lkKey.toLowerCase()) ?? '';
+                        } else {
+                            displayValue = '';
+                        }
+                    }
+                    const inputValue = (isReadOnly || !allowLookup) ? displayValue : rawValue;
+                    const viewText = (displayValue == null ? '' : String(displayValue)).trim();
                     const editText = (inputValue == null ? '' : String(inputValue)).trim();
                   // ? 雙元素：顯示模式 + 編輯模式
                     const alignClass = getAlignClass(meta, rawValue);
