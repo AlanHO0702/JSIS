@@ -85,7 +85,8 @@
     const parts = [];
     let i = 0;
     while (r[`result${i}`] !== undefined) {
-      const v = (r[`result${i}`] ?? "").toString().trim();
+      const raw = r[`result${i}`];
+      const v = (raw == null || typeof raw === 'object') ? "" : String(raw).trim();
       if (v !== "") parts.push(v);
       i++;
     }

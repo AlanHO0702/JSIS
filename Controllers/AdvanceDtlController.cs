@@ -63,7 +63,7 @@ public class AdvanceDtlController : ControllerBase
             PayBankIdProc: "SPOdRecvBankIdGet",
             RecvBankIdProc: "SPOdRecvBankIdGet",
             CompanyIdColumn: "CustomerId",
-            HasIsIn: false
+            IsRecv: true
         )
     };
 
@@ -79,7 +79,7 @@ public class AdvanceDtlController : ControllerBase
         string PayBankIdProc,
         string RecvBankIdProc,
         string CompanyIdColumn = "CompanyId",  // 客戶/廠商編號欄位名稱
-        bool HasIsIn = true                     // 是否有 IsIn 欄位
+        bool IsRecv = false                     // 是否為收款模組 (SPOdRecv*，欄位結構不同)
     );
 
     /// <summary>
@@ -100,10 +100,10 @@ public class AdvanceDtlController : ControllerBase
         {
             await conn.OpenAsync();
 
-            // 根據模組配置決定查詢欄位
-            var selectColumns = cfg.HasIsIn
-                ? $"{cfg.CompanyIdColumn}, IsIn, RateToNT, StrikeMode"
-                : $"{cfg.CompanyIdColumn}, RateToNT, StrikeMode";
+            // 根據模組配置決定查詢欄位 (IsRecv 模組無 IsIn 欄位)
+            var selectColumns = cfg.IsRecv
+                ? $"{cfg.CompanyIdColumn}, RateToNT, StrikeMode"
+                : $"{cfg.CompanyIdColumn}, IsIn, RateToNT, StrikeMode";
 
             var sql = $"SELECT {selectColumns} FROM [{cfg.MainTable}] WITH (NOLOCK) WHERE PaperNum = @paperNum";
 
@@ -116,7 +116,7 @@ public class AdvanceDtlController : ControllerBase
 
             var companyId = reader[cfg.CompanyIdColumn]?.ToString() ?? "";
             var rateToNT = reader["RateToNT"] == DBNull.Value ? 0 : Convert.ToDouble(reader["RateToNT"]);
-            var isIn = cfg.HasIsIn && reader["IsIn"] != DBNull.Value ? Convert.ToInt32(reader["IsIn"]) : 0;
+            var isIn = !cfg.IsRecv && reader["IsIn"] != DBNull.Value ? Convert.ToInt32(reader["IsIn"]) : 0;
             var strikeMode = reader["StrikeMode"] == DBNull.Value ? 0 : Convert.ToInt32(reader["StrikeMode"]);
 
             if (string.IsNullOrWhiteSpace(companyId))
@@ -218,11 +218,10 @@ public class AdvanceDtlController : ControllerBase
             // 新增單據時，若來源帳款無資料，自動插入一筆預設 0 的資料
             if (rows.Count == 0)
             {
-                var mt = (moduleType ?? "advance").ToLower();
                 string insertSql;
                 Dictionary<string, object?> defaultRow;
 
-                if (mt == "recv")
+                if (cfg.IsRecv)
                 {
                     // SPOdRecvSource 沒有 OtherAmount / OtherAmountOg 欄位
                     insertSql = $@"
@@ -549,14 +548,14 @@ public class AdvanceDtlController : ControllerBase
             await conn.OpenAsync();
             tx = (SqlTransaction)await conn.BeginTransactionAsync();
 
-            // 先取得 CJourName
+            // 取得 CJourName (IsRecv 模組的主檔無此欄位，跳過)
             string cjourNum = "";
-            var getCjourSql = $"SELECT CJourName FROM [{cfg.MainTable}] WITH (NOLOCK) WHERE PaperNum = @paperNum";
-            await using (var getCjourCmd = new SqlCommand(getCjourSql, conn, tx))
+            if (!cfg.IsRecv)
             {
+                var getCjourSql = $"SELECT CJourName FROM [{cfg.MainTable}] WITH (NOLOCK) WHERE PaperNum = @paperNum";
+                await using var getCjourCmd = new SqlCommand(getCjourSql, conn, tx);
                 getCjourCmd.Parameters.AddWithValue("@paperNum", req.PaperNum);
-                var result = await getCjourCmd.ExecuteScalarAsync();
-                cjourNum = result?.ToString() ?? "";
+                cjourNum = (await getCjourCmd.ExecuteScalarAsync())?.ToString() ?? "";
             }
 
             // 執行 InsertSum SP
@@ -566,7 +565,7 @@ public class AdvanceDtlController : ControllerBase
                 CommandTimeout = 120
             };
             cmd.Parameters.AddWithValue("@PaperNum", req.PaperNum);
-            cmd.Parameters.AddWithValue("@CJourNum", cjourNum);
+            if (!cfg.IsRecv) cmd.Parameters.AddWithValue("@CJourNum", cjourNum);
 
             await cmd.ExecuteNonQueryAsync();
             await tx.CommitAsync();
@@ -658,8 +657,17 @@ public class AdvanceDtlController : ControllerBase
                 var item = GetIntValue(row, "Item");
                 if (item == 0) continue;
 
-                var sql = $@"
-                    UPDATE [{cfg.SourceTable}] SET
+                // IsRecv 模組 (SPOdRecvSource) 無 OtherAmount / OtherAmountOg 欄位
+                var sql = cfg.IsRecv
+                    ? $@"UPDATE [{cfg.SourceTable}] SET
+                        CashAmount = @CashAmount,
+                        BankAmount = @BankAmount,
+                        BillAmount = @BillAmount,
+                        CashAmountOg = @CashAmountOg,
+                        BankAmountOg = @BankAmountOg,
+                        BillAmountOg = @BillAmountOg
+                    WHERE PaperNum = @PaperNum AND Item = @Item"
+                    : $@"UPDATE [{cfg.SourceTable}] SET
                         CashAmount = @CashAmount,
                         BankAmount = @BankAmount,
                         BillAmount = @BillAmount,
@@ -676,11 +684,11 @@ public class AdvanceDtlController : ControllerBase
                 cmd.Parameters.AddWithValue("@CashAmount", GetDecimalValue(row, "CashAmount"));
                 cmd.Parameters.AddWithValue("@BankAmount", GetDecimalValue(row, "BankAmount"));
                 cmd.Parameters.AddWithValue("@BillAmount", GetDecimalValue(row, "BillAmount"));
-                cmd.Parameters.AddWithValue("@OtherAmount", GetDecimalValue(row, "OtherAmount"));
+                if (!cfg.IsRecv) cmd.Parameters.AddWithValue("@OtherAmount", GetDecimalValue(row, "OtherAmount"));
                 cmd.Parameters.AddWithValue("@CashAmountOg", GetDecimalValue(row, "CashAmountOg"));
                 cmd.Parameters.AddWithValue("@BankAmountOg", GetDecimalValue(row, "BankAmountOg"));
                 cmd.Parameters.AddWithValue("@BillAmountOg", GetDecimalValue(row, "BillAmountOg"));
-                cmd.Parameters.AddWithValue("@OtherAmountOg", GetDecimalValue(row, "OtherAmountOg"));
+                if (!cfg.IsRecv) cmd.Parameters.AddWithValue("@OtherAmountOg", GetDecimalValue(row, "OtherAmountOg"));
 
                 await cmd.ExecuteNonQueryAsync();
             }
@@ -868,7 +876,7 @@ public class AdvanceDtlController : ControllerBase
             string insertSql;
             if (req.TableType?.ToLower() == "source")
             {
-                if ((req.ModuleType ?? "advance").ToLower() == "recv")
+                if (cfg.IsRecv)
                 {
                     // SPOdRecvSource 沒有 OtherAmount / OtherAmountOg 欄位
                     insertSql = $@"
@@ -1042,10 +1050,17 @@ public class AdvanceDtlController : ControllerBase
                 if (req.TableType?.ToLower() == "source")
                 {
                     // 根據 mode 決定更新哪些欄位
+                    // IsRecv 模組 (SPOdRecvSource) 沒有 OtherAmount / OtherAmountOg 欄位
+                    bool isRecv = cfg.IsRecv;
                     if (req.Mode == "og")
                     {
-                        updateSql = $@"
-                            UPDATE [{tableName}] SET
+                        updateSql = isRecv
+                            ? $@"UPDATE [{tableName}] SET
+                                CashAmountOg = @CashAmountOg,
+                                BankAmountOg = @BankAmountOg,
+                                BillAmountOg = @BillAmountOg
+                            WHERE PaperNum = @PaperNum AND Item = @Item"
+                            : $@"UPDATE [{tableName}] SET
                                 CashAmountOg = @CashAmountOg,
                                 BankAmountOg = @BankAmountOg,
                                 BillAmountOg = @BillAmountOg,
@@ -1058,13 +1073,18 @@ public class AdvanceDtlController : ControllerBase
                         cmd.Parameters.AddWithValue("@CashAmountOg", GetDecimalValue(row, "CashAmountOg"));
                         cmd.Parameters.AddWithValue("@BankAmountOg", GetDecimalValue(row, "BankAmountOg"));
                         cmd.Parameters.AddWithValue("@BillAmountOg", GetDecimalValue(row, "BillAmountOg"));
-                        cmd.Parameters.AddWithValue("@OtherAmountOg", GetDecimalValue(row, "OtherAmountOg"));
+                        if (!isRecv) cmd.Parameters.AddWithValue("@OtherAmountOg", GetDecimalValue(row, "OtherAmountOg"));
                         await cmd.ExecuteNonQueryAsync();
                     }
                     else
                     {
-                        updateSql = $@"
-                            UPDATE [{tableName}] SET
+                        updateSql = isRecv
+                            ? $@"UPDATE [{tableName}] SET
+                                CashAmount = @CashAmount,
+                                BankAmount = @BankAmount,
+                                BillAmount = @BillAmount
+                            WHERE PaperNum = @PaperNum AND Item = @Item"
+                            : $@"UPDATE [{tableName}] SET
                                 CashAmount = @CashAmount,
                                 BankAmount = @BankAmount,
                                 BillAmount = @BillAmount,
@@ -1077,7 +1097,7 @@ public class AdvanceDtlController : ControllerBase
                         cmd.Parameters.AddWithValue("@CashAmount", GetDecimalValue(row, "CashAmount"));
                         cmd.Parameters.AddWithValue("@BankAmount", GetDecimalValue(row, "BankAmount"));
                         cmd.Parameters.AddWithValue("@BillAmount", GetDecimalValue(row, "BillAmount"));
-                        cmd.Parameters.AddWithValue("@OtherAmount", GetDecimalValue(row, "OtherAmount"));
+                        if (!isRecv) cmd.Parameters.AddWithValue("@OtherAmount", GetDecimalValue(row, "OtherAmount"));
                         await cmd.ExecuteNonQueryAsync();
                     }
                 }
