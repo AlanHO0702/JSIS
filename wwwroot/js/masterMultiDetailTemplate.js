@@ -888,9 +888,13 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
 
       // ★ 修正：使用 getRowValue 處理大小寫，且只有 undefined 時才取 KeySelfName（避免 0 被當成 falsy）
       let raw = getRowValue(row, f.FieldName);
-      if (raw === "" && f.KeySelfName) raw = getRowValue(row, f.KeySelfName);
+      // 非實體欄位（有 KeySelfName）→ 改抓 KeySelfName 作為 lookup key，display fallback 為空字串
+      const isVirtualField = !!f.KeySelfName;
+      if (isVirtualField && (raw == null || raw === "")) {
+        raw = getRowValue(row, f.KeySelfName) ?? "";
+      }
 
-      let display = raw;
+      let display = isVirtualField ? "" : raw;
       // ★ 複合鍵支援：若 OCX lookup 有 _compositeKeySelfNames，用多欄位組成複合鍵查找
       const ocxData = oc[f.FieldName];
       if (ocxData?._compositeKeySelfNames) {

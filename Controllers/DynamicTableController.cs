@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json.Serialization;
@@ -1106,7 +1106,7 @@ SELECT TOP 1 RunSQLAfterAdd
         // 給多頁籤明細（_MultiTabDetail）使用：依 PaperNum 取回該字典表的所有列
         // 回傳格式：[{ col1:..., col2:... }, ...]
         [HttpGet("ByPaperNum")]
-        public async Task<IActionResult> ByPaperNum([FromQuery] string table, [FromQuery] string paperNum, [FromQuery] int top = 9999)
+        public async Task<IActionResult> ByPaperNum([FromQuery] string table, [FromQuery] string paperNum, [FromQuery] int top = 9999, [FromQuery] string? itemId = null)
         {
             if (string.IsNullOrWhiteSpace(table))
                 return BadRequest("table 必須指定");
@@ -1215,10 +1215,26 @@ SELECT TOP 1 RunSQLAfterAdd
             var selectCols = string.Join(",", safeCols.Select(Esc));
             var orderBy = safeCols.Any(c => c.Equals("Item", StringComparison.OrdinalIgnoreCase)) ? Esc("Item") : Esc("PaperNum");
 
+            var whereClause = Esc("PaperNum") + " = @paperNum";
+            if (!string.IsNullOrWhiteSpace(itemId))
+            {
+                var detailFilterSql = await ResolveMasterFilterSqlAsync(itemId, dictTable);
+                if (!string.IsNullOrWhiteSpace(detailFilterSql))
+                {
+                    var extra = detailFilterSql.Trim();
+                    if (extra.StartsWith("where ", StringComparison.OrdinalIgnoreCase))
+                        extra = extra.Substring(5).Trim();
+                    if (extra.StartsWith("and ", StringComparison.OrdinalIgnoreCase))
+                        extra = extra.Substring(4).Trim();
+                    if (!string.IsNullOrWhiteSpace(extra))
+                        whereClause += " AND " + extra;
+                }
+            }
+
             var sql = $@"
 SELECT TOP (@top) {selectCols}
   FROM {EscTableName(realTable)} WITH (NOLOCK)
- WHERE {Esc("PaperNum")} = @paperNum
+ WHERE {whereClause}
  ORDER BY {orderBy};";
 
                 try
