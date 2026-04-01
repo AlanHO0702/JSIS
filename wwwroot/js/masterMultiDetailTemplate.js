@@ -2461,6 +2461,7 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
       addSubDetailRow,
       deleteSubDetailRow,
       saveAll,
+      reloadDetails: () => loadAllDetails(lastMasterRow),
       get isDirty() { return isDirty; }
     };
 

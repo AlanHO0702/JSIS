@@ -476,7 +476,8 @@ document.addEventListener('DOMContentLoaded', () => {
       buttonName: "",
       paperNum: "",
       searchParams: [],
-      inputs: {}
+      inputs: {},
+      onSuccess: null
     };
 
     const loadParamOptions = async (itemId, buttonName, paramName, superValue) => {
@@ -631,8 +632,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const raw = await res.text();
         let data; try { data = JSON.parse(raw); } catch { data = { ok: false, error: raw }; }
         if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
-        localStorage.setItem("afterSave", "1");
-        location.reload();
+        if (typeof state.onSuccess === 'function') {
+          if (window.bootstrap) {
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            modal?.hide();
+          }
+          await state.onSuccess();
+        } else {
+          localStorage.setItem("afterSave", "1");
+          location.reload();
+        }
       } catch (err) {
         alert(`執行失敗: ${err?.message || err}`);
       } finally {
@@ -645,6 +654,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.itemId = ctx.itemId || "";
       state.buttonName = ctx.buttonName || "";
       state.paperNum = ctx.paperNum || "";
+      state.onSuccess = meta.onSuccess || null;
 
       const configUrl = `/api/PaperSearch/Config?itemId=${encodeURIComponent(state.itemId)}&buttonName=${encodeURIComponent(state.buttonName)}`;
       const res = await fetch(configUrl, withJwtHeaders());
@@ -1777,7 +1787,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (searchTemplate === "jsdcondrunspdll.dll" && designType === 1) {
-      await condRunSp.open(ctx, { dialogCaption: btn.dataset.dialogCaption || "" });
+      await condRunSp.open(ctx, {
+        dialogCaption: btn.dataset.dialogCaption || "",
+        onSuccess: async () => {
+          window._mmdApi?.[domId]?.reloadDetails?.();
+        }
+      });
       return;
     }
 
@@ -1834,6 +1849,9 @@ document.addEventListener('DOMContentLoaded', () => {
           const tip = hasStats
             ? `已寄出 ${sent} 筆（總數 ${total}，略過 ${skipped}）`
             : msgText;
+
+          // 執行完畢後重新載入所有 detail 頁籤
+          window._mmdApi?.[domId]?.reloadDetails?.();
 
           if (window.Swal?.fire) {
             await Swal.fire({
