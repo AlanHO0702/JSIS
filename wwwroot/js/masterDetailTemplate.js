@@ -85,7 +85,8 @@
     const parts = [];
     let i = 0;
     while (r[`result${i}`] !== undefined) {
-      const v = (r[`result${i}`] ?? "").toString().trim();
+      const raw = r[`result${i}`];
+      const v = (raw == null || typeof raw === 'object') ? "" : String(raw).trim();
       if (v !== "") parts.push(v);
       i++;
     }
@@ -446,12 +447,13 @@
           let raw = row[col];
           if (raw == null) raw = ""; // 避免 undefined/null 顯示
 
-          // 非實體欄位 → 改抓 KeySelfName
-          if ((raw == null || raw === "") && f.KeySelfName) {
-              raw = row[f.KeySelfName];
+          // 非實體欄位（有 KeySelfName）→ 改抓 KeySelfName 作為 lookup key，display fallback 為空字串
+          const isVirtualField = !!f.KeySelfName;
+          if (isVirtualField && (raw == null || raw === "")) {
+              raw = row[f.KeySelfName] ?? "";
           }
 
-          let display = raw;
+          let display = isVirtualField ? "" : raw;
 
           // OCX Lookup（優先）— 支援複合鍵
           const ocxData = ocxMaps[col];
@@ -1317,10 +1319,12 @@
           ? `/api/CommonTable/Query?table=${encodeURIComponent(cfg.MasterTable)}&top=${cfg.MasterTop || 200}`
               + (cfg.MasterOrderBy ? `&orderBy=${encodeURIComponent(cfg.MasterOrderBy)}` : "")
               + (cfg.MasterOrderDir ? `&orderDir=${encodeURIComponent(cfg.MasterOrderDir)}` : "")
+              + (cfg.MasterFilterSql ? `&filter=${encodeURIComponent(cfg.MasterFilterSql)}` : "")
               + queryStr
           : `/api/CommonTable/TopRows?table=${encodeURIComponent(cfg.MasterTable)}&top=${cfg.MasterTop || 200}`
               + (cfg.MasterOrderBy ? `&orderBy=${encodeURIComponent(cfg.MasterOrderBy)}` : "")
-              + (cfg.MasterOrderDir ? `&orderDir=${encodeURIComponent(cfg.MasterOrderDir)}` : "");
+              + (cfg.MasterOrderDir ? `&orderDir=${encodeURIComponent(cfg.MasterOrderDir)}` : "")
+              + (cfg.MasterFilterSql ? `&filter=${encodeURIComponent(cfg.MasterFilterSql)}` : "");
 
     const masterRows = await fetch(masterUrl).then(r => r.json());
 
@@ -1340,7 +1344,8 @@
                 + names.map(n => `&keyNames=${encodeURIComponent(n)}`).join("")
                 + values.map(v => `&keyValues=${encodeURIComponent(v ?? "")}`).join("")
                 + (cfg.DetailOrderBy ? `&orderBy=${encodeURIComponent(cfg.DetailOrderBy)}` : "")
-                + (cfg.DetailOrderDir ? `&orderDir=${encodeURIComponent(cfg.DetailOrderDir)}` : "");
+                + (cfg.DetailOrderDir ? `&orderDir=${encodeURIComponent(cfg.DetailOrderDir)}` : "")
+                + (cfg.DetailFilterSql ? `&filter=${encodeURIComponent(cfg.DetailFilterSql)}` : "");
 
       const detailRows = await fetch(detailUrl).then(r => r.json());
 

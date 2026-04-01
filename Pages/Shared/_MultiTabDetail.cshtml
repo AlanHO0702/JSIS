@@ -127,7 +127,8 @@
     // Dict meta cache (datatype/format/width...)
     const DICT_META_CACHE = new Map(); // tn -> Map(fieldLower -> { dataType, formatStr, comboStyle, bFooter })
     const LOOKUP_META_CACHE = new Map(); // tn -> Map(fieldLower -> { table, key, result })
-    const LOOKUP_DATA_CACHE = new Map(); // tn -> Map(fieldLower -> Map(key -> label))
+    const LOOKUP_DATA_CACHE = new Map(); // tn -> Map(fieldLower -> Map(key -> label))（下拉選單用，含所有顯示欄位）
+    const LOOKUP_CELL_CACHE = new Map(); // tn -> Map(fieldLower -> Map(key -> label))（cell 顯示用，跳過 result0）
     const READONLY_META_CACHE = new Map(); // tn -> Map(fieldLower -> boolean)
     // ★ 共用 cache：避免 fetchLookupMeta / fetchReadOnlyMeta 各打一次相同 API
     const FULL_DICT_ROWS_CACHE = new Map(); // tn -> raw rows[]
@@ -201,7 +202,7 @@
                 const cond1Source = (r.lookupCond1ResultField || r.LookupCond1ResultField || '').toString().trim();
                 const cond2Field  = (r.lookupCond2Field  || r.LookupCond2Field  || '').toString().trim();
                 const cond2Source = (r.lookupCond2ResultField || r.LookupCond2ResultField || '').toString().trim();
-                map.set(field.toLowerCase(), { field, table, key, result, keySelf: '', source: 'lookup',
+                map.set(field.toLowerCase(), { field, table, key, result, keySelf: ocxKeySelf, source: 'lookup',
                     cond1Field, cond1Source, cond2Field, cond2Source });
                 return;
             }
@@ -248,6 +249,7 @@
         if (LOOKUP_DATA_CACHE.has(tn)) return LOOKUP_DATA_CACHE.get(tn);
         const meta = await fetchLookupMeta(dictTable);
         const fieldMap = new Map();
+        const cellFieldMap = new Map();
         for (const [field, cfg] of meta.entries()) {
             try {
                 const keyForLookup = cfg.lookupKey || cfg.key;
@@ -255,28 +257,48 @@
                 const res = await fetch(url);
                 if (!res.ok) continue;
                 const data = await res.json();
-                const map = new Map();
+                const map = new Map();      // 下拉選單用：含所有顯示欄位
+                const cellMap = new Map();  // cell 顯示用：跳過 result0（多欄位時）
                 (data || []).forEach(row => {
                     const key = row.key == null ? '' : String(row.key);
                     if (key === '') return;
-                    const label = Object.keys(row)
-                        .filter(p => p.startsWith('result'))
+                    const allRk = Object.keys(row).filter(p => p.startsWith('result'));
+                    // 下拉：全部 result 欄位合併
+                    const fullLabel = allRk
+                        .map(p => row[p])
+                        .filter(v => v != null && typeof v !== 'object' && String(v).trim() !== '')
+                        .map(v => String(v))
+                        .join(' - ');
+                    // cell：多欄位時跳過 result0，NULL 顯示空值
+                    const cellLabel = (allRk.length > 1 ? allRk.filter(p => p !== 'result0') : allRk)
                         .map(p => row[p])
                         .filter(v => v != null && typeof v !== 'object' && String(v).trim() !== '')
                         .map(v => String(v))
                         .join(' - ');
                     const trimmed = key.trim();
                     const lowered = trimmed.toLowerCase();
-                    const text = label || trimmed || key;
-                    map.set(key, text);
-                    if (trimmed && trimmed !== key) map.set(trimmed, text);
-                    if (lowered) map.set(lowered, text);
+                    const fullText = fullLabel || trimmed || key;
+                    map.set(key, fullText);
+                    if (trimmed && trimmed !== key) map.set(trimmed, fullText);
+                    if (lowered) map.set(lowered, fullText);
+                    cellMap.set(key, cellLabel);
+                    if (trimmed && trimmed !== key) cellMap.set(trimmed, cellLabel);
+                    if (lowered) cellMap.set(lowered, cellLabel);
                 });
                 fieldMap.set(field, map);
+                cellFieldMap.set(field, cellMap);
             } catch { }
         }
         LOOKUP_DATA_CACHE.set(tn, fieldMap);
+        LOOKUP_CELL_CACHE.set(tn, cellFieldMap);
         return fieldMap;
+    }
+
+    async function fetchCellMaps(dictTable) {
+        const tn = cleanTableName(dictTable);
+        if (!tn) return new Map();
+        if (!LOOKUP_CELL_CACHE.has(tn)) await fetchLookupMaps(dictTable);
+        return LOOKUP_CELL_CACHE.get(tn) || new Map();
     }
 
     function escapeHtml(v) {
@@ -412,6 +434,8 @@
             if (trimmed && lookupMap.has(trimmed)) return lookupMap.get(trimmed) ?? trimmed;
             const lowered = trimmed.toLowerCase();
             if (lowered && lookupMap.has(lowered)) return lookupMap.get(lowered) ?? lowered;
+            // OCX 非實體欄位：lookup 找不到時回傳空字串，而非原始 key 值
+            if (lookupMeta?.source === 'ocx') return '';
         }
 
         if (s === '') return '';
@@ -1076,12 +1100,13 @@
             window._detailFieldReadOnlyMap[dictKey] = Object.fromEntries(readOnlyMap.entries());
         }
         const lookupMeta = await fetchLookupMeta(dictTable);
-        const lookupMaps = await fetchLookupMaps(dictTable);
+        const lookupMaps = await fetchLookupMaps(dictTable);   // 下拉選單用（全部 result）
+        const cellMaps = await fetchCellMaps(dictTable);        // cell 顯示用（result1+）
         const lookupResultMap = new Map();
         for (const [fieldLower, cfg] of lookupMeta.entries()) {
             const resultLower = (cfg?.result || '').toString().toLowerCase();
             if (!resultLower) continue;
-            const map = lookupMaps.get(fieldLower);
+            const map = cellMaps.get(fieldLower);
             if (!map) continue;
             if (!lookupResultMap.has(resultLower)) lookupResultMap.set(resultLower, { map, meta: cfg });
         }
@@ -1136,7 +1161,7 @@
                 const isReadOnly = readOnlyMap.get(fieldLower) === true;
                 const roClass = isReadOnly ? ' readonly-cell' : '';
                 const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
-                let lookupMap = lookupMaps.get(fieldLower);
+                let lookupMap = cellMaps.get(fieldLower);
                 let metaLookup = lookupMeta.get(fieldLower);
                 if (!metaLookup) {
                     const alt = lookupResultMap.get(fieldLower);
@@ -1169,7 +1194,7 @@
                       };
                   }
                 let lookupKeyOverride = null;
-                  if (allowLookup && metaLookup?.source === 'ocx') {
+                  if (allowLookup && (metaLookup?.source === 'ocx' || metaLookup?.keySelf)) {
                       // Composite key: build key from multiple fields joined by \x1f
                       if (metaLookup.compositeKeySelfNames && metaLookup.compositeKeySelfNames.length > 1) {
                           const parts = metaLookup.compositeKeySelfNames.map(f => {
@@ -1195,7 +1220,7 @@
                     const keyStr = lookupKeyOverride == null ? '' : String(lookupKeyOverride).trim();
                     const keyIsEmpty = keyStr === '';
                     let keySourceMissing = false;
-                    if (metaLookup?.source === 'ocx') {
+                    if (metaLookup?.source === 'ocx' || metaLookup?.keySelf) {
                         if (metaLookup.compositeKeySelfNames && metaLookup.compositeKeySelfNames.length > 1) {
                             // For composite keys, check ALL key fields
                             keySourceMissing = metaLookup.compositeKeySelfNames.some(f => {
@@ -1215,8 +1240,18 @@
                     const rawStr = rawValue == null ? '' : String(rawValue);
                     const canLookup = allowLookup && !canDropdown && !keySourceMissing && (rawStr !== '' || !keyIsEmpty);
                     const value = formatCellValue(rawValue, meta, lookupMap, row, metaLookup, canLookup, lookupKeyOverride);
-                    const inputValue = (isReadOnly || !allowLookup) ? value : rawValue;
-                    const viewText = (value == null ? '' : String(value)).trim();
+                    // 非實體欄位（有 keySelf）：以 lookup 結果為準，找不到則顯示空字串（不顯示原始 key 值）
+                    let displayValue = value;
+                    if (metaLookup?.keySelf) {
+                        const lkKey = lookupKeyOverride != null ? String(lookupKeyOverride).trim() : String(rawValue ?? '').trim();
+                        if (lkKey && lookupMap) {
+                            displayValue = lookupMap.get(lkKey) ?? lookupMap.get(lkKey.toLowerCase()) ?? '';
+                        } else {
+                            displayValue = '';
+                        }
+                    }
+                    const inputValue = (isReadOnly || !allowLookup) ? displayValue : rawValue;
+                    const viewText = (displayValue == null ? '' : String(displayValue)).trim();
                     const editText = (inputValue == null ? '' : String(inputValue)).trim();
                   // ? 雙元素：顯示模式 + 編輯模式
                     const alignClass = getAlignClass(meta, rawValue);
@@ -1501,7 +1536,7 @@
                             return target ? (target.value ?? '').trim() : '';
                         };
                         for (const { resultField, cfg } of deps) {
-                            const lkMap = lookupMaps.get(resultField);
+                            const lkMap = cellMaps.get(resultField);
                             if (!lkMap) continue;
                             let lookupKey = '';
                             if (cfg.compositeKeySelfNames && cfg.compositeKeySelfNames.length > 1) {
