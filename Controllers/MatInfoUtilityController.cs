@@ -49,6 +49,16 @@ namespace PcbErpApi.Controllers
             public string UserId { get; set; } = string.Empty;
         }
 
+        public sealed class SpecPrintRequest
+        {
+            public string PartNum { get; set; } = string.Empty;
+            public string Revision { get; set; } = string.Empty;
+            public string PaperNum { get; set; } = string.Empty;
+            public string UserId { get; set; } = string.Empty;
+            public string ShowDate { get; set; } = string.Empty;
+            public string ShowTo { get; set; } = string.Empty;
+        }
+
         public sealed class MatInfoUiConfigResponse
         {
             public string ItemId { get; set; } = string.Empty;
@@ -199,6 +209,86 @@ SELECT TOP 1 DLLValue
                 while (await rd.NextResultAsync());
             }
             return Ok(new { ok = true, partNum = copiedPartNum });
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> BuildSpecPrintPayload([FromBody] SpecPrintRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.PartNum))
+                return BadRequest("PartNum is required.");
+
+            await using var conn = new SqlConnection(_connStr);
+            await conn.OpenAsync();
+
+            var printSp = "MGNdSpecReport";
+            await using (var cmd = new SqlCommand(@"
+SELECT TOP 1 ISNULL(Value,'') AS Value
+  FROM CURdSysParams WITH (NOLOCK)
+ WHERE SystemId = 'MGN' AND ParamId = 'PrintSpecListSp';", conn))
+            await using (var rd = await cmd.ExecuteReaderAsync())
+            {
+                if (await rd.ReadAsync())
+                {
+                    var v = (rd["Value"]?.ToString() ?? string.Empty).Trim();
+                    if (!string.IsNullOrWhiteSpace(v)) printSp = v;
+                }
+            }
+
+            var parameterNames = new List<string>();
+            await using (var cmd = new SqlCommand(@"
+SELECT p.name
+  FROM sys.parameters p
+ WHERE p.object_id = OBJECT_ID(@ProcName)
+   AND p.parameter_id > 0
+   AND p.is_output = 0
+ ORDER BY p.parameter_id;", conn))
+            {
+                cmd.Parameters.AddWithValue("@ProcName", printSp);
+                await using var rd = await cmd.ExecuteReaderAsync();
+                while (await rd.ReadAsync())
+                {
+                    var name = (rd["name"]?.ToString() ?? string.Empty).Trim();
+                    if (!string.IsNullOrWhiteSpace(name))
+                        parameterNames.Add(name.TrimStart('@'));
+                }
+            }
+
+            var orderedValues = new List<string>
+            {
+                (req.PartNum ?? string.Empty).Trim(),
+                (req.Revision ?? string.Empty).Trim(),
+                (req.ShowDate ?? string.Empty).Trim(),
+                (req.ShowTo ?? string.Empty).Trim(),
+                (req.PaperNum ?? string.Empty).Trim(),
+                (req.UserId ?? string.Empty).Trim()
+            };
+
+            var payloadParams = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            if (parameterNames.Count > 0)
+            {
+                for (var i = 0; i < parameterNames.Count; i++)
+                {
+                    payloadParams[parameterNames[i]] = i < orderedValues.Count ? orderedValues[i] : string.Empty;
+                }
+            }
+            else
+            {
+                payloadParams["PartNum"] = orderedValues[0];
+                payloadParams["Revision"] = orderedValues[1];
+                payloadParams["ShowDate"] = orderedValues[2];
+                payloadParams["ShowTo"] = orderedValues[3];
+                payloadParams["ShowNum"] = orderedValues[4];
+                payloadParams["UserId"] = orderedValues[5];
+            }
+
+            return Ok(new
+            {
+                ok = true,
+                spName = printSp,
+                reportName = printSp,
+                requiresLegacyPrompt = string.Equals(printSp, "MGNdSpecReport", StringComparison.OrdinalIgnoreCase),
+                @params = payloadParams
+            });
         }
 
         [HttpGet]

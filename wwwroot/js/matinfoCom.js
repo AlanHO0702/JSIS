@@ -2109,7 +2109,7 @@
     }
     if (btnSave) btnSave.hidden = isEditMode;
     if (btnCancel) btnCancel.hidden = !isEditMode;
-    const lockButtons = [btnQuery, btnAdd, btnToFormal, btnDetail, btnHistory, btnToEmo, btnDelete, btnSave, btnTabFirst, btnTabPrev, btnTabNext, btnTabLast];
+    const lockButtons = [btnQuery, btnAdd, btnToFormal, btnDetail, btnHistory, btnDelete, btnSave, btnTabFirst, btnTabPrev, btnTabNext, btnTabLast];
     lockButtons.forEach((btn) => { if (btn) btn.disabled = isEditMode; });
     document.querySelector('.matinfo-page')?.classList.toggle('is-edit-mode', isEditMode);
     detailGrids.forEach((grid) => grid.toggleEdit(isEditMode));
@@ -4375,6 +4375,12 @@
       : confirm('確定要轉工程?');
     if (!ok) return;
 
+    if (isEditMode) {
+      const saved = await saveRecord();
+      if (!saved) return;
+      setEditMode(false);
+    }
+
     const chk = await fetch(`/api/MatInfoEmo/Check?partNum=${encodeURIComponent(currentKey.partnum)}`, withJwtHeaders());
     if (chk.ok) {
       const data = await chk.json();
@@ -4573,8 +4579,103 @@
     }
     await specGrid?.loadRows();
   });
-  btnSpecPrint?.addEventListener('click', () => {
-    notify('warning', '列印功能尚未設定');
+  const openPdfInNewWindow = (blob, title) => {
+    const blobUrl = URL.createObjectURL(blob);
+    const reportTitle = String(title || '報表').trim();
+    const safeTitle = reportTitle.replace(/[<>&"]/g, (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[ch]));
+    const win = window.open('about:blank', '_blank');
+    if (win) {
+      win.document.write(
+        '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + safeTitle + '<\/title><\/head>'
+        + '<body style="margin:0;overflow:hidden;">'
+        + '<embed src="' + blobUrl + '" type="application\/pdf" style="position:fixed;top:0;left:0;width:100%;height:100%;" \/>'
+        + '<\/body><\/html>'
+      );
+      win.document.close();
+    } else {
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+  };
+
+  btnSpecPrint?.addEventListener('click', async () => {
+    if (!currentKey?.partnum) {
+      notify('error', '請先選擇一筆資料');
+      return;
+    }
+    await specGrid?.loadRows?.();
+    if ((specGrid?.getRowCount?.() ?? 0) <= 0) {
+      notify('error', '沒有規格資料可供列印');
+      return;
+    }
+    const paperNum = String(
+      getValue(currentRecord, 'PaperNum') ||
+      getValue(currentRecord, 'paperNum') ||
+      ''
+    ).trim();
+    const userId = getUserId();
+
+    const payloadResp = await fetch('/api/MatInfoUtility/BuildSpecPrintPayload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        partNum: currentKey.partnum,
+        revision: currentKey.revision || '',
+        paperNum,
+        userId,
+        showDate: '',
+        showTo: ''
+      })
+    });
+    if (!payloadResp.ok) {
+      notify('error', await payloadResp.text());
+      return;
+    }
+    const payload = await payloadResp.json();
+    let showDate = '';
+    let showTo = '';
+    if (payload?.requiresLegacyPrompt) {
+      showDate = String(window.prompt('請輸入要顯示在報表上的 DATE (YYYY/MM/DD)', '') || '').trim();
+      showTo = String(window.prompt('請輸入要顯示在報表上的 TO', '') || '').trim();
+    }
+
+    const finalPayloadResp = await fetch('/api/MatInfoUtility/BuildSpecPrintPayload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        partNum: currentKey.partnum,
+        revision: currentKey.revision || '',
+        paperNum,
+        userId,
+        showDate,
+        showTo
+      })
+    });
+    if (!finalPayloadResp.ok) {
+      notify('error', await finalPayloadResp.text());
+      return;
+    }
+    const finalPayload = await finalPayloadResp.json();
+    const printResp = await fetch('/api/report/generate-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        spName: finalPayload?.spName || 'MGNdSpecReport',
+        reportName: finalPayload?.reportName || 'MGNdSpecReport',
+        params: finalPayload?.params || {}
+      })
+    });
+    if (!printResp.ok) {
+      notify('error', await printResp.text());
+      return;
+    }
+    const pdfBlob = await printResp.blob();
+    openPdfInNewWindow(pdfBlob, finalPayload?.reportName || '承委單列印');
   });
 
   btnCommonFirst?.addEventListener('click', () => commonGrid?.selectRow(0));
@@ -4771,8 +4872,14 @@
   }
   document.addEventListener('matinfo:add:done', async (e) => {
     const partnum = e.detail?.partnum;
-    if (await searchByAddedPartnum(partnum)) return;
-    await refreshCurrentRecordInPlace();
+    let loaded = await searchByAddedPartnum(partnum);
+    if (!loaded) {
+      loaded = await refreshCurrentRecordInPlace();
+    }
+    if (!loaded || !currentKey?.partnum) return;
+    isNew = false;
+    setKeyFieldsEditable(false);
+    setEditMode(true);
   });
   document.addEventListener('matinfo:search:done', (e) => {
     const rows = e.detail?.rows;
