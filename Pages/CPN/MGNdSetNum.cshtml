@@ -1043,6 +1043,36 @@
     if (btn?.id === 'setMainToggleEdit' || btn?.id === 'setSubToggleEdit' || btn?.id === 'setDtlToggleEdit') {
       refreshEncodeModeFromActive(next);
     }
+    syncMutationButtons();
+  }
+
+  function isMainEditing() {
+    return !!(mainGrid && mainGrid.isEdit && mainGrid.isEdit());
+  }
+
+  function isEncodeEditing() {
+    return [setMainGrid, setSubGrid, setDtlGrid].some(g => !!(g && g.isEdit && g.isEdit()));
+  }
+
+  function syncMainMutationButtons() {
+    const editing = isMainEditing();
+    ['mainAddRow', 'mainDelete', 'mainSave', 'mainCancel'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) btn.disabled = !editing;
+    });
+  }
+
+  function syncEncodeMutationButtons() {
+    const editing = isEncodeEditing();
+    ['encodeAdd', 'encodeDelete', 'encodeSave', 'encodeCancel', 'btnCopyToMat', 'btnImportMapping'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) btn.disabled = !editing;
+    });
+  }
+
+  function syncMutationButtons() {
+    syncMainMutationButtons();
+    syncEncodeMutationButtons();
   }
 
   function currentEncodeGrid() {
@@ -1064,6 +1094,7 @@
         ? '<i class="bi bi-eye"></i>瀏覽'
         : '<i class="bi bi-pencil-square"></i>修改';
     }
+    syncMutationButtons();
   }
 
   function resolveTableNameByActiveTab() {
@@ -1833,6 +1864,10 @@
   }
 
   async function importMapping() {
+    if (!isEncodeEditing()) {
+      showMsg('請先按修改進入編輯模式', 'warning');
+      return;
+    }
     if (!currentSetClass || !currentNumId) {
       showMsg('請先選擇編碼方式屬性(NumId)', 'warning');
       return;
@@ -1851,6 +1886,10 @@
   }
 
   async function copyToMat() {
+    if (!isEncodeEditing()) {
+      showMsg('請先按修改進入編輯模式', 'warning');
+      return;
+    }
     if (!currentSetClass || !currentNumId) {
       showMsg('請先選擇編碼方式屬性(NumId)', 'warning');
       return;
@@ -1937,8 +1976,18 @@
       const allEditing = [setMainGrid, setSubGrid, setDtlGrid].every(g => !!(g && g.isEdit && g.isEdit()));
       setAllEncodeEdit(!allEditing);
     });
-    encodeUnifiedBtns.add?.addEventListener('click', () => triggerEncodeAction('add'));
+    encodeUnifiedBtns.add?.addEventListener('click', () => {
+      if (!isEncodeEditing()) {
+        showMsg('請先按修改進入編輯模式', 'warning');
+        return;
+      }
+      triggerEncodeAction('add');
+    });
     encodeUnifiedBtns.save?.addEventListener('click', async () => {
+      if (!isEncodeEditing()) {
+        showMsg('請先按修改進入編輯模式', 'warning');
+        return;
+      }
       try {
         await saveAllEncode();
       } catch (err) {
@@ -1946,17 +1995,30 @@
       }
     });
     encodeUnifiedBtns.cancel?.addEventListener('click', async () => {
+      if (!isEncodeEditing()) {
+        showMsg('請先按修改進入編輯模式', 'warning');
+        return;
+      }
       try {
         await cancelAllEncode();
       } catch (err) {
         showMsg(err?.message || '取消失敗', 'error');
       }
     });
-    encodeUnifiedBtns.del?.addEventListener('click', () => triggerEncodeAction('del'));
+    encodeUnifiedBtns.del?.addEventListener('click', () => {
+      if (!isEncodeEditing()) {
+        showMsg('請先按修改進入編輯模式', 'warning');
+        return;
+      }
+      triggerEncodeAction('del');
+    });
 
     btnMainToggle?.addEventListener('click', () => toggleEdit(mainGrid, btnMainToggle));
     document.getElementById('mainAddRow')?.addEventListener('click', () => {
-      toggleEdit(mainGrid, btnMainToggle, true);
+      if (!isMainEditing()) {
+        showMsg('請先按修改進入編輯模式', 'warning');
+        return;
+      }
       if (pendingMainRow) pendingMainRow.remove();
       const newRow = addRow(
         mainTable.tBodies[0],
@@ -1970,11 +2032,19 @@
       setPendingMainRow(newRow);
     });
     document.getElementById('mainSave')?.addEventListener('click', async () => {
+      if (!isMainEditing()) {
+        showMsg('請先按修改進入編輯模式', 'warning');
+        return;
+      }
       await saveGrid(mainGrid, '主分類');
       setPendingMainRow(null);
       toggleEdit(mainGrid, btnMainToggle, false);
     });
     btnMainCancel?.addEventListener('click', async () => {
+      if (!isMainEditing()) {
+        showMsg('請先按修改進入編輯模式', 'warning');
+        return;
+      }
       if (pendingMainRow) {
         pendingMainRow.remove();
         setPendingMainRow(null);
@@ -1985,6 +2055,10 @@
     // 主分類刪除：若是未儲存的新列，直接移除前端列
     mainDeleteBtn = document.getElementById('mainDelete');
     mainDeleteBtn?.addEventListener('click', async () => {
+      if (!isMainEditing()) {
+        showMsg('請先按修改進入編輯模式', 'warning');
+        return;
+      }
       // 先處理尚未儲存的新增列，再處理已存在資料的刪除
       if (pendingMainRow) {
         pendingMainRow.remove();
@@ -2008,6 +2082,10 @@
     });
 
     async function deleteSetMain() {
+      if (!(setMainGrid && setMainGrid.isEdit && setMainGrid.isEdit())) {
+        showMsg('請先按修改進入編輯模式', 'warning');
+        return;
+      }
       const sel = setMainTable.tBodies[0].querySelector('tr.table-primary');
       if (!sel) { showMsg('請先選擇要刪除的品號編碼原則', 'warning'); return; }
       const idx = Number(sel.dataset.idx);
@@ -2021,6 +2099,10 @@
     }
 
     async function deleteSetSub() {
+      if (!(setSubGrid && setSubGrid.isEdit && setSubGrid.isEdit())) {
+        showMsg('請先按修改進入編輯模式', 'warning');
+        return;
+      }
       const sel = setSubTable.tBodies[0].querySelector('tr.table-primary');
       if (!sel) { showMsg('請先選擇要刪除的編碼方式屬性', 'warning'); return; }
       const idx = Number(sel.dataset.idx);
@@ -2035,6 +2117,10 @@
     }
 
     async function deleteSetDtl() {
+      if (!(setDtlGrid && setDtlGrid.isEdit && setDtlGrid.isEdit())) {
+        showMsg('請先按修改進入編輯模式', 'warning');
+        return;
+      }
       const sel = setDtlTable.tBodies[0].querySelector('tr.table-primary');
       if (!sel) { showMsg('請先選擇要刪除的屬性種類明細', 'warning'); return; }
       const idx = Number(sel.dataset.idx);
@@ -2087,8 +2173,13 @@
       label: '品號編碼原則',
       reload: loadSetMain,
       customToggle: () => toggleEdit(setMainGrid, btnSetMainToggle),
+      beforeAdd: () => {
+        if (!(setMainGrid && setMainGrid.isEdit && setMainGrid.isEdit())) {
+          showMsg('請先按修改進入編輯模式', 'warning');
+          return false;
+        }
+      },
       customAdd: () => {
-        toggleEdit(setMainGrid, btnSetMainToggle, true);
         const row = addRow(setMainTable.tBodies[0], setMainCols, { TableName: 'MINdMatInfo', PKName: 'PartNum' }, ['SetClass']);
         showEditRow(row);
         refreshEncodeModeFromActive(true);
@@ -2124,13 +2215,13 @@
       keyFields: ['SetClass','NumId'],
       customToggle: () => toggleEdit(setSubGrid, btnSetSubToggle),
       beforeAdd: () => {
+        if (!(setSubGrid && setSubGrid.isEdit && setSubGrid.isEdit())) { showMsg('請先按修改進入編輯模式', 'warning'); return false; }
         if (!currentSetClass) { showMsg('請先選擇 SetClass', 'warning'); return false; }
       },
       newDefaults: () => ({ SetClass: currentSetClass, IsMust:1, iShowName:1 }),
       label: '編碼方式屬性',
       reload: () => loadSetSub(currentSetClass),
       customAdd: () => {
-        toggleEdit(setSubGrid, btnSetSubToggle, true);
         const row = addRow(setSubTable.tBodies[0], setSubCols, { SetClass: currentSetClass, IsMust:1, iShowName:1 }, ['SetClass','NumId']);
         showEditRow(row);
         refreshEncodeModeFromActive(true);
@@ -2166,6 +2257,7 @@
       keyFields: ['SetClass','NumId','DtlNumId'],
       customToggle: () => toggleEdit(setDtlGrid, btnSetDtlToggle),
       beforeAdd: () => {
+        if (!(setDtlGrid && setDtlGrid.isEdit && setDtlGrid.isEdit())) { showMsg('請先按修改進入編輯模式', 'warning'); return false; }
         if (!currentSetClass || !currentNumId) { showMsg('請先選擇 SetClass / NumId', 'warning'); return false; }
       },
       newDefaults: () => ({ SetClass: currentSetClass, NumId: currentNumId }),
@@ -2174,7 +2266,6 @@
       label: '屬性種類明細',
       reload: () => loadSetDtl(currentSetClass, currentNumId),
       customAdd: () => {
-        toggleEdit(setDtlGrid, btnSetDtlToggle, true);
         const row = addRow(setDtlTable.tBodies[0], setDtlCols, { SetClass: currentSetClass, NumId: currentNumId, DtlNumId: '' }, ['SetClass','NumId','DtlNumId']);
         ensureDtlKeySync();
         showEditRow(row);
@@ -2366,6 +2457,7 @@
     if (btnSetDtlToggle) btnSetDtlToggle.textContent = '修改';
     activeEncodeSection = 'setMain';
     refreshEncodeModeFromActive(false);
+    syncMutationButtons();
     wireButtons();
     await Promise.all([loadMain(), loadSetMain()]);
   }
