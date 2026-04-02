@@ -37,6 +37,7 @@ namespace PcbErpApi.Controllers
             {
                 cmd.CommandType = CommandType.StoredProcedure;
                 cmd.CommandText = req.SpName;
+                cmd.CommandTimeout = 180;
                 await conn.OpenAsync();
                 // 確保日期格式為 ymd，避免 yyyy/MM/dd 被錯誤解讀
                 using (var dfCmd = new SqlCommand("SET DATEFORMAT ymd", conn))
