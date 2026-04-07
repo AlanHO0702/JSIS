@@ -1,0 +1,867 @@
+@*
+    HP000059 - 員工新增單
+    對應 Delphi: HPSdEmpInfoDtl.dll
+    自訂按鈕功能:
+      - btnC2: 明細維護 — 依 EmpId 查詢員工詳細資料並以多頁籤 Modal 顯示
+*@
+@model dynamic
+
+<div class="modal fade" id="empInfoDtlModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title mb-0">
+          員工明細
+          <span class="text-muted ms-2" id="empInfoDtlEmpId" style="font-size:.85rem;"></span>
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <ul class="nav nav-tabs px-3 pt-2" id="empInfoDtlTabs" role="tablist"></ul>
+        <div class="tab-content px-3 pb-3 pt-2" id="empInfoDtlTabContent"></div>
+      </div>
+      <div class="modal-footer py-1">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">關閉</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+#empInfoDtlModal .modal-body {
+  background: #fafbfc;
+  overflow-x: hidden;
+}
+#empInfoDtlModal .tab-content,
+#empInfoDtlModal .tab-pane {
+  overflow-x: hidden;
+}
+#empInfoDtlModal .nav-tabs .nav-link {
+  font-size: .82rem;
+}
+#empInfoDtlModal .emp-dtl-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px 10px;
+  margin-bottom: 4px;
+}
+#empInfoDtlModal .emp-dtl-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+#empInfoDtlModal .emp-dtl-cell.col-span-3 {
+  grid-column: 1 / -1;
+}
+#empInfoDtlModal .emp-dtl-label {
+  width: 6.6em;
+  flex: 0 0 6.6em;
+  text-align: right;
+  font-size: .78rem;
+  color: #4b5563;
+  white-space: nowrap;
+  padding-right: 6px;
+}
+#empInfoDtlModal .emp-dtl-value {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+#empInfoDtlModal .emp-dtl-text {
+  height: 24px;
+  min-height: 24px;
+  font-size: .78rem;
+  line-height: 1.2;
+  padding: 2px 6px;
+  background-color: #fff;
+}
+#empInfoDtlModal .emp-dtl-check {
+  margin: 0;
+  transform: scale(.92);
+}
+#empInfoDtlModal .lookup-split-field {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
+}
+#empInfoDtlModal .lookup-code-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  max-width: 42%;
+  min-width: 66px;
+  display: flex;
+  align-items: stretch;
+}
+#empInfoDtlModal .lookup-code-wrap input.lookup-code-input {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  height: 24px !important;
+  min-height: 24px;
+  padding-right: 24px !important;
+  font-size: .78rem;
+  line-height: 1.2;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+#empInfoDtlModal .lookup-name-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid #ced4da;
+  border-left: none;
+  background: var(--bs-body-bg, #fff);
+  color: var(--bs-body-color, #212529);
+  font-size: .78rem;
+  line-height: 1.2;
+  padding: 2px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  cursor: pointer;
+}
+#empInfoDtlModal .lookup-name-btn:hover {
+  background: #f8f9fa;
+}
+#empInfoDtlModal .lookup-toggle {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  z-index: 3;
+}
+#empInfoDtlModal .lookup-toggle::before {
+  content: "";
+  display: block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #6b7280;
+  margin: 0 auto;
+}
+.emp-lookup-dropdown-list {
+  z-index: 2055;
+  background: #fff;
+  border: 1px solid #b6c2d9;
+  border-radius: 6px;
+  box-shadow: 0 8px 20px rgba(30, 41, 59, .18);
+  overflow: auto;
+}
+.emp-lookup-dropdown-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  margin: 0;
+  background: transparent;
+  text-align: left;
+  padding: 1px 8px;
+  font-size: .78rem;
+  line-height: 1.3;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.emp-lookup-dropdown-item:hover,
+.emp-lookup-dropdown-item:focus {
+  background: #e2e8f0;
+  outline: none;
+}
+.emp-lookup-dropdown-item.is-selected {
+  background: #dbeafe;
+}
+@@media (max-width: 992px) {
+  #empInfoDtlModal .emp-dtl-row {
+    grid-template-columns: 1fr;
+    gap: 3px 0;
+  }
+}
+</style>
+
+<script>
+(() => {
+  window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+  const LOOKUP_EMPTY_LABEL = '--請選擇--';
+  let activeLookupList = null;
+  let activeLookupInput = null;
+
+  const modalEl = document.getElementById('empInfoDtlModal');
+  const tabNav = document.getElementById('empInfoDtlTabs');
+  const tabContent = document.getElementById('empInfoDtlTabContent');
+
+  const readPaperNum = (ctx) => {
+    const v = (ctx?.paperNum || window._paperNum || '').toString().trim();
+    if (v) return v;
+    if (typeof window.getPaperNum === 'function') {
+      try { return (window.getPaperNum() || '').toString().trim(); } catch {}
+    }
+    return '';
+  };
+
+  const withJwt = (init = {}) => {
+    const jwt = localStorage.getItem('jwtId');
+    const headers = { ...(init.headers || {}) };
+    if (jwt) headers['X-JWTID'] = jwt;
+    return { ...init, headers };
+  };
+
+  const escHtml = (s) => {
+    if (s == null) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+
+  const escAttr = (s) => escHtml(s);
+
+  const fmtDate = (s) => {
+    if (!s) return '';
+    const m = s.toString().match(/^(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2}))?/);
+    if (!m) return s;
+    return m[2] ? `${m[1]} ${m[2]}` : m[1];
+  };
+
+  const isDateType = (dt) => (dt || '').toLowerCase().includes('date');
+
+  const isCheckedValue = (v) => {
+    const s = (v ?? '').toString().trim().toLowerCase();
+    return s === '1' || s === 'true' || s === 'y' || s === 'yes';
+  };
+
+  const normalizeLookupText = (value) => (value ?? '').toString().trim().toLowerCase();
+  const normalizeLookupKey = (value) => (value ?? '').toString().trim().toLowerCase();
+
+  const formatLookupDisplay = (key, label) => {
+    const k = (key ?? '').toString().trim();
+    const l = (label ?? '').toString().trim();
+    if (!k && !l) return '';
+    if (!k) return l;
+    if (!l) return k;
+    const prefix = `${k.toLowerCase()} - `;
+    if (l.toLowerCase().startsWith(prefix)) return l;
+    return `${k} - ${l}`;
+  };
+
+  const stripLookupPrefix = (code, label) => {
+    const c = (code ?? '').toString().trim();
+    const raw = (label ?? '').toString();
+    if (!c || !raw) return raw;
+    const prefix = `${c.toLowerCase()} - `;
+    return raw.toLowerCase().startsWith(prefix) ? raw.substring(prefix.length) : raw;
+  };
+
+  const getLookupLabel = (key, keyToLabel) => {
+    if (!key || !keyToLabel) return '';
+    if (keyToLabel[key] != null) return keyToLabel[key];
+    const lower = normalizeLookupKey(key);
+    return lower && keyToLabel[lower] != null ? keyToLabel[lower] : '';
+  };
+
+  const mapLookupKey = (raw, labelToKey) => {
+    if (!raw || !labelToKey) return raw ?? '';
+    if (labelToKey[raw] != null) return labelToKey[raw];
+    const lower = normalizeLookupKey(raw);
+    return lower && labelToKey[lower] != null ? labelToKey[lower] : raw;
+  };
+
+  const hiddenFieldLabels = new Set([
+    '帳號',
+    '銀行代碼',
+    '到職日',
+    'email',
+    'e-mail',
+    '項次',
+    '英文姓名',
+    '加班時數類別'
+  ]);
+
+  const hiddenFieldNames = new Set([
+    'account',
+    'accountno',
+    'bankcode',
+    'bankid',
+    'indate',
+    'joindate',
+    'email',
+    'emailaddr',
+    'seq',
+    'seqno',
+    'engname',
+    'englishname',
+    'otclasstype',
+    'ottype',
+    'overtimetype'
+  ]);
+
+  const shouldHideField = (field) => {
+    const label = (field?.displayLabel || '').toString().trim().toLowerCase();
+    const name = (field?.fieldName || '').toString().trim().toLowerCase();
+    return hiddenFieldLabels.has(label) || hiddenFieldNames.has(name);
+  };
+
+  const isAddressFullSpan = (field) => {
+    const txt = `${field?.displayLabel || ''} ${field?.fieldName || ''}`.trim();
+    return txt.includes('通訊地址') || txt.includes('戶籍地址');
+  };
+
+  const updateLookupNameBtn = (inputEl, labelText) => {
+    const nameBtn = inputEl.closest('.lookup-split-field')?.querySelector('.lookup-name-btn');
+    if (!nameBtn) return;
+    const code = (inputEl.value || inputEl.dataset.selected || '').trim();
+    nameBtn.textContent = stripLookupPrefix(code, labelText || '');
+  };
+
+  const getPaneFieldValue = (paneEl, key) => {
+    if (!paneEl || !paneEl._fieldValueMap) return '';
+    const k = (key || '').toString().trim().toLowerCase();
+    if (!k) return '';
+    return paneEl._fieldValueMap[k] ?? '';
+  };
+
+  const resolveCondValue = (inputEl, fieldOrLabel) => {
+    const key = (fieldOrLabel || '').toString().trim();
+    if (!key) return '';
+    const pane = inputEl.closest('.tab-pane');
+    return getPaneFieldValue(pane, key);
+  };
+
+  const syncLookupLabel = (inputEl) => {
+    const hidden = inputEl.closest('.lookup-split-field')?.querySelector('input.lookup-key[name]');
+    const raw = (inputEl.value || '').trim();
+    if (!raw) {
+      if (hidden) hidden.value = '';
+      inputEl.dataset.selected = '';
+      updateLookupNameBtn(inputEl, '');
+      return;
+    }
+    const mapped = mapLookupKey(raw, inputEl._lookupLabelToKey || {});
+    const key = (mapped || '').toString().split(' - ')[0];
+    if (hidden) hidden.value = key;
+    inputEl.dataset.selected = key;
+    const label = getLookupLabel(key, inputEl._lookupKeyToLabel || {});
+    if (label) updateLookupNameBtn(inputEl, label);
+  };
+
+  const applyLookupData = (inputEl, data, selected) => {
+    const rows = Array.isArray(data) ? data : [];
+    const keyToLabel = {};
+    const labelToKey = {};
+    const items = [];
+
+    rows.forEach(row => {
+      const key = row?.key == null ? '' : String(row.key);
+      const resultKeys = Object.keys(row || {})
+        .filter(k => k.startsWith('result'))
+        .sort((a, b) => Number(a.slice(6) || 0) - Number(b.slice(6) || 0));
+      const label = resultKeys
+        .map(k => row[k])
+        .filter(v => v != null && typeof v !== 'object' && String(v).trim() !== '')
+        .map(v => String(v))
+        .join(' - ');
+
+      keyToLabel[key] = label;
+      const keyNorm = normalizeLookupKey(key);
+      if (keyNorm && keyToLabel[keyNorm] == null) keyToLabel[keyNorm] = label;
+
+      const display = formatLookupDisplay(key, label);
+      if (display) {
+        labelToKey[display] = key;
+        const displayNorm = normalizeLookupKey(display);
+        if (displayNorm && labelToKey[displayNorm] == null) labelToKey[displayNorm] = key;
+      }
+
+      labelToKey[key] = key;
+      if (keyNorm && labelToKey[keyNorm] == null) labelToKey[keyNorm] = key;
+      items.push({ key, label });
+    });
+
+    inputEl._lookupKeyToLabel = keyToLabel;
+    inputEl._lookupLabelToKey = labelToKey;
+    inputEl._lookupItems = items;
+
+    const initRaw = (selected ?? '').toString().trim();
+    const mapped = mapLookupKey(initRaw, labelToKey);
+    const initFallback = initRaw.split(' - ')[0] || initRaw;
+    const initKey = (mapped && mapped !== initRaw) ? mapped : initFallback;
+
+    inputEl.value = initKey || '';
+    inputEl.dataset.selected = initKey || '';
+
+    const hidden = inputEl.closest('.lookup-split-field')?.querySelector('input.lookup-key[name]');
+    if (hidden) hidden.value = initKey || '';
+
+    const initLabel = getLookupLabel(initKey, keyToLabel) || inputEl.dataset.display || '';
+    updateLookupNameBtn(inputEl, initLabel);
+  };
+
+  const loadLookupOptions = async (inputEl) => {
+    if (!inputEl || inputEl.dataset.lookupLoading === '1') return;
+
+    const table = (inputEl.dataset.table || '').trim();
+    const key = (inputEl.dataset.key || '').trim();
+    const result = (inputEl.dataset.result || '').trim();
+    if (!table || !key || !result) return;
+
+    const cond1Field = (inputEl.dataset.cond1Field || '').trim();
+    const cond1Source = (inputEl.dataset.cond1Source || '').trim();
+    const cond2Field = (inputEl.dataset.cond2Field || '').trim();
+    const cond2Source = (inputEl.dataset.cond2Source || '').trim();
+
+    const cond1ValueField = cond1Source || cond1Field;
+    const cond2ValueField = cond2Source || cond2Field;
+    const cond1Value = cond1ValueField ? resolveCondValue(inputEl, cond1ValueField) : '';
+    const cond2Value = cond2ValueField ? resolveCondValue(inputEl, cond2ValueField) : '';
+
+    const cond1FieldParam = cond1Field || cond1Source;
+    const cond2FieldParam = cond2Field || cond2Source;
+    const condKey = `${cond1Field}:${cond1Value}|${cond2Field}:${cond2Value}`;
+
+    if (inputEl.dataset.lookupLoaded === '1' && inputEl.dataset.lookupCondKey === condKey)
+      return;
+
+    inputEl.dataset.lookupCondKey = condKey;
+    inputEl.dataset.lookupLoading = '1';
+
+    const url = `/api/TableFieldLayout/LookupData?table=${encodeURIComponent(table)}&key=${encodeURIComponent(key)}&result=${encodeURIComponent(result)}`
+      + (cond1FieldParam && cond1Value ? `&cond1Field=${encodeURIComponent(cond1FieldParam)}&cond1Value=${encodeURIComponent(cond1Value)}` : '')
+      + (cond2FieldParam && cond2Value ? `&cond2Field=${encodeURIComponent(cond2FieldParam)}&cond2Value=${encodeURIComponent(cond2Value)}` : '');
+
+    try {
+      const resp = await fetch(url, withJwt());
+      const data = resp.ok ? await resp.json() : [];
+      applyLookupData(inputEl, data, inputEl.dataset.selected || inputEl.value || '');
+      inputEl.dataset.lookupLoaded = '1';
+    } catch {
+      // ignore lookup load errors in modal display
+    } finally {
+      delete inputEl.dataset.lookupLoading;
+    }
+  };
+
+  const buildLookupListForInput = (inputEl, showAll = false) => {
+    const list = document.createElement('div');
+    list.className = 'emp-lookup-dropdown-list';
+
+    const items = Array.isArray(inputEl?._lookupItems) ? inputEl._lookupItems : [];
+    const currentKey =
+      inputEl.closest('.lookup-split-field')?.querySelector('input.lookup-key[name]')?.value ??
+      (inputEl.dataset.selected || inputEl.value || '');
+    const filter = showAll ? '' : normalizeLookupText(inputEl.value || '');
+
+    const addItem = (key, label) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'emp-lookup-dropdown-item';
+      item.dataset.key = key == null ? '' : String(key);
+      item.textContent = formatLookupDisplay(key, label) || String(key ?? '');
+      if ((currentKey ?? '') === (key ?? '')) item.classList.add('is-selected');
+      list.appendChild(item);
+    };
+
+    addItem('', LOOKUP_EMPTY_LABEL);
+    items.forEach(it => {
+      const key = it?.key ?? '';
+      const label = it?.label ?? '';
+      const display = formatLookupDisplay(key, label);
+      if (filter) {
+        const f = normalizeLookupText(filter);
+        const match =
+          normalizeLookupText(key).includes(f) ||
+          normalizeLookupText(label).includes(f) ||
+          normalizeLookupText(display).includes(f);
+        if (!match) return;
+      }
+      addItem(key, label);
+    });
+
+    return list;
+  };
+
+  const positionDropdown = (list, anchor) => {
+    if (!list || !anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const maxHeight = Math.max(140, Math.min(260, spaceBelow - 8));
+    const placeBelow = spaceBelow >= 140;
+
+    list.style.position = 'fixed';
+    list.style.left = `${Math.max(6, rect.left)}px`;
+    list.style.top = placeBelow ? `${rect.bottom}px` : `${Math.max(6, rect.top - maxHeight)}px`;
+    list.style.minWidth = `${Math.max(120, rect.width)}px`;
+    list.style.maxHeight = `${maxHeight}px`;
+  };
+
+  const closeLookupDropdown = () => {
+    if (activeLookupList) activeLookupList.remove();
+    activeLookupList = null;
+    activeLookupInput = null;
+    document.removeEventListener('mousedown', onLookupDocDown, true);
+    document.removeEventListener('pointerdown', onLookupDocDown, true);
+    document.removeEventListener('click', onLookupDocDown, true);
+    document.removeEventListener('focusin', onLookupFocusIn, true);
+    document.removeEventListener('keydown', onLookupKeydown, true);
+    window.removeEventListener('resize', onLookupResize, true);
+  };
+
+  const onLookupDocDown = (e) => {
+    if (activeLookupList && activeLookupList.contains(e.target)) return;
+    if (activeLookupInput && activeLookupInput.contains(e.target)) return;
+    closeLookupDropdown();
+  };
+
+  const onLookupFocusIn = (e) => {
+    if (activeLookupList && activeLookupList.contains(e.target)) return;
+    if (activeLookupInput && activeLookupInput.contains(e.target)) return;
+    closeLookupDropdown();
+  };
+
+  const onLookupKeydown = (e) => {
+    if (e.key === 'Escape') closeLookupDropdown();
+  };
+
+  const onLookupResize = () => closeLookupDropdown();
+
+  const openLookupDropdownForInput = (inputEl, showAll = false) => {
+    if (!inputEl) return;
+
+    closeLookupDropdown();
+    const list = buildLookupListForInput(inputEl, showAll);
+    activeLookupList = list;
+    activeLookupInput = inputEl;
+
+    const onPick = (e) => {
+      const item = e.target.closest('.emp-lookup-dropdown-item');
+      if (!item) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const key = item.dataset.key ?? '';
+      const label = getLookupLabel(key, inputEl._lookupKeyToLabel || {});
+
+      inputEl.value = key || '';
+      inputEl.dataset.selected = key || '';
+      updateLookupNameBtn(inputEl, label || '');
+
+      const hidden = inputEl.closest('.lookup-split-field')?.querySelector('input.lookup-key[name]');
+      if (hidden) hidden.value = key || '';
+
+      try {
+        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch {}
+
+      closeLookupDropdown();
+    };
+
+    list.addEventListener('pointerdown', onPick);
+    list.addEventListener('mousedown', onPick);
+    list.addEventListener('click', onPick);
+
+    document.body.appendChild(list);
+    positionDropdown(list, inputEl);
+
+    document.addEventListener('mousedown', onLookupDocDown, true);
+    document.addEventListener('pointerdown', onLookupDocDown, true);
+    document.addEventListener('click', onLookupDocDown, true);
+    document.addEventListener('focusin', onLookupFocusIn, true);
+    document.addEventListener('keydown', onLookupKeydown, true);
+    window.addEventListener('resize', onLookupResize, true);
+  };
+
+  const buildCell = (f, gridColumnStart) => {
+    const fieldName = (f.fieldName || '').toString();
+    const label = (f.displayLabel || fieldName || '').toString();
+    const fullSpan = isAddressFullSpan(f);
+    const colStyle = fullSpan ? '' : ` style="grid-column:${gridColumnStart};"`;
+    const cellClass = fullSpan ? 'emp-dtl-cell col-span-3' : 'emp-dtl-cell';
+    let valueHtml = '';
+
+    if ((Number(f.comboStyle || 0) === 1)) {
+      valueHtml = `<div class="emp-dtl-value"><input type="checkbox" class="form-check-input emp-dtl-check" ${isCheckedValue(f.value) ? 'checked' : ''} disabled></div>`;
+    } else if (f.hasLookup) {
+      const code = (f.value || '').toString();
+      const nameText = stripLookupPrefix(code, f.displayValue || '');
+      valueHtml = `
+        <div class="emp-dtl-value">
+          <div class="lookup-split-field" data-field="${escAttr(fieldName)}">
+            <input type="hidden" class="lookup-key" name="${escAttr(fieldName)}" value="${escAttr(code)}">
+            <div class="lookup-code-wrap">
+              <input type="text"
+                     class="form-control form-control-sm lookup-dropdown lookup-code-input"
+                     value="${escAttr(code)}"
+                     data-field="${escAttr(fieldName)}"
+                     data-table="${escAttr(f.lookupTable || '')}"
+                     data-key="${escAttr(f.lookupKey || '')}"
+                     data-result="${escAttr(f.lookupResult || '')}"
+                     data-cond1-field="${escAttr(f.lookupCond1Field || '')}"
+                     data-cond1-source="${escAttr(f.lookupCond1Source || '')}"
+                     data-cond2-field="${escAttr(f.lookupCond2Field || '')}"
+                     data-cond2-source="${escAttr(f.lookupCond2Source || '')}"
+                     data-display="${escAttr(nameText)}"
+                     data-selected="${escAttr(code)}"
+                     autocomplete="off">
+              <button type="button" class="lookup-toggle" aria-label="展開下拉" tabindex="-1"></button>
+            </div>
+            <button type="button" class="lookup-name-btn" tabindex="-1" title="點擊搜尋">${escHtml(nameText)}</button>
+          </div>
+        </div>`;
+    } else {
+      const raw = (f.value || '').toString();
+      const display = isDateType(f.dataType) ? fmtDate(raw) : raw;
+      valueHtml = `<div class="emp-dtl-value"><input type="text" class="form-control form-control-sm emp-dtl-text" value="${escAttr(display)}" readonly></div>`;
+    }
+
+    return `
+      <div class="${cellClass}" data-field="${escAttr(fieldName)}"${colStyle}>
+        <label class="emp-dtl-label">${escHtml(label)}</label>
+        ${valueHtml}
+      </div>`;
+  };
+
+  const buildTabPaneHtml = (pg) => {
+    const rowMap = new Map();
+    (pg.fields || []).filter(f => !shouldHideField(f)).forEach(f => {
+      const row = Number.isFinite(Number(f.layRow)) ? Number(f.layRow) : 0;
+      if (!rowMap.has(row)) rowMap.set(row, []);
+      rowMap.get(row).push(f);
+    });
+
+    return [...rowMap.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, fields]) => {
+        const sorted = [...fields].sort((a, b) => {
+          const ac = Number.isFinite(Number(a.layColumn)) ? Number(a.layColumn) : 0;
+          const bc = Number.isFinite(Number(b.layColumn)) ? Number(b.layColumn) : 0;
+          if (ac !== bc) return ac - bc;
+          return String(a.fieldName || '').localeCompare(String(b.fieldName || ''));
+        });
+
+        const numericCols = sorted
+          .map(x => Number(x.layColumn))
+          .filter(x => Number.isFinite(x));
+        const oneBased = numericCols.length > 0 && Math.min(...numericCols) >= 1;
+
+        const cells = sorted.map(f => {
+          const raw = Number(f.layColumn);
+          const col = Number.isFinite(raw) ? raw : (oneBased ? 1 : 0);
+          const start = oneBased ? col : (col + 1);
+          const safeStart = Math.max(1, Math.min(3, start));
+          return buildCell(f, safeStart);
+        }).join('');
+
+        return `<div class="emp-dtl-row">${cells}</div>`;
+      })
+      .join('');
+  };
+
+  const initPaneValueMap = (paneEl, fields) => {
+    const map = {};
+    (fields || []).forEach(f => {
+      const key1 = (f.fieldName || '').toString().trim().toLowerCase();
+      const key2 = (f.displayLabel || '').toString().trim().toLowerCase();
+      const value = (f.value ?? '').toString();
+      if (key1) map[key1] = value;
+      if (key2 && map[key2] == null) map[key2] = value;
+    });
+    paneEl._fieldValueMap = map;
+  };
+
+  const initLookupInputs = (paneEl) => {
+    paneEl.querySelectorAll('input.lookup-dropdown[data-table][data-key][data-result]').forEach(input => {
+      const hidden = input.closest('.lookup-split-field')?.querySelector('input.lookup-key[name]');
+      const selected = (hidden?.value || input.dataset.selected || input.value || '').toString();
+      input.dataset.selected = selected;
+      input.value = selected;
+      updateLookupNameBtn(input, input.dataset.display || '');
+      loadLookupOptions(input);
+    });
+  };
+
+  const buildModal = (data) => {
+    closeLookupDropdown();
+    document.getElementById('empInfoDtlEmpId').textContent = `工號 ${data.empId || ''}`;
+    tabNav.innerHTML = '';
+    tabContent.innerHTML = '';
+
+    (data.pages || []).forEach((pg, idx) => {
+      const tabId = `empDtlTab_${pg.page}`;
+      const paneId = `empDtlPane_${pg.page}`;
+      const active = idx === 0 ? 'active' : '';
+
+      tabNav.insertAdjacentHTML('beforeend', `
+        <li class="nav-item" role="presentation">
+          <button class="nav-link py-1 px-3 ${active}" id="${tabId}"
+                  data-bs-toggle="tab" data-bs-target="#${paneId}"
+                  type="button" role="tab" style="font-size:.82rem;">
+            ${escHtml(pg.title || `明細${pg.page}`)}
+          </button>
+        </li>`);
+
+      tabContent.insertAdjacentHTML('beforeend', `
+        <div class="tab-pane fade show ${active}" id="${paneId}" role="tabpanel">
+          ${buildTabPaneHtml(pg)}
+        </div>`);
+
+      const paneEl = document.getElementById(paneId);
+      if (paneEl) {
+        initPaneValueMap(paneEl, pg.fields || []);
+        initLookupInputs(paneEl);
+      }
+    });
+  };
+
+  modalEl?.addEventListener('hidden.bs.modal', () => {
+    closeLookupDropdown();
+  });
+
+  modalEl?.addEventListener('click', async (e) => {
+    const toggle = e.target.closest('.lookup-toggle');
+    if (toggle) {
+      e.preventDefault();
+      e.stopPropagation();
+      const input = toggle.closest('.lookup-code-wrap')?.querySelector('input.lookup-dropdown');
+      if (!input) return;
+      await loadLookupOptions(input);
+      openLookupDropdownForInput(input, true);
+      return;
+    }
+
+    const nameBtn = e.target.closest('.lookup-name-btn');
+    if (nameBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const input = nameBtn.closest('.lookup-split-field')?.querySelector('input.lookup-dropdown');
+      if (!input) return;
+      await loadLookupOptions(input);
+      openLookupDropdownForInput(input, true);
+    }
+  });
+
+  modalEl?.addEventListener('focusin', async (e) => {
+    const input = e.target.closest('input.lookup-dropdown');
+    if (!input) return;
+    await loadLookupOptions(input);
+    try {
+      const len = (input.value || '').length;
+      if (len) input.setSelectionRange(0, len);
+    } catch {}
+  });
+
+  modalEl?.addEventListener('input', async (e) => {
+    const input = e.target.closest('input.lookup-dropdown');
+    if (!input) return;
+    syncLookupLabel(input);
+    await loadLookupOptions(input);
+    openLookupDropdownForInput(input, false);
+  });
+
+  modalEl?.addEventListener('change', (e) => {
+    const input = e.target.closest('input.lookup-dropdown');
+    if (!input) return;
+    syncLookupLabel(input);
+  });
+
+  modalEl?.addEventListener('blur', (e) => {
+    const input = e.target.closest('input.lookup-dropdown');
+    if (!input) return;
+    const keyToLabel = input._lookupKeyToLabel || {};
+    const raw = (input.value || '').trim();
+
+    if (!raw) {
+      syncLookupLabel(input);
+      return;
+    }
+
+    const key = mapLookupKey(raw, input._lookupLabelToKey || {});
+    const label = getLookupLabel(key, keyToLabel);
+    if (label) {
+      input.value = key || raw;
+      updateLookupNameBtn(input, label);
+      syncLookupLabel(input);
+    }
+
+    setTimeout(() => {
+      if (activeLookupInput === input) closeLookupDropdown();
+    }, 0);
+  }, true);
+
+  modalEl?.addEventListener('keydown', (e) => {
+    const input = e.target.closest('input.lookup-dropdown');
+    if (!input) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      loadLookupOptions(input).then(() => openLookupDropdownForInput(input, true));
+      return;
+    }
+
+    if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+    if (!input.value) return;
+
+    const start = input.selectionStart ?? 0;
+    const end = input.selectionEnd ?? 0;
+    const allSelected = start === 0 && end === input.value.length;
+    if (!allSelected) return;
+
+    input.value = '';
+    syncLookupLabel(input);
+    e.preventDefault();
+  });
+
+  const empInfoDtl = async (ctx) => {
+    const paperNum = readPaperNum(ctx);
+    if (!paperNum) return Swal.fire({ icon: 'info', title: '沒有單號' });
+
+    const itemId = (ctx?.itemId || window._itemId || 'HP000059').toString();
+    const buttonName = 'btnC2';
+
+    Swal.fire({
+      title: '載入中…',
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      didOpen: () => Swal.showLoading()
+    });
+
+    try {
+      const url = `/api/EmpInfoDtl/GetEmpDetail?itemId=${encodeURIComponent(itemId)}&buttonName=${encodeURIComponent(buttonName)}&paperNum=${encodeURIComponent(paperNum)}`;
+      const resp = await fetch(url, withJwt());
+      const data = await resp.json();
+      Swal.close();
+
+      if (!resp.ok || !data.ok)
+        return Swal.fire({ icon: 'error', title: '載入失敗', text: data.error || `HTTP ${resp.status}` });
+
+      if (!Array.isArray(data.pages) || data.pages.length === 0)
+        return Swal.fire({ icon: 'info', title: '查無明細資料', text: `EmpId: ${data.empId || ''}` });
+
+      buildModal(data);
+      bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    } catch (err) {
+      Swal.close();
+      console.error('empInfoDtl error:', err);
+      Swal.fire({ icon: 'error', title: '執行錯誤', text: err?.message || '發生未知錯誤' });
+    }
+  };
+
+  window.ActionRailCustomHandlers['HP000059'] = {
+    btnC2: empInfoDtl
+  };
+})();
+</script>
+
+
+
+
+

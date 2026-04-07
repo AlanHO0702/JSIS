@@ -900,10 +900,23 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         var parts = n.Split('.', StringSplitOptions.RemoveEmptyEntries);
         foreach (var p in parts)
         {
-            if (!System.Text.RegularExpressions.Regex.IsMatch(p, "^[A-Za-z_][A-Za-z0-9_]*$"))
+            if (!IsValidProcPart(p))
                 throw new InvalidOperationException("Invalid SP name");
         }
         return n;
+    }
+
+    private static bool IsValidProcPart(string part)
+    {
+        if (string.IsNullOrWhiteSpace(part)) return false;
+        var first = part[0];
+        if (!(first == '_' || char.IsLetter(first))) return false;
+        for (var i = 1; i < part.Length; i++)
+        {
+            var c = part[i];
+            if (!(c == '_' || char.IsLetterOrDigit(c))) return false;
+        }
+        return true;
     }
 
     private async Task<ButtonConfigDto?> LoadButtonConfigAsync(SqlConnection conn, string itemId, string buttonName, SqlTransaction? tx = null)
