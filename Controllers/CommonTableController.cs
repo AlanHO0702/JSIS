@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Data.SqlClient; // ???? SQL Server ????
+using System.Text.RegularExpressions;
 
 namespace PcbErpApi.Controllers
 {
@@ -26,6 +27,55 @@ namespace PcbErpApi.Controllers
             _connStr = config.GetConnectionString("DefaultConnection")
                    ?? _context.Database.GetConnectionString()
                    ?? throw new InvalidOperationException("Missing connection string.");
+        }
+
+        private async Task<string> ResolveUseIdAsync()
+        {
+            var jwtHeader = Request?.Headers["X-JWTID"].ToString();
+            var userId = string.Empty;
+
+            await using var conn = new SqlConnection(_connStr);
+            await conn.OpenAsync();
+
+            if (!string.IsNullOrWhiteSpace(jwtHeader) && Guid.TryParse(jwtHeader, out var jwtId))
+            {
+                await using var cmd = new SqlCommand(
+                    "SELECT UserId FROM CURdUserOnline WITH (NOLOCK) WHERE JwtId = @jwtId", conn);
+                cmd.Parameters.AddWithValue("@jwtId", jwtId);
+                userId = (await cmd.ExecuteScalarAsync())?.ToString() ?? string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(userId))
+                userId = User?.Identity?.Name ?? string.Empty;
+
+            userId = userId.Trim();
+            if (!string.IsNullOrWhiteSpace(userId))
+            {
+                await using var cmd = new SqlCommand(
+                    "SELECT UseId FROM CURdUsers WITH (NOLOCK) WHERE UserId = @userId", conn);
+                cmd.Parameters.AddWithValue("@userId", userId);
+                var result = (await cmd.ExecuteScalarAsync())?.ToString() ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(result)) return result.Trim();
+            }
+
+            var claim = User?.Claims?.FirstOrDefault(c =>
+                string.Equals(c.Type, "UseId", StringComparison.OrdinalIgnoreCase))?.Value;
+            if (!string.IsNullOrWhiteSpace(claim)) return claim.Trim();
+
+            return "A001";
+        }
+
+        private async Task EnsureBuiltInFilterParamsAsync(SqlCommand cmd, string? filterSql)
+        {
+            if (cmd == null || string.IsNullOrWhiteSpace(filterSql)) return;
+            if (cmd.Parameters.Cast<SqlParameter>().Any(p =>
+                string.Equals(p.ParameterName, "@UseId", StringComparison.OrdinalIgnoreCase))) return;
+
+            if (Regex.IsMatch(filterSql, @"(?<!\w)@UseId(?!\w)", RegexOptions.IgnoreCase))
+            {
+                var useId = await ResolveUseIdAsync();
+                cmd.Parameters.AddWithValue("@UseId", string.IsNullOrWhiteSpace(useId) ? "A001" : useId);
+            }
         }
 
         public class SaveTableChangesRequest
@@ -766,6 +816,7 @@ ORDER BY idx.index_id, ic.key_ordinal";
         await using (var cmd = new SqlCommand(sql, conn))
         {
             cmd.Parameters.Add(pTop);
+            await EnsureBuiltInFilterParamsAsync(cmd, filter);
             await using var rd = await cmd.ExecuteReaderAsync();
             dt.Load(rd);
         }
@@ -820,6 +871,7 @@ ORDER BY idx.index_id, ic.key_ordinal";
         await using (var cmd = new SqlCommand(sql, conn))
         {
             parameters.ForEach(p => cmd.Parameters.Add(p));
+            await EnsureBuiltInFilterParamsAsync(cmd, filter);
             await using var rd = await cmd.ExecuteReaderAsync();
             dt.Load(rd);
         }
@@ -1087,6 +1139,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         await using (var cmd = new SqlCommand(sql, conn))
         {
             parameters.ForEach(p => cmd.Parameters.Add(p));
+            await EnsureBuiltInFilterParamsAsync(cmd, filter);
             await using var rd = await cmd.ExecuteReaderAsync();
             dt.Load(rd);
         }
