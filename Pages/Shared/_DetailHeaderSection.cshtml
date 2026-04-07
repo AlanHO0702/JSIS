@@ -77,6 +77,7 @@
 
     var headerLookupMap = ViewData["HeaderLookupMap"] as Dictionary<string, string>;
     var headerLookupTypeMap = ViewData["HeaderLookupResultTypes"] as Dictionary<string, string>;
+    var headerOcxMaps = ViewData["HeaderOcxMaps"];
     var headerTabBaseLabel = ViewData["HeaderTableDisplayLabel"]?.ToString() ?? "分頁";
 
     string actionPartial = (ViewData["ActionRailPartial"] as string)
@@ -425,6 +426,30 @@
       window._paperNum = String(newPaperNum);
       window.selectedPaperNum = String(newPaperNum);
     }
+
+    // 刷新非實體 OCX lookup 顯示欄位（如 FinishedName 依 Finished 的值動態更新）
+    const ocxMaps = PAGE?.headerOcxMaps;
+    if (Array.isArray(ocxMaps)) {
+      for (const map of ocxMaps) {
+        const keySelf = (map.KeySelfName || '').toString();
+        const displayField = (map.FieldName || '').toString();
+        const lookupValues = map.LookupValues || {};
+        if (!keySelf || !displayField) continue;
+        const keyRaw = getRowValueCI(row, keySelf);
+        if (keyRaw === undefined) continue;
+        const keyStr = (keyRaw ?? '').toString().trim();
+        const matchKey = Object.keys(lookupValues).find(k => k.toLowerCase() === keyStr.toLowerCase());
+        const displayName = matchKey ? lookupValues[matchKey] : '';
+        const displayEl = document.querySelector(
+          `.erp-header-form textarea[name="${CSS.escape(displayField)}"], .erp-header-form input[name="${CSS.escape(displayField)}"]`
+        );
+        if (displayEl) {
+          displayEl.value = displayName;
+          displayEl.dataset.init = displayName;
+        }
+      }
+    }
+
     window.__unsavedChanges = false;
     captureHeaderInitValues();
     if (typeof window.updateSaveCheckButtons === 'function') window.updateSaveCheckButtons();
@@ -2131,6 +2156,7 @@ const PAGE = {
   deleteApiUrl: "@DeleteApiUrl",
   detailRouteTemplate: "@detailRouteTemplate",
   headerFields: @Html.Raw(JsonSerializer.Serialize(headerFieldsList)),
+  headerOcxMaps: @Html.Raw(JsonSerializer.Serialize(headerOcxMaps ?? new List<object>())),
 };
 
 // 放在最前面（辭典開關）
@@ -3395,13 +3421,11 @@ if (editBtn) {
     const headerTableName = window._headerRealTableName || window._headerTableName || window._tableName;
     const paperNum = window._paperNum || (typeof PAGE !== 'undefined' ? PAGE.paperNum : null);
 
-    // 如果是從「編輯模式」切回「檢視模式」（保留），則儲存單身資料
+    // 如果是從「編輯模式」切回「檢視模式」（保留），則儲存單頭及單身資料
     if (isEdit) {
-      const detailSave = await saveMultiTabChanges();
-      if (!detailSave.ok) return;
+      const headerSave = await saveHeaderForm();
+      if (!headerSave.ok) return;
       setHeaderEditMode(false);
-      // 存檔後重新載入單身，補齊 LOOKUP 欄位顯示值
-      if (typeof window.__refreshMultiTab === 'function') await window.__refreshMultiTab();
       return;
     }
 
