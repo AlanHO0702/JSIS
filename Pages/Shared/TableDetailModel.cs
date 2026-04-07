@@ -204,6 +204,9 @@ public abstract class TableDetailModel<T> : PageModel where T : class, new()
         ViewData["HeaderLookupResultTypes"] = headerLookupMaps
             .GroupBy(x => x.FieldName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().ResultDataType ?? "", StringComparer.OrdinalIgnoreCase);
+        ViewData["HeaderOcxMaps"] = headerLookupMaps
+            .Select(x => new { FieldName = x.FieldName, KeySelfName = x.KeySelfName, LookupValues = x.LookupValues })
+            .ToList();
 
         var headerDisplayLabel = await _context.CurdTableNames
             .AsNoTracking()
