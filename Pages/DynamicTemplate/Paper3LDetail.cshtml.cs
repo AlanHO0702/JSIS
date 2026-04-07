@@ -224,6 +224,9 @@ namespace PcbErpApi.Pages.DynamicTemplate
             ViewData["HeaderLookupResultTypes"] = headerLookup
                 .GroupBy(x => x.FieldName, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.First().ResultDataType ?? "", StringComparer.OrdinalIgnoreCase);
+            ViewData["HeaderOcxMaps"] = headerLookup
+                .Select(x => new { FieldName = x.FieldName, KeySelfName = x.KeySelfName, LookupValues = x.LookupValues })
+                .ToList();
 
             // 5) Query fields (for search modal reuse)
             QueryFields = _ctx.CURdPaperSelected

@@ -455,6 +455,14 @@
         box-shadow: 0 0 0 0.15rem rgba(13, 110, 253, 0.25);
     }
 
+    .advance-dtl-table .cell-edit[type="checkbox"] {
+        width: 14px;
+        height: 14px;
+        padding: 0;
+        display: block;
+        margin: auto;
+    }
+
     .advance-dtl-table .cell-view {
         display: inline-block;
         width: 100%;
@@ -563,6 +571,12 @@ window.AdvanceDtlManager = window.AdvanceDtlManager || (() => {
     let _currentPaperNum = '';
     // 當前 domId
     let _currentDomId = '';
+    // 票據銀行選項快取 { domId: { pay: [], recv: [] } }
+    const _billBankCache = {};
+    // 票據科目選項快取 { domId: [] }
+    const _billSysAccCache = {};
+    // 票別選項快取（靜態資料，全域共用）
+    let _billTypeCache = null;
 
     // JWT Headers
     const withJwtHeaders = (init = {}) => {
@@ -588,6 +602,30 @@ window.AdvanceDtlManager = window.AdvanceDtlManager || (() => {
         bindBankSelectEvent(domId);
     };
 
+    // 立即儲存銀行與帳戶到主檔
+    const saveBankAccount = async (domId, bankId, accountId) => {
+        const cfg = window._advanceDtlConfigs?.[domId];
+        if (!cfg || !_currentPaperNum) return;
+        try {
+            const resp = await fetch(`/api/AdvanceDtl/SaveBank`, withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    moduleType: cfg.moduleType,
+                    paperNum: _currentPaperNum,
+                    bankId: bankId || null,
+                    accountId: accountId || null
+                })
+            }));
+            const data = await resp.json();
+            if (!data.ok) {
+                console.error('儲存銀行帳戶失敗:', data.error);
+            }
+        } catch (err) {
+            console.error('儲存銀行帳戶錯誤:', err);
+        }
+    };
+
     // 綁定銀行下拉選單變更事件
     const bindBankSelectEvent = (domId) => {
         const bankSelect = document.getElementById(`${domId}-bankId`);
@@ -597,6 +635,13 @@ window.AdvanceDtlManager = window.AdvanceDtlManager || (() => {
         bankSelect.onchange = async () => {
             const selectedBankId = bankSelect.value;
             await loadAccountOptions(domId, selectedBankId);
+            // 銀行變更時立即更新主檔 BankId，並清除 AccountId
+            await saveBankAccount(domId, selectedBankId, null);
+        };
+
+        accountSelect.onchange = async () => {
+            // 帳戶變更時立即更新主檔 AccountId
+            await saveBankAccount(domId, bankSelect.value, accountSelect.value);
         };
     };
 
@@ -669,9 +714,6 @@ window.AdvanceDtlManager = window.AdvanceDtlManager || (() => {
         // 使用不區分大小寫的方式取得欄位值
         const savedBankId = getFieldValue(masterData, 'BankId');
         const savedAccountId = getFieldValue(masterData, 'AccountId');
-
-        console.log('masterData:', masterData);
-        console.log('savedBankId:', savedBankId, 'savedAccountId:', savedAccountId);
 
         if (savedBankId) {
             bankSelect.value = savedBankId;
@@ -1047,6 +1089,10 @@ window.AdvanceDtlManager = window.AdvanceDtlManager || (() => {
     // 設定當前 paperNum
     const setPaperNum = (paperNum) => {
         _currentPaperNum = paperNum;
+        // 單號變更時清除票據銀行快取（新單號可能有不同的可用銀行）
+        Object.keys(_billBankCache).forEach(k => delete _billBankCache[k]);
+        // 清除科目快取（IsIn 可能因單號不同而異）
+        Object.keys(_billSysAccCache).forEach(k => delete _billSysAccCache[k]);
     };
 
     // 獲取當前 paperNum
@@ -1081,30 +1127,350 @@ window.AdvanceDtlManager = window.AdvanceDtlManager || (() => {
         `).join('');
     };
 
-    // 渲染票據 Grid (供外部呼叫)
-    const renderBillGrid = (domId, rows) => {
+    // ── 票據頁籤銀行/帳戶雙擊下拉輔助函數（參考 _MultiTabDetail showLookupDropdown）────
+
+    // 注入 CSS（只注入一次，樣式與 _MultiTabDetail mmd-lookup-dd 一致）
+    const _ensureBillLookupCss = () => {
+        if (document.getElementById('bill-lookup-dd-css')) return;
+        const style = document.createElement('style');
+        style.id = 'bill-lookup-dd-css';
+        style.textContent = `
+.bill-lookup-dd{background:#fff;border:1px solid #b0c4de;border-radius:6px;box-shadow:0 4px 18px rgba(0,0,0,.18);max-height:300px;display:flex;flex-direction:column;overflow:hidden;font-size:.85rem}
+.bill-lookup-search{border:none;border-bottom:1px solid #dde6f0;padding:5px 9px;outline:none;font-size:.85rem;min-width:160px;width:100%}
+.bill-lookup-list{overflow-y:auto;max-height:252px}
+.bill-lookup-item{padding:4px 10px;cursor:pointer;white-space:nowrap}
+.bill-lookup-item:hover,.bill-lookup-item:focus{background:#e8f0ff;outline:none}
+.bill-lookup-item.selected{background:#d0e4ff;font-weight:500}
+.bill-lk-td{cursor:text}
+.bill-lk-td:hover{background:rgba(59,130,246,.04)}
+`;
+        document.head.appendChild(style);
+    };
+
+    // 顯示下拉搜尋彈窗（獨立搜尋框 + 模糊比對 + 鍵盤導航，樣式同 _MultiTabDetail）
+    // lookupMap: { key: displayLabel }，onSelect(key, label) 為選取後的 callback
+    const _showBillLookupDropdown = (td, lookupMap, onSelect) => {
+        _ensureBillLookupCss();
+        const existing = document.getElementById('bill-lookup-dd');
+        if (existing) existing.remove();
+
+        const entries   = Object.entries(lookupMap || {});
+        const cellInput = td.querySelector('input.cell-edit');
+        const currentRaw = cellInput?.value || '';
+
+        const dd = document.createElement('div');
+        dd.id = 'bill-lookup-dd';
+        dd.className = 'bill-lookup-dd';
+
+        const search = document.createElement('input');
+        search.type = 'text';
+        search.placeholder = '搜尋…';
+        search.className = 'bill-lookup-search';
+        dd.appendChild(search);
+
+        const list = document.createElement('div');
+        list.className = 'bill-lookup-list';
+        dd.appendChild(list);
+
+        // 模糊比對（同 _MultiTabDetail）
+        const fuzzyMatch = (text, query) => {
+            let ti = 0;
+            for (let qi = 0; qi < query.length; qi++) {
+                const idx = text.indexOf(query[qi], ti);
+                if (idx < 0) return false;
+                ti = idx + 1;
+            }
+            return true;
+        };
+        const matchRank = (text, key, q) => {
+            const tL = text.toLowerCase(), kL = key.toLowerCase();
+            if (tL.startsWith(q) || kL.startsWith(q)) return 0;
+            if (tL.includes(q)   || kL.includes(q))   return 1;
+            if (fuzzyMatch(tL, q) || fuzzyMatch(kL, q)) return 2;
+            return -1;
+        };
+
+        const renderItems = (filter) => {
+            list.innerHTML = '';
+            const q = (filter || '').toLowerCase();
+            let matched = [];
+            entries.forEach(([key, label]) => {
+                if (!q) { matched.push({ key, label, rank: 0 }); return; }
+                const rank = matchRank(label, key, q);
+                if (rank >= 0) matched.push({ key, label, rank });
+            });
+            if (q) matched.sort((a, b) => a.rank - b.rank);
+            matched.forEach(({ key, label }) => {
+                const item = document.createElement('div');
+                item.className = 'bill-lookup-item';
+                item.tabIndex = -1;
+                item.textContent = label;
+                item.dataset.key = key;
+                if (String(currentRaw) === String(key)) item.classList.add('selected');
+                item.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    if (cellInput) cellInput.value = key;
+                    onSelect?.(key, label);
+                    cleanup();
+                    cellInput?.focus();
+                });
+                list.appendChild(item);
+            });
+        };
+
+        renderItems('');
+        search.addEventListener('input', () => renderItems(search.value));
+
+        // 定位（避免超出視窗底部）
+        const rect = td.getBoundingClientRect();
+        dd.style.position = 'fixed';
+        dd.style.left = `${rect.left}px`;
+        dd.style.minWidth = `${Math.max(rect.width, 200)}px`;
+        dd.style.zIndex = '99999';
+
+        // ★ 必須 append 到 modal 內，否則 Bootstrap focus trap 會搶走 search 的焦點
+        const modalEl = td.closest('.modal') || document.body;
+        modalEl.appendChild(dd);
+
+        const ddH = dd.offsetHeight || 300;
+        const below = window.innerHeight - rect.bottom;
+        dd.style.top = (below >= ddH || below >= rect.top)
+            ? `${rect.bottom + 1}px`
+            : `${rect.top - ddH - 1}px`;
+
+        // 與 masterMultiDetailTemplate.js 完全一致：用 requestAnimationFrame focus 搜尋框
+        requestAnimationFrame(() => search.focus());
+
+        // 點擊外部關閉
+        const onMousedown = (e) => {
+            if (!dd.contains(e.target)) cleanup();
+        };
+        setTimeout(() => document.addEventListener('mousedown', onMousedown), 0);
+
+        // 鍵盤導航
+        search.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape')    { cleanup(); cellInput?.focus(); }
+            if (e.key === 'ArrowDown') { list.querySelector('.bill-lookup-item')?.focus(); e.preventDefault(); }
+        });
+        list.addEventListener('keydown', (e) => {
+            const f = document.activeElement;
+            if      (e.key === 'ArrowDown') { f?.nextElementSibling?.focus(); e.preventDefault(); }
+            else if (e.key === 'ArrowUp')   { (f?.previousElementSibling ?? search).focus(); e.preventDefault(); }
+            else if (e.key === 'Enter')     { f?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); e.preventDefault(); }
+            else if (e.key === 'Escape')    { cleanup(); cellInput?.focus(); }
+        });
+
+        const cleanup = () => {
+            dd.remove();
+            document.removeEventListener('mousedown', onMousedown);
+        };
+    };
+
+    // 載入票據開票銀行選項並快取（呼叫 PayBankIdProc SP）
+    const _loadBillPayBankOptions = async (domId) => {
+        if (_billBankCache[domId]?.pay) return;
+        if (!_billBankCache[domId]) _billBankCache[domId] = {};
+        const cfg = window._advanceDtlConfigs?.[domId];
+        try {
+            const resp = await fetch(
+                `/api/AdvanceDtl/GetBillPayBankOptions?moduleType=${cfg.moduleType}&paperNum=${encodeURIComponent(_currentPaperNum)}`,
+                withJwtHeaders()
+            );
+            const data = await resp.json();
+            _billBankCache[domId].pay = data.ok ? (data.items || []) : [];
+        } catch { _billBankCache[domId].pay = []; }
+    };
+
+    // 載入票據收票銀行選項並快取（呼叫 RecvBankIdProc SP）
+    const _loadBillRecvBankOptions = async (domId) => {
+        if (_billBankCache[domId]?.recv) return;
+        if (!_billBankCache[domId]) _billBankCache[domId] = {};
+        const cfg = window._advanceDtlConfigs?.[domId];
+        try {
+            const resp = await fetch(
+                `/api/AdvanceDtl/GetBillRecvBankOptions?moduleType=${cfg.moduleType}&paperNum=${encodeURIComponent(_currentPaperNum)}`,
+                withJwtHeaders()
+            );
+            const data = await resp.json();
+            _billBankCache[domId].recv = data.ok ? (data.items || []) : [];
+        } catch { _billBankCache[domId].recv = []; }
+    };
+
+    // 取得帳戶選項清單（呼叫 PayAccountProc/RecvAccountProc SP，回傳 item 陣列供下拉用）
+    const _fetchBillAccountItems = async (domId, side, bankId) => {
+        if (!bankId) return [];
+        const cfg = window._advanceDtlConfigs?.[domId];
+        const endpoint = side === 'pay' ? 'GetBillPayAccountOptions' : 'GetBillRecvAccountOptions';
+        try {
+            const resp = await fetch(
+                `/api/AdvanceDtl/${endpoint}?moduleType=${cfg.moduleType}&bankId=${encodeURIComponent(bankId)}`,
+                withJwtHeaders()
+            );
+            const data = await resp.json();
+            return data.ok ? (data.items || []) : [];
+        } catch { return []; }
+    };
+
+    // 載入票據科目選項並快取（呼叫 APRdSysAccIdGet SP）
+    const _loadBillSysAccOptions = async (domId) => {
+        if (_billSysAccCache[domId]) return;
+        const cfg = window._advanceDtlConfigs?.[domId];
+        try {
+            const resp = await fetch(
+                `/api/AdvanceDtl/GetBillSysAccOptions?moduleType=${cfg.moduleType}&paperNum=${encodeURIComponent(_currentPaperNum)}`,
+                withJwtHeaders()
+            );
+            const data = await resp.json();
+            _billSysAccCache[domId] = data.ok ? (data.items || []) : [];
+        } catch { _billSysAccCache[domId] = []; }
+    };
+
+    // 載入票別選項並快取（靜態資料，全域共用）
+    const _loadBillTypeOptions = async () => {
+        if (_billTypeCache) return;
+        try {
+            const resp = await fetch('/api/AdvanceDtl/GetBillTypeOptions', withJwtHeaders());
+            const data = await resp.json();
+            _billTypeCache = data.ok ? (data.items || []) : [];
+        } catch { _billTypeCache = []; }
+    };
+
+    // ── 渲染票據 Grid (供外部呼叫) ────────────────────────────────
+    const renderBillGrid = async (domId, rows) => {
         const body = document.getElementById(`${domId}-billBody`);
         if (!body) return;
+
+        // 先確保銀行、科目、票別選項已載入（快取後不重複呼叫）
+        await Promise.all([
+            _loadBillPayBankOptions(domId),
+            _loadBillRecvBankOptions(domId),
+            _loadBillSysAccOptions(domId),
+            _loadBillTypeOptions()
+        ]);
+
+        const payBanks  = _billBankCache[domId]?.pay  || [];
+        const recvBanks = _billBankCache[domId]?.recv || [];
+
+        // 建立 lookupMap { BankId: "BankId ShortName" }
+        const buildBankLookup = (banks) => {
+            const map = {};
+            banks.forEach(b => {
+                const id = b.BankId || '';
+                if (!id) return;
+                const name = b.ShortName || '';
+                map[id] = name ? `${id} ${name}` : id;
+            });
+            return map;
+        };
+        const payBankMap  = buildBankLookup(payBanks);
+        const recvBankMap = buildBankLookup(recvBanks);
+
+        // 建立科目 lookupMap { AccId: "AccId AccIdName" }
+        const sysAccMap = {};
+        (_billSysAccCache[domId] || []).forEach(it => {
+            const id   = it.AccId || '';
+            const name = it.AccIdName || '';
+            if (id) sysAccMap[id] = name ? `${id} ${name}` : id;
+        });
+
+        // 建立票別 lookupMap { BillTypeId: "BillTypeId BillTypeName" }
+        const billTypeMap = {};
+        (_billTypeCache || []).forEach(it => {
+            const id   = it.BillTypeId || '';
+            const name = it.BillTypeName || '';
+            if (id) billTypeMap[id] = name ? `${id} ${name}` : id;
+        });
 
         body.innerHTML = rows.map((r, i) => `
             <tr data-index="${i}" data-paper-num="${r.PaperNum || ''}" data-item="${r.Item || ''}">
                 <td><span class="cell-view">${r.Item || ''}</span></td>
                 <td><input class="cell-edit" data-field="BillId" value="${r.BillId || ''}"></td>
                 <td><input class="cell-edit" data-field="Amount" value="${r.Amount || 0}"></td>
-                <td><input class="cell-edit" data-field="PayBankId" value="${r.PayBankId || ''}"></td>
-                <td><span class="cell-view">${r.BankNamePay || ''}</span></td>
-                <td><input class="cell-edit" data-field="PayAccountId" value="${r.PayAccountId || ''}"></td>
-                <td><input class="cell-edit" data-field="RecvBankId" value="${r.RecvBankId || ''}"></td>
-                <td><span class="cell-view">${r.BankNameRecv || ''}</span></td>
-                <td><input class="cell-edit" data-field="RecvAccountId" value="${r.RecvAccountId || ''}"></td>
-                <td><input class="cell-edit" data-field="BillAccId" value="${r.BillAccId || ''}"></td>
-                <td><input class="cell-edit" data-field="BillTypeId" value="${r.BillTypeId || ''}"></td>
+                <td class="bill-lk-td" data-type="bank" data-side="pay">
+                    <input class="cell-edit" data-field="PayBankId" value="${r.PayBankId || ''}">
+                </td>
+                <td><span class="cell-view bill-bank-name" data-side="pay">${r.BankNamePay || ''}</span></td>
+                <td class="bill-lk-td" data-type="account" data-side="pay">
+                    <input class="cell-edit" data-field="PayAccountId" value="${r.PayAccountId || ''}">
+                </td>
+                <td class="bill-lk-td" data-type="bank" data-side="recv">
+                    <input class="cell-edit" data-field="RecvBankId" value="${r.RecvBankId || ''}">
+                </td>
+                <td><span class="cell-view bill-bank-name" data-side="recv">${r.BankNameRecv || ''}</span></td>
+                <td class="bill-lk-td" data-type="account" data-side="recv">
+                    <input class="cell-edit" data-field="RecvAccountId" value="${r.RecvAccountId || ''}">
+                </td>
+                <td class="bill-lk-td" data-type="sysacc"><input class="cell-edit" data-field="BillAccId" value="${r.BillAccId || ''}"></td>
+                <td class="bill-lk-td" data-type="billtype"><input class="cell-edit" data-field="BillTypeId" value="${r.BillTypeId || ''}"></td>
                 <td><input class="cell-edit" data-field="DueDate" type="date" value="${r.DueDate || ''}"></td>
                 <td><input class="cell-edit" data-field="Inhibit" type="checkbox" ${r.Inhibit ? 'checked' : ''}></td>
                 <td><input class="cell-edit" data-field="ParaLine" type="checkbox" ${r.ParaLine ? 'checked' : ''}></td>
                 <td><input class="cell-edit" data-field="Title" type="checkbox" ${r.Title ? 'checked' : ''}></td>
             </tr>
         `).join('');
+
+        // 為每列的銀行/帳戶 td 綁定雙擊下拉事件
+        body.querySelectorAll('tr').forEach(tr => {
+            ['pay', 'recv'].forEach(side => {
+                const banks   = side === 'pay' ? payBanks  : recvBanks;
+                const bankMap = side === 'pay' ? payBankMap : recvBankMap;
+
+                // ── 銀行 td ──
+                const bankTd  = tr.querySelector(`.bill-lk-td[data-type="bank"][data-side="${side}"]`);
+                const accTd   = tr.querySelector(`.bill-lk-td[data-type="account"][data-side="${side}"]`);
+                const nameSpan = tr.querySelector(`.bill-bank-name[data-side="${side}"]`);
+
+                if (bankTd) {
+                    bankTd.addEventListener('dblclick', (e) => {
+                        e.stopPropagation();
+                        const accInput = accTd?.querySelector('input.cell-edit');
+                        _showBillLookupDropdown(bankTd, bankMap, (key) => {
+                            const found = banks.find(b => b.BankId === key);
+                            if (nameSpan) nameSpan.textContent = found?.ShortName || '';
+                            if (accInput) accInput.value = '';
+                        });
+                    });
+                }
+
+                // ── 帳戶 td ──
+                if (accTd) {
+                    accTd.addEventListener('dblclick', async (e) => {
+                        e.stopPropagation();
+                        const bankInput = tr.querySelector(`.bill-lk-td[data-type="bank"][data-side="${side}"] input.cell-edit`);
+                        const bankId = bankInput?.value || '';
+                        if (!bankId) { alert('請先選擇銀行'); return; }
+
+                        const items = await _fetchBillAccountItems(domId, side, bankId);
+                        const accountMap = {};
+                        items.forEach(it => {
+                            const id   = it.AccountId || '';
+                            const name = it.AccountName || '';
+                            if (id) accountMap[id] = name ? `${id} ${name}` : id;
+                        });
+
+                        _showBillLookupDropdown(accTd, accountMap, () => {});
+                    });
+                }
+            });
+
+            // ── 票據科目 td ──
+            const sysAccTd = tr.querySelector('.bill-lk-td[data-type="sysacc"]');
+            if (sysAccTd) {
+                sysAccTd.addEventListener('dblclick', (e) => {
+                    e.stopPropagation();
+                    _showBillLookupDropdown(sysAccTd, sysAccMap, () => {});
+                });
+            }
+
+            // ── 票別 td ──
+            const billTypeTd = tr.querySelector('.bill-lk-td[data-type="billtype"]');
+            if (billTypeTd) {
+                billTypeTd.addEventListener('dblclick', (e) => {
+                    e.stopPropagation();
+                    _showBillLookupDropdown(billTypeTd, billTypeMap, () => {});
+                });
+            }
+        });
     };
 
     // 渲染其他科目 Grid (供外部呼叫)

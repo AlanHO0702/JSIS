@@ -681,14 +681,15 @@ ORDER BY idx.index_id, ic.key_ordinal";
         {
             if (value == null || value == DBNull.Value) return DBNull.Value;
             var s = value.ToString() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(s)) return DBNull.Value;
 
             var t = ResolveDbBaseType(dbType);
 
-            // ??憿??湔???銝莎??踹?隤方??詨?
+            // 字串型別（char/varchar/text）：空字串保留為空字串，不轉成 NULL
+            // 這樣 UPDATE 時清空欄位可正確存入空字串，INSERT 時的空字串過濾由呼叫端處理
             if (t.Contains("char") || t.Contains("text"))
                 return s;
 
+            if (string.IsNullOrWhiteSpace(s)) return DBNull.Value;
             if (t is "int" or "bigint" or "smallint" or "tinyint")
                 return long.TryParse(s, out var l) ? l : (object?)DBNull.Value;
             if (t.Contains("decimal") || t.Contains("numeric") || t.Contains("money"))
