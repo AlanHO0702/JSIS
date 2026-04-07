@@ -37,7 +37,9 @@ public class AdvanceDtlController : ControllerBase
             AutoCountProc: "APRdAdvanceAutoCount",
             InsertSumProc: "APRdAdvanceSubInsSum",
             PayBankIdProc: "APRDAdvancePayBankIdGet",
-            RecvBankIdProc: "APRDAdvanceRecvBankIdGet"
+            RecvBankIdProc: "APRDAdvanceRecvBankIdGet",
+            PayAccountProc: "APRdGetPayAccount",
+            RecvAccountProc: "APRdGetRecvAccount"
         ),
         ["advancerev"] = new ModuleConfig(
             MainTable: "APRdAdvanceRevMain",
@@ -49,7 +51,9 @@ public class AdvanceDtlController : ControllerBase
             AutoCountProc: "APRdAdvanceRevAutoCount",
             InsertSumProc: "APRdAdvanceRevSubInsSum",
             PayBankIdProc: "APRDAdvanceRevPayBankIdGet",
-            RecvBankIdProc: "APRDAdvanceRecvBankIdGet"
+            RecvBankIdProc: "APRDAdvanceRecvBankIdGet",
+            PayAccountProc: "APRdGetPayAccount",
+            RecvAccountProc: "APRdGetRecvAccount"
         ),
         ["recv"] = new ModuleConfig(
             MainTable: "SPOdRecvMain",
@@ -62,6 +66,8 @@ public class AdvanceDtlController : ControllerBase
             InsertSumProc: "SPOdRecvSubInsSum",
             PayBankIdProc: "SPOdRecvBankIdGet",
             RecvBankIdProc: "SPOdRecvBankIdGet",
+            PayAccountProc: "SPOdRecvGetAccount",
+            RecvAccountProc: "SPOdRecvGetAccount",
             CompanyIdColumn: "CustomerId",
             IsRecv: true
         )
@@ -78,6 +84,8 @@ public class AdvanceDtlController : ControllerBase
         string InsertSumProc,
         string PayBankIdProc,
         string RecvBankIdProc,
+        string PayAccountProc,
+        string RecvAccountProc,
         string CompanyIdColumn = "CompanyId",  // 客戶/廠商編號欄位名稱
         bool IsRecv = false                     // 是否為收款模組 (SPOdRecv*，欄位結構不同)
     );
@@ -309,6 +317,254 @@ public class AdvanceDtlController : ControllerBase
             }
 
             return Ok(new { ok = true, banks });
+        }
+        catch (Exception ex)
+        {
+            return Ok(new { ok = false, error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 取得票據開票銀行選項 (呼叫 PayBankIdProc SP)
+    /// GET /api/AdvanceDtl/GetBillPayBankOptions?moduleType=advance&paperNum=xxx
+    /// </summary>
+    [HttpGet("GetBillPayBankOptions")]
+    public async Task<IActionResult> GetBillPayBankOptions([FromQuery] string moduleType, [FromQuery] string paperNum)
+    {
+        if (!_moduleConfigs.TryGetValue(moduleType ?? "advance", out var cfg))
+            return Ok(new { ok = false, error = "無效的模組類型" });
+
+        await using var conn = new SqlConnection(_cs);
+        try
+        {
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(cfg.PayBankIdProc, conn)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            cmd.Parameters.AddWithValue("@PaperNum", paperNum ?? "");
+
+            var items = new List<Dictionary<string, string?>>();
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var row = new Dictionary<string, string?>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i)?.ToString();
+                items.Add(row);
+            }
+            return Ok(new { ok = true, items });
+        }
+        catch (Exception ex)
+        {
+            return Ok(new { ok = false, error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 取得票據收票銀行選項 (呼叫 RecvBankIdProc SP)
+    /// GET /api/AdvanceDtl/GetBillRecvBankOptions?moduleType=advance&paperNum=xxx
+    /// </summary>
+    [HttpGet("GetBillRecvBankOptions")]
+    public async Task<IActionResult> GetBillRecvBankOptions([FromQuery] string moduleType, [FromQuery] string paperNum)
+    {
+        if (!_moduleConfigs.TryGetValue(moduleType ?? "advance", out var cfg))
+            return Ok(new { ok = false, error = "無效的模組類型" });
+
+        await using var conn = new SqlConnection(_cs);
+        try
+        {
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(cfg.RecvBankIdProc, conn)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            cmd.Parameters.AddWithValue("@PaperNum", paperNum ?? "");
+
+            var items = new List<Dictionary<string, string?>>();
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var row = new Dictionary<string, string?>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i)?.ToString();
+                items.Add(row);
+            }
+            return Ok(new { ok = true, items });
+        }
+        catch (Exception ex)
+        {
+            return Ok(new { ok = false, error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 取得票據開票帳戶選項 (呼叫 PayAccountProc SP)
+    /// GET /api/AdvanceDtl/GetBillPayAccountOptions?moduleType=advance&bankId=xxx
+    /// </summary>
+    [HttpGet("GetBillPayAccountOptions")]
+    public async Task<IActionResult> GetBillPayAccountOptions([FromQuery] string moduleType, [FromQuery] string bankId)
+    {
+        if (!_moduleConfigs.TryGetValue(moduleType ?? "advance", out var cfg))
+            return Ok(new { ok = false, error = "無效的模組類型" });
+
+        await using var conn = new SqlConnection(_cs);
+        try
+        {
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(cfg.PayAccountProc, conn)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            cmd.Parameters.AddWithValue("@BankId", bankId ?? "");
+
+            var items = new List<Dictionary<string, string?>>();
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var row = new Dictionary<string, string?>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i)?.ToString();
+                items.Add(row);
+            }
+            return Ok(new { ok = true, items });
+        }
+        catch (Exception ex)
+        {
+            return Ok(new { ok = false, error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 取得票據收票帳戶選項 (呼叫 RecvAccountProc SP)
+    /// GET /api/AdvanceDtl/GetBillRecvAccountOptions?moduleType=advance&bankId=xxx
+    /// </summary>
+    [HttpGet("GetBillRecvAccountOptions")]
+    public async Task<IActionResult> GetBillRecvAccountOptions([FromQuery] string moduleType, [FromQuery] string bankId)
+    {
+        if (!_moduleConfigs.TryGetValue(moduleType ?? "advance", out var cfg))
+            return Ok(new { ok = false, error = "無效的模組類型" });
+
+        await using var conn = new SqlConnection(_cs);
+        try
+        {
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(cfg.RecvAccountProc, conn)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            cmd.Parameters.AddWithValue("@BankId", bankId ?? "");
+
+            var items = new List<Dictionary<string, string?>>();
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var row = new Dictionary<string, string?>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i)?.ToString();
+                items.Add(row);
+            }
+            return Ok(new { ok = true, items });
+        }
+        catch (Exception ex)
+        {
+            return Ok(new { ok = false, error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 取得票據科目選項 (呼叫 APRdSysAccIdGet SP)
+    /// GET /api/AdvanceDtl/GetBillSysAccOptions?moduleType=advance&paperNum=xxx
+    /// SysAccId=5 → 應收票據，SysAccId=6 → 應付票據
+    /// </summary>
+    [HttpGet("GetBillSysAccOptions")]
+    public async Task<IActionResult> GetBillSysAccOptions([FromQuery] string moduleType, [FromQuery] string paperNum)
+    {
+        if (!_moduleConfigs.TryGetValue(moduleType ?? "advance", out var cfg))
+            return Ok(new { ok = false, error = "無效的模組類型" });
+
+        await using var conn = new SqlConnection(_cs);
+        try
+        {
+            await conn.OpenAsync();
+
+            int sysAccId;
+            if (cfg.IsRecv)
+            {
+                // recv 模組固定為應收票據
+                sysAccId = 5;
+            }
+            else
+            {
+                // 查詢主檔的 IsIn 欄位判斷應收/應付
+                var mainSql = $"SELECT IsIn FROM [{cfg.MainTable}] WITH (NOLOCK) WHERE PaperNum = @paperNum";
+                await using var mainCmd = new SqlCommand(mainSql, conn);
+                mainCmd.Parameters.AddWithValue("@paperNum", paperNum ?? "");
+                var isInObj = await mainCmd.ExecuteScalarAsync();
+                var isIn = isInObj == null || isInObj == DBNull.Value ? 0 : Convert.ToInt32(isInObj);
+
+                // advance: IsIn=1(預收)→5, IsIn=0(預付)→6
+                // advancerev: IsIn=1(預收退款)→6, IsIn=0(預付退款)→5
+                sysAccId = (moduleType ?? "advance").Equals("advancerev", StringComparison.OrdinalIgnoreCase)
+                    ? (isIn == 1 ? 6 : 5)
+                    : (isIn == 1 ? 5 : 6);
+            }
+
+            await using var cmd = new SqlCommand("APRdSysAccIdGet", conn)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            cmd.Parameters.AddWithValue("@SysAccId", sysAccId);
+
+            var items = new List<Dictionary<string, string?>>();
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var row = new Dictionary<string, string?>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i)?.ToString();
+                items.Add(row);
+            }
+            return Ok(new { ok = true, items });
+        }
+        catch (Exception ex)
+        {
+            return Ok(new { ok = false, error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 取得票別選項
+    /// GET /api/AdvanceDtl/GetBillTypeOptions
+    /// </summary>
+    [HttpGet("GetBillTypeOptions")]
+    public async Task<IActionResult> GetBillTypeOptions()
+    {
+        await using var conn = new SqlConnection(_cs);
+        try
+        {
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(
+                "SELECT BillTypeId, BillTypeName FROM dbo.APRdBillType WITH (NOLOCK)", conn)
+            {
+                CommandTimeout = 30
+            };
+
+            var items = new List<Dictionary<string, string?>>();
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var row = new Dictionary<string, string?>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i)?.ToString();
+                items.Add(row);
+            }
+            return Ok(new { ok = true, items });
         }
         catch (Exception ex)
         {
