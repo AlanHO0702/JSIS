@@ -114,7 +114,7 @@ namespace PcbErpApi.Pages.CUR
 
             var orderBy = string.IsNullOrWhiteSpace(setup.OrderByField)
                 ? await GetDefaultOrderByAsync(TableName)
-                : setup.OrderByField;
+                : NormalizeOrderBy(setup.OrderByField) ?? await GetDefaultOrderByAsync(TableName);
 
             QueryFields = await LoadQueryFieldsAsync(itemId, TableName, "TW");
             ViewData["QueryFields"] = QueryFields;
@@ -126,7 +126,8 @@ namespace PcbErpApi.Pages.CUR
             // 判斷是否有查詢參數（使用者透過查詢功能帶入條件）
             var hasQueryParams = QueryFields.Any(qf =>
                 Request.Query.ContainsKey(qf.ColumnName) &&
-                !string.IsNullOrWhiteSpace(Request.Query[qf.ColumnName].ToString()));
+                !string.IsNullOrWhiteSpace(Request.Query[qf.ColumnName].ToString()))
+                || IsDoQueryRequested(Request.Query);
             ViewData["HasQueryParams"] = hasQueryParams;
 
             var filterParams = new List<SqlParameter>();
@@ -256,7 +257,8 @@ namespace PcbErpApi.Pages.CUR
                 var openNoRecord = await IsOpenNoRecordAsync(itemId);
                 var hasQueryParams = QueryFields.Any(qf =>
                     Request.Query.ContainsKey(qf.ColumnName) &&
-                    !string.IsNullOrWhiteSpace(Request.Query[qf.ColumnName].ToString()));
+                    !string.IsNullOrWhiteSpace(Request.Query[qf.ColumnName].ToString()))
+                    || IsDoQueryRequested(Request.Query);
 
                 if (openNoRecord && !hasQueryParams)
                 {
@@ -287,7 +289,7 @@ namespace PcbErpApi.Pages.CUR
                 {
                     orderBy = string.IsNullOrWhiteSpace(setup.OrderByField)
                         ? await GetDefaultOrderByAsync(TableName)
-                        : setup.OrderByField;
+                        : NormalizeOrderBy(setup.OrderByField) ?? await GetDefaultOrderByAsync(TableName);
                 }
 
                 pageIndex = pageIndex <= 0 ? 1 : pageIndex;
@@ -359,7 +361,7 @@ namespace PcbErpApi.Pages.CUR
 
             var orderBy = string.IsNullOrWhiteSpace(setup.OrderByField)
                 ? await GetDefaultOrderByAsync(TableName)
-                : setup.OrderByField;
+                : NormalizeOrderBy(setup.OrderByField) ?? await GetDefaultOrderByAsync(TableName);
 
             QueryFields = await LoadQueryFieldsAsync(itemId, TableName, "TW");
             var filterParams = new List<SqlParameter>();
@@ -725,6 +727,28 @@ SELECT TOP 1 c.name
             if (s.Contains(">")) return ">";
             if (s.Contains("<")) return "<";
             return "=";
+        }
+
+        private static bool IsDoQueryRequested(IQueryCollection query)
+        {
+            if (query == null || query.Count == 0) return false;
+            if (!query.TryGetValue("doQuery", out var doQuery)) return false;
+            var v = doQuery.ToString().Trim();
+            if (string.IsNullOrWhiteSpace(v)) return false;
+            return !v.Equals("0", StringComparison.OrdinalIgnoreCase)
+                   && !v.Equals("false", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string? NormalizeOrderBy(string? raw)
+        {
+            var s = (raw ?? string.Empty)
+                .Replace('*', ' ')
+                .Replace('+', ' ')
+                .Trim();
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            while (s.Contains("  "))
+                s = s.Replace("  ", " ");
+            return s;
         }
 
         private static string CombineFilter(string? baseFilter, string? extra)
