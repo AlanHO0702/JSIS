@@ -334,7 +334,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             selectKey = $"[{keyFields[0]}] as [key]";
         }
 
-        var sql = $"SELECT {selectKey}, {selectResult} FROM [{table.Trim()}]{whereSql}";
+        var sql = $"SELECT DISTINCT {selectKey}, {selectResult} FROM [{table.Trim()}]{whereSql}";
 
         var list = new List<Dictionary<string, object>>();
         using (var conn = new SqlConnection(_connStr))

@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using ClosedXML.Excel;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -1997,6 +1998,77 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             if (tx != null) { try { await tx.RollbackAsync(); } catch { } }
             return StatusCode(500, new { ok = false, error = ex.GetBaseException().Message });
         }
+    }
+
+    // ===== 自寫按鈕：匯出 Excel（對應 Delphi HPSdChargeCalcExcel.dll） =====
+    [HttpPost("execByButtonExcel")]
+    public async Task<IActionResult> ExecByButtonExcel([FromBody] ExecByButtonRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req?.ItemId) || string.IsNullOrWhiteSpace(req.ButtonName))
+            return BadRequest(new { ok = false, error = "ItemId/ButtonName 為必填" });
+
+        await using var conn = new SqlConnection(_cs);
+        await conn.OpenAsync();
+
+        // 讀取按鈕參數（傳遞資料給DLL之設定）：SeqNum=1 常數 → SP 名稱
+        const string paramSql = @"
+SELECT SeqNum, ParamType, ISNULL(ParamFieldName,'') AS ParamFieldName
+  FROM CURdOCXItmCusBtnTranPm WITH (NOLOCK)
+ WHERE ItemId = @itemId AND ButtonName = @buttonName
+ ORDER BY SeqNum;";
+
+        string? spName = null;
+        await using (var cmd = new SqlCommand(paramSql, conn))
+        {
+            cmd.Parameters.AddWithValue("@itemId", req.ItemId);
+            cmd.Parameters.AddWithValue("@buttonName", req.ButtonName);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                var seqNum = Convert.ToInt32(rd["SeqNum"]);
+                var paramType = rd["ParamType"] == DBNull.Value ? 0 : Convert.ToInt32(rd["ParamType"]);
+                var fieldName = rd["ParamFieldName"].ToString()!;
+                if (seqNum == 1 && paramType == 1) // 常數 → SP 名稱
+                    spName = fieldName;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(spName))
+            return BadRequest(new { ok = false, error = "找不到 SP 名稱設定（SeqNum=1 常數）" });
+
+        var paperNum = (req.PaperNum ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(paperNum))
+            return BadRequest(new { ok = false, error = "目前單號為空" });
+
+        // 執行 SP，用 DeriveParameters 自動取得參數名稱，設第一個為 paperNum
+        var dt = new DataTable();
+        await using (var cmd = new SqlCommand(spName, conn))
+        {
+            cmd.CommandType = CommandType.StoredProcedure;
+            cmd.CommandTimeout = 9600;
+            SqlCommandBuilder.DeriveParameters(cmd);
+            foreach (SqlParameter p in cmd.Parameters)
+            {
+                if (p.Direction == ParameterDirection.ReturnValue) continue;
+                p.Value = paperNum;
+                break;
+            }
+            using var da = new SqlDataAdapter(cmd);
+            da.Fill(dt);
+        }
+
+        // 產 Excel（ClosedXML）
+        using var wb = new XLWorkbook();
+        var ws = wb.AddWorksheet("Sheet1");
+        ws.Cell(1, 1).InsertTable(dt);
+        ws.Row(1).Style.Font.Bold = true;
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        var fileName = $"{spName}_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
+        return File(ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            fileName);
     }
 
     // Helper: 將 JsonElement 轉成 CLR 類型

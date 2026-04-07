@@ -114,6 +114,20 @@
             return d.ToString("#,##0.##");
         if (v is float f)
             return f.ToString("#,##0.##");
+        if (v is System.Text.Json.JsonElement je)
+        {
+            if (je.ValueKind == System.Text.Json.JsonValueKind.Number)
+            {
+                if (je.TryGetDecimal(out var jDec))
+                    return jDec.ToString("#,##0.##");
+                if (je.TryGetDouble(out var jDbl))
+                    return jDbl.ToString("#,##0.##");
+            }
+            var jeStr = je.ValueKind == System.Text.Json.JsonValueKind.String ? (je.GetString() ?? "") : je.ToString();
+            if (showDateOnly && !string.IsNullOrWhiteSpace(jeStr) && DateTime.TryParse(jeStr, out var jeParsed))
+                return FormatDateByMask(jeParsed, editMask);
+            return jeStr;
+        }
         if (v is IFormattable fm)
             return fm.ToString(null, System.Globalization.CultureInfo.InvariantCulture);
 
@@ -125,14 +139,35 @@
     }
     private static string FormatEditValue(object? v, CURdTableField field)
     {
-        var s = v?.ToString() ?? "";
-        if (string.IsNullOrWhiteSpace(s)) return "";
+        if (v == null) return "";
 
         var dataType = (field.DataType ?? "").Trim().ToLowerInvariant();
         var editMask = field.FormatStr;
         var hasDateSemantics = HasDateOnlyMask(editMask)
             || (dataType.Contains("date") && !dataType.Contains("time"));
 
+        if (v is System.Text.Json.JsonElement je)
+        {
+            if (je.ValueKind == System.Text.Json.JsonValueKind.Number)
+            {
+                if (je.TryGetDecimal(out var jDec))
+                    return jDec.ToString("G29");
+                if (je.TryGetDouble(out var jDbl))
+                    return jDbl.ToString("G");
+            }
+            var jeStr = je.ValueKind == System.Text.Json.JsonValueKind.String ? (je.GetString() ?? "") : je.ToString();
+            if (string.IsNullOrWhiteSpace(jeStr)) return "";
+            if (hasDateSemantics && DateTime.TryParse(jeStr, out var jeDt))
+                return FormatDateByMask(jeDt, editMask);
+            return jeStr;
+        }
+
+        if (v is decimal dec) return dec.ToString("G29");
+        if (v is double d) return d.ToString("G");
+        if (v is float f) return f.ToString("G");
+
+        var s = v.ToString() ?? "";
+        if (string.IsNullOrWhiteSpace(s)) return "";
         if (!hasDateSemantics) return s;
         if (!DateTime.TryParse(s, out var dt)) return s;
         return FormatDateByMask(dt, editMask);
@@ -225,6 +260,7 @@
                             bool isCheckbox = (f.ComboStyle ?? 0) == 1;
                             var cellClass = IsNumberDataType(f) ? "cell-number" : "cell-text";
                             <td class="text-nowrap @cellClass @(isCheckbox ? "cell-checkbox" : "") @(isReadOnly ? "readonly-td" : "")" data-field="@f.FieldName">
+                                <div class="cell-host">
                                 <span class="cell-view @(isCheckbox ? "d-inline-flex justify-content-center w-100" : "") @(isReadOnly ? "readonly-cell" : "")" data-raw="@raw">
                                     @if (isCheckbox)
                                     {
@@ -255,6 +291,7 @@
                                            data-readonly="@(isReadOnly ? "1" : "0")"
                                            @(isReadOnly ? "readonly" : "") />
                                 }
+                                </div>
                             </td>
                         }
                         @{

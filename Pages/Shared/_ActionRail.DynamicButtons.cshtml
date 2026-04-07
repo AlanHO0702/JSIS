@@ -22,7 +22,9 @@
     var replaceExists = (b?.ReplaceExists ?? "").ToString();
     var dialogCaption = (b?.DialogCaption ?? "").ToString();
     var allowSelCount = (b?.AllowSelCount ?? "").ToString();
+    var printRptName = (b?.PrintRptName ?? "").ToString();
     var needInEdit = (b?.bNeedInEdit ?? "").ToString();
+    var ocxName = (b?.OCXName ?? "").ToString();
 
     <button type="button"
             class="fab"
@@ -30,6 +32,7 @@
             data-custom-btn="1"
             data-button-name="@btnName"
             data-design-type="@designType"
+            data-ocx-name="@ocxName"
             data-search-template="@searchTemplate"
             data-sp-name="@spName"
             data-exec-sp-name="@execSpName"
@@ -37,6 +40,7 @@
             data-replace-exists="@replaceExists"
             data-dialog-caption="@dialogCaption"
             data-allow-sel-count="@allowSelCount"
+            data-print-rpt-name="@printRptName"
             data-b-need-in-edit="@needInEdit">
         @caption
     </button>
@@ -809,7 +813,7 @@
     };
 
     const loadDict = async (table) => {
-      if (!table) throw new Error("MultiSelectDD is required");
+      if (!table) throw new Error("MultiSelectDD/Select Sp Name is required");
       const url = `/api/TableFieldLayout/DictFields?table=${encodeURIComponent(table)}&lang=TW`;
       const res = await fetch(url, withJwtHeaders());
       if (!res.ok) throw new Error(await res.text());
@@ -1127,11 +1131,12 @@
 
     const fetchSearch = async () => {
       setFetchLoading(true);
+      const inputs = collectInputs();
       const payload = {
         itemId: state.itemId,
         buttonName: state.buttonName,
         paperNum: state.paperNum,
-        params: collectInputs()
+        params: inputs
       };
       try {
         const res = await fetch("/api/PaperSearch/Search", withJwtHeaders({
@@ -1232,14 +1237,15 @@
 
       clearTable(availTable);
       clearTable(selTable);
-      await loadDict(meta.multiSelectDd || cfg.multiSelectDd || cfg.MultiSelectDd || "");
+      const dictTable = (meta.multiSelectDd || cfg.multiSelectDd || cfg.MultiSelectDd || meta.spName || cfg.spName || cfg.SpName || meta.execSpName || cfg.execSpName || cfg.ExecSpName || "").toString().trim();
+      await loadDict(dictTable);
       buildHeads();
       // 套用欄位拖曳排序
       if (window.initColumnDragSort) {
         [availTable, selTable].forEach(tbl => {
           if (!tbl) return;
           const hRow = tbl.querySelector('thead tr');
-          if (hRow) initColumnDragSort({ headerRow: hRow, tbody: tbl.querySelector('tbody'), scrollWrap: tbl.closest('.table-responsive') || tbl.parentElement, tableName: meta.multiSelectDd || cfg.multiSelectDd || cfg.MultiSelectDd || '', onSaved: null });
+          if (hRow) initColumnDragSort({ headerRow: hRow, tbody: tbl.querySelector('tbody'), scrollWrap: tbl.closest('.table-responsive') || tbl.parentElement, tableName: dictTable, onSaved: null });
         });
       }
       await buildForm(state.itemId, state.buttonName);
@@ -1332,6 +1338,9 @@
       itemId: "",
       buttonName: "",
       paperNum: "",
+      spName: "",
+      execSpName: "",
+      printRptName: "",
       searchParams: [],
       inputs: {}
     };
@@ -1603,13 +1612,54 @@
       btnConfirm.textContent = loading ? "執行中..." : "確定";
     };
 
+    const normalizeReportName = (name) => {
+      const s = (name || "").toString().trim();
+      if (!s) return "";
+      return s.toLowerCase().endsWith(".rpt") ? s.slice(0, -4) : s;
+    };
+
+    const autoPrintResult = async (inputParams) => {
+      const spName = (state.spName || state.execSpName || "").toString().trim();
+      const rptRaw = (state.printRptName || "").toString().trim();
+      if (!spName || !rptRaw) return;
+
+      const payload = {
+        paperNum: state.paperNum || "",
+        spName,
+        reportName: normalizeReportName(rptRaw),
+        params: { ...(inputParams || {}) }
+      };
+
+      const res = await fetch('/api/report/generate-url', withJwtHeaders({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }));
+      if (!res.ok) throw new Error(await res.text());
+
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const win = window.open('about:blank', '_blank');
+      if (win) {
+        win.location.href = blobUrl;
+      } else {
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    };
     const runSp = async () => {
       setConfirmLoading(true);
+      const inputs = collectInputs();
       const payload = {
         itemId: state.itemId,
         buttonName: state.buttonName,
         paperNum: state.paperNum,
-        params: collectInputs()
+        params: inputs
       };
       try {
         const res = await fetch("/api/PaperSearch/RunSpExec", withJwtHeaders({
@@ -1622,6 +1672,13 @@
         if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
         if (modalEl) {
           try { bootstrap.Modal.getOrCreateInstance(modalEl).hide(); } catch {}
+        }
+        if ((state.printRptName || "").toString().trim() !== "") {
+          try {
+            await autoPrintResult(inputs);
+          } catch (printErr) {
+            alert(`列印失敗: ${printErr?.message || printErr}`);
+          }
         }
         if (typeof window.__refreshHeaderData === "function") {
           try { await window.__refreshHeaderData(); } catch {}
@@ -1645,6 +1702,9 @@
       state.itemId = ctx.itemId || "";
       state.buttonName = ctx.buttonName || "";
       state.paperNum = ctx.paperNum || "";
+      state.spName = meta.spName || "";
+      state.execSpName = meta.execSpName || "";
+      state.printRptName = meta.printRptName || "";
 
       const configUrl = `/api/PaperSearch/Config?itemId=${encodeURIComponent(state.itemId)}&buttonName=${encodeURIComponent(state.buttonName)}`;
       const res = await fetch(configUrl, withJwtHeaders());
@@ -2137,12 +2197,14 @@
     const meta = {
       designType,
       searchTemplate,
+      ocxName: (btn.dataset.ocxName || "").toLowerCase(),
       spName: btn.dataset.spName || "",
       execSpName: btn.dataset.execSpName || "",
       multiSelectDd: btn.dataset.multiSelectDd || "",
       replaceExists: btn.dataset.replaceExists || "",
       dialogCaption: btn.dataset.dialogCaption || "",
-      allowSelCount: btn.dataset.allowSelCount || ""
+      allowSelCount: btn.dataset.allowSelCount || "",
+      printRptName: btn.dataset.printRptName || ""
     };
     const ctx = {
       buttonName: btn.getAttribute('data-button-name') || '',
@@ -2192,45 +2254,67 @@
       return;
     }
 
-    if (searchTemplate === "jsdpapersearchdll.dll") {
-      if (designType !== 1) {
-        alert("此按鈕 SearchTemplate=JSdPaperSearchDLL.dll，但 DesignType 不是 1，請調整按鈕設定。");
+    if (designType === 1) {
+      if (searchTemplate === "jsdpapersearchdll.dll") {
+        try {
+          await paperSearch.open(ctx, meta);
+        } catch (err) {
+          console.error("paper search template error", err);
+          alert(`執行失敗: ${err?.message || err}`);
+        }
         return;
       }
-      try {
-        await paperSearch.open(ctx, meta);
-      } catch (err) {
-        console.error("paper search template error", err);
-        alert(`執行失敗: ${err?.message || err}`);
+
+      if (searchTemplate === "jsdcondrunspdll.dll") {
+        try {
+          await condRunSp.open(ctx, meta);
+        } catch (err) {
+          console.error("cond-run-sp template error", err);
+          alert(`執行失敗: ${err?.message || err}`);
+        }
+        return;
       }
-      return;
+
+      if (searchTemplate === "minduomgetlot.dll") {
+        try {
+          await uomGetLot.open(ctx, meta);
+        } catch (err) {
+          console.error("uom-get-lot template error", err);
+          alert(`執行失敗: ${err?.message || err}`);
+        }
+        return;
+      }
     }
 
-    if (searchTemplate === "jsdcondrunspdll.dll") {
-      if (designType !== 1) {
-        alert("此按鈕 SearchTemplate=JSdCondRunSpDLL.dll，但 DesignType 不是 1，請調整按鈕設定。");
+    if (designType === 0) {
+      if (meta.ocxName === "hpsdchargecalcexcel.dll") {
+        try {
+          const resp = await fetch('/api/StoredProc/execByButtonExcel', withJwtHeaders({
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ itemId: ctx.itemId, buttonName: ctx.buttonName, paperNum: ctx.paperNum })
+          }));
+          if (!resp.ok) {
+            let msg = `HTTP ${resp.status}`;
+            try { const j = await resp.json(); msg = j.error || msg; } catch {}
+            alert(`執行失敗: ${msg}`);
+            return;
+          }
+          const blob = await resp.blob();
+          const cd = resp.headers.get('Content-Disposition') || '';
+          const match = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+          const fileName = match ? match[1].replace(/['"]/g, '') : 'export.xlsx';
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = fileName; a.click();
+          URL.revokeObjectURL(url);
+        } catch (err) {
+          console.error("execByButtonExcel error", err);
+          alert(`執行失敗: ${err?.message || err}`);
+        }
         return;
       }
-      try {
-        await condRunSp.open(ctx, meta);
-      } catch (err) {
-        console.error("cond-run-sp template error", err);
-        alert(`執行失敗: ${err?.message || err}`);
-      }
-      return;
-    }
-
-    if (searchTemplate === "minduomgetlot.dll") {
-      if (designType !== 1) {
-        alert("此按鈕 SearchTemplate=MINdUOMGetLot.dll，但 DesignType 不是 1，請調整按鈕設定。");
-        return;
-      }
-      try {
-        await uomGetLot.open(ctx, meta);
-      } catch (err) {
-        console.error("uom-get-lot template error", err);
-        alert(`執行失敗: ${err?.message || err}`);
-      }
+      alert(`此按鈕（${ctx.buttonName}）設計方式為自寫（DesignType=0），尚未實作自訂處理程序。`);
       return;
     }
 

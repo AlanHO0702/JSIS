@@ -1212,6 +1212,10 @@ SELECT TOP 1 RunSQLAfterAdd
             if (safeCols.Count == 0)
                 return Ok(Array.Empty<Dictionary<string, object?>>());
 
+            // 確保 PaperNum 一定包含在 SELECT 中（即使字典沒設定），讓前端 data-paper-num 可以正確讀取
+            if (!safeCols.Any(c => c.Equals("PaperNum", StringComparison.OrdinalIgnoreCase)))
+                safeCols.Insert(0, "PaperNum");
+
             var selectCols = string.Join(",", safeCols.Select(Esc));
             var orderBy = safeCols.Any(c => c.Equals("Item", StringComparison.OrdinalIgnoreCase)) ? Esc("Item") : Esc("PaperNum");
 

@@ -424,6 +424,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             public int? ReplaceExists { get; set; }
             public string DialogCaption { get; set; } = string.Empty;
             public int? AllowSelCount { get; set; }
+            public string PrintRptName { get; set; } = string.Empty;
             public int? bNeedNum { get; set; }
             public int? bNeedInEdit { get; set; }
             public int? DesignType { get; set; }
@@ -438,6 +439,7 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
             await conn.OpenAsync();
 
             var hasIsUpdateMoney = await HasCustButtonColumnAsync(conn, "IsUpdateMoney");
+            var hasPrintRptName = await HasCustButtonColumnAsync(conn, "PrintRptName");
 
             var sql = $@"
 SELECT ItemId, SerialNum, ButtonName,
@@ -445,6 +447,7 @@ SELECT ItemId, SerialNum, ButtonName,
        bVisible, bNeedNum, bNeedInEdit, DesignType,
        OCXName, CoClassName, SpName, ExecSpName,
        SearchTemplate, MultiSelectDD, ReplaceExists, DialogCaption, AllowSelCount,
+       {(hasPrintRptName ? "PrintRptName" : "CAST('' AS nvarchar(1)) AS PrintRptName")},
        {(hasIsUpdateMoney ? "IsUpdateMoney" : "CAST(0 AS int) AS IsUpdateMoney")}
   FROM CURdOCXItemCustButton WITH (NOLOCK)
  WHERE ItemId = @itemId
@@ -475,6 +478,7 @@ SELECT ItemId, SerialNum, ButtonName,
                     ReplaceExists = TryToInt(rd["ReplaceExists"]),
                     DialogCaption = rd["DialogCaption"]?.ToString() ?? string.Empty,
                     AllowSelCount = TryToInt(rd["AllowSelCount"]),
+                    PrintRptName = rd["PrintRptName"]?.ToString() ?? string.Empty,
                     bNeedNum = TryToInt(rd["bNeedNum"]),
                     bNeedInEdit = TryToInt(rd["bNeedInEdit"]),
                     DesignType = TryToInt(rd["DesignType"]),
