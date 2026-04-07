@@ -1549,15 +1549,36 @@ function enableFormLayoutEditing(container, dictName) {
         opt.label = name ? `${code} ${name}` : code;
         dl.appendChild(opt);
       });
+      const cellMap = {};
+      const dropMap = {};
+      rows.forEach(r => {
+        const code = String(pickRowValueCI(r, meta.keyField) ?? '').trim();
+        if (!code) return;
+        const name = String(pickRowValueCI(r, meta.nameField) ?? '').trim();
+        cellMap[code] = name || code;
+        dropMap[code] = name ? `${code} ${name}` : code;
+      });
       table.querySelectorAll(`tbody .cell-edit[name="${f.FieldName}"]`).forEach(inp => {
+        inp._lookupCellMap = cellMap;
+        inp._lookupMap = dropMap;
         inp.setAttribute('list', listId);
         if (inp.dataset.lkBound === '1') return;
         inp.dataset.lkBound = '1';
+        const syncView = () => {
+          const td = inp.closest('td');
+          const span = td?.querySelector('.cell-view');
+          if (!span) return;
+          const code = String(inp.value || '').trim();
+          span.textContent = code ? (cellMap[code] ?? code) : '';
+        };
         const norm = () => {
           const v = (inp.value || '').toString();
           const first = v.split(/\s+/).filter(Boolean)[0] || '';
           if (first !== v) inp.value = first;
+          inp.dataset.raw = inp.value || '';
+          syncView();
         };
+        syncView();
         inp.addEventListener('input', norm);
         inp.addEventListener('change', norm);
       });
@@ -3160,6 +3181,8 @@ function enableFormLayoutEditing(container, dictName) {
   // Top toolbar actions apply to current active tab.
   const topEdit = document.getElementById('btnTopEdit');
   const topSave = document.getElementById('btnTopSave');
+  const topSaveIcon = document.getElementById('btnTopSaveIcon');
+  const topCancelIcon = document.getElementById('btnTopCancelIcon');
   const topAdd  = document.getElementById('btnTopAdd');
   const topDelete = document.getElementById('btnTopDelete');
   const topQuery = document.getElementById('btnTopQuery');
@@ -3183,6 +3206,8 @@ function enableFormLayoutEditing(container, dictName) {
 
   const setTopEditUI = (editing) => {
     topSave?.classList.toggle('d-none', !editing);
+    if (topSaveIcon) topSaveIcon.disabled = !editing;
+    if (topCancelIcon) topCancelIcon.disabled = !editing;
     document.body.classList.toggle('ccs-editing', !!editing);
     if (detailCountBox) {
       detailCountBox.classList.toggle('mode-edit', !!editing);
@@ -3431,9 +3456,14 @@ function enableFormLayoutEditing(container, dictName) {
       await triggerTabAction('save');
     }
   };
+  const handleTopCancel = async () => {
+    await triggerTabAction('cancel');
+  };
 
   topEdit?.addEventListener('click', async () => { await triggerTabAction('edit'); });
   topSave?.addEventListener('click', handleTopSave);
+  topSaveIcon?.addEventListener('click', handleTopSave);
+  topCancelIcon?.addEventListener('click', handleTopCancel);
   topAdd?.addEventListener('click', async () => { await triggerTabAction('add'); });
   topDelete?.addEventListener('click', async () => {
     const paperNum = String(currentCompany || '').trim();

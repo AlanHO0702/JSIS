@@ -170,6 +170,13 @@
   .matinfo-add-grid td:nth-child(1) select {
     min-width: 0;
   }
+  .matinfo-add-grid td:nth-child(1) {
+    width: 130px;
+  }
+  .matinfo-add-grid th:nth-child(2),
+  .matinfo-add-grid td:nth-child(2) {
+    width: 120px;
+  }
   .matinfo-add-grid thead th {
     background: #f7f9ff;
     color: #1d3b6b;
@@ -187,6 +194,74 @@
     border: 1px solid #cfd7e6;
     border-radius: 4px;
     font-size: 0.8rem;
+  }
+  .matinfo-add-dtl-trigger {
+    width: 100%;
+    min-width: 0;
+    height: 24px;
+    padding: 1px 22px 1px 6px;
+    border: 1px solid #cfd7e6;
+    border-radius: 4px;
+    background-color: #fff;
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+    background-size: 12px 12px;
+    background-image: url('data:image/svg+xml;utf8,<svg width="11" height="11" fill="gray" xmlns="http://www.w3.org/2000/svg"><path d="M2 4.5l3.5 3.5L9 4.5" stroke="gray" stroke-width="2" fill="none" stroke-linecap="round"/></svg>');
+    text-align: left;
+    font-size: 0.8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #0f172a;
+    cursor: pointer;
+  }
+  .matinfo-add-dtl-trigger:hover,
+  .matinfo-add-dtl-trigger:focus {
+    border-color: #93c5fd;
+    outline: none;
+  }
+  .matinfo-add-dtl-dropdown-list {
+    position: fixed;
+    z-index: 4000;
+    background: #fff;
+    border: 1px solid #b6c2d9;
+    border-radius: 6px;
+    box-shadow: 0 8px 20px rgba(30, 41, 59, 0.18);
+    overflow: auto;
+  }
+  .matinfo-add-dtl-dropdown-item {
+    display: block;
+    width: 100%;
+    border: 0;
+    margin: 0;
+    background: transparent;
+    text-align: left;
+    padding: 3px 10px;
+    font-size: 0.82rem;
+    line-height: 1.4;
+    min-height: 24px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .matinfo-add-dtl-dropdown-item .lookup-code {
+    display: inline-block;
+    min-width: 110px;
+    margin-right: 16px;
+    color: #0f3a7a;
+    font-weight: 600;
+  }
+  .matinfo-add-dtl-dropdown-item .lookup-name {
+    color: #1f2937;
+  }
+  .matinfo-add-dtl-dropdown-item:hover,
+  .matinfo-add-dtl-dropdown-item:focus {
+    background: #e2e8f0;
+    outline: none;
+  }
+  .matinfo-add-dtl-dropdown-item.is-selected {
+    background: #dbeafe;
   }
   .matinfo-add-bottom {
     display: grid;
@@ -466,6 +541,33 @@
     isTmpPN2Real: 0,
     currOldPN: ""
   };
+  let activeDtlDropdownList = null;
+  let activeDtlDropdownAnchor = null;
+
+  const normalizeText = (v) => String(v ?? "").trim().toLowerCase();
+
+  const closeDtlDropdown = () => {
+    if (activeDtlDropdownList) activeDtlDropdownList.remove();
+    activeDtlDropdownList = null;
+    activeDtlDropdownAnchor = null;
+    document.removeEventListener("mousedown", onDtlDropdownDocDown, true);
+    document.removeEventListener("keydown", onDtlDropdownKeyDown, true);
+    window.removeEventListener("resize", onDtlDropdownResize, true);
+  };
+
+  const onDtlDropdownDocDown = (ev) => {
+    if (activeDtlDropdownList && activeDtlDropdownList.contains(ev.target)) return;
+    if (activeDtlDropdownAnchor && activeDtlDropdownAnchor.contains(ev.target)) return;
+    closeDtlDropdown();
+  };
+
+  const onDtlDropdownKeyDown = (ev) => {
+    if (ev.key === "Escape") closeDtlDropdown();
+  };
+
+  const onDtlDropdownResize = () => {
+    closeDtlDropdown();
+  };
 
   const notify = async (type, message) => {
     if (window.Swal) {
@@ -525,21 +627,93 @@
   };
 
   const getMissingRequired = () => {
-    return state.rows.filter((row, idx) => {
+    return state.rows.filter((row) => {
       const isMust = (row.IsMust ?? row.ismust ?? 0) == 1;
-      let dtlNumId = (row.DtlNumId ?? row.dtlNumId ?? "").toString().trim();
-      if (!dtlNumId) {
-        const select = elGridBody.querySelector(`select.matinfo-add-dtl[data-idx="${idx}"]`);
-        if (select instanceof HTMLSelectElement) {
-          dtlNumId = select.value.trim();
-          if (dtlNumId) row.DtlNumId = dtlNumId;
-        }
-      }
+      const dtlNumId = (row.DtlNumId ?? row.dtlNumId ?? "").toString().trim();
       return isMust && !dtlNumId;
     });
   };
 
+  const openDtlDropdown = async (triggerEl, idx) => {
+    if (!(triggerEl instanceof HTMLElement)) return;
+    const row = state.rows[idx];
+    if (!row) return;
+    const numId = (row.NumId ?? row.numId ?? "").toString().trim();
+    if (!numId || !state.setClass) return;
+    const options = await loadDtlOptions(state.setClass, numId);
+    if (!Array.isArray(options) || options.length === 0) return;
+
+    closeDtlDropdown();
+    const list = document.createElement("div");
+    list.className = "matinfo-add-dtl-dropdown-list";
+
+    const current = (row.DtlNumId ?? row.dtlNumId ?? "").toString().trim();
+    const addItem = (key, label) => {
+      const keyText = String(key || "").trim();
+      const labelText = String(label || "").trim();
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "matinfo-add-dtl-dropdown-item";
+      item.dataset.key = keyText;
+      item.dataset.label = labelText;
+      if (normalizeText(keyText) === normalizeText(current)) item.classList.add("is-selected");
+      if (keyText) {
+        const codeSpan = document.createElement("span");
+        codeSpan.className = "lookup-code";
+        codeSpan.textContent = keyText;
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "lookup-name";
+        nameSpan.textContent = labelText;
+        item.appendChild(codeSpan);
+        item.appendChild(nameSpan);
+      } else {
+        item.textContent = "(清空)";
+      }
+      list.appendChild(item);
+    };
+
+    addItem("", "");
+    options.forEach((opt) => {
+      const key = String(opt.DtlNumId ?? opt.dtlNumId ?? "").trim();
+      if (!key) return;
+      const label = String(opt.DtlNumName ?? opt.dtlNumName ?? key).trim();
+      addItem(key, label);
+    });
+
+    const pick = async (ev) => {
+      const item = ev.target.closest(".matinfo-add-dtl-dropdown-item");
+      if (!item) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      row.DtlNumId = item.dataset.key || "";
+      row.DtlNumName = item.dataset.label || "";
+      await updateAddData(row);
+      updateGrid();
+      closeDtlDropdown();
+    };
+
+    list.addEventListener("mousedown", pick);
+    list.addEventListener("click", pick);
+    document.body.appendChild(list);
+
+    const rect = triggerEl.getBoundingClientRect();
+    const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - 8);
+    const maxHeight = Math.max(110, Math.min(240, spaceBelow));
+    const top = Math.min(Math.max(6, rect.bottom), Math.max(6, window.innerHeight - maxHeight - 6));
+    list.style.left = `${Math.max(6, rect.left)}px`;
+    list.style.top = `${top}px`;
+    list.style.minWidth = `${Math.max(260, rect.width + 120)}px`;
+    list.style.maxHeight = `${maxHeight}px`;
+
+    activeDtlDropdownList = list;
+    activeDtlDropdownAnchor = triggerEl;
+    document.addEventListener("mousedown", onDtlDropdownDocDown, true);
+    document.addEventListener("keydown", onDtlDropdownKeyDown, true);
+    window.addEventListener("resize", onDtlDropdownResize, true);
+  };
+
   const updateGrid = () => {
+    closeDtlDropdown();
     if (!state.rows.length) {
       elGridBody.innerHTML = "<tr><td colspan=\"7\">沒有屬性資料</td></tr>";
       return;
@@ -552,23 +726,11 @@
       const dtlNumName = row.DtlNumName ?? row.dtlNumName ?? "";
       const numId = row.NumId ?? row.numId ?? "";
       const numName = row.NumName ?? row.numName ?? "";
-      const cacheKey = `${state.setClass}|${numId}`;
-      const options = state.dtlCache[cacheKey] || [];
-      const selectOptions = options.length
-        ? options.map((opt) => {
-            const value = opt.DtlNumId ?? opt.dtlNumId ?? "";
-            const label = opt.DtlNumName ?? opt.dtlNumName ?? value;
-            const selected = value === dtlNumId ? "selected" : "";
-            return `<option value=\"${value}\" ${selected}>${value} ${label}</option>`;
-          }).join("")
-        : (dtlNumId ? `<option value=\"${dtlNumId}\">${dtlNumId}</option>` : "");
+      const display = `${dtlNumId || ""}`.trim();
       return `
         <tr>
           <td>
-            <select class="matinfo-add-dtl" data-idx="${idx}" data-numid="${numId}">
-              <option value=""></option>
-              ${selectOptions}
-            </select>
+            <button type="button" class="matinfo-add-dtl-trigger" data-idx="${idx}" data-numid="${numId}" title="${display}">${display}</button>
           </td>
           <td>${dtlNumName}</td>
           <td>${numId}</td>
@@ -775,26 +937,14 @@
       state.rows[idx].iShowName = target.checked ? 1 : 0;
       return;
     }
-    if (target instanceof HTMLSelectElement && target.classList.contains("matinfo-add-dtl")) {
-      const idx = Number(target.dataset.idx || "-1");
-      if (idx < 0 || idx >= state.rows.length) return;
-      state.rows[idx].DtlNumId = target.value;
-      await updateAddData(state.rows[idx]);
-      updateGrid();
-    }
   });
 
-  elGridBody.addEventListener("focusin", async (e) => {
-    const target = e.target;
-    if (!(target instanceof HTMLSelectElement)) return;
-    if (!target.classList.contains("matinfo-add-dtl")) return;
-    const idx = Number(target.dataset.idx || "-1");
+  elGridBody.addEventListener("click", async (e) => {
+    const trigger = e.target instanceof HTMLElement ? e.target.closest(".matinfo-add-dtl-trigger") : null;
+    if (!trigger) return;
+    const idx = Number(trigger.dataset.idx || "-1");
     if (idx < 0 || idx >= state.rows.length) return;
-    const row = state.rows[idx];
-    const numId = row.NumId ?? row.numId ?? "";
-    if (!numId || !state.setClass) return;
-    const options = await loadDtlOptions(state.setClass, numId);
-    fillSelectOptions(target, options, row.DtlNumId ?? row.dtlNumId ?? "");
+    await openDtlDropdown(trigger, idx);
   });
 
   btnGenNum?.addEventListener("click", async () => {
@@ -1063,6 +1213,7 @@
   }
 
   modalEl.addEventListener("hidden.bs.modal", () => {
+    closeDtlDropdown();
     forceHideModal();
   });
   modalEl.querySelectorAll('[data-bs-dismiss="modal"], .btn-close').forEach((btn) => {

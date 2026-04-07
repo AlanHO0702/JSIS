@@ -66,6 +66,39 @@
   </div>
 </div>
 
+<!-- PaperSearch Lookup 名稱查詢 Modal -->
+<div class="modal fade" id="paperSearchLookupModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="false" style="pointer-events:none;">
+  <div class="modal-dialog modal-dialog-scrollable" style="max-width:420px; pointer-events:all;">
+    <div class="modal-content" style="font-size:0.78rem;">
+      <div class="modal-header py-1 px-2">
+        <span class="modal-title fw-bold psl-title" style="font-size:0.8rem;">名稱查詢</span>
+        <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal" style="font-size:0.6rem;"></button>
+      </div>
+      <div class="modal-body p-1">
+        <div class="d-flex gap-1 mb-1">
+          <input type="text" class="form-control form-control-sm psl-code-filter" placeholder="代碼篩選" style="font-size:0.75rem;">
+          <input type="text" class="form-control form-control-sm psl-name-filter" placeholder="名稱篩選" style="font-size:0.75rem;">
+        </div>
+        <div style="max-height:280px; overflow-y:auto;">
+          <table class="table table-sm table-hover mb-0" style="font-size:0.75rem;">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th style="width:38%; padding:2px 6px;">代碼</th>
+                <th style="padding:2px 6px;">名稱</th>
+              </tr>
+            </thead>
+            <tbody class="psl-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer py-1 px-2">
+        <button type="button" class="btn btn-primary btn-sm py-0 px-2 psl-confirm" style="font-size:0.75rem;">確定</button>
+        <button type="button" class="btn btn-secondary btn-sm py-0 px-2" data-bs-dismiss="modal" style="font-size:0.75rem;">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <style>
   #paperSearchModal .paper-search-dialog { --bs-modal-width: 1200px; --bs-modal-margin: 0; margin-top: 12vh; }
   #paperSearchModal .paper-search-modal { height: calc(88vh); display: flex; flex-direction: column; }
@@ -110,6 +143,24 @@
   #paperSearchModal .ps-fetch.is-loading { pointer-events: none; opacity: .8; }
   #paperSearchModal .ps-fetch .spin { display: inline-block; margin-right: 6px; animation: ps-spin 0.8s linear infinite; }
   @@keyframes ps-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  /* Lookup 控制項 */
+  #paperSearchModal .paper-search-form .ps-lookup-wrap { flex: 0 0 200px; min-width: 0; display: flex; align-items: stretch; }
+  #paperSearchModal .paper-search-form .ps-lookup-code-wrap { position: relative; flex: 0 0 84px; min-width: 68px; max-width: 84px; align-self: stretch; }
+  #paperSearchModal .paper-search-form .ps-lookup-code-wrap .ps-control { width: 100%; padding-right: 22px; }
+  #paperSearchModal .paper-search-form .ps-lookup-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; border: 0; background: transparent; cursor: pointer; z-index: 6; }
+  #paperSearchModal .paper-search-form .ps-lookup-toggle::before { content: ""; display: block; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #6b7280; margin: 0 auto; }
+  #paperSearchModal .paper-search-form .ps-lookup-name-btn { flex: 1 1 auto; min-width: 0; padding: 0 6px; border: 1px solid #ced4da; border-left: none; border-radius: 0 4px 4px 0; background: #fff; color: var(--bs-body-color,#495057); font-size: var(--field-value-size); line-height: 24px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  #paperSearchModal .paper-search-form .ps-lookup-name-btn:hover { background: #f8f9fa; }
+  #paperSearchModal .paper-search-form .ps-lookup-name-btn:disabled { background: var(--bs-secondary-bg,#e9ecef); color: var(--bs-secondary-color,#6c757d); cursor: default; }
+  #paperSearchModal .paper-search-form .ps-lookup-panel { display: none; position: absolute; top: 100%; left: 0; z-index: 9999; background: #fff; border: 1px solid #b9c7de; border-radius: 0 0 6px 6px; box-shadow: 0 4px 12px rgba(0,0,0,.15); max-height: 180px; overflow-y: auto; min-width: 100%; max-width: 280px; }
+  #paperSearchModal .paper-search-form .ps-lookup-panel.open { display: block; }
+  #paperSearchModal .paper-search-form .ps-lookup-panel-item { padding: 2px 8px; cursor: pointer; font-size: var(--field-value-size); white-space: nowrap; }
+  #paperSearchModal .paper-search-form .ps-lookup-panel-item:hover,
+  #paperSearchModal .paper-search-form .ps-lookup-panel-item.active { background: #2d5fa8; color: #fff; }
+  /* 名稱查詢 Modal */
+  #paperSearchLookupModal .modal-dialog { margin: 4rem auto; }
+  #paperSearchLookupModal .psl-body td { padding: 2px 6px; }
+  #paperSearchLookupModal .psl-body tr:hover { cursor: pointer; }
   @@media (max-width: 991.98px) {
     #paperSearchModal .paper-search-dialog { --bs-modal-width: 100vw; --bs-modal-margin: 0; }
     #paperSearchModal .paper-search-modal { border-radius: 0; }
@@ -299,6 +350,101 @@
 
     enableDrag();
 
+    // ── 共用 lookup 名稱查詢 Modal（靜態 HTML）────────────────────────────
+    const lookupModalEl = document.getElementById("paperSearchLookupModal");
+    if (lookupModalEl && lookupModalEl.parentElement !== document.body) {
+      document.body.appendChild(lookupModalEl);
+    }
+    const pslTitleEl      = lookupModalEl?.querySelector(".psl-title");
+    const pslCodeFilterEl = lookupModalEl?.querySelector(".psl-code-filter");
+    const pslNameFilterEl = lookupModalEl?.querySelector(".psl-name-filter");
+    const pslBodyEl       = lookupModalEl?.querySelector(".psl-body");
+    const pslConfirmBtn   = lookupModalEl?.querySelector(".psl-confirm");
+
+    let lookupTargetInput = null;
+    let lookupSelectedKey = null;
+
+    const escHtml = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+    const getLookupItems = (input) => Array.isArray(input?._lookupItems) ? input._lookupItems : [];
+    const getNameOnly = (key, label) => {
+      if (!label || !key) return label || "";
+      const prefix = `${key} `;
+      return label.startsWith(prefix) ? label.slice(prefix.length) : label;
+    };
+
+    const renderLookupRows = () => {
+      if (!pslBodyEl || !lookupTargetInput) return;
+      const codeFilter = (pslCodeFilterEl?.value || "").trim().toLowerCase();
+      const nameFilter = (pslNameFilterEl?.value || "").trim().toLowerCase();
+      const items = getLookupItems(lookupTargetInput);
+      pslBodyEl.innerHTML = "";
+      items.forEach(item => {
+        const nameText = getNameOnly(item.key, item.label);
+        if (codeFilter && !item.key.toLowerCase().includes(codeFilter)) return;
+        if (nameFilter && !nameText.toLowerCase().includes(nameFilter)) return;
+        const tr = document.createElement("tr");
+        tr.dataset.key = item.key;
+        if (item.key === lookupSelectedKey) tr.classList.add("table-primary");
+        const tdCode = document.createElement("td"); tdCode.textContent = item.key;
+        const tdName = document.createElement("td"); tdName.textContent = nameText;
+        tr.appendChild(tdCode); tr.appendChild(tdName);
+        tr.addEventListener("click", () => {
+          pslBodyEl.querySelectorAll("tr").forEach(r => r.classList.remove("table-primary"));
+          tr.classList.add("table-primary");
+          lookupSelectedKey = item.key;
+        });
+        tr.addEventListener("dblclick", () => { lookupSelectedKey = item.key; applyLookupSelection(); });
+        pslBodyEl.appendChild(tr);
+      });
+    };
+
+    const applyLookupSelection = () => {
+      if (!lookupTargetInput || !lookupSelectedKey) return;
+      const items = getLookupItems(lookupTargetInput);
+      const hit = items.find(i => i.key === lookupSelectedKey);
+      if (hit && typeof lookupTargetInput._psApplyItem === "function") {
+        lookupTargetInput._psApplyItem(hit);
+      } else {
+        lookupTargetInput.value = lookupSelectedKey;
+      }
+      lookupTargetInput.dispatchEvent(new Event("change", { bubbles: true }));
+      if (window.bootstrap && lookupModalEl) {
+        bootstrap.Modal.getOrCreateInstance(lookupModalEl).hide();
+      }
+    };
+
+    const openLookupModal = (input, caption) => {
+      if (!lookupModalEl || !window.bootstrap) return;
+      lookupTargetInput = input;
+      lookupSelectedKey = (input?.value || "").trim() || null;
+      if (pslTitleEl) pslTitleEl.textContent = caption ? `${caption} 查詢` : "名稱查詢";
+      if (pslCodeFilterEl) pslCodeFilterEl.value = "";
+      if (pslNameFilterEl) pslNameFilterEl.value = "";
+      renderLookupRows();
+      bootstrap.Modal.getOrCreateInstance(lookupModalEl, { backdrop: false, keyboard: true }).show();
+      setTimeout(() => pslCodeFilterEl?.focus(), 150);
+    };
+
+    pslCodeFilterEl?.addEventListener("input", renderLookupRows);
+    pslNameFilterEl?.addEventListener("input", renderLookupRows);
+    pslConfirmBtn?.addEventListener("click", applyLookupSelection);
+    lookupModalEl?.addEventListener("hidden.bs.modal", () => {
+      lookupTargetInput = null; lookupSelectedKey = null;
+    });
+
+    // 點外部關閉各欄位下拉面板
+    document.addEventListener("click", ev => {
+      if (!ev.target.closest(".ps-lookup-code-wrap")) {
+        formEl?.querySelectorAll(".ps-lookup-panel.open").forEach(p => p.classList.remove("open"));
+      }
+    }, true);
+    modalEl?.addEventListener("hidden.bs.modal", () => {
+      if (window.bootstrap && lookupModalEl) {
+        try { bootstrap.Modal.getOrCreateInstance(lookupModalEl).hide(); } catch {}
+      }
+    });
+
     const toNumber = (v, fallback = 0) => {
       const n = parseInt(v, 10);
       return Number.isFinite(n) ? n : fallback;
@@ -452,7 +598,11 @@
         if (!name) return;
         const input = formEl?.querySelector(`[data-param="${name}"]`);
         if (input) {
-          let val = input.value ?? "";
+          let val = (input.value ?? "").toString().trim();
+          if (Array.isArray(input._lookupItems) && val) {
+            const hit = input._lookupItems.find(i => i.key === val);
+            val = hit ? hit.key : val;
+          }
           const mask = input.getAttribute("data-edit-mask");
           if (mask && val) val = applyEditMask(val, mask);
           values[name] = val;
@@ -582,7 +732,13 @@
       const superKey = normalizeKey(rawSuperId);
       if (!superKey) return "";
       const superInput = formEl?.querySelector(`[data-param="${superKey}"]`);
-      if (superInput && (superInput.value ?? "") !== "") return superInput.value ?? "";
+      if (superInput && (superInput.value ?? "") !== "") {
+        if (Array.isArray(superInput._lookupItems)) {
+          const hit = superInput._lookupItems.find(i => i.key === superInput.value);
+          return hit ? hit.key : superInput.value;
+        }
+        return superInput.value ?? "";
+      }
 
       const headerVal = rawSuperId ? getHeaderFieldValue(rawSuperId) : "";
       if (headerVal) return headerVal;
@@ -676,74 +832,151 @@
             headerDefault = getDefaultFromTableKind(tableKind, paramValue);
           }
           if (controlType === 1) {
-            const select = document.createElement("select");
-            select.className = "form-select form-select-sm ps-control";
-            select.setAttribute("data-param", name);
-            const emptyOpt = document.createElement("option");
-            emptyOpt.value = "";
-            emptyOpt.textContent = "";
-            emptyOpt.setAttribute("data-empty", "1");
-            select.appendChild(emptyOpt);
-            wrap.appendChild(select);
-            const applySelectOptions = (options) => {
-              select.querySelectorAll("option:not([data-empty])").forEach(o => o.remove());
-              if (Array.isArray(options)) {
-                options.forEach(opt => {
-                  const o = document.createElement("option");
-                  const val = opt.value ?? opt.Value ?? "";
-                  const text = opt.text ?? opt.Text ?? "";
-                  o.value = val;
-                  o.textContent = text ? `${val} ${text}`.trim() : val;
-                  if (text && text !== val) o.title = text;
-                  select.appendChild(o);
-                });
-              }
+            // ── Lookup 控制項（參考 _DetailHeaderSection.cshtml 樣式）──
+            const caption = p.DisplayName || p.displayName || name;
+            const lookupWrap = document.createElement("div");
+            lookupWrap.className = "ps-lookup-wrap";
+
+            const codeWrap = document.createElement("div");
+            codeWrap.className = "ps-lookup-code-wrap";
+
+            const codeInput = document.createElement("input");
+            codeInput.className = "form-control form-control-sm ps-control";
+            codeInput.type = "text";
+            codeInput.setAttribute("data-param", name);
+            codeInput.setAttribute("autocomplete", "off");
+
+            const toggleBtn = document.createElement("button");
+            toggleBtn.type = "button";
+            toggleBtn.className = "ps-lookup-toggle";
+            toggleBtn.setAttribute("aria-label", "展開選項");
+            toggleBtn.tabIndex = -1;
+
+            const dropPanel = document.createElement("div");
+            dropPanel.className = "ps-lookup-panel";
+
+            codeWrap.appendChild(codeInput);
+            codeWrap.appendChild(toggleBtn);
+            codeWrap.appendChild(dropPanel);
+
+            const nameBtn = document.createElement("button");
+            nameBtn.type = "button";
+            nameBtn.className = "ps-lookup-name-btn";
+            nameBtn.title = "點擊查詢";
+            nameBtn.tabIndex = -1;
+
+            lookupWrap.appendChild(codeWrap);
+            lookupWrap.appendChild(nameBtn);
+            wrap.appendChild(lookupWrap);
+
+            codeInput._lookupItems = [];
+
+            const findItemByRaw = (raw) => {
+              const items = codeInput._lookupItems || [];
+              const text = (raw || "").toString().trim();
+              if (!text) return null;
+              const lower = text.toLowerCase();
+              let hit = items.find(i => i.key.toLowerCase() === lower || i.label.toLowerCase() === lower);
+              if (!hit) hit = items.find(i => i.label.toLowerCase().startsWith(`${lower} `));
+              if (!hit) { const first = text.split(/\s+/)[0]; if (first) hit = items.find(i => i.key.toLowerCase() === first.toLowerCase()); }
+              return hit || null;
             };
+
+            const applyItem = (item) => {
+              codeInput.value = item ? item.key : "";
+              nameBtn.textContent = item ? getNameOnly(item.key, item.label) : "";
+            };
+            codeInput._psApplyItem = applyItem;
+
+            const renderDropPanel = () => {
+              const cur = codeInput.value;
+              dropPanel.innerHTML = codeInput._lookupItems.length
+                ? codeInput._lookupItems.map(it => {
+                    const active = it.key === cur ? " active" : "";
+                    return `<div class="ps-lookup-panel-item${active}" data-key="${escHtml(it.key)}">${escHtml(it.key)} ${escHtml(getNameOnly(it.key, it.label))}</div>`;
+                  }).join("")
+                : `<div class="ps-lookup-panel-item" style="color:#999;cursor:default;">（無選項）</div>`;
+            };
+
             const loadOptions = async () => {
               try {
-                console.debug("paperSearch loadOptions", {
-                  itemId,
-                  buttonName,
-                  paramName: p.ParamName || p.paramName,
-                  superValue: getSuperValue(p)
-                });
-                const options = await loadParamOptions(itemId, buttonName, p.ParamName || p.paramName, getSuperValue(p));
-                applySelectOptions(options);
+                const raw = await loadParamOptions(itemId, buttonName, p.ParamName || p.paramName, getSuperValue(p));
+                codeInput._lookupItems = Array.isArray(raw)
+                  ? raw.map(o => {
+                      const k = String(o.value ?? o.Value ?? "");
+                      const t = String(o.text ?? o.Text ?? "");
+                      return { key: k, label: t ? `${k} ${t}` : k };
+                    })
+                  : [];
                 return true;
               } catch (err) {
                 console.warn("load options failed", err);
-                applySelectOptions([]);
-                const errOpt = document.createElement("option");
-                errOpt.value = "";
-                errOpt.textContent = "讀取失敗";
-                if (err && err.message) errOpt.title = err.message;
-                errOpt.disabled = true;
-                select.appendChild(errOpt);
+                codeInput._lookupItems = [];
                 return false;
               }
             };
             await loadOptions();
+
+            // 預設值
             const defVal = headerDefault || (p.DefaultValue ?? p.defaultValue);
             if (defVal != null && defVal !== "") {
-              const masked = applyEditMask(defVal, getParamEditMask(p));
-              if (masked !== "" && !Array.from(select.options).some(o => o.value === masked)) {
-                const o = document.createElement("option");
-                o.value = masked;
-                o.textContent = masked;
-                select.appendChild(o);
-              }
-              select.value = masked;
+              const masked = applyEditMask(String(defVal), getParamEditMask(p));
+              const hit = findItemByRaw(masked);
+              applyItem(hit || (masked ? { key: masked, label: masked } : null));
             }
-            select.addEventListener("focus", () => {
-              if (select.querySelectorAll("option").length <= 1) {
-                loadOptions().catch(() => {});
-              }
+
+            // 展開下拉面板
+            const openPanel = () => {
+              if (codeInput.disabled) return;
+              renderDropPanel();
+              formEl?.querySelectorAll(".ps-lookup-panel.open").forEach(p2 => { if (p2 !== dropPanel) p2.classList.remove("open"); });
+              dropPanel.classList.toggle("open");
+            };
+            codeInput.addEventListener("click", openPanel);
+            toggleBtn.addEventListener("click", ev => { ev.stopPropagation(); openPanel(); });
+
+            dropPanel.addEventListener("click", ev => {
+              const item = ev.target.closest(".ps-lookup-panel-item[data-key]");
+              if (!item) return;
+              const hit = codeInput._lookupItems.find(i => i.key === item.dataset.key);
+              if (hit) applyItem(hit);
+              dropPanel.classList.remove("open");
+              codeInput.dispatchEvent(new Event("change", { bubbles: true }));
             });
-            select.addEventListener("keydown", (ev) => {
+
+            // 名稱按鈕 → 開啟查詢 Modal
+            nameBtn.addEventListener("click", () => {
+              if (nameBtn.disabled) return;
+              openLookupModal(codeInput, caption);
+            });
+
+            // Delete / Backspace 清空
+            codeInput.addEventListener("keydown", ev => {
               if (ev.key === "Delete" || ev.key === "Backspace") {
-                select.value = "";
+                applyItem(null);
+                codeInput.dispatchEvent(new Event("change", { bubbles: true }));
               }
             });
+
+            // iReadOnly
+            if (Number(p.iReadOnly ?? p.IReadOnly ?? 0) === 1) {
+              codeInput.disabled = true;
+              nameBtn.disabled = true;
+              toggleBtn.disabled = true;
+            }
+
+            // SuperId 級聯
+            const superKey = normalizeKey(p.SuperId || p.superId);
+            if (superKey) {
+              const superInput = formEl?.querySelector(`[data-param="${superKey}"]`);
+              if (superInput && !codeInput.dataset.superBound) {
+                codeInput.dataset.superBound = "1";
+                superInput.addEventListener("change", () => {
+                  applyItem(null);
+                  loadOptions().catch(() => {});
+                });
+              }
+            }
           } else {
             const input = document.createElement("input");
             input.className = "form-control form-control-sm ps-control";
