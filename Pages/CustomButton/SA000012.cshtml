@@ -1,0 +1,925 @@
+@*
+    SA000012 - 客戶收款發票沖銷
+    對應 Delphi: StrikeDtlDLL.pas (TfrmSPOdStrikeDtlDLL)
+    自訂按鈕功能:
+      - btnC2: 發票分配 → 開啟「沖帳明細維護」Modal
+    主表: SPOdStrikeMain
+    來源表: SPOdStrikeSourceInv
+    API: /api/SA000012/*
+*@
+@model dynamic
+
+<!-- ═══ 發票分配 Modal ═══ -->
+<div id="sa12-modal" class="modal fade" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog sa12-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+
+            <!-- 標題列 -->
+            <div class="modal-header py-1 px-3">
+                <h6 class="modal-title mb-0">發票分配</h6>
+                <button type="button" class="btn-close btn-sm" data-bs-dismiss="modal"></button>
+            </div>
+
+            <!-- 主體 -->
+            <div class="modal-body p-0 d-flex flex-column" style="overflow:hidden;">
+
+                <!-- ① 頂部資訊：沖銷匯率 / 轉預收 / 超收 -->
+                <div class="sa12-bar sa12-bar-top d-flex align-items-center gap-4 px-3 py-1 border-bottom">
+                    <span class="sa12-label">沖銷匯率</span>
+                    <strong id="sa12-rate" class="sa12-val">-</strong>
+                    <span class="sa12-label ms-3">轉預收金額</span>
+                    <input id="sa12-advance" class="sa12-top-inp" type="text" autocomplete="off" value="0">
+                    <span class="sa12-label ms-3">超收金額</span>
+                    <input id="sa12-over" class="sa12-top-inp" type="text" autocomplete="off" value="0">
+                </div>
+
+                <!-- ② 已輸入金額統計 -->
+                <div class="sa12-bar d-flex align-items-center gap-3 px-3 py-1 border-bottom" style="background:#f5f5f5;">
+                    <span class="sa12-label">已輸入金額總計：</span>
+                    <span class="sa12-label ms-1">現金：</span><span id="sa12-use-cash"  class="sa12-val">-</span>
+                    <span class="sa12-label ms-2">銀存：</span><span id="sa12-use-bank"  class="sa12-val">-</span>
+                    <span class="sa12-label ms-2">票據：</span><span id="sa12-use-bill"  class="sa12-val">-</span>
+                    <span class="sa12-label ms-2">手續費：</span><span id="sa12-use-other" class="sa12-val">-</span>
+                </div>
+
+                <!-- ③ Tab 標籤 + 工具列 -->
+                <div class="sa12-bar d-flex align-items-stretch border-bottom" style="min-height:28px;">
+                    <!-- Tab 標籤 -->
+                    <div class="sa12-tab-active px-3 d-flex align-items-center">帳款</div>
+                    <!-- 工具列：✓ ✗ ↺ + 剩餘金額合計 + ↑↓ -->
+                    <div class="d-flex align-items-center gap-1 px-2 border-start flex-fill">
+                        <button id="sa12-btn-post"    class="btn btn-xs sa12-nav-btn sa12-btn-save"   title="儲存(Post)">&#10003;</button>
+                        <button id="sa12-btn-cancel"  class="btn btn-xs sa12-nav-btn sa12-btn-cancl"  title="取消(Cancel)">&#10005;</button>
+                        <button id="sa12-btn-refresh" class="btn btn-xs sa12-nav-btn"                 title="重新整理">&#x21BB;</button>
+                        <span class="sa12-label ms-2">剩餘金額合計：</span>
+                        <strong id="sa12-og-sum" class="sa12-og-val text-primary">-</strong>
+                        <button id="sa12-btn-up"   class="btn btn-xs sa12-nav-btn ms-2" title="上移一格">&#9650;</button>
+                        <button id="sa12-btn-down" class="btn btn-xs sa12-nav-btn"     title="下移一格">&#9660;</button>
+                    </div>
+                </div>
+
+                <!-- ④ Grid 區域：表頭/表尾固定，資料列獨立捲動 -->
+                <div class="sa12-grid-outer flex-fill d-flex flex-column" style="min-height:0; overflow:hidden;">
+                    <!-- 欄位標題（固定，不隨資料捲動） -->
+                    <div id="sa12-head-wrap" style="overflow:hidden; flex-shrink:0; border-bottom:2px solid #aaa;">
+                        <table id="sa12-grid-head" class="sa12-tbl">
+                            <thead><tr id="sa12-thead-row"></tr></thead>
+                        </table>
+                    </div>
+                    <!-- 資料列（可上下左右捲動） -->
+                    <div id="sa12-body-wrap" style="flex:1 1 0%; min-height:0; overflow:auto;">
+                        <table id="sa12-grid" class="sa12-tbl">
+                            <tbody id="sa12-tbody"></tbody>
+                        </table>
+                    </div>
+                    <!-- 合計列（固定，不隨資料捲動） -->
+                    <div id="sa12-foot-wrap" style="overflow:hidden; flex-shrink:0; border-top:2px solid #aaa;">
+                        <table id="sa12-grid-foot" class="sa12-tbl">
+                            <tfoot><tr id="sa12-tfoot-row"></tr></tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ⑤ 底部統計 + 確定按鈕 -->
+                <div class="d-flex align-items-center justify-content-between border-top px-3 py-1" style="font-size:12px; background:#f5f5f5;">
+                    <div class="d-flex gap-3 align-items-center">
+                        <span class="sa12-label">未沖原幣餘額：</span>
+                        <span id="sa12-rest-og" class="fw-bold" style="color:#333;">-</span>
+                    </div>
+                    <div class="d-flex gap-3 align-items-center">
+                        <span class="sa12-label">沖銷原幣總計：</span>
+                        <span id="sa12-sum-og" class="fw-bold">-</span>
+                        <span class="sa12-label ms-2">沖銷本位幣(目前匯率)總計：</span>
+                        <span id="sa12-sum-nt" class="fw-bold">-</span>
+                        <span class="sa12-label ms-2">沖銷本位幣(原始匯率)總計：</span>
+                        <span id="sa12-strike-nt" class="fw-bold">-</span>
+                        <button id="sa12-btn-ok" class="btn btn-primary btn-sm ms-3 px-4">&#10003; 確定</button>
+                    </div>
+                </div>
+
+            </div><!-- /modal-body -->
+        </div>
+    </div>
+</div>
+
+<style>
+/* ── Dialog 尺寸 ───────────────────────────────── */
+.sa12-dialog { max-width: 98vw; width: 98vw; margin: 10px auto; }
+.sa12-dialog .modal-content { height: calc(100vh - 40px); }
+
+/* ── 字體/標籤 ─────────────────────────────────── */
+.sa12-bar     { font-size: 12px; flex-shrink: 0; }
+.sa12-bar-top { font-size: 13px; }
+.sa12-label   { color: #555; white-space: nowrap; }
+.sa12-val     { font-size: 13px; white-space: nowrap; }
+.sa12-top-inp { width: 100px; font-size: 13px; font-weight: 600; text-align: right;
+                border: 1px solid #ccc; border-radius: 3px; padding: 1px 4px;
+                background: #fff; }
+.sa12-top-inp.sa12-dirty { background: #fff3cd !important; outline: 1px solid #ffc107; }
+/* 剩餘金額合計 與 已輸入 同一字型大小 */
+.sa12-og-val  { font-size: 12px; white-space: nowrap; }
+
+/* ── Tab 標籤 ─────────────────────────────────── */
+.sa12-tab-active {
+    font-size: 12px; font-weight: 600;
+    border-bottom: 2px solid #0d6efd;
+    color: #0d6efd; cursor: default;
+}
+
+/* ── 工具列小按鈕 ──────────────────────────────── */
+.btn-xs { padding: 1px 5px; font-size: 12px; line-height: 1.4; }
+.sa12-nav-btn       { border: 1px solid #ccc; background: #fff; border-radius: 3px; }
+.sa12-nav-btn:hover { background: #e9ecef; }
+.sa12-btn-save  { color: #198754; border-color: #198754; font-weight: 700; }
+.sa12-btn-save:hover  { background: #d1e7dd; }
+.sa12-btn-cancl { color: #dc3545; border-color: #dc3545; font-weight: 700; }
+.sa12-btn-cancl:hover { background: #f8d7da; }
+/* 尚未修改時為深灰色（無色彩） */
+.sa12-btn-save.sa12-btn-grey,
+.sa12-btn-cancl.sa12-btn-grey {
+    color: #888 !important; border-color: #ccc !important;
+    font-weight: 400 !important; cursor: default;
+}
+.sa12-btn-save.sa12-btn-grey:hover,
+.sa12-btn-cancl.sa12-btn-grey:hover { background: #fff !important; }
+
+/* ── 已修改未儲存的輸入框（dirty） ─────────────── */
+.sa12-inp.sa12-dirty { background: #fff3cd !important; outline: 1px solid #ffc107; }
+
+/* ── 負數金額：紅底白字 ─────────────────────────── */
+.sa12-cell-neg { background: #dc3545 !important; color: white !important; }
+.sa12-cell-neg .sa12-inp { color: white !important; background: transparent !important; }
+
+/* ── Grid（三段式：head/body/foot 各自獨立） ────── */
+.sa12-grid-outer { }
+/* 共用 table 樣式 */
+.sa12-tbl { border-collapse: collapse; table-layout: fixed; font-size: 12px; white-space: nowrap; }
+/* body-wrap 永遠保留捲軸空間，避免捲軸出現時擠壓欄寬造成 head/body 錯位 */
+#sa12-body-wrap { scrollbar-gutter: stable; }
+
+/* 欄位標題 */
+#sa12-grid-head thead th {
+    background: #e9ecef; border: 1px solid #ccc;
+    padding: 2px 4px; font-weight: 600;
+    user-select: none; cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    position: relative;
+}
+#sa12-grid-head thead th.sa12-sort-asc::after  { content: ' ▲'; font-size: 10px; }
+#sa12-grid-head thead th.sa12-sort-desc::after { content: ' ▼'; font-size: 10px; }
+#sa12-grid-head thead th.drag-over { border-left: 2px solid #0d6efd; }
+
+/* 資料列 */
+#sa12-grid tbody td {
+    border: 1px solid #ddd; padding: 1px 3px;
+    overflow: hidden; text-overflow: ellipsis;
+}
+#sa12-grid tbody tr:hover        { background: #f0f4ff; }
+#sa12-grid tbody tr.sa12-sel     { background: #b2ebf2 !important; }
+#sa12-grid tbody tr.sa12-red td  { background: #ffcccc; color: #900; }
+#sa12-grid tbody tr.sa12-navy td { color: navy; }
+
+/* 合計列 */
+#sa12-grid-foot tfoot td {
+    border: 1px solid #ccc; padding: 2px 4px;
+    background: #f0f0f0; font-weight: 600; font-size: 12px;
+}
+
+/* ── 金額輸入框 ─────────────────────────────────── */
+.sa12-inp {
+    width: 100%; text-align: right; border: none; background: transparent;
+    font-size: 12px; padding: 0 2px;
+    font-family: inherit;
+}
+.sa12-inp:focus { outline: 1px solid #86b7fe; background: #fff; }
+
+/* ── 欄寬調整 handle ──────────────────────────── */
+.col-resizer {
+    position: absolute; right: 0; top: 0; bottom: 0;
+    width: 5px; cursor: col-resize; z-index: 3;
+}
+
+/* 拖曳時游標 */
+body.sa12-resizing { cursor: col-resize !important; }
+body.sa12-resizing * { user-select: none; pointer-events: none; }
+body.sa12-resizing #sa12-grid thead { pointer-events: all; }
+</style>
+
+<script>
+(() => {
+    'use strict';
+    window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+    const DOM_ID   = 'sa12';
+    const API_BASE = '/api/SA000012';
+    const DICT_TBL = 'SPOdStrikeSourceInv';
+
+    // ── 工具 ──────────────────────────────────────────────────────
+    const readPaperNum = (ctx) => {
+        const v = (ctx?.paperNum || window._paperNum || '').toString().trim();
+        if (v) return v;
+        if (typeof window.getPaperNum === 'function') {
+            try { return (window.getPaperNum() || '').toString().trim(); } catch { /* ignore */ }
+        }
+        return '';
+    };
+    const withJwt = (init = {}) => {
+        const jwt = localStorage.getItem('jwtId');
+        const h = Object.assign({}, init.headers || {});
+        if (jwt) h['X-JWTID'] = jwt;
+        return { ...init, headers: h };
+    };
+    const fmt = (v, isMoneyField = false) => {
+        const n = parseFloat(v ?? 0);
+        if (isNaN(n)) return '';
+        if (isMoneyField || Math.abs(n) >= 1000)
+            return n.toLocaleString('zh-TW', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+        return n.toString();
+    };
+    const parseSortVal = (t) => {
+        if (!t) return '';
+        const s = t.replace(/,/g, '').trim();
+        if (!isNaN(s) && s !== '') return parseFloat(s);
+        return s.toLowerCase();
+    };
+
+    // ── 狀態 ──────────────────────────────────────────────────────
+    let _modal     = null;
+    let _paperNum  = '';
+    let _rows      = [];
+    let _fields    = [];          // 來自資料辭典的欄位定義
+    let _colOrder  = [];          // 目前欄位顯示順序索引陣列
+    let _selIndex  = -1;
+    let _sortField = '';
+    let _sortAsc   = true;
+    // dirty tracking: key=`${ri}-${fieldName}`, value=原始字串值
+    const _dirty   = new Map();
+
+    // ── 數值欄位判斷（用於靠右對齊 / 負數紅底） ──────────────────
+    // 只看第一列有值的 sample，如果是 JS number type 就算數值欄
+    const isNumericCol = (fieldName) => {
+        for (const r of _rows) {
+            const v = r[fieldName];
+            if (v == null || v === '') continue;
+            return typeof v === 'number';
+        }
+        return false;
+    };
+
+    // ── ✓/✗ 按鈕狀態：無修改時灰色，有修改時恢復原色 ────────────
+    const updateNavBtnState = () => {
+        const hasDirty = _dirty.size > 0;
+        document.getElementById(`${DOM_ID}-btn-post`)
+            ?.classList.toggle('sa12-btn-grey', !hasDirty);
+        document.getElementById(`${DOM_ID}-btn-cancel`)
+            ?.classList.toggle('sa12-btn-grey', !hasDirty);
+    };
+
+    // ── Modal 控制 ────────────────────────────────────────────────
+    const showModal = () => {
+        const el = document.getElementById(`${DOM_ID}-modal`);
+        if (!el) return;
+        if (!_modal) _modal = new bootstrap.Modal(el, { backdrop: 'static', keyboard: false });
+        _modal.show();
+    };
+    const hideModal = () => _modal?.hide();
+
+    // ── 欄位定義（資料辭典） ──────────────────────────────────────
+    const loadFieldDefs = async () => {
+        if (_fields.length) return;   // 只載入一次
+        const resp = await fetch(`${API_BASE}/GetFieldDefs`, withJwt());
+        const data = await resp.json();
+        if (data.ok && data.fields?.length) {
+            _fields    = data.fields.filter(f => f.visible !== 0);
+            _colOrder  = _fields.map((_, i) => i);
+            restoreSavedOrder();
+        }
+    };
+
+    // localStorage 儲存/還原欄位順序
+    const STORAGE_KEY_ORDER = `sa12-col-order:${DICT_TBL}`;
+    const STORAGE_KEY_WIDTH = `colwidth:${DICT_TBL}`;
+    const saveColOrder = () => {
+        try { localStorage.setItem(STORAGE_KEY_ORDER, JSON.stringify(_colOrder)); } catch { /* ignore */ }
+    };
+    const restoreSavedOrder = () => {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY_ORDER);
+            if (!raw) return;
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr) && arr.length === _fields.length)
+                _colOrder = arr;
+        } catch { /* ignore */ }
+    };
+
+    // ── 載入所有資料 ──────────────────────────────────────────────
+    const loadAll = async (pn) => {
+        await loadFieldDefs();
+
+        // Prepare
+        await fetch(`${API_BASE}/Prepare?paperNum=${encodeURIComponent(pn)}`, withJwt()).catch(() => {});
+
+        // Master (匯率 / 轉預收 / 超收)
+        const mResp = await fetch(`${API_BASE}/GetMaster?paperNum=${encodeURIComponent(pn)}`, withJwt());
+        const mData = await mResp.json();
+        if (mData.ok) {
+            const d = mData.data || {};
+            document.getElementById(`${DOM_ID}-rate`).textContent = fmt(d.RateToNT);
+            const advInp  = document.getElementById(`${DOM_ID}-advance`);
+            const overInp = document.getElementById(`${DOM_ID}-over`);
+            advInp.value  = fmt(d.AdvanceAmountOg, true);
+            overInp.value = fmt(d.OverAmountOg,    true);
+            advInp.dataset.orig  = advInp.value;
+            overInp.dataset.orig = overInp.value;
+            advInp.classList.remove('sa12-dirty');
+            overInp.classList.remove('sa12-dirty');
+            // dirty 追蹤
+            [advInp, overInp].forEach(inp => {
+                inp.oninput = () => inp.classList.toggle('sa12-dirty', inp.value !== inp.dataset.orig);
+            });
+        }
+
+        // ShowSum (剩餘金額合計)
+        const ssResp = await fetch(`${API_BASE}/GetShowSum?paperNum=${encodeURIComponent(pn)}`, withJwt());
+        const ssData = await ssResp.json();
+        if (ssData.ok)
+            document.getElementById(`${DOM_ID}-og-sum`).textContent = ssData.ogSumStr || '-';
+
+        // Source data + AllAmount
+        await loadSourceAndAmount(pn);
+    };
+
+    const loadSourceAndAmount = async (pn) => {
+        const [srcResp, amtResp] = await Promise.all([
+            fetch(`${API_BASE}/GetSourceData?paperNum=${encodeURIComponent(pn)}`, withJwt()),
+            fetch(`${API_BASE}/GetAllAmount?paperNum=${encodeURIComponent(pn)}`,  withJwt())
+        ]);
+        const srcData = await srcResp.json();
+        const amtData = await amtResp.json();
+
+        _rows = srcData.ok ? (srcData.rows || []) : [];
+        _dirty.clear();           // 重新載入後清除所有 dirty 標記
+        updateNavBtnState();
+        applySortIfAny();
+        renderGrid();
+
+        if (amtData.ok) updateAmountBars(amtData.data || {});
+    };
+
+    // ── 金額統計列 ────────────────────────────────────────────────
+    const updateAmountBars = (d) => {
+        const setEl = (id, v, limitV) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.textContent = fmt(v);
+            el.style.color = (parseFloat(v) > parseFloat(limitV)) ? 'red' : '#333';
+        };
+        setEl(`${DOM_ID}-use-cash`,  d.UseCashAmount,  d.CashAmountOg);
+        setEl(`${DOM_ID}-use-bank`,  d.UseBankAmount,  d.BankAmountOg);
+        setEl(`${DOM_ID}-use-bill`,  d.UseBillAmount,  d.BillAmountOg);
+        document.getElementById(`${DOM_ID}-use-other`).textContent = fmt(d.UseOtherAmount ?? 0);
+
+        document.getElementById(`${DOM_ID}-sum-og`).textContent    = fmt(d.SUMAmountOg   ?? 0);
+        document.getElementById(`${DOM_ID}-sum-nt`).textContent    = fmt(d.SUMAmount      ?? 0);
+        document.getElementById(`${DOM_ID}-rest-og`).textContent   = fmt(d.RestCalcOg     ?? 0);
+        document.getElementById(`${DOM_ID}-strike-nt`).textContent = fmt(d.StrikeAmount   ?? 0);
+    };
+
+    // ── 排序 ──────────────────────────────────────────────────────
+    const applySortIfAny = () => {
+        if (!_sortField) return;
+        _rows.sort((a, b) => {
+            const av = parseSortVal(String(a[_sortField] ?? ''));
+            const bv = parseSortVal(String(b[_sortField] ?? ''));
+            if (av < bv) return _sortAsc ? -1 : 1;
+            if (av > bv) return _sortAsc ?  1 : -1;
+            return 0;
+        });
+    };
+
+    // ── 顏色判斷（HightLightRed / HightLightNavy） ────────────────
+    // 支援簡單條件: "FieldName<0", "FieldName>0", "FieldName=value"
+    const evalHighlight = (condition, row) => {
+        if (!condition) return false;
+        try {
+            // 替換欄位名稱為實際值
+            const expr = condition.replace(/([A-Za-z_][A-Za-z0-9_]*)/g, (m) => {
+                if (m in row) {
+                    const v = row[m];
+                    return (v === null || v === undefined) ? '0' : `(${parseFloat(v) || 0})`;
+                }
+                return m;
+            });
+            // eslint-disable-next-line no-new-func
+            return !!Function(`"use strict"; return (${expr});`)();
+        } catch { return false; }
+    };
+
+    // ── 欄寬同步（將 head th 寬度套用到 body/foot 同欄） ─────────
+    // 直接讀取 th.style.width（inline style），避免 getBoundingClientRect 在
+    // resize mousemove 過程中讀到尚未更新的舊值而造成錯位。
+    const syncColWidths = () => {
+        const ths = Array.from(document.querySelectorAll('#sa12-grid-head thead th'));
+        if (!ths.length) return;
+
+        // 優先從 inline style 取寬度；若無則以 offsetWidth 補
+        const widths = ths.map(th => {
+            const sw = th.style.width;
+            if (sw && sw.endsWith('px')) return sw;
+            return `${Math.max(30, th.offsetWidth)}px`;
+        });
+        const totalW = widths.reduce((s, w) => s + parseFloat(w), 0);
+
+        // head table 總寬
+        const headTbl = document.getElementById('sa12-grid-head');
+        if (headTbl) headTbl.style.width = totalW + 'px';
+
+        // 同步到 body table（colgroup）
+        const bodyTbl = document.getElementById(`${DOM_ID}-grid`);
+        if (bodyTbl) {
+            bodyTbl.style.width = totalW + 'px';
+            let cg = bodyTbl.querySelector('colgroup');
+            if (!cg) { cg = document.createElement('colgroup'); bodyTbl.prepend(cg); }
+            cg.innerHTML = widths.map(w => `<col style="width:${w};min-width:${w}">`).join('');
+        }
+
+        // 同步到 foot table（colgroup）
+        const footTbl = document.getElementById('sa12-grid-foot');
+        if (footTbl) {
+            footTbl.style.width = totalW + 'px';
+            let cg = footTbl.querySelector('colgroup');
+            if (!cg) { cg = document.createElement('colgroup'); footTbl.prepend(cg); }
+            cg.innerHTML = widths.map(w => `<col style="width:${w};min-width:${w}">`).join('');
+        }
+    };
+
+    // ── Grid 渲染 ─────────────────────────────────────────────────
+    const renderGrid = () => {
+        renderHeader();
+        renderBody();
+        renderFooter();
+        initColumnResize();
+        initDragSort();
+        restoreSavedWidths();
+        syncColWidths();   // 最後同步欄寬到 body/foot
+        bindHeaderEvents(); // 重渲染後重新綁定表頭事件
+    };
+
+    const visibleFields = () => _colOrder.map(i => _fields[i]).filter(Boolean);
+
+    // thead
+    const renderHeader = () => {
+        const tr = document.getElementById(`${DOM_ID}-thead-row`);
+        if (!tr) return;
+        const vf = visibleFields();
+        tr.innerHTML = vf.map((f, ci) => {
+            const sortCls = _sortField === f.fieldName
+                ? (_sortAsc ? ' sa12-sort-asc' : ' sa12-sort-desc') : '';
+            const align = (f.isMoneyField || isNumericCol(f.fieldName)) ? ' text-end' : '';
+            return `<th data-field="${f.fieldName}" data-ci="${ci}"
+                        class="${sortCls}${align}"
+                        style="width:${f.displaySize}px; min-width:${f.displaySize}px; position:relative;"
+                        title="${f.displayLabel}">
+                        ${f.displayLabel}
+                        <div class="col-resizer"></div>
+                    </th>`;
+        }).join('');
+    };
+
+    // tbody
+    const renderBody = () => {
+        const tbody = document.getElementById(`${DOM_ID}-tbody`);
+        if (!tbody) return;
+        const vf = visibleFields();
+
+        if (_rows.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="${vf.length}" class="text-center text-muted py-3">無資料</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = _rows.map((r, ri) => {
+            const isRed  = vf.some(f => f.hightLightRed  && evalHighlight(f.hightLightRed,  r));
+            const isNavy = vf.some(f => f.hightLightNavy && evalHighlight(f.hightLightNavy, r));
+            const selCls = ri === _selIndex ? ' sa12-sel' : '';
+            const clsCls = isRed ? ' sa12-red' : (isNavy ? ' sa12-navy' : '');
+
+            const cells = vf.map(f => {
+                const val = r[f.fieldName] ?? '';
+                const isNum = f.isMoneyField || isNumericCol(f.fieldName);
+                const align = isNum ? ' text-end' : '';
+                const numVal = parseFloat(val);
+                // 只要是數值欄且值為負數，就套用紅底白字
+                const negCls = (isNum && !isNaN(numVal) && numVal < 0) ? ' sa12-cell-neg' : '';
+                // 資料辭典底色（clXxx → Xxx，去掉 cl 前綴）
+                let bgStyle = '';
+                if (!negCls && f.editColor) {
+                    let c = f.editColor.trim();
+                    if (c.toLowerCase().startsWith('cl')) c = c.substring(2);
+                    if (c) bgStyle = ` style="background-color:${c} !important;"`;
+                }
+                if (!f.readOnly) {
+                    // 可編輯欄位
+                    return `<td class="${align}${negCls}"${bgStyle}>
+                        <input class="sa12-inp" data-field="${f.fieldName}" data-ri="${ri}"
+                               value="${fmt(val, isNum)}" autocomplete="off"${bgStyle}>
+                    </td>`;
+                }
+                // 唯讀欄位
+                const display = isNum ? fmt(val, true) : (val ?? '');
+                return `<td class="${align}${negCls}"${bgStyle} title="${display}">${display}</td>`;
+            }).join('');
+
+            return `<tr class="${selCls}${clsCls}" data-ri="${ri}" data-sort="${r.SortSerial ?? 0}">${cells}</tr>`;
+        }).join('');
+
+        // 事件綁定
+        tbody.querySelectorAll('tr[data-ri]').forEach(tr => {
+            tr.addEventListener('click', () => selectRow(parseInt(tr.dataset.ri)));
+            tr.addEventListener('dblclick', (e) => {
+                const ri   = parseInt(tr.dataset.ri);
+                const row  = _rows[ri];
+                const inp  = e.target.closest('input.sa12-inp');
+                const fld  = inp ? inp.dataset.field : '';
+                if (row) runAutoCalc(fld, row.SourNum ?? '', row.Item ?? 0);
+            });
+        });
+        // 修改追蹤：input → 標記 dirty（不立即送 AutoCalc，等使用者按 ✓）
+        tbody.querySelectorAll('input.sa12-inp').forEach(inp => {
+            inp.addEventListener('input', () => {
+                const key = `${inp.dataset.ri}-${inp.dataset.field}`;
+                if (!_dirty.has(key)) _dirty.set(key, inp.defaultValue); // 記錄原始值
+                const isDirty = inp.value !== _dirty.get(key);
+                inp.classList.toggle('sa12-dirty', isDirty);
+                if (!isDirty) _dirty.delete(key); // 改回原值 → 不算 dirty
+                updateNavBtnState();
+            });
+        });
+    };
+
+    // tfoot：所有數值欄位都顯示合計
+    const renderFooter = () => {
+        const tr = document.getElementById(`${DOM_ID}-tfoot-row`);
+        if (!tr) return;
+        const vf = visibleFields();
+
+        tr.innerHTML = vf.map((f, ci) => {
+            if (ci === 0) return `<td>總計：</td>`;
+            const isNum = f.isMoneyField || f.bFooter || isNumericCol(f.fieldName);
+            if (!isNum) return `<td></td>`;
+            const total = _rows.reduce((s, r) => s + (parseFloat(r[f.fieldName]) || 0), 0);
+            return `<td class="text-end">${fmt(total, true)}</td>`;
+        }).join('');
+    };
+
+    // ── 選列 ──────────────────────────────────────────────────────
+    const selectRow = (ri) => {
+        _selIndex = ri;
+        document.querySelectorAll(`#${DOM_ID}-tbody tr`).forEach((tr, i) => {
+            tr.classList.toggle('sa12-sel', i === ri);
+        });
+    };
+
+    // ── 欄位標題事件（排序 + 批次清除） ───────────────────────────
+    const bindHeaderEvents = () => {
+        const thead = document.getElementById(`${DOM_ID}-thead-row`);
+        if (!thead) return;
+
+        thead.querySelectorAll('th').forEach((th, ci) => {
+            // 雙擊：排序，若為可編輯欄位另詢問整欄清零
+            th.addEventListener('dblclick', async (e) => {
+                if (e.target.classList.contains('col-resizer')) return;
+                if (th.dataset.resizing === '1') return;
+                const field = th.dataset.field;
+
+                // 排序
+                if (_sortField === field) _sortAsc = !_sortAsc;
+                else { _sortField = field; _sortAsc = true; }
+                applySortIfAny();
+                renderGrid(); // 內部已呼叫 bindHeaderEvents()
+
+                // 批次自動計算（對應 grdSourceOgTitleButtonClick，僅可編輯欄位）
+                const fieldDef = _fields.find(f => f.fieldName === field);
+                if (!fieldDef || fieldDef.readOnly) return;
+                const confirmed = await Swal.fire({
+                    icon: 'question',
+                    title: `整欄清零「${fieldDef.displayLabel}」?`,
+                    showCancelButton: true, confirmButtonText: '確定', cancelButtonText: '取消'
+                });
+                if (confirmed.isConfirmed) await runAutoCalc(field, '', 1);
+            });
+        });
+    };
+
+    // ── Post (✓)：只存使用者輸入值（不觸發 AutoCalc），最後 reload ─
+    const handlePost = async () => {
+        // 一次快照所有 dirty 輸入（避免 reload 後 DOM 失效）
+        const snapshot = Array.from(
+            document.querySelectorAll(`#${DOM_ID}-tbody input.sa12-inp.sa12-dirty`)
+        ).map(inp => ({
+            ri:    parseInt(inp.dataset.ri),
+            field: inp.dataset.field,
+            value: inp.value
+        })).filter(s => _rows[s.ri]);
+
+        const advInp  = document.getElementById(`${DOM_ID}-advance`);
+        const overInp = document.getElementById(`${DOM_ID}-over`);
+        const masterDirty = advInp?.classList.contains('sa12-dirty') || overInp?.classList.contains('sa12-dirty');
+
+        if (!snapshot.length && !masterDirty) return;
+
+        try {
+            // 依序把每個修改值直接寫入 DB（保留使用者輸入，不觸發 AutoCalc 覆寫）
+            for (const s of snapshot) {
+                const row = _rows[s.ri];
+                const rawVal = s.value.replace(/,/g, ''); // 去千分位符號
+                await fetch(`${API_BASE}/UpdateField`, withJwt({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        paperNum:  _paperNum,
+                        sourNum:   row.SourNum ?? '',
+                        item:      row.Item    ?? 0,
+                        fieldName: s.field,
+                        value:     rawVal
+                    })
+                }));
+            }
+            // 儲存轉預收 / 超收金額（若已修改）
+            if (masterDirty) {
+                await fetch(`${API_BASE}/UpdateMaster`, withJwt({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        paperNum:        _paperNum,
+                        advanceAmountOg: parseFloat((advInp?.value ?? '0').replace(/,/g, '')) || 0,
+                        overAmountOg:    parseFloat((overInp?.value ?? '0').replace(/,/g, '')) || 0
+                    })
+                }));
+            }
+            // 儲存後 reload（不呼叫 AutoCalc，避免 SP 覆蓋使用者輸入）
+            _dirty.clear();
+            updateNavBtnState();
+            await loadSourceAndAmount(_paperNum);
+        } catch (err) {
+            Swal.fire({ icon: 'error', title: String(err?.message || err) });
+        }
+    };
+
+    // ── Cancel (✗)：放棄所有修改，重新載入 ──────────────────────
+    const handleCancel = async () => {
+        _dirty.clear();
+        await loadSourceAndAmount(_paperNum);
+    };
+
+    // ── AutoCalc（純 API，不 reload）────────────────────────────
+    const callAutoCalcAPI = async (fieldName, sourNum, item) => {
+        const resp = await fetch(`${API_BASE}/AutoCalc`, withJwt({
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paperNum: _paperNum, sourNum, item, fieldName, sourceType: 0 })
+        }));
+        const data = await resp.json();
+        if (!data.ok) console.warn('AutoCalc:', data.error);
+    };
+
+    // ── AutoCalc（API + reload，雙擊時使用）──────────────────────
+    const runAutoCalc = async (fieldName, sourNum, item) => {
+        try {
+            await callAutoCalcAPI(fieldName, sourNum, item);
+            await loadSourceAndAmount(_paperNum);
+        } catch (err) { console.error('AutoCalc error:', err); }
+    };
+
+    // ── 上移 / 下移 ───────────────────────────────────────────────
+    const moveRow = async (direction) => {
+        if (_selIndex < 0) return Swal.fire({ icon: 'info', title: '請先選取一列' });
+        const row = _rows[_selIndex];
+        if (!row?.SortSerial) return;
+        const prevSourNum = row.SourNum;
+        const prevItem    = row.Item;
+        try {
+            const resp = await fetch(`${API_BASE}/SerialChange`, withJwt({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paperNum: _paperNum, sortSerial: row.SortSerial, direction })
+            }));
+            const data = await resp.json();
+            if (!data.ok) return Swal.fire({ icon: 'error', title: data.error || '移動失敗' });
+            await loadSourceAndAmount(_paperNum);
+            const ni = _rows.findIndex(r => r.SourNum == prevSourNum && r.Item == prevItem);
+            _selIndex = ni >= 0 ? ni : _selIndex;
+            renderGrid();
+        } catch (err) { Swal.fire({ icon: 'error', title: String(err?.message || err) }); }
+    };
+
+    // ── 欄寬調整（針對 head table 的 th） ────────────────────────
+    let _resizing = false, _resStartX = 0, _resStartW = 0, _resThIdx = -1;
+
+    const initColumnResize = () => {
+        const headTable = document.getElementById('sa12-grid-head');
+        if (!headTable) return;
+        const ths = Array.from(headTable.querySelectorAll('thead th'));
+
+        ths.forEach((th, idx) => {
+            const handle = th.querySelector('.col-resizer');
+            if (!handle) return;
+            handle.addEventListener('mousedown', (e) => {
+                e.preventDefault(); e.stopPropagation();
+                _resizing  = true;
+                _resStartX = e.pageX;
+                _resStartW = th.getBoundingClientRect().width;
+                _resThIdx  = idx;
+                th.dataset.resizing = '1';
+                document.body.classList.add('sa12-resizing');
+            });
+        });
+    };
+
+    const applyColWidth = (idx, w) => {
+        const ths = Array.from(document.querySelectorAll('#sa12-grid-head thead th'));
+        const th = ths[idx];
+        if (!th) return;
+        const wpx = `${Math.max(30, Math.round(w))}px`;
+        th.style.width = wpx; th.style.minWidth = wpx;
+        syncColWidths();  // 同步到 body / foot
+    };
+
+    const restoreSavedWidths = () => {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY_WIDTH);
+            if (!raw) return;
+            const cols = JSON.parse(raw) || [];
+            const ths = Array.from(document.querySelectorAll('#sa12-grid-head thead th'));
+            cols.forEach(c => {
+                const idx = ths.findIndex(th => th.dataset.field === c.fieldName);
+                if (idx >= 0 && Number.isFinite(Number(c.width)))
+                    applyColWidth(idx, c.width);
+            });
+        } catch { /* ignore */ }
+    };
+
+    document.addEventListener('mousemove', (e) => {
+        if (!_resizing || _resThIdx < 0) return;
+        applyColWidth(_resThIdx, _resStartW + (e.pageX - _resStartX));
+    });
+    document.addEventListener('mouseup', () => {
+        if (!_resizing) return;
+        _resizing = false;
+        document.body.classList.remove('sa12-resizing');
+        const ths = Array.from(document.querySelectorAll('#sa12-grid-head thead th'));
+        if (ths[_resThIdx]) delete ths[_resThIdx].dataset.resizing;
+        const payload = ths.map(th => ({
+            fieldName: th.dataset.field,
+            width: Math.round(th.getBoundingClientRect().width)
+        }));
+        try { localStorage.setItem(STORAGE_KEY_WIDTH, JSON.stringify(payload)); } catch { /* ignore */ }
+        _resThIdx = -1;
+    });
+
+    // ── 欄位拖曳排序（原生 HTML5 drag-drop，不需 SortableJS） ─────
+    let _dragSrcCi = -1;
+
+    const initDragSort = () => {
+        const hRow = document.getElementById(`${DOM_ID}-thead-row`);
+        if (!hRow) return;
+
+        hRow.querySelectorAll('th').forEach((th, ci) => {
+            th.draggable = true;
+
+            th.addEventListener('dragstart', (e) => {
+                // 避免與 col-resizer 衝突
+                if (e.target.classList.contains('col-resizer')) { e.preventDefault(); return; }
+                _dragSrcCi = ci;
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', String(ci));
+                setTimeout(() => { th.style.opacity = '0.4'; }, 0);
+            });
+
+            th.addEventListener('dragend', () => {
+                th.style.opacity = '';
+                hRow.querySelectorAll('th').forEach(t => t.classList.remove('drag-over'));
+                _dragSrcCi = -1;
+            });
+
+            th.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                hRow.querySelectorAll('th').forEach(t => t.classList.remove('drag-over'));
+                if (ci !== _dragSrcCi) th.classList.add('drag-over');
+            });
+
+            th.addEventListener('dragleave', () => {
+                th.classList.remove('drag-over');
+            });
+
+            th.addEventListener('drop', (e) => {
+                e.preventDefault();
+                th.classList.remove('drag-over');
+                if (_dragSrcCi < 0 || _dragSrcCi === ci) return;
+                // 重排 _colOrder
+                const moved = _colOrder.splice(_dragSrcCi, 1)[0];
+                _colOrder.splice(ci, 0, moved);
+                saveColOrder();
+                renderGrid();
+                bindHeaderEvents();
+            });
+        });
+    };
+
+    // ── 確定 ───────────────────────────────────────────────────���──
+    const handleOK = async (ctx) => {
+        const pn = _paperNum || readPaperNum(ctx);
+        if (!pn) return Swal.fire({ icon: 'info', title: '沒有單號' });
+        Swal.fire({ title: '處理中…', allowOutsideClick: false, allowEscapeKey: false,
+            didOpen: () => Swal.showLoading() });
+        try {
+            const resp = await fetch(`${API_BASE}/Confirm`, withJwt({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paperNum: pn })
+            }));
+            const data = await resp.json();
+            if (!data.ok) return Swal.fire({ icon: 'error', title: data.error || '確認失敗' });
+            hideModal();
+            await Swal.fire({ icon: 'success', title: '完成', timer: 1000, showConfirmButton: false });
+            if (typeof window.__refreshHeaderData === 'function') await window.__refreshHeaderData();
+            if (typeof window.__refreshMultiTab   === 'function') await window.__refreshMultiTab();
+        } catch (err) { Swal.fire({ icon: 'error', title: String(err?.message || err) }); }
+    };
+
+    // ── 主入口 btnC2 ──────────────────────────────���───────────────
+    const openInvoiceAlloc = async (ctx) => {
+        const pn = readPaperNum(ctx);
+        if (!pn) return Swal.fire({ icon: 'info', title: '沒有單號' });
+        _paperNum = pn; _selIndex = -1; _rows = []; _sortField = ''; _sortAsc = true;
+
+        showModal();
+        try {
+            await loadAll(pn);
+            bindHeaderEvents();
+        } catch (err) {
+            console.error('openInvoiceAlloc error:', err);
+            Swal.fire({ icon: 'error', title: '載入失敗', text: err.message });
+        }
+    };
+
+    // ── DOMContentLoaded ──────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+        // 初始化：✓/✗ 預設灰色
+        updateNavBtnState();
+
+        // 確定
+        document.getElementById(`${DOM_ID}-btn-ok`)
+            ?.addEventListener('click', () => handleOK({}));
+        // ✓ 儲存
+        document.getElementById(`${DOM_ID}-btn-post`)
+            ?.addEventListener('click', handlePost);
+        // ✗ 取消
+        document.getElementById(`${DOM_ID}-btn-cancel`)
+            ?.addEventListener('click', handleCancel);
+        // ↺ 刷新
+        document.getElementById(`${DOM_ID}-btn-refresh`)
+            ?.addEventListener('click', () => { if (_paperNum) loadSourceAndAmount(_paperNum); });
+        // ↑↓ 移動
+        document.getElementById(`${DOM_ID}-btn-up`)
+            ?.addEventListener('click', () => moveRow(1));
+        document.getElementById(`${DOM_ID}-btn-down`)
+            ?.addEventListener('click', () => moveRow(0));
+
+        // 水平捲動同步：body-wrap 左右捲動時，head/foot 跟著同步
+        document.getElementById('sa12-body-wrap')?.addEventListener('scroll', (e) => {
+            const sl = e.target.scrollLeft;
+            const hw = document.getElementById('sa12-head-wrap');
+            const fw = document.getElementById('sa12-foot-wrap');
+            if (hw) hw.scrollLeft = sl;
+            if (fw) fw.scrollLeft = sl;
+        });
+
+        // Modal 關閉
+        const modalEl = document.getElementById(`${DOM_ID}-modal`);
+        modalEl?.addEventListener('hidden.bs.modal', () => {
+            _dirty.clear();
+            if (typeof window.triggerSpecialUIUpdate === 'function')
+                window.triggerSpecialUIUpdate();
+        });
+
+        // F3：開啟資料辭典（capture phase，優先攔截避免被頁面其他 F3 搶走）
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'F3') return;
+            const el = document.getElementById(`${DOM_ID}-modal`);
+            if (!el || !el.classList.contains('show')) return; // 只在本 modal 開啟時作用
+            e.preventDefault();
+            e.stopImmediatePropagation(); // 阻止其他 F3 listeners（如單頭資料辭典）
+            if (typeof window.showDictModal === 'function') {
+                window.showDictModal('fieldDictModal', DICT_TBL);
+            }
+        }, { capture: true });
+    });
+
+    // ── 註冊 ───────────────────────────────────────────��──────────
+    window.ActionRailCustomHandlers['SA000012'] = {
+        btnC2: openInvoiceAlloc,
+        btnOK: handleOK
+    };
+})();
+</script>
