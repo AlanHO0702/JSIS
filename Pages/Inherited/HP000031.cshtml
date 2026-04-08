@@ -1,0 +1,150 @@
+@*
+    HP000031 (HPSdOverTimeMain - 加班單) 單據的確認、送審前處理 Hook
+
+    這個檔案會在 PaperDetail.cshtml 中自動載入（如果 ItemId = HP000031）
+    對應 Delphi: OverTimePaper.pas btnCompletedClick / btnExamClick
+                 -> OTConfirm -> OTDoHint -> inherited
+
+    主要功能：
+    1. 確認/送審前執行加班時數上限檢查 (OTConfirm)
+       - 先查 CURdSysParams SystemId='HPS', ParamId='OTMaxUse', Value='1'
+       - 有啟用才呼叫 HPSdOTHourCheck；NeedRaise=1 時彈確認框，用戶按否則中止
+    2. 確認/送審前執行加班限制提示 (OTDoHint)
+       - 呼叫 HPSdOverTimeLimit；Result 不為空時彈確認框，用戶按否則中止
+*@
+
+<script>
+window.InheritedActionHooks = window.InheritedActionHooks || {};
+
+/**
+ * 加班時數上限 + 限制提示檢查
+ * Delphi: OverTimePaper.pas OTConfirm() + OTDoHint()
+ *
+ * @@param {string} paperNum - 單據號碼
+ * @@returns {Promise<boolean>} - 成功返回 true，使用者取消返回 false
+ */
+async function hpsOverTimeCheck(paperNum) {
+    try {
+        // === OTConfirm ===
+        // 先查 CURdSysParams 確認 OTMaxUse=1 才執行時數上限檢查
+        // Delphi: select Value from CURdSysParams where SystemId='HPS' and ParamId='OTMaxUse' and Value='1'
+        const sysParamResp = await fetch('/api/StoredProc/queryDirect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                TableName: 'CURdSysParams',
+                WhereClause: "SystemId = @@systemId AND ParamId = @@paramId AND Value = @@value",
+                Parameters: { systemId: 'HPS', paramId: 'OTMaxUse', value: '1' },
+                Columns: ['Value']
+            })
+        });
+
+        if (sysParamResp.ok) {
+            const sysParamData = await sysParamResp.json();
+            if (sysParamData && sysParamData.length > 0) {
+                // OTMaxUse=1，執行加班時數上限檢查
+                const hourChkResp = await fetch('/api/StoredProc/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        Key: 'HPSdOTHourCheck',
+                        Args: { PaperNum: paperNum }
+                    })
+                });
+
+                if (!hourChkResp.ok) {
+                    const errText = await hourChkResp.text();
+                    await Swal.fire({ icon: 'error', title: '加班時數檢查失敗', text: errText });
+                    return false;
+                }
+
+                const hourChkData = await hourChkResp.json();
+                if (hourChkData && hourChkData.length > 0) {
+                    const needRaise = hourChkData[0].NeedRaise;
+                    const checkStr  = hourChkData[0].CheckStr || '';
+
+                    if (needRaise === 1 && checkStr) {
+                        const ask = await Swal.fire({
+                            icon: 'question',
+                            title: '加班時數確認',
+                            text: checkStr,
+                            showCancelButton: true,
+                            confirmButtonText: '是',
+                            cancelButtonText: '否'
+                        });
+                        if (!ask.isConfirmed) return false;
+                    }
+                }
+            }
+        }
+
+        // === OTDoHint ===
+        // 執行 HPSdOverTimeLimit 加班限制提示（不論 OTMaxUse 是否啟用都執行）
+        const limitResp = await fetch('/api/StoredProc/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                Key: 'HPSdOverTimeLimit',
+                Args: { PaperNum: paperNum }
+            })
+        });
+
+        if (!limitResp.ok) {
+            const errText = await limitResp.text();
+            await Swal.fire({ icon: 'error', title: '加班限制檢查失敗', text: errText });
+            return false;
+        }
+
+        const limitData = await limitResp.json();
+        if (limitData && limitData.length > 0) {
+            const result = limitData[0].Result || '';
+            if (result) {
+                const ask = await Swal.fire({
+                    icon: 'question',
+                    title: '加班限制提示',
+                    text: result,
+                    showCancelButton: true,
+                    confirmButtonText: '是',
+                    cancelButtonText: '否'
+                });
+                if (!ask.isConfirmed) return false;
+            }
+        }
+
+        return true;
+
+    } catch (err) {
+        console.error('[HP000031] hpsOverTimeCheck 執行錯誤:', err);
+        await Swal.fire({ icon: 'error', title: '執行錯誤', text: err.message });
+        return false;
+    }
+}
+
+// 為 HP000031 註冊 Hooks
+window.InheritedActionHooks['HP000031'] = {
+
+    /**
+     * 確認前執行
+     * Delphi: OverTimePaper.pas btnCompletedClick -> OTConfirm + OTDoHint -> inherited
+     *
+     * 參數 context: { tableName, paperNum, userId }
+     * 回傳: Promise<boolean> - 回傳 false 會中止確認操作
+     */
+    beforeConfirm: async (context) => {
+        return await hpsOverTimeCheck(context.paperNum);
+    },
+
+    /**
+     * 送審前執行
+     * Delphi: OverTimePaper.pas btnExamClick -> OTConfirm + OTDoHint -> inherited
+     *
+     * 參數 context: { tableName, paperNum, userId }
+     * 回傳: Promise<boolean> - 回傳 false 會中止送審操作
+     */
+    beforeExam: async (context) => {
+        return await hpsOverTimeCheck(context.paperNum);
+    }
+};
+
+console.log('[HP000031] Inherited hooks 已載入');
+</script>
