@@ -82,6 +82,7 @@
     Sortable.create(headerRow, {
       animation: 150,
       forceFallback: true,
+      fallbackOnBody: true,
       ghostClass: 'col-dragging',
       filter: '.col-resizer',
       preventOnFilter: false,
@@ -89,6 +90,7 @@
       onStart: function () {
         originalOrder = Array.from(headerRow.children).map(function (h) { return h.dataset.field; });
         document.body.classList.add('col-sorting');
+        document.body.style.userSelect = 'none';
         startAutoScroll();
       },
 
@@ -101,6 +103,7 @@
 
       onEnd: function (evt) {
         document.body.classList.remove('col-sorting');
+        document.body.style.userSelect = '';
         stopAutoScroll();
         clearDragOver();
 
