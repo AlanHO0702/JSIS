@@ -524,8 +524,9 @@
               inp.dataset.raw = raw == null ? "" : raw;
 
               // ★ 若有 lookup 對照表，記錄並綁定雙擊下拉（編輯模式可選取，瀏覽模式唯讀）
-              const fieldDropdownMap = ocxMaps[col]?.dropdown || lookupMaps[col]?.dropdown;
-              const fieldCellMap     = ocxMaps[col]?.cell    || lookupMaps[col]?.cell;
+              // OCX Lookup 僅用於顯示文字，不觸發雙擊下拉
+              const fieldDropdownMap = lookupMaps[col]?.dropdown;
+              const fieldCellMap     = lookupMaps[col]?.cell;
               if (fieldDropdownMap && Object.keys(fieldDropdownMap).length > 0) {
                 inp._lookupMap     = fieldDropdownMap;
                 inp._lookupCellMap = fieldCellMap;
