@@ -1292,7 +1292,7 @@
                 <a class="nav-link" data-tab-target="#strike-dtl-other" href="#strike-dtl-other">其他扣款沖帳</a>
               </li>
               <li class="nav-item">
-                <a class="nav-link" data-tab-target="#strike-dtl-debit" href="#strike-dtl-debit">抵扣款明細</a>
+                <a class="nav-link" data-tab-target="#strike-dtl-debit" href="#strike-dtl-debit">折扣款明細</a>
               </li>
             </ul>
 
@@ -1444,7 +1444,7 @@
                 </div>
               </div>
 
-              <!-- 抵扣款明細 -->
+              <!-- 折扣款明細 -->
               <div class="tab-pane fade" id="strike-dtl-debit" data-flex="column" style="height: 100%;">
                 <div class="strike-toolbar">
                   <button type="button" class="btn btn-sm btn-outline-secondary" data-action="post" data-target="debit">&#10003;</button>
@@ -1475,7 +1475,7 @@
             </div>
             <div style="display: flex; gap: 20px; font-size: 14px; padding: 6px 8px; background: #f8f9fa; border-top: 1px solid #dee2e6; flex-shrink: 0;">
               <span><strong>已輸入金額總計:</strong></span>
-              <span>現金: <span id="strike-dtl-txt-use-cash">0</span></span>
+              <span><span id="lbl-use-cash">現金</span>: <span id="strike-dtl-txt-use-cash">0</span></span>
               <span>銀存: <span id="strike-dtl-txt-use-bank">0</span></span>
               <span>票據: <span id="strike-dtl-txt-use-bill">0</span></span>
               <span>其他: <span id="strike-dtl-txt-use-other">0</span></span>
@@ -1512,7 +1512,7 @@
                   <button type="button" class="btn btn-sm btn-info btn-spe-full" data-source="og" style="display: none; font-size: 11px; padding: 0px 8px;">補滿原值</button>
                 </div>
                 <div style="flex: 1; overflow: auto;">
-                  <table class="table table-sm table-bordered mb-0" style="font-size: 14px;">
+                  <table id="tbl-source-og" class="table table-sm table-bordered mb-0" style="font-size: 14px;">
                     <thead style="position: sticky; top: 0; background: #f8f9fa; z-index: 1;">
                       <tr>
                         <th>立帳單號</th>
@@ -1521,9 +1521,9 @@
                         <th>憑證單號</th>
                         <th>發票號碼</th>
                         <th>剩餘原幣</th>
-                        <th>現金沖銷</th>
-                        <th>銀存沖銷</th>
-                        <th>票據沖銷</th>
+                        <th id="th-source-og-cash">現金沖銷</th>
+                        <th id="th-source-og-bank">銀存沖銷</th>
+                        <th id="th-source-og-bill">票據沖銷</th>
                         <th>其他沖銷</th>
                         <th>折讓沖銷</th>
                         <th>沖銷金額</th>
@@ -1546,7 +1546,7 @@
                   <button type="button" class="btn btn-sm btn-info btn-spe-full" data-source="local" style="display: none; font-size: 11px; padding: 0px 8px;">補滿原值</button>
                 </div>
                 <div style="flex: 1; overflow: auto;">
-                  <table class="table table-sm table-bordered mb-0" style="font-size: 14px;">
+                  <table id="tbl-source" class="table table-sm table-bordered mb-0" style="font-size: 14px;">
                     <thead style="position: sticky; top: 0; background: #f8f9fa; z-index: 1;">
                       <tr>
                         <th>立帳單號</th>
@@ -1555,9 +1555,9 @@
                         <th>憑證單號</th>
                         <th>發票號碼</th>
                         <th>剩餘金額</th>
-                        <th>現金沖銷</th>
-                        <th>銀存沖銷</th>
-                        <th>票據沖銷</th>
+                        <th id="th-source-cash">現金沖銷</th>
+                        <th id="th-source-bank">銀存沖銷</th>
+                        <th id="th-source-bill">票據沖銷</th>
                         <th>其他沖銷</th>
                         <th>折讓沖銷</th>
                         <th>沖銷金額</th>
@@ -1691,6 +1691,12 @@
     display: flex !important;
     flex-direction: column !important;
   }
+
+  /* SAL 模式：隱藏沖帳帳款表格的銀存/票據沖銷欄 (第8、9欄) */
+  #tbl-source-og.sal-mode th:nth-child(8), #tbl-source-og.sal-mode td:nth-child(8),
+  #tbl-source-og.sal-mode th:nth-child(9), #tbl-source-og.sal-mode td:nth-child(9),
+  #tbl-source.sal-mode th:nth-child(8),    #tbl-source.sal-mode td:nth-child(8),
+  #tbl-source.sal-mode th:nth-child(9),    #tbl-source.sal-mode td:nth-child(9) { display: none !important; }
 
   /* 調窄各頁籤欄位高度（現金沖帳除外） */
   #strike-dtl-bank th, #strike-dtl-bank td,
@@ -2252,6 +2258,16 @@
             if (useBillSpan) useBillSpan.style.display = '';
             const modalTitle = els.modal?.querySelector('.modal-title');
             if (modalTitle) modalTitle.textContent = '沖帳明細維護';
+            // 還原沖帳帳款欄位
+            const thCashOg = document.getElementById('th-source-og-cash');
+            const thCashNT = document.getElementById('th-source-cash');
+            if (thCashOg) thCashOg.textContent = '現金沖銷';
+            if (thCashNT) thCashNT.textContent = '現金沖銷';
+            document.getElementById('tbl-source-og')?.classList.remove('sal-mode');
+            document.getElementById('tbl-source')?.classList.remove('sal-mode');
+            // 還原已輸入金額總計的現金標籤
+            const lblUseCash = document.getElementById('lbl-use-cash');
+            if (lblUseCash) lblUseCash.textContent = '現金';
             return;
         }
         try {
@@ -2295,6 +2311,31 @@
                 // 修改標題文字
                 const modalTitle = els.modal?.querySelector('.modal-title');
                 if (modalTitle) modalTitle.textContent = '出納收款明細維護';
+
+                // 沖帳帳款欄位：現金沖銷→出納沖銷，隱藏銀存/票據欄
+                const thCashOg = document.getElementById('th-source-og-cash');
+                const thCashNT = document.getElementById('th-source-cash');
+                if (thCashOg) thCashOg.textContent = '出納沖銷';
+                if (thCashNT) thCashNT.textContent = '出納沖銷';
+                document.getElementById('tbl-source-og')?.classList.add('sal-mode');
+                document.getElementById('tbl-source')?.classList.add('sal-mode');
+                // 已輸入金額總計的現金標籤改為「出納」
+                const lblUseCash = document.getElementById('lbl-use-cash');
+                if (lblUseCash) lblUseCash.textContent = '出納';
+
+                // 切換到第一個可見的頁籤（隱藏後原本 active 的頁籤可能已不可見）
+                const tabContent = document.getElementById('strike-dtl-detail-tabs');
+                if (tabContent) {
+                    const firstVisibleLink = navTabs.querySelector('.nav-item:not([style*="none"]) .nav-link');
+                    if (firstVisibleLink) {
+                        navTabs.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+                        tabContent.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('show', 'active'));
+                        const targetId = (firstVisibleLink.getAttribute('data-tab-target') || '').substring(1);
+                        const targetPane = targetId ? document.getElementById(targetId) : null;
+                        if (targetPane) targetPane.classList.add('show', 'active');
+                        firstVisibleLink.classList.add('active');
+                    }
+                }
             }
         } catch (err) {
             console.error('loadSALMode error:', err);
@@ -3487,7 +3528,7 @@
         bindDatalistPrefixFilter(els['tbody-post']);
     };
 
-    // 載入抵扣款明細資料
+    // 載入折扣款明細資料
     const loadDebitData = async () => {
         try {
             const resp = await fetch(`/api/StrikeSelect/GetDetailDebitData?paperNum=${encodeURIComponent(paperNum)}`, withJwtHeaders());
@@ -3503,7 +3544,7 @@
         }
     };
 
-    // 渲染抵扣款明細表格
+    // 渲染折扣款明細表格
     const renderDebitTable = () => {
         if (!els['tbody-debit']) return;
 
@@ -4564,7 +4605,7 @@
     // 註冊按鈕處理函式
     window.ActionRailCustomHandlers['PR000004'].btnC2 = openStrikeDetail;
 
-    // 匯出重新載入抵扣款明細函式 (供折讓搜尋確認後使用)
+    // 匯出重新載入折扣款明細函式 (供折讓搜尋確認後使用)
     window.reloadDebitData = async () => {
         await loadDebitData();
         await executeAutoCalc('', '', '', 1, -1);
@@ -4944,10 +4985,12 @@
     };
 
     // paperSearch 確認後自動開啟沖帳明細維護
-    window.__paperSearchAfterConfirm = async ({ paperNum }) => {
+    window.__paperSearchAfterConfirm = async ({ paperNum, ocxName }) => {
         const openDtl = window.ActionRailCustomHandlers?.['PR000004']?.btnC2;
         if (typeof openDtl === 'function') {
-            try { await openDtl({ paperNum }); } catch (e) { console.error('Auto open strike detail after paperSearch error:', e); }
+            // APRdStrikeSAL.dll 觸發時啟用 SAL 模式（對應 Delphi iSALMode 判斷）
+            const enableSAL = ((ocxName || '').toLowerCase() === 'aprdstrikesal.dll') ? 1 : 0;
+            try { await openDtl({ paperNum, enableSAL }); } catch (e) { console.error('Auto open strike detail after paperSearch error:', e); }
             if (window.Swal) Swal.close();
         }
     };
@@ -6226,7 +6269,7 @@
             // 關閉 modal
             hideModal();
 
-            // 重新載入抵扣款明細
+            // 重新載入折扣款明細
             if (typeof window.reloadDebitData === 'function') {
                 await window.reloadDebitData();
             }
