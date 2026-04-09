@@ -49,14 +49,12 @@ namespace PcbErpApi.Pages.SysParams
                 SelectedSystem = SystemList.FirstOrDefault();
             }
 
-            // 4) 取清單資料（也做一次 Trim 比對，避免資料庫有尾端空白）
-            Rows = string.IsNullOrEmpty(SelectedSystem)
-                ? new List<CURdSysParams>()
-                : await _ctx.CURdSysParams
-                    .Where(x => x.SystemId != null && x.SystemId.Trim() == SelectedSystem)
-                    .OrderBy(x => x.ParamId)
-                    .AsNoTracking()
-                    .ToListAsync();
+            // 4) 載入全部資料（供前端跨系統別篩選）
+            Rows = await _ctx.CURdSysParams
+                .OrderBy(x => x.SystemId)
+                .ThenBy(x => x.ParamId)
+                .AsNoTracking()
+                .ToListAsync();
 
             // 5) 載入辭典欄位定義
             FieldDictList = _dictService.GetFieldDict(DictTableName, typeof(CURdSysParams));
