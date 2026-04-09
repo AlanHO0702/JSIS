@@ -956,8 +956,9 @@ const buildBody = async (tbody, dict, rows, onRowClick, isDetail = false) => {
           ? formatted
           : (display == null ? "" : String(display));
         // ★ 若有 lookup 對照表，記錄並綁定雙擊下拉（編輯模式可選取，瀏覽模式唯讀）
-        const fieldLookupMap = oc[f.FieldName]?.dropdown || lk[f.FieldName]?.dropdown;
-        const fieldCellMap   = oc[f.FieldName]?.cell    || lk[f.FieldName]?.cell;
+        // OCX Lookup 僅用於顯示文字，不觸發雙擊下拉
+        const fieldLookupMap = lk[f.FieldName]?.dropdown;
+        const fieldCellMap   = lk[f.FieldName]?.cell;
         if (fieldLookupMap && Object.keys(fieldLookupMap).length > 0) {
           inp._lookupMap     = fieldLookupMap;  // 下拉用（含所有顯示欄位合併）
           inp._lookupCellMap = fieldCellMap;    // 儲存格顯示用（只用 result0）
@@ -2048,8 +2049,9 @@ for (let i = 0; i < (cfg.Details || []).length; i++) {
           // ★ 從快取綁定雙擊下拉選單（與 buildBody 一致）
           const ocxData = getCachedOCXLookup(f);
           const lkData  = getCachedLookup(f);
-          const fieldLookupMap = ocxData?.dropdown || lkData?.dropdown;
-          const fieldCellMap   = ocxData?.cell    || lkData?.cell;
+          // OCX Lookup 僅用於顯示文字，不觸發雙擊下拉
+          const fieldLookupMap = lkData?.dropdown;
+          const fieldCellMap   = lkData?.cell;
           if (fieldLookupMap && Object.keys(fieldLookupMap).length > 0) {
             inp._lookupMap     = fieldLookupMap;
             inp._lookupCellMap = fieldCellMap;

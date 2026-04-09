@@ -506,14 +506,40 @@ public class StoredProcController : ControllerBase
                 resolvedParams.Add(new { paramType = p.ParamType, fieldName = p.ParamFieldName, tableKind = p.TableKind, value = value?.ToString() ?? "(null)" });
             }
 
-            var affected = await cmd.ExecuteNonQueryAsync();
+            string? spMessage = null;
+            await using (var reader = await cmd.ExecuteReaderAsync())
+            {
+                do
+                {
+                    var colIdx = -1;
+                    for (var i = 0; i < reader.FieldCount; i++)
+                    {
+                        if (string.Equals(reader.GetName(i), "ReturnValue", StringComparison.OrdinalIgnoreCase))
+                        { colIdx = i; break; }
+                    }
+                    if (colIdx >= 0)
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            if (!reader.IsDBNull(colIdx))
+                            {
+                                var raw = (reader.GetValue(colIdx)?.ToString() ?? "").Trim();
+                                if (raw.StartsWith("MESGE:", StringComparison.OrdinalIgnoreCase))
+                                { spMessage = raw; break; }
+                            }
+                        }
+                        if (spMessage != null) break;
+                    }
+                } while (await reader.NextResultAsync());
+            }
+
             await tx.CommitAsync();
-            return Ok(new { ok = true, rowsAffected = affected, spName = spNameRaw, paramCount = paramDefs.Count, resolvedParams });
+            return Ok(new { ok = true, message = spMessage, spName = spNameRaw, paramCount = paramDefs.Count, resolvedParams });
         }
         catch (Exception ex)
         {
             if (tx != null) { try { await tx.RollbackAsync(); } catch { } }
-            return StatusCode(500, new { ok = false, error = ex.GetBaseException().Message });
+            return StatusCode(500, new { ok = false, error = ExtractPrimaryError(ex) });
         }
     }
 
@@ -1494,6 +1520,18 @@ SELECT f.FieldName,
     {
         if (string.IsNullOrWhiteSpace(name)) return string.Empty;
         return name.Trim();
+    }
+
+    /// <summary>
+    /// SqlException 會把所有 SQL Server 訊息串接（含 transaction cleanup 系統訊息），
+    /// 只取第一條（即 SP 自己 RAISERROR/THROW 的訊息）回傳給前端。
+    /// </summary>
+    private static string ExtractPrimaryError(Exception ex)
+    {
+        var baseEx = ex.GetBaseException();
+        if (baseEx is SqlException sqlEx && sqlEx.Errors.Count > 0)
+            return sqlEx.Errors[0].Message;
+        return baseEx.Message;
     }
 
     private static string QuoteIdentifier(string name)
