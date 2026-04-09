@@ -273,9 +273,9 @@
       const k = (th.dataset.field || "").toLowerCase();
       const w = saved[k];
       if (w) th.style.width = `${w}px`;
-      if (!th.querySelector(".md-col-resizer")) {
+      if (!th.querySelector(".col-resizer")) {
         const handle = document.createElement("span");
-        handle.className = "md-col-resizer";
+        handle.className = "col-resizer";
         th.appendChild(handle);
       }
     });
@@ -283,7 +283,7 @@
     let isDown = false, startX = 0, startW = 0, th = null;
 
     ths.forEach(h => {
-      const handle = h.querySelector(".md-col-resizer");
+      const handle = h.querySelector(".col-resizer");
       if (!handle) return;
       handle.addEventListener("mousedown", (e) => {
         e.preventDefault();
@@ -414,7 +414,7 @@
         if (w) th.style.width = w + "px";
 
         const handle = document.createElement("span");
-        handle.className = "md-col-resizer";
+        handle.className = "col-resizer";
         th.appendChild(handle);
 
         theadTr.appendChild(th);
@@ -550,8 +550,9 @@
               inp.dataset.raw = raw == null ? "" : raw;
 
               // ★ 若有 lookup 對照表，記錄並綁定雙擊下拉（編輯模式可選取，瀏覽模式唯讀）
-              const fieldDropdownMap = ocxMaps[col]?.dropdown || lookupMaps[col]?.dropdown;
-              const fieldCellMap     = ocxMaps[col]?.cell    || lookupMaps[col]?.cell;
+              // OCX Lookup 僅用於顯示文字，不觸發雙擊下拉
+              const fieldDropdownMap = lookupMaps[col]?.dropdown;
+              const fieldCellMap     = lookupMaps[col]?.cell;
               if (fieldDropdownMap && Object.keys(fieldDropdownMap).length > 0) {
                 inp._lookupMap     = fieldDropdownMap;
                 inp._lookupCellMap = fieldCellMap;
@@ -1021,7 +1022,7 @@
         th.style.cursor = "default";
         th.title = "點擊排序";
         th.addEventListener("click", (e) => {
-          if (e.target?.classList?.contains("md-col-resizer")) return;
+          if (e.target?.classList?.contains("col-resizer")) return;
           const field = th.dataset.field;
           if (!field) return;
           const current = th.dataset.sortOrder || "desc";

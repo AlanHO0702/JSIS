@@ -68,13 +68,26 @@ namespace PcbErpApi.Controllers
         private async Task EnsureBuiltInFilterParamsAsync(SqlCommand cmd, string? filterSql)
         {
             if (cmd == null || string.IsNullOrWhiteSpace(filterSql)) return;
-            if (cmd.Parameters.Cast<SqlParameter>().Any(p =>
-                string.Equals(p.ParameterName, "@UseId", StringComparison.OrdinalIgnoreCase))) return;
+            var hasParam = new Func<string, bool>(name =>
+                cmd.Parameters.Cast<SqlParameter>().Any(p =>
+                    string.Equals(p.ParameterName, name, StringComparison.OrdinalIgnoreCase)));
 
-            if (Regex.IsMatch(filterSql, @"(?<!\w)@UseId(?!\w)", RegexOptions.IgnoreCase))
+            if (Regex.IsMatch(filterSql, @"(?<!\w)@UseId(?!\w)", RegexOptions.IgnoreCase) && !hasParam("@UseId"))
             {
                 var useId = await ResolveUseIdAsync();
                 cmd.Parameters.AddWithValue("@UseId", string.IsNullOrWhiteSpace(useId) ? "A001" : useId);
+            }
+
+            if (Regex.IsMatch(filterSql, @"(?<!\w)@sGUID(?!\w)", RegexOptions.IgnoreCase) && !hasParam("@sGUID"))
+            {
+                // Legacy JSdMasDtlDLL screens often use FilterSQL: GlobalId=@sGUID.
+                // Prefer explicit query/header value; fallback keeps existing legacy behavior.
+                var sGuid = Request?.Query["sGUID"].ToString();
+                if (string.IsNullOrWhiteSpace(sGuid))
+                    sGuid = Request?.Headers["X-SGUID"].ToString();
+                if (string.IsNullOrWhiteSpace(sGuid))
+                    sGuid = "GlobalId";
+                cmd.Parameters.AddWithValue("@sGUID", sGuid);
             }
         }
 
