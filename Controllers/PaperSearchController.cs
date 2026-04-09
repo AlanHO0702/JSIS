@@ -362,18 +362,51 @@ public class PaperSearchController : ControllerBase
                 spParam.Value = CoerceParamValue(spParam, string.Empty);
         }
 
-        var affected = await cmd.ExecuteNonQueryAsync();
-        if (debug == 1)
+        try
         {
-            var echo = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (SqlParameter spParam in cmd.Parameters)
+            string? spMessage = null;
+            await using (var reader = await cmd.ExecuteReaderAsync())
             {
-                if (spParam.Direction == ParameterDirection.ReturnValue) continue;
-                echo[spParam.ParameterName] = spParam.Value == DBNull.Value ? null : spParam.Value;
+                do
+                {
+                    var colIdx = -1;
+                    for (var i = 0; i < reader.FieldCount; i++)
+                    {
+                        if (string.Equals(reader.GetName(i), "ReturnValue", StringComparison.OrdinalIgnoreCase))
+                        { colIdx = i; break; }
+                    }
+                    if (colIdx >= 0)
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            if (!reader.IsDBNull(colIdx))
+                            {
+                                var raw = (reader.GetValue(colIdx)?.ToString() ?? "").Trim();
+                                if (raw.StartsWith("MESGE:", StringComparison.OrdinalIgnoreCase))
+                                { spMessage = raw; break; }
+                            }
+                        }
+                        if (spMessage != null) break;
+                    }
+                } while (await reader.NextResultAsync());
             }
-            return Ok(new { ok = true, rowsAffected = affected, debugParams = echo });
+
+            if (debug == 1)
+            {
+                var echo = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                foreach (SqlParameter spParam in cmd.Parameters)
+                {
+                    if (spParam.Direction == ParameterDirection.ReturnValue) continue;
+                    echo[spParam.ParameterName] = spParam.Value == DBNull.Value ? null : spParam.Value;
+                }
+                return Ok(new { ok = true, message = spMessage, debugParams = echo });
+            }
+            return Ok(new { ok = true, message = spMessage });
         }
-        return Ok(new { ok = true, rowsAffected = affected });
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { ok = false, error = ExtractPrimaryError(ex) });
+        }
     }
 
     private static string NormalizeParamName(string name)
@@ -1167,6 +1200,18 @@ SELECT TOP 1 CommandText
             return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// SqlException 會把所有 SQL Server 訊息串接（含 transaction cleanup 系統訊息），
+    /// 只取第一條（即 SP 自己 RAISERROR/THROW 的訊息）回傳給前端。
+    /// </summary>
+    private static string ExtractPrimaryError(Exception ex)
+    {
+        var baseEx = ex.GetBaseException();
+        if (baseEx is SqlException sqlEx && sqlEx.Errors.Count > 0)
+            return sqlEx.Errors[0].Message;
+        return baseEx.Message;
     }
 
     private static object? CoerceParamValue(SqlParameter spParam, object? value)
