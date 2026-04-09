@@ -930,7 +930,10 @@ ORDER BY idx.index_id, ic.key_ordinal";
                     if (!string.IsNullOrWhiteSpace(key) && map.LookupValues != null && map.LookupValues.TryGetValue(key, out var dv) && dv != null)
                         display = dv;
 
-                    row[map.FieldName] = display;
+                    // 只有在確實找到對應值時才寫入，避免用 "" 覆蓋欄位
+                    // 讓 JS 看到 undefined（而非 ""），以便觸發 client-side fallback lookup
+                    if (!string.IsNullOrWhiteSpace(display))
+                        row[map.FieldName] = display;
                 }
             }
         }

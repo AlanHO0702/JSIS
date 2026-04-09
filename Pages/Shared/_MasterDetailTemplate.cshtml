@@ -432,20 +432,32 @@ document.addEventListener('DOMContentLoaded', () => {
     setTarget('detail');
   });
 
-  // 監聽輸入變化
+  // 監聽輸入變化：只有在任一欄位的值確實與進入編輯時不同，才標記 dirty
+  const checkAnythingDirty = () => {
+    // 新增列（__state="added"）直接算 dirty
+    if (document.querySelector('tr[data-state="added"]')) return true;
+    for (const inp of document.querySelectorAll('.cell-edit')) {
+      if (inp.classList.contains('d-none')) continue; // 未在編輯模式的 input 略過
+      const cur = inp.type === 'checkbox' ? (inp.checked ? '1' : '0') : (inp.value ?? '');
+      const def = inp.type === 'checkbox' ? (inp.defaultChecked ? '1' : '0') : (inp.defaultValue ?? '');
+      if (cur !== def) return true;
+    }
+    return false;
+  };
+
   document.addEventListener('input', (e) => {
     if (e.target.closest('.cell-edit')) {
-      setDirty(true);
+      setDirty(checkAnythingDirty());
     }
   });
   document.addEventListener('change', (e) => {
     if (e.target.closest('.cell-edit')) {
-      setDirty(true);
+      setDirty(checkAnythingDirty());
     }
   });
   document.addEventListener('click', (e) => {
     if (e.target.matches('.cell-edit[type="checkbox"]')) {
-      setDirty(true);
+      setDirty(checkAnythingDirty());
     }
   });
 
@@ -545,6 +557,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const defVal = f.defaultValue || f.DefaultValue || "";
       const dtRaw = f.dataType ?? f.DataType;
       const dt = Number(dtRaw);
+      // 判斷是否為 detail 資料表欄位（多重判斷：TableKind / AliasName / TableName）
+      const tableKindRaw = (f.tableKind || f.TableKind || "").toLowerCase();
+      const aliasNameRaw = (f.aliasName || f.AliasName || "").toLowerCase();
+      const fieldTableName = (f.tableName || f.TableName || "").toLowerCase();
+      const isDetailField =
+        tableKindRaw.startsWith('detail') || tableKindRaw.startsWith('subdetail') ||
+        (aliasNameRaw && aliasNameRaw !== 't0') ||
+        (fieldTableName && masterTable && fieldTableName !== masterTable.toLowerCase());
 
       const wrap = document.createElement("div");
       wrap.className = "query-item";
@@ -569,7 +589,10 @@ document.addEventListener('DOMContentLoaded', () => {
         opSelect.appendChild(opt);
       });
 
-      const urlOp = urlParams.get(`Cond_${colName}`) || "";
+      // detail 欄位的 operator 存在 DtlCond_ 前綴
+      const urlOp = isDetailField
+        ? (urlParams.get(`DtlCond_${colName}`) || "")
+        : (urlParams.get(`Cond_${colName}`) || "");
       const defEqRaw = (f.defaultEqual || f.DefaultEqual || "").toString();
       const defEq = (urlOp || defEqRaw).toLowerCase();
       if (defEq && !Array.from(opSelect.options).some(o => o.value.toLowerCase() === defEq)) {
@@ -586,11 +609,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const input = document.createElement("input");
       input.className = "form-control query-input";
       input.name = colName;
+      input.dataset.isDetail = isDetailField ? "1" : "0";
       if (dt === 1) input.type = "date";
       else if (dt === 2) input.type = "number";
       else input.type = "text";
 
-      const urlValue = urlParams.get(colName);
+      // detail 欄位的值存在 Dtl_ 前綴
+      const urlValue = isDetailField ? urlParams.get(`Dtl_${colName}`) : urlParams.get(colName);
       input.value = urlValue || defVal || "";
 
       row.appendChild(label);
@@ -635,26 +660,33 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     const url = new URL(window.location.href);
 
-    // 收集查詢欄位
+    // 收集查詢欄位（detail 欄位加 Dtl_ 前綴，避免和 master query 混淆）
     queryFieldGrid?.querySelectorAll('.query-input').forEach(input => {
       const val = input.value?.trim() ?? "";
+      const isDetail = input.dataset.isDetail === "1";
+      const paramName = isDetail ? `Dtl_${input.name}` : input.name;
       if (val) {
-        url.searchParams.set(input.name, val);
+        url.searchParams.set(paramName, val);
       } else {
-        url.searchParams.delete(input.name);
+        url.searchParams.delete(paramName);
       }
+      // 清除另一種前綴的舊值（避免殘留）
+      url.searchParams.delete(isDetail ? input.name : `Dtl_${input.name}`);
     });
 
     queryFieldGrid?.querySelectorAll('.query-op').forEach(select => {
       const op = select.value?.trim() ?? "";
       const field = select.dataset.field || "";
-      const paramName = `Cond_${field}`;
       const input = field ? queryFieldGrid.querySelector(`.query-input[name="${CSS.escape(field)}"]`) : null;
+      const isDetail = input?.dataset.isDetail === "1";
+      const paramName = isDetail ? `DtlCond_${field}` : `Cond_${field}`;
       const hasValue = !!(input && (input.value ?? "").toString().trim() !== "");
       if (field && op && op !== "=" && hasValue) {
         url.searchParams.set(paramName, op);
       } else if (field) {
         url.searchParams.delete(paramName);
+        // 清除另一種前綴的舊值
+        url.searchParams.delete(isDetail ? `Cond_${field}` : `DtlCond_${field}`);
       }
     });
 

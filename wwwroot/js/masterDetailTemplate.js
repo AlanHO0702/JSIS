@@ -107,8 +107,20 @@
     visible: f => (f.Visible ?? 1) == 1,
     fmt: f => f.FormatStr || null,
     dataType: f => f.DataType || null,
-    readonly: f => (f.ReadOnly ?? 0) == 1
+    readonly: f => (f.ReadOnly ?? 0) == 1,
+    editColor: f => {
+      // clYellow → Yellow, clGray → Gray ... 去掉 Delphi 慣用的 cl 前綴
+      const raw = (f.EditColor ?? '').trim();
+      if (!raw) return '';
+      return raw.toLowerCase().startsWith('cl') ? raw.substring(2) : raw;
+    }
   };
+
+  /** 把 EditColor 套用到 input 元素（編輯底色） */
+  function applyEditColor(inp, color) {
+    if (!inp || !color) return;
+    inp.style.setProperty('background-color', color, 'important');
+  }
 
   // -----------------------------
   // 🧩 Lookup Dropdown（雙擊下拉選單）
@@ -444,16 +456,30 @@
           const col = f.FieldName;
 
           // 取得原始資料
-          let raw = row[col];
+          const _origRaw = row[col]; // undefined 表示欄位不存在於 row
+          let raw = _origRaw;
           if (raw == null) raw = ""; // 避免 undefined/null 顯示
 
-          // 非實體欄位（有 KeySelfName）→ 改抓 KeySelfName 作為 lookup key，display fallback 為空字串
-          const isVirtualField = !!f.KeySelfName;
-          if (isVirtualField && (raw == null || raw === "")) {
-              raw = row[f.KeySelfName] ?? "";
+          // 非實體欄位判斷：
+          //   1. 有 KeySelfName（OCX Lookup 模式，最精確）
+          //   2. 欄位不在 row 中且有 KeyFieldName → 假設 data row 的 key 欄位與 lookup table key 同名
+          //   3. 欄位不在 row 中且有 LookupKeyField（一般 Lookup 非實體欄位）
+          const _isMissingFromRow = _origRaw === undefined;
+          const keySelf = f.KeySelfName
+            || (_isMissingFromRow && f.KeyFieldName  ? f.KeyFieldName  : "")
+            || (_isMissingFromRow && f.LookupKeyField ? f.LookupKeyField : "");
+          const isVirtualField = !!keySelf;
+          if (isVirtualField && raw === "") {
+              raw = row[keySelf] ?? "";
+              // [DEBUG] 如果還是空的，印出 row 的欄位讓開發者找到正確的 KeySelfName
+              if (raw === "" && (f.OCXLKTableName || f.LookupTable)) {
+                console.warn(`[MasterDetail][NonEntity] "${col}" lookup failed. keySelf="${keySelf}", row keys:`, Object.keys(row), 'row:', row);
+              }
           }
 
-          let display = isVirtualField ? "" : raw;
+          // raw 可能是：① key 值（待 OCX/Lookup 轉換）② server 已 enrich 的 display 值
+          // 一律以 raw 為初始 display；OCX/Lookup 查到就覆蓋，查不到則保留 raw
+          let display = raw;
 
           // OCX Lookup（優先）— 支援複合鍵
           const ocxData = ocxMaps[col];
@@ -539,7 +565,7 @@
 
           // Lookup 或 Readonly → 灰底且不可編輯
          // ---- 是否唯讀（非實體 lookup + 辭典唯讀）----
-          const isVirtualLookup = !!f.KeySelfName;
+          const isVirtualLookup = isVirtualField; // 與上方 keySelf 判斷一致
           // 新增列：只要不是虛擬欄位，一律允許編輯（含原本 readonly 欄位）
           let ro = isNewRow
             ? isVirtualLookup
@@ -554,6 +580,13 @@
           } else {
             inp.readOnly = false;
             inp.classList.remove("readonly-cell");
+          }
+
+          // 套用辭典設定的 EditColor（瀏覽與編輯皆顯示底色）
+          const editColor = DICT_MAP.editColor(f);
+          if (editColor) {
+            applyEditColor(inp, editColor);
+            applyEditColor(span, editColor);
           }
 
           if (isEditMode && inp.dataset.readonly !== "1") {
@@ -624,8 +657,9 @@
       const ocxData = ocxMaps[f.FieldName];
       const lkData = lookupMaps[f.FieldName];
       if (!ocxData && !lkData) continue;
+      const _effectiveKeySelf = f.KeySelfName || f.KeyFieldName || f.LookupKeyField || "";
       const keySelfNames = ocxData?._compositeKeySelfNames
-        || (f.KeySelfName ? [f.KeySelfName] : (f.LookupKeyField ? [f.LookupKeyField] : []));
+        || (_effectiveKeySelf ? [_effectiveKeySelf] : []);
       for (const kn of keySelfNames) {
         const knLower = kn.toLowerCase();
         if (!_keyToLookup[knLower]) _keyToLookup[knLower] = [];
@@ -633,7 +667,7 @@
           resultFieldName: f.FieldName,
           ocxData: ocxData || lkData,
           compositeKeySelfNames: ocxData?._compositeKeySelfNames || null,
-          keySelf: f.KeySelfName || f.LookupKeyField || null
+          keySelf: _effectiveKeySelf || null
         });
       }
     }
@@ -850,7 +884,23 @@
       if (excludeSet.has(k.toLowerCase())) return;
       if (k.toLowerCase() === 'pageindex' || k.toLowerCase() === 'pagesize') return;
       if (k.toLowerCase() === 'tab') return;
+      // detail 欄位條件（Dtl_ / DtlCond_ 前綴）由 getDetailQueryParams 處理
+      if (k.startsWith('Dtl_') || k.startsWith('DtlCond_')) return;
       result[k] = v;
+    });
+    return result;
+  };
+
+  // 取出 detail 資料表的查詢條件（Dtl_ 前綴），轉換為可直接送 Query API 的格式
+  const getDetailQueryParams = () => {
+    const params = new URLSearchParams(window.location.search);
+    const result = {};
+    params.forEach((v, k) => {
+      if (k.startsWith('DtlCond_')) {
+        result[`Cond_${k.substring(8)}`] = v;
+      } else if (k.startsWith('Dtl_')) {
+        result[k.substring(4)] = v;
+      }
     });
     return result;
   };
@@ -871,7 +921,7 @@
     const masterName = cfg.MasterDict || cfg.MasterTable;
     const detailName = cfg.DetailDict || cfg.DetailTable;
 
-    // 讀取 URL 查詢參數
+    // 讀取 URL 查詢參數（master 條件；detail 條件另由 getDetailQueryParams 處理）
     const urlQueryParams = getQueryParams();
 
     const mHead = root.querySelector(`#${cfg.DomId}-m-head`);
@@ -1312,10 +1362,30 @@
     const queryStr = buildQueryString(urlQueryParams);
     const hasQueryParams = Object.keys(urlQueryParams).length > 0;
 
+    // detail 資料表查詢條件（Dtl_ 前綴）
+    const detailQueryParams = getDetailQueryParams();
+    const hasDetailQueryParams = Object.keys(detailQueryParams).length > 0;
+
+    // 若有 detail 條件，先查 detail table 取得符合的 master key 集合
+    let masterKeyFilterSet = null;
+    if (hasDetailQueryParams && cfg.DetailTable && (cfg.KeyMap || []).length > 0) {
+      try {
+        const dtlQueryStr = buildQueryString(detailQueryParams);
+        const dtlUrl = `/api/CommonTable/Query?table=${encodeURIComponent(cfg.DetailTable)}&top=9999${dtlQueryStr}`;
+        const dtlRows = await fetch(dtlUrl).then(r => r.json());
+        const keyMap = cfg.KeyMap || [];
+        masterKeyFilterSet = new Set(
+          dtlRows.map(r => keyMap.map(k => String(r[k.Detail] ?? "")).join('\x1f'))
+        );
+      } catch (err) {
+        console.warn('[MasterDetail] Detail pre-query failed:', err);
+      }
+    }
+
     const masterUrl =
       cfg.MasterApi?.trim()
         ? cfg.MasterApi + (cfg.MasterApi.includes('?') ? queryStr : (queryStr ? '?' + queryStr.substring(1) : ''))
-        : hasQueryParams
+        : (hasQueryParams || hasDetailQueryParams)
           ? `/api/CommonTable/Query?table=${encodeURIComponent(cfg.MasterTable)}&top=${cfg.MasterTop || 200}`
               + (cfg.MasterOrderBy ? `&orderBy=${encodeURIComponent(cfg.MasterOrderBy)}` : "")
               + (cfg.MasterOrderDir ? `&orderDir=${encodeURIComponent(cfg.MasterOrderDir)}` : "")
@@ -1326,7 +1396,16 @@
               + (cfg.MasterOrderDir ? `&orderDir=${encodeURIComponent(cfg.MasterOrderDir)}` : "")
               + (cfg.MasterFilterSql ? `&filter=${encodeURIComponent(cfg.MasterFilterSql)}` : "");
 
-    const masterRows = await fetch(masterUrl).then(r => r.json());
+    let masterRows = await fetch(masterUrl).then(r => r.json());
+
+    // 若有 detail 條件，對 master 結果做 client-side 過濾
+    if (masterKeyFilterSet !== null) {
+      const keyMap = cfg.KeyMap || [];
+      masterRows = masterRows.filter(r => {
+        const k = keyMap.map(km => String(r[km.Master] ?? "")).join('\x1f');
+        return masterKeyFilterSet.has(k);
+      });
+    }
 
     // 主檔點選 → 載入明細
     async function onMasterClick(tr, row) {
