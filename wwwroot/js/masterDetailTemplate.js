@@ -261,9 +261,9 @@
       const k = (th.dataset.field || "").toLowerCase();
       const w = saved[k];
       if (w) th.style.width = `${w}px`;
-      if (!th.querySelector(".md-col-resizer")) {
+      if (!th.querySelector(".col-resizer")) {
         const handle = document.createElement("span");
-        handle.className = "md-col-resizer";
+        handle.className = "col-resizer";
         th.appendChild(handle);
       }
     });
@@ -271,7 +271,7 @@
     let isDown = false, startX = 0, startW = 0, th = null;
 
     ths.forEach(h => {
-      const handle = h.querySelector(".md-col-resizer");
+      const handle = h.querySelector(".col-resizer");
       if (!handle) return;
       handle.addEventListener("mousedown", (e) => {
         e.preventDefault();
@@ -402,7 +402,7 @@
         if (w) th.style.width = w + "px";
 
         const handle = document.createElement("span");
-        handle.className = "md-col-resizer";
+        handle.className = "col-resizer";
         th.appendChild(handle);
 
         theadTr.appendChild(th);
@@ -972,7 +972,7 @@
         th.style.cursor = "default";
         th.title = "點擊排序";
         th.addEventListener("click", (e) => {
-          if (e.target?.classList?.contains("md-col-resizer")) return;
+          if (e.target?.classList?.contains("col-resizer")) return;
           const field = th.dataset.field;
           if (!field) return;
           const current = th.dataset.sortOrder || "desc";
