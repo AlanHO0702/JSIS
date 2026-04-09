@@ -143,6 +143,18 @@ public class StoredProcController : ControllerBase
             RequiredParams: new[] { "PaperId", "PaperNum", "UserId" }
         ),
 
+            // HP000031 加班單 - 確認/送審前加班時數上限檢查
+            ["HPSdOTHourCheck"] = new StoredProcDef(
+            ProcName: "dbo.HPSdOTHourCheck",
+            RequiredParams: new[] { "PaperNum" }
+        ),
+
+            // HP000031 加班單 - 確認/送審前加班限制提示
+            ["HPSdOverTimeLimit"] = new StoredProcDef(
+            ProcName: "dbo.HPSdOverTimeLimit",
+            RequiredParams: new[] { "PaperNum" }
+        ),
+
             // AA000033 物資轉傳票
             ["AJNdMTL2AAMConfirm"] = new StoredProcDef(
                 ProcName: "dbo.AJNdMTL2AAMConfirm",
