@@ -390,10 +390,38 @@
         return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
     }
 
+    // 將 "yyyy/mm/dd hh:mm" 轉為 datetime-local 所需的 "yyyy-MM-DDTHH:mm"
+    function normalizeForDateTimePicker(value) {
+        const s = String(value ?? '').trim();
+        if (!s) return '';
+        const m = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})(?:[\sT](\d{1,2}):(\d{2}))?/);
+        if (m) {
+            const hh = (m[4] || '00').padStart(2, '0');
+            const mm = (m[5] || '00').padStart(2, '0');
+            return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}T${hh}:${mm}`;
+        }
+        const d = new Date(s);
+        if (isNaN(d)) return '';
+        return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    }
+
     function formatDateForDisplay(ymd) {
         const m = String(ymd ?? '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
         if (!m) return '';
         return `${m[1]}/${m[2]}/${m[3]}`;
+    }
+
+    // datetime-local 回傳值 "yyyy-MM-DDTHH:mm" → 顯示用 "yyyy/MM/DD HH:mm"
+    function formatDateTimeForDisplay(dtLocal) {
+        const m = String(dtLocal ?? '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+        if (!m) return '';
+        return `${m[1]}/${m[2]}/${m[3]} ${m[4]}:${m[5]}`;
+    }
+
+    // 判斷格式字串是否包含時間部分 (hh:nn / hh:mm)
+    function isDateTimeType(meta) {
+        const fmt = (meta?.formatStr || '').toString().toLowerCase();
+        return fmt.includes('hh:nn') || fmt.includes('hh:mm') || fmt.includes('hh:ss');
     }
 
     function parseDecimalsFromFormat(fmt) {
@@ -446,11 +474,16 @@
         const dataType = (meta?.dataType || '').toLowerCase();
         const fmt = (meta?.formatStr || '').toLowerCase();
 
-        // Date / DateTime -> show date only (yyyy/MM/dd)
+        // Date / DateTime
         if (dataType.includes('date') || fmt.includes('yyyy/mm/dd') || fmt.includes('yyyy-mm-dd')) {
             const d = tryParseDate(raw);
             if (!d) return s;
-            return `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
+            const datePart = `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
+            // 若格式含時間 (hh:nn / hh:mm)，加上時分顯示
+            if (fmt.includes('hh:nn') || fmt.includes('hh:mm') || fmt.includes('hh:ss')) {
+                return `${datePart} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+            }
+            return datePart;
         }
 
         // Number formatting
@@ -593,12 +626,13 @@
                 if (edit) edit.value = keyValue;
             });
 
-            if (keyField && keyField.toLowerCase() !== (field || '').toString().toLowerCase()) {
+            // source === 'lookup' 時欄位本身就是 key，不需要再寫回 keyField（避免 LookupKeyField 與 row 欄位同名時誤蓋其他欄）
+            if (keyField && keyField.toLowerCase() !== (field || '').toString().toLowerCase() && opts?.source !== 'lookup') {
                 setRowFieldValue(tr, keyField, keyValue, keyValue);
             }
 
             updateRowCache(tr, field, keyValue);
-            if (keyField) updateRowCache(tr, keyField, keyValue);
+            if (keyField && opts?.source !== 'lookup') updateRowCache(tr, keyField, keyValue);
 
             // 更新 lookup result 中文顯示欄位（例如 AccName、SubAccName）
             const resultField = (opts?.resultField || '').toString().trim();
@@ -741,8 +775,12 @@
             const toggle = td?.querySelector('.date-toggle');
             if (!dateInput || !toggle) return;
 
+            const isDateTimeInput = dateInput.type === 'datetime-local';
+
             const syncDateInput = () => {
-                const v = normalizeDateForPicker(textInput.value);
+                const v = isDateTimeInput
+                    ? normalizeForDateTimePicker(textInput.value)
+                    : normalizeDateForPicker(textInput.value);
                 dateInput.value = v || '';
             };
             syncDateInput();
@@ -760,7 +798,9 @@
             dateInput.addEventListener('change', () => {
                 const isReadOnly = td?.dataset?.readonly === '1' || textInput.dataset.readonly === '1' || textInput.readOnly;
                 if (!allowEdit || !getHeaderEditState() || isReadOnly) return;
-                const formatted = formatDateForDisplay(dateInput.value) || dateInput.value;
+                const formatted = isDateTimeInput
+                    ? (formatDateTimeForDisplay(dateInput.value) || dateInput.value)
+                    : (formatDateForDisplay(dateInput.value) || dateInput.value);
                 if (!formatted) return;
                 textInput.value = formatted;
                 const view = td?.querySelector('.cell-view');
@@ -1272,11 +1312,14 @@
                         ? ` data-lookup-field="${escapeHtml(field)}"${keyFieldAttr}${resultFieldAttr}`
                         : "";
                     const tdReadOnlyAttr = ` data-readonly="${isReadOnly ? '1' : '0'}"`;
+                    const isDateTime = isDate && isDateTimeType(meta);
                     const dateEditClass = isDate ? ' date-dropdown' : '';
-                    const dateValue = isDate ? normalizeDateForPicker(editText) : '';
+                    const dateValue = isDateTime
+                        ? normalizeForDateTimePicker(editText)
+                        : (isDate ? normalizeDateForPicker(editText) : '');
                     const dateAddon = isDate
-                        ? `<input type="date" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
-                           <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇日期" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
+                        ? `<input type="${isDateTime ? 'datetime-local' : 'date'}" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
+                           <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇${isDateTime ? '日期時間' : '日期'}" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
                         : '';
                     const partNumBtn = isPartNum
                         ? '<button type="button" class="partnum-lookup-btn" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>'
@@ -1628,13 +1671,13 @@
                                 const trimmed = k.trim();
                                 if (trimmed && trimmed !== k) filteredMap.set(trimmed, label || trimmed);
                             });
-                            if (filteredMap.size > 0) showLookupDropdown(td, field, filteredMap, { resultField: meta?.result || '' });
+                            if (filteredMap.size > 0) showLookupDropdown(td, field, filteredMap, { resultField: meta?.result || '', source: 'lookup' });
                         } catch { }
                         return;
                     }
                     const map = lookupMaps.get(fieldLower);
                     if (!map || map.size === 0) return;
-                    showLookupDropdown(td, field, map, { resultField: lookupMetaMap[fieldLower]?.result || '' });
+                    showLookupDropdown(td, field, map, { resultField: lookupMetaMap[fieldLower]?.result || '', source: 'lookup' });
                 });
 
             }
