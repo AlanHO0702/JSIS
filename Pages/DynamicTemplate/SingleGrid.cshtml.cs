@@ -86,10 +86,7 @@ namespace PcbErpApi.Pages.CUR
             Breadcrumbs = await _breadcrumbService.BuildBreadcrumbsAsync(item.SuperId);
             ViewData["Breadcrumbs"] = Breadcrumbs;
 
-            var setup = await _ctx.CurdOcxtableSetUp.AsNoTracking()
-                .Where(x => x.ItemId == itemId)
-                .OrderBy(x => x.TableKind)
-                .FirstOrDefaultAsync();
+            var setup = await LoadPrimarySetupAsync(itemId);
 
             if (setup == null)
                 return NotFound($"CURdOCXTableSetUp not found for item {itemId}.");
@@ -232,10 +229,7 @@ namespace PcbErpApi.Pages.CUR
                 ItemId = item.ItemId;
                 ItemName = item.ItemName;
 
-                var setup = await _ctx.CurdOcxtableSetUp.AsNoTracking()
-                    .Where(x => x.ItemId == itemId)
-                    .OrderBy(x => x.TableKind)
-                    .FirstOrDefaultAsync();
+                var setup = await LoadPrimarySetupAsync(itemId);
 
                 if (setup == null)
                     return new JsonResult(new { success = false, error = $"CURdOCXTableSetUp not found for item {itemId}." });
@@ -333,10 +327,7 @@ namespace PcbErpApi.Pages.CUR
             ItemId = item.ItemId;
             ItemName = item.ItemName;
 
-            var setup = await _ctx.CurdOcxtableSetUp.AsNoTracking()
-                .Where(x => x.ItemId == itemId)
-                .OrderBy(x => x.TableKind)
-                .FirstOrDefaultAsync();
+            var setup = await LoadPrimarySetupAsync(itemId);
 
             if (setup == null)
                 return NotFound($"CURdOCXTableSetUp not found for item {itemId}.");
@@ -608,6 +599,19 @@ SELECT TOP 1 c.name
             public string? DefaultEqual { get; set; }
             public string? CommandText { get; set; }
             public int? DefaultType { get; set; }
+        }
+
+        private async Task<CurdOcxtableSetUp?> LoadPrimarySetupAsync(string itemId)
+        {
+            var setups = await _ctx.CurdOcxtableSetUp.AsNoTracking()
+                .Where(x => x.ItemId == itemId)
+                .ToListAsync();
+            if (setups.Count == 0) return null;
+
+            // 對齊標準版 Trace：優先使用 Master1。
+            return setups.FirstOrDefault(x => string.Equals((x.TableKind ?? string.Empty).Trim(), "Master1", StringComparison.OrdinalIgnoreCase))
+                ?? setups.FirstOrDefault(x => (x.TableKind ?? string.Empty).Contains("MASTER", StringComparison.OrdinalIgnoreCase))
+                ?? setups.OrderBy(x => x.TableKind).FirstOrDefault();
         }
 
         private async Task<List<QueryFieldDef>> LoadQueryFieldsAsync(string itemId, string tableName, string lang)

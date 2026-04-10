@@ -592,6 +592,20 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
         private string BuildExtraFilter(List<SqlParameter> parameters)
         {
             var parts = new List<string>();
+            var customerVal = (Customer ?? string.Empty).Trim();
+            var partVal = (Part ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(customerVal))
+            {
+                customerVal = (Request.Query["CompanyId"].ToString() ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(customerVal))
+                {
+                    customerVal = customerVal.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? customerVal;
+                }
+            }
+            if (string.IsNullOrWhiteSpace(partVal))
+            {
+                partVal = (Request.Query["PartNum"].ToString() ?? string.Empty).Trim();
+            }
 
             if (Effect.Equals("valid", StringComparison.OrdinalIgnoreCase))
             {
@@ -605,29 +619,29 @@ SELECT TOP 1 ISNULL(NULLIF(RealTableName,''), TableName) AS ActualName
 
             if (ModeNum == 1)
             {
-                if (!string.IsNullOrWhiteSpace(Part))
+                if (!string.IsNullOrWhiteSpace(partVal))
                 {
                     var op = ResolveOperator(PartOp);
                     var pName = $"@p{parameters.Count}";
                     parts.Add($"t0.MatName {op} {pName}");
-                    parameters.Add(new SqlParameter(pName, BuildValue(op, Part)));
+                    parameters.Add(new SqlParameter(pName, BuildValue(op, partVal)));
                 }
             }
             else
             {
-                if (!string.IsNullOrWhiteSpace(Customer))
+                if (!string.IsNullOrWhiteSpace(customerVal))
                 {
                     var op = ResolveOperator(CustomerOp);
                     var pName = $"@p{parameters.Count}";
                     parts.Add($"t0.CompanyId {op} {pName}");
-                    parameters.Add(new SqlParameter(pName, BuildValue(op, Customer)));
+                    parameters.Add(new SqlParameter(pName, BuildValue(op, customerVal)));
                 }
-                if (!string.IsNullOrWhiteSpace(Part))
+                if (!string.IsNullOrWhiteSpace(partVal))
                 {
                     var op = ResolveOperator(PartOp);
                     var pName = $"@p{parameters.Count}";
                     parts.Add($"t0.PartNum {op} {pName}");
-                    parameters.Add(new SqlParameter(pName, BuildValue(op, Part)));
+                    parameters.Add(new SqlParameter(pName, BuildValue(op, partVal)));
                 }
             }
 
