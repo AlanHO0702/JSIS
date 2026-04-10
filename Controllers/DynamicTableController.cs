@@ -719,6 +719,24 @@ SELECT TOP 1 RunSQLAfterAdd
                         whereSql = startsWithAndOr ? $"WHERE 1=1 {extra}" : $"WHERE {extra}";
                     else
                         whereSql = startsWithAndOr ? $"{whereSql} {extra}" : $"{whereSql} AND {extra}";
+
+                    // FilterSql 可能含 @UserId / @UseId 佔位符，需補入當前登入者
+                    if (Regex.IsMatch(extra, @"@UserId\b", RegexOptions.IgnoreCase)
+                        && !parameters.Any(p => p.ParameterName.Equals("@UserId", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        var currentUserId = HttpContext.Items["UserId"]?.ToString()
+                            ?? User?.Claims?.FirstOrDefault(c => string.Equals(c.Type, "UserId", StringComparison.OrdinalIgnoreCase))?.Value
+                            ?? "";
+                        parameters.Add(new SqlParameter("@UserId", currentUserId));
+                    }
+                    if (Regex.IsMatch(extra, @"@UseId\b", RegexOptions.IgnoreCase)
+                        && !parameters.Any(p => p.ParameterName.Equals("@UseId", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        var currentUseId = HttpContext.Items["UseId"]?.ToString()
+                            ?? User?.Claims?.FirstOrDefault(c => string.Equals(c.Type, "UseId", StringComparison.OrdinalIgnoreCase))?.Value
+                            ?? "";
+                        parameters.Add(new SqlParameter("@UseId", currentUseId));
+                    }
                 }
             }
             // EMOdProdInfo 優先用 PartNum 排序（主鍵有索引），其他表用 PaperDate/PaperNum
