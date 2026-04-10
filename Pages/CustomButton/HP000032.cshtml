@@ -1,0 +1,318 @@
+@*
+    HP000032 - 請假單
+    對應 Delphi: HPSdTimeOffSpeCalc.dll
+    自訂按鈕功能:
+      - btnC3: 特休假查詢
+        1. 取得 PaperNum (Master1) + Item (Detail1/Item 欄位值)
+        2. 呼叫 HPSdFindEmpSpeHis SP 取得 EmpId + BookYear
+        3. 查詢 HPSdEmpSpecial 顯示特休假資料 (SpecialId=1)
+*@
+@model dynamic
+
+<style>
+#hp32SpeCalcModal .modal-dialog { max-width: 900px; margin-top: 6vh; }
+#hp32SpeCalcModal .modal-header { padding: 6px 12px; }
+#hp32SpeCalcModal .modal-title  { font-size: 15px; line-height: 1.2; }
+#hp32SpeCalcModal .modal-body   { padding: 0; }
+#hp32SpeCalcModal .modal-footer { padding: 6px 12px; }
+#hp32SpeCalcModal .table-wrapper {
+  overflow: auto;
+  max-height: 55vh;
+}
+#hp32SpeCalcModal table {
+  border-collapse: collapse; width: auto; min-width: 100%; table-layout: auto;
+}
+#hp32SpeCalcModal th,
+#hp32SpeCalcModal td {
+  border: 1px solid #dee2e6; vertical-align: middle;
+  white-space: nowrap; font-size: var(--field-value-size, 13px);
+  padding: 2px 6px; line-height: 1.4;
+}
+#hp32SpeCalcModal thead th {
+  position: sticky; top: 0; background: #f8fafc; z-index: 2;
+  font-size: var(--field-label-size, 12px); font-weight: 600; text-align: center;
+}
+</style>
+
+<!-- 隱藏的 file input，供 btnC4 上傳附件用 -->
+<input type="file" id="hp32AttachFileInput" style="display:none" accept="*/*">
+
+<div class="modal fade" id="hp32SpeCalcModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          特休假查詢
+          <small class="text-muted ms-2" id="hp32SpeCalcEmpId" style="font-size:.82rem;"></small>
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="table-wrapper">
+          <table class="table table-bordered table-hover table-sm align-middle mb-0">
+            <thead class="table-light">
+              <tr id="hp32SpeCalcHead"></tr>
+            </thead>
+            <tbody id="hp32SpeCalcBody">
+              <tr><td class="text-center text-muted py-3">載入中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">關閉</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+    window.ActionRailCustomHandlers = window.ActionRailCustomHandlers || {};
+
+    const withJwtHeaders = (init = {}) => {
+        const jwt = localStorage.getItem('jwtId');
+        const headers = Object.assign({}, init.headers || {});
+        if (jwt) headers['X-JWTID'] = jwt;
+        return { ...init, headers };
+    };
+
+    const escHtml = (v) => String(v ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    let bsModal = null;
+
+    /**
+     * 從 DOM 取得目前 Detail1 選取列的 Item 值
+     * 對應 Delphi: qryGetTranData.Locate('SeqNum', 2) → sItem
+     */
+    const readDetailItem = () => {
+        // 從選取的 detail row 讀取
+        const tr = document.querySelector('.multi-tab-detail .tab-pane.show.active tbody tr.row-selected');
+        if (tr) {
+            const inp = tr.querySelector('input.cell-edit[data-field="Item"], [data-field="Item"]');
+            if (inp?.value) return inp.value.trim();
+            if (tr.dataset.item) return tr.dataset.item.trim();
+        }
+        // fallback: 第一筆 row
+        const firstTr = document.querySelector('.multi-tab-detail .tab-pane.show.active tbody tr[data-item]');
+        if (firstTr?.dataset.item) return firstTr.dataset.item.trim();
+        return '';
+    };
+
+    /**
+     * 開啟特休假查詢 Modal
+     * 對應 Delphi: btnGetParamsClick
+     */
+    const openSpeCalcModal = async (ctx) => {
+        const paperNum = (ctx?.paperNum || window._paperNum || '').toString().trim();
+        if (!paperNum) {
+            return Swal.fire({ icon: 'info', title: '請先開啟單據', text: '找不到單號 (PaperNum)' });
+        }
+
+        const item = readDetailItem();
+        if (!item) {
+            return Swal.fire({ icon: 'info', title: '請選取明細列', text: '找不到明細項次 (Item)' });
+        }
+
+        // 顯示 Modal
+        const modalEl = document.getElementById('hp32SpeCalcModal');
+        if (!modalEl) return;
+
+        if (!bsModal && window.bootstrap?.Modal) {
+            bsModal = new bootstrap.Modal(modalEl, { backdrop: true });
+        }
+        if (bsModal) bsModal.show();
+
+        // 重設內容
+        const head = document.getElementById('hp32SpeCalcHead');
+        const body = document.getElementById('hp32SpeCalcBody');
+        const empIdEl = document.getElementById('hp32SpeCalcEmpId');
+        if (head) head.innerHTML = '';
+        if (body) body.innerHTML = '<tr><td class="text-center text-muted py-3">載入中...</td></tr>';
+        if (empIdEl) empIdEl.textContent = '';
+
+        try {
+            const url = `/api/HP000032/GetSpeHisCalc?paperNum=${encodeURIComponent(paperNum)}&item=${encodeURIComponent(item)}`;
+            const resp = await fetch(url, withJwtHeaders());
+            const rawText = await resp.text();
+
+            let data;
+            try {
+                data = JSON.parse(rawText);
+            } catch {
+                // 回傳非 JSON（可能是 404 HTML 或 SessionExpired 等）
+                if (body) body.innerHTML = `<tr><td class="text-center text-danger py-3">API 錯誤 (HTTP ${resp.status})：${escHtml(rawText.slice(0, 300))}</td></tr>`;
+                return;
+            }
+
+            if (!resp.ok || !data.ok) {
+                if (body) body.innerHTML = `<tr><td class="text-center text-danger py-3">${escHtml(data.error || '查詢失敗')}</td></tr>`;
+                return;
+            }
+
+            if (empIdEl) empIdEl.textContent = data.empId ? `員工：${data.empId}` : '';
+
+            const columns = data.columns || [];
+            const rows    = data.rows    || [];
+
+            // 渲染表頭
+            if (head) {
+                head.innerHTML = columns.map(c => `<th>${escHtml(c)}</th>`).join('');
+            }
+
+            // 渲染表身
+            if (body) {
+                if (!rows.length) {
+                    body.innerHTML = `<tr><td colspan="${columns.length || 1}" class="text-center text-muted py-3">（無特休假資料）</td></tr>`;
+                } else {
+                    body.innerHTML = rows.map(row =>
+                        `<tr>${columns.map(c => `<td>${escHtml(row[c])}</td>`).join('')}</tr>`
+                    ).join('');
+                }
+            }
+        } catch (err) {
+            console.error('HP000032 btnC3 error:', err);
+            if (body) body.innerHTML = `<tr><td class="text-center text-danger py-3">${escHtml(err.message || '發生錯誤')}</td></tr>`;
+        }
+    };
+
+    // ─────────────────────────────────────────────
+    // btnC4: 上傳附件
+    // 對應 Delphi: MPHdUploadNote.dll (HPSdTimeOffSub)
+    //   參數: SeqNum1=HPSdTimeOffSub(常數), SeqNum2=目前單號, SeqNum3=Detail1.Item
+    // ─────────────────────────────────────────────
+    const uploadAttachment = async (ctx) => {
+        const paperNum = (ctx?.paperNum || window._paperNum || '').toString().trim();
+        if (!paperNum) return Swal.fire({ icon: 'info', title: '請先開啟單據' });
+
+        const item = readDetailItem();
+        if (!item) return Swal.fire({ icon: 'info', title: '請選取明細列', text: '找不到明細項次 (Item)' });
+
+        // 讓使用者選擇檔案（用隱藏的 <input type="file">）
+        const fileInput = document.getElementById('hp32AttachFileInput');
+        if (!fileInput) return;
+
+        fileInput.value = '';
+        fileInput.onchange = async () => {
+            const file = fileInput.files?.[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('paperNum', paperNum);
+            formData.append('item', item);
+
+            Swal.fire({ title: '上傳中...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+            try {
+                const resp = await fetch('/api/HP000032/UploadAttachment', withJwtHeaders({ method: 'POST', body: formData }));
+                const rawText = await resp.text();
+                let data;
+                try { data = JSON.parse(rawText); } catch { data = { ok: false, error: rawText.slice(0, 200) }; }
+
+                if (data.ok) {
+                    await Swal.fire({ icon: 'success', title: '上傳成功', text: data.fileName });
+                    if (typeof window.prcDoReOpen === 'function') window.prcDoReOpen();
+                } else {
+                    await Swal.fire({ icon: 'warning', title: '上傳失敗', text: data.error || '未知錯誤' });
+                }
+            } catch (err) {
+                await Swal.fire({ icon: 'error', title: '上傳錯誤', text: err.message });
+            }
+        };
+        fileInput.click();
+    };
+
+    // ─────────────────────────────────────────────
+    // btnC5: 檢視附件
+    // 對應 Delphi: MPHdViewNote.dll (HPSdTimeOffSub) → ShellExecute
+    //   在新分頁開啟（PDF/圖片直接預覽，其他下載）
+    // ─────────────────────────────────────────────
+    const viewAttachment = async (ctx) => {
+        const paperNum = (ctx?.paperNum || window._paperNum || '').toString().trim();
+        if (!paperNum) return Swal.fire({ icon: 'info', title: '請先開啟單據' });
+
+        const item = readDetailItem();
+        if (!item) return Swal.fire({ icon: 'info', title: '請選取明細列', text: '找不到明細項次 (Item)' });
+
+        // 先確認檔案存在（HEAD-like check），再開新頁
+        Swal.fire({ title: '開啟中...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+        try {
+            const jwt = localStorage.getItem('jwtId');
+            const url = `/api/HP000032/ViewAttachment?paperNum=${encodeURIComponent(paperNum)}&item=${encodeURIComponent(item)}`;
+            const resp = await fetch(url, { headers: jwt ? { 'X-JWTID': jwt } : {} });
+
+            if (resp.ok && resp.headers.get('content-type') !== 'application/json') {
+                // 二進位回應 → 轉成 blob 開新頁
+                const blob  = await resp.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                Swal.close();
+                window.open(blobUrl, '_blank');
+            } else {
+                // JSON 回應 = 錯誤訊息
+                const text = await resp.text();
+                let data;
+                try { data = JSON.parse(text); } catch { data = { error: text.slice(0, 200) }; }
+                await Swal.fire({ icon: 'warning', title: '檢視失敗', text: data.error || text });
+            }
+        } catch (err) {
+            await Swal.fire({ icon: 'error', title: '錯誤', text: err.message });
+        }
+    };
+
+    // ─────────────────────────────────────────────
+    // btnC6: 刪除附件
+    // 對應 Delphi: MPHdDelNote.dll (HPSdTimeOffSub)
+    //   1. 確認刪除
+    //   2. DELETE 實體檔案 + UPDATE AttchFile=''
+    // ─────────────────────────────────────────────
+    const deleteAttachment = async (ctx) => {
+        const paperNum = (ctx?.paperNum || window._paperNum || '').toString().trim();
+        if (!paperNum) return Swal.fire({ icon: 'info', title: '請先開啟單據' });
+
+        const item = readDetailItem();
+        if (!item) return Swal.fire({ icon: 'info', title: '請選取明細列', text: '找不到明細項次 (Item)' });
+
+        const confirm = await Swal.fire({
+            icon: 'question', title: '刪除附件',
+            text: `確定要刪除 ${paperNum} 第 ${item} 列的附件？`,
+            showCancelButton: true, confirmButtonText: '確定刪除', cancelButtonText: '取消',
+            confirmButtonColor: '#dc3545'
+        });
+        if (!confirm.isConfirmed) return;
+
+        Swal.fire({ title: '刪除中...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+        try {
+            const resp = await fetch('/api/HP000032/DeleteAttachment', withJwtHeaders({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paperNum, item: parseInt(item, 10) })
+            }));
+            const rawText = await resp.text();
+            let data;
+            try { data = JSON.parse(rawText); } catch { data = { ok: false, error: rawText.slice(0, 200) }; }
+
+            if (data.ok) {
+                await Swal.fire({ icon: 'success', title: '刪除成功' });
+                if (typeof window.prcDoReOpen === 'function') window.prcDoReOpen();
+            } else {
+                await Swal.fire({ icon: 'warning', title: '刪除失敗', text: data.error || '未知錯誤' });
+            }
+        } catch (err) {
+            await Swal.fire({ icon: 'error', title: '刪除錯誤', text: err.message });
+        }
+    };
+
+    // 註冊按鈕處理函式
+    window.ActionRailCustomHandlers['HP000032'] = {
+        btnC3: openSpeCalcModal,  // 特休假查詢
+        btnC4: uploadAttachment,  // 上傳附件
+        btnC5: viewAttachment,    // 檢視附件
+        btnC6: deleteAttachment   // 刪除附件
+    };
+})();
+</script>
