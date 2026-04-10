@@ -43,10 +43,11 @@
   </ul>
 </div>
 
-<div style="display:flex; gap:20px;" class="index-page">
+<div class="index-page">
   <!-- 左側模組 -->
-  <div style="width:240px;" class="index-side">
+  <div class="index-side">
     <h4>系統模組</h4>
+    <div class="index-side-scroll">
     <ul class="index-tree" style="list-style:none; padding-left:0;">
       @foreach (var mod0 in level0)
       {
@@ -79,11 +80,12 @@
             }
           </li>
       }
-    </ul>
+      </ul>
+    </div>
   </div>
 
   <!-- 右側功能列表 -->
-  <div style="width:700px;" class="index-main">
+  <div class="index-main">
   <div class="index-headerbar">
     <div class="index-headerbar-row1">
       <ul class="nav nav-pills index-nav">
@@ -105,6 +107,7 @@
       <button class="btn btn-primary btn-sm index-action-btn" onclick="openAddModal()" style="white-space:nowrap;">新增功能</button>
     </div>
   </div>
+  <div class="index-main-scroll">
   @if (displayItems.Any() || level0SelectedItem != null)
   {
 
@@ -215,6 +218,7 @@
     </div>
     <p>請從左側展開模組並選擇子模組查看功能</p>
   }
+  </div>
   </div>
 </div>
 
@@ -942,6 +946,27 @@ let selectedItemId = null;         // 右側清單目前選到的功能
 let dictSelectedTr = null;         // 辭典表格目前選到的列（用來開報表設定）
 let dictFieldSettings = {};        // 辭典設定的欄位設定：{ tableName: [...fieldSettings] }
 let tableNameFieldSettings = {};   // TableName 的欄位設定：{ tableName: [...fieldSettings] }
+const INDEX_SIDE_SCROLL_KEY = "index-side-scroll-top";
+
+function saveIndexSideScrollTop() {
+  const sideScroll = document.querySelector('.index-side-scroll');
+  if (!sideScroll) return;
+  try {
+    sessionStorage.setItem(INDEX_SIDE_SCROLL_KEY, String(sideScroll.scrollTop || 0));
+  } catch {}
+}
+
+function restoreIndexSideScrollTop() {
+  const sideScroll = document.querySelector('.index-side-scroll');
+  if (!sideScroll) return;
+  try {
+    const rawTop = sessionStorage.getItem(INDEX_SIDE_SCROLL_KEY);
+    if (rawTop === null || rawTop === undefined || rawTop === "") return;
+    const top = Number(rawTop);
+    if (!Number.isFinite(top) || top < 0) return;
+    sideScroll.scrollTop = top;
+  } catch {}
+}
 
 /* ========= 對 HTML 直接呼叫的函式一律掛在 window ========= */
 window.toggleChildren = function (id, linkEl) {
@@ -1146,6 +1171,22 @@ async function ensureOutputTypeOptions(selectedValue) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  restoreIndexSideScrollTop();
+
+  const sideLinks = document.querySelectorAll('.index-side-scroll a[href*="level1Id="]');
+  sideLinks.forEach(link => {
+    link.addEventListener('click', (ev) => {
+      if (ev.defaultPrevented) return;
+      if (ev.button !== 0) return;
+      if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+      saveIndexSideScrollTop();
+    });
+  });
+
+  window.addEventListener('beforeunload', saveIndexSideScrollTop);
+});
+
+document.addEventListener('DOMContentLoaded', () => {
   // 新增送出
   document.getElementById('addItemForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1334,6 +1375,8 @@ const EP_DEFAULT_TYPE_NAMES = { 0: '固定常數', 1: 'SQL指令', 2: '登入帳
 function updateEpDefaultTypeName(val) {
   document.getElementById('epDefaultTypeName').textContent = EP_DEFAULT_TYPE_NAMES[Number(val)] ?? '';
 }
+
+
 
 document.addEventListener('DOMContentLoaded', () => {
   // 切換到報表設定頁籤時載入參數
@@ -2691,9 +2734,13 @@ function _saveSysButtons(){
   }
 
   .index-page {
+    display: flex;
+    align-items: stretch;
+    gap: 20px;
     background: #f6f5ff;
     padding: 0 12px 12px;
     border-radius: 12px;
+    min-height: 0;
   }
 
   .index-side,
@@ -2705,8 +2752,21 @@ function _saveSysButtons(){
   }
 
   .index-side {
+    width: 240px;
     padding: 12px 10px;
     border-right: 1px solid #e6eaf2;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    max-height: calc(100vh - 120px);
+  }
+
+  .index-side-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 4px;
   }
 
   .index-side h4 {
@@ -2824,7 +2884,12 @@ function _saveSysButtons(){
   }
 
   .index-main {
+    width: 700px;
     padding: 12px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    max-height: calc(100vh - 120px);
   }
 
   .index-headerbar {
@@ -2834,6 +2899,14 @@ function _saveSysButtons(){
     border-bottom: 1px solid #e6eaf2;
     margin: -12px -12px 8px;
     gap: 4px;
+  }
+
+  .index-main-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-bottom: 4px;
   }
 
   .index-headerbar-row1 {
@@ -2915,6 +2988,10 @@ function _saveSysButtons(){
 
   .index-list .list-group-item.selectable:hover {
     background: #eef2ff;
+  }
+
+  .index-list {
+    margin-bottom: 0;
   }
 
   #level2-list .selectable.active{
@@ -3486,6 +3563,21 @@ function _saveSysButtons(){
 body.modal-dragging { user-select: none; }
 
 @@media (max-width: 768px) {
+  .index-page {
+    flex-direction: column;
+  }
+
+  .index-side,
+  .index-main {
+    width: 100%;
+    max-height: none;
+  }
+
+  .index-side-scroll,
+  .index-main-scroll {
+    overflow: visible;
+  }
+
   .edit-item-dialog { width: 96vw; max-width: 96vw; }
   .edit-item-grid { grid-template-columns: 1fr; }
   .edit-params-layout { grid-template-columns: 1fr; max-height: none; }
@@ -3495,3 +3587,6 @@ body.modal-dragging { user-select: none; }
   .cb-legacy-input { width: 100%; }
 }
 </style>
+
+
+

@@ -1204,8 +1204,6 @@
                 const fieldLower = field.toLowerCase();
                 const meta = metaMap.get(fieldLower);
                 const isReadOnly = readOnlyMap.get(fieldLower) === true;
-                const roClass = isReadOnly ? ' readonly-cell' : '';
-                const roAttr = isReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
                 let lookupMap = cellMaps.get(fieldLower);
                 let metaLookup = lookupMeta.get(fieldLower);
                 if (!metaLookup) {
@@ -1226,6 +1224,10 @@
                   const canDropdown = !!(metaLookup?.source === 'lookup'
                       && lookupMap && lookupMap.size
                       && ((metaFieldLower && metaFieldLower === fieldLower) || (metaResult && metaResult === fieldLower)));
+                const lockByLookupResult = allowLookup && isResultField;
+                const effectiveReadOnly = isReadOnly || lockByLookupResult;
+                const roClass = effectiveReadOnly ? ' readonly-cell' : '';
+                const roAttr = effectiveReadOnly ? ' data-readonly="1" readonly' : ' data-readonly="0"';
                   if (canDropdown) lookupFieldSet.add(field);
                   if (canDropdown) {
                       lookupMetaMap[fieldLower] = {
@@ -1265,7 +1267,12 @@
                     const keyStr = lookupKeyOverride == null ? '' : String(lookupKeyOverride).trim();
                     const keyIsEmpty = keyStr === '';
                     let keySourceMissing = false;
-                    if (metaLookup?.source === 'ocx' || metaLookup?.keySelf) {
+                    if (metaLookup?.source === 'lookup' && isResultField) {
+                        const keyFieldName = metaLookup?.key || '';
+                        const keyRawVal = keyFieldName ? getValueCaseInsensitive(row, keyFieldName) : null;
+                        const keyRawStr = keyRawVal == null ? '' : String(keyRawVal).trim();
+                        keySourceMissing = !!keyFieldName && keyRawStr === '';
+                    } else if (metaLookup?.source === 'ocx' || metaLookup?.keySelf) {
                         if (metaLookup.compositeKeySelfNames && metaLookup.compositeKeySelfNames.length > 1) {
                             // For composite keys, check ALL key fields
                             keySourceMissing = metaLookup.compositeKeySelfNames.some(f => {
@@ -1295,7 +1302,27 @@
                             displayValue = '';
                         }
                     }
-                    const inputValue = (isReadOnly || !allowLookup) ? displayValue : rawValue;
+                    // 名稱欄位保護：只有找得到對應代碼欄位時，才依代碼是否為空決定是否清空名稱
+                    const lowerFieldName = String(fieldLower || '').toLowerCase();
+                    const hasRowField = (name) => Object.keys(row || {}).some(k => normalizeFieldKey(k) === normalizeFieldKey(name));
+                    let linkedCodeField = '';
+                    if (lowerFieldName.endsWith('name')) {
+                        const base = field.slice(0, -4);
+                        const candidates = [base, `${base}Id`, `${base}Code`];
+                        linkedCodeField = candidates.find(hasRowField) || '';
+                    } else if (field.endsWith('名稱')) {
+                        const base = field.slice(0, -2);
+                        const candidates = [base, `${base}代碼`, `${base}代號`, `${base}編號`];
+                        linkedCodeField = candidates.find(hasRowField) || '';
+                    }
+                    if (linkedCodeField) {
+                        const baseVal = getValueCaseInsensitive(row, linkedCodeField);
+                        const baseStr = baseVal == null ? '' : String(baseVal).trim();
+                        if (baseStr === '') {
+                            displayValue = '';
+                        }
+                    }
+                    const inputValue = (effectiveReadOnly || !allowLookup) ? displayValue : rawValue;
                     const viewText = (displayValue == null ? '' : String(displayValue)).trim();
                     const editText = (inputValue == null ? '' : String(inputValue)).trim();
                   // ? 雙元素：顯示模式 + 編輯模式
@@ -1311,21 +1338,21 @@
                     const lookupAttr = canDropdown
                         ? ` data-lookup-field="${escapeHtml(field)}"${keyFieldAttr}${resultFieldAttr}`
                         : "";
-                    const tdReadOnlyAttr = ` data-readonly="${isReadOnly ? '1' : '0'}"`;
+                    const tdReadOnlyAttr = ` data-readonly="${effectiveReadOnly ? '1' : '0'}"`;
                     const isDateTime = isDate && isDateTimeType(meta);
                     const dateEditClass = isDate ? ' date-dropdown' : '';
                     const dateValue = isDateTime
                         ? normalizeForDateTimePicker(editText)
                         : (isDate ? normalizeDateForPicker(editText) : '');
                     const dateAddon = isDate
-                        ? `<input type="${isDateTime ? 'datetime-local' : 'date'}" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${isReadOnly ? ' disabled' : ''}>
-                           <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇${isDateTime ? '日期時間' : '日期'}" tabindex="-1"${isReadOnly ? ' disabled' : ''}></button>`
+                        ? `<input type="${isDateTime ? 'datetime-local' : 'date'}" class="cell-edit d-none cell-date-input" tabindex="-1" aria-hidden="true" value="${escapeHtml(dateValue)}"${effectiveReadOnly ? ' disabled' : ''}>
+                           <button type="button" class="cell-edit d-none date-toggle" aria-label="選擇${isDateTime ? '日期時間' : '日期'}" tabindex="-1"${effectiveReadOnly ? ' disabled' : ''}></button>`
                         : '';
                     const partNumBtn = isPartNum
                         ? '<button type="button" class="partnum-lookup-btn" title="開啟庫存一覽" aria-label="開啟庫存一覽">?</button>'
                         : '';
                     html += `<td data-field="${escapeHtml(field)}"${classAttr}${lookupAttr}${tdReadOnlyAttr}>
-                        <span class="${viewClass}${roClass}" data-init-view="${escapeHtml(viewText)}" data-readonly="${isReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span>
+                        <span class="${viewClass}${roClass}" data-init-view="${escapeHtml(viewText)}" data-readonly="${effectiveReadOnly ? '1' : '0'}">${escapeHtml(viewText)}</span>
                         <input type="text"
                                class="${editClass}${roClass}${dateEditClass}"
                                data-field="${field}"
