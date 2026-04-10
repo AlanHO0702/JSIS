@@ -859,6 +859,66 @@
   #condRunSpModal .crs-field { display: flex; align-items: center; gap: 8px; }
   #condRunSpModal .crs-label { white-space: nowrap; margin: 0; flex: 0 0 90px; text-align: right; font-size: var(--field-label-size); }
   #condRunSpModal .crs-control { flex: 1 1 auto; min-width: 0; font-size: var(--field-value-size); }
+  #condRunSpModal .crs-select-wrap { position: relative; flex: 1 1 auto; min-width: 0; }
+  #condRunSpModal .crs-select-trigger {
+    position: relative;
+    width: 100%;
+    height: calc(1.5em + .5rem + 2px);
+    padding-right: 1.8rem;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #condRunSpModal .crs-select-trigger::after {
+    content: "";
+    position: absolute;
+    right: .65rem;
+    top: 50%;
+    width: .4rem;
+    height: .4rem;
+    border-right: 1.5px solid #6b7280;
+    border-bottom: 1.5px solid #6b7280;
+    transform: translateY(-65%) rotate(45deg);
+    pointer-events: none;
+  }
+  #condRunSpModal .crs-select-panel {
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 0;
+    right: 0;
+    z-index: 1085;
+    display: none;
+    max-height: 220px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #b9c7de;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,.15);
+  }
+  #condRunSpModal .crs-select-panel.open { display: block; }
+  #condRunSpModal .crs-select-item {
+    padding: 4px 8px;
+    font-size: var(--field-value-size);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #condRunSpModal .crs-select-item:hover,
+  #condRunSpModal .crs-select-item.active {
+    background: #2d5fa8;
+    color: #fff;
+  }
+  #condRunSpModal .crs-control[readonly],
+  #condRunSpModal .crs-control:disabled,
+  #condRunSpModal .crs-select-trigger:disabled {
+    background: var(--bs-secondary-bg, #e9ecef) !important;
+    color: var(--bs-secondary-color, #6c757d) !important;
+    border-color: #ced4da !important;
+    cursor: not-allowed;
+    opacity: 1;
+  }
 
   /* Checkbox 樣式 - 完全模仿 Bootstrap form-check-input */
   #mainGrid td input[type="checkbox"].cell-edit {
@@ -1341,6 +1401,29 @@
       };
 
       const normalizeKey = (name) => (name || "").replace(/^@@+/, "").toLowerCase();
+      const getLoginUserIdCrs = () =>
+        String(window._userId || localStorage.getItem("erpLoginUserId") || "admin").trim();
+      const getLoginUseIdCrs = () =>
+        String(window._useId || localStorage.getItem("erpLoginBUId") || window.DEFAULT_USEID || "A001").trim();
+      const getParamTypeDefault = (p) => {
+        const pt = Number(p?.ParamType ?? p?.paramType ?? 0);
+        if (pt === 2) return getLoginUserIdCrs();
+        if (pt === 3) return getLoginUseIdCrs();
+        return "";
+      };
+      const buildDialogDefault = (p, rowDefault) => {
+        if (rowDefault != null && String(rowDefault).trim() !== "") return rowDefault;
+        const configured = p?.DefaultValue ?? p?.defaultValue;
+        if (configured != null && String(configured).trim() !== "") return configured;
+        return getParamTypeDefault(p);
+      };
+
+      const closeCrsSelectPanels = (exceptPanel = null) => {
+        formEl?.querySelectorAll(".crs-select-panel.open").forEach(panel => {
+          if (exceptPanel && panel === exceptPanel) return;
+          panel.classList.remove("open");
+        });
+      };
 
       const loadParamOptions = async (itemId, buttonName, paramName, superValue) => {
         const extra = superValue ? `&superValue=${encodeURIComponent(superValue)}` : "";
@@ -1408,73 +1491,114 @@
           const tableKind = p.TableKind ?? p.tableKind;
           const paramValue = p.ParamValue ?? p.paramValue;
           const rowDefault = paramValue ? getDefaultFromTableKind(tableKind, paramValue) : "";
+          const defVal = buildDialogDefault(p, rowDefault);
+          const readOnly = Number(p.iReadOnly ?? p.IReadOnly ?? 0) === 1;
 
           if (controlType === 1) {
-            const select = document.createElement("select");
-            select.className = "form-select form-select-sm crs-control";
-            select.setAttribute("data-param", name);
-            const emptyOpt = document.createElement("option");
-            emptyOpt.value = "";
-            emptyOpt.textContent = "";
-            select.appendChild(emptyOpt);
-            wrap.appendChild(select);
+            const selectWrap = document.createElement("div");
+            selectWrap.className = "crs-select-wrap";
+
+            const hiddenInput = document.createElement("input");
+            hiddenInput.type = "hidden";
+            hiddenInput.setAttribute("data-param", name);
+
+            const trigger = document.createElement("button");
+            trigger.type = "button";
+            trigger.className = "form-control form-control-sm crs-control crs-select-trigger";
+            trigger.textContent = "";
+
+            const panel = document.createElement("div");
+            panel.className = "crs-select-panel";
+
+            const selectState = { options: [] };
+            const normalizeOption = (opt) => {
+              const value = String(opt?.value ?? opt?.Value ?? "");
+              const text = String(opt?.text ?? opt?.Text ?? "");
+              return {
+                value,
+                label: text ? `${value} ${text}`.trim() : value
+              };
+            };
+            const renderPanel = () => {
+              panel.innerHTML = "";
+              const current = String(hiddenInput.value || "");
+              const items = [{ value: "", label: "" }, ...selectState.options];
+              items.forEach(opt => {
+                const item = document.createElement("div");
+                item.className = "crs-select-item";
+                if (opt.value === current && !(current === "" && opt.value === "")) item.classList.add("active");
+                item.textContent = opt.label;
+                item.dataset.value = opt.value;
+                item.addEventListener("mousedown", (ev) => {
+                  ev.preventDefault();
+                  hiddenInput.value = opt.value;
+                  trigger.textContent = opt.label;
+                  closeCrsSelectPanels();
+                });
+                panel.appendChild(item);
+              });
+            };
+            const setValue = (raw) => {
+              const value = raw == null ? "" : String(raw);
+              hiddenInput.value = value;
+              const hit = selectState.options.find(x => x.value === value);
+              trigger.textContent = hit ? hit.label : value;
+            };
+            const setOptions = (options) => {
+              selectState.options = Array.isArray(options) ? options.map(normalizeOption) : [];
+              renderPanel();
+              setValue(hiddenInput.value);
+            };
+
+            trigger.addEventListener("click", () => {
+              if (trigger.disabled) return;
+              const open = panel.classList.contains("open");
+              closeCrsSelectPanels(panel);
+              panel.classList.toggle("open", !open);
+            });
+            trigger.addEventListener("keydown", (ev) => {
+              if (ev.key === "Delete" || ev.key === "Backspace") {
+                hiddenInput.value = "";
+                trigger.textContent = "";
+                renderPanel();
+                ev.preventDefault();
+                return;
+              }
+              if (ev.key === "Escape") {
+                panel.classList.remove("open");
+                ev.preventDefault();
+              }
+            });
+
+            selectWrap.appendChild(hiddenInput);
+            selectWrap.appendChild(trigger);
+            selectWrap.appendChild(panel);
+            wrap.appendChild(selectWrap);
+
             try {
               const superValue = getSuperValueCrs(p);
               const options = await loadParamOptions(itemId, buttonName, p.ParamName || p.paramName, superValue);
-              if (Array.isArray(options)) {
-                options.forEach(opt => {
-                  const o = document.createElement("option");
-                  const val = opt.value ?? opt.Value ?? "";
-                  const text = opt.text ?? opt.Text ?? "";
-                  o.value = val;
-                  o.textContent = text ? `${val} ${text}`.trim() : val;
-                  if (text && text !== val) o.title = text;
-                  select.appendChild(o);
-                });
-              }
+              setOptions(options);
             } catch (err) {
               console.warn("load options failed", err);
+              setOptions([]);
             }
-            const defVal = rowDefault || (p.DefaultValue ?? p.defaultValue);
-            if (defVal != null && defVal !== "") {
-              select.value = applyEditMask(defVal, p.EditMask ?? p.editMask);
-              if (!select.value) {
-                const o = document.createElement("option");
-                o.value = defVal;
-                o.textContent = defVal;
-                select.appendChild(o);
-                select.value = defVal;
-              }
+            if (defVal != null && String(defVal).trim() !== "") {
+              setValue(applyEditMask(defVal, p.EditMask ?? p.editMask));
             }
-            select.addEventListener("keydown", (ev) => {
-              if (ev.key === "Delete" || ev.key === "Backspace") {
-                select.value = "";
-              }
-            });
+            if (readOnly) trigger.disabled = true;
+
             const superKey = normalizeKey(p.SuperId || p.superId);
             if (superKey) {
               const superInput = formEl?.querySelector(`[data-param="${superKey}"]`);
-              if (superInput && !select.dataset.superBound) {
-                select.dataset.superBound = "1";
+              if (superInput && !hiddenInput.dataset.superBound) {
+                hiddenInput.dataset.superBound = "1";
                 superInput.addEventListener("change", async () => {
                   try {
                     const options = await loadParamOptions(itemId, buttonName, p.ParamName || p.paramName, superInput.value ?? "");
-                    select.innerHTML = "";
-                    const emptyOpt = document.createElement("option");
-                    emptyOpt.value = "";
-                    emptyOpt.textContent = "";
-                    select.appendChild(emptyOpt);
-                    if (Array.isArray(options)) {
-                      options.forEach(opt => {
-                        const o = document.createElement("option");
-                        const val = opt.value ?? opt.Value ?? "";
-                        const text = opt.text ?? opt.Text ?? "";
-                        o.value = val;
-                        o.textContent = text ? `${val} ${text}`.trim() : val;
-                        if (text && text !== val) o.title = text;
-                        select.appendChild(o);
-                      });
-                    }
+                    hiddenInput.value = "";
+                    trigger.textContent = "";
+                    setOptions(options);
                   } catch (err) {
                     console.warn("load options failed", err);
                   }
@@ -1486,11 +1610,9 @@
             input.className = "form-control form-control-sm crs-control";
             input.type = "text";
             input.setAttribute("data-param", name);
-            const defVal = rowDefault || (p.DefaultValue ?? p.defaultValue);
             if (defVal != null && defVal !== "") {
               input.value = applyEditMask(defVal, p.EditMask ?? p.editMask);
             }
-            const readOnly = Number(p.iReadOnly ?? p.IReadOnly ?? 0) === 1;
             if (readOnly) input.readOnly = true;
             wrap.appendChild(input);
           }
@@ -1506,16 +1628,21 @@
           if (!name) return;
           const input = formEl?.querySelector(`[data-param="${name}"]`);
           if (input) {
-            values[name] = input.value ?? "";
+            let value = input.value ?? "";
+            if (String(value).trim() === "") {
+              const ptDefault = getParamTypeDefault(p);
+              if (ptDefault) value = ptDefault;
+            }
+            values[name] = value;
             return;
           }
           const paramValue = p.ParamValue ?? p.paramValue;
           const fromRow = paramValue ? getRowFieldValue(state.selectedRow, paramValue) : "";
-          const defVal = fromRow || (p.DefaultValue ?? p.defaultValue ?? p.ParamValue ?? p.paramValue);
+          const defVal = buildDialogDefault(p, fromRow) || (p.ParamValue ?? p.paramValue);
           values[name] = defVal == null ? "" : defVal;
         });
         if (values.useid != null && String(values.useid).trim() === "") {
-          values.useid = window.DEFAULT_USEID || window._useId || "A001";
+          values.useid = getLoginUseIdCrs();
         }
         state.inputs = values;
         return values;
@@ -1576,12 +1703,20 @@
         if (titleEl) titleEl.textContent = caption;
 
         await buildForm(state.itemId, state.buttonName);
+        closeCrsSelectPanels();
         if (window.bootstrap) {
           const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
           modal.show();
         }
       };
 
+      formEl?.addEventListener("pointerdown", (ev) => {
+        const target = ev.target;
+        if (!(target instanceof Element) || !target.closest(".crs-select-wrap")) {
+          closeCrsSelectPanels();
+        }
+      });
+      modalEl?.addEventListener("hidden.bs.modal", () => closeCrsSelectPanels());
       btnConfirm?.addEventListener("click", (e) => { e.preventDefault(); runSp(); });
 
       return { open };
@@ -3216,10 +3351,10 @@
 
   async function loadInqMust() {
     if (inqMustLoaded) return;
-    const table = window._singleRealTable || table?.dataset?.dictTable || window._dictTableName || "";
-    if (!table) return;
+    const paperId = window._singleRealTable || table?.dataset?.dictTable || window._dictTableName || "";
+    if (!paperId) return;
     try {
-      const res = await fetch(`/api/DictSetupApi/InqMust?paperId=${encodeURIComponent(table)}`);
+      const res = await fetch(`/api/DictSetupApi/InqMust?paperId=${encodeURIComponent(paperId)}`);
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       inqMustList = Array.isArray(data) ? data : [];
