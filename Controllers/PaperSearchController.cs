@@ -217,38 +217,45 @@ public class PaperSearchController : ControllerBase
             paramValues[paramName] = value;
         }
 
-        var availableRows = await ExecuteSearchOnceAsync(conn, spName, paramValues, setHadExists: false);
-        var selectedRows = (cfg.IGetHadExists ?? 0) == 1
-            ? await ExecuteSearchOnceAsync(conn, spName, paramValues, setHadExists: true)
-            : new List<Dictionary<string, object?>>();
-
-        if (debug == 1)
+        try
         {
-            await using var cmd = new SqlCommand(spName, conn)
-            {
-                CommandType = CommandType.StoredProcedure,
-                CommandTimeout = 180
-            };
+            var availableRows = await ExecuteSearchOnceAsync(conn, spName, paramValues, setHadExists: false);
+            var selectedRows = (cfg.IGetHadExists ?? 0) == 1
+                ? await ExecuteSearchOnceAsync(conn, spName, paramValues, setHadExists: true)
+                : new List<Dictionary<string, object?>>();
 
-            SqlCommandBuilder.DeriveParameters(cmd);
-            foreach (SqlParameter spParam in cmd.Parameters)
+            if (debug == 1)
             {
-                if (spParam.Direction == ParameterDirection.ReturnValue) continue;
-                if (paramValues.TryGetValue(spParam.ParameterName, out var val))
-                    spParam.Value = CoerceParamValue(spParam, val);
-                else
-                    spParam.Value = CoerceParamValue(spParam, string.Empty);
+                await using var cmd = new SqlCommand(spName, conn)
+                {
+                    CommandType = CommandType.StoredProcedure,
+                    CommandTimeout = 180
+                };
+
+                SqlCommandBuilder.DeriveParameters(cmd);
+                foreach (SqlParameter spParam in cmd.Parameters)
+                {
+                    if (spParam.Direction == ParameterDirection.ReturnValue) continue;
+                    if (paramValues.TryGetValue(spParam.ParameterName, out var val))
+                        spParam.Value = CoerceParamValue(spParam, val);
+                    else
+                        spParam.Value = CoerceParamValue(spParam, string.Empty);
+                }
+                var echo = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                foreach (SqlParameter spParam in cmd.Parameters)
+                {
+                    if (spParam.Direction == ParameterDirection.ReturnValue) continue;
+                    echo[spParam.ParameterName] = spParam.Value == DBNull.Value ? null : spParam.Value;
+                }
+                return Ok(new { ok = true, data = availableRows, selected = selectedRows, debugParams = echo });
             }
-            var echo = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (SqlParameter spParam in cmd.Parameters)
-            {
-                if (spParam.Direction == ParameterDirection.ReturnValue) continue;
-                echo[spParam.ParameterName] = spParam.Value == DBNull.Value ? null : spParam.Value;
-            }
-            return Ok(new { ok = true, data = availableRows, selected = selectedRows, debugParams = echo });
+
+            return Ok(new { ok = true, data = availableRows, selected = selectedRows });
         }
-
-        return Ok(new { ok = true, data = availableRows, selected = selectedRows });
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { ok = false, error = ExtractPrimaryError(ex) });
+        }
     }
 
     [HttpPost("Confirm")]

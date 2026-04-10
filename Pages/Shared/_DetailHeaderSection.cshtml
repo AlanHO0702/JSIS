@@ -1927,6 +1927,8 @@
                             var readOnlyClass = isReadOnly ? "dict-readonly" : "";
                             var readOnlyAttr = isReadOnly ? " data-readonly=\"1\"" : " data-readonly=\"0\"";
                             var isDateType = (field.DataType ?? "").IndexOf("date", StringComparison.OrdinalIgnoreCase) >= 0;
+                            var fmtLower   = (field.FormatStr ?? "").ToLower();
+                            var isDateTimeType = isDateType && (fmtLower.Contains("hh:nn") || fmtLower.Contains("hh:mm") || fmtLower.Contains("hh:ss"));
 
                             <li class="header-label-item"
                                 data-field="@field.FieldName"
@@ -2021,7 +2023,9 @@
                                 var datePickerValue = "";
                                 if (rawValue != null && DateTime.TryParse(rawValue.ToString(), out var dt))
                                 {
-                                    datePickerValue = dt.ToString("yyyy-MM-dd");
+                                    datePickerValue = isDateTimeType
+                                        ? dt.ToString("yyyy-MM-ddTHH:mm")
+                                        : dt.ToString("yyyy-MM-dd");
                                 }
                                 <li class="@liClass @(alignRight ? "field-number" : "field-text")"
                                     data-field="@field.FieldName"
@@ -2035,14 +2039,15 @@
                                            value="@displayText"
                                            @(isReadOnly ? "readonly" : "")
                                            data-align="@(alignRight ? "right" : (alignCenter ? "center" : null))"
+                                           data-is-datetime="@(isDateTimeType ? "1" : "0")"
                                            style="@editStyle"
                                            @Html.Raw(readOnlyAttr) />
-                                    <input type="date"
+                                    <input type="@(isDateTimeType ? "datetime-local" : "date")"
                                            class="date-picker-input"
                                            tabindex="-1"
                                            aria-hidden="true"
                                            value="@datePickerValue" />
-                                    <button type="button" class="lookup-toggle date-toggle" aria-label="選擇日期" tabindex="-1"></button>
+                                    <button type="button" class="lookup-toggle date-toggle" aria-label="選擇@(isDateTimeType ? "日期時間" : "日期")" tabindex="-1"></button>
                                 </li>
                             }
                             else
@@ -4502,22 +4507,50 @@ $(function () {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
 
+  // 將 "yyyy/mm/dd hh:mm" → datetime-local 需要的 "yyyy-MM-DDTHH:mm"
+  const normalizeForDateTimePicker = (value) => {
+    const s = String(value ?? '').trim();
+    if (!s) return '';
+    const m = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})(?:[\sT](\d{1,2}):(\d{2}))?/);
+    if (m) {
+      const p2 = v => String(v || '0').padStart(2, '0');
+      return `${m[1]}-${p2(m[2])}-${p2(m[3])}T${p2(m[4])}:${p2(m[5])}`;
+    }
+    const d = new Date(s);
+    if (isNaN(d)) return '';
+    const p2 = v => String(v).padStart(2, '0');
+    return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`;
+  };
+
   const formatDateForDisplay = (ymd) => {
     const m = String(ymd ?? '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!m) return '';
     return `${m[1]}/${m[2]}/${m[3]}`;
   };
 
+  // datetime-local 回傳 "yyyy-MM-DDTHH:mm" → 顯示用 "yyyy/MM/DD HH:mm"
+  const formatDateTimeForDisplay = (dtLocal) => {
+    const m = String(dtLocal ?? '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (!m) return '';
+    return `${m[1]}/${m[2]}/${m[3]} ${m[4]}:${m[5]}`;
+  };
+
   $('.date-dropdown').each(function() {
     const textInput = this;
     const dateInput = $(this).siblings('input.date-picker-input')[0];
     if (!dateInput) return;
-    const normalized = normalizeDateForPicker(textInput.value);
+    const isDateTime = textInput.dataset.isDatetime === '1' || dateInput.type === 'datetime-local';
+
+    const normalized = isDateTime
+      ? normalizeForDateTimePicker(textInput.value)
+      : normalizeDateForPicker(textInput.value);
     if (normalized) dateInput.value = normalized;
 
     $(dateInput).on('change', function() {
       if (!this.value) return;
-      textInput.value = formatDateForDisplay(this.value) || this.value;
+      textInput.value = isDateTime
+        ? (formatDateTimeForDisplay(this.value) || this.value)
+        : (formatDateForDisplay(this.value) || this.value);
       try {
         textInput.dispatchEvent(new Event('input', { bubbles: true }));
         textInput.dispatchEvent(new Event('change', { bubbles: true }));
@@ -4525,7 +4558,9 @@ $(function () {
     });
 
     $(textInput).on('input change', function() {
-      const v = normalizeDateForPicker(this.value);
+      const v = isDateTime
+        ? normalizeForDateTimePicker(this.value)
+        : normalizeDateForPicker(this.value);
       if (v) dateInput.value = v;
     });
 
