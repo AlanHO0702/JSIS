@@ -354,13 +354,37 @@ function restoreSearchFormSafe(formEl, saved) {
 
   const byKey = Object.create(null);
   const byField = Object.create(null);
-  saved.forEach(f => {
+  const used = new Set();
+  saved.forEach((f, i) => {
     if (!f) return;
-    if (f.Key) byKey[f.Key] = f;
+    if (f.Key) byKey[f.Key] = i;
     const fld = f.Field || '';
     if (!byField[fld]) byField[fld] = [];
-    byField[fld].push(f);
+    byField[fld].push(i);
   });
+
+  const takeByIndex = (idx) => {
+    if (idx == null || used.has(idx)) return null;
+    const item = saved[idx];
+    if (!item) return null;
+    used.add(idx);
+    return item;
+  };
+
+  const takeByField = (fld, pos) => {
+    const list = byField[fld];
+    if (!Array.isArray(list) || list.length === 0) return null;
+    if (pos != null && pos >= 0 && pos < list.length) {
+      const hit = takeByIndex(list[pos]);
+      if (hit) return hit;
+    }
+    for (let i = 0; i < list.length; i++) {
+      const hit = takeByIndex(list[i]);
+      if (hit) return hit;
+    }
+    return null;
+  };
+
   const valueEls = Array.from(
     formEl.querySelectorAll('[name]:not([name^="Cond_"]):not([type="hidden"])')
   );
@@ -372,10 +396,10 @@ function restoreSearchFormSafe(formEl, saved) {
     const idx = namePos[name] = (namePos[name] ?? 0);
     namePos[name]++;
 
-    let hit = byKey[`${name}#${idx}`] ||
-              (byField[name] && byField[name][idx]) ||
-              (el.dataset.field && byField[el.dataset.field] && byField[el.dataset.field][idx]) ||
-              (byField[name] && byField[name][0]);
+    let hit = takeByIndex(byKey[`${name}#${idx}`]) ||
+              takeByField(name, idx) ||
+              takeByField(el.dataset.field || '', idx) ||
+              takeByField(name, 0);
 
     if (!hit) return;
 

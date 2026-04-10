@@ -99,6 +99,48 @@
         padding-bottom: 2px;
         font-size: var(--field-value-size);
     }
+    .query-date-wrap {
+        position: relative;
+        flex: 0 0 160px;
+        min-width: 160px;
+        max-width: 160px;
+    }
+    .query-date-wrap .query-input {
+        padding-right: 28px;
+    }
+    .query-date-btn {
+        position: absolute;
+        right: 4px;
+        top: 50%;
+        transform: translateY(-50%);
+        border: 0;
+        background: transparent;
+        padding: 0;
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+    }
+    .query-date-btn::before {
+        content: "";
+        display: block;
+        width: 6px;
+        height: 6px;
+        margin: 0 auto;
+        border-right: 1.5px solid #6b7280;
+        border-bottom: 1.5px solid #6b7280;
+        transform: rotate(45deg) translateY(-1px);
+    }
+    .query-date-btn:disabled {
+        opacity: .5;
+        cursor: not-allowed;
+    }
+    .query-date-picker-proxy {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+        width: 1px;
+        height: 1px;
+    }
     /* --- 查詢 Lookup：完全自給自足，不依賴 _DetailHeaderSection.cshtml --- */
     .query-lookup-wrap {
         display: flex; align-items: stretch; box-sizing: border-box;
@@ -120,9 +162,14 @@
         flex-shrink: 0;
     }
     .query-lookup-wrap .lookup-toggle::before {
-        content: ""; display: block; width: 0; height: 0;
-        border-left: 5px solid transparent; border-right: 5px solid transparent;
-        border-top: 6px solid #6b7280; margin: 0 auto;
+        content: "";
+        display: block;
+        width: 6px;
+        height: 6px;
+        margin: 0 auto;
+        border-right: 1.5px solid #6b7280;
+        border-bottom: 1.5px solid #6b7280;
+        transform: rotate(45deg) translateY(-1px);
     }
     .query-lookup-wrap .lookup-name-btn {
         flex: 1 1 auto; min-width: 0; align-self: stretch;
@@ -241,12 +288,20 @@
         }
         const parsed = new Date(s);
         if (!Number.isNaN(parsed.getTime())) {
-            const y = String(parsed.getFullYear());
+            const year = parsed.getFullYear();
+            if (!Number.isInteger(year) || year < 1 || year > 9999) return "";
+            const y = String(year).padStart(4, "0");
             const mo = String(parsed.getMonth() + 1).padStart(2, "0");
             const d = String(parsed.getDate()).padStart(2, "0");
             return `${y}-${mo}-${d}`;
         }
         return "";
+    };
+
+    const toDisplayDate = (ymd) => {
+        const m = String(ymd ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return "";
+        return `${m[1]}/${m[2]}/${m[3]}`;
     };
 
     const fetchEquals = async () => {
@@ -697,7 +752,9 @@
         const superId = (field.superId || field.SuperId || "").toString();
         const readOnly = Number(field.iReadOnly ?? field.IReadOnly ?? field.readOnly ?? 0) === 1;
 
+        const isDateQueryField = !(controlType === 1 || controlType === 2 || commandText) && dataType === 1;
         let input;
+        let inputContainer = null;
         if (controlType === 1 || controlType === 2 || commandText) {
             // Lookup 欄位：用 text input（name 屬性讓表單收集代碼值）
             const inp = document.createElement("input");
@@ -711,7 +768,75 @@
         } else {
             const inp = document.createElement("input");
             inp.className = "form-control query-input";
-            inp.type = dataType === 1 ? "date" : "text";
+            inp.type = "text";
+            inp.autocomplete = "off";
+            if (isDateQueryField) {
+                inp.inputMode = "numeric";
+                const dateWrap = document.createElement("div");
+                dateWrap.className = "query-date-wrap";
+
+                const picker = document.createElement("input");
+                picker.type = "date";
+                picker.className = "query-date-picker-proxy";
+                picker.min = "0001-01-01";
+                picker.max = "9999-12-31";
+                picker.step = "1";
+
+                const dateBtn = document.createElement("button");
+                dateBtn.type = "button";
+                dateBtn.className = "query-date-btn";
+                dateBtn.setAttribute("aria-label", "選擇日期");
+
+                const syncPickerFromText = () => {
+                    const normalized = normalizeDateValue(inp.value);
+                    if (!inp.value) {
+                        picker.value = "";
+                        return;
+                    }
+                    if (!normalized) {
+                        inp.value = "";
+                        picker.value = "";
+                        return;
+                    }
+                    inp.value = toDisplayDate(normalized);
+                    picker.value = normalized;
+                };
+
+                inp.addEventListener("blur", syncPickerFromText);
+                inp.addEventListener("change", syncPickerFromText);
+                inp.addEventListener("dblclick", () => {
+                    try {
+                        inp.focus();
+                        inp.select();
+                        inp.setSelectionRange(0, inp.value.length);
+                    } catch { }
+                });
+
+                picker.addEventListener("change", () => {
+                    if (!picker.value) {
+                        inp.value = "";
+                        return;
+                    }
+                    const normalized = normalizeDateValue(picker.value);
+                    inp.value = normalized ? toDisplayDate(normalized) : "";
+                    inp.dispatchEvent(new Event("change", { bubbles: true }));
+                });
+
+                dateBtn.addEventListener("click", (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (inp.readOnly) return;
+                    const normalized = normalizeDateValue(inp.value);
+                    picker.value = normalized || "";
+                    if (typeof picker.showPicker === "function") picker.showPicker();
+                    else picker.focus();
+                });
+
+                dateWrap.appendChild(inp);
+                dateWrap.appendChild(dateBtn);
+                dateWrap.appendChild(picker);
+                inputContainer = dateWrap;
+            }
             input = inp;
         }
 
@@ -721,17 +846,21 @@
         input.dataset.column = colName;
         if (field.tableName || field.TableName) input.dataset.tableName = field.tableName || field.TableName;
         if (field.aliasName || field.AliasName) input.dataset.aliasName = field.aliasName || field.AliasName;
-        if (readOnly) input.readOnly = true;
+        if (readOnly) {
+            input.readOnly = true;
+            const dateBtn = inputContainer?.querySelector?.(".query-date-btn");
+            if (dateBtn) dateBtn.disabled = true;
+        }
 
         row.appendChild(label);
         row.appendChild(opSelect);
-        row.appendChild(input);
+        row.appendChild(inputContainer || input);
         wrap.appendChild(row);
         gridEl.appendChild(wrap);
 
         const rawDefaultVal = applyDefaultByType(field);
         let defaultVal = applyEditMask(rawDefaultVal, field);
-        if (input.type === "date") {
+        if (isDateQueryField) {
             defaultVal = normalizeDateValue(defaultVal);
         }
 
@@ -744,7 +873,7 @@
         }
 
         // 憒??舀??雿泵嚗?蝛?
-        if (input.type === "date" && isDatePlaceholder(defaultVal)) {
+        if (isDateQueryField && isDatePlaceholder(defaultVal)) {
             defaultVal = "";
         }
         if (controlType === 1 || controlType === 2 || commandText) {
@@ -753,9 +882,13 @@
             if (defaultVal) input.value = defaultVal;
             convertToLookup(input, colName, superId, opts, caption);
         } else if (defaultVal) {
-            input.value = defaultVal;
-        } else if (input.type === "date") {
+            input.value = isDateQueryField ? toDisplayDate(defaultVal) : defaultVal;
+        } else if (isDateQueryField) {
             input.value = "";
+        }
+        if (isDateQueryField) {
+            const picker = inputContainer?.querySelector?.(".query-date-picker-proxy");
+            if (picker) picker.value = normalizeDateValue(input.value) || "";
         }
     };
 
@@ -934,5 +1067,3 @@
     })();
 })();
 </script>
-
-
