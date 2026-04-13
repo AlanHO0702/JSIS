@@ -1,0 +1,443 @@
+@page "/SPO/SPOdOutInvInq"
+@using PcbErpApi.Models
+@model PcbErpApi.Pages.SPO.SPOdOutInvInqModel
+@{
+    Layout = "_InquiryTemplate";
+    ViewData["Title"] = Model.PageTitle;
+    ViewData["ShowInqHeader"] = false;
+    ViewData["ShowInqRail"] = true;
+    ViewData["InqRailTitle"] = "查詢";
+    ViewData["InqRailWidth"] = "120px";
+}
+
+@section InqRail {
+    <button type="submit" form="inqForm" class="inq-rail-btn">查詢</button>
+    <button type="button" class="inq-rail-btn" id="btnExportExcel">匯出Excel</button>
+    <button type="button" class="inq-rail-btn" id="btnPaperTrace">單據追蹤</button>
+    <button type="button" class="inq-rail-btn" id="btnSaveHeight">儲存高度設定</button>
+    <button type="button" class="inq-rail-btn" id="btnEditDict">編輯辭典</button>
+    <button type="button" class="inq-rail-btn" id="btnResetParams">重設參數</button>
+    <button type="button" class="inq-rail-btn" id="btnClearInq">清除</button>
+    <div class="inq-rail-status">
+      <div>資料筆數：<span id="inqTotalCount">0</span></div>
+      <div>目前位置：<span id="inqCurrentPos">0</span></div>
+    </div>
+}
+
+<input type="hidden" name="itemId" value="@Model.ResolvedItemId" />
+
+@{
+  var gDict = Model.GridDictFields ?? new List<CURdTableField>();
+  var gFields = gDict
+      .Where(f => (f.Visible ?? 1) != 0)
+      .OrderBy(f => f.SerialNum ?? int.MaxValue)
+      .ToList();
+
+  string GLabel(CURdTableField f) => string.IsNullOrWhiteSpace(f.DisplayLabel) ? f.FieldName : f.DisplayLabel!;
+
+  object? GVal(object? row, string? name)
+  {
+      if (row == null || string.IsNullOrWhiteSpace(name)) return null;
+      if (row is IDictionary<string, object?> dict)
+      {
+          if (dict.TryGetValue(name, out var v)) return v;
+          var key = dict.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
+          return key != null ? dict[key] : null;
+      }
+      var prop = row.GetType().GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
+      return prop?.GetValue(row);
+  }
+
+  string GFormat(object? v, CURdTableField f)
+  {
+      return FormatHelper.FormatValue(v, f.DataType, f.FormatStr);
+  }
+}
+
+<div class="inq-table-wrap">
+  <table class="table table-sm table-hover align-middle inq-table">
+    <thead>
+      <tr>
+        @foreach (var f in gFields)
+        {
+          <th class="inq-sortable" data-field="@f.FieldName">
+            <span class="th-text">@GLabel(f)</span>
+            <span class="col-resizer" draggable="false"></span>
+          </th>
+        }
+      </tr>
+    </thead>
+    <tbody>
+    @if (Model.Items.Count == 0)
+    {
+      <tr>
+        <td colspan="@(Math.Max(1, gFields.Count))" class="text-center text-muted py-2">沒有資料</td>
+      </tr>
+    }
+    else
+    {
+      foreach (var row in Model.Items)
+      {
+        var paperId = GVal(row, "PaperId")?.ToString() ?? "";
+        var paperNum = GVal(row, "PaperNum")?.ToString() ?? "";
+        var sourNum = GVal(row, "SourNum")?.ToString() ?? "";
+        var sourItem = GVal(row, "SourItem")?.ToString() ?? "";
+        var itemType = GVal(row, "ItemType")?.ToString() ?? "";
+        <tr data-paper-id="@paperId"
+            data-paper-num="@paperNum"
+            data-sour-num="@sourNum"
+            data-sour-item="@sourItem"
+            data-item-type="@itemType"
+            data-short-name="@(GVal(row, "ShortName")?.ToString() ?? "")"
+            data-ship-term-name="@(GVal(row, "ShipTermName")?.ToString() ?? "")"
+            data-pay-way-name="@(GVal(row, "PayWayName")?.ToString() ?? "")"
+            data-invoice-type-name="@(GVal(row, "InvoiceTypeName")?.ToString() ?? "")"
+            data-invoice-num="@(GVal(row, "InvoiceNum")?.ToString() ?? "")"
+            data-invoice-date="@(GVal(row, "InvoiceDate")?.ToString() ?? "")"
+            data-expect-date="@(GVal(row, "ExpectDate")?.ToString() ?? "")"
+            data-archives-no="@(GVal(row, "ArchivesNo")?.ToString() ?? "")"
+            data-area-name="@(GVal(row, "AreaName")?.ToString() ?? "")"
+            data-ship-to="@(GVal(row, "ShipTo")?.ToString() ?? "")"
+            data-out-addr="@(GVal(row, "OutAddr")?.ToString() ?? "")"
+            data-indirect-addr="@(GVal(row, "IndirectAddr")?.ToString() ?? "")">
+          @foreach (var f in gFields)
+          {
+            var val = GVal(row, f.FieldName);
+            <td>@GFormat(val, f)</td>
+          }
+        </tr>
+      }
+    }
+    </tbody>
+  </table>
+</div>
+
+<div id="outInvDetailPanel" class="outinv-detail-panel" style="display:none;">
+  <ul class="nav nav-tabs outinv-tabs" id="outInvTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="outinv-info-tab" data-bs-toggle="tab" data-bs-target="#outinv-tab-info" type="button" role="tab" aria-controls="outinv-tab-info" aria-selected="true">銷貨資料</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="outinv-order-tab" data-bs-toggle="tab" data-bs-target="#outinv-tab-order" type="button" role="tab" aria-controls="outinv-tab-order" aria-selected="false">訂單明細</button>
+    </li>
+  </ul>
+  <div class="tab-content outinv-tab-content">
+    <div class="tab-pane fade show active" id="outinv-tab-info" role="tabpanel" aria-labelledby="outinv-info-tab">
+      <div class="outinv-info-grid">
+        <label class="outinv-label">客戶名稱</label><span class="outinv-value" id="detShortName"></span>
+        <label class="outinv-label">發票號碼</label><span class="outinv-value" id="detInvoiceNum"></span>
+        <label class="outinv-label">交易條件</label><span class="outinv-value" id="detShipTermName"></span>
+        <label class="outinv-label">發票日期</label><span class="outinv-value" id="detInvoiceDate"></span>
+        <label class="outinv-label">付款方式</label><span class="outinv-value" id="detPayWayName"></span>
+        <label class="outinv-label">付款日期</label><span class="outinv-value" id="detExpectDate"></span>
+        <label class="outinv-label">發票種類</label><span class="outinv-value" id="detInvoiceTypeName"></span>
+        <label class="outinv-label">文號</label><span class="outinv-value" id="detArchivesNo"></span>
+        <label class="outinv-label">出貨區域</label><span class="outinv-value" id="detAreaName"></span>
+        <label class="outinv-label">出貨抬頭</label><span class="outinv-value" id="detShipTo"></span>
+        <label class="outinv-label">出貨地址</label><span class="outinv-value" id="detOutAddr"></span>
+        <label class="outinv-label">指送客戶</label><span class="outinv-value" id="detIndirectAddr"></span>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="outinv-tab-order" role="tabpanel" aria-labelledby="outinv-order-tab">
+      <div class="outinv-sub-wrap">
+        <table class="table table-sm table-hover align-middle inq-table" id="orderSubTable" data-inq-cell-nav="0">
+          <thead><tr id="orderSubHead"><th class="text-muted">欄位載入中</th></tr></thead>
+          <tbody id="orderSubBody"><tr><td class="text-muted">請先選取主檔資料</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .outinv-detail-panel {
+    border: 1px solid #d8dee8;
+    border-radius: 8px;
+    background: #fff;
+    margin-top: 6px;
+    overflow: hidden;
+  }
+  .outinv-tabs {
+    border-bottom: 1px solid #d8dee8;
+    margin: 0;
+    padding: 0 6px;
+    background: #f8fafc;
+  }
+  .outinv-tabs .nav-link {
+    font-size: 0.82rem;
+    padding: 4px 10px;
+    border: 1px solid transparent;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    color: #1d3b6b;
+  }
+  .outinv-tabs .nav-link.active {
+    color: #1f5fbf;
+    border-color: #d8dee8 #d8dee8 #fff;
+    background: #fff;
+    font-weight: 600;
+  }
+  .outinv-tab-content {
+    padding: 6px;
+  }
+  .outinv-info-grid {
+    display: grid;
+    grid-template-columns: 90px minmax(170px, 1fr) 90px minmax(170px, 1fr);
+    gap: 6px 8px;
+    align-items: center;
+  }
+  .outinv-label {
+    text-align: right;
+    color: #1d3b6b;
+    font-size: 0.82rem;
+    white-space: nowrap;
+  }
+  .outinv-value {
+    min-height: 24px;
+    border: 1px solid #e1e7f0;
+    border-radius: 4px;
+    background: #f8fafc;
+    padding: 2px 6px;
+    color: #374151;
+    font-size: 0.82rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .outinv-sub-wrap {
+    border: 1px solid #e1e7f0;
+    border-radius: 6px;
+    overflow: auto;
+    max-height: 260px;
+  }
+  .outinv-sub-wrap .inq-table {
+    margin: 0;
+  }
+  @@media (max-width: 1024px) {
+    .outinv-info-grid {
+      grid-template-columns: 90px minmax(160px, 1fr);
+    }
+  }
+</style>
+
+@section InqPageData {
+  <script>
+    window._inqPageData = {
+      dictTableName: "@(Model.DictTableName ?? "")",
+      paramTableName: "@(Model.ParamTableName ?? "")",
+      totalCount: @Model.TotalCount,
+      currentUserId: "@Model.CurrentUserId",
+      currentUseId: "@Model.CurrentUseId",
+      itemId: "@Model.ResolvedItemId"
+    };
+  </script>
+}
+
+<script>
+  (function () {
+    const detailPanel = document.getElementById("outInvDetailPanel");
+    const orderHead = document.getElementById("orderSubHead");
+    const orderBody = document.getElementById("orderSubBody");
+    let selectedOrderSubRow = null;
+
+    const setValue = (id, value) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = String(value || "");
+    };
+
+    const renderInfo = (tr) => {
+      if (!tr || !detailPanel) return;
+      detailPanel.style.display = "block";
+      setValue("detShortName", tr.dataset.shortName);
+      setValue("detShipTermName", tr.dataset.shipTermName);
+      setValue("detPayWayName", tr.dataset.payWayName);
+      setValue("detInvoiceTypeName", tr.dataset.invoiceTypeName);
+      setValue("detInvoiceNum", tr.dataset.invoiceNum);
+      setValue("detInvoiceDate", tr.dataset.invoiceDate);
+      setValue("detExpectDate", tr.dataset.expectDate);
+      setValue("detArchivesNo", tr.dataset.archivesNo);
+      setValue("detAreaName", tr.dataset.areaName);
+      setValue("detShipTo", tr.dataset.shipTo);
+      setValue("detOutAddr", tr.dataset.outAddr);
+      setValue("detIndirectAddr", tr.dataset.indirectAddr);
+    };
+
+    const getFieldValue = (row, name) => {
+      if (!row || !name) return "";
+      if (Object.prototype.hasOwnProperty.call(row, name)) return row[name] ?? "";
+      const key = Object.keys(row).find(k => k.toLowerCase() === name.toLowerCase());
+      return key ? (row[key] ?? "") : "";
+    };
+
+    const renderOrderSub = (payload) => {
+      const items = Array.isArray(payload?.items) ? payload.items : [];
+      let fields = Array.isArray(payload?.fields) ? payload.fields : [];
+
+      if (fields.length === 0 && items.length > 0) {
+        fields = Object.keys(items[0]).map(k => ({ fieldName: k, displayLabel: k }));
+      }
+
+      orderHead.innerHTML = "";
+      orderBody.innerHTML = "";
+      selectedOrderSubRow = null;
+
+      if (fields.length === 0) {
+        orderHead.innerHTML = "<th class=\"text-muted\">沒有欄位</th>";
+        orderBody.innerHTML = "<tr><td class=\"text-muted\">沒有資料</td></tr>";
+        return;
+      }
+
+      const headTr = document.createElement("tr");
+      fields.forEach(f => {
+        const th = document.createElement("th");
+        th.textContent = String(f?.displayLabel || f?.fieldName || "");
+        headTr.appendChild(th);
+      });
+      orderHead.appendChild(headTr);
+
+      if (items.length === 0) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = fields.length;
+        td.className = "text-center text-muted py-2";
+        td.textContent = "沒有資料";
+        tr.appendChild(td);
+        orderBody.appendChild(tr);
+        return;
+      }
+
+      let firstRow = null;
+      items.forEach(item => {
+        const tr = document.createElement("tr");
+        tr.dataset.paperId = String(getFieldValue(item, "PaperId") || "");
+        tr.dataset.paperNum = String(getFieldValue(item, "PaperNum") || "");
+        fields.forEach(f => {
+          const td = document.createElement("td");
+          const raw = getFieldValue(item, String(f?.fieldName || ""));
+          td.textContent = raw == null ? "" : String(raw);
+          tr.appendChild(td);
+        });
+        tr.addEventListener("click", () => {
+          Array.from(orderBody.querySelectorAll("tr")).forEach(r => r.classList.remove("table-active"));
+          tr.classList.add("table-active");
+          selectedOrderSubRow = tr;
+        });
+        orderBody.appendChild(tr);
+        if (!firstRow) firstRow = tr;
+      });
+
+      if (firstRow) {
+        firstRow.classList.add("table-active");
+        selectedOrderSubRow = firstRow;
+      }
+    };
+
+    const loadOrderSub = async (tr) => {
+      const sourNum = tr?.dataset?.sourNum || "";
+      const sourItem = tr?.dataset?.sourItem || "";
+      const itemType = tr?.dataset?.itemType || "";
+      const key = `${sourNum}|${sourItem}|${itemType}`;
+      if (detailPanel) detailPanel.dataset.loadKey = key;
+
+      if (!sourNum || !sourItem || !itemType) {
+        renderOrderSub({ items: [], fields: [] });
+        return;
+      }
+
+      try {
+        const res = await fetch(`?handler=OrderSub&sourNum=${encodeURIComponent(sourNum)}&sourItem=${encodeURIComponent(sourItem)}&itemType=${encodeURIComponent(itemType)}`);
+        const payload = res.ok ? await res.json() : { items: [], fields: [] };
+        if (detailPanel?.dataset?.loadKey !== key) return;
+        renderOrderSub(payload);
+      } catch {
+        renderOrderSub({ items: [], fields: [] });
+      }
+    };
+
+    const hookMainRows = () => {
+      const rows = Array.from(document.querySelectorAll(".inq-table-wrap .inq-table tbody tr"))
+        .filter(r => !r.querySelector("td[colspan]"));
+      rows.forEach(tr => {
+        tr.addEventListener("click", () => {
+          renderInfo(tr);
+          loadOrderSub(tr);
+        });
+      });
+
+      const active = document.querySelector(".inq-table-wrap .inq-table tbody tr.table-active") || rows[0];
+      if (active) {
+        renderInfo(active);
+        loadOrderSub(active);
+      }
+    };
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", hookMainRows);
+    } else {
+      hookMainRows();
+    }
+
+    document.getElementById("btnClearInq")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      window.location.href = `${window.location.pathname}?itemId=${encodeURIComponent("@Model.ResolvedItemId")}`;
+    }, true);
+
+    document.getElementById("btnPaperTrace")?.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+
+      const onOrderTab = document.getElementById("outinv-order-tab")?.classList.contains("active");
+      const selectedMain = window._inq?.selectedRow || document.querySelector(".inq-table-wrap .inq-table tbody tr.table-active");
+      const traceRow = (onOrderTab && selectedOrderSubRow?.dataset?.paperId && selectedOrderSubRow?.dataset?.paperNum)
+        ? selectedOrderSubRow
+        : selectedMain;
+
+      if (!traceRow) return alert("請先選擇一筆資料");
+
+      const pid = traceRow.dataset.paperId || "";
+      const pnum = traceRow.dataset.paperNum || "";
+      if (!pid || !pnum) return alert("找不到單據資訊");
+
+      const currentUserId = "@Model.CurrentUserId";
+      const currentUseId = "@Model.CurrentUseId";
+
+      try {
+        const res = await fetch("/api/Flow/ResolveItemIdByFromType", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paperId: pid, paperNum: pnum, userId: currentUserId, useId: currentUseId })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const resolvedId = data.itemId || pid;
+          window.open(`/DynamicTemplate/Paper/${encodeURIComponent(resolvedId)}/${encodeURIComponent(pnum)}`, "_blank");
+          return;
+        }
+      } catch { }
+
+      window.open(`/DynamicTemplate/Paper/${encodeURIComponent(pid)}/${encodeURIComponent(pnum)}`, "_blank");
+    }, true);
+  })();
+</script>
+
+@if (Request.Query.ContainsKey("debug"))
+{
+  <div class="mt-3 p-2 border rounded bg-light">
+    <div class="fw-bold mb-1">Debug Exec</div>
+    <div class="small text-muted">@Model.DebugExecText</div>
+    <ul class="small mb-0">
+      @foreach (var p in Model.DebugParams)
+      {
+        <li>@p.Name = @(p.Value ?? "NULL")</li>
+      }
+    </ul>
+    <div class="fw-bold mt-2 mb-1">Debug Query</div>
+    <ul class="small mb-0">
+      @foreach (var kv in Request.Query)
+      {
+        <li>@kv.Key = @kv.Value.ToString()</li>
+      }
+    </ul>
+  </div>
+}

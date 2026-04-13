@@ -700,7 +700,7 @@ body {
                                     <span style="flex: 1;">@item.ItemName</span>
                                 </a>
                             } else {
-                                <a href="javascript:void(0)" title="@hint" class="dyn-link" data-itemid="@item.ItemId" data-itemname="@item.ItemName" data-superid="@item.SuperId" style="flex:1; display: flex; align-items: center;" onclick="resolveAndGo('@item.ItemId','@item.ItemName','@item.SuperId')">
+                                <a href="javascript:void(0)" title="@hint" class="dyn-link" data-itemid="@item.ItemId" data-itemname="@item.ItemName" data-superid="@item.SuperId" data-classname="@(item.ClassName ?? string.Empty)" data-powertype="@(item.PowerType?.ToString() ?? string.Empty)" style="flex:1; display: flex; align-items: center;" onclick="resolveAndGo('@item.ItemId','@item.ItemName','@item.SuperId','@(item.ClassName ?? string.Empty)','@(item.PowerType?.ToString() ?? string.Empty)')">
                                     <span style="display: inline-block; width: 90px; flex-shrink: 0; font-family: 'Consolas', monospace; font-weight: 500;">@displayCode</span>
                                     <span style="flex: 1;">@item.ItemName</span>
                                 </a>
@@ -1974,11 +1974,19 @@ body {
         return `/CCS/${resolvedId}/${sysId}`;
     }
 
+    function resolveSpecialClassRoute(itemId, className) {
+        const cls = String(className ?? "").trim().replace(/\.dll$/i, "").toLowerCase();
+        if (cls === "spodoutinvinq") return `/SPO/SPOdOutInvInq?itemId=${encodeURIComponent(itemId)}`;
+        return null;
+    }
+
     const itemHintCache = new Map();
 
     function getTemplateNameFromMeta(meta, itemId) {
         const hard = pageMap[itemId];
         if (hard) return hard;
+        const special = resolveSpecialClassRoute(itemId, meta?.ClassName ?? meta?.className ?? "");
+        if (special) return special;
 
         const companyLink = resolveCompanyLinkFromMeta(meta, itemId);
         if (companyLink) return companyLink;
@@ -2017,6 +2025,8 @@ body {
     function getLocalHint(itemId, className, powerType) {
         const hard = pageMap[itemId];
         if (hard) return hard;
+        const special = resolveSpecialClassRoute(itemId, className);
+        if (special) return special;
         const localMeta = { ClassName: className, PowerType: powerType };
         const companyLink = resolveCompanyLinkFromMeta(localMeta, itemId);
         return companyLink || null;
@@ -2057,6 +2067,8 @@ body {
         console.debug('resolveAndGo click', { itemId, itemName, superId });
         const hard = pageMap[itemId];
         if (hard) { location.href = hard; return; }
+        const special = resolveSpecialClassRoute(itemId, className);
+        if (special) { location.href = special; return; }
 
         // 先嘗試本地 className/powerType 映射（我的最愛可帶進來）
         const localMeta = { ClassName: className, PowerType: powerType };
@@ -2087,6 +2099,8 @@ body {
 
             const companyLink = resolveCompanyLinkFromMeta(meta, itemId);
             if (companyLink) { location.href = companyLink; return; }
+            const specialFromMeta = resolveSpecialClassRoute(itemId, meta?.ClassName ?? meta?.className ?? "");
+            if (specialFromMeta) { location.href = specialFromMeta; return; }
 
             const itemType = Number(meta.itemType ?? meta.ItemType);
             const outputType = Number(meta.outputType ?? meta.OutputType);
@@ -2704,6 +2718,11 @@ body {
                 window.open(hard, '_blank');
                 return;
             }
+            const special = resolveSpecialClassRoute(itemId, className);
+            if (special) {
+                window.open(special, '_blank');
+                return;
+            }
 
             const localMeta = { ClassName: className, PowerType: powerType };
             const localLink = resolveCompanyLinkFromMeta(localMeta, itemId);
@@ -2721,6 +2740,11 @@ body {
                 const companyLink = resolveCompanyLinkFromMeta(meta, itemId);
                 if (companyLink) {
                     window.open(companyLink, '_blank');
+                    return;
+                }
+                const specialFromMeta = resolveSpecialClassRoute(itemId, meta?.ClassName ?? meta?.className ?? "");
+                if (specialFromMeta) {
+                    window.open(specialFromMeta, '_blank');
                     return;
                 }
 
@@ -3324,4 +3348,3 @@ body {
     })();
 
 </script>
-

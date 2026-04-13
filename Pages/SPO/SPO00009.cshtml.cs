@@ -528,6 +528,9 @@ namespace PcbErpApi.Pages.SPO
                 || key.Equals("pageSize", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("pageIndex", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("spId", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("sUseId", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("itemId", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("doQuery", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("handler", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("__RequestVerificationToken", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("debug", StringComparison.OrdinalIgnoreCase);
