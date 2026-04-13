@@ -314,7 +314,10 @@ SELECT RuleId, DLLValue
             await using var conn = new SqlConnection(cs);
             await conn.OpenAsync();
             const string sql = @"
-SELECT ItemId, SerialNum, ButtonName, Caption, Hint, OCXName, CoClassName
+SELECT ItemId, SerialNum, ButtonName, Caption, Hint, OCXName, CoClassName,
+       bNeedNum, bNeedInEdit, DesignType, SpName, ExecSpName,
+       SearchTemplate, MultiSelectDD, ReplaceExists, DialogCaption, AllowSelCount,
+       PrintRptName
   FROM CURdOCXItemCustButton WITH (NOLOCK)
  WHERE ItemId = @itemId
  ORDER BY SerialNum";
@@ -325,13 +328,24 @@ SELECT ItemId, SerialNum, ButtonName, Caption, Hint, OCXName, CoClassName
             {
                 list.Add(new ItemCustButtonRow
                 {
-                    ItemId     = rd["ItemId"]?.ToString() ?? "",
-                    SerialNum  = rd["SerialNum"] == DBNull.Value ? null : Convert.ToInt32(rd["SerialNum"]),
-                    ButtonName = rd["ButtonName"]?.ToString() ?? "",
-                    Caption    = rd["Caption"]?.ToString() ?? "",
-                    Hint       = rd["Hint"]?.ToString() ?? "",
-                    OCXName    = rd["OCXName"]?.ToString() ?? "",
-                    CoClassName = rd["CoClassName"]?.ToString() ?? ""
+                    ItemId       = rd["ItemId"]?.ToString() ?? "",
+                    SerialNum    = rd["SerialNum"] == DBNull.Value ? null : Convert.ToInt32(rd["SerialNum"]),
+                    ButtonName   = rd["ButtonName"]?.ToString() ?? "",
+                    Caption      = rd["Caption"]?.ToString() ?? "",
+                    Hint         = rd["Hint"]?.ToString() ?? "",
+                    OCXName      = rd["OCXName"]?.ToString() ?? "",
+                    CoClassName  = rd["CoClassName"]?.ToString() ?? "",
+                    bNeedNum     = rd["bNeedNum"] == DBNull.Value ? null : Convert.ToInt32(rd["bNeedNum"]),
+                    bNeedInEdit  = rd["bNeedInEdit"] == DBNull.Value ? null : Convert.ToInt32(rd["bNeedInEdit"]),
+                    DesignType   = rd["DesignType"] == DBNull.Value ? null : Convert.ToInt32(rd["DesignType"]),
+                    SpName       = rd["SpName"]?.ToString() ?? "",
+                    ExecSpName   = rd["ExecSpName"]?.ToString() ?? "",
+                    SearchTemplate = rd["SearchTemplate"]?.ToString() ?? "",
+                    MultiSelectDD  = rd["MultiSelectDD"]?.ToString() ?? "",
+                    ReplaceExists  = rd["ReplaceExists"] == DBNull.Value ? null : Convert.ToInt32(rd["ReplaceExists"]),
+                    DialogCaption  = rd["DialogCaption"]?.ToString() ?? "",
+                    AllowSelCount  = rd["AllowSelCount"] == DBNull.Value ? null : Convert.ToInt32(rd["AllowSelCount"]),
+                    PrintRptName   = rd["PrintRptName"]?.ToString() ?? ""
                 });
             }
             return list;
@@ -348,13 +362,24 @@ SELECT ItemId, SerialNum, ButtonName, Caption, Hint, OCXName, CoClassName
 
         public class ItemCustButtonRow
         {
-            public string ItemId      { get; set; } = string.Empty;
-            public int?   SerialNum   { get; set; }
-            public string ButtonName  { get; set; } = string.Empty;
-            public string Caption     { get; set; } = string.Empty;
-            public string Hint        { get; set; } = string.Empty;
-            public string OCXName     { get; set; } = string.Empty;
-            public string CoClassName { get; set; } = string.Empty;
+            public string ItemId        { get; set; } = string.Empty;
+            public int?   SerialNum     { get; set; }
+            public string ButtonName    { get; set; } = string.Empty;
+            public string Caption       { get; set; } = string.Empty;
+            public string Hint          { get; set; } = string.Empty;
+            public string OCXName       { get; set; } = string.Empty;
+            public string CoClassName   { get; set; } = string.Empty;
+            public int?   bNeedNum      { get; set; }
+            public int?   bNeedInEdit   { get; set; }
+            public int?   DesignType    { get; set; }
+            public string SpName        { get; set; } = string.Empty;
+            public string ExecSpName    { get; set; } = string.Empty;
+            public string SearchTemplate  { get; set; } = string.Empty;
+            public string MultiSelectDD   { get; set; } = string.Empty;
+            public int?   ReplaceExists   { get; set; }
+            public string DialogCaption   { get; set; } = string.Empty;
+            public int?   AllowSelCount   { get; set; }
+            public string PrintRptName    { get; set; } = string.Empty;
         }
     }
 }

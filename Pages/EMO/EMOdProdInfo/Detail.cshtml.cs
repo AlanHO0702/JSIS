@@ -432,6 +432,7 @@ WHERE ItemId = @itemId
             public int? bNeedNum { get; set; }
             public int? bNeedInEdit { get; set; }
             public int? DesignType { get; set; }
+            public string PrintRptName { get; set; } = string.Empty;
         }
 
         private string? ResolveActionRailLogicPartial(string itemId)
@@ -465,7 +466,8 @@ SELECT ItemId, SerialNum, ButtonName,
        CustCaption, CustHint,
        bVisible, bNeedNum, bNeedInEdit, DesignType,
        OCXName, CoClassName, SpName, ExecSpName,
-       SearchTemplate, MultiSelectDD, ReplaceExists, DialogCaption, AllowSelCount
+       SearchTemplate, MultiSelectDD, ReplaceExists, DialogCaption, AllowSelCount,
+       PrintRptName
   FROM CURdOCXItemCustButton WITH (NOLOCK)
  WHERE ItemId = @itemId
  ORDER BY SerialNum, ButtonName;";
@@ -503,7 +505,8 @@ SELECT ItemId, SerialNum, ButtonName,
                     AllowSelCount = TryToInt(rd["AllowSelCount"]),
                     bNeedNum = TryToInt(rd["bNeedNum"]),
                     bNeedInEdit = TryToInt(rd["bNeedInEdit"]),
-                    DesignType = TryToInt(rd["DesignType"])
+                    DesignType = TryToInt(rd["DesignType"]),
+                    PrintRptName = rd["PrintRptName"]?.ToString() ?? string.Empty
                 });
             }
 
