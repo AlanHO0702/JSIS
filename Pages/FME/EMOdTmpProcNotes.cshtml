@@ -1,0 +1,1153 @@
+@page "/EMOdTmpProcNotes"
+@model PcbErpApi.Pages.FME.EMOdTmpProcNotesModel
+@{
+    ViewData["Title"] = "群組製程備註資料";
+    Layout = "~/Pages/Shared/_Layout.cshtml";
+}
+
+<div class="tmp-proc-notes-container">
+
+    <!-- ══════════════════════════════════
+         工具列 (panControl / TToolBar)
+         對應: dbnBrowse / btChange / btAppend / btDelete / pnlName
+         ══════════════════════════════════ -->
+    <div class="toolbar-section">
+
+        <!-- DBNavigator (對應 dbnBrowse, 導覽 dsProdStyleTreeSub) -->
+        <div class="btn-group btn-group-sm me-1" title="明細導覽">
+            <button class="btn btn-outline-secondary" id="btnNavFirst" title="第一筆">
+                <i class="bi bi-skip-start-fill"></i>
+            </button>
+            <button class="btn btn-outline-secondary" id="btnNavPrev" title="上一筆">
+                <i class="bi bi-caret-left-fill"></i>
+            </button>
+            <button class="btn btn-outline-secondary" id="btnNavNext" title="下一筆">
+                <i class="bi bi-caret-right-fill"></i>
+            </button>
+            <button class="btn btn-outline-secondary" id="btnNavLast" title="最後一筆">
+                <i class="bi bi-skip-end-fill"></i>
+            </button>
+        </div>
+        <div class="btn-group btn-group-sm me-1">
+            <button class="btn btn-outline-primary" id="btnNavPost" title="儲存備註">
+                <i class="bi bi-floppy"></i>
+            </button>
+            <button class="btn btn-outline-secondary" id="btnNavCancel" title="取消變更">
+                <i class="bi bi-x-circle"></i>
+            </button>
+            <button class="btn btn-outline-info" id="btnNavRefresh" title="重新整理">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+        </div>
+
+        <div class="vr mx-2"></div>
+
+        <!-- 改動 (btChange) -->
+        <button class="btn btn-sm btn-outline-warning me-1" id="btnChange" title="改動群組製程清單">
+            <i class="bi bi-arrow-left-right"></i> 改動
+        </button>
+
+        <!-- 新增 (btAppend) -->
+        <button class="btn btn-sm btn-outline-success me-1" id="btnAppend" title="新增群組節點">
+            <i class="bi bi-plus-lg"></i> 新增
+        </button>
+
+        <!-- 刪除 (btDelete) -->
+        <button class="btn btn-sm btn-outline-danger me-1" id="btnDelete" title="刪除群組節點">
+            <i class="bi bi-trash3"></i> 刪除
+        </button>
+
+        <div class="vr mx-2"></div>
+
+        <!-- 更名面板 (pnlName: edtName + btnName) -->
+        <div class="d-flex align-items-center gap-1">
+            <input type="text" id="edtName" class="form-control form-control-sm"
+                   style="width: 160px;" placeholder="選擇節點後可更名">
+            <button class="btn btn-sm btn-secondary" id="btnName" title="更名">
+                <i class="bi bi-pencil-square"></i> 更名
+            </button>
+        </div>
+
+        <!-- 隱藏的 edtId (對應 Delphi edtId, Visible=False) -->
+        <input type="hidden" id="edtId">
+
+        <div class="ms-auto">
+            <span id="lblCurrentNode" class="badge bg-primary"></span>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════
+         主體區域: 樹狀圖(左) + 明細(右)
+         對應 pnlAll
+         ══════════════════════════════════ -->
+    <div class="main-area">
+
+        <!-- 左側: TreeView (trvMas) -->
+        <div class="tree-panel" id="treePanel">
+            <div class="tree-panel-header">
+                群組製程
+                <div class="spinner-border spinner-border-sm text-primary ms-auto" id="treeLoading" style="display:none;"></div>
+            </div>
+            <div class="tree-body" id="treeBody">
+                <!-- 動態產生 -->
+            </div>
+        </div>
+
+        <!-- 中間垂直分隔線 (Splitter2) -->
+        <div class="splitter-v" id="splitterV"></div>
+
+        <!-- 右側: 上方明細表格 + 下方備註 Memo (pnlRight) -->
+        <div class="right-panel" id="rightPanel">
+
+            <!-- 上方: 明細表格 (grdProdStyleTreeSub) -->
+            <div class="grid-panel" id="gridPanel">
+                <div class="grid-panel-header d-flex justify-content-between align-items-center">
+                    <span>製程明細</span>
+                    <span id="subCount" class="badge bg-secondary">0 筆</span>
+                </div>
+                <div class="table-responsive" style="height: calc(100% - 28px); overflow-y: auto;">
+                    <table class="table table-sm table-bordered table-hover mb-0" id="tblSub">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th style="width: 90px;">製程代號</th>
+                                <th>製程名稱</th>
+                                <th>備註 (預覽)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="subTbody">
+                            <!-- 動態載入 -->
+                        </tbody>
+                    </table>
+                    <div id="subEmpty" class="text-center py-3 text-muted" style="display:none;">
+                        <i class="bi bi-inbox fs-5 d-block"></i> 請從左側選擇群組
+                    </div>
+                </div>
+            </div>
+
+            <!-- 水平分隔線 (Splitter1) -->
+            <div class="splitter-h" id="splitterH"></div>
+
+            <!-- 下方: 備註 Memo (DBMemo1 → Notes from dsProdStyleTreeSub) -->
+            <div class="notes-panel" id="notesPanel">
+                <div class="notes-panel-header d-flex justify-content-between align-items-center">
+                    <span>備註</span>
+                    <small id="lblNotesProcCode" class="text-muted"></small>
+                </div>
+                <textarea id="txtNotes"
+                          class="form-control form-control-sm notes-textarea"
+                          placeholder="請從上方選擇一筆製程以查看或編輯備註..."></textarea>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+
+<!-- ══════════════════════════════════
+     Modal: 新增群組節點 (btAppendClick → dlgProcNotesAdd)
+     欄位: 上層代碼 (cobSuperId) + 名稱 (edtItemName)
+     ══════════════════════════════════ -->
+<div class="modal fade" id="modalAppend" tabindex="-1" aria-labelledby="modalAppendLabel" aria-hidden="true">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2 bg-success text-white">
+                <h6 class="modal-title" id="modalAppendLabel">
+                    <i class="bi bi-plus-circle"></i> 備註條件新增
+                </h6>
+                <button type="button" class="btn-close btn-close-white btn-close-sm" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2">
+                    <label class="form-label form-label-sm mb-1">上層代碼</label>
+                    <select class="form-select form-select-sm" id="cobSuperId">
+                        <option value="">-- 請選擇 --</option>
+                    </select>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label form-label-sm mb-1">條件名稱</label>
+                    <input type="text" class="form-control form-control-sm" id="edtItemName" placeholder="輸入名稱">
+                </div>
+            </div>
+            <div class="modal-footer py-1">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-success btn-sm" id="btnAppendOK">
+                    <i class="bi bi-check-lg"></i> 確定
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- ══════════════════════════════════
+     Modal: 刪除群組節點 (btDeleteClick → dlgProcNotesDel)
+     欄位: 條件代碼 (cobItemId)
+     ══════════════════════════════════ -->
+<div class="modal fade" id="modalDelete" tabindex="-1" aria-labelledby="modalDeleteLabel" aria-hidden="true">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2 bg-danger text-white">
+                <h6 class="modal-title" id="modalDeleteLabel">
+                    <i class="bi bi-trash3"></i> 備註條件刪除
+                </h6>
+                <button type="button" class="btn-close btn-close-white btn-close-sm" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2">
+                    <label class="form-label form-label-sm mb-1">條件代碼</label>
+                    <select class="form-select form-select-sm" id="cobItemId">
+                        <option value="">-- 請選擇 --</option>
+                    </select>
+                </div>
+                <div class="alert alert-warning py-1 small mb-0">
+                    <i class="bi bi-exclamation-triangle"></i> 刪除後無法還原，請確認。
+                </div>
+            </div>
+            <div class="modal-footer py-1">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-danger btn-sm" id="btnDeleteOK">
+                    <i class="bi bi-trash3"></i> 確定刪除
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- ══════════════════════════════════
+     Modal: 製程改動 (btChangeClick → dlgProcNoteSearch)
+     雙清單選擇 (TJSdMultSelect): 來源 ↔ 目的
+     ══════════════════════════════════ -->
+<div class="modal fade" id="modalChange" tabindex="-1" aria-labelledby="modalChangeLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header py-2 bg-warning text-dark">
+                <h6 class="modal-title" id="modalChangeLabel">
+                    <i class="bi bi-arrow-left-right"></i> 製程改動
+                    <small id="lblChangeNode" class="ms-2 fw-normal"></small>
+                </h6>
+                <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-2">
+                <div class="row g-2 h-100">
+                    <!-- 左側: 來源 (可用製程) -->
+                    <div class="col-5">
+                        <div class="dual-list-header bg-light border rounded-top px-2 py-1">
+                            <strong class="small">來源 (可用製程)</strong>
+                            <span id="srcCount" class="badge bg-secondary float-end">0</span>
+                        </div>
+                        <div class="dual-list-body border border-top-0 rounded-bottom"
+                             style="height: 320px; overflow-y: auto;">
+                            <table class="table table-sm table-hover mb-0" id="tblSrcProcs">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th style="width:80px;">代號</th>
+                                        <th>名稱</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="srcTbody"></tbody>
+                            </table>
+                        </div>
+                        <div class="mt-1">
+                            <input type="text" id="srcFilter" class="form-control form-control-sm"
+                                   placeholder="篩選製程代號或名稱...">
+                        </div>
+                    </div>
+
+                    <!-- 中間: 移動按鈕 -->
+                    <div class="col-2 d-flex flex-column justify-content-center align-items-center gap-2">
+                        <button class="btn btn-sm btn-outline-primary w-100" id="btnMoveRight" title="加入 →">
+                            <i class="bi bi-chevron-right"></i><i class="bi bi-chevron-right"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary w-100" id="btnMoveAllRight" title="全部加入 →→">
+                            <i class="bi bi-chevron-double-right"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary w-100" id="btnMoveLeft" title="← 移除">
+                            <i class="bi bi-chevron-left"></i><i class="bi bi-chevron-left"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary w-100" id="btnMoveAllLeft" title="←← 全部移除">
+                            <i class="bi bi-chevron-double-left"></i>
+                        </button>
+                    </div>
+
+                    <!-- 右側: 目的 (已選製程) -->
+                    <div class="col-5">
+                        <div class="dual-list-header bg-light border rounded-top px-2 py-1">
+                            <strong class="small">目的 (已選製程)</strong>
+                            <span id="tgtCount" class="badge bg-primary float-end">0</span>
+                        </div>
+                        <div class="dual-list-body border border-top-0 rounded-bottom"
+                             style="height: 320px; overflow-y: auto;">
+                            <table class="table table-sm table-hover mb-0" id="tblTgtProcs">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th style="width:80px;">代號</th>
+                                        <th>名稱</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tgtTbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer py-1">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-warning btn-sm" id="btnChangeOK">
+                    <i class="bi bi-check-lg"></i> 確定改動
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+@section Styles {
+<style>
+    .tmp-proc-notes-container {
+        padding: 5px 15px;
+        max-width: 1600px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        height: calc(100vh - 80px);
+    }
+
+    .toolbar-section {
+        display: flex;
+        align-items: center;
+        padding: 4px 0;
+        border-bottom: 1px solid #dee2e6;
+        margin-bottom: 4px;
+        flex-shrink: 0;
+        flex-wrap: wrap;
+        gap: 3px;
+    }
+
+    /* ── 主體區域 ── */
+    .main-area {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+        gap: 0;
+    }
+
+    /* ── 樹狀面板 ── */
+    .tree-panel {
+        width: 300px;
+        min-width: 160px;
+        max-width: 480px;
+        display: flex;
+        flex-direction: column;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        overflow: hidden;
+        flex-shrink: 0;
+    }
+
+    .tree-panel-header {
+        background-color: #f8f9fa;
+        font-size: 0.82rem;
+        font-weight: 500;
+        padding: 4px 8px;
+        border-bottom: 1px solid #dee2e6;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+
+    .tree-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 2px 0;
+    }
+
+    .tree-node {
+        display: flex;
+        align-items: center;
+        padding: 3px 6px;
+        cursor: pointer;
+        font-size: 0.8rem;
+        user-select: none;
+        border-bottom: 1px solid #f0f0f0;
+        white-space: nowrap;
+    }
+
+    .tree-node:hover {
+        background-color: #e7f1ff;
+    }
+
+    .tree-node.active {
+        background-color: #0d6efd !important;
+        color: white;
+    }
+
+    .tree-node.active .text-muted {
+        color: #ffffffcc !important;
+    }
+
+    .tree-node .node-icon {
+        margin-right: 4px;
+        flex-shrink: 0;
+    }
+
+    .tree-node .node-name {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .tree-node .node-id {
+        font-size: 0.7rem;
+        color: #6c757d;
+        margin-left: 4px;
+    }
+
+    /* ── 垂直分隔線 (可拖動) ── */
+    .splitter-v {
+        width: 5px;
+        background-color: #dee2e6;
+        cursor: col-resize;
+        flex-shrink: 0;
+        transition: background-color 0.15s;
+    }
+
+    .splitter-v:hover, .splitter-v.dragging {
+        background-color: #0d6efd;
+    }
+
+    /* ── 右側面板 ── */
+    .right-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        min-width: 0;
+    }
+
+    /* ── 明細表格區 ── */
+    .grid-panel {
+        height: 50%;
+        min-height: 80px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        flex-shrink: 0;
+    }
+
+    .grid-panel-header {
+        background-color: #f8f9fa;
+        font-size: 0.82rem;
+        font-weight: 500;
+        padding: 4px 8px;
+        border-bottom: 1px solid #dee2e6;
+        flex-shrink: 0;
+    }
+
+    /* ── 水平分隔線 (可拖動) ── */
+    .splitter-h {
+        height: 5px;
+        background-color: #dee2e6;
+        cursor: row-resize;
+        flex-shrink: 0;
+        transition: background-color 0.15s;
+    }
+
+    .splitter-h:hover, .splitter-h.dragging {
+        background-color: #0d6efd;
+    }
+
+    /* ── 備註面板 ── */
+    .notes-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-height: 60px;
+    }
+
+    .notes-panel-header {
+        background-color: #f8f9fa;
+        font-size: 0.82rem;
+        font-weight: 500;
+        padding: 4px 8px;
+        border-bottom: 1px solid #dee2e6;
+        flex-shrink: 0;
+    }
+
+    .notes-textarea {
+        flex: 1;
+        resize: none;
+        border: none;
+        border-radius: 0;
+        font-size: 0.8rem;
+        line-height: 1.6;
+        padding: 6px 8px;
+        font-family: 'Noto Sans TC', sans-serif;
+    }
+
+    .notes-textarea:focus {
+        outline: none;
+        box-shadow: inset 0 0 0 2px rgba(13, 110, 253, 0.25);
+    }
+
+    /* ── 表格共用 ── */
+    .table th {
+        font-size: 0.75rem;
+        font-weight: 600;
+        white-space: nowrap;
+        padding: 0.18rem 0.35rem;
+    }
+
+    .table td {
+        font-size: 0.75rem;
+        vertical-align: middle;
+        padding: 0.18rem 0.35rem;
+        white-space: nowrap;
+    }
+
+    .table tbody tr:hover {
+        background-color: #e7f1ff;
+        cursor: pointer;
+    }
+
+    .table tbody tr.selected {
+        background-color: #cfe2ff;
+    }
+
+    .sticky-top {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+
+    .notes-preview-cell {
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #6c757d;
+        font-style: italic;
+    }
+
+    /* ── 雙清單選擇 ── */
+    .dual-list-header {
+        font-size: 0.8rem;
+    }
+
+    #tblSrcProcs td, #tblTgtProcs td {
+        font-size: 0.75rem;
+        padding: 0.15rem 0.35rem;
+    }
+
+    #tblSrcProcs tbody tr:hover, #tblTgtProcs tbody tr:hover {
+        background-color: #e7f1ff;
+        cursor: pointer;
+    }
+
+    #tblSrcProcs tbody tr.selected, #tblTgtProcs tbody tr.selected {
+        background-color: #cfe2ff;
+    }
+
+    .btn-sm {
+        font-size: 0.78rem;
+    }
+</style>
+}
+
+
+@section Scripts {
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script>
+    // ══════════════════════════════════════════════════
+    // 全域狀態
+    // ══════════════════════════════════════════════════
+    let treeData = [];            // 完整樹狀資料
+    let subData = [];             // 目前群組的明細資料
+    let currentItemId = null;     // 目前選中的樹節點 ItemId
+    let currentItemName = null;
+    let currentSubIndex = -1;     // 目前在 subData 中的索引
+    let notesOriginal = '';       // 備份原始備註用於取消
+
+    // 雙清單暫存
+    let srcProcs = [];            // 來源製程清單
+    let tgtProcs = [];            // 已選製程清單
+
+    // ══════════════════════════════════════════════════
+    // 初始化
+    // ══════════════════════════════════════════════════
+    $(document).ready(function () {
+        loadTree();
+        bindEvents();
+        initSplitters();
+    });
+
+    // ══════════════════════════════════════════════════
+    // 事件綁定
+    // ══════════════════════════════════════════════════
+    function bindEvents() {
+        // ── DBNavigator ──
+        $('#btnNavFirst').click(navFirst);
+        $('#btnNavPrev').click(navPrev);
+        $('#btnNavNext').click(navNext);
+        $('#btnNavLast').click(navLast);
+        $('#btnNavPost').click(postNotes);
+        $('#btnNavCancel').click(cancelNotes);
+        $('#btnNavRefresh').click(function () {
+            if (currentItemId) loadSub(currentItemId);
+        });
+
+        // ── 工具列 CRUD ──
+        $('#btnAppend').click(openAppendModal);
+        $('#btnDelete').click(openDeleteModal);
+        $('#btnChange').click(openChangeModal);
+        $('#btnName').click(doRename);
+
+        // ── 明細表格列點選 ──
+        $('#subTbody').on('click', 'tr', function () {
+            var idx = parseInt($(this).data('idx'));
+            selectSubRow(idx);
+        });
+
+        // ── 備註輸入框 ──
+        $('#txtNotes').on('input', function () {
+            // 標記已修改
+            if (currentSubIndex >= 0) {
+                $(this).css('border-color', '#ffc107');
+            }
+        });
+
+        // ── 新增 Modal OK ──
+        $('#btnAppendOK').click(doAppend);
+
+        // ── 刪除 Modal OK ──
+        $('#btnDeleteOK').click(doDelete);
+
+        // ── 改動 Modal: 雙清單移動 ──
+        $('#btnMoveRight').click(moveSelectedRight);
+        $('#btnMoveAllRight').click(moveAllRight);
+        $('#btnMoveLeft').click(moveSelectedLeft);
+        $('#btnMoveAllLeft').click(moveAllLeft);
+        $('#btnChangeOK').click(doChange);
+
+        // ── 來源篩選 ──
+        $('#srcFilter').on('input', function () {
+            filterSrcTable($(this).val().trim().toLowerCase());
+        });
+
+        // ── 雙清單列點選 ──
+        $('#srcTbody').on('click', 'tr', function () {
+            $(this).siblings().removeClass('selected');
+            $(this).addClass('selected');
+        });
+        $('#tgtTbody').on('click', 'tr', function () {
+            $(this).siblings().removeClass('selected');
+            $(this).addClass('selected');
+        });
+        // 雙擊移動
+        $('#srcTbody').on('dblclick', 'tr', moveSelectedRight);
+        $('#tgtTbody').on('dblclick', 'tr', moveSelectedLeft);
+    }
+
+    // ══════════════════════════════════════════════════
+    // 樹狀圖
+    // ══════════════════════════════════════════════════
+    function loadTree() {
+        $('#treeLoading').show();
+        $.ajax({
+            url: '/api/EMOdTmpProcNotes/tree',
+            type: 'GET',
+            success: function (resp) {
+                $('#treeLoading').hide();
+                if (resp.success) {
+                    treeData = resp.data || [];
+                    renderTree(treeData);
+                } else {
+                    alert('載入樹狀資料失敗: ' + resp.message);
+                }
+            },
+            error: function (xhr) {
+                $('#treeLoading').hide();
+                alert('載入樹狀資料失敗');
+            }
+        });
+    }
+
+    function renderTree(data) {
+        var html = '';
+        data.forEach(function (node) {
+            var level = parseInt(node.LevelNo || 1);
+            var indent = (level - 1) * 18;
+            html += `<div class="tree-node" data-id="${escHtml(node.ItemId)}" data-name="${escHtml(node.ItemName)}" style="padding-left: ${indent + 6}px;">
+                        <span class="node-name">${escHtml(node.ItemName)}</span>
+                        <span class="node-id">${escHtml(node.ItemId)}</span>
+                     </div>`;
+        });
+        $('#treeBody').html(html || '<div class="text-muted small p-2">無資料</div>');
+
+        // 樹節點點選
+        $('#treeBody').off('click', '.tree-node').on('click', '.tree-node', function () {
+            $('.tree-node').removeClass('active');
+            $(this).addClass('active');
+            var id = $(this).data('id');
+            var name = $(this).data('name');
+            selectTreeNode(id, name);
+        });
+    }
+
+    function selectTreeNode(id, name) {
+        if (currentItemId === id) return;
+        currentItemId = id;
+        currentItemName = name;
+
+        // 更新右上工具列
+        $('#edtId').val(id);
+        $('#edtName').val(name);
+        $('#lblCurrentNode').text(id + ' - ' + name);
+
+        // 載入明細
+        loadSub(id);
+    }
+
+    // ══════════════════════════════════════════════════
+    // 明細表格
+    // ══════════════════════════════════════════════════
+    function loadSub(itemId) {
+        subData = [];
+        currentSubIndex = -1;
+        $('#subTbody').empty();
+        $('#subEmpty').show();
+        $('#txtNotes').val('').css('border-color', '');
+        $('#lblNotesProcCode').text('');
+
+        $.ajax({
+            url: '/api/EMOdTmpProcNotes/sub/' + encodeURIComponent(itemId),
+            type: 'GET',
+            success: function (resp) {
+                if (resp.success && resp.data && resp.data.length > 0) {
+                    subData = resp.data;
+                    renderSubTable(subData);
+                    $('#subEmpty').hide();
+                    $('#subCount').text(subData.length + ' 筆');
+                    // 預選第一筆 (對應 Navigator 進入後的初始狀態)
+                    selectSubRow(0);
+                } else {
+                    $('#subEmpty').show();
+                    $('#subCount').text('0 筆');
+                }
+            },
+            error: function (xhr) {
+                alert('載入明細失敗: ' + (xhr.responseJSON?.message || xhr.responseText));
+            }
+        });
+    }
+
+    function renderSubTable(data) {
+        var tbody = $('#subTbody');
+        tbody.empty();
+        data.forEach(function (row, idx) {
+            var preview = (row.Notes || '').substring(0, 40) + ((row.Notes || '').length > 40 ? '...' : '');
+            var tr = $('<tr>').attr('data-idx', idx);
+            tr.append(`<td>${escHtml(row.ProcCode || '')}</td>`);
+            tr.append(`<td>${escHtml(row.ProcName || '')}</td>`);
+            tr.append(`<td class="notes-preview-cell">${preview ? escHtml(preview) : '<span class="text-muted fst-italic">（無備註）</span>'}</td>`);
+            tbody.append(tr);
+        });
+    }
+
+    function selectSubRow(idx) {
+        if (idx < 0 || idx >= subData.length) return;
+        currentSubIndex = idx;
+        var row = subData[idx];
+
+        $('#subTbody tr').removeClass('selected');
+        $('#subTbody tr[data-idx="' + idx + '"]').addClass('selected');
+
+        // 顯示備註 (對應 DBMemo1.DataSource=dsProdStyleTreeSub, DataField='Notes')
+        var notes = row.Notes || '';
+        notesOriginal = notes;
+        $('#txtNotes').val(notes).css('border-color', '');
+        $('#lblNotesProcCode').text(row.ProcCode + ' ' + row.ProcName);
+    }
+
+    // ══════════════════════════════════════════════════
+    // DBNavigator 操作
+    // ══════════════════════════════════════════════════
+    function navFirst()  { selectSubRow(0); }
+    function navPrev()   { selectSubRow(Math.max(0, currentSubIndex - 1)); }
+    function navNext()   { selectSubRow(Math.min(subData.length - 1, currentSubIndex + 1)); }
+    function navLast()   { selectSubRow(subData.length - 1); }
+
+    // Post: 儲存目前備註 (對應 Navigator nbPost)
+    function postNotes() {
+        if (currentSubIndex < 0) { alert('請先選擇一筆製程'); return; }
+        var row = subData[currentSubIndex];
+        var newNotes = $('#txtNotes').val();
+        $.ajax({
+            url: '/api/EMOdTmpProcNotes/notes',
+            type: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                itemId: row.ItemId,
+                procCode: row.ProcCode,
+                notes: newNotes
+            }),
+            success: function (resp) {
+                if (resp.success) {
+                    subData[currentSubIndex].Notes = newNotes;
+                    notesOriginal = newNotes;
+                    $('#txtNotes').css('border-color', '');
+                    // 更新明細表格預覽
+                    var preview = newNotes.substring(0, 40) + (newNotes.length > 40 ? '...' : '');
+                    $('#subTbody tr[data-idx="' + currentSubIndex + '"] td:last')
+                        .html(preview ? escHtml(preview) : '<span class="text-muted fst-italic">（無備註）</span>');
+                } else {
+                    alert(resp.message || '儲存失敗');
+                }
+            },
+            error: function (xhr) {
+                alert('儲存失敗: ' + (xhr.responseJSON?.message || xhr.responseText));
+            }
+        });
+    }
+
+    // Cancel: 還原備註 (對應 Navigator nbCancel)
+    function cancelNotes() {
+        $('#txtNotes').val(notesOriginal).css('border-color', '');
+    }
+
+    // ══════════════════════════════════════════════════
+    // 新增 Modal (dlgProcNotesAdd)
+    // ══════════════════════════════════════════════════
+    function openAppendModal() {
+        $('#edtItemName').val('');
+        // 載入群組清單到 cobSuperId
+        loadComboData('#cobSuperId', function () {
+            // 預設選中目前節點
+            if (currentItemId) {
+                $('#cobSuperId').val(currentItemId);
+            }
+        });
+        new bootstrap.Modal('#modalAppend').show();
+        setTimeout(function () { $('#edtItemName').focus(); }, 350);
+    }
+
+    function doAppend() {
+        var superId = $('#cobSuperId').val();
+        var itemName = $('#edtItemName').val().trim();
+        if (!superId) { alert('請選擇上層代碼'); return; }
+        if (!itemName) { alert('請輸入名稱'); return; }
+
+        $.ajax({
+            url: '/api/EMOdTmpProcNotes/append',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ superId: superId, itemName: itemName }),
+            success: function (resp) {
+                if (resp.success) {
+                    bootstrap.Modal.getInstance('#modalAppend').hide();
+                    loadTree();  // 重新整理樹狀
+                } else {
+                    alert(resp.message || '新增失敗');
+                }
+            },
+            error: function (xhr) {
+                alert('新增失敗: ' + (xhr.responseJSON?.message || xhr.responseText));
+            }
+        });
+    }
+
+    // ══════════════════════════════════════════════════
+    // 刪除 Modal (dlgProcNotesDel)
+    // ══════════════════════════════════════════════════
+    function openDeleteModal() {
+        // 載入群組清單到 cobItemId，預選目前節點
+        loadComboData('#cobItemId', function () {
+            if (currentItemId) {
+                $('#cobItemId').val(currentItemId);
+            }
+        });
+        new bootstrap.Modal('#modalDelete').show();
+    }
+
+    function doDelete() {
+        var itemId = $('#cobItemId').val();
+        if (!itemId) { alert('請選擇要刪除的節點'); return; }
+
+        $.ajax({
+            url: '/api/EMOdTmpProcNotes/delete',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ itemId: itemId }),
+            success: function (resp) {
+                if (resp.success) {
+                    bootstrap.Modal.getInstance('#modalDelete').hide();
+                    // 若刪除的是目前選中節點，清空右側
+                    if (currentItemId === itemId) {
+                        currentItemId = null;
+                        currentItemName = null;
+                        subData = [];
+                        $('#subTbody').empty();
+                        $('#subEmpty').show();
+                        $('#txtNotes').val('');
+                        $('#lblCurrentNode').text('');
+                        $('#edtId').val('');
+                        $('#edtName').val('');
+                    }
+                    loadTree();
+                } else {
+                    alert(resp.message || '刪除失敗');
+                }
+            },
+            error: function (xhr) {
+                alert('刪除失敗: ' + (xhr.responseJSON?.message || xhr.responseText));
+            }
+        });
+    }
+
+    // ══════════════════════════════════════════════════
+    // 更名 (btnNameClick)
+    // ══════════════════════════════════════════════════
+    function doRename() {
+        var itemId = $('#edtId').val().trim();
+        var newName = $('#edtName').val().trim();
+        if (!itemId) { alert('請先選擇節點'); return; }
+        if (!newName) { alert('請輸入新名稱'); return; }
+
+        $.ajax({
+            url: '/api/EMOdTmpProcNotes/rename',
+            type: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify({ itemId: itemId, itemName: newName }),
+            success: function (resp) {
+                if (resp.success) {
+                    // 更新 treeData 與畫面
+                    var node = treeData.find(n => n.ItemId === itemId);
+                    if (node) node.ItemName = newName;
+                    currentItemName = newName;
+                    $('#lblCurrentNode').text(itemId + ' - ' + newName);
+                    renderTree(treeData);
+                    // 重新 highlight 選中節點
+                    $('#treeBody .tree-node[data-id="' + itemId + '"]').addClass('active');
+                } else {
+                    alert(resp.message || '更名失敗');
+                }
+            },
+            error: function (xhr) {
+                alert('更名失敗: ' + (xhr.responseJSON?.message || xhr.responseText));
+            }
+        });
+    }
+
+    // ══════════════════════════════════════════════════
+    // 改動 Modal (dlgProcNoteSearch / TJSdMultSelect)
+    // ══════════════════════════════════════════════════
+    function openChangeModal() {
+        if (!currentItemId) { alert('請先選擇節點'); return; }
+        $('#lblChangeNode').text(currentItemId + ' - ' + (currentItemName || ''));
+        $('#srcFilter').val('');
+
+        // 並行載入左右清單
+        $.when(
+            $.ajax({ url: '/api/EMOdTmpProcNotes/procs-available/' + encodeURIComponent(currentItemId) }),
+            $.ajax({ url: '/api/EMOdTmpProcNotes/procs-selected/' + encodeURIComponent(currentItemId) })
+        ).done(function (srcResp, tgtResp) {
+            srcProcs = (srcResp[0].success ? srcResp[0].data : []) || [];
+            tgtProcs = (tgtResp[0].success ? tgtResp[0].data : []) || [];
+            renderDualList();
+            new bootstrap.Modal('#modalChange').show();
+        }).fail(function () {
+            alert('載入製程清單失敗');
+        });
+    }
+
+    function renderDualList() {
+        renderSrcTable(srcProcs);
+        renderTgtTable(tgtProcs);
+    }
+
+    function renderSrcTable(data) {
+        var filter = $('#srcFilter').val().trim().toLowerCase();
+        var tbody = $('#srcTbody');
+        tbody.empty();
+        data.forEach(function (row, idx) {
+            if (filter && !row.ProcCode.toLowerCase().includes(filter) &&
+                          !(row.ProcName || '').toLowerCase().includes(filter)) return;
+            tbody.append(
+                `<tr data-idx="${idx}"><td>${escHtml(row.ProcCode)}</td><td>${escHtml(row.ProcName || '')}</td></tr>`
+            );
+        });
+        $('#srcCount').text(srcProcs.length);
+    }
+
+    function renderTgtTable(data) {
+        var tbody = $('#tgtTbody');
+        tbody.empty();
+        data.forEach(function (row, idx) {
+            tbody.append(
+                `<tr data-idx="${idx}"><td>${escHtml(row.ProcCode)}</td><td>${escHtml(row.ProcName || '')}</td></tr>`
+            );
+        });
+        $('#tgtCount').text(tgtProcs.length);
+    }
+
+    function filterSrcTable(filter) {
+        renderSrcTable(srcProcs);  // re-render with filter
+    }
+
+    function moveSelectedRight() {
+        var selected = $('#srcTbody tr.selected');
+        if (selected.length === 0) { alert('請先選擇來源製程'); return; }
+        var idx = parseInt(selected.first().data('idx'));
+        if (idx >= 0 && idx < srcProcs.length) {
+            tgtProcs.push(srcProcs[idx]);
+            srcProcs.splice(idx, 1);
+            renderDualList();
+        }
+    }
+
+    function moveAllRight() {
+        var filter = $('#srcFilter').val().trim().toLowerCase();
+        var toMove = filter
+            ? srcProcs.filter(r => r.ProcCode.toLowerCase().includes(filter) ||
+                                   (r.ProcName || '').toLowerCase().includes(filter))
+            : [...srcProcs];
+        toMove.forEach(r => tgtProcs.push(r));
+        srcProcs = srcProcs.filter(r => !toMove.includes(r));
+        renderDualList();
+    }
+
+    function moveSelectedLeft() {
+        var selected = $('#tgtTbody tr.selected');
+        if (selected.length === 0) { alert('請先選擇目的製程'); return; }
+        var idx = parseInt(selected.first().data('idx'));
+        if (idx >= 0 && idx < tgtProcs.length) {
+            srcProcs.push(tgtProcs[idx]);
+            // 按 ProcCode 排序
+            srcProcs.sort((a, b) => a.ProcCode.localeCompare(b.ProcCode));
+            tgtProcs.splice(idx, 1);
+            renderDualList();
+        }
+    }
+
+    function moveAllLeft() {
+        tgtProcs.forEach(r => srcProcs.push(r));
+        srcProcs.sort((a, b) => a.ProcCode.localeCompare(b.ProcCode));
+        tgtProcs = [];
+        renderDualList();
+    }
+
+    function doChange() {
+        var procCodes = tgtProcs.map(r => r.ProcCode);
+        $.ajax({
+            url: '/api/EMOdTmpProcNotes/change',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                itemId: currentItemId,
+                procCodes: procCodes
+            }),
+            success: function (resp) {
+                if (resp.success) {
+                    bootstrap.Modal.getInstance('#modalChange').hide();
+                    loadSub(currentItemId);  // 重新整理明細
+                } else {
+                    alert(resp.message || '改動失敗');
+                }
+            },
+            error: function (xhr) {
+                alert('改動失敗: ' + (xhr.responseJSON?.message || xhr.responseText));
+            }
+        });
+    }
+
+    // ══════════════════════════════════════════════════
+    // 下拉選單載入 (共用)
+    // ══════════════════════════════════════════════════
+    function loadComboData(selector, callback) {
+        $.ajax({
+            url: '/api/EMOdTmpProcNotes/tree-for-combo',
+            type: 'GET',
+            success: function (resp) {
+                var $sel = $(selector);
+                $sel.empty().append('<option value="">-- 請選擇 --</option>');
+                if (resp.success && resp.data) {
+                    resp.data.forEach(function (row) {
+                        var indent = '　'.repeat((parseInt(row.LevelNo) || 1) - 1);
+                        $sel.append(`<option value="${escHtml(row.ItemId)}">${indent}${escHtml(row.ItemId)} ${escHtml(row.ItemName)}</option>`);
+                    });
+                }
+                if (callback) callback();
+            },
+            error: function () {
+                alert('載入下拉清單失敗');
+            }
+        });
+    }
+
+    // ══════════════════════════════════════════════════
+    // 可拖動分隔線 (Splitter)
+    // ══════════════════════════════════════════════════
+    function initSplitters() {
+        // 垂直分隔線 (左右)
+        var isDraggingV = false;
+        $('#splitterV').on('mousedown', function (e) {
+            isDraggingV = true;
+            $(this).addClass('dragging');
+            e.preventDefault();
+        });
+        $(document).on('mousemove', function (e) {
+            if (!isDraggingV) return;
+            var container = $('.main-area');
+            var offset = container.offset();
+            var newWidth = e.pageX - offset.left;
+            newWidth = Math.max(120, Math.min(500, newWidth));
+            $('#treePanel').css('width', newWidth + 'px');
+        });
+        $(document).on('mouseup', function () {
+            if (isDraggingV) {
+                isDraggingV = false;
+                $('#splitterV').removeClass('dragging');
+            }
+        });
+
+        // 水平分隔線 (上下 in 右側)
+        var isDraggingH = false;
+        var startY = 0, startGridH = 0;
+        $('#splitterH').on('mousedown', function (e) {
+            isDraggingH = true;
+            startY = e.pageY;
+            startGridH = $('#gridPanel').outerHeight();
+            $(this).addClass('dragging');
+            e.preventDefault();
+        });
+        $(document).on('mousemove.splitterH', function (e) {
+            if (!isDraggingH) return;
+            var delta = e.pageY - startY;
+            var newH = Math.max(60, Math.min(500, startGridH + delta));
+            $('#gridPanel').css('height', newH + 'px');
+        });
+        $(document).on('mouseup.splitterH', function () {
+            if (isDraggingH) {
+                isDraggingH = false;
+                $('#splitterH').removeClass('dragging');
+            }
+        });
+    }
+
+    // ══════════════════════════════════════════════════
+    // 工具函式
+    // ══════════════════════════════════════════════════
+    function escHtml(str) {
+        if (str === null || str === undefined) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+</script>
+}

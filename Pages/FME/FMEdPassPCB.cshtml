@@ -21,9 +21,12 @@
                 <i class="bi bi-download"></i> 匯入參數明細
             </button>
         </div>
-        <div class="paper-info ms-auto">
-            <span class="me-3"><strong>單號：</strong><span id="lblPaperNum">@Model.PaperNum</span></span>
-            <span><strong>項次：</strong><span id="lblItem">1</span></span>
+        <span id="pnlRouteSeq" class="me-3 paper-info" style="display:none!important">
+            <strong>途序：</strong><span id="lblRouteSeq">-</span>
+        </span>
+        <div class="paper-info ms-auto d-flex align-items-center gap-3">
+            <span><strong>單號：</strong><span id="lblPaperNum" style="display:inline-block; min-width:120px;">　</span></span>
+            <span><strong>項次：</strong><span id="lblItem" style="display:inline-block; min-width:20px;">　</span></span>
         </div>
     </div>
 
@@ -180,6 +183,21 @@
                                 </div>
                                 <div class="col-auto" style="width: 85px;">
                                     <input type="number" class="form-control form-control-sm border-danger" id="txtSQnty" value="0">
+                                </div>
+                            </div>
+                            <!-- 作業人員 / 機台 (iNeedMUT_Equip=1 時顯示並必填) -->
+                            <div class="row g-1 mt-0 align-items-center" id="pnlWorkerEquip" style="display:none!important">
+                                <div class="col-auto" style="width: 100px;">
+                                    <label class="form-label form-label-sm mb-0" id="lblWorker">作業人員</label>
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="text" class="form-control form-control-sm" id="txtWorker" placeholder="輸入作業人員">
+                                </div>
+                                <div class="col-auto" style="width: 70px;">
+                                    <label class="form-label form-label-sm mb-0">機 台</label>
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="text" class="form-control form-control-sm" id="txtEquipId" placeholder="輸入機台">
                                 </div>
                             </div>
                             <div class="row g-1 mt-1">
@@ -688,6 +706,7 @@
     // 全域變數 - 作業型畫面，不預先建立單號
     let lotInfo = null;  // 匯入的批號資訊
     let currentUserId = '@Model.UserId';
+    let currentTempPaperNum = ''; // 匯入暫存單號，用於隔離多使用者多報暫存
 
     $(document).ready(function () {
         // 初始化
@@ -721,11 +740,31 @@
             executePass();
         });
 
-        // 取消 (清除表單)
+        // 製程參數：匯入（工具列/頁籤按鈕都共用）
+        $('#btnImportParam, #btnParamImport').click(function () {
+            importProcParams();
+        });
+
+        // 製程參數：清除
+        $('#btnParamClear').click(function () {
+            clearProcParams();
+        });
+
+        // 取消 (清除表單並刪除草稿)
         $('#btnCancel').click(function () {
             if (lotInfo && confirm('確定要取消並清除目前資料嗎？')) {
-                clearForm();
-                $('#txtLotNum').focus();
+                cancelDraft(currentTempPaperNum, function () {
+                    clearForm();
+                    $('#txtLotNum').focus();
+                });
+            }
+        });
+
+        // 關閉視窗時嘗試刪除草稿（best-effort）
+        $(window).on('beforeunload', function () {
+            if (currentTempPaperNum) {
+                navigator.sendBeacon('/api/FMEdPassPCB/cancel-draft',
+                    new Blob([JSON.stringify({ paperNum: currentTempPaperNum })], { type: 'application/json' }));
             }
         });
 
@@ -750,9 +789,43 @@
         });
 
         // 表格行選擇
-        $('#tblXOut tbody, #tblXOutDefect tbody, #tblSelectLot tbody').on('click', 'tr', function () {
+        $('#tblXOut tbody, #tblXOutDefect tbody').on('click', 'tr', function () {
             $(this).siblings().removeClass('selected');
             $(this).addClass('selected');
+        });
+
+        // 選擇批號列點選：壓合站切換項次 + 更新主畫面
+        $('#tblSelectLot tbody').on('click', 'tr', function () {
+            $(this).siblings().removeClass('selected');
+            $(this).addClass('selected');
+
+            var layerData = $(this).data('layerData');
+            if (!layerData || !lotInfo) return; // 非壓合站或尚未匯入，不處理
+
+            var serialNum = $(this).data('serialNum');
+
+            // 更新項次
+            $('#lblItem').text(serialNum);
+
+            // 更新批號輸入框（供 executePass 讀取）
+            $('#txtLotNum').val(layerData.LotNum || layerData.lotNum || '');
+
+            // 更新主畫面欄位（同 fillLotInfo 的部分邏輯）
+            var layerName = layerData.LayerName || layerData.layerName || layerData.LayerId || layerData.layerId || '';
+            $('#txtLayerName').val(layerName);
+
+            var popName = layerData.POPName || layerData.popName || layerData.POP || layerData.pop || '';
+            $('#txtPopName').val(popName);
+
+            var qnty = parseFloat(layerData.Qnty || layerData.qnty) || 0;
+            $('#txtQnty').val(qnty);
+
+            // 更新 lotInfo 中對應的層別欄位，讓 executePass 能送正確資料
+            lotInfo['LotNum']   = layerData.LotNum   || layerData.lotNum   || lotInfo['LotNum'];
+            lotInfo['LayerId']  = layerData.LayerId  || layerData.layerId  || lotInfo['LayerId'];
+            lotInfo['LayerName']= layerData.LayerName|| layerData.layerName|| lotInfo['LayerName'];
+            lotInfo['POP']      = layerData.POP      || layerData.pop      || lotInfo['POP'];
+            lotInfo['Qnty']     = qnty;
         });
 
         // 數量變更自動計算 (失去焦點或按 Enter 時觸發)
@@ -828,11 +901,17 @@
             data: JSON.stringify({
                 lotNum: lotNum,
                 inStock: 0,      // 0=一般過帳
-                paperNum: '',    // 空字串，SP會檢查重複
+                paperNum: currentTempPaperNum, // 後端若為空會自動產生暫存單號
                 userId: currentUserId
             }),
             success: function (resp) {
                 if (resp.success && resp.lotInfo) {
+                    currentTempPaperNum = resp.paperNum || currentTempPaperNum;
+                    if (currentTempPaperNum) {
+                        $('#lblPaperNum').text(currentTempPaperNum);
+                        $('#txtParamPaperNum').val(currentTempPaperNum);
+                        $('#lblItem').text('1');
+                    }
                     lotInfo = resp.lotInfo;
                     fillLotInfo(resp.lotInfo);
                     $('#txtPQnty').focus();
@@ -1008,23 +1087,118 @@
 
         // === ★ 修正重點 3：控制顯示邏輯 ===
         var aftProcType = getIntVal(info, 'AftProcType');
+        var xOutNeedDefect = getIntVal(info, 'XOutNeedDefect');
         
-        // 原始邏輯：只有 (報廢批) 或 (成品入庫) 才顯示
-        if (isXOut === 1 || aftProcType === 990) {
+        // Delphi 對應邏輯：需先符合 XOut 面板條件，再看 XOutNeedDefect
+        if ((isXOut === 1 || aftProcType === 990) && xOutNeedDefect === 1) {
              $('#pnlXOutDefect').show();
         } else {
              $('#pnlXOutDefect').hide();
         }
-        
-        // 【測試用】如果你想強制看到報廢區塊，可以把上面那幾行註解掉，改成下面這行：
-        // $('#pnlXOutDefect').show(); 
 
         // Debug 資訊
         console.log('Qnty:', qnty, 'PQnty:', pQnty, 'IsShowPQnty:', isShowPQnty);
         console.log('=== lotInfo (FMEdPassChoiceLotPCB) ===');
         console.log('欄位:', Object.keys(info));
 
-        // 忽略大小寫取值的輔助函數
+        // === ★ 新增：填入「選擇批號」表格 ===
+        renderSelectLotTable(info);
+
+        // === iNeedMUT_Equip：控制作業人員/機台欄位 ===
+        var iNeedMUT = getIntVal(info, 'iNeedMUT_Equip');
+        if (iNeedMUT === 1) {
+            $('#pnlWorkerEquip').show();
+        } else {
+            $('#pnlWorkerEquip').hide();
+            $('#txtWorker').val('');
+            $('#txtEquipId').val('');
+        }
+
+        // === 途序顯示 (RouteSerial / TotalRouteSerial) ===
+        var routeSerial = getIntVal(info, 'RouteSerial');
+        var totalSerial = getIntVal(info, 'TotalRouteSerial');
+        if (routeSerial > 0) {
+            var seqText = totalSerial > 0
+                ? routeSerial + ' / ' + totalSerial
+                : routeSerial + ' / ?';
+            $('#lblRouteSeq').text(seqText);
+            $('#pnlRouteSeq').show();
+        } else {
+            $('#pnlRouteSeq').hide();
+            $('#lblRouteSeq').text('-');
+        }
+
+        // Debug 資訊
+        console.log('Qnty:', qnty, 'PQnty:', pQnty, 'IsShowPQnty:', isShowPQnty);
+        console.log('GoodPCS:', getIntVal(info, 'GoodPCS'));
+        console.log('iNeedMUT_Equip:', iNeedMUT);
+    }
+
+    function importProcParams() {
+        if (!currentTempPaperNum) {
+            alert('請先匯入批號');
+            return;
+        }
+
+        $.ajax({
+            url: '/api/FMEdPassPCB/param/import',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                paperNum: currentTempPaperNum,
+                userId: currentUserId
+            }),
+            success: function (resp) {
+                if (!resp.success) {
+                    alert(resp.message || '匯入製程參數失敗');
+                    return;
+                }
+                renderProcParamTable(resp.data || []);
+                alert('製程參數匯入完成');
+            },
+            error: function (xhr) {
+                alert(xhr.responseJSON?.message || '匯入製程參數失敗');
+            }
+        });
+    }
+
+    function clearProcParams() {
+        if (!currentTempPaperNum) {
+            alert('請先匯入批號');
+            return;
+        }
+        if (!confirm('確定要清除製程參數明細嗎？')) return;
+
+        $.ajax({
+            url: '/api/FMEdPassPCB/param/clear',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                paperNum: currentTempPaperNum,
+                userId: currentUserId
+            }),
+            success: function (resp) {
+                if (!resp.success) {
+                    alert(resp.message || '清除製程參數失敗');
+                    return;
+                }
+                renderProcParamTable(resp.data || []);
+                alert('製程參數已清除');
+            },
+            error: function (xhr) {
+                alert(xhr.responseJSON?.message || '清除製程參數失敗');
+            }
+        });
+    }
+
+    function renderProcParamTable(list) {
+        var tbody = $('#tblProcParam tbody');
+        tbody.empty();
+
+        if (!list || list.length === 0) {
+            return;
+        }
+
         function getVal(obj, key) {
             if (!obj) return '';
             var lowerKey = key.toLowerCase();
@@ -1033,81 +1207,15 @@
             }
             return '';
         }
-        function getNumVal(obj, key) {
-            var v = getVal(obj, key);
-            return v === '' ? 0 : parseFloat(v) || 0;
-        }
-        function getIntVal(obj, key) {
-            var v = getVal(obj, key);
-            return v === '' ? 0 : parseInt(v) || 0;
-        }
 
-        // === 料號、版序 ===
-        $('#txtPartNum').val(getVal(info, 'PartNum'));
-        $('#txtRevision').val(getVal(info, 'Revision'));
-
-        // === 製程 (Controller 已補 Lookup) ===
-        $('#txtProcName').val(getVal(info, 'ProcName') || getVal(info, 'ProcCode'));
-        $('#txtAftProcName').val(getVal(info, 'AftProcName') || getVal(info, 'AftProc'));
-
-        // === 階段 (Controller 已補 Lookup) ===
-        $('#txtLayerName').val(getVal(info, 'LayerName') || getVal(info, 'LayerId'));
-        $('#txtAftLayerName').val(getVal(info, 'AftLayerName') || getVal(info, 'AftLayer'));
-
-        // === 型狀 (Controller 已補 Lookup) ===
-        $('#txtPopName').val(getVal(info, 'POPName') || getVal(info, 'POP'));
-        $('#txtAftPopName').val(getVal(info, 'AftPOPName') || getVal(info, 'AftPOP'));
-
-        // === 原始數量 (SP 回傳 Qnty) ===
-        var qnty = getNumVal(info, 'Qnty');
-        $('#txtQnty').val(qnty);
-
-        // === 過帳良品數 (依 IsShowPQnty 旗標決定) ===
-        // Delphi 邏輯 (PassPCB.pas:2102-2105):
-        //   if IsShowPQnty = 1 then PQnty := SP.PQnty else PQnty := 0
-        var isShowPQnty = getIntVal(info, 'IsShowPQnty');
-        var pQnty = (isShowPQnty === 1) ? getNumVal(info, 'PQnty') : 0;
-        $('#txtPQnty').val(pQnty);
-
-        // === 報廢數 (SP 直接回傳 SQnty) ===
-        $('#txtSQnty').val(getNumVal(info, 'SQnty'));
-
-        // === 產品類別 (從 MINdMatInfo.ProdStyle) ===
-        // 注意: ProdStyle 是產品類別，POType 是訂單種類 (正常/樣品/試產)
-        var prodStyle = getVal(info, 'ProdStyle');
-        $('#txtPoType').val(prodStyle);
-
-        // === 允收X報數 (從 MINdMatInfo.AllowXOutQnty) ===
-        var allowXOutQnty = getIntVal(info, 'AllowXOutQnty');
-        $('#txtXOutQnty').val(allowXOutQnty);
-
-        // === 報廢明細區塊顯示控制 ===
-        // 依 Delphi 邏輯: IsXOut=1 或 AftProcType=990(成品) 時顯示
-        var isXOut = getIntVal(info, 'IsXOut');
-        var aftProcType = getIntVal(info, 'AftProcType');
-        if (isXOut === 1 || aftProcType === 990) {
-            $('#pnlXOutDefect').show();
-        } else {
-            $('#pnlXOutDefect').hide();
-        }
-
-        // === 單報缺點明細區塊顯示控制 ===
-        // 當製程規範有設定 XOutNeedDefect=1 時顯示
-        var xOutNeedDefect = getIntVal(info, 'XOutNeedDefect');
-        if (xOutNeedDefect === 1) {
-            $('#pnlXOutDefect').show();
-            console.log('顯示單報缺點明細 (XOutNeedDefect=1)');
-        } else {
-            $('#pnlXOutDefect').hide();
-            console.log('隱藏單報缺點明細 (XOutNeedDefect=' + xOutNeedDefect + ')');
-        }
-
-        // === ★ 新增：填入「選擇批號」表格 ===
-        renderSelectLotTable(info);
-
-        // Debug 資訊
-        console.log('Qnty:', qnty, 'PQnty:', pQnty, 'IsShowPQnty:', isShowPQnty);
-        console.log('GoodPCS:', getIntVal(info, 'GoodPCS'));
+        list.forEach(function (row) {
+            var tr = $('<tr>');
+            tr.append($('<td>').text(getVal(row, 'ParamName') || getVal(row, 'Name')));
+            tr.append($('<td>').text(getVal(row, 'ParamValue') || getVal(row, 'Value')));
+            tr.append($('<td>').text(getVal(row, 'Unit')));
+            tr.append($('<td>').text(getVal(row, 'Notes') || getVal(row, 'Remark')));
+            tbody.append(tr);
+        });
     }
 
     // 填入「選擇批號」表格
@@ -1130,7 +1238,7 @@
         }
 
         // 建立表格列的輔助函數 (必須在使用前定義)
-        function createSelectLotRow(data, serialNum) {
+        function createSelectLotRow(data, serialNum, isLamination) {
             var lotNum = getVal(data, 'LotNum');
             var layerName = getVal(data, 'LayerName') || getVal(data, 'LayerId');
             var qnty = getNumVal(data, 'Qnty');
@@ -1142,39 +1250,44 @@
             var goodPCS = getNumVal(data, 'GoodPCS');
 
             var row = $('<tr></tr>');
-            row.append('<td class="text-center">' + serialNum + '</td>');  // 項次
-            row.append('<td>' + (lotNum || '') + '</td>');  // 批號(F5)
-            row.append('<td>' + (layerName || '') + '</td>');  // 階段
-            row.append('<td class="text-end">' + qnty.toFixed(0) + '</td>');  // 原始數量
-            row.append('<td class="text-end">' + pQnty.toFixed(0) + '</td>');  // 過帳數
-            row.append('<td class="text-end">' + sQnty.toFixed(0) + '</td>');  // 報廢數
-            row.append('<td class="text-end">' + uQnty.toFixed(0) + '</td>');  // 留存數
-            row.append('<td class="text-end">' + xOutQnty.toFixed(0) + '</td>');  // 本站新增單報數
-            row.append('<td>' + (dateCode || '') + '</td>');  // DateCode
-            row.append('<td class="text-end">' + goodPCS.toFixed(0) + '</td>');  // 完成良品PCS數
+            row.append('<td class="text-center">' + serialNum + '</td>');
+            row.append('<td>' + (lotNum || '') + '</td>');
+            row.append('<td>' + (layerName || '') + '</td>');
+            row.append('<td class="text-end">' + qnty.toFixed(0) + '</td>');
+            row.append('<td class="text-end">' + pQnty.toFixed(0) + '</td>');
+            row.append('<td class="text-end">' + sQnty.toFixed(0) + '</td>');
+            row.append('<td class="text-end">' + uQnty.toFixed(0) + '</td>');
+            row.append('<td class="text-end">' + xOutQnty.toFixed(0) + '</td>');
+            row.append('<td>' + (dateCode || '') + '</td>');
+            row.append('<td class="text-end">' + goodPCS.toFixed(0) + '</td>');
+
+            // 壓合站：把層別資料掛在列上，供點選切換用
+            if (isLamination) {
+                row.data('layerData', data);
+                row.data('serialNum', serialNum);
+                row.css('cursor', 'pointer');
+            }
             return row;
         }
 
-        console.log('renderSelectLotTable 被呼叫', info);
-        console.log('AllLayers:', info.AllLayers);
-        console.log('AllLayers 長度:', info.AllLayers ? info.AllLayers.length : 0);
-
         // 檢查是否為壓合站且有多層別資料
         if (info.AllLayers && info.AllLayers.length > 0) {
-            console.log('壓合站模式：顯示 ' + info.AllLayers.length + ' 個層別');
-            // 壓合站：顯示所有層別
             info.AllLayers.forEach(function(layer, index) {
-                console.log('  處理層別 ' + (index + 1) + ':', layer);
-                var row = createSelectLotRow(layer, index + 1);
+                var row = createSelectLotRow(layer, index + 1, true);
                 tbody.append(row);
             });
+
+            // 預設選取第一列並觸發切換（顯示第一層別的資料）
+            var $firstRow = tbody.find('tr:first');
+            $firstRow.addClass('selected');
+            $firstRow.trigger('click');
             return;
         }
 
-        // 一般情況：顯示單一批號
-        console.log('一般模式：顯示單一批號');
-        var row = createSelectLotRow(info, 1);
+        // 一般情況：顯示單一批號（不需切換）
+        var row = createSelectLotRow(info, 1, false);
         tbody.append(row);
+        $('#lblItem').text('1');
     }
 
     // 執行過帳 - 建立單號並呼叫 FMEdPassResult SP
@@ -1211,10 +1324,27 @@
             return v === '' ? 0 : parseInt(v) || 0;
         }
 
+        // 作業人員/機台必填驗證 (iNeedMUT_Equip=1 時)
+        if (getIntVal('iNeedMUT_Equip') === 1) {
+            var worker = $('#txtWorker').val().trim();
+            var equipId = $('#txtEquipId').val().trim();
+            if (!worker) {
+                alert('請輸入作業人員');
+                $('#txtWorker').focus();
+                return;
+            }
+            if (!equipId) {
+                alert('請輸入機台');
+                $('#txtEquipId').focus();
+                return;
+            }
+        }
+
         // 收集畫面資料 (對應 Controller 的 ExecutePassRequest)
         var passData = {
             // 基本資訊
             lotNum: lotNum,
+            paperNum: currentTempPaperNum,
             userId: currentUserId,
 
             // 從 lotInfo 帶入 (SP 回傳的欄位)
@@ -1238,6 +1368,8 @@
             // 其他
             dateCode: getVal('DateCode'),
             notes: $('#txtNotes').val(),
+            worker: $('#txtWorker').val().trim(),
+            equipId: $('#txtEquipId').val().trim(),
 
             // 明細資料
             xOutList: collectXOutData(),
@@ -1257,19 +1389,29 @@
             success: function (resp) {
                 if (resp.success) {
                     var msg = resp.message || '過帳完成';
-                    if (resp.paperNum) {
-                        msg += '\n單號: ' + resp.paperNum;
-                    }
+                    if (resp.paperNum) msg += '\n單號: ' + resp.paperNum;
                     alert(msg);
-                    // 清空表單，準備下一筆
                     clearForm();
                     $('#txtLotNum').focus();
                 } else {
-                    alert(resp.message || '過帳失敗');
+                    if (resp.needReImport) {
+                        alert('⚠ ' + (resp.message || '草稿已失效，請重新匯入批號'));
+                        clearForm();
+                        $('#txtLotNum').focus();
+                    } else {
+                        alert(resp.message || '過帳失敗');
+                    }
                 }
             },
             error: function (xhr) {
-                alert('過帳失敗: ' + (xhr.responseJSON?.message || xhr.responseText));
+                var errData = xhr.responseJSON;
+                if (errData && errData.needReImport) {
+                    alert('⚠ ' + (errData.message || '草稿已失效，請重新匯入批號'));
+                    clearForm();
+                    $('#txtLotNum').focus();
+                } else {
+                    alert('過帳失敗: ' + (errData?.message || xhr.responseText));
+                }
             }
         });
     }
@@ -1280,8 +1422,9 @@
         $('#tblXOut tbody tr').each(function (idx) {
             var qnty = parseFloat($(this).find('input[type="number"]').val()) || 0;
             var isFullScrap = $(this).find('input[type="checkbox"]').is(':checked') ? 1 : 0;
+            var orgQnty = parseFloat($(this).find('td:eq(2)').text()) || 0;
             if (qnty > 0) {
-                list.push({ item: idx + 1, qnty: qnty, isFullScrap: isFullScrap });
+                list.push({ item: idx + 1, qnty: qnty, orgQnty: orgQnty, isFullScrap: isFullScrap });
             }
         });
         return list;
@@ -1409,6 +1552,24 @@
         });
     }
 
+    // 呼叫 cancel-draft API 刪除草稿，完成後執行 callback
+    function cancelDraft(paperNum, callback) {
+        if (!paperNum) {
+            if (callback) callback();
+            return;
+        }
+        $.ajax({
+            url: '/api/FMEdPassPCB/cancel-draft',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ paperNum: paperNum }),
+            complete: function () {
+                // 不管成功或失敗都執行 callback（草稿刪除失敗是可接受的孤立記錄）
+                if (callback) callback();
+            }
+        });
+    }
+
     // 清除表單
     function clearForm() {
         $('#txtLotNum').val('');
@@ -1427,15 +1588,23 @@
         $('#txtScrapStrXOutQnty').val(0);
         $('#txtPoType').val('');
         $('#txtNotes').val('');
+        $('#txtWorker').val('');
+        $('#txtEquipId').val('');
+        $('#pnlWorkerEquip').hide();
+        $('#lblRouteSeq').text('-');
+        $('#pnlRouteSeq').hide();
         $('#lblPanelLayout').text('');  // 排版數
         $('#lblGoodPCS').text('0');  // 良品PCS數
         $('#tblXOut tbody').empty();
         $('#tblXOutDefect tbody').empty();
         $('#tblSelectLot tbody').empty();
-        $('#lblPaperNum').text('(過帳後產生)');
-        $('#lblItem').text('1');
+        $('#lblPaperNum').text('\u3000'); // 全形空白佔位，保持寬度不跑動
+        $('#txtParamPaperNum').val('');
+        $('#txtParamItem').val('1');
+        $('#lblItem').text('\u3000');
         $('#pnlXOutDefect').hide();  // 隱藏單報缺點明細區
         lotInfo = null;
+        currentTempPaperNum = '';
     }
 
     // 互動式數量自動調整

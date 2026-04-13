@@ -27,121 +27,122 @@ public class FMEdPassPCBController : ControllerBase
     #region 匯入批號 (核心功能)
 
     /// <summary>
-    /// 匯入批號 - 呼叫 FMEdPassChoiceLotPCB SP 取得批號資訊
+    /// 匯入批號
+    /// 流程: 取正式號碼 → 建草稿 FMEdPassMain(Finished=0) → 呼叫 FMEdPassChoiceLotPCB → 回傳資料
     /// 對應 Delphi prcImport 程序
     /// </summary>
-[HttpPost("import")]
-public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
-{
-    try
+    [HttpPost("import")]
+    public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.LotNum))
-            return BadRequest(new { success = false, message = "請輸入批號" });
-
-        var cs = _context.Database.GetConnectionString();
-        await using var conn = new SqlConnection(cs);
-        await conn.OpenAsync();
-
-        // 準備儲存資料的容器
-        Dictionary<string, object?>? lotInfo = null;
-        var xOutList = new List<Dictionary<string, object?>>();
-        var defectList = new List<Dictionary<string, object?>>();
-
-        await using (var cmd = new SqlCommand("exec FMEdPassChoiceLotPCB @LotNum, @InStock, @PaperNum", conn))
+        try
         {
-            cmd.Parameters.AddWithValue("@LotNum", request.LotNum.Trim());
-            cmd.Parameters.AddWithValue("@InStock", request.InStock);
-            cmd.Parameters.AddWithValue("@PaperNum", request.PaperNum ?? "");
+            if (string.IsNullOrWhiteSpace(request.LotNum))
+                return BadRequest(new { success = false, message = "請輸入批號" });
 
-            try
+            var cs = _context.Database.GetConnectionString();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            // 1. 決定要使用的 PaperNum
+            //    - 若前端已有暫存單號（換批號時），沿用並先清除舊明細
+            //    - 若沒有，取正式號碼並建草稿主檔
+            string paperNum;
+            if (!string.IsNullOrWhiteSpace(request.PaperNum))
             {
-                await using var rd = await cmd.ExecuteReaderAsync();
-
-                // 1. 讀取第一張表：批號主資訊 (Result Set 1)
-                if (await rd.ReadAsync())
+                // 確認草稿仍存在
+                var exists = await DraftExists(conn, request.PaperNum.Trim());
+                if (exists)
                 {
-                    lotInfo = ReadRowToDictionary(rd);
+                    paperNum = request.PaperNum.Trim();
+                    // 清除舊的明細（換批號時重新填入）
+                    await CleanDraftDetails(conn, paperNum);
                 }
-
-                // 2. 嘗試讀取第二張表：多報明細 (Result Set 2)
-                if (await rd.NextResultAsync())
+                else
                 {
-                    while (await rd.ReadAsync())
-                    {
-                        xOutList.Add(ReadRowToDictionary(rd));
-                    }
+                    // 草稿已逾時被刪除，重新取號
+                    paperNum = await CreateDraftPaper(conn, request.UserId ?? "admin");
+                    if (string.IsNullOrWhiteSpace(paperNum))
+                        return BadRequest(new { success = false, message = "取單號失敗，請重試" });
                 }
-
-                // 3. 嘗試讀取第三張表：報廢明細 (Result Set 3)
-                if (await rd.NextResultAsync())
-                {
-                    while (await rd.ReadAsync())
-                    {
-                        defectList.Add(ReadRowToDictionary(rd));
-                    }
-                }
-            }
-            catch (SqlException sqlEx)
-            {
-                _logger.LogWarning("FMEdPassChoiceLotPCB 回傳錯誤: {Message}", sqlEx.Message);
-                return BadRequest(new { success = false, message = sqlEx.Message });
-            }
-        }
-
-        if (lotInfo == null || lotInfo.Count == 0)
-            return BadRequest(new { success = false, message = "無此批號!!" });
-
-        // 將明細表塞入 lotInfo 中，讓前端可以拿到
-        lotInfo["XOutList"] = xOutList;
-        lotInfo["DefectList"] = defectList;
-
-        // 補充 Lookup 欄位
-        await EnrichWithLookupFields(conn, lotInfo);
-
-        // 檢查是否為壓合站,若是則查詢所有層別
-        var procCode = GetStringValue(lotInfo, "ProcCode");
-        _logger.LogInformation("批號 {LotNum} 的製程代碼: [{ProcCode}] (長度={Length})", request.LotNum, procCode, procCode.Length);
-
-        if (procCode.Trim() == "P1200")  // 壓合站 (使用 Trim() 去除空白)
-        {
-            _logger.LogInformation("判斷為壓合站，開始查詢所有層別");
-            var allLayers = await GetAllLayersForLamination(conn, request.LotNum);
-            _logger.LogInformation("查詢到 {Count} 個層別", allLayers.Count);
-
-            if (allLayers.Count > 0)
-            {
-                lotInfo["AllLayers"] = allLayers;
-
-                // 計算最小良品數
-                var minGoodQty = allLayers.Min(layer => GetIntValue(layer, "Qnty"));
-                lotInfo["MinGoodQty"] = minGoodQty;
-                _logger.LogInformation("壓合站最小良品數: {MinQty}", minGoodQty);
             }
             else
             {
-                _logger.LogWarning("壓合站但查詢不到任何層別資料");
+                // 第一次匯入，取正式號碼並建草稿
+                paperNum = await CreateDraftPaper(conn, request.UserId ?? "admin");
+                if (string.IsNullOrWhiteSpace(paperNum))
+                    return BadRequest(new { success = false, message = "取單號失敗，請重試" });
             }
-        }
-        else
-        {
-            _logger.LogInformation("非壓合站，製程代碼為: {ProcCode}", procCode);
-        }
 
-        // 呼叫 FMEdPassSetXOut 取得多報明細 (根據料號的成型尺寸片數)
-        var xOutDetailList = await GetXOutDetailList(conn, request.LotNum, request.PaperNum ?? "");
-        if (xOutDetailList.Count > 0)
-        {
-            lotInfo["XOutDetailList"] = xOutDetailList;
-        }
+            // 2. 呼叫 FMEdPassChoiceLotPCB 取得批號資訊
+            Dictionary<string, object?>? lotInfo = null;
+            var xOutList = new List<Dictionary<string, object?>>();
+            var defectList = new List<Dictionary<string, object?>>();
 
-        return Ok(new { success = true, lotInfo });
+            try
+            {
+                await using var cmd = new SqlCommand("exec FMEdPassChoiceLotPCB @LotNum, @InStock, @PaperNum", conn);
+                cmd.Parameters.AddWithValue("@LotNum", request.LotNum.Trim());
+                cmd.Parameters.AddWithValue("@InStock", request.InStock);
+                cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+
+                await using var rd = await cmd.ExecuteReaderAsync();
+                if (await rd.ReadAsync())
+                    lotInfo = ReadRowToDictionary(rd);
+
+                if (await rd.NextResultAsync())
+                    while (await rd.ReadAsync())
+                        xOutList.Add(ReadRowToDictionary(rd));
+
+                if (await rd.NextResultAsync())
+                    while (await rd.ReadAsync())
+                        defectList.Add(ReadRowToDictionary(rd));
+            }
+            catch (SqlException sqlEx)
+            {
+                // SP 的 RAISERROR（批號暫扣、重複過帳等）直接回傳給前端
+                _logger.LogWarning("FMEdPassChoiceLotPCB 回傳錯誤: {Message}", sqlEx.Message);
+                return BadRequest(new { success = false, message = sqlEx.Message });
+            }
+
+            if (lotInfo == null || lotInfo.Count == 0)
+                return BadRequest(new { success = false, message = "無此批號!!" });
+
+            lotInfo["XOutList"] = xOutList;
+            lotInfo["DefectList"] = defectList;
+
+            // 3. 補充 Lookup 欄位（製程名稱、階段名稱等）
+            await EnrichWithLookupFields(conn, lotInfo);
+
+            // 4. 壓合站：查詢所有層別
+            var procCode = GetStringValue(lotInfo, "ProcCode");
+            _logger.LogInformation("批號 {LotNum} 的製程代碼: [{ProcCode}]", request.LotNum, procCode);
+
+            if (procCode.Trim() == "P1200")
+            {
+                var allLayers = await GetAllLayersForLamination(conn, request.LotNum);
+                _logger.LogInformation("壓合站查詢到 {Count} 個層別", allLayers.Count);
+                if (allLayers.Count > 0)
+                {
+                    lotInfo["AllLayers"] = allLayers;
+                    lotInfo["MinGoodQty"] = allLayers.Min(layer => GetIntValue(layer, "Qnty"));
+                }
+            }
+
+            // 5. 多報明細
+            var xOutDetailList = await GetXOutDetailList(conn, request.LotNum, paperNum);
+            if (xOutDetailList.Count > 0)
+                lotInfo["XOutDetailList"] = xOutDetailList;
+
+            lotInfo["PaperNum"] = paperNum;
+            _logger.LogInformation("匯入批號完成: LotNum={LotNum}, PaperNum={PaperNum}", request.LotNum, paperNum);
+            return Ok(new { success = true, lotInfo, paperNum });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "匯入批號失敗: {LotNum}", request.LotNum);
+            return BadRequest(new { success = false, message = ex.Message });
+        }
     }
-    catch (Exception ex)
-    {
-        _logger.LogError(ex, "匯入批號失敗: {LotNum}", request.LotNum);
-        return BadRequest(new { success = false, message = ex.Message });
-    }
-}
 
 
 
@@ -298,6 +299,63 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
             catch (Exception ex)
             {
                 _logger.LogError(ex, "查詢排版數量失敗: PartNum={PartNum}, Revision={Revision}", partNum, revision);
+            }
+        }
+
+        // 8. 途序總站數 (RouteSerial 已由 SP 回傳，這裡補充總站數 TotalRouteSerial)
+        //    途序 = RouteSerial / TotalRouteSerial，例如 7 / 14
+        var routePartNum = GetStringValue(lotInfo, "PartNum").Trim();
+        var routeRevision = GetStringValue(lotInfo, "Revision").Trim();
+        var routeLayerId  = GetStringValue(lotInfo, "LayerId").Trim();
+        var routeLotNum   = GetStringValue(lotInfo, "LotNum").Trim();
+
+        if (!string.IsNullOrEmpty(routePartNum))
+        {
+            try
+            {
+                // 先用 PartNum + Revision + LayerId 查 TmpRouteId，找不到再退回只用 PartNum + Revision
+                int total = 0;
+                await using var cmd = new SqlCommand(@"
+                    DECLARE @TmpId NVARCHAR(20)
+
+                    -- 優先：PartNum + Revision + LayerId 精確查
+                    SELECT TOP 1 @TmpId = LTRIM(RTRIM(TmpRouteId))
+                    FROM EMOdProdLayer WITH(NOLOCK)
+                    WHERE LTRIM(RTRIM(PartNum))  = @PartNum
+                      AND LTRIM(RTRIM(Revision)) = @Revision
+                      AND LTRIM(RTRIM(LayerId))  = @LayerId
+                      AND TmpRouteId IS NOT NULL
+                      AND LTRIM(RTRIM(TmpRouteId)) <> ''
+
+                    -- Fallback：只用 PartNum + Revision（取第一筆）
+                    IF @TmpId IS NULL OR @TmpId = ''
+                        SELECT TOP 1 @TmpId = LTRIM(RTRIM(TmpRouteId))
+                        FROM EMOdProdLayer WITH(NOLOCK)
+                        WHERE LTRIM(RTRIM(PartNum))  = @PartNum
+                          AND LTRIM(RTRIM(Revision)) = @Revision
+                          AND TmpRouteId IS NOT NULL
+                          AND LTRIM(RTRIM(TmpRouteId)) <> ''
+
+                    -- 計算總站數
+                    SELECT COUNT(*) FROM EMOdTmpRouteDtl WITH(NOLOCK) WHERE TmpId = @TmpId", conn);
+
+                cmd.Parameters.AddWithValue("@PartNum",  routePartNum);
+                cmd.Parameters.AddWithValue("@Revision", routeRevision);
+                cmd.Parameters.AddWithValue("@LayerId",  routeLayerId);
+
+                var result = await cmd.ExecuteScalarAsync();
+                if (result != null && result != DBNull.Value)
+                    total = Convert.ToInt32(result);
+
+                if (total > 0)
+                    lotInfo["TotalRouteSerial"] = total;
+
+                _logger.LogInformation("途序查詢: LotNum={LotNum}, PartNum={PartNum}, LayerId={LayerId}, Total={Total}",
+                    routeLotNum, routePartNum, routeLayerId, total);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "查詢途序總站數失敗: PartNum={PartNum}, LayerId={LayerId}", routePartNum, routeLayerId);
             }
         }
     }
@@ -499,7 +557,7 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
 
     /// <summary>
     /// 執行過帳確認
-    /// 流程: 建立單號 → 寫入主檔/明細 → 呼叫 FMEdPassResult SP
+    /// 流程: 驗證草稿存在 → 寫入明細 → 呼叫 FMEdPassResult SP → 更新主檔 Finished=3
     /// </summary>
     [HttpPost("execute")]
     public async Task<IActionResult> ExecutePass([FromBody] ExecutePassRequest request)
@@ -509,9 +567,25 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
             if (string.IsNullOrWhiteSpace(request.LotNum))
                 return BadRequest(new { success = false, message = "請先匯入批號" });
 
+            if (string.IsNullOrWhiteSpace(request.PaperNum))
+                return BadRequest(new { success = false, message = "缺少過帳單號，請重新匯入批號" });
+
             var cs = _context.Database.GetConnectionString();
             await using var conn = new SqlConnection(cs);
             await conn.OpenAsync();
+
+            // 驗證草稿主檔是否仍存在 (Finished=0)
+            if (!await DraftExists(conn, request.PaperNum.Trim()))
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "過帳單草稿已不存在（可能已逾時或已被清除），請重新匯入批號",
+                    needReImport = true
+                });
+            }
+
+            var paperNum = request.PaperNum.Trim();
 
             // 讀取系統參數 (對應 PassPCB.pas 各項檢查)
             var procNeedDateCode = await GetSysParamInt(conn, "ProcNeedDateCode");
@@ -521,10 +595,8 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
             var wipInStk2AssInStk = await GetSysParamInt(conn, "WIPInStk2AssInStk");
 
             // 檢查 DateCode 是否需要 (對應 PassPCB.pas 第742-750行)
-            // 修改：同時檢查系統參數 + 製程設定中的 IsDateCode
             if (procNeedDateCode == 1)
             {
-                // 查詢下站製程的 IsDateCode 設定
                 int isDateCode = 0;
                 await using (var cmd = new SqlCommand(@"
                     SELECT IsDateCode FROM EMOdProcInfo WITH(NOLOCK)
@@ -536,56 +608,26 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
                         isDateCode = Convert.ToInt32(result);
                 }
 
-                // 只有當製程設定中 IsDateCode = 1 時，才要求輸入 DateCode
                 if (isDateCode == 1 && string.IsNullOrWhiteSpace(request.DateCode))
-                {
                     return BadRequest(new { success = false, message = "過帳失敗: 請輸入DateCode" });
-                }
             }
 
             await using var tran = conn.BeginTransaction();
 
             try
             {
-                // 1. 取得伺服器日期
-                string sDate = DateTime.Now.ToString("yyMMdd");
-                await using (var cmdDate = new SqlCommand("exec CURdGetServerDateTimeStr", conn, tran))
-                {
-                    await using var rd = await cmdDate.ExecuteReaderAsync();
-                    if (await rd.ReadAsync())
-                        sDate = rd["sDate"]?.ToString() ?? sDate;
-                }
-
-                // 2. 取得單號
-                string? paperNum = null;
-                await using (var cmdNum = new SqlCommand("exec CURdGetPaperNum @Table, @p1, @p2, @Date, @Head, @UseId", conn, tran))
-                {
-                    cmdNum.Parameters.AddWithValue("@Table", "FMEdPassMain");
-                    cmdNum.Parameters.AddWithValue("@p1", "");
-                    cmdNum.Parameters.AddWithValue("@p2", "C");
-                    cmdNum.Parameters.AddWithValue("@Date", sDate);
-                    cmdNum.Parameters.AddWithValue("@Head", "A");
-                    cmdNum.Parameters.AddWithValue("@UseId", request.UserId ?? "admin");
-                    paperNum = (await cmdNum.ExecuteScalarAsync())?.ToString();
-                }
-
-                if (string.IsNullOrWhiteSpace(paperNum))
-                {
-                    await tran.RollbackAsync();
-                    return BadRequest(new { success = false, message = "取單號失敗" });
-                }
-
-                // 3. 建立主檔 (Status=0, Finished=0, FlowStatus=0 先建立未完成狀態)
+                // 1. 更新草稿主檔（確認仍為草稿狀態，補填過帳時間/使用者）
                 await using (var cmd = new SqlCommand(@"
-                    INSERT INTO FMEdPassMain (PaperNum, PaperDate, UserId, BuildDate, Status, Finished, UseId, FlowStatus)
-                    VALUES (@PaperNum, GETDATE(), @UserId, GETDATE(), 0, 0, 'A001', 0)", conn, tran))
+                    UPDATE FMEdPassMain
+                    SET PaperDate = GETDATE(), UserId = @UserId
+                    WHERE PaperNum = @PaperNum AND Finished = 0", conn, tran))
                 {
                     cmd.Parameters.AddWithValue("@PaperNum", paperNum);
                     cmd.Parameters.AddWithValue("@UserId", request.UserId ?? "admin");
                     await cmd.ExecuteNonQueryAsync();
                 }
 
-                // 4. 建立明細
+                // 2. 建立明細
                 await using (var cmd = new SqlCommand(@"
                     INSERT INTO FMEdPassSub (
                         PaperNum, Item, LotNum, PartNum, Revision,
@@ -697,18 +739,12 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
                 }
 
                 // 8. 呼叫過帳結果 SP
-                try
+                await using (var cmd = new SqlCommand("FMEdPassResult", conn, tran))
                 {
-                    await using var cmd = new SqlCommand("FMEdPassResult", conn, tran);
                     cmd.CommandType = CommandType.StoredProcedure;
                     cmd.Parameters.AddWithValue("@PaperNum", paperNum);
                     await using var rd = await cmd.ExecuteReaderAsync();
-                    // 讀取並關閉 DataReader (確保釋放資源)
                     while (await rd.ReadAsync()) { }
-                }
-                catch (Exception spEx)
-                {
-                    _logger.LogWarning(spEx, "FMEdPassResult SP 執行失敗");
                 }
 
                 // 9. 更新主檔狀態為完成 (Finished=3, FlowStatus=31 表示已完成)
@@ -853,6 +889,119 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
         }
     }
 
+    [HttpPost("param/import")]
+    public async Task<IActionResult> ImportProcParams([FromBody] ProcParamRequest request)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.PaperNum))
+                return BadRequest(new { success = false, message = "缺少 PaperNum" });
+
+            var cs = _context.Database.GetConnectionString();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            await using (var cmd = new SqlCommand("exec FMEdPassImportParam @PaperNum, @UserId", conn))
+            {
+                cmd.Parameters.AddWithValue("@PaperNum", request.PaperNum.Trim());
+                cmd.Parameters.AddWithValue("@UserId", request.UserId ?? "admin");
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            var rows = await GetProcParamDetails(conn, request.PaperNum.Trim());
+            return Ok(new { success = true, data = rows, total = rows.Count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "匯入製程參數失敗: {PaperNum}", request.PaperNum);
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPost("param/clear")]
+    public async Task<IActionResult> ClearProcParams([FromBody] ProcParamRequest request)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.PaperNum))
+                return BadRequest(new { success = false, message = "缺少 PaperNum" });
+
+            var cs = _context.Database.GetConnectionString();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            await using (var cmd = new SqlCommand("exec FMEdPassClearParam @PaperNum", conn))
+            {
+                cmd.Parameters.AddWithValue("@PaperNum", request.PaperNum.Trim());
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            var rows = await GetProcParamDetails(conn, request.PaperNum.Trim());
+            return Ok(new { success = true, data = rows, total = rows.Count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "清除製程參數失敗: {PaperNum}", request.PaperNum);
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPost("xout/sync")]
+    public async Task<IActionResult> SyncXOut([FromBody] XOutSyncRequest request)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.PaperNum) || string.IsNullOrWhiteSpace(request.LotNum))
+                return BadRequest(new { success = false, message = "缺少必要參數" });
+
+            var cs = _context.Database.GetConnectionString();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            await using (var cmd = new SqlCommand("exec FMEdPassTmp2XOutNewAdd @PaperNum, @LotNum", conn))
+            {
+                cmd.Parameters.AddWithValue("@PaperNum", request.PaperNum.Trim());
+                cmd.Parameters.AddWithValue("@LotNum", request.LotNum.Trim());
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            return Ok(new { success = true, message = "多報同步完成" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "多報同步失敗: PaperNum={PaperNum}, LotNum={LotNum}", request.PaperNum, request.LotNum);
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 刪除草稿過帳單（前端取消按鈕或 beforeunload 呼叫）
+    /// 只刪除 Finished=0 的草稿，已完成的過帳單不受影響
+    /// </summary>
+    [HttpPost("cancel-draft")]
+    public async Task<IActionResult> CancelDraft([FromBody] CancelDraftRequest request)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.PaperNum))
+                return Ok(new { success = true }); // 無單號，視為已清除
+
+            var cs = _context.Database.GetConnectionString();
+            await using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            await DeleteDraft(conn, request.PaperNum.Trim());
+
+            _logger.LogInformation("草稿已刪除: {PaperNum}", request.PaperNum.Trim());
+            return Ok(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "刪除草稿失敗: {PaperNum}", request.PaperNum);
+            return Ok(new { success = false, message = ex.Message }); // 前端 beforeunload 不需要等回應，統一回 200
+        }
+    }
+
     /// <summary>
     /// 建構 WIP 查詢條件
     /// </summary>
@@ -925,6 +1074,111 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
     private string SqlEscape(string input)
     {
         return input.Replace("'", "''");
+    }
+
+    // ── 草稿輔助方法 ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 取正式號碼並建立草稿主檔 (Finished=0)
+    /// </summary>
+    private async Task<string> CreateDraftPaper(SqlConnection conn, string userId)
+    {
+        string sDate = DateTime.Now.ToString("yyMMdd");
+        await using (var cmdDate = new SqlCommand("exec CURdGetServerDateTimeStr", conn))
+        {
+            await using var rd = await cmdDate.ExecuteReaderAsync();
+            if (await rd.ReadAsync())
+                sDate = rd["sDate"]?.ToString() ?? sDate;
+        }
+
+        string? paperNum;
+        await using (var cmdNum = new SqlCommand(
+            "exec CURdGetPaperNum @Table, @p1, @p2, @Date, @Head, @UseId", conn))
+        {
+            cmdNum.Parameters.AddWithValue("@Table", "FMEdPassMain");
+            cmdNum.Parameters.AddWithValue("@p1", "");
+            cmdNum.Parameters.AddWithValue("@p2", "C");
+            cmdNum.Parameters.AddWithValue("@Date", sDate);
+            cmdNum.Parameters.AddWithValue("@Head", "A");
+            cmdNum.Parameters.AddWithValue("@UseId", userId);
+            paperNum = (await cmdNum.ExecuteScalarAsync())?.ToString();
+        }
+
+        if (string.IsNullOrWhiteSpace(paperNum))
+            return string.Empty;
+
+        await using var ins = new SqlCommand(@"
+            INSERT INTO FMEdPassMain (PaperNum, PaperDate, UserId, BuildDate, Status, Finished, UseId, FlowStatus)
+            VALUES (@PaperNum, GETDATE(), @UserId, GETDATE(), 0, 0, @UserId, 0)", conn);
+        ins.Parameters.AddWithValue("@PaperNum", paperNum);
+        ins.Parameters.AddWithValue("@UserId", userId);
+        await ins.ExecuteNonQueryAsync();
+
+        _logger.LogInformation("建立草稿過帳單: {PaperNum}", paperNum);
+        return paperNum;
+    }
+
+    /// <summary>
+    /// 驗證草稿是否仍存在 (Finished=0)
+    /// </summary>
+    private static async Task<bool> DraftExists(SqlConnection conn, string paperNum)
+    {
+        await using var cmd = new SqlCommand(
+            "SELECT COUNT(1) FROM FMEdPassMain WITH(NOLOCK) WHERE PaperNum=@PaperNum AND Finished=0", conn);
+        cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+        var cnt = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+        return cnt > 0;
+    }
+
+    /// <summary>
+    /// 清除草稿明細（換批號時呼叫），保留主檔
+    /// </summary>
+    private static async Task CleanDraftDetails(SqlConnection conn, string paperNum)
+    {
+        foreach (var sql in new[]
+        {
+            "DELETE FROM FMEdPassSub WHERE PaperNum=@PaperNum",
+            "DELETE FROM FMEdPassSubXOut WHERE PaperNum=@PaperNum",
+            "DELETE FROM FMEdPassXOutDefect WHERE PaperNum=@PaperNum"
+        })
+        {
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+            await cmd.ExecuteNonQueryAsync();
+        }
+    }
+
+    /// <summary>
+    /// 刪除草稿（主檔 + 所有明細），供取消或 beforeunload 呼叫
+    /// </summary>
+    private static async Task DeleteDraft(SqlConnection conn, string paperNum)
+    {
+        foreach (var sql in new[]
+        {
+            "DELETE FROM FMEdPassSubXOut WHERE PaperNum=@PaperNum",
+            "DELETE FROM FMEdPassXOutDefect WHERE PaperNum=@PaperNum",
+            "DELETE FROM FMEdPassSub WHERE PaperNum=@PaperNum",
+            "DELETE FROM FMEdPassMain WHERE PaperNum=@PaperNum AND Finished=0"
+        })
+        {
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+            await cmd.ExecuteNonQueryAsync();
+        }
+    }
+
+    private static async Task<List<Dictionary<string, object?>>> GetProcParamDetails(SqlConnection conn, string paperNum)
+    {
+        var list = new List<Dictionary<string, object?>>();
+        await using var cmd = new SqlCommand(
+            "SELECT * FROM FMEdPassProcParamDtl WITH(NOLOCK) WHERE PaperNum = @PaperNum", conn);
+        cmd.Parameters.AddWithValue("@PaperNum", paperNum);
+        await using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+        {
+            list.Add(ReadRowToDictionary(rd));
+        }
+        return list;
     }
 
     #endregion
@@ -1188,6 +1442,7 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
     {
         // 基本資訊
         public string LotNum { get; set; } = "";
+        public string? PaperNum { get; set; }
         public string? UserId { get; set; }
 
         // 從 lotInfo 帶入的欄位
@@ -1211,6 +1466,8 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
         // 其他
         public string? DateCode { get; set; }
         public string? Notes { get; set; }
+        public string? Worker { get; set; }
+        public string? EquipId { get; set; }
 
         // 明細資料
         public List<XOutItem>? XOutList { get; set; }
@@ -1256,6 +1513,23 @@ public async Task<IActionResult> ImportLot([FromBody] ImportLotRequest request)
 
         /// <summary>DateCode 篩選</summary>
         public string? DateCode { get; set; }
+    }
+
+    public class ProcParamRequest
+    {
+        public string PaperNum { get; set; } = "";
+        public string? UserId { get; set; }
+    }
+
+    public class XOutSyncRequest
+    {
+        public string PaperNum { get; set; } = "";
+        public string LotNum { get; set; } = "";
+    }
+
+    public class CancelDraftRequest
+    {
+        public string? PaperNum { get; set; }
     }
 
     #endregion
